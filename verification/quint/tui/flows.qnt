@@ -63,7 +63,7 @@ module tui_flows {
     | HomeInvitationSent            // Resident invitation sent
     | HomeResidentJoined            // Resident accepted invitation
     | HomeModeratorPromoted           // Resident promoted to moderator
-    | HomeFull                      // Home at capacity (8 residents)
+    | HomeFull                      // Home at capacity (8 members)
 
   // Flow 3: Neighborhood formation phases
   type NeighborhoodFlowPhase =
@@ -98,7 +98,7 @@ module tui_flows {
     | SocialContactsExist            // User has contacts
     | SocialHomeExists              // User has created/owns a home
     | SocialContactInvitedToHome    // Contact invited to join home
-    | SocialContactJoinedHome       // Contact joined as resident (is_resident = true)
+    | SocialContactJoinedHome       // Contact joined as member (is_member = true)
     | SocialNicknameUpdated           // Contact nickname changed
     | SocialHomeContactsFiltered    // Contacts filtered by home membership
 
@@ -107,7 +107,7 @@ module tui_flows {
   type InvitationType =
     | GuardianInvitation             // Become a guardian
     | ContactInvitation              // Simple contact
-    | HomeResidentInvitation(HomeId) // Join a home as resident
+    | HomeResidentInvitation(HomeId) // Join a home as member
 
   // ============ AGENT STATE ============
 
@@ -133,7 +133,7 @@ module tui_flows {
 
     // Homes & Neighborhoods
     ownedHomes: Set[HomeId],
-    residentOf: Set[HomeId],
+    memberOf: Set[HomeId],
     moderatorOf: Set[HomeId],
     neighborhoods: Set[NeighborhoodId],
 
@@ -188,7 +188,7 @@ module tui_flows {
     id: HomeId,
     owner: AgentId,
     moderators: Set[AgentId],
-    residents: Set[AgentId],
+    members: Set[AgentId],
     capacity: int,                   // Max 8
     linkedNeighborhood: Option[NeighborhoodId]
   }
@@ -242,7 +242,7 @@ module tui_flows {
     channels: Set(),
     directMessages: Set(),
     ownedHomes: Set(),
-    residentOf: Set(),
+    memberOf: Set(),
     moderatorOf: Set(),
     neighborhoods: Set(),
     activeRecoverySession: None,
@@ -852,7 +852,7 @@ module tui_flows {
         id: homeId,
         owner: owner,
         moderators: Set(owner),
-        residents: Set(owner),
+        members: Set(owner),
         capacity: 8,
         linkedNeighborhood: None
       }),
@@ -860,7 +860,7 @@ module tui_flows {
       agents' = agents.set(owner, {
         ...ownerState,
         ownedHomes: ownerState.ownedHomes.union(Set(homeId)),
-        residentOf: ownerState.residentOf.union(Set(homeId)),
+        memberOf: ownerState.memberOf.union(Set(homeId)),
         moderatorOf: ownerState.moderatorOf.union(Set(homeId)),
         lastEmittedSignals: Set(HomeSignal)
       }),
@@ -879,36 +879,36 @@ module tui_flows {
     }
   }
 
-  // Join home as resident
-  action joinHome(resident: AgentId, homeId: HomeId): bool = {
-    val residentState = getAgent(agents, resident)
+  // Join home as member
+  action joinHome(member: AgentId, homeId: HomeId): bool = {
+    val memberState = getAgent(agents, member)
     val home = if (homeId.in(homes.keys())) homes.get(homeId) else {
-      id: homeId, owner: "", moderators: Set(), residents: Set(),
+      id: homeId, owner: "", moderators: Set(), members: Set(),
       capacity: 8, linkedNeighborhood: None
     }
     val ownerState = getAgent(agents, home.owner)
     all {
       homeId.in(homes.keys()),
-      residentState.hasAccount,
-      not(home.residents.contains(resident)),
-      home.residents.size() < home.capacity,
+      memberState.hasAccount,
+      not(home.members.contains(member)),
+      home.members.size() < home.capacity,
       // Update home
       homes' = homes.put(homeId, {
         ...home,
-        residents: home.residents.union(Set(resident))
+        members: home.members.union(Set(member))
       }),
-      // Update resident and owner states
+      // Update member and owner states
       agents' = agents
-        .set(resident, {
-          ...residentState,
-          residentOf: residentState.residentOf.union(Set(homeId)),
+        .set(member, {
+          ...memberState,
+          memberOf: memberState.memberOf.union(Set(homeId)),
           lastEmittedSignals: Set(HomeSignal, ContactsSignal)
         })
         .set(home.owner, {
           ...ownerState,
           lastEmittedSignals: Set(HomeSignal)
         }),
-      homeFlowPhase' = homeFlowPhase.set(resident, HomeResidentJoined),
+      homeFlowPhase' = homeFlowPhase.set(member, HomeResidentJoined),
       // Unchanged
       allAgents' = allAgents,
       invitations' = invitations,
@@ -923,36 +923,36 @@ module tui_flows {
     }
   }
 
-  // Promote resident to moderator
-  action promoteModerator(owner: AgentId, homeId: HomeId, resident: AgentId): bool = {
+  // Promote member to moderator
+  action promoteModerator(owner: AgentId, homeId: HomeId, member: AgentId): bool = {
     val home = if (homeId.in(homes.keys())) homes.get(homeId) else {
-      id: homeId, owner: "", moderators: Set(), residents: Set(),
+      id: homeId, owner: "", moderators: Set(), members: Set(),
       capacity: 8, linkedNeighborhood: None
     }
-    val residentState = getAgent(agents, resident)
+    val memberState = getAgent(agents, member)
     val ownerState = getAgent(agents, owner)
     all {
       homeId.in(homes.keys()),
       home.owner == owner,
-      home.residents.contains(resident),
-      not(home.moderators.contains(resident)),
+      home.members.contains(member),
+      not(home.moderators.contains(member)),
       // Update home
       homes' = homes.put(homeId, {
         ...home,
-        moderators: home.moderators.union(Set(resident))
+        moderators: home.moderators.union(Set(member))
       }),
       // Update states
       agents' = agents
-        .set(resident, {
-          ...residentState,
-          moderatorOf: residentState.moderatorOf.union(Set(homeId)),
+        .set(member, {
+          ...memberState,
+          moderatorOf: memberState.moderatorOf.union(Set(homeId)),
           lastEmittedSignals: Set(HomeSignal)
         })
         .set(owner, {
           ...ownerState,
           lastEmittedSignals: Set(HomeSignal)
         }),
-      homeFlowPhase' = homeFlowPhase.set(resident, HomeModeratorPromoted),
+      homeFlowPhase' = homeFlowPhase.set(member, HomeModeratorPromoted),
       // Unchanged
       allAgents' = allAgents,
       invitations' = invitations,
@@ -1009,7 +1009,7 @@ module tui_flows {
     neighborhoodId: NeighborhoodId
   ): bool = {
     val home = if (homeId.in(homes.keys())) homes.get(homeId) else {
-      id: homeId, owner: "", moderators: Set(), residents: Set(),
+      id: homeId, owner: "", moderators: Set(), members: Set(),
       capacity: 8, linkedNeighborhood: None
     }
     val neighborhood = if (neighborhoodId.in(neighborhoods.keys())) neighborhoods.get(neighborhoodId) else {
@@ -1082,12 +1082,12 @@ module tui_flows {
   }
 
   // Invite a contact to join a home
-  // Creates a home resident invitation and adds contact to home residents when they accept
+  // Creates a home member invitation and adds contact to home members when they accept
   action inviteContactToHome(owner: AgentId, homeId: HomeId, contactId: AgentId): bool = {
     val ownerState = getAgent(agents, owner)
     val contactState = getAgent(agents, contactId)
     val home = if (homeId.in(homes.keys())) homes.get(homeId) else {
-      id: homeId, owner: "", moderators: Set(), residents: Set(),
+      id: homeId, owner: "", moderators: Set(), members: Set(),
       capacity: 8, linkedNeighborhood: None
     }
     all {
@@ -1096,18 +1096,18 @@ module tui_flows {
       contactState.hasAccount,
       home.owner == owner or home.moderators.contains(owner),  // Owner or moderator can invite
       ownerState.contacts.contains(contactId),  // Must be a contact
-      not(home.residents.contains(contactId)), // Not already a resident
-      home.residents.size() < home.capacity,  // Home has capacity
-      // Update home with new resident
+      not(home.members.contains(contactId)), // Not already a member
+      home.members.size() < home.capacity,  // Home has capacity
+      // Update home with new member
       homes' = homes.put(homeId, {
         ...home,
-        residents: home.residents.union(Set(contactId))
+        members: home.members.union(Set(contactId))
       }),
       // Update both agent states
       agents' = agents
         .set(contactId, {
           ...contactState,
-          residentOf: contactState.residentOf.union(Set(homeId)),
+          memberOf: contactState.memberOf.union(Set(homeId)),
           lastEmittedSignals: Set(HomeSignal, ContactsSignal)
         })
         .set(owner, {
@@ -1136,25 +1136,25 @@ module tui_flows {
     val ownerState = getAgent(agents, owner)
     val contactState = getAgent(agents, contactId)
     val home = if (homeId.in(homes.keys())) homes.get(homeId) else {
-      id: homeId, owner: "", moderators: Set(), residents: Set(),
+      id: homeId, owner: "", moderators: Set(), members: Set(),
       capacity: 8, linkedNeighborhood: None
     }
     all {
       homeId.in(homes.keys()),
       home.owner == owner or home.moderators.contains(owner),  // Owner or moderator can remove
-      home.residents.contains(contactId),  // Must be a resident
+      home.members.contains(contactId),  // Must be a member
       contactId != home.owner,  // Can't remove owner
-      // Update home - remove resident and moderator status
+      // Update home - remove member and moderator status
       homes' = homes.put(homeId, {
         ...home,
-        residents: home.residents.exclude(Set(contactId)),
+        members: home.members.exclude(Set(contactId)),
         moderators: home.moderators.exclude(Set(contactId))
       }),
       // Update contact state
       agents' = agents
         .set(contactId, {
           ...contactState,
-          residentOf: contactState.residentOf.exclude(Set(homeId)),
+          memberOf: contactState.memberOf.exclude(Set(homeId)),
           moderatorOf: contactState.moderatorOf.exclude(Set(homeId)),
           lastEmittedSignals: Set(HomeSignal, ContactsSignal)
         })
@@ -1177,16 +1177,16 @@ module tui_flows {
     }
   }
 
-  // Get contacts who are residents of a specific home (filter contacts by home)
+  // Get contacts who are members of a specific home (filter contacts by home)
   // This is a "view" action - no state mutation, just emits signal for UI refresh
   action filterContactsByHome(agent: AgentId, homeId: HomeId): bool = {
     val agentState = getAgent(agents, agent)
     val home = if (homeId.in(homes.keys())) homes.get(homeId) else {
-      id: homeId, owner: "", moderators: Set(), residents: Set(),
+      id: homeId, owner: "", moderators: Set(), members: Set(),
       capacity: 8, linkedNeighborhood: None
     }
-    // Compute contacts that are residents of this home
-    val homeContacts = agentState.contacts.filter(c => home.residents.contains(c))
+    // Compute contacts that are members of this home
+    val homeContacts = agentState.contacts.filter(c => home.members.contains(c))
     all {
       agentState.hasAccount,
       homeId.in(homes.keys()),
@@ -1213,13 +1213,13 @@ module tui_flows {
 
   // ============ SOCIAL GRAPH HELPER DEFINITIONS ============
 
-  // Pure function: Get contacts who are residents of a given home
+  // Pure function: Get contacts who are members of a given home
   pure def getHomeContacts(agentState: AgentState, home: HomeRecord): Set[AgentId] =
-    agentState.contacts.filter(c => home.residents.contains(c))
+    agentState.contacts.filter(c => home.members.contains(c))
 
-  // Pure function: Check if a contact is a resident of a given home
+  // Pure function: Check if a contact is a member of a given home
   pure def isContactResident(agentState: AgentState, contactId: AgentId, home: HomeRecord): bool =
-    agentState.contacts.contains(contactId) and home.residents.contains(contactId)
+    agentState.contacts.contains(contactId) and home.members.contains(contactId)
 
   // ============ NON-DETERMINISTIC STEP ============
 
@@ -1329,14 +1329,14 @@ module tui_flows {
   val homeCapacityInvariant: bool =
     homes.keys().forall(bid => {
       val home = homes.get(bid)
-      home.residents.size() <= home.capacity
+      home.members.size() <= home.capacity
     })
 
-  // Moderators must be residents
+  // Moderators must be members
   val moderatorsAreResidents: bool =
     homes.keys().forall(bid => {
       val home = homes.get(bid)
-      home.moderators.subseteq(home.residents)
+      home.moderators.subseteq(home.members)
     })
 
   // Invitation consistency
@@ -1350,26 +1350,26 @@ module tui_flows {
       (inv.isDeclined implies inv.isImported)
     })
 
-  // Social Graph: Contact-resident mapping consistency
-  // If an agent is residentOf a home, they must appear in that home's residents
+  // Social Graph: Contact-member mapping consistency
+  // If an agent is memberOf a home, they must appear in that home's members
   val contactHomeMappingConsistency: bool =
     allAgents.forall(agent => {
       val state = getAgent(agents, agent)
-      state.residentOf.forall(bid => {
+      state.memberOf.forall(bid => {
         if (bid.in(homes.keys())) {
           val home = homes.get(bid)
-          home.residents.contains(agent)
+          home.members.contains(agent)
         } else true
       })
     })
 
-  // Social Graph: Home residents must have accounts
+  // Social Graph: Home members must have accounts
   val blockResidentsHaveAccounts: bool =
     homes.keys().forall(bid => {
       val home = homes.get(bid)
-      home.residents.forall(resident => {
-        val residentState = getAgent(agents, resident)
-        residentState.hasAccount
+      home.members.forall(member => {
+        val memberState = getAgent(agents, member)
+        memberState.hasAccount
       })
     })
 
@@ -1501,8 +1501,8 @@ module tui_flows {
     .then(createNeighborhood("bob", "downtown", "Downtown"))
     .then(linkHomeToNeighborhood("bob", "bob-home", "downtown"))
     .then(all {
-      assert(homes.get("bob-home").residents.contains("bob")),
-      assert(homes.get("bob-home").residents.contains("alice")),
+      assert(homes.get("bob-home").members.contains("bob")),
+      assert(homes.get("bob-home").members.contains("alice")),
       assert(homes.get("bob-home").moderators.contains("alice")),
       assert(neighborhoods.get("downtown").linkedHomes.contains("bob-home")),
       // Keep state unchanged
@@ -1585,10 +1585,10 @@ module tui_flows {
     .then(createHome("bob", "social-home"))
     // Bob invites alice (contact) to join home
     .then(inviteContactToHome("bob", "social-home", "alice"))
-    // Verify alice is now a resident
+    // Verify alice is now a member
     .then(all {
-      assert(homes.get("social-home").residents.contains("alice")),
-      assert(getAgent(agents, "alice").residentOf.contains("social-home")),
+      assert(homes.get("social-home").members.contains("alice")),
+      assert(getAgent(agents, "alice").memberOf.contains("social-home")),
       assert(getAgent(agents, "bob").lastEmittedSignals.contains(HomeSignal)),
       assert(getAgent(agents, "bob").lastEmittedSignals.contains(ContactsSignal)),
       // Continue
@@ -1610,7 +1610,7 @@ module tui_flows {
     .then(filterContactsByHome("bob", "social-home"))
     // Verify final state
     .then(all {
-      // Alice is contact and resident
+      // Alice is contact and member
       assert(getAgent(agents, "bob").contacts.contains("alice")),
       assert(isContactResident(getAgent(agents, "bob"), "alice", homes.get("social-home"))),
       // Nickname persists
@@ -1649,9 +1649,9 @@ module tui_flows {
     // Bob creates home and invites alice
     .then(createHome("bob", "kick-home"))
     .then(inviteContactToHome("bob", "kick-home", "alice"))
-    // Verify alice is resident
+    // Verify alice is member
     .then(all {
-      assert(homes.get("kick-home").residents.contains("alice")),
+      assert(homes.get("kick-home").members.contains("alice")),
       allAgents' = allAgents,
       agents' = agents,
       invitations' = invitations,
@@ -1668,11 +1668,11 @@ module tui_flows {
     })
     // Bob removes alice from home
     .then(removeContactFromHome("bob", "kick-home", "alice"))
-    // Verify alice is no longer resident
+    // Verify alice is no longer member
     .then(all {
-      assert(not(homes.get("kick-home").residents.contains("alice"))),
-      assert(not(getAgent(agents, "alice").residentOf.contains("kick-home"))),
-      // Alice is still a contact, just not a resident
+      assert(not(homes.get("kick-home").members.contains("alice"))),
+      assert(not(getAgent(agents, "alice").memberOf.contains("kick-home"))),
+      // Alice is still a contact, just not a member
       assert(getAgent(agents, "bob").contacts.contains("alice")),
       assert(allInvariants),
       allAgents' = allAgents,

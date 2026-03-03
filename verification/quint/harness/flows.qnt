@@ -347,7 +347,7 @@ module harness_flows {
     .then(bobCreatesHome("social-home"))
     // Bob sets nickname for alice (alice is now a contact!)
     .then(bobSetsNicknameForAlice("My Friend Alice"))
-    // Bob invites alice to his home (alice becomes a resident)
+    // Bob invites alice to his home (alice becomes a member)
     .then(bobInvitesAliceToHome("social-home"))
     // Bob filters contacts by home to view only home members
     .then(bobFiltersContactsByHome("social-home"))
@@ -357,8 +357,8 @@ module harness_flows {
       assert(executedScenarios.contains("social_graph_filter")),
       assert(executedScenarios.contains("social_graph_complete")),
       assert(scenarioOutcomes.get("social_graph_complete") == true),
-      // Verify state: alice should be a resident of the home
-      assert(tui_flows::homes.get("social-home").residents.contains("alice")),
+      // Verify state: alice should be a member of the home
+      assert(tui_flows::homes.get("social-home").members.contains("alice")),
       // Verify nickname was set
       assert(tui_flows::agents.get("bob").contactNicknames.get("alice") == "My Friend Alice"),
       tui_flows::allAgents' = tui_flows::allAgents,

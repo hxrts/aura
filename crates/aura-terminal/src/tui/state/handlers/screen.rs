@@ -314,16 +314,16 @@ pub fn handle_neighborhood_key(
             }
             KeyCode::Left | KeyCode::Char('h') => {
                 state.neighborhood.detail_focus = match state.neighborhood.detail_focus {
-                    DetailFocus::Messages | DetailFocus::Input => DetailFocus::Residents,
-                    DetailFocus::Residents => DetailFocus::Channels,
+                    DetailFocus::Messages | DetailFocus::Input => DetailFocus::Members,
+                    DetailFocus::Members => DetailFocus::Channels,
                     DetailFocus::Channels => DetailFocus::Channels,
                 };
             }
             KeyCode::Right | KeyCode::Char('l') => {
                 state.neighborhood.detail_focus = match state.neighborhood.detail_focus {
-                    DetailFocus::Channels => DetailFocus::Residents,
-                    DetailFocus::Residents => DetailFocus::Residents,
-                    DetailFocus::Messages | DetailFocus::Input => DetailFocus::Residents,
+                    DetailFocus::Channels => DetailFocus::Members,
+                    DetailFocus::Members => DetailFocus::Members,
+                    DetailFocus::Messages | DetailFocus::Input => DetailFocus::Members,
                 };
             }
             KeyCode::Up | KeyCode::Char('k') => match state.neighborhood.detail_focus {
@@ -334,10 +334,10 @@ pub fn handle_neighborhood_key(
                         NavKey::Up,
                     );
                 }
-                DetailFocus::Residents => {
-                    state.neighborhood.selected_resident = navigate_list(
-                        state.neighborhood.selected_resident,
-                        state.neighborhood.resident_count,
+                DetailFocus::Members => {
+                    state.neighborhood.selected_member = navigate_list(
+                        state.neighborhood.selected_member,
+                        state.neighborhood.member_count,
                         NavKey::Up,
                     );
                 }
@@ -351,10 +351,10 @@ pub fn handle_neighborhood_key(
                         NavKey::Down,
                     );
                 }
-                DetailFocus::Residents => {
-                    state.neighborhood.selected_resident = navigate_list(
-                        state.neighborhood.selected_resident,
-                        state.neighborhood.resident_count,
+                DetailFocus::Members => {
+                    state.neighborhood.selected_member = navigate_list(
+                        state.neighborhood.selected_member,
+                        state.neighborhood.member_count,
                         NavKey::Down,
                     );
                 }

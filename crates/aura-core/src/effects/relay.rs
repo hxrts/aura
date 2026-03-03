@@ -70,7 +70,7 @@ impl RelayContext {
 /// neighborhood peers, which are preferred over guardians.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RelayRelationship {
-    /// Co-resident in the same home.
+    /// Co-member in the same home.
     ///
     /// Home peers share home context and have high mutual trust.
     /// They can relay for any member of shared neighborhoods.

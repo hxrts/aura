@@ -1,7 +1,7 @@
 //! Home View Reduction
 //!
 //! Transforms social/home-related journal facts into `HomeDelta` updates.
-//! Handles home creation, resident changes, and storage statistics.
+//! Handles home creation, member changes, and storage statistics.
 
 use crate::reactive::scheduler::ViewReduction;
 use aura_core::identifiers::AuthorityId;
@@ -19,13 +19,13 @@ pub enum HomeDelta {
         created_at: u64,
         creator_id: String,
     },
-    /// A resident joined the home
+    /// A member joined the home
     ResidentAdded {
         authority_id: String,
         name: String,
         joined_at: u64,
     },
-    /// A resident left the home
+    /// A member left the home
     ResidentRemoved { authority_id: String, left_at: u64 },
     /// Home storage statistics updated
     StorageUpdated {
@@ -145,7 +145,7 @@ mod tests {
             "Test Home".to_string(),
         );
 
-        let resident_joined = SocialFact::resident_joined_ms(
+        let member_joined = SocialFact::member_joined_ms(
             test_authority_id(),
             test_home_id(),
             test_context_id(),
@@ -155,7 +155,7 @@ mod tests {
 
         let facts = vec![
             make_test_fact(1, FactContent::Relational(home_created.to_generic())),
-            make_test_fact(2, FactContent::Relational(resident_joined.to_generic())),
+            make_test_fact(2, FactContent::Relational(member_joined.to_generic())),
         ];
 
         let deltas = reduction.reduce(&facts, None);

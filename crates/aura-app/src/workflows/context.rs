@@ -102,7 +102,7 @@ pub async fn move_position(
     neighborhood.position = Some(position);
 
     // Keep homes selection aligned with neighborhood traversal when the target
-    // home is known locally (for resident/channel metadata lookups).
+    // home is known locally (for member/channel metadata lookups).
     if homes.has_home(&target_home_id) {
         homes.select_home(Some(target_home_id));
         core.views_mut().set_homes(homes);
@@ -212,9 +212,9 @@ pub async fn add_home_to_neighborhood(
 
         let target_home_id = resolve_target_home_id(&neighborhood, HomeSelector::parse(home_id)?)?;
         let target_home_name = resolve_home_name(&homes, &neighborhood, target_home_id);
-        let target_resident_count = homes
+        let target_member_count = homes
             .home_state(&target_home_id)
-            .map(|home| home.resident_count);
+            .map(|home| home.member_count);
 
         if target_home_id != neighborhood.home_home_id
             && neighborhood.neighbor(&target_home_id).is_none()
@@ -224,7 +224,7 @@ pub async fn add_home_to_neighborhood(
                 name: target_home_name,
                 one_hop_link: OneHopLinkType::Direct,
                 shared_contacts: 0,
-                resident_count: target_resident_count,
+                member_count: target_member_count,
                 can_traverse: true,
             });
         }
@@ -273,16 +273,16 @@ pub async fn link_home_one_hop_link(
         }
 
         let target_home_name = resolve_home_name(&homes, &neighborhood, target_home_id);
-        let target_resident_count = homes
+        let target_member_count = homes
             .home_state(&target_home_id)
-            .map(|home| home.resident_count);
+            .map(|home| home.member_count);
 
         let updated_neighbor = NeighborHome {
             id: target_home_id,
             name: target_home_name,
             one_hop_link: OneHopLinkType::Direct,
             shared_contacts: 0,
-            resident_count: target_resident_count,
+            member_count: target_member_count,
             can_traverse: true,
         };
 
@@ -367,7 +367,7 @@ pub async fn create_home(
                 name: home_name.clone(),
                 one_hop_link: OneHopLinkType::Direct,
                 shared_contacts: 0,
-                resident_count: Some(1),
+                member_count: Some(1),
                 can_traverse: true,
             });
         }
@@ -551,7 +551,7 @@ mod tests {
                 name: "Beta".to_string(),
                 one_hop_link: OneHopLinkType::Direct,
                 shared_contacts: 0,
-                resident_count: Some(1),
+                member_count: Some(1),
                 can_traverse: true,
             });
             core.views_mut().set_neighborhood(neighborhood);

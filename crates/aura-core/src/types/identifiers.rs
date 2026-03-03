@@ -505,7 +505,7 @@ hash_id!(
     /// Home identifier for social topology homes
     ///
     /// Homes are storage/relay containers in the social architecture. Each home
-    /// has storage limits, residents, and neighborhood memberships.
+    /// has storage limits, members, and neighborhood memberships.
     HomeId,
     prefix: "home"
 );

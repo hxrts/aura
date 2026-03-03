@@ -50,8 +50,8 @@ fn best_home_for_context(
         .max_by_key(|(_, home)| {
             (
                 u8::from(home.can_moderate()),
-                u8::from(!home.residents.is_empty()),
-                home.resident_count,
+                u8::from(!home.members.is_empty()),
+                home.member_count,
             )
         })
 }
@@ -142,9 +142,9 @@ async fn resolve_scope(
     let (context_id, home_id, can_moderate, peers) =
         if let Some((home_id, home_state)) = home_from_channel {
             let peers = home_state
-                .residents
+                .members
                 .iter()
-                .map(|resident| resident.id)
+                .map(|member| member.id)
                 .collect::<Vec<_>>();
             (
                 home_state
@@ -159,7 +159,7 @@ async fn resolve_scope(
                 .ok_or_else(|| AuraError::not_found("Channel hint missing for moderation scope"))?;
             let peers = homes
                 .current_home()
-                .map(|home| home.residents.iter().map(|resident| resident.id).collect())
+                .map(|home| home.members.iter().map(|member| member.id).collect())
                 .unwrap_or_default();
             let can_moderate = homes
                 .current_home()
@@ -174,9 +174,9 @@ async fn resolve_scope(
                 fallback.id,
                 fallback.can_moderate(),
                 fallback
-                    .residents
+                    .members
                     .iter()
-                    .map(|resident| resident.id)
+                    .map(|member| member.id)
                     .collect(),
             )
         } else {
@@ -207,7 +207,7 @@ async fn resolve_scope_by_channel_id(
         let context_id = home
             .context_id
             .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
-        let peers = home.residents.iter().map(|resident| resident.id).collect();
+        let peers = home.members.iter().map(|member| member.id).collect();
         Ok(ModerationScope {
             context_id,
             home_id,
@@ -380,7 +380,7 @@ pub async fn kick_user_resolved(
     let scope = resolve_scope_by_channel_id(app_core, Some(channel_id)).await?;
     if !scope.can_moderate {
         return Err(AuraError::permission_denied(
-            "Only moderators with kick capability can kick residents",
+            "Only moderators with kick capability can kick members",
         ));
     }
 
@@ -435,7 +435,7 @@ pub async fn ban_user_resolved(
     let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
     if !scope.can_moderate {
         return Err(AuraError::permission_denied(
-            "Only moderators with ban capability can ban residents",
+            "Only moderators with ban capability can ban members",
         ));
     }
 
@@ -493,7 +493,7 @@ pub async fn unban_user_resolved(
     let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
     if !scope.can_moderate {
         return Err(AuraError::permission_denied(
-            "Only moderators with ban capability can unban residents",
+            "Only moderators with ban capability can unban members",
         ));
     }
 
@@ -545,7 +545,7 @@ pub async fn mute_user_resolved(
     let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
     if !scope.can_moderate {
         return Err(AuraError::permission_denied(
-            "Only moderators with mute capability can mute residents",
+            "Only moderators with mute capability can mute members",
         ));
     }
 
@@ -606,7 +606,7 @@ pub async fn unmute_user_resolved(
     let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
     if !scope.can_moderate {
         return Err(AuraError::permission_denied(
-            "Only moderators with mute capability can unmute residents",
+            "Only moderators with mute capability can unmute members",
         ));
     }
 
@@ -760,7 +760,7 @@ mod tests {
                 nickname: "Bob".to_string(),
                 nickname_suggestion: Some("Bobby".to_string()),
                 is_guardian: false,
-                is_resident: false,
+                is_member: false,
                 last_interaction: None,
                 is_online: true,
                 read_receipt_policy: Default::default(),

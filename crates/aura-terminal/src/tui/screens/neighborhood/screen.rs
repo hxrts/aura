@@ -11,7 +11,7 @@ use crate::tui::layout::dim;
 use crate::tui::props::NeighborhoodViewProps;
 use crate::tui::state_machine::NeighborhoodMode;
 use crate::tui::theme::Theme;
-use crate::tui::types::{short_id, AccessLevel, Contact, HomeBudget, HomeSummary, Resident};
+use crate::tui::types::{short_id, AccessLevel, Contact, HomeBudget, HomeMember, HomeSummary};
 
 pub async fn run_neighborhood_screen() -> std::io::Result<()> {
     element! {
@@ -109,7 +109,7 @@ fn HomeMap(props: &HomeMapProps) -> impl Into<AnyElement<'static>> {
                             .clone()
                             .unwrap_or_else(|| "Unnamed Home".to_string());
                         let home_badge = if home_entry.is_home { " ⌂" } else { "" };
-                        let residents = format!("{}/{}", home_entry.resident_count, home_entry.max_residents);
+                        let members = format!("{}/{}", home_entry.member_count, home_entry.max_members);
                         element! {
                             View(
                                 key: home_entry.id.clone(),
@@ -123,7 +123,7 @@ fn HomeMap(props: &HomeMapProps) -> impl Into<AnyElement<'static>> {
                                     Text(content: name, color: Theme::TEXT)
                                     Text(content: home_badge, color: Theme::PRIMARY)
                                 }
-                                Text(content: residents, color: Theme::TEXT_MUTED)
+                                Text(content: members, color: Theme::TEXT_MUTED)
                             }
                         }
                     }).collect()
@@ -138,7 +138,7 @@ fn HomeMap(props: &HomeMapProps) -> impl Into<AnyElement<'static>> {
 #[derive(Default, Props)]
 struct HomeHeaderProps {
     home_name: String,
-    resident_count: usize,
+    member_count: usize,
     storage_text: String,
     moderator_label: String,
 }
@@ -147,7 +147,7 @@ struct HomeHeaderProps {
 fn HomeHeader(props: &HomeHeaderProps) -> impl Into<AnyElement<'static>> {
     let status_line = format!(
         "Members/Participants: {} • {} • {}",
-        props.resident_count, props.storage_text, props.moderator_label
+        props.member_count, props.storage_text, props.moderator_label
     );
     let name_line = format!("Name: {}", props.home_name);
 
@@ -212,15 +212,15 @@ fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
 }
 
 #[derive(Default, Props)]
-struct ResidentListProps {
-    residents: Vec<Resident>,
+struct MemberListProps {
+    members: Vec<HomeMember>,
     selected_index: usize,
     moderator_actions_enabled: bool,
 }
 
 #[component]
-fn ResidentList(props: &ResidentListProps) -> impl Into<AnyElement<'static>> {
-    let residents = props.residents.clone();
+fn MemberList(props: &MemberListProps) -> impl Into<AnyElement<'static>> {
+    let members = props.members.clone();
     let selected = props.selected_index;
 
     element! {
@@ -241,12 +241,12 @@ fn ResidentList(props: &ResidentListProps) -> impl Into<AnyElement<'static>> {
                 })
             }
             View(flex_direction: FlexDirection::Column, gap: 0) {
-                #(if residents.is_empty() {
+                #(if members.is_empty() {
                     vec![element! {
                         View { Text(content: "No members or participants", color: Theme::TEXT_MUTED) }
                     }]
                 } else {
-                    residents.iter().enumerate().map(|(idx, r)| {
+                    members.iter().enumerate().map(|(idx, r)| {
                         let is_selected = idx == selected;
                         let id_hint = short_id(&r.id, 4);
                         let name = format!("{} · #{}", r.name, id_hint);
@@ -281,7 +281,7 @@ struct SocialStatusProps {
     homes_count: usize,
     channel_count: usize,
     selected_channel_name: String,
-    resident_count: usize,
+    member_count: usize,
     moderator_actions_enabled: bool,
 }
 
@@ -315,7 +315,7 @@ fn SocialStatusPanel(props: &SocialStatusProps) -> impl Into<AnyElement<'static>
             Text(content: format!("Access: {} ({}) • {}", props.enter_depth.label(), hop_distance_hint(props.enter_depth), entered_text), color: Theme::TEXT_MUTED)
             Text(content: format!("Known homes: {}", props.homes_count), color: Theme::TEXT_MUTED)
             Text(content: format!("Channels: {} • Focus: #{}", props.channel_count, props.selected_channel_name), color: Theme::TEXT_MUTED)
-            Text(content: format!("Members/participants in view: {}", props.resident_count), color: Theme::TEXT_MUTED)
+            Text(content: format!("Members/participants in view: {}", props.member_count), color: Theme::TEXT_MUTED)
             Text(content: format!("Moderator actions: {}", moderator_text), color: Theme::TEXT_MUTED)
         }
     }
@@ -329,13 +329,13 @@ fn hop_distance_hint(access_level: AccessLevel) -> &'static str {
     }
 }
 
-fn convert_resident(r: &aura_app::ui::types::home::Resident) -> Resident {
+fn convert_member(r: &aura_app::ui::types::home::HomeMember) -> HomeMember {
     let role_label = match r.role {
         aura_app::ui::types::home::HomeRole::Member => "Member",
         aura_app::ui::types::home::HomeRole::Moderator => "Member + Moderator",
         aura_app::ui::types::home::HomeRole::Participant => "Participant",
     };
-    Resident {
+    HomeMember {
         id: r.id.to_string(),
         name: format!("{} ({role_label})", r.name),
         is_moderator: r.is_moderator(),
@@ -345,13 +345,13 @@ fn convert_resident(r: &aura_app::ui::types::home::Resident) -> Resident {
 
 fn convert_budget(
     storage: &aura_app::ui::types::HomeFlowBudget,
-    resident_count: u32,
+    member_count: u32,
 ) -> HomeBudget {
     HomeBudget {
         total: storage.total_allocation(),
         used: storage.total_used(),
-        resident_count: resident_count as u8,
-        max_residents: aura_app::ui::types::MAX_RESIDENTS,
+        member_count: member_count as u8,
+        max_members: aura_app::ui::types::MAX_MEMBERS,
     }
 }
 
@@ -363,8 +363,8 @@ fn convert_neighbor_home(
     HomeSummary {
         id: n.id.to_string(),
         name: Some(n.name.clone()),
-        resident_count: n.resident_count.unwrap_or(0) as u8,
-        max_residents: 8,
+        member_count: n.member_count.unwrap_or(0) as u8,
+        max_members: 8,
         is_home: n.id == *home_home_id,
         can_enter: n.can_traverse,
     }
@@ -391,7 +391,7 @@ pub fn NeighborhoodScreen(
     let active_scope_ref = hooks.use_ref(|| Arc::new(std::sync::RwLock::new(String::new())));
     let active_scope: Arc<std::sync::RwLock<String>> = active_scope_ref.read().clone();
 
-    let reactive_residents = hooks.use_state(Vec::new);
+    let reactive_members = hooks.use_state(Vec::new);
     let reactive_budget = hooks.use_state(HomeBudget::default);
     let reactive_channels = hooks.use_state(Vec::new);
     let reactive_contacts = hooks.use_state(Vec::new);
@@ -409,8 +409,8 @@ pub fn NeighborhoodScreen(
                 homes.push(HomeSummary {
                     id: n.home_home_id.to_string(),
                     name: Some(n.home_name.clone()),
-                    resident_count: 0,
-                    max_residents: 8,
+                    member_count: 0,
+                    max_members: 8,
                     is_home: true,
                     can_enter: true,
                 });
@@ -454,26 +454,26 @@ pub fn NeighborhoodScreen(
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
-        let mut reactive_residents = reactive_residents.clone();
+        let mut reactive_members = reactive_members.clone();
         let mut reactive_budget = reactive_budget.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |home_state| {
                 if let Some(current_home) = home_state.current_home() {
-                    let residents: Vec<Resident> = current_home
-                        .residents
+                    let members: Vec<HomeMember> = current_home
+                        .members
                         .iter()
-                        .map(convert_resident)
+                        .map(convert_member)
                         .collect();
-                    let budget = convert_budget(&current_home.storage, current_home.resident_count);
-                    reactive_residents.set(residents);
+                    let budget = convert_budget(&current_home.storage, current_home.member_count);
+                    reactive_members.set(members);
                     reactive_budget.set(budget);
                 } else {
-                    reactive_residents.set(Vec::new());
+                    reactive_members.set(Vec::new());
                     reactive_budget.set(HomeBudget {
                         total: 0,
                         used: 0,
-                        resident_count: 0,
-                        max_residents: aura_app::ui::types::MAX_RESIDENTS,
+                        member_count: 0,
+                        max_members: aura_app::ui::types::MAX_MEMBERS,
                     });
                 }
             })
@@ -503,7 +503,7 @@ pub fn NeighborhoodScreen(
 
     let neighborhood_name = reactive_neighborhood_name.read().clone();
     let homes = reactive_homes.read().clone();
-    let residents = reactive_residents.read().clone();
+    let members = reactive_members.read().clone();
     let budget = reactive_budget.read().clone();
     let channels = reactive_channels.read().clone();
 
@@ -518,7 +518,7 @@ pub fn NeighborhoodScreen(
         .get(props.view.selected_home)
         .map(|b| b.id.clone())
         .unwrap_or_default();
-    // Only expose channel/resident detail when full access is active.
+    // Only expose channel/member detail when full access is active.
     // This keeps Limited/Partial traversal views from leaking full-only data.
     let full_entered =
         is_detail && is_entered && matches!(props.view.enter_depth, AccessLevel::Full);
@@ -528,8 +528,8 @@ pub fn NeighborhoodScreen(
     } else {
         Vec::new()
     };
-    let display_residents = if show_detail_lists {
-        residents
+    let display_members = if show_detail_lists {
+        members
     } else {
         Vec::new()
     };
@@ -540,7 +540,7 @@ pub fn NeighborhoodScreen(
         .unwrap_or_else(|| "none".to_string());
     let homes_count = homes.len();
     let channel_count = display_channels.len();
-    let resident_count = display_residents.len();
+    let member_count = display_members.len();
     let display_moderator_actions_enabled =
         props.view.moderator_actions_enabled && show_detail_lists;
 
@@ -579,7 +579,7 @@ pub fn NeighborhoodScreen(
                             View(flex_direction: FlexDirection::Column, gap: 0) {
                                 HomeHeader(
                                     home_name: current_home_name.clone(),
-                                    resident_count: resident_count,
+                                    member_count: member_count,
                                     storage_text: storage_text,
                                     moderator_label: moderator_label,
                                 )
@@ -587,9 +587,9 @@ pub fn NeighborhoodScreen(
                                     vec![element! {
                                         View(flex_direction: FlexDirection::Column, gap: 0) {
                                             ChannelList(channels: display_channels.clone(), selected_index: props.view.selected_channel)
-                                            ResidentList(
-                                                residents: display_residents.clone(),
-                                                selected_index: props.view.selected_resident,
+                                            MemberList(
+                                                members: display_members.clone(),
+                                                selected_index: props.view.selected_member,
                                                 moderator_actions_enabled: display_moderator_actions_enabled,
                                             )
                                         }
@@ -633,7 +633,7 @@ pub fn NeighborhoodScreen(
                         homes_count: homes_count,
                         channel_count: channel_count,
                         selected_channel_name: selected_channel_name,
-                        resident_count: resident_count,
+                        member_count: member_count,
                         moderator_actions_enabled: display_moderator_actions_enabled,
                     )
                 }

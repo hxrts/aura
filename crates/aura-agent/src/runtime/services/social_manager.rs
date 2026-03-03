@@ -321,7 +321,7 @@ mod tests {
 
         let home_id = HomeId::from_bytes([1u8; 32]);
         let mut home_state = Home::new_empty(home_id);
-        home_state.residents = vec![local, peer];
+        home_state.members = vec![local, peer];
 
         manager
             .initialize_with_social(Some(home_state), vec![])

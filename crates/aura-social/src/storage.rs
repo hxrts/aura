@@ -33,9 +33,9 @@ impl StorageService {
         size <= available
     }
 
-    /// Calculate the total storage used by residents.
-    pub fn resident_storage_used(residents: &[ResidentFact]) -> u64 {
-        residents.iter().map(|r| r.storage_allocated).sum()
+    /// Calculate the total storage used by members.
+    pub fn member_storage_used(members: &[ResidentFact]) -> u64 {
+        members.iter().map(|r| r.storage_allocated).sum()
     }
 
     /// Calculate neighborhood allocation obligations.
@@ -46,30 +46,30 @@ impl StorageService {
     /// Build a storage budget from component facts.
     pub fn build_budget(
         home_fact: &HomeFact,
-        residents: &[ResidentFact],
+        members: &[ResidentFact],
         memberships: &[HomeMemberFact],
         pinned_storage: u64,
     ) -> HomeStorageBudget {
         HomeStorageBudget {
             home_id: home_fact.home_id,
-            resident_storage_spent: Self::resident_storage_used(residents),
+            member_storage_spent: Self::member_storage_used(members),
             pinned_storage_spent: pinned_storage,
             neighborhood_allocations: Self::neighborhood_allocations(memberships),
         }
     }
 
-    /// Calculate remaining resident allocation capacity.
+    /// Calculate remaining member allocation capacity.
     ///
-    /// Returns how much more storage could be allocated to residents.
-    pub fn remaining_resident_capacity(budget: &HomeStorageBudget) -> u64 {
-        let limit = budget.resident_storage_limit();
-        limit.saturating_sub(budget.resident_storage_spent)
+    /// Returns how much more storage could be allocated to members.
+    pub fn remaining_member_capacity(budget: &HomeStorageBudget) -> u64 {
+        let limit = budget.member_storage_limit();
+        limit.saturating_sub(budget.member_storage_spent)
     }
 
-    /// Validate that a new resident can be added with default allocation.
-    pub fn validate_new_resident(budget: &HomeStorageBudget) -> Result<(), SocialError> {
+    /// Validate that a new member can be added with default allocation.
+    pub fn validate_new_member(budget: &HomeStorageBudget) -> Result<(), SocialError> {
         let default_allocation = ResidentFact::DEFAULT_STORAGE_ALLOCATION;
-        let remaining = Self::remaining_resident_capacity(budget);
+        let remaining = Self::remaining_member_capacity(budget);
 
         if default_allocation > remaining {
             return Err(SocialError::storage_exceeded(remaining, default_allocation));
@@ -115,12 +115,12 @@ mod tests {
     }
 
     #[test]
-    fn test_available_space_with_residents() {
+    fn test_available_space_with_members() {
         let home_id = HomeId::from_bytes([1u8; 32]);
         let mut budget = HomeStorageBudget::new(home_id);
 
-        // Add storage for 4 residents
-        budget.resident_storage_spent = 4 * ResidentFact::DEFAULT_STORAGE_ALLOCATION;
+        // Add storage for 4 members
+        budget.member_storage_spent = 4 * ResidentFact::DEFAULT_STORAGE_ALLOCATION;
 
         let available = StorageService::available_space(&budget);
         let expected =
@@ -143,7 +143,7 @@ mod tests {
         let mut budget = HomeStorageBudget::new(home_id);
 
         // Use up all storage
-        budget.resident_storage_spent = HomeFact::DEFAULT_STORAGE_LIMIT;
+        budget.member_storage_spent = HomeFact::DEFAULT_STORAGE_LIMIT;
 
         // Request more than available
         let result = StorageService::validate_allocation(&budget, 1000);
@@ -171,7 +171,7 @@ mod tests {
         let neighborhood_id = NeighborhoodId::from_bytes([1u8; 32]);
 
         let home_fact = HomeFact::new(home_id, test_timestamp());
-        let residents = vec![
+        let members = vec![
             ResidentFact::new(
                 aura_core::identifiers::AuthorityId::new_from_entropy([1u8; 32]),
                 home_id,
@@ -189,10 +189,10 @@ mod tests {
             test_timestamp(),
         )];
 
-        let budget = StorageService::build_budget(&home_fact, &residents, &memberships, 0);
+        let budget = StorageService::build_budget(&home_fact, &members, &memberships, 0);
 
         assert_eq!(
-            budget.resident_storage_spent,
+            budget.member_storage_spent,
             2 * ResidentFact::DEFAULT_STORAGE_ALLOCATION
         );
         assert_eq!(

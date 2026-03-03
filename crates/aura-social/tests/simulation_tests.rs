@@ -40,28 +40,28 @@ fn test_neighborhood_id(seed: u8) -> NeighborhoodId {
     NeighborhoodId::from_bytes([seed; 32])
 }
 
-/// Create a home with the specified number of residents
-fn create_home(home_seed: u8, resident_count: usize) -> (Home, AuthorityId, Vec<AuthorityId>) {
+/// Create a home with the specified number of members
+fn create_home(home_seed: u8, member_count: usize) -> (Home, AuthorityId, Vec<AuthorityId>) {
     let home_id = test_home_id(home_seed);
     let timestamp = test_timestamp();
 
     let home_fact = HomeFact::new(home_id, timestamp.clone());
 
-    let mut residents = Vec::with_capacity(resident_count);
-    let mut resident_facts = Vec::with_capacity(resident_count);
+    let mut members = Vec::with_capacity(member_count);
+    let mut member_facts = Vec::with_capacity(member_count);
 
-    for i in 0..resident_count {
+    for i in 0..member_count {
         let authority = test_authority((home_seed * 10) + i as u8 + 1);
-        residents.push(authority);
-        resident_facts.push(ResidentFact::new(authority, home_id, timestamp.clone()));
+        members.push(authority);
+        member_facts.push(ResidentFact::new(authority, home_id, timestamp.clone()));
     }
 
-    let moderator = residents[0];
+    let moderator = members[0];
     let moderator_facts = vec![ModeratorFact::new(moderator, home_id, timestamp)];
 
-    let home = Home::from_facts(&home_fact, None, &resident_facts, &moderator_facts);
+    let home = Home::from_facts(&home_fact, None, &member_facts, &moderator_facts);
 
-    (home, moderator, residents)
+    (home, moderator, members)
 }
 
 /// Create a neighborhood with the specified homes
@@ -168,23 +168,23 @@ impl ReachabilityChecker for PartialReachability {
 
 #[test]
 fn test_large_home_simulation() {
-    // Simulate a home at maximum capacity (8 residents)
-    let (home, moderator, residents) = create_home(1, 8);
+    // Simulate a home at maximum capacity (8 members)
+    let (home, moderator, members) = create_home(1, 8);
     let topology = SocialTopology::new(moderator, Some(home), vec![]);
 
     // Should have 7 home peers
     assert_eq!(topology.same_home_members().len(), 7);
 
-    // All residents should be known
-    for resident in &residents {
-        if resident != &moderator {
-            assert!(topology.knows_peer(resident));
+    // All members should be known
+    for member in &members {
+        if member != &moderator {
+            assert!(topology.knows_peer(member));
         }
     }
 
     // Home should be at capacity
     let (full_home, _, _) = create_home(2, 8);
-    assert!(!full_home.can_add_resident());
+    assert!(!full_home.can_add_member());
 }
 
 #[test]
@@ -255,12 +255,12 @@ fn test_mesh_neighborhood_topology() {
 #[test]
 fn test_partial_home_partition() {
     // Simulate a scenario where some home peers are unreachable
-    let (home, moderator, residents) = create_home(1, 5);
+    let (home, moderator, members) = create_home(1, 5);
     let topology = SocialTopology::new(moderator, Some(home), vec![]);
 
     // Only first two peers are reachable
     let reachable_peers: std::collections::HashSet<AuthorityId> =
-        residents[1..=2].iter().copied().collect();
+        members[1..=2].iter().copied().collect();
     let reachability = PartialReachability::new(reachable_peers.iter().copied());
 
     // Build candidates
@@ -305,13 +305,13 @@ fn test_complete_home_partition() {
 
     // But we should still get all candidates when not filtering
     let all_candidates = builder.build_candidates(&context, &NeverReachable);
-    assert_eq!(all_candidates.len(), 4); // 5 residents - 1 self
+    assert_eq!(all_candidates.len(), 4); // 5 members - 1 self
 }
 
 #[test]
 fn test_guardian_fallback_during_partition() {
     // Test that guardians can be used when home peers are unreachable
-    let (home, moderator, _residents) = create_home(1, 3);
+    let (home, moderator, _members) = create_home(1, 3);
     let mut topology = SocialTopology::new(moderator, Some(home), vec![]);
 
     let guardian = test_authority(88);
@@ -363,7 +363,7 @@ fn test_discovery_layer_cost_progression() {
 
 #[test]
 fn test_progressive_social_presence_loss() {
-    let (home, moderator, _residents) = create_home(1, 3);
+    let (home, moderator, _members) = create_home(1, 3);
 
     // Full social presence
     let topology_full = SocialTopology::new(moderator, Some(home), vec![]);
@@ -391,13 +391,13 @@ fn test_progressive_social_presence_loss() {
 #[test]
 fn test_deterministic_topology_construction() {
     // Verify that topology construction is deterministic
-    let (home1a, moderator1a, residents1a) = create_home(1, 5);
-    let (home1b, moderator1b, residents1b) = create_home(1, 5);
+    let (home1a, moderator1a, members1a) = create_home(1, 5);
+    let (home1b, moderator1b, members1b) = create_home(1, 5);
 
     // Same seed should produce same results
     assert_eq!(home1a.home_id, home1b.home_id);
     assert_eq!(moderator1a, moderator1b);
-    assert_eq!(residents1a, residents1b);
+    assert_eq!(members1a, members1b);
 
     // Topologies should be equivalent
     let topology_a = SocialTopology::new(moderator1a, Some(home1a), vec![]);

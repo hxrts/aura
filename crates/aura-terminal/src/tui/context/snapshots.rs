@@ -138,7 +138,7 @@ impl SnapshotHelper {
             let my_role = home_state.as_ref().map(|b| b.my_role);
             HomeSnapshot {
                 home_state,
-                is_resident: my_role.is_some(),
+                is_member: my_role.is_some(),
                 is_moderator: matches!(my_role, Some(HomeRole::Moderator | HomeRole::Member)),
             }
         } else {

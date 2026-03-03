@@ -22,12 +22,12 @@ pub struct Home {
     pub home_id: HomeId,
     /// Total storage limit in bytes
     pub storage_limit: u64,
-    /// Maximum number of residents
-    pub max_residents: u8,
+    /// Maximum number of members
+    pub max_members: u8,
     /// Maximum number of neighborhoods this home can join
     pub neighborhood_limit: u8,
-    /// Current residents (authority IDs)
-    pub residents: Vec<AuthorityId>,
+    /// Current members (authority IDs)
+    pub members: Vec<AuthorityId>,
     /// Current moderator designations with capability bundles.
     pub moderator_designations: Vec<ModeratorDesignation>,
     /// Current storage budget tracking
@@ -40,30 +40,30 @@ impl Home {
     /// # Arguments
     /// * `home_fact` - The home existence/configuration fact
     /// * `config` - The home configuration fact (optional, uses v1 defaults if None)
-    /// * `residents` - All resident facts for this home
+    /// * `members` - All member facts for this home
     /// * `moderators` - All moderator facts for this home
     pub fn from_facts(
         home_fact: &HomeFact,
         config: Option<&HomeConfigFact>,
-        residents: &[ResidentFact],
+        members: &[ResidentFact],
         moderators: &[ModeratorFact],
     ) -> Self {
         let config = config
             .cloned()
             .unwrap_or_else(|| HomeConfigFact::v1_default(home_fact.home_id));
 
-        // Calculate storage budget from residents
-        let resident_storage_spent: u64 = residents.iter().map(|r| r.storage_allocated).sum();
+        // Calculate storage budget from members
+        let member_storage_spent: u64 = members.iter().map(|r| r.storage_allocated).sum();
 
         let mut storage_budget = HomeStorageBudget::new(home_fact.home_id);
-        storage_budget.resident_storage_spent = resident_storage_spent;
-        let resident_set: BTreeSet<AuthorityId> =
-            residents.iter().map(|r| r.authority_id).collect();
+        storage_budget.member_storage_spent = member_storage_spent;
+        let member_set: BTreeSet<AuthorityId> =
+            members.iter().map(|r| r.authority_id).collect();
         let mut designation_by_authority: BTreeMap<AuthorityId, ModeratorDesignation> =
             BTreeMap::new();
         for moderator in moderators {
             // Invariant: Moderator ⊆ Member. Ignore stale/non-member grants in materialized view.
-            if !resident_set.contains(&moderator.authority_id) {
+            if !member_set.contains(&moderator.authority_id) {
                 continue;
             }
             let designation = ModeratorDesignation::from(moderator);
@@ -82,9 +82,9 @@ impl Home {
         Self {
             home_id: home_fact.home_id,
             storage_limit: home_fact.storage_limit,
-            max_residents: config.max_residents,
+            max_members: config.max_members,
             neighborhood_limit: config.neighborhood_limit,
-            residents: residents.iter().map(|r| r.authority_id).collect(),
+            members: members.iter().map(|r| r.authority_id).collect(),
             moderator_designations: designation_by_authority.into_values().collect(),
             storage_budget,
         }
@@ -95,22 +95,22 @@ impl Home {
         Self {
             home_id,
             storage_limit: HomeFact::DEFAULT_STORAGE_LIMIT,
-            max_residents: HomeConfigFact::V1_MAX_RESIDENTS,
+            max_members: HomeConfigFact::V1_MAX_MEMBERS,
             neighborhood_limit: HomeConfigFact::V1_NEIGHBORHOOD_LIMIT,
-            residents: Vec::new(),
+            members: Vec::new(),
             moderator_designations: Vec::new(),
             storage_budget: HomeStorageBudget::new(home_id),
         }
     }
 
-    /// Check if this home can accept another resident.
-    pub fn can_add_resident(&self) -> bool {
-        self.residents.len() < self.max_residents as usize
+    /// Check if this home can accept another member.
+    pub fn can_add_member(&self) -> bool {
+        self.members.len() < self.max_members as usize
     }
 
-    /// Check if an authority is a resident of this home.
-    pub fn is_resident(&self, authority: &AuthorityId) -> bool {
-        self.residents.contains(authority)
+    /// Check if an authority is a member of this home.
+    pub fn is_member(&self, authority: &AuthorityId) -> bool {
+        self.members.contains(authority)
     }
 
     /// Check if an authority is a moderator of this home.
@@ -151,8 +151,8 @@ impl Home {
         capabilities: ModeratorCapabilities,
         designated_at: aura_core::time::TimeStamp,
     ) -> Result<(), SocialError> {
-        if !self.is_resident(&authority) {
-            return Err(SocialError::not_resident(self.home_id));
+        if !self.is_member(&authority) {
+            return Err(SocialError::not_member(self.home_id));
         }
 
         if let Some(designation) = self
@@ -190,26 +190,26 @@ impl Home {
         Ok(())
     }
 
-    /// Get the number of current residents.
-    pub fn resident_count(&self) -> usize {
-        self.residents.len()
+    /// Get the number of current members.
+    pub fn member_count(&self) -> usize {
+        self.members.len()
     }
 
-    /// Get available resident slots.
+    /// Get available member slots.
     pub fn available_slots(&self) -> usize {
-        (self.max_residents as usize).saturating_sub(self.residents.len())
+        (self.max_members as usize).saturating_sub(self.members.len())
     }
 
     /// Validate that an authority can join this home.
     pub fn validate_join(&self, authority: &AuthorityId) -> Result<(), SocialError> {
-        if self.is_resident(authority) {
+        if self.is_member(authority) {
             return Err(SocialError::AlreadyResident {
                 home_id: self.home_id,
             });
         }
 
-        if !self.can_add_resident() {
-            return Err(SocialError::home_full(self.home_id, self.max_residents));
+        if !self.can_add_member() {
+            return Err(SocialError::home_full(self.home_id, self.max_members));
         }
 
         Ok(())
@@ -224,9 +224,9 @@ impl Home {
         Ok(())
     }
 
-    /// Get all home peers (residents excluding self).
+    /// Get all home peers (members excluding self).
     pub fn same_home_members(&self, self_authority: &AuthorityId) -> Vec<AuthorityId> {
-        self.residents
+        self.members
             .iter()
             .filter(|a| *a != self_authority)
             .copied()
@@ -255,7 +255,7 @@ mod tests {
         let home_id = HomeId::from_bytes([1u8; 32]);
         let home_fact = HomeFact::new(home_id, test_timestamp());
 
-        let residents = vec![
+        let members = vec![
             ResidentFact::new(test_authority(1), home_id, test_timestamp()),
             ResidentFact::new(test_authority(2), home_id, test_timestamp()),
         ];
@@ -266,25 +266,25 @@ mod tests {
             test_timestamp(),
         )];
 
-        let home_instance = Home::from_facts(&home_fact, None, &residents, &moderators);
+        let home_instance = Home::from_facts(&home_fact, None, &members, &moderators);
 
         assert_eq!(home_instance.home_id, home_id);
-        assert_eq!(home_instance.resident_count(), 2);
-        assert!(home_instance.is_resident(&test_authority(1)));
-        assert!(home_instance.is_resident(&test_authority(2)));
-        assert!(!home_instance.is_resident(&test_authority(3)));
+        assert_eq!(home_instance.member_count(), 2);
+        assert!(home_instance.is_member(&test_authority(1)));
+        assert!(home_instance.is_member(&test_authority(2)));
+        assert!(!home_instance.is_member(&test_authority(3)));
         assert!(home_instance.is_moderator(&test_authority(1)));
         assert!(!home_instance.is_moderator(&test_authority(2)));
     }
 
     #[test]
-    fn test_moderator_designation_requires_resident_membership() {
+    fn test_moderator_designation_requires_member_membership() {
         let home_id = HomeId::from_bytes([9u8; 32]);
         let mut home_instance = Home::new_empty(home_id);
         let member = test_authority(1);
         let outsider = test_authority(2);
 
-        home_instance.residents.push(member);
+        home_instance.members.push(member);
         assert!(home_instance
             .assign_moderator_designation(
                 member,
@@ -308,7 +308,7 @@ mod tests {
         let mut home_instance = Home::new_empty(home_id);
         let member = test_authority(1);
 
-        home_instance.residents.push(member);
+        home_instance.members.push(member);
         let assigned = home_instance.assign_moderator_designation(
             member,
             ModeratorCapabilities::default(),
@@ -328,7 +328,7 @@ mod tests {
         let mut home_instance = Home::new_empty(home_id);
         let member = test_authority(1);
 
-        home_instance.residents.push(member);
+        home_instance.members.push(member);
         let assigned = home_instance.assign_moderator_designation(
             member,
             ModeratorCapabilities::default(),
@@ -349,14 +349,14 @@ mod tests {
         let home_id = HomeId::from_bytes([2u8; 32]);
         let mut home_instance = Home::new_empty(home_id);
 
-        // Can add residents up to max
+        // Can add members up to max
         for i in 0..8u8 {
-            assert!(home_instance.can_add_resident());
-            home_instance.residents.push(test_authority(i));
+            assert!(home_instance.can_add_member());
+            home_instance.members.push(test_authority(i));
         }
 
         // Now full
-        assert!(!home_instance.can_add_resident());
+        assert!(!home_instance.can_add_member());
         assert_eq!(home_instance.available_slots(), 0);
     }
 
@@ -370,13 +370,13 @@ mod tests {
         assert!(home_instance.validate_join(&authority).is_ok());
 
         // Can't join twice
-        home_instance.residents.push(authority);
+        home_instance.members.push(authority);
         let result = home_instance.validate_join(&authority);
         assert!(matches!(result, Err(SocialError::AlreadyResident { .. })));
 
         // Fill home
         for i in 2..9u8 {
-            home_instance.residents.push(test_authority(i));
+            home_instance.members.push(test_authority(i));
         }
 
         // Can't join full home
@@ -394,7 +394,7 @@ mod tests {
         let peer1 = test_authority(2);
         let peer2 = test_authority(3);
 
-        home_instance.residents = vec![self_auth, peer1, peer2];
+        home_instance.members = vec![self_auth, peer1, peer2];
 
         let peers = home_instance.same_home_members(&self_auth);
         assert_eq!(peers.len(), 2);

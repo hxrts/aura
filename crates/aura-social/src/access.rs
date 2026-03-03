@@ -346,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn test_determine_default_access_level_resident() {
+    fn test_determine_default_access_level_member() {
         let home_id = HomeId::from_bytes([1u8; 32]);
         let home_instance = Home::new_empty(home_id);
 

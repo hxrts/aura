@@ -503,19 +503,19 @@ impl AppCore {
                     ));
                 }
 
-                let Some(resident) = home.resident(&target) else {
+                let Some(member) = home.member(&target) else {
                     return Err(IntentError::validation_failed(format!(
-                        "Resident not found: {target_id}"
+                        "Member not found: {target_id}"
                     )));
                 };
 
-                if matches!(resident.role, crate::views::HomeRole::Moderator) {
+                if matches!(member.role, crate::views::HomeRole::Moderator) {
                     return Err(IntentError::validation_failed(
                         "Target already has moderator designation",
                     ));
                 }
 
-                if !matches!(resident.role, crate::views::HomeRole::Member) {
+                if !matches!(member.role, crate::views::HomeRole::Member) {
                     return Err(IntentError::validation_failed(
                         "Only members can be designated as moderators",
                     ));
@@ -541,13 +541,13 @@ impl AppCore {
                     ));
                 }
 
-                let Some(resident) = home.resident(&target) else {
+                let Some(member) = home.member(&target) else {
                     return Err(IntentError::validation_failed(format!(
-                        "Resident not found: {target_id}"
+                        "Member not found: {target_id}"
                     )));
                 };
 
-                if !matches!(resident.role, crate::views::HomeRole::Moderator) {
+                if !matches!(member.role, crate::views::HomeRole::Moderator) {
                     return Err(IntentError::validation_failed("Target is not a moderator"));
                 }
             }

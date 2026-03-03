@@ -35,17 +35,17 @@ pub fn test_neighborhood_id(seed: u8) -> NeighborhoodId {
     NeighborhoodId::from_bytes([seed; 32])
 }
 
-/// Create a test home with a given number of residents.
+/// Create a test home with a given number of members.
 ///
 /// # Arguments
 /// * `home_seed` - Seed for the home ID
-/// * `resident_count` - Number of residents to create (first resident is the moderator)
+/// * `member_count` - Number of members to create (first member is the moderator)
 ///
 /// # Returns
-/// A tuple of (Home, moderator_authority, resident_authorities)
+/// A tuple of (Home, moderator_authority, member_authorities)
 pub fn create_test_home(
     home_seed: u8,
-    resident_count: usize,
+    member_count: usize,
 ) -> (Home, AuthorityId, Vec<AuthorityId>) {
     let home_id = test_home_id(home_seed);
     let timestamp = test_timestamp();
@@ -53,29 +53,29 @@ pub fn create_test_home(
     // Create home fact
     let home_fact = HomeFact::new(home_id, timestamp.clone());
 
-    // Create residents (first one is the moderator)
-    let mut residents = Vec::with_capacity(resident_count);
-    let mut resident_facts = Vec::with_capacity(resident_count);
+    // Create members (first one is the moderator)
+    let mut members = Vec::with_capacity(member_count);
+    let mut member_facts = Vec::with_capacity(member_count);
 
-    for i in 0..resident_count {
+    for i in 0..member_count {
         let authority = test_authority((home_seed * 10) + i as u8 + 1);
-        residents.push(authority);
-        resident_facts.push(ResidentFact::new(authority, home_id, timestamp.clone()));
+        members.push(authority);
+        member_facts.push(ResidentFact::new(authority, home_id, timestamp.clone()));
     }
 
-    let moderator = residents[0];
+    let moderator = members[0];
     let moderator_facts = vec![ModeratorFact::new(moderator, home_id, timestamp)];
 
-    let home = Home::from_facts(&home_fact, None, &resident_facts, &moderator_facts);
+    let home = Home::from_facts(&home_fact, None, &member_facts, &moderator_facts);
 
-    (home, moderator, residents)
+    (home, moderator, members)
 }
 
 /// Create a test home with custom configuration.
 pub fn create_test_home_with_config(
     home_seed: u8,
-    resident_count: usize,
-    max_residents: u8,
+    member_count: usize,
+    max_members: u8,
     neighborhood_limit: u8,
 ) -> (Home, AuthorityId, Vec<AuthorityId>) {
     let home_id = test_home_id(home_seed);
@@ -84,30 +84,30 @@ pub fn create_test_home_with_config(
     let home_fact = HomeFact::new(home_id, timestamp.clone());
     let config_fact = HomeConfigFact {
         home_id,
-        max_residents,
+        max_members,
         neighborhood_limit,
     };
 
-    let mut residents = Vec::with_capacity(resident_count);
-    let mut resident_facts = Vec::with_capacity(resident_count);
+    let mut members = Vec::with_capacity(member_count);
+    let mut member_facts = Vec::with_capacity(member_count);
 
-    for i in 0..resident_count {
+    for i in 0..member_count {
         let authority = test_authority((home_seed * 10) + i as u8 + 1);
-        residents.push(authority);
-        resident_facts.push(ResidentFact::new(authority, home_id, timestamp.clone()));
+        members.push(authority);
+        member_facts.push(ResidentFact::new(authority, home_id, timestamp.clone()));
     }
 
-    let moderator = residents[0];
+    let moderator = members[0];
     let moderator_facts = vec![ModeratorFact::new(moderator, home_id, timestamp)];
 
     let home = Home::from_facts(
         &home_fact,
         Some(&config_fact),
-        &resident_facts,
+        &member_facts,
         &moderator_facts,
     );
 
-    (home, moderator, residents)
+    (home, moderator, members)
 }
 
 /// Create a test neighborhood with a given number of member homes.
@@ -214,21 +214,21 @@ pub fn create_test_topology(
 /// Create a social topology with a single home (no neighborhoods).
 pub fn create_single_home_topology(
     home_seed: u8,
-    resident_count: usize,
+    member_count: usize,
 ) -> (SocialTopology, Home, AuthorityId, Vec<AuthorityId>) {
-    let (home, moderator, residents) = create_test_home(home_seed, resident_count);
+    let (home, moderator, members) = create_test_home(home_seed, member_count);
     let topology = SocialTopology::new(moderator, Some(home.clone()), vec![]);
-    (topology, home, moderator, residents)
+    (topology, home, moderator, members)
 }
 
 /// Create a social topology with a home in a neighborhood.
 pub fn create_neighborhood_topology(
     home_seed: u8,
-    resident_count: usize,
+    member_count: usize,
     neighborhood_seed: u8,
     neighbor_home_count: usize,
 ) -> (SocialTopology, Home, Neighborhood, AuthorityId) {
-    let (home, moderator, _residents) = create_test_home(home_seed, resident_count);
+    let (home, moderator, _members) = create_test_home(home_seed, member_count);
     let (mut neighborhood, _home_ids) =
         create_test_neighborhood(neighborhood_seed, neighbor_home_count);
 
@@ -268,9 +268,9 @@ impl SocialTopologyBuilder {
         self
     }
 
-    /// Add a home with the given number of residents.
-    pub fn with_new_home(mut self, home_seed: u8, resident_count: usize) -> Self {
-        let (home, _moderator, _residents) = create_test_home(home_seed, resident_count);
+    /// Add a home with the given number of members.
+    pub fn with_new_home(mut self, home_seed: u8, member_count: usize) -> Self {
+        let (home, _moderator, _members) = create_test_home(home_seed, member_count);
         self.home = Some(home);
         self
     }
@@ -366,13 +366,13 @@ mod tests {
 
     #[test]
     fn test_create_test_home() {
-        let (home, moderator, residents) = create_test_home(1, 3);
+        let (home, moderator, members) = create_test_home(1, 3);
 
-        assert_eq!(residents.len(), 3);
-        assert_eq!(moderator, residents[0]);
-        assert!(home.is_resident(&moderator));
+        assert_eq!(members.len(), 3);
+        assert_eq!(moderator, members[0]);
+        assert!(home.is_member(&moderator));
         assert!(home.is_moderator(&moderator));
-        assert_eq!(home.residents.len(), 3);
+        assert_eq!(home.members.len(), 3);
     }
 
     #[test]
@@ -400,15 +400,15 @@ mod tests {
 
     #[test]
     fn test_single_home_topology() {
-        let (topology, _home, moderator, residents) = create_single_home_topology(1, 3);
+        let (topology, _home, moderator, members) = create_single_home_topology(1, 3);
 
         assert!(topology.has_social_presence());
         let same_home_members = topology.same_home_members();
-        assert_eq!(same_home_members.len(), 2); // 3 residents - 1 self = 2 peers
+        assert_eq!(same_home_members.len(), 2); // 3 members - 1 self = 2 peers
 
-        // All other residents should be home peers
-        for resident in &residents[1..] {
-            assert!(same_home_members.contains(resident));
+        // All other members should be home peers
+        for member in &members[1..] {
+            assert!(same_home_members.contains(member));
         }
         assert!(!same_home_members.contains(&moderator));
     }
@@ -441,14 +441,14 @@ mod tests {
 
     #[test]
     fn test_discovery_layer_with_fixtures() {
-        let (topology, _home, moderator, residents) = create_single_home_topology(1, 3);
+        let (topology, _home, moderator, members) = create_single_home_topology(1, 3);
 
         // Local authority (moderator) should be direct to self
         assert_eq!(topology.discovery_layer(&moderator), DiscoveryLayer::Direct);
 
         // Home peers are Direct because we have a relationship with them
         assert_eq!(
-            topology.discovery_layer(&residents[1]),
+            topology.discovery_layer(&members[1]),
             DiscoveryLayer::Direct
         );
 

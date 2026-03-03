@@ -174,8 +174,8 @@ pub async fn set_channel_mode_resolved(
                 .max_by_key(|(_, home)| {
                     (
                         u8::from(home.is_admin()),
-                        u8::from(!home.residents.is_empty()),
-                        home.resident_count,
+                        u8::from(!home.members.is_empty()),
+                        home.member_count,
                     )
                 })
                 .map(|(home_id, _)| *home_id)
@@ -204,8 +204,8 @@ pub async fn set_channel_mode_resolved(
                 context_id,
             );
             placeholder.my_role = crate::views::home::HomeRole::Participant;
-            placeholder.residents.clear();
-            placeholder.resident_count = 0;
+            placeholder.members.clear();
+            placeholder.member_count = 0;
             placeholder.online_count = 0;
             homes.add_home_with_auto_select(placeholder);
             target_home_id = Some(resolved_channel);

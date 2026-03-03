@@ -155,7 +155,7 @@ pub fn get_help_commands() -> Vec<HelpCommand> {
         HelpCommand::new(
             "Full",
             "",
-            "Full access to resident/channel views",
+            "Full access to member/channel views",
             "Neighborhood",
         ),
         // Settings screen

@@ -1228,7 +1228,7 @@ mod tests {
             "Test Home".to_string(),
         );
 
-        let resident_joined = SocialFact::resident_joined_ms(
+        let member_joined = SocialFact::member_joined_ms(
             test_authority_id(),
             test_home_id(),
             test_context_id(),
@@ -1246,7 +1246,7 @@ mod tests {
 
         let facts = vec![
             make_test_fact(1, FactContent::Relational(home_created.to_generic())),
-            make_test_fact(2, FactContent::Relational(resident_joined.to_generic())),
+            make_test_fact(2, FactContent::Relational(member_joined.to_generic())),
             make_test_fact(3, FactContent::Relational(storage_updated.to_generic())),
         ];
 

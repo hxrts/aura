@@ -134,7 +134,7 @@ impl std::error::Error for AvailabilityError {}
 ///     type UnitId = HomeId;
 ///
 ///     fn replication_peers(&self, _unit: HomeId) -> Vec<AuthorityId> {
-///         self.residents.iter()
+///         self.members.iter()
 ///             .filter(|a| *a != &self.local_authority)
 ///             .copied()
 ///             .collect()

@@ -117,7 +117,7 @@ pub struct RecoverySessionState {
 #[derive(Debug, Clone, Default)]
 pub struct HomeState {
     pub owner: String,
-    pub residents: Vec<String>,
+    pub members: Vec<String>,
     pub moderators: Vec<String>,
 }
 
@@ -412,7 +412,7 @@ impl FlowTraceReplayer {
                 .unwrap_or_default()
                 .to_string();
 
-            home.residents = Self::extract_string_set(obj.get("residents"));
+            home.members = Self::extract_string_set(obj.get("members"));
             home.moderators = Self::extract_string_set(obj.get("moderators"));
         }
 
@@ -548,31 +548,31 @@ impl FlowTraceReplayer {
             }
         }
 
-        // Invariant 2: Home capacity (max 8 residents)
+        // Invariant 2: Home capacity (max 8 members)
         for (home_id, home_state) in &state.homes {
-            if home_state.residents.len() <= 8 {
+            if home_state.members.len() <= 8 {
                 results.passed_count += 1;
             } else {
                 results.failures.push(format!(
-                    "Home {} has {} residents (max 8)",
+                    "Home {} has {} members (max 8)",
                     home_id,
-                    home_state.residents.len()
+                    home_state.members.len()
                 ));
             }
         }
 
-        // Invariant 3: Moderators must be residents
+        // Invariant 3: Moderators must be members
         for (home_id, home_state) in &state.homes {
-            let all_moderators_are_residents = home_state
+            let all_moderators_are_members = home_state
                 .moderators
                 .iter()
-                .all(|s| home_state.residents.contains(s));
+                .all(|s| home_state.members.contains(s));
 
-            if all_moderators_are_residents {
+            if all_moderators_are_members {
                 results.passed_count += 1;
             } else {
                 results.failures.push(format!(
-                    "Home {home_id} has moderators who are not residents"
+                    "Home {home_id} has moderators who are not members"
                 ));
             }
         }
@@ -602,14 +602,14 @@ impl FlowTraceReplayer {
             }
         }
 
-        // Invariant 6: Home residents must be valid agents (Social Graph)
+        // Invariant 6: Home members must be valid agents (Social Graph)
         for (home_id, home_state) in &state.homes {
-            for resident in &home_state.residents {
-                if state.agents.contains_key(resident) {
+            for member in &home_state.members {
+                if state.agents.contains_key(member) {
                     results.passed_count += 1;
                 } else {
                     results.failures.push(format!(
-                        "Home {home_id} has resident {resident} who is not a valid agent"
+                        "Home {home_id} has member {member} who is not a valid agent"
                     ));
                 }
             }
@@ -719,7 +719,7 @@ fn test_flow_invariant_validation() {
 fn test_home_capacity_invariant() {
     let mut state = FlowState::default();
 
-    // Add agents for residents
+    // Add agents for members
     for i in 0..9 {
         state.agents.insert(
             format!("user{i}"),
@@ -730,12 +730,12 @@ fn test_home_capacity_invariant() {
         );
     }
 
-    // Valid: 8 residents
+    // Valid: 8 members
     state.homes.insert(
         "home1".to_string(),
         HomeState {
             owner: "bob".to_string(),
-            residents: (0..8).map(|i| format!("user{i}")).collect(),
+            members: (0..8).map(|i| format!("user{i}")).collect(),
             moderators: vec!["user0".to_string()],
         },
     );
@@ -743,24 +743,24 @@ fn test_home_capacity_invariant() {
     let results = FlowTraceReplayer::validate_flow_invariants(&state);
     assert!(
         results.all_passed,
-        "8 residents should be valid: {:?}",
+        "8 members should be valid: {:?}",
         results.failures
     );
 
-    // Invalid: 9 residents
+    // Invalid: 9 members
     state
         .homes
         .get_mut("home1")
         .unwrap()
-        .residents
+        .members
         .push("user8".to_string());
     let results = FlowTraceReplayer::validate_flow_invariants(&state);
-    assert!(!results.all_passed, "9 residents should fail");
+    assert!(!results.all_passed, "9 members should fail");
 }
 
-/// Test moderators-are-residents invariant
+/// Test moderators-are-members invariant
 #[test]
-fn test_moderators_are_residents_invariant() {
+fn test_moderators_are_members_invariant() {
     let mut state = FlowState::default();
 
     // Add agents for participants
@@ -774,22 +774,22 @@ fn test_moderators_are_residents_invariant() {
         );
     }
 
-    // Invalid: moderator not a resident
+    // Invalid: moderator not a member
     state.homes.insert(
         "home1".to_string(),
         HomeState {
             owner: "bob".to_string(),
-            residents: vec!["alice".to_string()],
-            moderators: vec!["carol".to_string()], // carol is not a resident
+            members: vec!["alice".to_string()],
+            moderators: vec!["carol".to_string()], // carol is not a member
         },
     );
 
     let results = FlowTraceReplayer::validate_flow_invariants(&state);
-    assert!(!results.all_passed, "Non-resident moderator should fail");
+    assert!(!results.all_passed, "Non-member moderator should fail");
     assert!(results
         .failures
         .iter()
-        .any(|f| f.contains("moderators who are not residents")));
+        .any(|f| f.contains("moderators who are not members")));
 }
 
 /// Test nicknames-for-contacts invariant (Social Graph)
@@ -832,9 +832,9 @@ fn test_nicknames_for_contacts_invariant() {
         .any(|f| f.contains("who is not a contact")));
 }
 
-/// Test home-residents-are-agents invariant (Social Graph)
+/// Test home-members-are-agents invariant (Social Graph)
 #[test]
-fn test_home_residents_are_agents_invariant() {
+fn test_home_members_are_agents_invariant() {
     let mut state = FlowState::default();
 
     // Setup agents
@@ -853,12 +853,12 @@ fn test_home_residents_are_agents_invariant() {
         },
     );
 
-    // Valid: home with valid agent residents
+    // Valid: home with valid agent members
     state.homes.insert(
         "home1".to_string(),
         HomeState {
             owner: "bob".to_string(),
-            residents: vec!["bob".to_string(), "alice".to_string()],
+            members: vec!["bob".to_string(), "alice".to_string()],
             moderators: vec!["bob".to_string()],
         },
     );
@@ -866,20 +866,20 @@ fn test_home_residents_are_agents_invariant() {
     let results = FlowTraceReplayer::validate_flow_invariants(&state);
     assert!(
         results.all_passed,
-        "Valid residents should pass: {:?}",
+        "Valid members should pass: {:?}",
         results.failures
     );
 
-    // Invalid: home with non-existent agent as resident
+    // Invalid: home with non-existent agent as member
     state
         .homes
         .get_mut("home1")
         .unwrap()
-        .residents
+        .members
         .push("ghost".to_string());
 
     let results = FlowTraceReplayer::validate_flow_invariants(&state);
-    assert!(!results.all_passed, "Invalid resident should fail");
+    assert!(!results.all_passed, "Invalid member should fail");
     assert!(results
         .failures
         .iter()
@@ -927,7 +927,7 @@ fn test_social_graph_flow_state_extraction() {
           "homes": {"#map": [
             ["home1", {
               "owner": "bob",
-              "residents": {"#set": ["bob", "alice"]},
+              "members": {"#set": ["bob", "alice"]},
               "moderators": {"#set": ["bob"]}
             }]
           ]},
@@ -953,8 +953,8 @@ fn test_social_graph_flow_state_extraction() {
         result.invariants_verified
     );
 
-    // Should have checked: agent validity, home capacity, moderators-are-residents,
-    // nicknames-for-contacts, and home-residents-are-agents
+    // Should have checked: agent validity, home capacity, moderators-are-members,
+    // nicknames-for-contacts, and home-members-are-agents
     assert!(
         result.invariants_verified >= 5,
         "Should verify multiple Social Graph invariants"

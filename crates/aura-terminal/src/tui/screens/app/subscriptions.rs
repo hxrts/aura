@@ -686,7 +686,7 @@ pub fn use_neighborhood_homes_subscription(
 /// Shared current-home metadata used by neighborhood state machine navigation.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NeighborhoodHomeMeta {
-    pub resident_count: usize,
+    pub member_count: usize,
     pub moderator_actions_enabled: bool,
 }
 
@@ -708,7 +708,7 @@ pub fn use_neighborhood_home_meta_subscription(
                 let snapshot = homes_state
                     .current_home()
                     .map(|home| NeighborhoodHomeMeta {
-                        resident_count: home.residents.len(),
+                        member_count: home.members.len(),
                         moderator_actions_enabled: home.is_admin(),
                     })
                     .unwrap_or_default();

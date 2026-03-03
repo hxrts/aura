@@ -84,20 +84,20 @@ impl HomeFact {
 
 /// Home configuration fact
 ///
-/// Corresponds to: `home_config(home_id, max_residents, neighborhood_limit)`
+/// Corresponds to: `home_config(home_id, max_members, neighborhood_limit)`
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct HomeConfigFact {
     /// Home this configuration applies to
     pub home_id: HomeId,
-    /// Maximum number of residents (v1: 8)
-    pub max_residents: u8,
+    /// Maximum number of members (v1: 8)
+    pub max_members: u8,
     /// Maximum number of neighborhoods to join (v1: 4)
     pub neighborhood_limit: u8,
 }
 
 impl HomeConfigFact {
-    /// v1 maximum residents per home
-    pub const V1_MAX_RESIDENTS: u8 = 8;
+    /// v1 maximum members per home
+    pub const V1_MAX_MEMBERS: u8 = 8;
     /// v1 maximum neighborhoods per home
     pub const V1_NEIGHBORHOOD_LIMIT: u8 = 4;
 
@@ -105,7 +105,7 @@ impl HomeConfigFact {
     pub fn v1_default(home_id: HomeId) -> Self {
         Self {
             home_id,
-            max_residents: Self::V1_MAX_RESIDENTS,
+            max_members: Self::V1_MAX_MEMBERS,
             neighborhood_limit: Self::V1_NEIGHBORHOOD_LIMIT,
         }
     }
@@ -114,17 +114,17 @@ impl HomeConfigFact {
     pub fn to_datalog(&self) -> String {
         format!(
             "home_config(\"{}\", {}, {});",
-            self.home_id, self.max_residents, self.neighborhood_limit
+            self.home_id, self.max_members, self.neighborhood_limit
         )
     }
 
     /// Validate against v1 constraints
     pub fn validate_v1(&self) -> Result<(), SocialFactError> {
-        if self.max_residents > Self::V1_MAX_RESIDENTS {
+        if self.max_members > Self::V1_MAX_MEMBERS {
             return Err(SocialFactError::V1ConstraintViolation(format!(
-                "max_residents {} exceeds v1 limit of {}",
-                self.max_residents,
-                Self::V1_MAX_RESIDENTS
+                "max_members {} exceeds v1 limit of {}",
+                self.max_members,
+                Self::V1_MAX_MEMBERS
             )));
         }
         if self.neighborhood_limit > Self::V1_NEIGHBORHOOD_LIMIT {
@@ -140,24 +140,24 @@ impl HomeConfigFact {
 
 /// Resident fact - user residing in a home
 ///
-/// Corresponds to: `resident(authority_id, home_id, joined_at, storage_allocated)`
+/// Corresponds to: `member(authority_id, home_id, joined_at, storage_allocated)`
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResidentFact {
-    /// Authority of the resident
+    /// Authority of the member
     pub authority_id: AuthorityId,
     /// Home where the authority resides
     pub home_id: HomeId,
     /// When the authority joined the home
     pub joined_at: TimeStamp,
-    /// Storage allocated by this resident (default: 200 KB)
+    /// Storage allocated by this member (default: 200 KB)
     pub storage_allocated: u64,
 }
 
 impl ResidentFact {
-    /// Default storage allocation per resident: 200 KB
+    /// Default storage allocation per member: 200 KB
     pub const DEFAULT_STORAGE_ALLOCATION: u64 = 200 * 1024;
 
-    /// Create a new resident with default storage allocation
+    /// Create a new member with default storage allocation
     pub fn new(authority_id: AuthorityId, home_id: HomeId, joined_at: TimeStamp) -> Self {
         Self {
             authority_id,
@@ -170,7 +170,7 @@ impl ResidentFact {
     /// Convert to Datalog fact string
     pub fn to_datalog(&self) -> String {
         format!(
-            "resident(\"{}\", \"{}\", \"{}\", {});",
+            "member(\"{}\", \"{}\", \"{}\", {});",
             self.authority_id,
             self.home_id,
             self.joined_at.to_index_ms(),
@@ -791,8 +791,8 @@ pub struct TraversalPosition {
 pub struct HomeStorageBudget {
     /// Home this budget tracks
     pub home_id: HomeId,
-    /// Current resident storage spent (sum of allocations)
-    pub resident_storage_spent: u64,
+    /// Current member storage spent (sum of allocations)
+    pub member_storage_spent: u64,
     /// Current pinned storage spent
     pub pinned_storage_spent: u64,
     /// Current neighborhood allocations (n * 1 MB)
@@ -804,7 +804,7 @@ impl HomeStorageBudget {
     pub fn new(home_id: HomeId) -> Self {
         Self {
             home_id,
-            resident_storage_spent: 0,
+            member_storage_spent: 0,
             pinned_storage_spent: 0,
             neighborhood_allocations: 0,
         }
@@ -816,20 +816,20 @@ impl HomeStorageBudget {
     pub fn remaining_shared_storage(&self) -> u64 {
         let total = HomeFact::DEFAULT_STORAGE_LIMIT;
         let spent =
-            self.resident_storage_spent + self.neighborhood_allocations + self.pinned_storage_spent;
+            self.member_storage_spent + self.neighborhood_allocations + self.pinned_storage_spent;
         total.saturating_sub(spent)
     }
 
-    /// Derive resident storage limit (8 * 200 KB = 1.6 MB)
-    pub fn resident_storage_limit(&self) -> u64 {
-        HomeConfigFact::V1_MAX_RESIDENTS as u64 * ResidentFact::DEFAULT_STORAGE_ALLOCATION
+    /// Derive member storage limit (8 * 200 KB = 1.6 MB)
+    pub fn member_storage_limit(&self) -> u64 {
+        HomeConfigFact::V1_MAX_MEMBERS as u64 * ResidentFact::DEFAULT_STORAGE_ALLOCATION
     }
 
     /// Derive pinned storage limit based on neighborhood count
     pub fn pinned_storage_limit(&self) -> u64 {
         let total = HomeFact::DEFAULT_STORAGE_LIMIT;
-        let resident_limit = self.resident_storage_limit();
-        total.saturating_sub(resident_limit + self.neighborhood_allocations)
+        let member_limit = self.member_storage_limit();
+        total.saturating_sub(member_limit + self.neighborhood_allocations)
     }
 }
 
@@ -895,7 +895,7 @@ pub struct SocialFactKey {
 /// Social domain fact types
 ///
 /// These facts represent social-related state changes in the journal,
-/// including blocks, residents, moderators, and neighborhoods.
+/// including blocks, members, moderators, and neighborhoods.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
 #[domain_fact(type_id = "social", schema_version = 1, context = "context_id")]
 pub enum SocialFact {
@@ -933,9 +933,9 @@ pub enum SocialFact {
         home_id: HomeId,
         /// Relational context
         context_id: ContextId,
-        /// When the resident joined
+        /// When the member joined
         joined_at: PhysicalTime,
-        /// Human-readable name for the resident
+        /// Human-readable name for the member
         name: String,
         /// Storage allocated in bytes (default: 200 KB)
         storage_allocated: u64,
@@ -948,7 +948,7 @@ pub enum SocialFact {
         home_id: HomeId,
         /// Relational context
         context_id: ContextId,
-        /// When the resident left
+        /// When the member left
         left_at: PhysicalTime,
     },
     /// Moderator granted capabilities in a home
@@ -1031,8 +1031,8 @@ impl SocialFact {
     /// Default storage limit for blocks: 10 MB
     pub const DEFAULT_BLOCK_STORAGE_LIMIT: u64 = 10 * 1024 * 1024;
 
-    /// Default storage allocation for residents: 200 KB
-    pub const DEFAULT_RESIDENT_STORAGE: u64 = 200 * 1024;
+    /// Default storage allocation for members: 200 KB
+    pub const DEFAULT_MEMBER_STORAGE: u64 = 200 * 1024;
 
     /// Get the timestamp in milliseconds
     pub fn timestamp_ms(&self) -> u64 {
@@ -1067,11 +1067,11 @@ impl SocialFact {
                 data: home_id.as_bytes().to_vec(),
             },
             SocialFact::ResidentJoined { authority_id, .. } => SocialFactKey {
-                sub_type: "resident-joined",
+                sub_type: "member-joined",
                 data: authority_id.to_string().into_bytes(),
             },
             SocialFact::ResidentLeft { authority_id, .. } => SocialFactKey {
-                sub_type: "resident-left",
+                sub_type: "member-left",
                 data: authority_id.to_string().into_bytes(),
             },
             SocialFact::ModeratorGranted { authority_id, .. } => SocialFactKey {
@@ -1141,7 +1141,7 @@ impl SocialFact {
     }
 
     /// Create a ResidentJoined fact with millisecond timestamp
-    pub fn resident_joined_ms(
+    pub fn member_joined_ms(
         authority_id: AuthorityId,
         home_id: HomeId,
         context_id: ContextId,
@@ -1157,12 +1157,12 @@ impl SocialFact {
                 uncertainty: None,
             },
             name,
-            storage_allocated: Self::DEFAULT_RESIDENT_STORAGE,
+            storage_allocated: Self::DEFAULT_MEMBER_STORAGE,
         }
     }
 
     /// Create a ResidentLeft fact with millisecond timestamp
-    pub fn resident_left_ms(
+    pub fn member_left_ms(
         authority_id: AuthorityId,
         home_id: HomeId,
         context_id: ContextId,
@@ -1271,8 +1271,8 @@ mod tests {
     }
 
     #[test]
-    fn test_resident_joined_serialization() {
-        let fact = SocialFact::resident_joined_ms(
+    fn test_member_joined_serialization() {
+        let fact = SocialFact::member_joined_ms(
             test_authority_id(),
             test_home_id(),
             test_context_id(),
@@ -1408,21 +1408,21 @@ mod tests {
 
         let invalid = HomeConfigFact {
             home_id: HomeId::from_bytes([2u8; 32]),
-            max_residents: 10, // > 8
+            max_members: 10, // > 8
             neighborhood_limit: 4,
         };
         assert!(invalid.validate_v1().is_err());
     }
 
     #[test]
-    fn test_resident_fact_to_datalog() {
-        let resident = ResidentFact::new(
+    fn test_member_fact_to_datalog() {
+        let member = ResidentFact::new(
             AuthorityId::new_from_entropy([3u8; 32]),
             HomeId::from_bytes([4u8; 32]),
             test_timestamp(),
         );
-        let datalog = resident.to_datalog();
-        assert!(datalog.starts_with("resident("));
+        let datalog = member.to_datalog();
+        assert!(datalog.starts_with("member("));
         assert!(datalog.contains("204800")); // 200 KB
     }
 
@@ -1480,12 +1480,12 @@ mod tests {
             HomeFact::DEFAULT_STORAGE_LIMIT
         );
 
-        // Add 8 residents
-        budget.resident_storage_spent = 8 * ResidentFact::DEFAULT_STORAGE_ALLOCATION;
+        // Add 8 members
+        budget.member_storage_spent = 8 * ResidentFact::DEFAULT_STORAGE_ALLOCATION;
         // Join 4 neighborhoods
         budget.neighborhood_allocations = 4 * HomeMemberFact::DEFAULT_ALLOCATION;
 
-        // Remaining should be 10 MB - 1.6 MB (residents) - 4 MB (allocations) = ~4.4 MB
+        // Remaining should be 10 MB - 1.6 MB (members) - 4 MB (allocations) = ~4.4 MB
         // 10,485,760 - 1,638,400 (8 * 204,800) - 4,194,304 (4 * 1,048,576) = 4,653,056
         let expected = HomeFact::DEFAULT_STORAGE_LIMIT
             - (8 * ResidentFact::DEFAULT_STORAGE_ALLOCATION)

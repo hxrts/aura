@@ -143,17 +143,17 @@ mod neighborhood_screen {
     }
 
     #[test]
-    fn test_resident_selection_reaches_neighborhood_props() {
+    fn test_member_selection_reaches_neighborhood_props() {
         let mut harness = PropsTestHarness::new();
         harness.go_to_screen(Screen::Neighborhood);
 
-        harness.state.neighborhood.resident_count = 10;
-        harness.state.neighborhood.selected_resident = 1;
+        harness.state.neighborhood.member_count = 10;
+        harness.state.neighborhood.selected_member = 1;
 
         let props = extract_neighborhood_view_props(&harness.state);
         assert_eq!(
-            props.selected_resident, 1,
-            "Selected resident must reach props"
+            props.selected_member, 1,
+            "Selected member must reach props"
         );
     }
 }
@@ -377,10 +377,10 @@ mod cross_screen {
         let mut harness = PropsTestHarness::new();
         harness.go_to_screen(Screen::Neighborhood);
 
-        harness.state.neighborhood.resident_count = 10;
-        harness.state.neighborhood.selected_resident = 1;
+        harness.state.neighborhood.member_count = 10;
+        harness.state.neighborhood.selected_member = 1;
         let neighborhood_props = extract_neighborhood_view_props(&harness.state);
-        assert_eq!(neighborhood_props.selected_resident, 1);
+        assert_eq!(neighborhood_props.selected_member, 1);
 
         // Navigate away and back
         harness.go_to_screen(Screen::Chat);
@@ -389,7 +389,7 @@ mod cross_screen {
         // Neighborhood state should be preserved
         let neighborhood_props = extract_neighborhood_view_props(&harness.state);
         assert_eq!(
-            neighborhood_props.selected_resident, 1,
+            neighborhood_props.selected_member, 1,
             "Screen state must be preserved across navigation"
         );
     }

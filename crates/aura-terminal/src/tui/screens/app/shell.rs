@@ -305,21 +305,21 @@ fn sync_neighborhood_navigation_state(
         .read()
         .map(|guard| *guard)
         .unwrap_or_default();
-    let resident_count = if expose_home_details {
-        home_meta.resident_count
+    let member_count = if expose_home_details {
+        home_meta.member_count
     } else {
         0
     };
-    state.neighborhood.resident_count = resident_count;
+    state.neighborhood.member_count = member_count;
     state.neighborhood.moderator_actions_enabled = if expose_home_details {
         home_meta.moderator_actions_enabled
     } else {
         false
     };
-    if resident_count == 0 {
-        state.neighborhood.selected_resident = 0;
-    } else if state.neighborhood.selected_resident >= resident_count {
-        state.neighborhood.selected_resident = resident_count.saturating_sub(1);
+    if member_count == 0 {
+        state.neighborhood.selected_member = 0;
+    } else if state.neighborhood.selected_member >= member_count {
+        state.neighborhood.selected_member = member_count.saturating_sub(1);
     }
 }
 

@@ -14,7 +14,7 @@
 //! 2. **Direct Messaging** - StartDirectChat, DM channel creation
 //! 3. **Channel Mode** - SetChannelMode, mode persistence
 //! 4. **Peer Management** - AddPeer, RemovePeer, ListPeers
-//! 5. **Home Operations** - Moderator grant/revoke, resident management
+//! 5. **Home Operations** - Moderator grant/revoke, member management
 //! 6. **Sync Operations** - ForceSync, sync status
 //! 7. **Connection Status** - Connection state tracking
 //! 8. **Toast Notifications** - Success/error toast display
@@ -852,8 +852,8 @@ async fn test_all_snapshots_consistent() {
     );
     let home_count = neighborhood.homes.len();
     println!("  Neighborhood: {home_count} homes");
-    let resident_count = home.residents().len();
-    println!("  Home: {resident_count} residents");
+    let member_count = home.members().len();
+    println!("  Home: {member_count} members");
     let invitation_count = invitations.invitations.len();
     println!("  Invitations: {invitation_count} invitations");
     let device_count = devices.devices.len();

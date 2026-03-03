@@ -6,7 +6,7 @@
 //!
 //! # Design
 //!
-//! **Home availability**: All residents of a home replicate all home-level
+//! **Home availability**: All members of a home replicate all home-level
 //! shared data. When retrieving data, we try local storage first, then query
 //! peers in deterministic order.
 //!

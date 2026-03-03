@@ -99,9 +99,9 @@ pub mod types {
         AuthorityRecord,
     };
     pub use crate::workflows::budget::{
-        check_can_add_resident, check_can_join_neighborhood, check_can_pin, format_budget_compact,
+        check_can_add_member, check_can_join_neighborhood, check_can_pin, format_budget_compact,
         format_budget_status, BudgetBreakdown, BudgetError, HomeFlowBudget, HOME_TOTAL_SIZE, KB,
-        MAX_NEIGHBORHOODS, MAX_RESIDENTS, MB, NEIGHBORHOOD_ALLOCATION, RESIDENT_ALLOCATION,
+        MAX_MEMBERS, MAX_NEIGHBORHOODS, MB, MEMBER_ALLOCATION, NEIGHBORHOOD_ALLOCATION,
     };
     pub use crate::workflows::chat_commands::{
         all_command_help, command_help, commands_in_category, is_command, normalize_channel_name,
@@ -133,12 +133,11 @@ pub mod types {
     pub use crate::views::{
         classify_threshold_security, format_recovery_status, security_level_hint, AccountBackup,
         AccountConfig, BanRecord, CeremonyProgress, Channel, ChannelType, ChatState, Contact,
-        ContactsState, Guardian, GuardianBinding, GuardianStatus, HomeRole, HomeState, HomesState,
-        Invitation, InvitationDirection, InvitationStatus, InvitationsState, KickRecord, Message,
-        MessageDeliveryStatus, MuteRecord, MySuggestion, NeighborHome, NeighborhoodState,
+        ContactsState, Guardian, GuardianBinding, GuardianStatus, HomeMember, HomeRole, HomeState,
+        HomesState, Invitation, InvitationDirection, InvitationStatus, InvitationsState, KickRecord,
+        Message, MessageDeliveryStatus, MuteRecord, MySuggestion, NeighborHome, NeighborhoodState,
         OneHopLinkType, RecoveryApproval, RecoveryProcess, RecoveryProcessStatus, RecoveryState,
-        Resident, SecurityLevel, SuggestionPolicy, TraversalPosition, BACKUP_PREFIX,
-        BACKUP_VERSION,
+        SecurityLevel, SuggestionPolicy, TraversalPosition, BACKUP_PREFIX, BACKUP_VERSION,
     };
     pub use crate::workflows::account::{
         can_submit_account_setup, is_valid_nickname_suggestion, validate_nickname_suggestion,

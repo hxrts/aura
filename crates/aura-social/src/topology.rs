@@ -69,10 +69,10 @@ impl SocialTopology {
         // Add home peers
         if let Some(home_ref) = &self.home {
             let home_id_bytes = *home_ref.home_id.as_bytes();
-            for resident in &home_ref.residents {
-                if resident != &self.local_authority {
+            for member in &home_ref.members {
+                if member != &self.local_authority {
                     self.peer_relationships.insert(
-                        *resident,
+                        *member,
                         RelayRelationship::SameHome {
                             home_id: home_id_bytes,
                         },
@@ -85,11 +85,11 @@ impl SocialTopology {
                 if neighborhood.is_member(home_ref.home_id) {
                     let _neighborhood_id_bytes = *neighborhood.neighborhood_id.as_bytes();
 
-                    // We would need to know residents of other blocks
+                    // We would need to know members of other blocks
                     // For now, we track the neighborhoods we're in but can't enumerate
                     // all neighborhood peers without additional data
                     // This will be populated by higher-level code that has access
-                    // to all home residents in the neighborhood
+                    // to all home members in the neighborhood
                 }
             }
         }
@@ -98,7 +98,7 @@ impl SocialTopology {
     /// Add a peer relationship manually.
     ///
     /// This is used to populate neighborhood peer relationships which require
-    /// knowledge of residents in other blocks.
+    /// knowledge of members in other blocks.
     pub fn add_peer(&mut self, peer: AuthorityId, relationship: RelayRelationship) {
         // Don't downgrade home peer to neighborhood peer
         if let Some(existing) = self.peer_relationships.get(&peer) {
@@ -119,7 +119,7 @@ impl SocialTopology {
         self.peer_relationships.contains_key(peer)
     }
 
-    /// Get all home peers (co-residents in our home).
+    /// Get all home peers (co-members in our home).
     pub fn same_home_members(&self) -> Vec<AuthorityId> {
         self.peer_relationships
             .iter()
@@ -328,7 +328,7 @@ impl SocialTopology {
 /// Ordered from least to most specific relationship:
 /// - Rendezvous: No relationship, need external discovery
 /// - Neighborhood: Have traversal capability via neighborhood
-/// - Home: Target is in same home (can relay through co-residents)
+/// - Home: Target is in same home (can relay through co-members)
 /// - Direct: Target is personally known (in peer relationships)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DiscoveryLayer {
@@ -338,7 +338,7 @@ pub enum DiscoveryLayer {
     /// Target may be reachable via multi-hop neighborhood relay.
     Neighborhood,
     /// Target is reachable via home-level relay.
-    /// We have co-residents who may be able to forward.
+    /// We have co-members who may be able to forward.
     Home,
     /// Target is personally known - we have a direct relationship.
     /// Can attempt direct connection without relay.
@@ -415,7 +415,7 @@ mod tests {
 
         let home_id = HomeId::from_bytes([1u8; 32]);
         let mut home_state = Home::new_empty(home_id);
-        home_state.residents = vec![local, peer1, peer2];
+        home_state.members = vec![local, peer1, peer2];
 
         let topology = SocialTopology::new(local, Some(home_state), vec![]);
 
@@ -576,7 +576,7 @@ mod tests {
 
         let home_id = HomeId::from_bytes([1u8; 32]);
         let mut home_state = Home::new_empty(home_id);
-        home_state.residents = vec![local, peer1];
+        home_state.members = vec![local, peer1];
 
         let topology = SocialTopology::new(local, Some(home_state), vec![]);
 
@@ -628,7 +628,7 @@ mod tests {
 
         let home_id = HomeId::from_bytes([1u8; 32]);
         let mut home_state = Home::new_empty(home_id);
-        home_state.residents = vec![local, peer1, peer2];
+        home_state.members = vec![local, peer1, peer2];
 
         let topology = SocialTopology::new(local, Some(home_state), vec![]);
 

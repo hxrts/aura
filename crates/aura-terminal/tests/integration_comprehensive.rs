@@ -211,23 +211,23 @@ mod neighborhood_screen_map {
     }
 
     #[test]
-    fn test_neighborhood_resident_navigation() {
+    fn test_neighborhood_member_navigation() {
         let mut tui = TestTui::new();
         tui.state.neighborhood.home_count = 1;
         tui.send_enter();
-        tui.state.neighborhood.detail_focus = DetailFocus::Residents;
+        tui.state.neighborhood.detail_focus = DetailFocus::Members;
 
         // Set up item counts for navigation to work
-        tui.state.neighborhood.resident_count = 10;
+        tui.state.neighborhood.member_count = 10;
 
-        // Navigate down in resident list
-        let initial = tui.state.neighborhood.selected_resident;
+        // Navigate down in member list
+        let initial = tui.state.neighborhood.selected_member;
         tui.send_char('j');
-        assert_eq!(tui.state.neighborhood.selected_resident, initial + 1);
+        assert_eq!(tui.state.neighborhood.selected_member, initial + 1);
 
         // Navigate up
         tui.send_char('k');
-        assert_eq!(tui.state.neighborhood.selected_resident, initial);
+        assert_eq!(tui.state.neighborhood.selected_member, initial);
     }
 
     #[test]

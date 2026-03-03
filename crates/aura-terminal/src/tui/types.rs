@@ -1258,16 +1258,16 @@ impl Contact {
 // Home Types
 // =============================================================================
 
-/// A resident in a home
+/// A member in a home
 #[derive(Clone, Debug, Default)]
-pub struct Resident {
+pub struct HomeMember {
     pub id: String,
     pub name: String,
     pub is_moderator: bool,
     pub is_self: bool,
 }
 
-impl Resident {
+impl HomeMember {
     pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -1287,13 +1287,13 @@ impl Resident {
     }
 }
 
-impl From<&aura_app::ui::types::home::Resident> for Resident {
-    fn from(r: &aura_app::ui::types::home::Resident) -> Self {
+impl From<&aura_app::ui::types::home::HomeMember> for HomeMember {
+    fn from(r: &aura_app::ui::types::home::HomeMember) -> Self {
         Self {
             id: r.id.to_string(),
             name: r.name.clone(),
             is_moderator: r.is_moderator(),
-            is_self: false, // Cannot determine from aura-app Resident alone
+            is_self: false, // Cannot determine from aura-app HomeMember alone
         }
     }
 }
@@ -1303,8 +1303,8 @@ impl From<&aura_app::ui::types::home::Resident> for Resident {
 pub struct HomeBudget {
     pub total: u64,
     pub used: u64,
-    pub resident_count: u8,
-    pub max_residents: u8,
+    pub member_count: u8,
+    pub max_members: u8,
 }
 
 impl HomeBudget {
@@ -1322,8 +1322,8 @@ impl From<&aura_app::ui::types::HomeFlowBudget> for HomeBudget {
         Self {
             total: budget.total_allocation(),
             used: budget.total_used(),
-            resident_count: budget.resident_count,
-            max_residents: aura_app::ui::types::MAX_RESIDENTS,
+            member_count: budget.member_count,
+            max_members: aura_app::ui::types::MAX_MEMBERS,
         }
     }
 }
@@ -1372,8 +1372,8 @@ impl AccessLevel {
 pub struct HomeSummary {
     pub id: String,
     pub name: Option<String>,
-    pub resident_count: u8,
-    pub max_residents: u8,
+    pub member_count: u8,
+    pub max_members: u8,
     pub is_home: bool,
     pub can_enter: bool,
 }
@@ -1382,7 +1382,7 @@ impl HomeSummary {
     pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
-            max_residents: 8,
+            max_members: 8,
             ..Default::default()
         }
     }
@@ -1392,8 +1392,8 @@ impl HomeSummary {
         self
     }
 
-    pub fn with_residents(mut self, count: u8) -> Self {
-        self.resident_count = count;
+    pub fn with_members(mut self, count: u8) -> Self {
+        self.member_count = count;
         self
     }
 

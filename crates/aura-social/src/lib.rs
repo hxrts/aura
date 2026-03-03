@@ -33,11 +33,11 @@
 //! use aura_social::facts::{HomeFact, ResidentFact};
 //!
 //! // Build a Home view from journal facts
-//! let home = Home::from_facts(&home_fact, &residents, &moderators);
+//! let home = Home::from_facts(&home_fact, &members, &moderators);
 //!
 //! // Check membership
-//! if home.is_resident(&authority_id) {
-//!     println!("Authority is a resident");
+//! if home.is_member(&authority_id) {
+//!     println!("Authority is a member");
 //! }
 //!
 //! // Build social topology for relay selection
@@ -66,8 +66,8 @@ pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
     // Category B: monotone additions
     ("social:home-create", "B"),
     ("social:home-delete", "B"),
-    ("social:resident-join", "B"),
-    ("social:resident-leave", "B"),
+    ("social:member-join", "B"),
+    ("social:member-leave", "B"),
     ("social:moderator-grant", "B"),
     ("social:moderator-revoke", "B"),
     ("social:neighborhood-create", "B"),

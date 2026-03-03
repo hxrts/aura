@@ -20,8 +20,8 @@ pub enum DetailFocus {
     /// Channel list on the left
     #[default]
     Channels,
-    /// Resident list on the left
-    Residents,
+    /// Member list on the left
+    Members,
     /// Message list on the right
     Messages,
     /// Input field on the right
@@ -60,9 +60,9 @@ pub struct NeighborhoodViewState {
     pub selected_channel: usize,
     pub channel_count: usize,
 
-    /// Resident navigation
-    pub selected_resident: usize,
-    pub resident_count: usize,
+    /// Member navigation
+    pub selected_member: usize,
+    pub member_count: usize,
 
     /// Messaging
     pub insert_mode: bool,

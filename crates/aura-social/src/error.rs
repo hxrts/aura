@@ -8,12 +8,12 @@ use thiserror::Error;
 /// Errors from social topology operations.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum SocialError {
-    /// Home has reached maximum resident capacity.
-    #[error("home {home_id} is full (max {max} residents)")]
+    /// Home has reached maximum member capacity.
+    #[error("home {home_id} is full (max {max} members)")]
     HomeFull {
         /// The home that is full
         home_id: HomeId,
-        /// Maximum residents allowed
+        /// Maximum members allowed
         max: u8,
     },
 
@@ -42,8 +42,8 @@ pub enum SocialError {
         reason: String,
     },
 
-    /// Authority is not a resident of the home.
-    #[error("authority is not a resident of home {home_id}")]
+    /// Authority is not a member of the home.
+    #[error("authority is not a member of home {home_id}")]
     NotResident {
         /// The home in question
         home_id: HomeId,
@@ -57,7 +57,7 @@ pub enum SocialError {
     },
 
     /// Authority is already a member.
-    #[error("authority is already a resident of home {home_id}")]
+    #[error("authority is already a member of home {home_id}")]
     AlreadyResident {
         /// The home in question
         home_id: HomeId,
@@ -110,8 +110,8 @@ impl SocialError {
         }
     }
 
-    /// Create a not resident error.
-    pub fn not_resident(home_id: HomeId) -> Self {
+    /// Create a not member error.
+    pub fn not_member(home_id: HomeId) -> Self {
         Self::NotResident { home_id }
     }
 

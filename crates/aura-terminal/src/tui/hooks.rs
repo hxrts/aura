@@ -466,10 +466,10 @@ impl Default for InvitationsSnapshot {
 /// Snapshot of home-related data for rendering
 #[derive(Debug, Clone)]
 pub struct HomeSnapshot {
-    /// Home state (contains id, name, residents, storage, etc.)
+    /// Home state (contains id, name, members, storage, etc.)
     pub home_state: Option<aura_app::ui::types::home::HomeState>,
-    /// Whether user is a resident
-    pub is_resident: bool,
+    /// Whether user is a member
+    pub is_member: bool,
     /// Whether user is a moderator
     pub is_moderator: bool,
 }
@@ -478,19 +478,19 @@ impl Default for HomeSnapshot {
     fn default() -> Self {
         Self {
             home_state: None,
-            is_resident: false,
+            is_member: false,
             is_moderator: false,
         }
     }
 }
 
 impl HomeSnapshot {
-    /// Get residents list from home state
+    /// Get members list from home state
     #[must_use]
-    pub fn residents(&self) -> &[aura_app::ui::types::home::Resident] {
+    pub fn members(&self) -> &[aura_app::ui::types::home::HomeMember] {
         self.home_state
             .as_ref()
-            .map(|b| b.residents.as_slice())
+            .map(|b| b.members.as_slice())
             .unwrap_or(&[])
     }
 

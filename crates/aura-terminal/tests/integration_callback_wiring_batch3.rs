@@ -7,7 +7,7 @@
 //! # TUI Callback Wiring E2E Tests - Batch 3
 //!
 //! Deep validation tests for:
-//! 1. **Home Operations** - CreateHome, HOMES_SIGNAL/HOMES_SIGNAL, resident management
+//! 1. **Home Operations** - CreateHome, HOMES_SIGNAL/HOMES_SIGNAL, member management
 //! 2. **Recovery Flow** - Full recovery lifecycle (start → approve → complete/cancel)
 //! 3. **Channel Lifecycle** - Create → Join → Send → Leave → Close
 //! 4. **Contact Management** - Nickname updates, guardian toggle, contact operations
@@ -96,12 +96,12 @@ async fn test_home_signals_initialization() {
                 println!("  Home ID: {home_id}", home_id = home_state.id);
                 println!("  Home name: {name}", name = home_state.name);
                 println!(
-                    "  Resident count: {resident_count}",
-                    resident_count = home_state.resident_count
+                    "  Member count: {member_count}",
+                    member_count = home_state.member_count
                 );
                 // Default state should have empty/default values
                 assert!(
-                    home_state.residents.is_empty() || home_state.id == ChannelId::default(),
+                    home_state.members.is_empty() || home_state.id == ChannelId::default(),
                     "Initial home state should be empty or default"
                 );
             } else {
@@ -209,30 +209,30 @@ async fn test_create_home_updates_signals() {
     println!("\n=== Create Home Updates Signals Test PASSED ===\n");
 }
 
-/// Test home resident management
+/// Test home member management
 #[tokio::test]
-async fn test_home_resident_operations() {
-    println!("\n=== Home Resident Operations Test ===\n");
+async fn test_home_member_operations() {
+    println!("\n=== Home Member Operations Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("home-residents").await;
+    let (ctx, app_core) = setup_test_env("home-members").await;
 
-    // Phase 1: Check initial home state for residents
-    println!("Phase 1: Check initial resident state");
+    // Phase 1: Check initial home state for members
+    println!("Phase 1: Check initial member state");
     let core = app_core.read().await;
 
     if let Ok(homes_state) = core.read(&*HOMES_SIGNAL).await {
         if let Some(home_state) = homes_state.current_home() {
             println!("  Home ID: {home_id}", home_id = home_state.id);
-            let resident_count = home_state.residents.len();
-            println!("  Initial residents: {resident_count}");
+            let member_count = home_state.members.len();
+            println!("  Initial members: {member_count}");
             println!("  My role: {role:?}", role = home_state.my_role);
 
-            // User should be owner/moderator of their own home
-            for resident in &home_state.residents {
+            // User should be member/moderator of their own home
+            for member in &home_state.members {
                 println!(
-                    "    Resident: {name} ({role:?})",
-                    name = resident.name,
-                    role = resident.role
+                    "    Member: {name} ({role:?})",
+                    name = member.name,
+                    role = member.role
                 );
             }
         } else {
@@ -253,8 +253,8 @@ async fn test_home_resident_operations() {
         Ok(response) => println!("  GrantModerator response: {response:?}"),
         Err(e) => {
             let err_msg = format!("{e:?}");
-            if err_msg.contains("Admin") || err_msg.contains("authorization") {
-                println!("  GrantModerator requires Admin privileges (expected)");
+            if err_msg.contains("Moderator") || err_msg.contains("authorization") {
+                println!("  GrantModerator requires Moderator privileges (expected)");
             } else {
                 println!("  GrantModerator error: {e:?}");
             }
@@ -274,8 +274,8 @@ async fn test_home_resident_operations() {
         Ok(response) => println!("  RevokeModerator response: {response:?}"),
         Err(e) => {
             let err_msg = format!("{e:?}");
-            if err_msg.contains("Admin") || err_msg.contains("authorization") {
-                println!("  RevokeModerator requires Admin privileges (expected)");
+            if err_msg.contains("Moderator") || err_msg.contains("authorization") {
+                println!("  RevokeModerator requires Moderator privileges (expected)");
             } else {
                 println!("  RevokeModerator error: {e:?}");
             }
@@ -284,8 +284,8 @@ async fn test_home_resident_operations() {
 
     drop(core);
     drop(ctx);
-    cleanup_test_dir("home-residents");
-    println!("\n=== Home Resident Operations Test PASSED ===\n");
+    cleanup_test_dir("home-members");
+    println!("\n=== Home Member Operations Test PASSED ===\n");
 }
 
 // ============================================================================

@@ -83,8 +83,8 @@ fn best_home_for_context(
         .max_by_key(|(_, home)| {
             (
                 u8::from(home.is_admin()),
-                u8::from(!home.residents.is_empty()),
-                home.resident_count,
+                u8::from(!home.members.is_empty()),
+                home.member_count,
             )
         })
 }
@@ -158,9 +158,9 @@ async fn resolve_scope(
         .context_id
         .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
     let peers = home_state
-        .residents
+        .members
         .iter()
-        .map(|resident| resident.id)
+        .map(|member| member.id)
         .collect();
 
     Ok(ModeratorScope {
@@ -186,9 +186,9 @@ async fn resolve_scope_by_channel_id(
             .context_id
             .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
         let peers = home_state
-            .residents
+            .members
             .iter()
-            .map(|resident| resident.id)
+            .map(|member| member.id)
             .collect();
         Ok(ModeratorScope {
             home_id,
@@ -263,13 +263,13 @@ pub async fn grant_moderator_resolved(
         ));
     }
 
-    if let Some(resident) = scope.home_state.resident(&target_id) {
-        if matches!(resident.role, HomeRole::Moderator) {
+    if let Some(member) = scope.home_state.member(&target_id) {
+        if matches!(member.role, HomeRole::Moderator) {
             return Err(AuraError::invalid(
                 "Target already has moderator designation",
             ));
         }
-        if !matches!(resident.role, HomeRole::Member) {
+        if !matches!(member.role, HomeRole::Member) {
             return Err(AuraError::invalid(
                 "Only members can be designated as moderators",
             ));
@@ -324,22 +324,22 @@ pub async fn grant_moderator_resolved(
         .home_mut(&scope.home_id)
         .ok_or_else(|| AuraError::not_found("No current home selected"))?;
 
-    let resident = home_state
-        .resident_mut(&target_id)
-        .ok_or_else(|| AuraError::not_found(format!("Resident not found: {target_id}")))?;
+    let member = home_state
+        .member_mut(&target_id)
+        .ok_or_else(|| AuraError::not_found(format!("Member not found: {target_id}")))?;
 
-    if matches!(resident.role, HomeRole::Moderator) {
+    if matches!(member.role, HomeRole::Moderator) {
         return Err(AuraError::invalid(
             "Target already has moderator designation",
         ));
     }
-    if !matches!(resident.role, HomeRole::Member) {
+    if !matches!(member.role, HomeRole::Member) {
         return Err(AuraError::invalid(
             "Only members can be designated as moderators",
         ));
     }
 
-    resident.role = HomeRole::Moderator;
+    member.role = HomeRole::Moderator;
     if local_authority == Some(target_id) {
         home_state.my_role = HomeRole::Moderator;
     }
@@ -373,13 +373,13 @@ pub async fn revoke_moderator_resolved(
         ));
     }
 
-    if let Some(resident) = scope.home_state.resident(&target_id) {
-        if !matches!(resident.role, HomeRole::Moderator) {
+    if let Some(member) = scope.home_state.member(&target_id) {
+        if !matches!(member.role, HomeRole::Moderator) {
             return Err(AuraError::invalid("Target is not a moderator"));
         }
     } else {
         return Err(AuraError::not_found(format!(
-            "Cannot revoke moderator from unknown resident: {target_id}"
+            "Cannot revoke moderator from unknown member: {target_id}"
         )));
     }
 
@@ -424,15 +424,15 @@ pub async fn revoke_moderator_resolved(
         .home_mut(&scope.home_id)
         .ok_or_else(|| AuraError::not_found("No current home selected"))?;
 
-    let resident = home_state
-        .resident_mut(&target_id)
-        .ok_or_else(|| AuraError::not_found(format!("Resident not found: {target_id}")))?;
+    let member = home_state
+        .member_mut(&target_id)
+        .ok_or_else(|| AuraError::not_found(format!("Member not found: {target_id}")))?;
 
-    if !matches!(resident.role, HomeRole::Moderator) {
+    if !matches!(member.role, HomeRole::Moderator) {
         return Err(AuraError::invalid("Target is not a moderator"));
     }
 
-    resident.role = HomeRole::Member;
+    member.role = HomeRole::Member;
     if local_authority == Some(target_id) {
         home_state.my_role = HomeRole::Member;
     }
@@ -568,7 +568,7 @@ mod tests {
                 nickname: "Bob".to_string(),
                 nickname_suggestion: Some("Bobby".to_string()),
                 is_guardian: false,
-                is_resident: true,
+                is_member: true,
                 last_interaction: None,
                 is_online: true,
                 read_receipt_policy: Default::default(),

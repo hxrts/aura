@@ -42,13 +42,13 @@ fn access_level_strategy() -> impl Strategy<Value = AccessLevel> {
 }
 
 fn allocation_strategy() -> impl Strategy<Value = (u8, u8, u64)> {
-    (0u8..=8u8, 0u8..=4u8).prop_flat_map(|(resident_count, neighborhood_count)| {
-        let resident_spent = resident_count as u64 * ResidentFact::DEFAULT_STORAGE_ALLOCATION;
+    (0u8..=8u8, 0u8..=4u8).prop_flat_map(|(member_count, neighborhood_count)| {
+        let member_spent = member_count as u64 * ResidentFact::DEFAULT_STORAGE_ALLOCATION;
         let neighborhood_spent = neighborhood_count as u64 * HomeMemberFact::DEFAULT_ALLOCATION;
         let max_pinned =
-            HomeFact::DEFAULT_STORAGE_LIMIT.saturating_sub(resident_spent + neighborhood_spent);
+            HomeFact::DEFAULT_STORAGE_LIMIT.saturating_sub(member_spent + neighborhood_spent);
         (
-            Just(resident_count),
+            Just(member_count),
             Just(neighborhood_count),
             0u64..=max_pinned,
         )
@@ -139,17 +139,17 @@ proptest! {
     #[test]
     #[ignore = "property"]
     fn property_allocations_sum_to_total(
-        (resident_count, neighborhood_count, pinned) in allocation_strategy(),
+        (member_count, neighborhood_count, pinned) in allocation_strategy(),
     ) {
-        let resident_spent = resident_count as u64 * ResidentFact::DEFAULT_STORAGE_ALLOCATION;
+        let member_spent = member_count as u64 * ResidentFact::DEFAULT_STORAGE_ALLOCATION;
         let neighborhood_spent = neighborhood_count as u64 * HomeMemberFact::DEFAULT_ALLOCATION;
 
         let mut budget = HomeStorageBudget::new(home_id(7));
-        budget.resident_storage_spent = resident_spent;
+        budget.member_storage_spent = member_spent;
         budget.neighborhood_allocations = neighborhood_spent;
         budget.pinned_storage_spent = pinned;
 
-        let spent = budget.resident_storage_spent
+        let spent = budget.member_storage_spent
             + budget.neighborhood_allocations
             + budget.pinned_storage_spent;
 

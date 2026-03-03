@@ -38,8 +38,8 @@ pub use display::{
     UNSELECTED_INDICATOR,
 };
 pub use home::{
-    AddHomeResult, BanRecord, HomeRole, HomeState, HomesState, KickRecord, MuteRecord,
-    PinnedMessageMeta, RemoveHomeResult, Resident,
+    AddHomeResult, BanRecord, HomeMember, HomeRole, HomeState, HomesState, KickRecord, MuteRecord,
+    PinnedMessageMeta, RemoveHomeResult,
 };
 pub use invitations::{
     Invitation, InvitationDirection, InvitationError, InvitationStatus, InvitationType,

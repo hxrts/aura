@@ -18,7 +18,7 @@ use crate::{
     thresholds::{default_channel_threshold, normalize_channel_threshold},
     views::{
         chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus},
-        home::{HomeRole, HomeState, Resident},
+        home::{HomeMember, HomeRole, HomeState},
     },
     AppCore,
 };
@@ -133,9 +133,9 @@ async fn resolve_channel_id_from_state_or_input(
                 || (!home_name.is_empty() && home_name.eq_ignore_ascii_case(normalized_name))
                 || (!home_name.is_empty() && format!("#{home_name}").eq_ignore_ascii_case(raw))
                 || (!home_name.is_empty() && format!("# {home_name}").eq_ignore_ascii_case(raw));
-            is_match.then_some((*home_id, home.is_admin(), home.resident_count))
+            is_match.then_some((*home_id, home.is_admin(), home.member_count))
         })
-        .max_by_key(|(_, is_admin, resident_count)| (u8::from(*is_admin), *resident_count))
+        .max_by_key(|(_, is_admin, member_count)| (u8::from(*is_admin), *member_count))
         .map(|(home_id, _, _)| home_id)
     {
         return Ok(home_id);
@@ -488,13 +488,13 @@ async fn enforce_home_moderation_for_sender(
         ));
     }
 
-    let has_resident_roster = candidates.iter().any(|home| !home.residents.is_empty());
-    let sender_is_resident = candidates
+    let has_member_roster = candidates.iter().any(|home| !home.members.is_empty());
+    let sender_is_member = candidates
         .iter()
-        .any(|home| home.resident(&sender_id).is_some());
-    if has_resident_roster && !sender_is_resident {
+        .any(|home| home.member(&sender_id).is_some());
+    if has_member_roster && !sender_is_member {
         return Err(AuraError::permission_denied(
-            "You are not a resident of this home",
+            "You are not a member of this home",
         ));
     }
 
@@ -629,7 +629,7 @@ async fn apply_authoritative_membership_projection(
     Ok(())
 }
 
-async fn restore_home_resident_membership(
+async fn restore_home_member_membership(
     app_core: &Arc<RwLock<AppCore>>,
     context_id: ContextId,
     authority_id: AuthorityId,
@@ -644,15 +644,15 @@ async fn restore_home_resident_membership(
 
     if let Some(home_id) = target_home_id {
         if let Some(home) = homes.home_mut(&home_id) {
-            if home.resident(&authority_id).is_none() {
-                home.add_resident(Resident {
+            if home.member(&authority_id).is_none() {
+                home.add_member(HomeMember {
                     id: authority_id,
                     name: authority_id.to_string(),
                     role: HomeRole::Participant,
                     is_online: true,
                     joined_at: joined_at_ms,
                     last_seen: Some(joined_at_ms),
-                    storage_allocated: crate::views::home::HomeState::RESIDENT_ALLOCATION,
+                    storage_allocated: crate::views::home::HomeState::MEMBER_ALLOCATION,
                 });
             }
         }
@@ -681,36 +681,36 @@ async fn ensure_home_state_for_channel(
                 home.context_id = Some(context_id);
                 changed = true;
             }
-            if let Some(member) = home.resident_mut(&owner_id) {
+            if let Some(member) = home.member_mut(&owner_id) {
                 if member.role != HomeRole::Member {
                     member.role = HomeRole::Member;
                     changed = true;
                 }
             } else {
-                home.add_resident(Resident {
+                home.add_member(HomeMember {
                     id: owner_id,
                     name: owner_id.to_string(),
                     role: HomeRole::Member,
                     is_online: true,
                     joined_at: now_ms,
                     last_seen: Some(now_ms),
-                    storage_allocated: HomeState::RESIDENT_ALLOCATION,
+                    storage_allocated: HomeState::MEMBER_ALLOCATION,
                 });
                 changed = true;
             }
 
             for member in members {
-                if *member == owner_id || home.resident(member).is_some() {
+                if *member == owner_id || home.member(member).is_some() {
                     continue;
                 }
-                home.add_resident(Resident {
+                home.add_member(HomeMember {
                     id: *member,
                     name: member.to_string(),
                     role: HomeRole::Participant,
                     is_online: true,
                     joined_at: now_ms,
                     last_seen: Some(now_ms),
-                    storage_allocated: HomeState::RESIDENT_ALLOCATION,
+                    storage_allocated: HomeState::MEMBER_ALLOCATION,
                 });
                 changed = true;
             }
@@ -723,17 +723,17 @@ async fn ensure_home_state_for_channel(
                 context_id,
             );
             for member in members {
-                if *member == owner_id || home.resident(member).is_some() {
+                if *member == owner_id || home.member(member).is_some() {
                     continue;
                 }
-                home.add_resident(Resident {
+                home.add_member(HomeMember {
                     id: *member,
                     name: member.to_string(),
                     role: HomeRole::Participant,
                     is_online: true,
                     joined_at: now_ms,
                     last_seen: Some(now_ms),
-                    storage_allocated: HomeState::RESIDENT_ALLOCATION,
+                    storage_allocated: HomeState::MEMBER_ALLOCATION,
                 });
             }
             homes.add_home_with_auto_select(home);
@@ -1074,7 +1074,7 @@ pub async fn join_channel(
             }
         })?;
 
-    restore_home_resident_membership(
+    restore_home_member_membership(
         app_core,
         context_id,
         runtime.authority_id(),
@@ -2209,7 +2209,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_enforce_home_moderation_allows_when_resident_list_is_empty() {
+    async fn test_enforce_home_moderation_allows_when_member_list_is_empty() {
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
         let app_core = Arc::new(RwLock::new(core));
@@ -2218,12 +2218,12 @@ mod tests {
         let context_id = ContextId::new_from_entropy([5u8; 32]);
         let owner = AuthorityId::new_from_entropy([1u8; 32]);
         let sender = AuthorityId::new_from_entropy([9u8; 32]);
-        let home_id = ChannelId::from_bytes(hash(b"messaging-empty-residents-home"));
+        let home_id = ChannelId::from_bytes(hash(b"messaging-empty-members-home"));
 
         let mut home = HomeState::new(home_id, Some("shared".to_string()), owner, 0, context_id);
         home.my_role = HomeRole::Participant;
-        home.residents.clear();
-        home.resident_count = 0;
+        home.members.clear();
+        home.member_count = 0;
         home.online_count = 0;
 
         let mut homes = HomesState::new();
@@ -2237,12 +2237,12 @@ mod tests {
             enforce_home_moderation_for_sender(&app_core, context_id, home_id, sender, 1_000).await;
         assert!(
             result.is_ok(),
-            "empty resident list should not block sender"
+            "empty member list should not block sender"
         );
     }
 
     #[tokio::test]
-    async fn test_enforce_home_moderation_blocks_muted_sender_with_empty_residents() {
+    async fn test_enforce_home_moderation_blocks_muted_sender_with_empty_members() {
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
         let app_core = Arc::new(RwLock::new(core));
@@ -2256,8 +2256,8 @@ mod tests {
 
         let mut home = HomeState::new(home_id, Some("shared".to_string()), owner, 0, context_id);
         home.my_role = HomeRole::Participant;
-        home.residents.clear();
-        home.resident_count = 0;
+        home.members.clear();
+        home.member_count = 0;
         home.online_count = 0;
         home.add_mute(MuteRecord {
             authority_id: sender,
@@ -2355,8 +2355,8 @@ mod tests {
             context_id,
         );
         moderation_home.my_role = HomeRole::Participant;
-        moderation_home.residents.clear();
-        moderation_home.resident_count = 0;
+        moderation_home.members.clear();
+        moderation_home.member_count = 0;
         moderation_home.online_count = 0;
         moderation_home.add_mute(MuteRecord {
             authority_id: sender,
@@ -2449,7 +2449,7 @@ mod tests {
             nickname: "Bob".to_string(),
             nickname_suggestion: Some("Bobby".to_string()),
             is_guardian: false,
-            is_resident: false,
+            is_member: false,
             last_interaction: None,
             is_online: true,
             read_receipt_policy: Default::default(),

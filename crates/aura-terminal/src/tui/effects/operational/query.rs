@@ -50,7 +50,7 @@ pub async fn handle_query(
                         id_str,
                         if contact.is_online { "Yes" } else { "No" },
                         if contact.is_guardian { "Yes" } else { "No" },
-                        if contact.is_resident { "Yes" } else { "No" }
+                        if contact.is_member { "Yes" } else { "No" }
                     );
 
                     Some(Ok(OpResponse::Data(info)))

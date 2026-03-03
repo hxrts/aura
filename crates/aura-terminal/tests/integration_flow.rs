@@ -627,7 +627,7 @@ async fn test_home_lifecycle_flow() {
     let bob_home = env.get_agent("bob").read_home().await;
     println!("  Home ID: {id}", id = bob_home.id);
     println!("  Home name: {name}", name = bob_home.name);
-    println!("  Residents: {count}", count = bob_home.residents.len());
+    println!("  Residents: {count}", count = bob_home.members.len());
 
     // Note: Home creation commands would be added here when implemented
     // For now, we verify the signal infrastructure is in place
@@ -846,7 +846,7 @@ async fn test_social_graph_flow() {
     println!("  Home name: {name}", name = bob_home_final.name);
     println!(
         "  Residents: {count}",
-        count = bob_home_final.residents.len()
+        count = bob_home_final.members.len()
     );
     println!("  My role: {role:?}", role = bob_home_final.my_role);
 

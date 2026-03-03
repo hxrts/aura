@@ -828,9 +828,9 @@ proptest! {
         prop_assert!(tui.state().notifications.selected_index < count);
     }
 
-    /// Property: Neighborhood resident selection stays within list bounds
+    /// Property: Neighborhood member selection stays within list bounds
     #[test]
-    fn prop_neighborhood_resident_selection_in_bounds(
+    fn prop_neighborhood_member_selection_in_bounds(
         count in 1usize..50,
         start in 0usize..50,
         events in prop::collection::vec(nav_event_strategy(), 0..50)
@@ -838,15 +838,15 @@ proptest! {
         let mut tui = TestTui::new();
         tui.send_char('1');
         tui.send_enter();
-        tui.state_mut().neighborhood.resident_count = count;
-        tui.state_mut().neighborhood.selected_resident = start % count;
-        tui.state_mut().neighborhood.detail_focus = aura_terminal::tui::state_machine::DetailFocus::Residents;
+        tui.state_mut().neighborhood.member_count = count;
+        tui.state_mut().neighborhood.selected_member = start % count;
+        tui.state_mut().neighborhood.detail_focus = aura_terminal::tui::state_machine::DetailFocus::Members;
 
         for event in events {
             tui.send(event);
         }
 
-        prop_assert!(tui.state().neighborhood.selected_resident < count);
+        prop_assert!(tui.state().neighborhood.selected_member < count);
     }
 
     /// Property: Chat channel selection stays within list bounds

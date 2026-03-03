@@ -77,8 +77,8 @@ pub struct Contact {
     pub nickname_suggestion: Option<String>,
     /// Whether this contact is a guardian
     pub is_guardian: bool,
-    /// Whether this contact is a home resident
-    pub is_resident: bool,
+    /// Whether this contact is a home member
+    pub is_member: bool,
     /// Last interaction time (ms since epoch)
     pub last_interaction: Option<u64>,
     /// Whether contact is online
@@ -238,9 +238,9 @@ impl ContactsState {
         self.contacts.values().filter(|c| c.is_guardian)
     }
 
-    /// Get resident contacts.
-    pub fn residents(&self) -> impl Iterator<Item = &Contact> {
-        self.contacts.values().filter(|c| c.is_resident)
+    /// Get member contacts.
+    pub fn members(&self) -> impl Iterator<Item = &Contact> {
+        self.contacts.values().filter(|c| c.is_member)
     }
 
     /// Get effective name for a contact.
@@ -324,7 +324,7 @@ impl ContactsState {
                     nickname,
                     nickname_suggestion: None,
                     is_guardian: false,
-                    is_resident: false,
+                    is_member: false,
                     last_interaction: None,
                     is_online: false,
                     read_receipt_policy: ReadReceiptPolicy::default(),

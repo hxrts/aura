@@ -1,6 +1,6 @@
 //! Integration tests for home role semantics and moderator behavior.
 
-use aura_app::views::{HomeRole, HomeState, KickRecord, Resident};
+use aura_app::views::{HomeMember, HomeRole, HomeState, KickRecord};
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 
 fn authority_id(seed: u8) -> AuthorityId {
@@ -34,12 +34,12 @@ fn test_home_creator_is_regular_member() {
 
     assert_eq!(home.my_role, HomeRole::Member);
     let creator_entry = match home
-        .residents
+        .members
         .iter()
-        .find(|resident| resident.id == creator)
+        .find(|member| member.id == creator)
     {
         Some(entry) => entry,
-        None => panic!("creator should exist in residents"),
+        None => panic!("creator should exist in members"),
     };
     assert_eq!(creator_entry.role, HomeRole::Member);
 }
@@ -58,29 +58,29 @@ fn test_moderator_can_kick() {
         context_id(2),
     );
 
-    home.add_resident(Resident {
+    home.add_member(HomeMember {
         id: moderator,
         name: "Bob".to_string(),
         role: HomeRole::Moderator,
         is_online: true,
         joined_at: 1_700_000_000_100,
         last_seen: Some(1_700_000_000_100),
-        storage_allocated: HomeState::RESIDENT_ALLOCATION,
+        storage_allocated: HomeState::MEMBER_ALLOCATION,
     });
-    home.add_resident(Resident {
+    home.add_member(HomeMember {
         id: participant,
         name: "Carol".to_string(),
         role: HomeRole::Participant,
         is_online: true,
         joined_at: 1_700_000_000_200,
         last_seen: Some(1_700_000_000_200),
-        storage_allocated: HomeState::RESIDENT_ALLOCATION,
+        storage_allocated: HomeState::MEMBER_ALLOCATION,
     });
 
     home.my_role = HomeRole::Moderator;
     assert!(home.can_moderate());
 
-    let removed = home.remove_resident(&participant);
+    let removed = home.remove_member(&participant);
     assert!(removed.is_some());
 
     home.add_kick(KickRecord {

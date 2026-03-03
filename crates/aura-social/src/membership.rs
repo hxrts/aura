@@ -10,7 +10,7 @@ use aura_core::identifiers::AuthorityId;
 pub struct MembershipValidator;
 
 impl MembershipValidator {
-    /// Validate that an authority can join a home as a resident.
+    /// Validate that an authority can join a home as a member.
     pub fn validate_home_join(home: &Home, authority: &AuthorityId) -> Result<(), SocialError> {
         home.validate_join(authority)
     }
@@ -54,7 +54,7 @@ impl MembershipValidator {
         target_block: Option<HomeId>,
     ) -> bool {
         // Home peers can relay for each other
-        if home.is_resident(authority) && home.is_resident(target) {
+        if home.is_member(authority) && home.is_member(target) {
             return true;
         }
 
@@ -76,7 +76,7 @@ impl MembershipValidator {
 #[derive(Debug, Clone, Default)]
 pub struct MembershipState {
     /// The home the authority resides in, if any
-    pub resident_block: Option<HomeId>,
+    pub member_block: Option<HomeId>,
     /// Neighborhoods the authority.s home belongs to
     pub neighborhood_memberships: Vec<NeighborhoodId>,
 }
@@ -84,18 +84,18 @@ pub struct MembershipState {
 impl MembershipState {
     /// Create a new membership state.
     pub fn new(
-        resident_block: Option<HomeId>,
+        member_block: Option<HomeId>,
         neighborhood_memberships: Vec<NeighborhoodId>,
     ) -> Self {
         Self {
-            resident_block,
+            member_block,
             neighborhood_memberships,
         }
     }
 
     /// Check if the authority has any social relationships.
     pub fn has_social_presence(&self) -> bool {
-        self.resident_block.is_some()
+        self.member_block.is_some()
     }
 
     /// Check if the authority is in a specific neighborhood.

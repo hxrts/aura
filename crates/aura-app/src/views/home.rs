@@ -33,33 +33,33 @@ impl HomeRole {
     }
 }
 
-/// A home resident
+/// A home member
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
-pub struct Resident {
-    /// Resident identifier (authority ID)
+pub struct HomeMember {
+    /// Member identifier (authority ID)
     pub id: AuthorityId,
     /// Display name
     pub name: String,
     /// Role in the home
     pub role: HomeRole,
-    /// Whether resident is online
+    /// Whether member is online
     pub is_online: bool,
-    /// When resident joined (ms since epoch)
+    /// When member joined (ms since epoch)
     pub joined_at: u64,
     /// Last seen time (ms since epoch)
     pub last_seen: Option<u64>,
-    /// Storage allocated by this resident in bytes
+    /// Storage allocated by this member in bytes
     pub storage_allocated: u64,
 }
 
-impl Resident {
-    /// Check if this resident has moderator designation.
+impl HomeMember {
+    /// Check if this member has moderator designation.
     pub fn is_moderator(&self) -> bool {
         matches!(self.role, HomeRole::Moderator)
     }
 
-    /// Check if this resident participates in threshold authority membership.
+    /// Check if this member participates in threshold authority membership.
     pub fn is_threshold_member(&self) -> bool {
         self.role.is_threshold_member()
     }
@@ -149,16 +149,16 @@ pub struct HomeState {
     pub id: ChannelId,
     /// Home name
     pub name: String,
-    /// All residents
-    pub residents: Vec<Resident>,
+    /// All members
+    pub members: Vec<HomeMember>,
     /// Current user's role
     pub my_role: HomeRole,
     /// Storage budget (uses comprehensive HomeFlowBudget from budget module)
     pub storage: HomeFlowBudget,
-    /// Number of online residents
+    /// Number of online members
     pub online_count: u32,
-    /// Total resident count
-    pub resident_count: u32,
+    /// Total member count
+    pub member_count: u32,
     /// Whether this is the user's primary home
     pub is_primary: bool,
     /// Channel topic (optional)
@@ -189,8 +189,8 @@ pub struct HomeState {
 impl HomeState {
     /// Default storage limit: 10 MB
     pub const DEFAULT_STORAGE_BUDGET: u64 = 10 * 1024 * 1024;
-    /// Default resident allocation: 200 KB
-    pub const RESIDENT_ALLOCATION: u64 = 200 * 1024;
+    /// Default member allocation: 200 KB
+    pub const MEMBER_ALLOCATION: u64 = 200 * 1024;
     /// Maximum number of kick records retained in memory.
     const MAX_KICK_LOG: usize = 200;
 
@@ -202,30 +202,30 @@ impl HomeState {
         created_at: u64,
         context_id: ContextId,
     ) -> Self {
-        let moderator = Resident {
+        let moderator = HomeMember {
             id: creator_id,
             name: "You".to_string(),
             role: HomeRole::Member,
             is_online: true,
             joined_at: created_at,
             last_seen: Some(created_at),
-            storage_allocated: Self::RESIDENT_ALLOCATION,
+            storage_allocated: Self::MEMBER_ALLOCATION,
         };
 
-        // Initialize budget with one resident (the creator)
+        // Initialize budget with one member (the creator)
         // Convert ChannelId to HomeId using shared byte representation
         let home_id = HomeId::from_bytes(*id.as_bytes());
         let mut budget = HomeFlowBudget::new(home_id);
-        let _ = budget.add_resident(); // Creator is first resident
+        let _ = budget.add_member(); // Creator is first member
 
         Self {
             id,
             name: name.unwrap_or_default(),
-            residents: vec![moderator],
+            members: vec![moderator],
             my_role: HomeRole::Member,
             storage: budget,
             online_count: 1,
-            resident_count: 1,
+            member_count: 1,
             is_primary: false,
             topic: None,
             pinned_messages: Vec::new(),
@@ -239,46 +239,46 @@ impl HomeState {
         }
     }
 
-    /// Get resident by ID
-    pub fn resident(&self, id: &AuthorityId) -> Option<&Resident> {
-        self.residents.iter().find(|r| r.id == *id)
+    /// Get member by ID
+    pub fn member(&self, id: &AuthorityId) -> Option<&HomeMember> {
+        self.members.iter().find(|r| r.id == *id)
     }
 
-    /// Get mutable reference to resident by ID
-    pub fn resident_mut(&mut self, id: &AuthorityId) -> Option<&mut Resident> {
-        self.residents.iter_mut().find(|r| r.id == *id)
+    /// Get mutable reference to member by ID
+    pub fn member_mut(&mut self, id: &AuthorityId) -> Option<&mut HomeMember> {
+        self.members.iter_mut().find(|r| r.id == *id)
     }
 
-    /// Add a resident to the home
-    pub fn add_resident(&mut self, resident: Resident) {
-        // Charge storage budget for new resident
-        let _ = self.storage.add_resident();
-        self.resident_count += 1;
-        if resident.is_online {
+    /// Add a member to the home
+    pub fn add_member(&mut self, member: HomeMember) {
+        // Charge storage budget for new member
+        let _ = self.storage.add_member();
+        self.member_count += 1;
+        if member.is_online {
             self.online_count += 1;
         }
-        self.residents.push(resident);
+        self.members.push(member);
     }
 
-    /// Remove a resident from the home
-    pub fn remove_resident(&mut self, id: &AuthorityId) -> Option<Resident> {
-        if let Some(pos) = self.residents.iter().position(|r| r.id == *id) {
-            let resident = self.residents.remove(pos);
+    /// Remove a member from the home
+    pub fn remove_member(&mut self, id: &AuthorityId) -> Option<HomeMember> {
+        if let Some(pos) = self.members.iter().position(|r| r.id == *id) {
+            let member = self.members.remove(pos);
             // Free storage budget
-            let _ = self.storage.remove_resident();
-            self.resident_count = self.resident_count.saturating_sub(1);
-            if resident.is_online {
+            let _ = self.storage.remove_member();
+            self.member_count = self.member_count.saturating_sub(1);
+            if member.is_online {
                 self.online_count = self.online_count.saturating_sub(1);
             }
-            Some(resident)
+            Some(member)
         } else {
             None
         }
     }
 
-    /// Get online residents
-    pub fn online_residents(&self) -> Vec<&Resident> {
-        self.residents.iter().filter(|r| r.is_online).collect()
+    /// Get online members
+    pub fn online_members(&self) -> Vec<&HomeMember> {
+        self.members.iter().filter(|r| r.is_online).collect()
     }
 
     /// Check if current user has elevated home privileges.
@@ -583,7 +583,7 @@ impl HomesState {
 
 #[cfg(test)]
 mod tests {
-    use super::{HomeRole, Resident};
+    use super::{HomeRole, HomeMember};
     use aura_core::identifiers::AuthorityId;
     use proptest::prelude::*;
 
@@ -595,7 +595,7 @@ mod tests {
         ]
     }
 
-    fn home_strategy() -> impl Strategy<Value = Vec<Resident>> {
+    fn home_strategy() -> impl Strategy<Value = Vec<HomeMember>> {
         prop::collection::vec(role_strategy(), 1..40).prop_map(|roles| {
             roles
                 .into_iter()
@@ -603,9 +603,9 @@ mod tests {
                 .map(|(index, role)| {
                     let mut entropy = [0u8; 32];
                     entropy[0] = index as u8;
-                    Resident {
+                    HomeMember {
                         id: AuthorityId::new_from_entropy(entropy),
-                        name: format!("resident-{index}"),
+                        name: format!("member-{index}"),
                         role,
                         is_online: true,
                         joined_at: index as u64,
@@ -621,15 +621,15 @@ mod tests {
         #[test]
         #[ignore = "property"]
         fn property_members_are_threshold_participants(home in home_strategy()) {
-            for resident in &home {
-                if resident.role.is_participant() {
+            for member in &home {
+                if member.role.is_participant() {
                     prop_assert!(
-                        !resident.is_threshold_member(),
+                        !member.is_threshold_member(),
                         "participant cannot be threshold member"
                     );
                 } else {
                     prop_assert!(
-                        resident.is_threshold_member(),
+                        member.is_threshold_member(),
                         "member/moderator must be threshold member"
                     );
                 }
@@ -639,10 +639,10 @@ mod tests {
         #[test]
         #[ignore = "property"]
         fn property_only_members_can_be_moderators(home in home_strategy()) {
-            for resident in &home {
-                if resident.is_moderator() {
+            for member in &home {
+                if member.is_moderator() {
                     prop_assert!(
-                        resident.is_threshold_member(),
+                        member.is_threshold_member(),
                         "moderator must be a threshold member"
                     );
                 }

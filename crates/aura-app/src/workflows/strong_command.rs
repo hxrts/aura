@@ -1211,7 +1211,7 @@ async fn consistency_invariant_holds(
                 None => return false,
             };
             match &plan.operation.command {
-                ResolvedCommand::Kick { target, .. } => home.resident(&target.0).is_none(),
+                ResolvedCommand::Kick { target, .. } => home.member(&target.0).is_none(),
                 ResolvedCommand::Ban { target, .. } => home.ban_list.contains_key(&target.0),
                 ResolvedCommand::Unban { target } => !home.ban_list.contains_key(&target.0),
                 ResolvedCommand::Mute { target, .. } => home.mute_list.contains_key(&target.0),
@@ -1227,13 +1227,13 @@ async fn consistency_invariant_holds(
             };
             match &plan.operation.command {
                 ResolvedCommand::Op { target } => {
-                    home.resident(&target.0).is_some_and(|resident| {
-                        matches!(resident.role, crate::views::home::HomeRole::Moderator)
+                    home.member(&target.0).is_some_and(|member| {
+                        matches!(member.role, crate::views::home::HomeRole::Moderator)
                     })
                 }
                 ResolvedCommand::Deop { target } => {
-                    home.resident(&target.0).is_some_and(|resident| {
-                        matches!(resident.role, crate::views::home::HomeRole::Participant)
+                    home.member(&target.0).is_some_and(|member| {
+                        matches!(member.role, crate::views::home::HomeRole::Participant)
                     })
                 }
                 ResolvedCommand::Mode { flags, .. } => home.mode_flags.as_ref() == Some(flags),
@@ -1641,7 +1641,7 @@ mod tests {
             nickname: "bob".to_string(),
             nickname_suggestion: Some("Bobby".to_string()),
             is_guardian: false,
-            is_resident: true,
+            is_member: true,
             last_interaction: None,
             is_online: true,
             read_receipt_policy: Default::default(),
@@ -1673,7 +1673,7 @@ mod tests {
             nickname: "bob".to_string(),
             nickname_suggestion: None,
             is_guardian: false,
-            is_resident: true,
+            is_member: true,
             last_interaction: None,
             is_online: true,
             read_receipt_policy: Default::default(),
@@ -1683,7 +1683,7 @@ mod tests {
             nickname: "bobby".to_string(),
             nickname_suggestion: None,
             is_guardian: false,
-            is_resident: true,
+            is_member: true,
             last_interaction: None,
             is_online: true,
             read_receipt_policy: Default::default(),
@@ -1734,7 +1734,7 @@ mod tests {
             nickname: "bob".to_string(),
             nickname_suggestion: None,
             is_guardian: false,
-            is_resident: true,
+            is_member: true,
             last_interaction: None,
             is_online: true,
             read_receipt_policy: Default::default(),
@@ -1956,7 +1956,7 @@ mod tests {
             nickname: "bob".to_string(),
             nickname_suggestion: None,
             is_guardian: false,
-            is_resident: true,
+            is_member: true,
             last_interaction: None,
             is_online: true,
             read_receipt_policy: Default::default(),
@@ -1966,7 +1966,7 @@ mod tests {
             nickname: "bob".to_string(),
             nickname_suggestion: None,
             is_guardian: false,
-            is_resident: true,
+            is_member: true,
             last_interaction: None,
             is_online: true,
             read_receipt_policy: Default::default(),

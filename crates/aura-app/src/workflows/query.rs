@@ -253,7 +253,7 @@ mod tests {
             nickname: "Bob".to_string(),
             nickname_suggestion: Some("Bobby".to_string()),
             is_guardian: false,
-            is_resident: false,
+            is_member: false,
             last_interaction: None,
             is_online: true,
             read_receipt_policy: Default::default(),

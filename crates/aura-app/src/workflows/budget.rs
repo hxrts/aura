@@ -5,9 +5,9 @@
 //! ## Storage Model
 //!
 //! - **Home total**: 10 MB fixed allocation
-//! - **Resident storage**: 200 KB per resident (max 8 = 1.6 MB)
+//! - **Member storage**: 200 KB per member (max 8 = 1.6 MB)
 //! - **Neighborhood allocation**: 1 MB per neighborhood (max 4 = 4 MB)
-//! - **Shared storage space**: Remainder after residents + allocations
+//! - **Shared storage space**: Remainder after members + allocations
 //!
 //! ## Key Principles
 //!
@@ -24,8 +24,8 @@
 //! let mut budget = HomeFlowBudget::new(HomeId::default());
 //!
 //! // Check capacity
-//! if budget.can_add_resident() {
-//!     budget.add_resident()?;
+//! if budget.can_add_member() {
+//!     budget.add_member()?;
 //! }
 //!
 //! // Join neighborhoods
@@ -63,10 +63,10 @@ pub const MB: u64 = 1024 * KB;
 ///
 /// Total home storage allocation (10 MB)
 pub const HOME_TOTAL_SIZE: u64 = 10 * MB;
-/// Storage allocated per resident (200 KB)
-pub const RESIDENT_ALLOCATION: u64 = 200 * KB;
-/// Maximum number of residents per home
-pub const MAX_RESIDENTS: u8 = 8;
+/// Storage allocated per member (200 KB)
+pub const MEMBER_ALLOCATION: u64 = 200 * KB;
+/// Maximum number of members per home
+pub const MAX_MEMBERS: u8 = 8;
 /// Storage contributed per neighborhood membership (1 MB)
 pub const NEIGHBORHOOD_ALLOCATION: u64 = MB;
 /// Maximum number of neighborhoods a home can join
@@ -85,10 +85,10 @@ pub const MAX_NEIGHBORHOODS: u8 = 4;
 pub struct HomeFlowBudget {
     /// Home ID (typed identifier from aura-core)
     pub home_id: HomeId,
-    /// Current number of residents
-    pub resident_count: u8,
-    /// Storage used by residents (spent counter as fact)
-    pub resident_storage_spent: u64,
+    /// Current number of members
+    pub member_count: u8,
+    /// Storage used by members (spent counter as fact)
+    pub member_storage_spent: u64,
     /// Number of neighborhoods joined
     pub neighborhood_count: u8,
     /// Total neighborhood allocations
@@ -102,8 +102,8 @@ impl HomeFlowBudget {
     pub fn new(home_id: HomeId) -> Self {
         Self {
             home_id,
-            resident_count: 0,
-            resident_storage_spent: 0,
+            member_count: 0,
+            member_storage_spent: 0,
             neighborhood_count: 0,
             neighborhood_allocations: 0,
             pinned_storage_spent: 0,
@@ -115,29 +115,29 @@ impl HomeFlowBudget {
         HOME_TOTAL_SIZE
     }
 
-    /// Maximum resident storage (8 × 200 KB = 1.6 MB)
-    pub fn resident_storage_limit(&self) -> u64 {
-        MAX_RESIDENTS as u64 * RESIDENT_ALLOCATION
+    /// Maximum member storage (8 × 200 KB = 1.6 MB)
+    pub fn member_storage_limit(&self) -> u64 {
+        MAX_MEMBERS as u64 * MEMBER_ALLOCATION
     }
 
-    /// Current resident storage used
-    pub fn resident_storage_used(&self) -> u64 {
-        self.resident_storage_spent
+    /// Current member storage used
+    pub fn member_storage_used(&self) -> u64 {
+        self.member_storage_spent
     }
 
-    /// Remaining resident storage capacity
-    pub fn resident_storage_remaining(&self) -> u64 {
-        self.resident_storage_limit()
-            .saturating_sub(self.resident_storage_spent)
+    /// Remaining member storage capacity
+    pub fn member_storage_remaining(&self) -> u64 {
+        self.member_storage_limit()
+            .saturating_sub(self.member_storage_spent)
     }
 
-    /// Calculate public-good space limit based on current configuration
+    /// Calculate shared storage space limit based on current configuration
     ///
-    /// Formula: 10 MB - neighborhood_allocations - resident_limit
+    /// Formula: 10 MB - neighborhood_allocations - member_limit
     pub fn pinned_storage_limit(&self) -> u64 {
         HOME_TOTAL_SIZE
             .saturating_sub(self.neighborhood_allocations)
-            .saturating_sub(self.resident_storage_limit())
+            .saturating_sub(self.member_storage_limit())
     }
 
     /// Remaining pinned storage capacity
@@ -148,7 +148,7 @@ impl HomeFlowBudget {
 
     /// Total storage used
     pub fn total_used(&self) -> u64 {
-        self.resident_storage_spent + self.neighborhood_allocations + self.pinned_storage_spent
+        self.member_storage_spent + self.neighborhood_allocations + self.pinned_storage_spent
     }
 
     /// Total storage remaining
@@ -161,10 +161,10 @@ impl HomeFlowBudget {
         self.total_used() as f64 / HOME_TOTAL_SIZE as f64
     }
 
-    /// Check if home can add another resident
-    pub fn can_add_resident(&self) -> bool {
-        self.resident_count < MAX_RESIDENTS
-            && self.resident_storage_remaining() >= RESIDENT_ALLOCATION
+    /// Check if home can add another member
+    pub fn can_add_member(&self) -> bool {
+        self.member_count < MAX_MEMBERS
+            && self.member_storage_remaining() >= MEMBER_ALLOCATION
     }
 
     /// Check if home can join another neighborhood
@@ -178,30 +178,30 @@ impl HomeFlowBudget {
         self.pinned_storage_remaining() >= size
     }
 
-    /// Add a resident (charge storage)
+    /// Add a member (charge storage)
     ///
     /// Returns error if capacity exceeded.
-    pub fn add_resident(&mut self) -> Result<(), BudgetError> {
-        if !self.can_add_resident() {
-            return Err(BudgetError::ResidentCapacityExceeded {
-                current: self.resident_count,
-                max: MAX_RESIDENTS,
+    pub fn add_member(&mut self) -> Result<(), BudgetError> {
+        if !self.can_add_member() {
+            return Err(BudgetError::MemberCapacityExceeded {
+                current: self.member_count,
+                max: MAX_MEMBERS,
             });
         }
-        self.resident_count += 1;
-        self.resident_storage_spent += RESIDENT_ALLOCATION;
+        self.member_count += 1;
+        self.member_storage_spent += MEMBER_ALLOCATION;
         Ok(())
     }
 
-    /// Remove a resident (free storage)
-    pub fn remove_resident(&mut self) -> Result<(), BudgetError> {
-        if self.resident_count == 0 {
-            return Err(BudgetError::NoResidentsToRemove);
+    /// Remove a member (free storage)
+    pub fn remove_member(&mut self) -> Result<(), BudgetError> {
+        if self.member_count == 0 {
+            return Err(BudgetError::NoMembersToRemove);
         }
-        self.resident_count -= 1;
-        self.resident_storage_spent = self
-            .resident_storage_spent
-            .saturating_sub(RESIDENT_ALLOCATION);
+        self.member_count -= 1;
+        self.member_storage_spent = self
+            .member_storage_spent
+            .saturating_sub(MEMBER_ALLOCATION);
         Ok(())
     }
 
@@ -255,8 +255,8 @@ impl HomeFlowBudget {
     pub fn breakdown(&self) -> BudgetBreakdown {
         BudgetBreakdown {
             total: HOME_TOTAL_SIZE,
-            resident_limit: self.resident_storage_limit(),
-            resident_used: self.resident_storage_spent,
+            member_limit: self.member_storage_limit(),
+            member_used: self.member_storage_spent,
             neighborhood_allocations: self.neighborhood_allocations,
             pinned_limit: self.pinned_storage_limit(),
             pinned_used: self.pinned_storage_spent,
@@ -281,10 +281,10 @@ impl Default for HomeFlowBudget {
 pub struct BudgetBreakdown {
     /// Total home allocation
     pub total: u64,
-    /// Resident storage limit
-    pub resident_limit: u64,
-    /// Resident storage used
-    pub resident_used: u64,
+    /// Member storage limit
+    pub member_limit: u64,
+    /// Member storage used
+    pub member_used: u64,
     /// Storage contributed to neighborhoods
     pub neighborhood_allocations: u64,
     /// Pinned storage limit
@@ -317,15 +317,15 @@ impl BudgetBreakdown {
 #[cfg_attr(feature = "uniffi", derive(uniffi::Error))]
 #[cfg_attr(feature = "uniffi", uniffi(flat_error))]
 pub enum BudgetError {
-    /// Cannot add more residents
-    ResidentCapacityExceeded {
-        /// Current resident count
+    /// Cannot add more members
+    MemberCapacityExceeded {
+        /// Current member count
         current: u8,
-        /// Maximum residents
+        /// Maximum members
         max: u8,
     },
-    /// No residents to remove
-    NoResidentsToRemove,
+    /// No members to remove
+    NoMembersToRemove,
     /// Cannot join more neighborhoods
     NeighborhoodCapacityExceeded {
         /// Current neighborhood count
@@ -347,10 +347,10 @@ pub enum BudgetError {
 impl fmt::Display for BudgetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ResidentCapacityExceeded { current, max } => {
-                write!(f, "Home at resident capacity ({current}/{max})")
+            Self::MemberCapacityExceeded { current, max } => {
+                write!(f, "Home at member capacity ({current}/{max})")
             }
-            Self::NoResidentsToRemove => write!(f, "No residents to remove"),
+            Self::NoMembersToRemove => write!(f, "No members to remove"),
             Self::NeighborhoodCapacityExceeded { current, max } => {
                 write!(f, "Home at neighborhood capacity ({current}/{max})")
             }
@@ -404,16 +404,16 @@ pub async fn get_budget_breakdown(app_core: &Arc<RwLock<AppCore>>) -> BudgetBrea
     budget.breakdown()
 }
 
-/// Check if a new resident can be added to the home
+/// Check if a new member can be added to the home
 ///
-/// **What it does**: Validates budget capacity for new resident
+/// **What it does**: Validates budget capacity for new member
 /// **Returns**: Boolean (true if capacity available)
 /// **Signal pattern**: Read-only operation (no emission)
 ///
-/// Frontends should call this before attempting to add a resident.
-pub async fn can_add_resident(app_core: &Arc<RwLock<AppCore>>) -> bool {
+/// Frontends should call this before attempting to add a member.
+pub async fn can_add_member(app_core: &Arc<RwLock<AppCore>>) -> bool {
     let budget = get_current_budget(app_core).await;
-    budget.can_add_resident()
+    budget.can_add_member()
 }
 
 /// Check if current home can join a neighborhood
@@ -458,7 +458,7 @@ pub async fn can_pin_content(
 /// **Signal pattern**: Write operation (emits BUDGET_SIGNAL)
 ///
 /// This is called internally when budget state changes (e.g., after
-/// adding a resident, pinning content, or receiving budget updates).
+/// adding a member, pinning content, or receiving budget updates).
 pub async fn update_budget(
     app_core: &Arc<RwLock<AppCore>>,
     budget: HomeFlowBudget,
@@ -483,8 +483,8 @@ pub async fn update_budget(
 ///
 /// Total: 2.4 MB / 10.0 MB (24% used)
 ///
-/// Resident Storage:
-///   2 residents (8 max)
+/// Member Storage:
+///   2 members (8 max)
 ///   400.0 KB / 1.6 MB used
 ///
 /// Neighborhood Allocations:
@@ -511,15 +511,15 @@ pub fn format_budget_status(budget: &HomeFlowBudget) -> String {
         usage_percent
     ));
 
-    output.push_str("\nResident Storage:\n");
+    output.push_str("\nMember Storage:\n");
     output.push_str(&format!(
-        "  {} residents ({} max)\n",
-        budget.resident_count, MAX_RESIDENTS
+        "  {} members ({} max)\n",
+        budget.member_count, MAX_MEMBERS
     ));
     output.push_str(&format!(
         "  {} / {} used\n",
-        BudgetBreakdown::format_size(breakdown.resident_used),
-        BudgetBreakdown::format_size(breakdown.resident_limit)
+        BudgetBreakdown::format_size(breakdown.member_used),
+        BudgetBreakdown::format_size(breakdown.member_limit)
     ));
 
     output.push_str("\nNeighborhood Allocations:\n");
@@ -580,27 +580,27 @@ pub fn format_budget_compact(budget: &HomeFlowBudget) -> String {
     )
 }
 
-/// Check if budget can accommodate a new resident, with error message.
+/// Check if budget can accommodate a new member, with error message.
 ///
 /// Returns `Ok(())` if capacity is available, `Err` with formatted message otherwise.
-/// Use this before attempting to add residents for user-friendly error messages.
+/// Use this before attempting to add members for user-friendly error messages.
 ///
 /// # Example
 ///
 /// ```rust
-/// use aura_app::ui::workflows::budget::{HomeFlowBudget, check_can_add_resident};
+/// use aura_app::ui::workflows::budget::{HomeFlowBudget, check_can_add_member};
 /// use aura_core::identifiers::HomeId;
 ///
 /// let budget = HomeFlowBudget::new(HomeId::default());
-/// assert!(check_can_add_resident(&budget).is_ok());
+/// assert!(check_can_add_member(&budget).is_ok());
 /// ```
-pub fn check_can_add_resident(budget: &HomeFlowBudget) -> Result<(), String> {
-    if budget.can_add_resident() {
+pub fn check_can_add_member(budget: &HomeFlowBudget) -> Result<(), String> {
+    if budget.can_add_member() {
         Ok(())
     } else {
         Err(format!(
-            "Cannot add resident: home at capacity ({}/{})",
-            budget.resident_count, MAX_RESIDENTS
+            "Cannot add member: home at capacity ({}/{})",
+            budget.member_count, MAX_MEMBERS
         ))
     }
 }
@@ -662,7 +662,7 @@ mod tests {
         let home_id = test_home_id("test_home");
         let budget = HomeFlowBudget::new(home_id);
         assert_eq!(budget.home_id, home_id);
-        assert_eq!(budget.resident_count, 0);
+        assert_eq!(budget.member_count, 0);
         assert_eq!(budget.neighborhood_count, 0);
         assert_eq!(budget.total_used(), 0);
     }
@@ -670,54 +670,54 @@ mod tests {
     #[test]
     fn test_constants() {
         assert_eq!(HOME_TOTAL_SIZE, 10 * MB);
-        assert_eq!(RESIDENT_ALLOCATION, 200 * KB);
-        assert_eq!(MAX_RESIDENTS, 8);
+        assert_eq!(MEMBER_ALLOCATION, 200 * KB);
+        assert_eq!(MAX_MEMBERS, 8);
         assert_eq!(NEIGHBORHOOD_ALLOCATION, MB);
         assert_eq!(MAX_NEIGHBORHOODS, 4);
 
         // Verify v1 arithmetic
-        let max_resident_storage = MAX_RESIDENTS as u64 * RESIDENT_ALLOCATION;
-        assert_eq!(max_resident_storage, 1_638_400); // 1.6 MB
+        let max_member_storage = MAX_MEMBERS as u64 * MEMBER_ALLOCATION;
+        assert_eq!(max_member_storage, 1_638_400); // 1.6 MB
     }
 
     #[test]
-    fn test_add_resident() {
+    fn test_add_member() {
         let mut budget = HomeFlowBudget::new(test_home_id("test"));
-        assert!(budget.can_add_resident());
+        assert!(budget.can_add_member());
 
-        budget.add_resident().unwrap();
-        assert_eq!(budget.resident_count, 1);
-        assert_eq!(budget.resident_storage_spent, RESIDENT_ALLOCATION);
+        budget.add_member().unwrap();
+        assert_eq!(budget.member_count, 1);
+        assert_eq!(budget.member_storage_spent, MEMBER_ALLOCATION);
 
-        // Add max residents
-        for _ in 1..MAX_RESIDENTS {
-            budget.add_resident().unwrap();
+        // Add max members
+        for _ in 1..MAX_MEMBERS {
+            budget.add_member().unwrap();
         }
-        assert_eq!(budget.resident_count, MAX_RESIDENTS);
-        assert!(!budget.can_add_resident());
+        assert_eq!(budget.member_count, MAX_MEMBERS);
+        assert!(!budget.can_add_member());
 
         // Try to add one more
-        let result = budget.add_resident();
+        let result = budget.add_member();
         assert!(matches!(
             result,
-            Err(BudgetError::ResidentCapacityExceeded { .. })
+            Err(BudgetError::MemberCapacityExceeded { .. })
         ));
     }
 
     #[test]
-    fn test_remove_resident() {
+    fn test_remove_member() {
         let mut budget = HomeFlowBudget::new(test_home_id("test"));
-        budget.add_resident().unwrap();
-        budget.add_resident().unwrap();
+        budget.add_member().unwrap();
+        budget.add_member().unwrap();
 
-        budget.remove_resident().unwrap();
-        assert_eq!(budget.resident_count, 1);
+        budget.remove_member().unwrap();
+        assert_eq!(budget.member_count, 1);
 
-        budget.remove_resident().unwrap();
-        assert_eq!(budget.resident_count, 0);
+        budget.remove_member().unwrap();
+        assert_eq!(budget.member_count, 0);
 
-        let result = budget.remove_resident();
-        assert!(matches!(result, Err(BudgetError::NoResidentsToRemove)));
+        let result = budget.remove_member();
+        assert!(matches!(result, Err(BudgetError::NoMembersToRemove)));
     }
 
     #[test]
@@ -751,7 +751,7 @@ mod tests {
         let initial_limit = budget.pinned_storage_limit();
         assert_eq!(
             initial_limit,
-            HOME_TOTAL_SIZE - budget.resident_storage_limit()
+            HOME_TOTAL_SIZE - budget.member_storage_limit()
         );
 
         // Join a neighborhood reduces pinned limit by 1 MB
@@ -784,9 +784,9 @@ mod tests {
 
         // Verify arithmetic
         assert_eq!(budget.neighborhood_allocations, 4 * MB); // 4 MB
-        assert_eq!(budget.resident_storage_limit(), 1_638_400); // 1.6 MB (8 × 200 KB)
+        assert_eq!(budget.member_storage_limit(), 1_638_400); // 1.6 MB (8 × 200 KB)
 
-        // Public-good space = 10 MB - 4 MB - 1.6 MB = 4.4 MB
+        // Shared storage space = 10 MB - 4 MB - 1.6 MB = 4.4 MB
         let expected_pinned_limit = HOME_TOTAL_SIZE - (4 * MB) - 1_638_400;
         assert_eq!(budget.pinned_storage_limit(), expected_pinned_limit);
 
@@ -798,7 +798,7 @@ mod tests {
         let mut budget = HomeFlowBudget::new(test_home_id("test"));
         assert_eq!(budget.usage_fraction(), 0.0);
 
-        budget.add_resident().unwrap();
+        budget.add_member().unwrap();
         assert!(budget.usage_fraction() > 0.0);
 
         budget.join_neighborhood().unwrap();
@@ -825,7 +825,7 @@ mod tests {
 
         // Should return default budget when signal not initialized
         let budget = get_current_budget(&app_core).await;
-        assert_eq!(budget.resident_count, 0);
+        assert_eq!(budget.member_count, 0);
     }
 
     #[tokio::test]
@@ -833,8 +833,8 @@ mod tests {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
 
-        // Should allow adding residents when budget is empty
-        assert!(can_add_resident(&app_core).await);
+        // Should allow adding members when budget is empty
+        assert!(can_add_member(&app_core).await);
 
         // Should allow joining neighborhoods when budget is empty
         assert!(can_join_neighborhood(&app_core).await);
@@ -869,15 +869,15 @@ mod tests {
 
         // Update budget
         let mut new_budget = HomeFlowBudget::new(test_home_id("test-home"));
-        new_budget.add_resident().unwrap();
-        new_budget.add_resident().unwrap();
+        new_budget.add_member().unwrap();
+        new_budget.add_member().unwrap();
 
         update_budget(&app_core, new_budget.clone()).await.unwrap();
 
         // Verify budget was updated
         let budget = get_current_budget(&app_core).await;
-        assert_eq!(budget.resident_count, 2);
-        assert_eq!(budget.resident_storage_spent, 2 * RESIDENT_ALLOCATION);
+        assert_eq!(budget.member_count, 2);
+        assert_eq!(budget.member_storage_spent, 2 * MEMBER_ALLOCATION);
     }
 
     // -------------------------------------------------------------------------
@@ -891,8 +891,8 @@ mod tests {
         /// Generate a sequence of budget operations
         #[derive(Debug, Clone)]
         enum BudgetOp {
-            AddResident,
-            RemoveResident,
+            AddMember,
+            RemoveMember,
             JoinNeighborhood,
             LeaveNeighborhood,
             PinContent(u64),
@@ -902,8 +902,8 @@ mod tests {
         /// Strategy for generating budget operations
         fn budget_op_strategy() -> impl Strategy<Value = BudgetOp> {
             prop_oneof![
-                Just(BudgetOp::AddResident),
-                Just(BudgetOp::RemoveResident),
+                Just(BudgetOp::AddMember),
+                Just(BudgetOp::RemoveMember),
                 Just(BudgetOp::JoinNeighborhood),
                 Just(BudgetOp::LeaveNeighborhood),
                 // Pin/unpin reasonable amounts (0 to 1 MB)
@@ -913,28 +913,28 @@ mod tests {
         }
 
         proptest! {
-            /// Property: resident_count never exceeds MAX_RESIDENTS
+            /// Property: member_count never exceeds MAX_MEMBERS
             #[test]
-            fn prop_resident_count_never_exceeds_max(
+            fn prop_member_count_never_exceeds_max(
                 ops in prop::collection::vec(budget_op_strategy(), 0..100)
             ) {
                 let mut budget = HomeFlowBudget::new(HomeId::default());
 
                 for op in ops {
                     match op {
-                        BudgetOp::AddResident => { let _ = budget.add_resident(); }
-                        BudgetOp::RemoveResident => { let _ = budget.remove_resident(); }
+                        BudgetOp::AddMember => { let _ = budget.add_member(); }
+                        BudgetOp::RemoveMember => { let _ = budget.remove_member(); }
                         BudgetOp::JoinNeighborhood => { let _ = budget.join_neighborhood(); }
                         BudgetOp::LeaveNeighborhood => { let _ = budget.leave_neighborhood(); }
                         BudgetOp::PinContent(size) => { let _ = budget.pin_content(size); }
                         BudgetOp::UnpinContent(size) => { budget.unpin_content(size); }
                     }
 
-                    // Invariant: resident_count is always within bounds
+                    // Invariant: member_count is always within bounds
                     prop_assert!(
-                        budget.resident_count <= MAX_RESIDENTS,
-                        "resident_count {} exceeded max {}",
-                        budget.resident_count, MAX_RESIDENTS
+                        budget.member_count <= MAX_MEMBERS,
+                        "member_count {} exceeded max {}",
+                        budget.member_count, MAX_MEMBERS
                     );
                 }
             }
@@ -948,8 +948,8 @@ mod tests {
 
                 for op in ops {
                     match op {
-                        BudgetOp::AddResident => { let _ = budget.add_resident(); }
-                        BudgetOp::RemoveResident => { let _ = budget.remove_resident(); }
+                        BudgetOp::AddMember => { let _ = budget.add_member(); }
+                        BudgetOp::RemoveMember => { let _ = budget.remove_member(); }
                         BudgetOp::JoinNeighborhood => { let _ = budget.join_neighborhood(); }
                         BudgetOp::LeaveNeighborhood => { let _ = budget.leave_neighborhood(); }
                         BudgetOp::PinContent(size) => { let _ = budget.pin_content(size); }
@@ -965,28 +965,28 @@ mod tests {
                 }
             }
 
-            /// Property: resident_storage_spent never exceeds resident_storage_limit
+            /// Property: member_storage_spent never exceeds member_storage_limit
             #[test]
-            fn prop_resident_storage_never_exceeds_limit(
+            fn prop_member_storage_never_exceeds_limit(
                 ops in prop::collection::vec(budget_op_strategy(), 0..100)
             ) {
                 let mut budget = HomeFlowBudget::new(HomeId::default());
 
                 for op in ops {
                     match op {
-                        BudgetOp::AddResident => { let _ = budget.add_resident(); }
-                        BudgetOp::RemoveResident => { let _ = budget.remove_resident(); }
+                        BudgetOp::AddMember => { let _ = budget.add_member(); }
+                        BudgetOp::RemoveMember => { let _ = budget.remove_member(); }
                         BudgetOp::JoinNeighborhood => { let _ = budget.join_neighborhood(); }
                         BudgetOp::LeaveNeighborhood => { let _ = budget.leave_neighborhood(); }
                         BudgetOp::PinContent(size) => { let _ = budget.pin_content(size); }
                         BudgetOp::UnpinContent(size) => { budget.unpin_content(size); }
                     }
 
-                    // Invariant: resident storage never exceeds limit
+                    // Invariant: member storage never exceeds limit
                     prop_assert!(
-                        budget.resident_storage_spent <= budget.resident_storage_limit(),
-                        "resident_storage_spent {} exceeded limit {}",
-                        budget.resident_storage_spent, budget.resident_storage_limit()
+                        budget.member_storage_spent <= budget.member_storage_limit(),
+                        "member_storage_spent {} exceeded limit {}",
+                        budget.member_storage_spent, budget.member_storage_limit()
                     );
                 }
             }
@@ -1000,8 +1000,8 @@ mod tests {
 
                 for op in ops {
                     match op {
-                        BudgetOp::AddResident => { let _ = budget.add_resident(); }
-                        BudgetOp::RemoveResident => { let _ = budget.remove_resident(); }
+                        BudgetOp::AddMember => { let _ = budget.add_member(); }
+                        BudgetOp::RemoveMember => { let _ = budget.remove_member(); }
                         BudgetOp::JoinNeighborhood => { let _ = budget.join_neighborhood(); }
                         BudgetOp::LeaveNeighborhood => { let _ = budget.leave_neighborhood(); }
                         BudgetOp::PinContent(size) => { let _ = budget.pin_content(size); }
@@ -1026,8 +1026,8 @@ mod tests {
 
                 for op in ops {
                     match op {
-                        BudgetOp::AddResident => { let _ = budget.add_resident(); }
-                        BudgetOp::RemoveResident => { let _ = budget.remove_resident(); }
+                        BudgetOp::AddMember => { let _ = budget.add_member(); }
+                        BudgetOp::RemoveMember => { let _ = budget.remove_member(); }
                         BudgetOp::JoinNeighborhood => { let _ = budget.join_neighborhood(); }
                         BudgetOp::LeaveNeighborhood => { let _ = budget.leave_neighborhood(); }
                         BudgetOp::PinContent(size) => { let _ = budget.pin_content(size); }
@@ -1043,55 +1043,55 @@ mod tests {
                 }
             }
 
-            /// Property: add_resident monotonically increases resident_count by 1
+            /// Property: add_member monotonically increases member_count by 1
             #[test]
-            fn prop_add_resident_monotone(
-                initial_residents in 0u8..MAX_RESIDENTS
+            fn prop_add_member_monotone(
+                initial_members in 0u8..MAX_MEMBERS
             ) {
                 let mut budget = HomeFlowBudget::new(HomeId::default());
 
                 // Set up initial state
-                for _ in 0..initial_residents {
-                    budget.add_resident().unwrap();
+                for _ in 0..initial_members {
+                    budget.add_member().unwrap();
                 }
 
-                let count_before = budget.resident_count;
-                let storage_before = budget.resident_storage_spent;
+                let count_before = budget.member_count;
+                let storage_before = budget.member_storage_spent;
 
-                if budget.can_add_resident() {
-                    budget.add_resident().unwrap();
+                if budget.can_add_member() {
+                    budget.add_member().unwrap();
                     // Monotone: count increased by exactly 1
-                    prop_assert_eq!(budget.resident_count, count_before + 1);
-                    // Storage increased by exactly RESIDENT_ALLOCATION
+                    prop_assert_eq!(budget.member_count, count_before + 1);
+                    // Storage increased by exactly MEMBER_ALLOCATION
                     prop_assert_eq!(
-                        budget.resident_storage_spent,
-                        storage_before + RESIDENT_ALLOCATION
+                        budget.member_storage_spent,
+                        storage_before + MEMBER_ALLOCATION
                     );
                 }
             }
 
-            /// Property: remove_resident monotonically decreases resident_count by 1
+            /// Property: remove_member monotonically decreases member_count by 1
             #[test]
-            fn prop_remove_resident_monotone(
-                initial_residents in 1u8..=MAX_RESIDENTS
+            fn prop_remove_member_monotone(
+                initial_members in 1u8..=MAX_MEMBERS
             ) {
                 let mut budget = HomeFlowBudget::new(HomeId::default());
 
                 // Set up initial state
-                for _ in 0..initial_residents {
-                    budget.add_resident().unwrap();
+                for _ in 0..initial_members {
+                    budget.add_member().unwrap();
                 }
 
-                let count_before = budget.resident_count;
-                let storage_before = budget.resident_storage_spent;
+                let count_before = budget.member_count;
+                let storage_before = budget.member_storage_spent;
 
-                budget.remove_resident().unwrap();
+                budget.remove_member().unwrap();
                 // Monotone: count decreased by exactly 1
-                prop_assert_eq!(budget.resident_count, count_before - 1);
-                // Storage decreased by exactly RESIDENT_ALLOCATION
+                prop_assert_eq!(budget.member_count, count_before - 1);
+                // Storage decreased by exactly MEMBER_ALLOCATION
                 prop_assert_eq!(
-                    budget.resident_storage_spent,
-                    storage_before - RESIDENT_ALLOCATION
+                    budget.member_storage_spent,
+                    storage_before - MEMBER_ALLOCATION
                 );
             }
 
@@ -1192,19 +1192,19 @@ mod tests {
 
             /// Property: capacity checks are consistent with operations
             #[test]
-            fn prop_can_add_resident_consistency(
-                initial_residents in 0u8..=MAX_RESIDENTS
+            fn prop_can_add_member_consistency(
+                initial_members in 0u8..=MAX_MEMBERS
             ) {
                 let mut budget = HomeFlowBudget::new(HomeId::default());
 
-                for _ in 0..initial_residents {
-                    let _ = budget.add_resident();
+                for _ in 0..initial_members {
+                    let _ = budget.add_member();
                 }
 
-                let can_add = budget.can_add_resident();
-                let result = budget.add_resident();
+                let can_add = budget.can_add_member();
+                let result = budget.add_member();
 
-                // Consistency: can_add_resident() correctly predicts success/failure
+                // Consistency: can_add_member() correctly predicts success/failure
                 prop_assert_eq!(can_add, result.is_ok());
             }
 

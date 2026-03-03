@@ -665,8 +665,8 @@ pub struct ContactsQuery {
     pub search: Option<String>,
     /// Filter guardians only
     pub guardians_only: bool,
-    /// Filter residents only
-    pub residents_only: bool,
+    /// Filter members only
+    pub members_only: bool,
 }
 
 impl Query for ContactsQuery {
@@ -680,7 +680,7 @@ impl Query for ContactsQuery {
                 DatalogValue::var("nickname"),
                 DatalogValue::var("nickname_suggestion"),
                 DatalogValue::var("is_guardian"),
-                DatalogValue::var("is_resident"),
+                DatalogValue::var("is_member"),
                 DatalogValue::var("last_interaction"),
                 DatalogValue::var("is_online"),
             ],
@@ -696,11 +696,11 @@ impl Query for ContactsQuery {
             ));
         }
 
-        if self.residents_only {
+        if self.members_only {
             body.push(DatalogFact::new(
                 "eq",
                 vec![
-                    DatalogValue::var("is_resident"),
+                    DatalogValue::var("is_member"),
                     DatalogValue::Boolean(true),
                 ],
             ));
@@ -716,7 +716,7 @@ impl Query for ContactsQuery {
                     DatalogValue::var("nickname"),
                     DatalogValue::var("nickname_suggestion"),
                     DatalogValue::var("is_guardian"),
-                    DatalogValue::var("is_resident"),
+                    DatalogValue::var("is_member"),
                     DatalogValue::var("last_interaction"),
                     DatalogValue::var("is_online"),
                 ],
@@ -754,7 +754,7 @@ impl Query for ContactsQuery {
                     nickname: get_string(&row, "nickname"),
                     nickname_suggestion: get_optional_string(&row, "nickname_suggestion"),
                     is_guardian: get_bool(&row, "is_guardian"),
-                    is_resident: get_bool(&row, "is_resident"),
+                    is_member: get_bool(&row, "is_member"),
                     last_interaction,
                     is_online: get_bool(&row, "is_online"),
                     read_receipt_policy: ReadReceiptPolicy::default(),
@@ -858,7 +858,7 @@ impl Query for RecoveryQuery {
                             DatalogValue::var("contact_nickname"),
                             DatalogValue::var("contact_suggested"),
                             DatalogValue::var("is_guardian"),
-                            DatalogValue::var("is_resident"),
+                            DatalogValue::var("is_member"),
                             DatalogValue::var("contact_last_interaction"),
                             DatalogValue::var("is_online"),
                         ],
@@ -892,7 +892,7 @@ impl Query for RecoveryQuery {
                             DatalogValue::var("contact_nickname"),
                             DatalogValue::var("contact_suggested"),
                             DatalogValue::var("is_guardian"),
-                            DatalogValue::var("is_resident"),
+                            DatalogValue::var("is_member"),
                             DatalogValue::var("contact_last_interaction"),
                             DatalogValue::var("is_online"),
                         ],
@@ -1020,7 +1020,7 @@ impl Query for HomesQuery {
                 DatalogValue::var("name"),
                 DatalogValue::var("is_primary"),
                 DatalogValue::var("my_role"),
-                DatalogValue::var("resident_count"),
+                DatalogValue::var("member_count"),
                 DatalogValue::var("online_count"),
                 DatalogValue::var("created_at"),
             ],
@@ -1056,7 +1056,7 @@ impl Query for HomesQuery {
                     DatalogValue::var("name"),
                     DatalogValue::var("is_primary"),
                     DatalogValue::var("my_role"),
-                    DatalogValue::var("resident_count"),
+                    DatalogValue::var("member_count"),
                     DatalogValue::var("online_count"),
                     DatalogValue::var("created_at"),
                 ],
@@ -1072,7 +1072,7 @@ impl Query for HomesQuery {
     fn dependencies(&self) -> Vec<FactPredicate> {
         vec![
             FactPredicate::new("home"),
-            FactPredicate::new("home_resident"),
+            FactPredicate::new("home_member"),
             FactPredicate::new("home_role"),
         ]
     }
@@ -1095,11 +1095,11 @@ impl Query for HomesQuery {
                 Ok(HomeState {
                     id: get_channel_id(&row, "id")?,
                     name: get_string(&row, "name"),
-                    residents: Vec::new(), // Populated by separate query
+                    members: Vec::new(), // Populated by separate query
                     my_role,
                     storage: HomeFlowBudget::default(),
                     online_count: get_int(&row, "online_count") as u32,
-                    resident_count: get_int(&row, "resident_count") as u32,
+                    member_count: get_int(&row, "member_count") as u32,
                     is_primary: get_bool(&row, "is_primary"),
                     topic: get_optional_string(&row, "topic"),
                     pinned_messages: Vec::new(),
@@ -1203,8 +1203,8 @@ impl Query for NeighborhoodQuery {
                     name: get_string(&row, "name"),
                     one_hop_link,
                     shared_contacts: get_int(&row, "shared_contacts") as u32,
-                    resident_count: {
-                        let count = get_int(&row, "resident_count");
+                    member_count: {
+                        let count = get_int(&row, "member_count");
                         if count > 0 {
                             Some(count as u32)
                         } else {

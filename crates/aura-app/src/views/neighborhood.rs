@@ -29,8 +29,8 @@ pub struct NeighborHome {
     pub one_hop_link: OneHopLinkType,
     /// Number of shared contacts
     pub shared_contacts: u32,
-    /// Resident count (if known)
-    pub resident_count: Option<u32>,
+    /// Member count (if known)
+    pub member_count: Option<u32>,
     /// Whether we can traverse to this home
     pub can_traverse: bool,
 }

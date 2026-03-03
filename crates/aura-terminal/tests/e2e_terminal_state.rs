@@ -1619,14 +1619,14 @@ async fn test_set_context_flow() {
 /// Test moderator role grant/revoke flow
 ///
 /// This test validates:
-/// 1. GrantModerator changes resident role to Admin
-/// 2. RevokeModerator changes Admin role back to Resident
+/// 1. GrantModerator changes member role to Moderator
+/// 2. RevokeModerator changes Moderator role back to Member
 /// 3. Authorization checks (only moderators can grant/revoke)
-/// 4. Role validation (can't modify Owner, can only revoke Admin)
+/// 4. Role validation (can only revoke Moderator)
 #[tokio::test]
 async fn test_moderator_role_flow() {
     use async_lock::RwLock;
-    use aura_app::views::home::{HomeRole, HomeState, Resident};
+    use aura_app::views::home::{HomeMember, HomeRole, HomeState};
     use aura_app::AppCore;
     use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_terminal::handlers::tui::TuiMode;
@@ -1663,14 +1663,14 @@ async fn test_moderator_role_flow() {
         .expect("Failed to create account");
     println!("  ✓ Account created");
 
-    // Phase 2: Set up a home with residents
-    println!("\nPhase 2: Setting up home with residents");
+    // Phase 2: Set up a home with members
+    println!("\nPhase 2: Setting up home with members");
 
     let home_id = "test-home-1".parse::<ChannelId>().unwrap_or_default();
     let home_context_id = ContextId::new_from_entropy([9u8; 32]);
     let owner_id = AuthorityId::new_from_entropy([1u8; 32]);
-    let resident1_id = AuthorityId::new_from_entropy([2u8; 32]);
-    let resident2_id = AuthorityId::new_from_entropy([3u8; 32]);
+    let member1_id = AuthorityId::new_from_entropy([2u8; 32]);
+    let member2_id = AuthorityId::new_from_entropy([3u8; 32]);
     let missing_id = AuthorityId::new_from_entropy([4u8; 32]);
 
     {
@@ -1685,9 +1685,9 @@ async fn test_moderator_role_flow() {
             home_context_id,
         );
 
-        // Add some residents
-        let resident1 = Resident {
-            id: resident1_id.clone(),
+        // Add some members
+        let member1 = HomeMember {
+            id: member1_id.clone(),
             name: "Alice".to_string(),
             role: HomeRole::Participant,
             is_online: true,
@@ -1696,8 +1696,8 @@ async fn test_moderator_role_flow() {
             storage_allocated: 200 * 1024,
         };
 
-        let resident2 = Resident {
-            id: resident2_id.clone(),
+        let member2 = HomeMember {
+            id: member2_id.clone(),
             name: "Bob".to_string(),
             role: HomeRole::Participant,
             is_online: true,
@@ -1706,8 +1706,8 @@ async fn test_moderator_role_flow() {
             storage_allocated: 200 * 1024,
         };
 
-        home.add_resident(resident1);
-        home.add_resident(resident2);
+        home.add_member(member1);
+        home.add_member(member2);
 
         // Set as owner so we have permission to grant/revoke
         home.my_role = HomeRole::Member;
@@ -1717,7 +1717,7 @@ async fn test_moderator_role_flow() {
         core.views().select_home(Some(home_id.clone()));
     }
 
-    println!("  ✓ Home created with 3 residents (1 owner, 2 residents)");
+    println!("  ✓ Home created with 3 members (1 owner, 2 members)");
 
     // Phase 3: Test GrantModerator command
     println!("\nPhase 3: Testing GrantModerator command");
@@ -1725,7 +1725,7 @@ async fn test_moderator_role_flow() {
     let result = ctx
         .dispatch(EffectCommand::GrantModerator {
             channel: None,
-            target: resident1_id.to_string(),
+            target: member1_id.to_string(),
         })
         .await;
 
@@ -1741,12 +1741,12 @@ async fn test_moderator_role_flow() {
         let core = app_core.read().await;
         let homes = core.views().get_homes();
         let home = homes.current_home().expect("Home should exist");
-        let resident = home.resident(&resident1_id).expect("Resident should exist");
+        let member = home.member(&member1_id).expect("Member should exist");
         assert!(
-            matches!(resident.role, HomeRole::Moderator),
-            "Resident should now be Admin"
+            matches!(member.role, HomeRole::Moderator),
+            "Member should now be Moderator"
         );
-        println!("  ✓ Resident role changed to Admin");
+        println!("  ✓ Member role changed to Moderator");
     }
 
     // Phase 4: Test RevokeModerator command
@@ -1755,7 +1755,7 @@ async fn test_moderator_role_flow() {
     let result = ctx
         .dispatch(EffectCommand::RevokeModerator {
             channel: None,
-            target: resident1_id.to_string(),
+            target: member1_id.to_string(),
         })
         .await;
 
@@ -1771,18 +1771,18 @@ async fn test_moderator_role_flow() {
         let core = app_core.read().await;
         let homes = core.views().get_homes();
         let home = homes.current_home().expect("Home should exist");
-        let resident = home.resident(&resident1_id).expect("Resident should exist");
+        let member = home.member(&member1_id).expect("Member should exist");
         assert!(
-            matches!(resident.role, HomeRole::Participant),
-            "Resident should now be back to Resident role"
+            matches!(member.role, HomeRole::Participant),
+            "Member should now be back to Participant role"
         );
-        println!("  ✓ Resident role changed back to Resident");
+        println!("  ✓ Member role changed back to Participant");
     }
 
     // Phase 5: Test error cases
     println!("\nPhase 5: Testing error cases");
 
-    // Can't modify Owner
+    // Can't grant moderator to creator (already a member)
     let result = ctx
         .dispatch(EffectCommand::GrantModerator {
             channel: None,
@@ -1791,32 +1791,32 @@ async fn test_moderator_role_flow() {
         .await;
 
     let Err(e) = result else {
-        panic!("Expected error when granting moderator to Owner");
+        panic!("Expected error when granting moderator to creator");
     };
     assert!(
-        e.contains("Owner") || e.contains("modify"),
-        "Should fail for Owner"
+        e.contains("moderator") || e.contains("modify") || e.contains("already"),
+        "Should fail for member who is already moderator or can't be modified"
     );
-    println!("  ✓ Cannot grant moderator to Owner (expected error)");
+    println!("  ✓ Cannot grant moderator to creator (expected error)");
 
-    // Can't revoke non-Admin
+    // Can't revoke non-Moderator
     let result = ctx
         .dispatch(EffectCommand::RevokeModerator {
             channel: None,
-            target: resident2_id.to_string(), // Still a Resident, not Admin
+            target: member2_id.to_string(), // Still a Participant, not Moderator
         })
         .await;
 
     let Err(e) = result else {
-        panic!("Expected error when revoking moderator from non-Admin");
+        panic!("Expected error when revoking moderator from non-Moderator");
     };
     assert!(
-        e.contains("Admin") || e.contains("revoke"),
-        "Should fail for non-Admin"
+        e.contains("not a moderator") || e.contains("revoke") || e.contains("Moderator"),
+        "Should fail for non-Moderator"
     );
-    println!("  ✓ Cannot revoke moderator from non-Admin (expected error)");
+    println!("  ✓ Cannot revoke moderator from non-Moderator (expected error)");
 
-    // Can't find non-existent resident
+    // Can't find non-existent member
     let result = ctx
         .dispatch(EffectCommand::GrantModerator {
             channel: None,
@@ -1825,13 +1825,13 @@ async fn test_moderator_role_flow() {
         .await;
 
     let Err(e) = result else {
-        panic!("Expected error when granting moderator to non-existent resident");
+        panic!("Expected error when granting moderator to non-existent member");
     };
     assert!(
-        e.contains("not found") || e.contains("Resident"),
-        "Should fail for non-existent resident"
+        e.contains("not found") || e.contains("Member"),
+        "Should fail for non-existent member"
     );
-    println!("  ✓ Cannot grant moderator to non-existent resident (expected error)");
+    println!("  ✓ Cannot grant moderator to non-existent member (expected error)");
 
     // Cleanup
     let _ = std::fs::remove_dir_all(&test_dir);
@@ -1912,7 +1912,7 @@ async fn test_neighborhood_navigation_flow() {
                     name: "Alice's Home".to_string(),
                     one_hop_link: OneHopLinkType::Direct,
                     shared_contacts: 3,
-                    resident_count: Some(5),
+                    member_count: Some(5),
                     can_traverse: true,
                 },
                 NeighborHome {
@@ -1920,7 +1920,7 @@ async fn test_neighborhood_navigation_flow() {
                     name: "Bob's Home".to_string(),
                     one_hop_link: OneHopLinkType::Direct,
                     shared_contacts: 2,
-                    resident_count: Some(4),
+                    member_count: Some(4),
                     can_traverse: true,
                 },
                 NeighborHome {
@@ -1928,7 +1928,7 @@ async fn test_neighborhood_navigation_flow() {
                     name: "Private Home".to_string(),
                     one_hop_link: OneHopLinkType::TwoHop,
                     shared_contacts: 0,
-                    resident_count: Some(8),
+                    member_count: Some(8),
                     can_traverse: false,
                 },
             ],
@@ -2879,7 +2879,7 @@ async fn test_authorization_checking() {
     println!("  ✓ Sensitive commands pass authorization");
 
     // Test that Admin commands are denied for non-Moderator users
-    // Default role is Resident (not Moderator), so Admin commands should fail
+    // Default role is Participant (not Moderator), so Admin commands should fail
     let ban_result = ctx.check_authorization(&EffectCommand::BanUser {
         channel: None,
         target: "spammer".to_string(),
@@ -3252,7 +3252,7 @@ async fn test_device_management() {
 ///
 /// This test verifies:
 /// 1. HomeInfo.created_at is populated from HomeState
-/// 2. Resident.is_self correctly identifies current user
+/// 2. HomeMember.is_self correctly identifies current user
 /// 3. Contact.has_pending_suggestion is derived correctly
 #[tokio::test]
 async fn test_snapshot_data_accuracy() {
@@ -3341,22 +3341,22 @@ async fn test_snapshot_data_accuracy() {
         println!("  ⚠ No home info in snapshot (home may not have been set)");
     }
 
-    println!("\nPhase 2: Testing Resident list");
+    println!("\nPhase 2: Testing Member list");
 
-    // The home's residents should include the creator
-    let residents = home_snapshot.residents();
-    let self_resident = residents.iter().find(|r| r.id == authority_id);
-    if let Some(resident) = self_resident {
+    // The home's members should include the creator
+    let members = home_snapshot.members();
+    let self_member = members.iter().find(|r| r.id == authority_id);
+    if let Some(member) = self_member {
         println!(
-            "  ✓ Found current user in residents: {} ({})",
-            resident.name, resident.id
+            "  ✓ Found current user in members: {} ({})",
+            member.name, member.id
         );
-    } else if !residents.is_empty() {
-        // If residents exist but none match, check why
-        println!("  ⚠ Current user not found in residents");
+    } else if !members.is_empty() {
+        // If members exist but none match, check why
+        println!("  ⚠ Current user not found in members");
         println!("    Expected authority: {}", authority_str);
-        for r in residents {
-            println!("    Resident: {} (id={})", r.name, r.id);
+        for r in members {
+            println!("    Member: {} (id={})", r.name, r.id);
         }
     }
 
@@ -3372,7 +3372,7 @@ async fn test_snapshot_data_accuracy() {
             nickname: "Alice".to_string(),
             nickname_suggestion: Some("Alice Smith".to_string()), // Different from nickname
             is_guardian: false,
-            is_resident: false,
+            is_member: false,
             last_interaction: Some(1702000000000),
             is_online: true,
             read_receipt_policy: ReadReceiptPolicy::default(),
@@ -3382,7 +3382,7 @@ async fn test_snapshot_data_accuracy() {
             nickname: "Bob".to_string(),
             nickname_suggestion: Some("Bob".to_string()), // Same as nickname
             is_guardian: false,
-            is_resident: false,
+            is_member: false,
             last_interaction: Some(1702000000000),
             is_online: false,
             read_receipt_policy: ReadReceiptPolicy::default(),
@@ -3392,7 +3392,7 @@ async fn test_snapshot_data_accuracy() {
             nickname: "Carol".to_string(),
             nickname_suggestion: None, // No suggestion
             is_guardian: false,
-            is_resident: false,
+            is_member: false,
             last_interaction: None,
             is_online: false,
             read_receipt_policy: ReadReceiptPolicy::default(),

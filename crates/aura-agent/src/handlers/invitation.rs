@@ -12,7 +12,7 @@ use crate::runtime::services::InvitationManager;
 use crate::runtime::AuraEffectSystem;
 use crate::InvitationServiceApi;
 use aura_app::signal_defs::HOMES_SIGNAL;
-use aura_app::views::home::{HomeState, HomesState, Resident, HomeRole};
+use aura_app::views::home::{HomeMember, HomeRole, HomeState, HomesState};
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
 use aura_core::effects::amp::{ChannelBootstrapPackage, ChannelCreateParams};
 use aura_core::effects::storage::StorageCoreEffects;
@@ -1660,7 +1660,7 @@ impl InvitationHandler {
             );
 
             if invite.sender_id != own_id {
-                if let Some(owner) = home.resident_mut(&invite.sender_id) {
+                if let Some(owner) = home.member_mut(&invite.sender_id) {
                     owner.name = invite.sender_id.to_string();
                     owner.is_online = false;
                     owner.last_seen = Some(now_ms);
@@ -1668,15 +1668,15 @@ impl InvitationHandler {
                 home.my_role = HomeRole::Participant;
             }
 
-            if home.resident(&own_id).is_none() {
-                home.add_resident(Resident {
+            if home.member(&own_id).is_none() {
+                home.add_member(HomeMember {
                     id: own_id,
                     name: "You".to_string(),
                     role: HomeRole::Participant,
                     is_online: true,
                     joined_at: now_ms,
                     last_seen: Some(now_ms),
-                    storage_allocated: HomeState::RESIDENT_ALLOCATION,
+                    storage_allocated: HomeState::MEMBER_ALLOCATION,
                 });
             }
 
@@ -1688,15 +1688,15 @@ impl InvitationHandler {
                 changed = true;
             }
 
-            if invite.sender_id != own_id && home.resident(&own_id).is_none() {
-                home.add_resident(Resident {
+            if invite.sender_id != own_id && home.member(&own_id).is_none() {
+                home.add_member(HomeMember {
                     id: own_id,
                     name: "You".to_string(),
                     role: HomeRole::Participant,
                     is_online: true,
                     joined_at: now_ms,
                     last_seen: Some(now_ms),
-                    storage_allocated: HomeState::RESIDENT_ALLOCATION,
+                    storage_allocated: HomeState::MEMBER_ALLOCATION,
                 });
                 changed = true;
             }
@@ -4023,7 +4023,7 @@ mod tests {
             .home_state(&expected_channel)
             .expect("accepted invitation should materialize home state");
         assert_eq!(home.context_id, Some(expected_context));
-        assert!(home.resident(&receiver_id).is_some());
+        assert!(home.member(&receiver_id).is_some());
         assert_eq!(home.my_role, HomeRole::Participant);
     }
 

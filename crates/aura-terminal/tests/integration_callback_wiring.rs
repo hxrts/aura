@@ -483,7 +483,7 @@ async fn test_contacts_signal_contact_tracking() {
             nickname: "Alice (Friend)".to_string(),
             nickname_suggestion: Some("Alice".to_string()),
             is_guardian: false,
-            is_resident: false,
+            is_member: false,
             last_interaction: None,
             is_online: true,
             read_receipt_policy: ReadReceiptPolicy::default(),

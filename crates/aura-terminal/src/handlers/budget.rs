@@ -39,7 +39,7 @@ use aura_app::ui::prelude::*;
 // Re-export workflow functions for backward compatibility
 // Business logic is now in aura_app::ui::workflows::budget
 pub use aura_app::ui::workflows::budget::{
-    can_add_resident, can_join_neighborhood, can_pin_content, get_budget_breakdown,
+    can_add_member, can_join_neighborhood, can_pin_content, get_budget_breakdown,
     get_current_budget, update_budget,
 };
 
@@ -62,16 +62,16 @@ pub fn format_budget_status(budget: &HomeFlowBudget) -> String {
         usage_percent
     ));
 
-    output.push_str("\nResident Storage:\n");
+    output.push_str("\nMember Storage:\n");
     output.push_str(&format!(
-        "  {} residents ({} max)\n",
-        budget.resident_count,
-        aura_app::ui::types::MAX_RESIDENTS
+        "  {} members ({} max)\n",
+        budget.member_count,
+        aura_app::ui::types::MAX_MEMBERS
     ));
     output.push_str(&format!(
         "  {} / {} used\n",
-        BudgetBreakdown::format_size(breakdown.resident_used),
-        BudgetBreakdown::format_size(breakdown.resident_limit)
+        BudgetBreakdown::format_size(breakdown.member_used),
+        BudgetBreakdown::format_size(breakdown.member_limit)
     ));
 
     output.push_str("\nNeighborhood Allocations:\n");
@@ -81,7 +81,7 @@ pub fn format_budget_status(budget: &HomeFlowBudget) -> String {
         aura_app::ui::types::MAX_NEIGHBORHOODS
     ));
     output.push_str(&format!(
-        "  {} donated\n",
+        "  {} contributed\n",
         BudgetBreakdown::format_size(breakdown.neighborhood_allocations)
     ));
 
@@ -121,18 +121,18 @@ pub fn format_budget_compact(budget: &HomeFlowBudget) -> String {
     )
 }
 
-/// Check if budget can accommodate a new resident
+/// Check if budget can accommodate a new member
 ///
 /// Returns Ok(()) if capacity is available, Err with message otherwise.
-/// Use this before attempting to add residents.
-pub fn check_can_add_resident(budget: &HomeFlowBudget) -> Result<(), String> {
-    if budget.can_add_resident() {
+/// Use this before attempting to add members.
+pub fn check_can_add_member(budget: &HomeFlowBudget) -> Result<(), String> {
+    if budget.can_add_member() {
         Ok(())
     } else {
         Err(format!(
-            "Cannot add resident: home at capacity ({}/{})",
-            budget.resident_count,
-            aura_app::ui::types::MAX_RESIDENTS
+            "Cannot add member: home at capacity ({}/{})",
+            budget.member_count,
+            aura_app::ui::types::MAX_MEMBERS
         ))
     }
 }
@@ -183,14 +183,14 @@ mod tests {
     fn test_format_budget_status() {
         let home_id = test_home_id("test-home");
         let mut budget = HomeFlowBudget::new(home_id);
-        budget.add_resident().unwrap();
+        budget.add_member().unwrap();
         budget.join_neighborhood().unwrap();
 
         let formatted = format_budget_status(&budget);
 
         // Check that key information is present
         assert!(formatted.contains(&home_id.to_string()));
-        assert!(formatted.contains("1 residents"));
+        assert!(formatted.contains("1 members"));
         assert!(formatted.contains("1 neighborhoods"));
         assert!(formatted.contains("Remaining"));
     }
@@ -208,15 +208,15 @@ mod tests {
     fn test_capacity_checks() {
         let mut budget = HomeFlowBudget::new(test_home_id("test"));
 
-        // Should be able to add resident initially
-        assert!(check_can_add_resident(&budget).is_ok());
+        // Should be able to add member initially
+        assert!(check_can_add_member(&budget).is_ok());
 
-        // Fill up residents
-        for _ in 0..aura_app::ui::types::MAX_RESIDENTS {
-            budget.add_resident().unwrap();
+        // Fill up members
+        for _ in 0..aura_app::ui::types::MAX_MEMBERS {
+            budget.add_member().unwrap();
         }
 
         // Now should fail
-        assert!(check_can_add_resident(&budget).is_err());
+        assert!(check_can_add_member(&budget).is_err());
     }
 }

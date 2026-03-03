@@ -333,7 +333,7 @@ pub enum Intent {
         message_id: String,
     },
 
-    /// Grant moderator (admin) privileges to a resident
+    /// Grant moderator (admin) privileges to a member
     GrantModerator {
         /// Home ID
         home_id: ContextId,
@@ -341,7 +341,7 @@ pub enum Intent {
         target_id: String,
     },
 
-    /// Revoke moderator (admin) privileges from a resident
+    /// Revoke moderator (admin) privileges from a member
     RevokeModerator {
         /// Home ID
         home_id: ContextId,

@@ -1,6 +1,6 @@
 //! Home-Level Data Availability
 //!
-//! Implements data availability for blocks. All residents replicate all
+//! Implements data availability for blocks. All members replicate all
 //! home-level shared data.
 
 use crate::facts::HomeId;
@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 /// Home-level data availability.
 ///
-/// Implements `DataAvailability` for home-scoped data. All residents
+/// Implements `DataAvailability` for home-scoped data. All members
 /// replicate all home data, providing redundancy equal to home size.
 ///
 /// # Type Parameters
@@ -75,12 +75,12 @@ where
         &self.home_instance
     }
 
-    /// Check if we are a resident of this home.
-    pub fn is_resident(&self) -> bool {
-        self.home_instance.is_resident(&self.local_authority)
+    /// Check if we are a member of this home.
+    pub fn is_member(&self) -> bool {
+        self.home_instance.is_member(&self.local_authority)
     }
 
-    /// Get replication peers (other residents).
+    /// Get replication peers (other members).
     fn replication_peers_internal(&self) -> Vec<AuthorityId> {
         self.home_instance.same_home_members(&self.local_authority)
     }
@@ -89,7 +89,7 @@ where
     fn check_capacity(&self, size: u64) -> Result<(), AvailabilityError> {
         let budget = &self.home_instance.storage_budget;
         if !StorageService::can_pin(budget, size) {
-            let used = budget.resident_storage_spent
+            let used = budget.member_storage_spent
                 + budget.neighborhood_allocations
                 + budget.pinned_storage_spent;
             return Err(AvailabilityError::CapacityExceeded {
@@ -244,7 +244,7 @@ mod tests {
 
         let home_fact = HomeFact::new(home_id, test_timestamp());
 
-        let residents = vec![
+        let members = vec![
             ResidentFact::new(moderator, home_id, test_timestamp()),
             ResidentFact::new(
                 AuthorityId::new_from_entropy([2u8; 32]),
@@ -260,7 +260,7 @@ mod tests {
 
         let moderators = vec![ModeratorFact::new(moderator, home_id, test_timestamp())];
 
-        Home::from_facts(&home_fact, None, &residents, &moderators)
+        Home::from_facts(&home_fact, None, &members, &moderators)
     }
 
     struct DummyStorage;
@@ -363,30 +363,30 @@ mod tests {
         );
 
         let peers = da.replication_peers(HomeId::from_bytes([1u8; 32]));
-        assert_eq!(peers.len(), 2); // 3 residents - 1 self = 2 peers
+        assert_eq!(peers.len(), 2); // 3 members - 1 self = 2 peers
         assert!(!peers.contains(&local));
     }
 
     #[test]
-    fn test_is_resident() {
+    fn test_is_member() {
         let home_instance = test_home();
-        let resident = AuthorityId::new_from_entropy([1u8; 32]);
-        let non_resident = AuthorityId::new_from_entropy([99u8; 32]);
+        let member = AuthorityId::new_from_entropy([1u8; 32]);
+        let non_member = AuthorityId::new_from_entropy([99u8; 32]);
 
-        let da_resident = HomeAvailability::new(
+        let da_member = HomeAvailability::new(
             home_instance.clone(),
-            resident,
+            member,
             Arc::new(DummyStorage),
             Arc::new(DummyNetwork),
         );
-        assert!(da_resident.is_resident());
+        assert!(da_member.is_member());
 
-        let da_non_resident = HomeAvailability::new(
+        let da_non_member = HomeAvailability::new(
             home_instance,
-            non_resident,
+            non_member,
             Arc::new(DummyStorage),
             Arc::new(DummyNetwork),
         );
-        assert!(!da_non_resident.is_resident());
+        assert!(!da_non_member.is_member());
     }
 }

@@ -88,7 +88,7 @@ pub const NEIGHBORHOOD_SIGNAL_NAME: &str = "NEIGHBORHOOD_SIGNAL";
 pub static NEIGHBORHOOD_SIGNAL: LazyLock<Signal<NeighborhoodState>> =
     LazyLock::new(|| Signal::new("app:neighborhood"));
 
-/// Signal for home storage budget (resident/neighborhood/pinned allocations)
+/// Signal for home storage budget (member/neighborhood/pinned allocations)
 pub const BUDGET_SIGNAL_NAME: &str = "BUDGET_SIGNAL";
 pub static BUDGET_SIGNAL: LazyLock<Signal<HomeFlowBudget>> =
     LazyLock::new(|| Signal::new("app:budget"));

@@ -342,7 +342,7 @@ impl ReactiveView for ContactsSignalView {
                                     nickname: String::new(),
                                     nickname_suggestion: suggested_name,
                                     is_guardian: false,
-                                    is_resident: false,
+                                    is_member: false,
                                     last_interaction: Some(added_at.ts_ms),
                                     is_online: false,
                                     read_receipt_policy: ReadReceiptPolicy::default(),
@@ -613,9 +613,9 @@ impl HomeSignalView {
         // Placeholder state exists to host moderation facts for shared contexts
         // that have not been materialized as local homes yet.
         placeholder.my_role = HomeRole::Participant;
-        placeholder.residents.clear();
+        placeholder.members.clear();
         placeholder.online_count = 0;
-        placeholder.resident_count = 0;
+        placeholder.member_count = 0;
         let placeholder_id = placeholder.id;
         let _ = homes.add_home(placeholder);
         homes
@@ -658,7 +658,7 @@ impl ReactiveView for HomeSignalView {
                             banned_at: ban.banned_at.ts_ms,
                         };
                         home_state.add_ban(record);
-                        let _ = home_state.remove_resident(&ban.banned_authority);
+                        let _ = home_state.remove_member(&ban.banned_authority);
                         changed = true;
                     }
                 }
@@ -699,7 +699,7 @@ impl ReactiveView for HomeSignalView {
                             kicked_at: kick.kicked_at.ts_ms,
                         };
                         home_state.add_kick(record);
-                        let _ = home_state.remove_resident(&kick.kicked_authority);
+                        let _ = home_state.remove_member(&kick.kicked_authority);
                         changed = true;
                     }
                 }
@@ -722,9 +722,9 @@ impl ReactiveView for HomeSignalView {
                 }
                 HOME_GRANT_MODERATOR_FACT_TYPE_ID => {
                     if let Some(grant) = HomeGrantModeratorFact::from_envelope(envelope) {
-                        if let Some(resident) = home_state.resident_mut(&grant.target_authority) {
-                            if matches!(resident.role, HomeRole::Member | HomeRole::Moderator) {
-                                resident.role = HomeRole::Moderator;
+                        if let Some(member) = home_state.member_mut(&grant.target_authority) {
+                            if matches!(member.role, HomeRole::Member | HomeRole::Moderator) {
+                                member.role = HomeRole::Moderator;
                                 changed = true;
                             }
                         }
@@ -738,9 +738,9 @@ impl ReactiveView for HomeSignalView {
                 }
                 HOME_REVOKE_MODERATOR_FACT_TYPE_ID => {
                     if let Some(revoke) = HomeRevokeModeratorFact::from_envelope(envelope) {
-                        if let Some(resident) = home_state.resident_mut(&revoke.target_authority) {
-                            if matches!(resident.role, HomeRole::Moderator) {
-                                resident.role = HomeRole::Member;
+                        if let Some(member) = home_state.member_mut(&revoke.target_authority) {
+                            if matches!(member.role, HomeRole::Moderator) {
+                                member.role = HomeRole::Member;
                                 changed = true;
                             }
                         }
@@ -952,11 +952,11 @@ impl ChatSignalView {
         {
             return false;
         }
-        let has_resident_roster = candidates.iter().any(|home| !home.residents.is_empty());
-        let sender_is_resident = candidates
+        let has_member_roster = candidates.iter().any(|home| !home.members.is_empty());
+        let sender_is_member = candidates
             .iter()
-            .any(|home| home.resident(&sender_id).is_some());
-        if has_resident_roster && !sender_is_resident {
+            .any(|home| home.member(&sender_id).is_some());
+        if has_member_roster && !sender_is_member {
             return false;
         }
 
@@ -1513,7 +1513,7 @@ mod tests {
 
         {
             let home = homes.current_home_mut().expect("home exists");
-            home.add_resident(aura_app::views::home::Resident {
+            home.add_member(aura_app::views::home::HomeMember {
                 id: target,
                 name: "target".to_string(),
                 role: aura_app::views::home::HomeRole::Member,
@@ -1532,11 +1532,11 @@ mod tests {
 
         let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
         let home_state = updated.current_home().unwrap();
-        let resident = home_state
-            .resident(&target)
-            .expect("target resident exists");
+        let member = home_state
+            .member(&target)
+            .expect("target member exists");
         assert!(matches!(
-            resident.role,
+            member.role,
             aura_app::views::home::HomeRole::Moderator
         ));
         assert!(matches!(
@@ -1549,11 +1549,11 @@ mod tests {
 
         let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
         let home_state = updated.current_home().unwrap();
-        let resident = home_state
-            .resident(&target)
-            .expect("target resident exists");
+        let member = home_state
+            .member(&target)
+            .expect("target member exists");
         assert!(matches!(
-            resident.role,
+            member.role,
             aura_app::views::home::HomeRole::Member
         ));
         assert!(matches!(
@@ -1591,7 +1591,7 @@ mod tests {
             .find_map(|(_, home)| (home.context_id == Some(unknown_context)).then_some(home))
             .expect("unknown context home should be materialized");
         assert!(home_state.mute_list.contains_key(&target));
-        assert!(home_state.residents.is_empty());
+        assert!(home_state.members.is_empty());
         assert!(matches!(home_state.my_role, HomeRole::Participant));
 
         let unmute = HomeUnmuteFact::new_ms(unknown_context, None, target, actor, 200).to_generic();
