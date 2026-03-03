@@ -310,6 +310,12 @@ pub use crate::sync::{
 pub mod timeout_coordinator;
 pub use timeout_coordinator::TimeoutCoordinator;
 
+pub mod peer_connection;
+pub use peer_connection::{
+    AttemptBudget, BackoffWindow, CandidateGeneration, CandidateKind, ConnectionCandidate,
+    Degraded, Direct, NetworkGeneration, PeerConnection, PeerConnectionActor, RelayOnly, Upgrading,
+};
+
 pub mod transport_coordinator;
 pub use transport_coordinator::{
     CoordinationResult, RetryingTransportManager, TransportCoordinationConfig,

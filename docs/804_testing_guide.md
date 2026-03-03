@@ -428,6 +428,41 @@ cargo test --package aura-terminal --test unit_state_machine
 - Keep tests fast
 - Parallelize independent tests
 
+## 13. Holepunch Backends and Artifact Triage
+
+Use the harness `--network-backend` option to select execution mode:
+
+```bash
+# Deterministic local backend
+cargo run -p aura-harness --bin aura-harness -- \
+  run --config configs/harness/local-loopback.toml \
+  --network-backend mock
+
+# Native Linux Patchbay (requires Linux + userns/capabilities)
+cargo run -p aura-harness --bin aura-harness -- \
+  run --config configs/harness/local-loopback.toml \
+  --network-backend patchbay
+
+# Cross-platform VM runner (macOS/Linux)
+cargo run -p aura-harness --bin aura-harness -- \
+  run --config configs/harness/local-loopback.toml \
+  --network-backend patchbay-vm
+```
+
+Harness writes backend resolution details to:
+
+```text
+artifacts/harness/<run>/network_backend_preflight.json
+```
+
+When a scenario fails, triage in this order:
+
+1. `network_backend_preflight.json` to confirm selected backend and fallback reason.
+2. `startup_summary.json` and `scenario_report.json` for run context and failing step.
+3. `events.json` and backend timeline artifacts (`timeline.json` / `event_timeline.json`) for event ordering.
+4. Namespace/network dumps (`ip-*`, `nft*`) and `*.pcap` files for packet/routing diagnosis.
+5. Agent logs for authority-local failures and retry state transitions.
+
 ## Related Documentation
 
 - [Test Infrastructure Reference](117_testkit.md) - Infrastructure details

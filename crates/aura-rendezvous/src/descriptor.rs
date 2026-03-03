@@ -6,7 +6,10 @@
 use crate::facts::{RendezvousDescriptor, TransportAddress, TransportHint};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult};
+use aura_transport::protocols::stun::StunMessage;
 use sha2::{Digest, Sha256};
+use std::net::SocketAddr;
+use std::time::Duration;
 
 /// Convert an AuthorityId to a 32-byte hash for commitment/indexing purposes.
 fn authority_hash_bytes(authority: &AuthorityId) -> [u8; 32] {
@@ -71,7 +74,7 @@ impl TransportSelector {
 
         for hint in &descriptor.transport_hints {
             match hint {
-                TransportHint::QuicDirect { addr } => {
+                TransportHint::QuicDirect { addr, .. } => {
                     if best_direct.is_none() {
                         best_direct = Some(addr);
                     }
@@ -81,7 +84,7 @@ impl TransportSelector {
                         best_reflexive = Some(addr);
                     }
                 }
-                TransportHint::TcpDirect { addr } => {
+                TransportHint::TcpDirect { addr, .. } => {
                     if best_tcp.is_none() {
                         best_tcp = Some(addr);
                     }
@@ -122,12 +125,14 @@ impl TransportSelector {
         // Try each hint in priority order with actual probing
         for hint in &descriptor.transport_hints {
             match hint {
-                TransportHint::QuicDirect { addr } => {
+                TransportHint::QuicDirect { addr, .. } => {
                     if prober.probe_endpoint(&addr.to_string()).await.is_ok() {
                         return Ok(SelectedTransport::Direct(addr.to_string()));
                     }
                 }
-                TransportHint::QuicReflexive { addr, stun_server } => {
+                TransportHint::QuicReflexive {
+                    addr, stun_server, ..
+                } => {
                     if let Ok(reflexive_addr) = prober.stun_probe(&stun_server.to_string()).await {
                         // Use the reflexive address discovered via STUN
                         return Ok(SelectedTransport::Direct(reflexive_addr));
@@ -136,7 +141,7 @@ impl TransportSelector {
                         return Ok(SelectedTransport::Direct(addr.to_string()));
                     }
                 }
-                TransportHint::TcpDirect { addr } => {
+                TransportHint::TcpDirect { addr, .. } => {
                     if prober.probe_endpoint(&addr.to_string()).await.is_ok() {
                         return Ok(SelectedTransport::Direct(addr.to_string()));
                     }
@@ -242,6 +247,7 @@ impl DescriptorBuilder {
                         TransportHint::QuicReflexive {
                             addr: reflexive_addr,
                             stun_server: stun_addr,
+                            bound_local: None,
                         },
                     );
                 }
@@ -311,16 +317,48 @@ impl TransportProber {
     }
 
     /// Perform STUN probe to discover reflexive address
-    ///
-    /// Currently returns an error. Full implementation will perform STUN
-    /// binding requests to discover the external NAT-mapped address.
     pub async fn stun_probe(&self, stun_server: &str) -> AuraResult<String> {
-        // Full implementation will:
-        // 1. Send STUN binding request to stun_server
-        // 2. Parse response to get reflexive address
-        // 3. Return the discovered external address
-        let _ = stun_server;
-        Err(AuraError::internal("STUN probe not yet implemented"))
+        let server: SocketAddr = stun_server
+            .parse()
+            .map_err(|e| AuraError::invalid(format!("invalid STUN server address: {e}")))?;
+
+        let socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
+            .await
+            .map_err(|e| AuraError::network(format!("failed to bind STUN socket: {e}")))?;
+        let request = StunMessage::binding_request();
+        let payload = serde_json::to_vec(&request)
+            .map_err(|e| AuraError::internal(format!("failed to encode STUN request: {e}")))?;
+
+        tokio::time::timeout(
+            Duration::from_millis(self.timeout_ms),
+            socket.send_to(&payload, server),
+        )
+        .await
+        .map_err(|_| AuraError::network("stun_probe send timeout"))?
+        .map_err(|e| AuraError::network(format!("failed to send STUN request: {e}")))?;
+
+        let mut buf = [0u8; 4096];
+        let (n, _) = tokio::time::timeout(
+            Duration::from_millis(self.timeout_ms),
+            socket.recv_from(&mut buf),
+        )
+        .await
+        .map_err(|_| AuraError::network("stun_probe recv timeout"))?
+        .map_err(|e| AuraError::network(format!("failed to receive STUN response: {e}")))?;
+
+        let response: StunMessage = serde_json::from_slice(&buf[..n])
+            .map_err(|e| AuraError::invalid(format!("failed to decode STUN response: {e}")))?;
+
+        if response.transaction_id != request.transaction_id {
+            return Err(AuraError::invalid(
+                "STUN transaction_id mismatch in response".to_string(),
+            ));
+        }
+
+        response
+            .mapped_address()
+            .map(|addr| addr.to_string())
+            .ok_or_else(|| AuraError::not_found("STUN response missing mapped address"))
     }
 
     /// Probe all hints in a descriptor and return reachable ones
@@ -332,10 +370,12 @@ impl TransportProber {
 
         for hint in &descriptor.transport_hints {
             let reachable = match hint {
-                TransportHint::QuicDirect { addr } | TransportHint::TcpDirect { addr } => {
+                TransportHint::QuicDirect { addr, .. } | TransportHint::TcpDirect { addr, .. } => {
                     self.probe_endpoint(&addr.to_string()).await.is_ok()
                 }
-                TransportHint::QuicReflexive { addr, stun_server } => {
+                TransportHint::QuicReflexive {
+                    addr, stun_server, ..
+                } => {
                     // Try STUN first, then direct
                     self.stun_probe(&stun_server.to_string()).await.is_ok()
                         || self.probe_endpoint(&addr.to_string()).await.is_ok()

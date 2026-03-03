@@ -192,6 +192,89 @@ ci-harness-replay:
 ci-test:
     cargo test --workspace -q
 
+# Tier 1 deterministic/property tests for holepunch decision logic
+ci-holepunch-tier1:
+    cargo test -p aura-testkit --test holepunch_tier1 -q
+
+# Tier 2 Patchbay NAT traversal integration scenarios
+ci-holepunch-tier2:
+    mkdir -p artifacts/holepunch/tier2
+    AURA_HOLEPUNCH_ARTIFACT_DIR="${PWD}/artifacts/holepunch/tier2" \
+      cargo test -p aura-harness --test holepunch_tier2_patchbay -q
+
+# Daily smoke for hole-punch paths with flake tracking output
+ci-holepunch-daily-smoke:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p artifacts/holepunch/daily
+    RUNS=5
+    FAILURES=0
+    for run in $(seq 1 "$RUNS"); do
+      echo "daily-smoke run $run/$RUNS"
+      if ! AURA_HOLEPUNCH_ARTIFACT_DIR="${PWD}/artifacts/holepunch/daily/run-${run}" \
+        cargo test -p aura-harness --test holepunch_tier2_patchbay -q; then
+        FAILURES=$((FAILURES + 1))
+      fi
+    done
+    FLAKE_RATE=$(awk -v f="$FAILURES" -v r="$RUNS" 'BEGIN { if (r == 0) { print 0 } else { printf "%.4f", (f / r) } }')
+    cat > artifacts/holepunch/daily/flake-rate.json <<JSON
+    {
+      "runs": $RUNS,
+      "failures": $FAILURES,
+      "flake_rate": $FLAKE_RATE
+    }
+    JSON
+
+# Tier 3 nightly stress suite
+ci-holepunch-nightly-stress:
+    mkdir -p artifacts/holepunch/nightly
+    AURA_HOLEPUNCH_ARTIFACT_DIR="${PWD}/artifacts/holepunch/nightly" \
+      cargo test -p aura-harness --test holepunch_tier3_stress -q
+
+# Verify artifact capture and retention outputs exist
+ci-holepunch-verify-artifacts:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    test -d artifacts/holepunch/nightly
+    test -n "$(find artifacts/holepunch/nightly -type f | head -n 1)"
+
+# Weekly flaky triage report generation
+ci-holepunch-flaky-triage:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p artifacts/holepunch/weekly
+    RUNS=10
+    FAILURES=0
+    for run in $(seq 1 "$RUNS"); do
+      if ! AURA_HOLEPUNCH_ARTIFACT_DIR="${PWD}/artifacts/holepunch/weekly/triage-run-${run}" \
+        cargo test -p aura-harness --test holepunch_tier2_patchbay -q; then
+        FAILURES=$((FAILURES + 1))
+      fi
+    done
+    cat > artifacts/holepunch/weekly/flaky-triage.md <<EOF
+    # Holepunch Flaky Test Triage
+    - total_runs: $RUNS
+    - failed_runs: $FAILURES
+    - action: quarantine unstable cases when failed_runs > 0 and open stabilization issues
+    EOF
+
+# Weekly patchbay toolchain audit against pinned fork
+ci-holepunch-toolchain-audit:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p artifacts/holepunch/weekly
+    rg -n -F 'name = "patchbay"' Cargo.lock
+    rg -n -F 'source = "git+https://github.com/hxrts/patchbay?branch=hxrts/aura#' Cargo.lock
+    {
+      echo "# Holepunch Toolchain Audit"
+      echo "cargo-lock-pin: ok"
+      if command -v patchbay-vm >/dev/null 2>&1; then
+        echo "patchbay-vm: $(patchbay-vm --version 2>/dev/null || echo installed)"
+      else
+        echo "patchbay-vm: not installed in runner"
+      fi
+    } > artifacts/holepunch/weekly/toolchain-audit.md
+
 # Property-monitored simulator lane (online property checks + regression helpers)
 ci-property-monitor:
     mkdir -p artifacts/property-monitor

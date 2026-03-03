@@ -246,6 +246,63 @@ pub enum PeerEvent {
     ConnectionFailed(Uuid, String),
 }
 
+/// Network usability signal emitted by platform monitors.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum NetworkUsability {
+    /// Network is usable for peer connectivity.
+    Usable,
+    /// Network is currently unusable (captured with a reason string).
+    Unusable { reason: String },
+}
+
+/// Network change signal with monotonic generation.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct NetworkChange {
+    /// Monotonic generation identifier for network state transitions.
+    pub generation: u64,
+    /// Current usability state.
+    pub usability: NetworkUsability,
+    /// Snapshot of local interface addresses associated with this generation.
+    pub interfaces: Vec<NetworkAddress>,
+}
+
+/// Runtime-agnostic stream of network change notifications.
+#[async_trait]
+pub trait NetworkChangeStream: Send {
+    /// Return the next network change, or `None` if the stream has closed.
+    async fn next_change(&mut self) -> Result<Option<NetworkChange>, NetworkError>;
+}
+
+#[async_trait]
+impl<T: NetworkChangeStream + ?Sized> NetworkChangeStream for Box<T> {
+    async fn next_change(&mut self) -> Result<Option<NetworkChange>, NetworkError> {
+        (**self).next_change().await
+    }
+}
+
+/// Optional network change subscription surface.
+///
+/// Handlers that do not expose platform network-change notifications may keep
+/// the default `NotImplemented` behavior.
+#[async_trait]
+pub trait NetworkChangeEffects: Send + Sync {
+    /// Subscribe to network change notifications.
+    async fn subscribe_network_changes(
+        &self,
+    ) -> Result<Box<dyn NetworkChangeStream>, NetworkError> {
+        Err(NetworkError::NotImplemented)
+    }
+}
+
+#[async_trait]
+impl<T: NetworkChangeEffects + ?Sized> NetworkChangeEffects for Arc<T> {
+    async fn subscribe_network_changes(
+        &self,
+    ) -> Result<Box<dyn NetworkChangeStream>, NetworkError> {
+        (**self).subscribe_network_changes().await
+    }
+}
+
 /// Core network effects interface for communication operations.
 ///
 /// This trait defines network operations for the Aura effects system.

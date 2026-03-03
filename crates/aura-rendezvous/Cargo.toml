@@ -16,6 +16,7 @@ aura-journal = { path = "../aura-journal" }
 aura-guards = { path = "../aura-guards" }
 aura-social = { path = "../aura-social" }
 aura-mpst = { path = "../aura-mpst" }
+aura-transport = { path = "../aura-transport" }
 telltale = { workspace = true }
 
 # Cryptographic dependencies (ChaCha20-Poly1305 via CryptoEffects)

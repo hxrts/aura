@@ -1,0 +1,107 @@
+name: Holepunch Scheduled
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 11 * * *"  # daily smoke
+    - cron: "0 6 * * *"   # nightly stress + artifact checks
+    - cron: "0 13 * * 1"  # weekly triage + toolchain audit
+
+env:
+  CARGO_TERM_COLOR: always
+  AURA_SUPPRESS_NIX_WELCOME: 1
+
+jobs:
+  daily-smoke:
+    name: Daily Smoke
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 11 * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: holepunch-daily-smoke
+      - name: Run daily smoke and flake report
+        run: nix develop --command just ci-holepunch-daily-smoke
+      - name: Upload daily smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: holepunch-daily-${{ github.run_id }}
+          path: artifacts/holepunch/daily
+          if-no-files-found: warn
+
+  nightly-stress:
+    name: Nightly Stress
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 6 * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: holepunch-nightly
+      - name: Run Tier 3 nightly stress suites
+        run: nix develop --command just ci-holepunch-nightly-stress
+      - name: Upload nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: holepunch-nightly-${{ github.run_id }}
+          path: artifacts/holepunch/nightly
+          if-no-files-found: warn
+
+  nightly-artifact-verification:
+    name: Nightly Artifact Verification
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 6 * * *'
+    needs: nightly-stress
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: holepunch-nightly-verify
+      - name: Download nightly artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: holepunch-nightly-${{ github.run_id }}
+          path: artifacts/holepunch/nightly
+      - name: Verify artifact capture and retention
+        run: nix develop --command just ci-holepunch-verify-artifacts
+
+  weekly-flaky-triage:
+    name: Weekly Flaky Triage
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 13 * * 1'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: holepunch-weekly-triage
+      - name: Generate flaky triage report
+        run: nix develop --command just ci-holepunch-flaky-triage
+      - name: Upload flaky triage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: holepunch-weekly-triage-${{ github.run_id }}
+          path: artifacts/holepunch/weekly/flaky-triage.md
+          if-no-files-found: warn
+
+  weekly-toolchain-audit:
+    name: Weekly Toolchain Audit
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 13 * * 1'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: holepunch-weekly-audit
+      - name: Validate patchbay / patchbay-vm pinning
+        run: nix develop --command just ci-holepunch-toolchain-audit
+      - name: Upload toolchain audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: holepunch-weekly-audit-${{ github.run_id }}
+          path: artifacts/holepunch/weekly/toolchain-audit.md
+          if-no-files-found: warn

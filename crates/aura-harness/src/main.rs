@@ -11,6 +11,7 @@ use aura_harness::config::require_existing_file;
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::build_seed_bundle;
 use aura_harness::load_and_validate_run_config;
+use aura_harness::network_lab::{resolve_backend_mode, NetworkBackendMode};
 use aura_harness::preflight::{run_preflight, PreflightReport};
 use aura_harness::replay::{parse_bundle, ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
 use aura_harness::resource_guards::ResourceGuard;
@@ -50,6 +51,8 @@ struct RunArgs {
     scenario: Option<PathBuf>,
     #[arg(long, default_value = "artifacts")]
     artifacts_dir: PathBuf,
+    #[arg(long, default_value = "mock")]
+    network_backend: String,
 }
 
 #[derive(Debug, Parser)]
@@ -87,6 +90,11 @@ fn main() -> Result<()> {
 fn run(args: RunArgs) -> Result<()> {
     require_existing_file(&args.config, "run config")?;
     let config = load_and_validate_run_config(&args.config)?;
+    let requested_backend: NetworkBackendMode = args
+        .network_backend
+        .parse()
+        .context("invalid --network-backend value")?;
+    let backend_preflight = resolve_backend_mode(requested_backend);
 
     let scenario_config = if let Some(path) = &args.scenario {
         Some(ScenarioRunner::load_and_validate(path)?)
@@ -110,6 +118,7 @@ fn run(args: RunArgs) -> Result<()> {
         &artifact_bundle,
         &summary,
         &preflight_report,
+        &backend_preflight,
         scenario_config.as_ref(),
     );
     if let Err(error) = run_result {
@@ -130,6 +139,7 @@ fn run_with_artifacts(
     artifact_bundle: &ArtifactBundle,
     summary: &aura_harness::tool_api::StartupSummary,
     preflight_report: &PreflightReport,
+    backend_preflight: &aura_harness::network_lab::BackendPreflightReport,
     scenario_config: Option<&aura_harness::config::ScenarioConfig>,
 ) -> Result<()> {
     let seed_bundle = build_seed_bundle(config);
@@ -192,6 +202,7 @@ fn run_with_artifacts(
 
     artifact_bundle.write_json("startup_summary.json", summary)?;
     artifact_bundle.write_json("preflight_report.json", preflight_report)?;
+    artifact_bundle.write_json("network_backend_preflight.json", backend_preflight)?;
     artifact_bundle.write_json("events.json", &events)?;
     artifact_bundle.write_json("initial_screens.json", &initial_screens)?;
     artifact_bundle.write_json("routing_metadata.json", &routing_metadata)?;

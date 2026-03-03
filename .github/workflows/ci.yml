@@ -75,6 +75,35 @@ jobs:
           CARGO_PROFILE_DEV_DEBUG: 0
           CARGO_INCREMENTAL: 0
 
+  holepunch-tier1:
+    name: Holepunch Tier 1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: holepunch-tier1
+      - name: Run deterministic/property holepunch tests
+        run: nix develop --command just ci-holepunch-tier1
+
+  holepunch-tier2:
+    name: Holepunch Tier 2
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: holepunch-tier2
+      - name: Run Patchbay NAT traversal scenarios
+        run: nix develop --command just ci-holepunch-tier2
+      - name: Upload holepunch artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: holepunch-tier2-${{ github.run_id }}
+          path: artifacts/holepunch
+          if-no-files-found: warn
+
   unused-deps:
     name: Unused Deps
     runs-on: ubuntu-latest

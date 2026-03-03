@@ -142,8 +142,9 @@ pub use leakage::{
 #[allow(deprecated)]
 // Migration utilities removed - middleware transition complete
 pub use network::{
-    NetworkAddress, NetworkCoreEffects, NetworkEffects, NetworkError, NetworkExtendedEffects,
-    PeerEvent, PeerEventStream, UdpEffects, UdpEndpoint, UdpEndpointEffects,
+    NetworkAddress, NetworkChange, NetworkChangeEffects, NetworkChangeStream, NetworkCoreEffects,
+    NetworkEffects, NetworkError, NetworkExtendedEffects, NetworkUsability, PeerEvent,
+    PeerEventStream, UdpEffects, UdpEndpoint, UdpEndpointEffects,
 };
 pub use noise::{HandshakeState, NoiseEffects, NoiseError, NoiseParams, TransportState};
 pub use query::{QueryEffects, QueryError, QuerySubscription};

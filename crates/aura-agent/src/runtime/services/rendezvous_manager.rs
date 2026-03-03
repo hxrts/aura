@@ -20,8 +20,8 @@ use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::{CryptoEffects, NoiseEffects};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_rendezvous::{
-    DiscoveredPeer, LanDiscoveryConfig, RendezvousConfig, RendezvousDescriptor, RendezvousFact,
-    RendezvousService, TransportHint,
+    DiscoveredPeer, LanDiscoveryConfig, LocalInterfaces, RendezvousConfig, RendezvousDescriptor,
+    RendezvousFact, RendezvousService, TransportHint,
 };
 use cfg_if::cfg_if;
 use std::collections::HashMap;
@@ -453,7 +453,9 @@ impl RendezvousManager {
             .clone()
             .ok_or("Rendezvous manager not started")?;
 
-        let hints = transport_hints.unwrap_or_else(|| self.config.default_transport_hints.clone());
+        let hints = Self::relay_first_order(
+            transport_hints.unwrap_or_else(|| self.config.default_transport_hints.clone()),
+        );
 
         // Retrieve identity keys to get public key
         let keys = retrieve_identity_keys(effects, &self.authority_id).await;
@@ -481,7 +483,9 @@ impl RendezvousManager {
             .clone()
             .ok_or("Rendezvous manager not started")?;
 
-        let hints = transport_hints.unwrap_or_else(|| self.config.default_transport_hints.clone());
+        let hints = Self::relay_first_order(
+            transport_hints.unwrap_or_else(|| self.config.default_transport_hints.clone()),
+        );
 
         // Retrieve identity keys to get public key
         let keys = retrieve_identity_keys(effects, &self.authority_id).await;
@@ -580,6 +584,7 @@ impl RendezvousManager {
             .get(&(context_id, peer))
             .cloned()
             .ok_or("Peer descriptor not found in cache")?;
+        let establish_descriptor = Self::relay_first_initial_descriptor(&descriptor);
 
         // Retrieve identity keys
         let keys = retrieve_identity_keys(effects, &self.authority_id).await;
@@ -596,7 +601,7 @@ impl RendezvousManager {
                 &local_private_key,
                 &remote_public_key,
                 now_ms,
-                &descriptor,
+                &establish_descriptor,
                 effects,
             )
             .await
@@ -675,6 +680,37 @@ impl RendezvousManager {
             .keys()
             .filter(|(ctx, auth)| *ctx == context_id && *auth != self.authority_id)
             .map(|(_, auth)| *auth)
+            .collect()
+    }
+
+    /// Return recoverable direct candidates for background direct-upgrade attempts.
+    ///
+    /// This intentionally excludes relay hints because relay is handled as the
+    /// initial path selection strategy.
+    pub async fn direct_upgrade_candidates(
+        &self,
+        context_id: ContextId,
+        peer: AuthorityId,
+        interfaces: &LocalInterfaces,
+    ) -> Vec<TransportHint> {
+        let descriptor = self
+            .state
+            .read()
+            .await
+            .descriptor_cache
+            .get(&(context_id, peer))
+            .cloned();
+        let Some(descriptor) = descriptor else {
+            return Vec::new();
+        };
+
+        descriptor
+            .transport_hints
+            .into_iter()
+            .filter(|hint| {
+                !matches!(hint, TransportHint::WebSocketRelay { .. })
+                    && hint.is_recoverable(interfaces)
+            })
             .collect()
     }
 
@@ -919,6 +955,30 @@ impl RendezvousManager {
     /// Get the configuration
     pub fn config(&self) -> &RendezvousManagerConfig {
         &self.config
+    }
+
+    fn relay_first_initial_descriptor(descriptor: &RendezvousDescriptor) -> RendezvousDescriptor {
+        let relay_hints: Vec<_> = descriptor
+            .transport_hints
+            .iter()
+            .filter(|hint| matches!(hint, TransportHint::WebSocketRelay { .. }))
+            .cloned()
+            .collect();
+        if relay_hints.is_empty() {
+            return descriptor.clone();
+        }
+
+        let mut relay_first = descriptor.clone();
+        relay_first.transport_hints = relay_hints;
+        relay_first
+    }
+
+    fn relay_first_order(mut hints: Vec<TransportHint>) -> Vec<TransportHint> {
+        hints.sort_by_key(|hint| match hint {
+            TransportHint::WebSocketRelay { .. } => 0u8,
+            _ => 1u8,
+        });
+        hints
     }
 
     /// Get the authority ID
@@ -1332,6 +1392,58 @@ mod tests {
 
         // No descriptor cached - should need refresh
         assert!(manager.needs_refresh(test_context(), 1000).await);
+
+        manager.stop().await.unwrap();
+    }
+
+    #[test]
+    fn test_relay_first_ordering_places_relay_before_direct() {
+        let relay = TransportHint::websocket_relay(test_peer());
+        let direct = TransportHint::quic_direct("127.0.0.1:8443").unwrap();
+        let ordered = RendezvousManager::relay_first_order(vec![direct.clone(), relay.clone()]);
+
+        assert!(matches!(
+            ordered.first(),
+            Some(TransportHint::WebSocketRelay { .. })
+        ));
+        assert!(ordered.iter().any(|hint| hint == &direct));
+    }
+
+    #[tokio::test]
+    async fn test_direct_upgrade_candidates_filter_recoverable_direct_hints() {
+        let config = RendezvousManagerConfig::for_testing();
+        let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
+        manager.start().await.unwrap();
+
+        let descriptor = RendezvousDescriptor {
+            authority_id: test_peer(),
+            context_id: test_context(),
+            transport_hints: vec![
+                TransportHint::websocket_relay(test_authority()),
+                TransportHint::quic_direct("10.0.0.42:8443").unwrap(),
+            ],
+            handshake_psk_commitment: [0u8; 32],
+            public_key: [0u8; 32],
+            valid_from: 0,
+            valid_until: u64::MAX,
+            nonce: [0u8; 32],
+            nickname_suggestion: None,
+        };
+        manager.cache_descriptor(descriptor).await.unwrap();
+
+        let mut interfaces = LocalInterfaces::new();
+        interfaces.insert("10.0.0.42");
+        let candidates = manager
+            .direct_upgrade_candidates(test_context(), test_peer(), &interfaces)
+            .await;
+        assert_eq!(candidates.len(), 1);
+        assert!(matches!(candidates[0], TransportHint::QuicDirect { .. }));
+
+        let interfaces = LocalInterfaces::new();
+        let none = manager
+            .direct_upgrade_candidates(test_context(), test_peer(), &interfaces)
+            .await;
+        assert!(none.is_empty());
 
         manager.stop().await.unwrap();
     }
