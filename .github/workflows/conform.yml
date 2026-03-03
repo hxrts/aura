@@ -1,0 +1,122 @@
+name: Conform
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  AURA_SUPPRESS_NIX_WELCOME: 1
+
+jobs:
+  conformance:
+    name: Conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: conformance
+      - name: Verify policy wiring
+        run: nix develop --command just ci-conformance-policy
+      - name: Run conformance gate
+        run: nix develop --command just ci-conformance
+        env:
+          CARGO_BUILD_JOBS: 4
+          AURA_CONFORMANCE_WRITE_ARTIFACTS: 1
+          AURA_CONFORMANCE_ARTIFACT_DIR: artifacts/conformance
+          AURA_CONFORMANCE_ROTATING_WINDOW: 8
+          AURA_CONFORMANCE_ITF_SEED_WINDOW: 8
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-${{ github.run_id }}
+          path: artifacts/conformance
+          if-no-files-found: warn
+
+  itf-conformance:
+    name: ITF Conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: itf-conformance
+      - run: nix develop --command just ci-conformance-itf
+
+  differential:
+    name: Differential
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: differential
+      - name: Build Lean oracle
+        run: nix develop --command just lean-oracle-build
+      - name: Run differential tests
+        run: nix develop --command just ci-conformance-diff
+
+  choreo-parity:
+    name: Choreo Parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: choreo-parity
+      - name: Run parity gates
+        run: nix develop --command just ci-choreo-parity
+        env:
+          CARGO_BUILD_JOBS: 4
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: choreo-parity-${{ github.run_id }}
+          path: artifacts/choreo-parity
+          if-no-files-found: warn
+
+  property-monitor:
+    name: Property Monitor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: property-monitor
+      - name: Run property-monitored simulations
+        run: nix develop --command just ci-property-monitor
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: property-monitor-${{ github.run_id }}
+          path: artifacts/property-monitor
+          if-no-files-found: warn
+
+  effects:
+    name: Effects
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: effects
+      - run: nix develop --command just ci-effects
+
+  agent-wasm:
+    name: Agent WASM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: agent-wasm
+      - name: Check WASM backends
+        run: nix develop --command just ci-agent-wasm
+        env:
+          CARGO_BUILD_JOBS: 4

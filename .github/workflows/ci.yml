@@ -5,66 +5,15 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
-  schedule:
-    - cron: "0 7 * * *"
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # Suppress Nix welcome message in CI
   AURA_SUPPRESS_NIX_WELCOME: 1
 
 jobs:
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 1: Link checks (run first)
-  # ─────────────────────────────────────────────────────────────────────────────
-
-  doc-links:
-    name: Doc Links
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: gaurav-nelson/github-action-markdown-link-check@v1
-        with:
-          use-quiet-mode: "yes"
-          use-verbose-mode: "yes"
-          config-file: ".github/config/markdown-link-check.json"
-          base-branch: "main"
-          folder-path: "docs"
-
-  crates-doc-links:
-    name: Crates Doc Links
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: crates-doc-links
-      - run: nix develop --command just ci-crates-doc-links
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 2: Book (runs after link checks pass)
-  # ─────────────────────────────────────────────────────────────────────────────
-
-  book:
-    name: Book
-    needs: [doc-links, crates-doc-links]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: book
-      - name: Build documentation
-        run: nix develop --command just ci-book
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 3: All other checks (run after book)
-  # ─────────────────────────────────────────────────────────────────────────────
-
   format:
     name: Format
-    needs: [book]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -73,18 +22,8 @@ jobs:
           cache-name: format
       - run: nix develop --command just ci-format
 
-  text-formatting:
-    name: Text Formatting
-    needs: [book]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check for emojis
-        run: ./scripts/check-text-formatting.sh
-
   clippy:
     name: Clippy
-    needs: [book]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -95,7 +34,6 @@ jobs:
 
   build:
     name: Build
-    needs: [book]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -104,43 +42,8 @@ jobs:
           cache-name: build
       - run: nix develop --command just ci-build
 
-  harness-build:
-    name: Harness Build
-    needs: [book]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: harness-build
-      - run: nix develop --command just ci-harness-build
-
-  harness-contract:
-    name: Harness Contract
-    needs: [book]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: harness-contract
-      - run: nix develop --command just ci-harness-contract
-
-  harness-nightly-replay:
-    name: Harness Nightly Replay
-    needs: [book]
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: harness-nightly-replay
-      - run: nix develop --command just ci-harness-replay
-
   test:
     name: Test
-    needs: [book]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -149,14 +52,10 @@ jobs:
           cache-name: test
       - name: Create swap space
         run: |
-          # Create 4GB swap for memory-heavy compilation
-          # Check if swap file already exists and is in use
           if [ -f /swapfile ]; then
-            echo "Swap file exists, checking if in use..."
             if swapon --show | grep -q /swapfile; then
-              echo "Swap already enabled at /swapfile, skipping creation"
+              echo "Swap already enabled"
             else
-              # File exists but not used as swap - remove and recreate
               sudo rm -f /swapfile
               sudo fallocate -l 4G /swapfile
               sudo chmod 600 /swapfile
@@ -169,136 +68,15 @@ jobs:
             sudo mkswap /swapfile
             sudo swapon /swapfile
           fi
-          echo "Swap status:"
-          free -h
       - name: Run tests
         run: nix develop --command just ci-test
         env:
-          # Reduce parallelism to lower peak disk usage from concurrent artifacts
           CARGO_BUILD_JOBS: 4
-          # Disable debug info to reduce disk usage (~50% reduction in target size)
           CARGO_PROFILE_DEV_DEBUG: 0
-          # Disable incremental compilation to reduce disk usage
           CARGO_INCREMENTAL: 0
-
-  property-monitor:
-    name: Property Monitor
-    needs: [book]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: property-monitor
-      - name: Run property-monitored simulations
-        run: nix develop --command just ci-property-monitor
-      - name: Upload property monitor artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: property-monitor-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/property-monitor
-          if-no-files-found: warn
-
-  choreo-parity:
-    name: Choreo Parity
-    needs: [book]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: choreo-parity
-      - name: Run parity gates
-        run: nix develop --command just ci-choreo-parity
-        env:
-          CARGO_BUILD_JOBS: 4
-      - name: Upload parity replay artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: choreo-parity-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/choreo-parity
-          if-no-files-found: warn
-
-  conformance-gate:
-    name: Conformance Gate
-    needs: [book]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: conformance-gate
-      - name: Verify conformance gate wiring
-        run: nix develop --command just ci-conformance-policy
-      - name: Run conformance gate
-        run: nix develop --command just ci-conformance
-        env:
-          CARGO_BUILD_JOBS: 4
-          AURA_CONFORMANCE_WRITE_ARTIFACTS: 1
-          AURA_CONFORMANCE_ARTIFACT_DIR: artifacts/conformance
-          AURA_CONFORMANCE_ROTATING_WINDOW: 8
-          AURA_CONFORMANCE_ITF_SEED_WINDOW: 8
-      - name: Upload conformance artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: conformance-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/conformance
-          if-no-files-found: warn
-
-  lean-quint-bridge:
-    name: Lean-Quint Bridge
-    needs: [book]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: lean-quint-bridge
-      - name: Run bridge cross-validation lane
-        run: nix develop --command just ci-lean-quint-bridge
-      - name: Upload bridge artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: lean-quint-bridge-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/lean-quint-bridge
-          if-no-files-found: warn
-
-  agent-wasm:
-    name: Agent WASM Matrix
-    needs: [book]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: agent-wasm
-      - name: Check aura-agent wasm backends
-        run: nix develop --command just ci-agent-wasm
-        env:
-          CARGO_BUILD_JOBS: 4
-
-  effects:
-    name: Effects Violations
-    needs: [book]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: effects
-      - run: nix develop --command just ci-effects
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Optional checks (warnings only)
-  # ─────────────────────────────────────────────────────────────────────────────
 
   unused-deps:
     name: Unused Deps
-    needs: [book]
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:

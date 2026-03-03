@@ -1,0 +1,89 @@
+name: Verify
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  AURA_SUPPRESS_NIX_WELCOME: 1
+
+jobs:
+  quint-typecheck:
+    name: Quint Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: quint-typecheck
+      - run: nix develop --command just ci-quint-typecheck
+
+  quint-verify:
+    name: Quint Verify
+    needs: quint-typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: quint-verify
+      - run: nix develop --command just ci-quint-verify
+
+  lean:
+    name: Lean
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: lean
+      - name: Build proofs
+        run: nix develop --command just ci-lean-build
+      - name: Check for incomplete proofs
+        run: nix develop --command just ci-lean-check-sorry
+
+  lean-quint-bridge:
+    name: Lean-Quint Bridge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: lean-quint-bridge
+      - name: Run bridge cross-validation
+        run: nix develop --command just ci-lean-quint-bridge
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lean-quint-bridge-${{ github.run_id }}
+          path: artifacts/lean-quint-bridge
+          if-no-files-found: warn
+
+  kani:
+    name: Kani
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'kani')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: kani
+      - name: Install CBMC
+        run: sudo apt-get update && sudo apt-get install -y cbmc
+      - name: Install Kani
+        run: |
+          nix develop .#nightly --command bash -c \
+            'cargo install --locked kani-verifier && cargo kani setup'
+      - name: Run Kani proofs
+        run: nix develop .#nightly --command just ci-kani
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kani-results-${{ github.run_id }}
+          path: kani-output.log
+          if-no-files-found: ignore

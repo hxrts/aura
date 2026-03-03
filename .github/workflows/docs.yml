@@ -1,0 +1,86 @@
+name: Docs
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+env:
+  AURA_SUPPRESS_NIX_WELCOME: 1
+
+jobs:
+  links:
+    name: Links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: "yes"
+          use-verbose-mode: "yes"
+          config-file: ".github/config/markdown-link-check.json"
+          base-branch: "main"
+          folder-path: "docs"
+
+  crate-links:
+    name: Crate Links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: crate-links
+      - run: nix develop --command just ci-crates-doc-links
+
+  text-formatting:
+    name: Text Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/check-text-formatting.sh
+
+  build:
+    name: Build
+    needs: [links, crate-links]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: docs-build
+      - run: nix develop --command just ci-book
+
+  deploy:
+    name: Deploy
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [build]
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: docs-deploy
+      - name: Build documentation
+        run: nix develop --command just ci-book
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/book
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
