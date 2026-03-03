@@ -184,8 +184,9 @@ ci-harness-contract:
 
 # Harness replay regression (nightly mixed-topology lane)
 ci-harness-replay:
-    cargo run -p aura-harness -- run --config configs/harness/local-loopback.toml --scenario scenarios/harness/local-discovery-smoke.toml
-    cargo run -p aura-harness -- replay --bundle artifacts/harness/local-loopback-smoke/replay_bundle.json
+    cargo build -p aura-terminal --bin aura -q
+    AURA_HARNESS_AURA_BIN="$PWD/target/debug/aura" cargo run -p aura-harness --bin aura-harness -- run --config configs/harness/local-loopback.toml --scenario scenarios/harness/local-discovery-smoke.toml
+    AURA_HARNESS_AURA_BIN="$PWD/target/debug/aura" cargo run -p aura-harness --bin aura-harness -- replay --bundle artifacts/harness/local-loopback-smoke/replay_bundle.json
 
 # Test suite
 ci-test:
@@ -411,7 +412,7 @@ ci-dry-run:
 
     # Environment check
     LOCAL_RUST=$(rustc --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
-    printf "[0/10] Rust version... "
+    printf "[0/13] Rust version... "
     if [[ "$LOCAL_RUST" == "{{CI_RUST_VERSION}}" ]]; then
         echo -e "${GREEN}$LOCAL_RUST${NC} (matches CI)"
     elif [[ "$LOCAL_RUST" < "{{CI_RUST_VERSION}}" ]]; then
@@ -422,18 +423,20 @@ ci-dry-run:
     echo ""
 
     # Run CI steps (same as GitHub workflows)
-    run_step "1/11" "Format"          "just ci-format"
-    run_step "2/11" "Clippy"          "just ci-clippy"
-    run_step "3/11" "Build"           "just ci-build"
-    run_step "4/11" "Test"            "just ci-test"
-    run_step "5/11" "Choreo Parity"   "just ci-choreo-parity"
-    run_step "6/11" "Effects"         "just ci-effects"
-    run_step "7/11" "Choreo"          "just ci-choreo"
-    run_step "8/11" "Doc Links"       "just ci-crates-doc-links"
-    run_step "9/11" "Verify Coverage" "just ci-verification-coverage"
+    run_step "1/13" "Format"             "just ci-format"
+    run_step "2/13" "Clippy"             "just ci-clippy"
+    run_step "3/13" "Build"              "just ci-build"
+    run_step "4/13" "Test"               "just ci-test"
+    run_step "5/13" "Choreo Parity"      "just ci-choreo-parity"
+    run_step "6/13" "Effects"            "just ci-effects"
+    run_step "7/13" "Choreo"             "just ci-choreo"
+    run_step "8/13" "Doc Links"          "just ci-crates-doc-links"
+    run_step "9/13" "Verify Coverage"    "just ci-verification-coverage"
+    run_step "10/13" "Conformance Policy" "just ci-conformance-policy"
+    run_step "11/13" "Harness Replay"     "just ci-harness-replay"
 
     # Quint (optional - skip if not installed)
-    printf "[10/11] Quint... "
+    printf "[12/13] Quint... "
     if command -v quint &>/dev/null; then
         if just ci-quint-typecheck >/dev/null 2>&1; then
             echo -e "${GREEN}OK${NC}"
@@ -446,7 +449,7 @@ ci-dry-run:
     fi
 
     # Architecture check (warning only)
-    printf "[11/11] Architecture... "
+    printf "[13/13] Architecture... "
     if ./scripts/check-arch.sh --quick >/dev/null 2>&1; then
         echo -e "${GREEN}OK${NC}"
     else

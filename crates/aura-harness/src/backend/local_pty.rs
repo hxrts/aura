@@ -425,6 +425,35 @@ mod tests {
         }
     }
 
+    fn wait_for_screen_contains(
+        backend: &mut LocalPtyBackend,
+        needle: &str,
+        timeout: Duration,
+    ) -> String {
+        const POLL_INTERVAL_MS: u128 = 30;
+        let max_attempts_u128 = timeout
+            .as_millis()
+            .max(POLL_INTERVAL_MS)
+            .div_ceil(POLL_INTERVAL_MS);
+        let max_attempts = usize::try_from(max_attempts_u128).unwrap_or(usize::MAX);
+
+        for attempt in 0..max_attempts {
+            let screen = match backend.snapshot() {
+                Ok(screen) => screen,
+                Err(error) => panic!("snapshot failed: {error}"),
+            };
+            if screen.contains(needle) {
+                return screen;
+            }
+            if attempt + 1 == max_attempts {
+                panic!("timed out waiting for screen to contain {needle:?}; got: {screen:?}");
+            }
+            thread::sleep(Duration::from_millis(POLL_INTERVAL_MS as u64));
+        }
+
+        panic!("wait_for_screen_contains reached unreachable state");
+    }
+
     #[test]
     fn local_backend_injects_default_clipboard_isolation_env() {
         let mut config = test_config();
@@ -442,11 +471,8 @@ mod tests {
         if let Err(error) = backend.start() {
             panic!("backend must start: {error}");
         }
-        thread::sleep(Duration::from_millis(120));
-        let screen = match backend.snapshot() {
-            Ok(screen) => screen,
-            Err(error) => panic!("snapshot failed: {error}"),
-        };
+        let screen =
+            wait_for_screen_contains(&mut backend, "mode=file_only", Duration::from_secs(3));
         assert!(
             screen.contains("mode=file_only"),
             "expected default clipboard mode to be file_only, got: {screen:?}"
@@ -516,11 +542,7 @@ mod tests {
         if let Err(error) = backend.start() {
             panic!("backend must start: {error}");
         }
-        thread::sleep(Duration::from_millis(120));
-        let screen = match backend.snapshot() {
-            Ok(screen) => screen,
-            Err(error) => panic!("snapshot failed: {error}"),
-        };
+        let screen = wait_for_screen_contains(&mut backend, "mode=system", Duration::from_secs(3));
         assert!(
             screen.contains("mode=system"),
             "expected custom clipboard mode override, got: {screen:?}"
