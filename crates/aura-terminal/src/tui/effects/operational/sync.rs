@@ -18,7 +18,7 @@ use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflow functions for convenience
-pub use aura_app::ui::workflows::sync::{force_sync, request_state};
+pub use aura_app::ui::workflows::sync::{force_sync, request_state_by_str};
 
 /// Handle sync commands
 ///
@@ -41,7 +41,7 @@ pub async fn handle_sync(
 
         EffectCommand::RequestState { peer_id } => {
             // Use workflow for business logic
-            let result = request_state(app_core, peer_id).await;
+            let result = request_state_by_str(app_core, peer_id).await;
 
             match result {
                 Ok(_) => Some(Ok(OpResponse::Data(format!(

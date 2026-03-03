@@ -26,7 +26,7 @@ use aura_core::effects::reactive::{
     ReactiveEffects, ReactiveError, Signal, SignalId, SignalStream,
 };
 use aura_core::hash;
-use aura_core::identifiers::AuthorityId;
+use aura_core::identifiers::{AuthorityId, CeremonyId};
 use aura_core::query::{FactPredicate, Query};
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::{Epoch, FrostThreshold};
@@ -861,7 +861,7 @@ impl AppCore {
         &self,
         threshold_k: FrostThreshold,
         total_n: u16,
-        guardian_ids: &[String],
+        guardian_ids: &[AuthorityId],
     ) -> Result<(Epoch, Vec<Vec<u8>>, Vec<u8>), IntentError> {
         let runtime = self
             .runtime
@@ -937,8 +937,8 @@ impl AppCore {
         &self,
         threshold_k: FrostThreshold,
         total_n: u16,
-        guardian_ids: &[String],
-    ) -> Result<String, IntentError> {
+        guardian_ids: &[AuthorityId],
+    ) -> Result<CeremonyId, IntentError> {
         let runtime = self.runtime.as_ref().ok_or_else(|| {
             IntentError::no_agent("initiate_guardian_ceremony requires a runtime")
         })?;
@@ -1004,7 +1004,7 @@ impl AppCore {
         threshold_k: FrostThreshold,
         total_n: u16,
         device_ids: &[String],
-    ) -> Result<String, IntentError> {
+    ) -> Result<CeremonyId, IntentError> {
         let runtime = self.runtime.as_ref().ok_or_else(|| {
             IntentError::no_agent("initiate_device_threshold_ceremony requires a runtime")
         })?;
@@ -1022,7 +1022,7 @@ impl AppCore {
     pub async fn initiate_device_enrollment_ceremony(
         &self,
         nickname_suggestion: String,
-        invitee_authority_id: Option<String>,
+        invitee_authority_id: Option<AuthorityId>,
     ) -> Result<crate::runtime_bridge::DeviceEnrollmentStart, IntentError> {
         let runtime = self.runtime.as_ref().ok_or_else(|| {
             IntentError::no_agent("initiate_device_enrollment_ceremony requires a runtime")
@@ -1037,7 +1037,7 @@ impl AppCore {
     pub async fn initiate_device_removal_ceremony(
         &self,
         device_id: String,
-    ) -> Result<String, IntentError> {
+    ) -> Result<CeremonyId, IntentError> {
         let runtime = self.runtime.as_ref().ok_or_else(|| {
             IntentError::no_agent("initiate_device_removal_ceremony requires a runtime")
         })?;
@@ -1062,7 +1062,7 @@ impl AppCore {
     /// Returns `IntentError::NoAgent` if no runtime is configured.
     pub async fn get_ceremony_status(
         &self,
-        ceremony_id: &str,
+        ceremony_id: &CeremonyId,
     ) -> Result<crate::runtime_bridge::CeremonyStatus, IntentError> {
         let runtime = self
             .runtime
@@ -1075,7 +1075,7 @@ impl AppCore {
     /// Get status of a key rotation ceremony (generic form)
     pub async fn get_key_rotation_ceremony_status(
         &self,
-        ceremony_id: &str,
+        ceremony_id: &CeremonyId,
     ) -> Result<crate::runtime_bridge::KeyRotationCeremonyStatus, IntentError> {
         let runtime = self.runtime.as_ref().ok_or_else(|| {
             IntentError::no_agent("get_key_rotation_ceremony_status requires a runtime")
@@ -1085,7 +1085,10 @@ impl AppCore {
     }
 
     /// Cancel an in-progress key rotation ceremony (best effort)
-    pub async fn cancel_key_rotation_ceremony(&self, ceremony_id: &str) -> Result<(), IntentError> {
+    pub async fn cancel_key_rotation_ceremony(
+        &self,
+        ceremony_id: &CeremonyId,
+    ) -> Result<(), IntentError> {
         let runtime = self.runtime.as_ref().ok_or_else(|| {
             IntentError::no_agent("cancel_key_rotation_ceremony requires a runtime")
         })?;

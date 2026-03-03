@@ -6,7 +6,7 @@
 use crate::workflows::runtime::require_runtime;
 use crate::workflows::signals::{emit_signal, read_signal};
 use crate::workflows::state_helpers::with_recovery_state;
-use crate::workflows::{channel_ref::ChannelRef, snapshot_policy::chat_snapshot};
+use crate::workflows::{channel_ref::ChannelSelector, snapshot_policy::chat_snapshot};
 use crate::{
     signal_defs::{DeviceInfo, SettingsState, SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME},
     thresholds::normalize_recovery_threshold,
@@ -122,14 +122,25 @@ pub async fn set_channel_mode(
 ) -> Result<(), AuraError> {
     let normalized_channel = crate::workflows::chat_commands::normalize_channel_name(&channel_id);
     let chat = chat_snapshot(app_core).await;
+    let homes = {
+        let core = app_core.read().await;
+        core.views().get_homes()
+    };
     let resolved_channel = {
-        let parsed = ChannelRef::parse(&normalized_channel).to_channel_id();
-        chat.all_channels()
-            .find(|entry| {
-                entry.id == parsed || entry.name.eq_ignore_ascii_case(&normalized_channel)
-            })
-            .map(|entry| entry.id)
-            .unwrap_or(parsed)
+        match ChannelSelector::parse(&normalized_channel)? {
+            ChannelSelector::Id(channel_id) => channel_id,
+            ChannelSelector::Name(channel_name) => chat
+                .all_channels()
+                .find(|entry| entry.name.eq_ignore_ascii_case(&channel_name))
+                .map(|entry| entry.id)
+                .or_else(|| {
+                    homes
+                        .iter()
+                        .find(|(_, home)| home.name.eq_ignore_ascii_case(&channel_name))
+                        .map(|(home_id, _)| *home_id)
+                })
+                .ok_or_else(|| AuraError::not_found(format!("Unknown channel: {channel_name}")))?,
+        }
     };
 
     set_channel_mode_resolved(app_core, resolved_channel, flags).await
@@ -156,30 +167,19 @@ pub async fn set_channel_mode_resolved(
     let mut target_home_id = if homes.has_home(&resolved_channel) {
         Some(resolved_channel)
     } else {
-        context_hint
-            .and_then(|context_id| {
-                homes
-                    .iter()
-                    .filter(|(_, home)| home.context_id == Some(context_id))
-                    .max_by_key(|(_, home)| {
-                        (
-                            u8::from(home.is_admin()),
-                            u8::from(!home.residents.is_empty()),
-                            home.resident_count,
-                        )
-                    })
-                    .map(|(home_id, _)| *home_id)
-            })
-            .or_else(|| homes.current_home_id().copied())
-            .or_else(|| {
-                homes
-                    .iter()
-                    .filter(|(_, home)| home.is_admin())
-                    .max_by_key(|(_, home)| {
-                        (u8::from(!home.residents.is_empty()), home.resident_count)
-                    })
-                    .map(|(home_id, _)| *home_id)
-            })
+        context_hint.and_then(|context_id| {
+            homes
+                .iter()
+                .filter(|(_, home)| home.context_id == Some(context_id))
+                .max_by_key(|(_, home)| {
+                    (
+                        u8::from(home.is_admin()),
+                        u8::from(!home.residents.is_empty()),
+                        home.resident_count,
+                    )
+                })
+                .map(|(home_id, _)| *home_id)
+        })
     };
 
     // Materialize a placeholder home when the channel context exists but
@@ -190,7 +190,11 @@ pub async fn set_channel_mode_resolved(
                 .runtime()
                 .map(|runtime| runtime.authority_id())
                 .or_else(|| core.authority().copied())
-                .unwrap_or_else(|| aura_core::identifiers::AuthorityId::new_from_entropy([0; 32]));
+                .ok_or_else(|| {
+                    AuraError::permission_denied(
+                        "Set channel mode requires a known authority for placeholder home context",
+                    )
+                })?;
 
             let mut placeholder = crate::views::home::HomeState::new(
                 resolved_channel,
@@ -356,7 +360,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_set_channel_mode_falls_back_to_current_admin_home() {
+    async fn test_set_channel_mode_rejects_unscoped_channel_without_context() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
 
@@ -400,15 +404,9 @@ mod tests {
             core.views_mut().set_chat(chat);
         }
 
-        set_channel_mode(&app_core, target_channel_name, "+m".to_string())
+        let error = set_channel_mode(&app_core, target_channel_name, "+m".to_string())
             .await
-            .expect("mode should fall back to current admin home");
-
-        let core = app_core.read().await;
-        let homes = core.views().get_homes();
-        let home = homes
-            .home_state(&current_home_id)
-            .expect("current home should still exist");
-        assert_eq!(home.mode_flags.as_deref(), Some("+m"));
+            .expect_err("mode update should fail without a channel-scoped home context");
+        assert!(error.to_string().contains("requires a home context"));
     }
 }

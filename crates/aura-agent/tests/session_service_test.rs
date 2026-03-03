@@ -36,7 +36,7 @@ async fn test_session_service_via_agent() -> Result<(), Box<dyn std::error::Erro
         .create_coordination_session(participants.clone())
         .await?;
 
-    assert!(!handle.session_id.is_empty());
+    assert!(!handle.session_id.to_string().is_empty());
     assert_eq!(handle.participants, participants);
     assert_eq!(handle.session_type, SessionType::Coordination);
     Ok(())
@@ -82,7 +82,7 @@ async fn test_threshold_session_via_agent() -> Result<(), Box<dyn std::error::Er
         .create_threshold_session(participants.clone(), 2)
         .await?;
 
-    assert!(!handle.session_id.is_empty());
+    assert!(!handle.session_id.to_string().is_empty());
     assert_eq!(handle.session_type, SessionType::ThresholdOperation);
     assert!(handle.metadata.contains_key("threshold"));
     Ok(())
@@ -101,7 +101,7 @@ async fn test_key_rotation_session_via_agent() -> Result<(), Box<dyn std::error:
 
     let handle = sessions.create_key_rotation_session().await?;
 
-    assert!(!handle.session_id.is_empty());
+    assert!(!handle.session_id.to_string().is_empty());
     assert_eq!(handle.session_type, SessionType::KeyRotation);
     assert!(handle.metadata.contains_key("rotation_type"));
     Ok(())
@@ -122,7 +122,7 @@ async fn test_end_session_via_agent() -> Result<(), Box<dyn std::error::Error>> 
     // Create and then end a session
     let handle = sessions.create_coordination_session(participants).await?;
 
-    let ended = sessions.end_session(&handle.session_id).await?;
+    let ended = sessions.end_session(&handle.session_id.to_string()).await?;
 
     assert_eq!(ended.session_id, handle.session_id);
     assert!(ended.metadata.contains_key("status"));

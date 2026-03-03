@@ -14,6 +14,7 @@ use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
 use crate::tui::types::{AccessLevel, MfaPolicy};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
+use aura_core::identifiers::CeremonyId;
 
 use super::types::*;
 
@@ -905,15 +906,16 @@ impl SettingsCallbacks {
                     });
 
                     // Prime status quickly (best-effort) so the modal has counters immediately.
+                    let ceremony_id_typed = CeremonyId::new(start.ceremony_id.clone());
                     if let Ok(status) =
                         aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
                             ctx.app_core_raw(),
-                            &start.ceremony_id,
+                            &ceremony_id_typed,
                         )
                         .await
                     {
                         let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
-                            ceremony_id: status.ceremony_id.clone(),
+                            ceremony_id: status.ceremony_id.to_string(),
                             kind: status.kind,
                             accepted_count: status.accepted_count,
                             total_count: status.total_count,
@@ -930,7 +932,7 @@ impl SettingsCallbacks {
 
                     let app = ctx.app_core_raw().clone();
                     let tx_monitor = tx.clone();
-                    let ceremony_id = start.ceremony_id.clone();
+                    let ceremony_id = CeremonyId::new(start.ceremony_id.clone());
                     spawn_ctx(ctx.clone(), async move {
                         let _ = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
                             &app,
@@ -938,7 +940,7 @@ impl SettingsCallbacks {
                             tokio::time::Duration::from_millis(500),
                             |status| {
                                 let _ = tx_monitor.try_send(UiUpdate::KeyRotationCeremonyStatus {
-                                    ceremony_id: status.ceremony_id.clone(),
+                                    ceremony_id: status.ceremony_id.to_string(),
                                     kind: status.kind,
                                     accepted_count: status.accepted_count,
                                     total_count: status.total_count,
@@ -987,7 +989,7 @@ impl SettingsCallbacks {
                 spawn_ctx(ctx.clone(), async move {
                     match aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
                         &app,
-                        ceremony_id,
+                        CeremonyId::new(ceremony_id),
                         tokio::time::Duration::from_millis(250),
                         |_| {},
                         tokio::time::sleep,

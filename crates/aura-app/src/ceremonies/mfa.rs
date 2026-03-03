@@ -90,15 +90,17 @@ impl MfaDeviceSet {
     ///
     /// For MFA, the maximum k equals the number of devices.
     pub fn max_threshold_k(&self) -> u8 {
-        self.devices.len().min(255) as u8
+        let capped = self.devices.len().min(usize::from(u8::MAX));
+        u8::try_from(capped).unwrap_or(u8::MAX)
     }
 
     /// Get recommended threshold for this device set
     ///
     /// Returns ceil((n+1)/2) for majority threshold.
     pub fn recommended_threshold(&self) -> u8 {
-        let n = self.devices.len() as u8;
-        (n / 2) + 1
+        let device_count = self.devices.len().min(usize::from(u8::MAX));
+        let n = u8::try_from(device_count).unwrap_or(u8::MAX);
+        (n / 2).saturating_add(1)
     }
 }
 

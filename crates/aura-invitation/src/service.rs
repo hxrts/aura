@@ -21,8 +21,9 @@ use crate::facts::InvitationFact;
 use crate::guards::{
     check_capability, check_flow_budget, costs, EffectCommand, GuardOutcome, GuardSnapshot,
 };
+use crate::InvitationOperation;
 use aura_core::effects::amp::ChannelBootstrapPackage;
-use aura_core::identifiers::{AuthorityId, CeremonyId, ContextId, InvitationId};
+use aura_core::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::time::PhysicalTime;
 use aura_core::DeviceId;
 use aura_guards::types::CapabilityId;
@@ -32,6 +33,10 @@ use serde::{Deserialize, Serialize};
 enum InvitationGuardError {
     #[error("Message too long: {length} > {max}")]
     MessageTooLong { length: u32, max: u32 },
+    #[error("Message length overflows u32: {length}")]
+    MessageLengthOverflow { length: u64 },
+    #[error("Expiration timestamp overflow: now={now_ms}, expires_in={expires_in_ms}")]
+    ExpirationOverflow { now_ms: u64, expires_in_ms: u64 },
 }
 
 // =============================================================================
@@ -101,7 +106,8 @@ pub enum InvitationType {
     /// Invitation to join a home/channel
     Channel {
         /// Home/channel identifier
-        home_id: String,
+        #[serde(with = "channel_id_serde")]
+        home_id: ChannelId,
         /// Optional nickname suggestion (what the channel/home wants to be called)
         #[serde(default, skip_serializing_if = "Option::is_none")]
         nickname_suggestion: Option<String>,
@@ -144,6 +150,27 @@ pub enum InvitationType {
         /// Public key package for the pending epoch
         public_key_package: Vec<u8>,
     },
+}
+
+mod channel_id_serde {
+    use aura_core::identifiers::ChannelId;
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::str::FromStr;
+
+    pub fn serialize<S>(value: &ChannelId, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<ChannelId, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        ChannelId::from_str(&raw).map_err(serde::de::Error::custom)
+    }
 }
 
 impl InvitationType {
@@ -310,10 +337,20 @@ impl InvitationService {
 
         // Validate message length
         if let Some(ref msg) = message {
-            if (msg.len() as u32) > policy.max_message_length {
+            let length = match u32::try_from(msg.len()) {
+                Ok(length) => length,
+                Err(_) => {
+                    let length = u64::try_from(msg.len()).unwrap_or(u64::MAX);
+                    return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
+                        InvitationGuardError::MessageLengthOverflow { length }.to_string(),
+                    ));
+                }
+            };
+
+            if length > policy.max_message_length {
                 return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
                     InvitationGuardError::MessageTooLong {
-                        length: msg.len() as u32,
+                        length,
                         max: policy.max_message_length,
                     }
                     .to_string(),
@@ -322,7 +359,21 @@ impl InvitationService {
         }
 
         // Calculate expiration
-        let expires_at_ms = expires_in_ms.map(|ms| snapshot.now_ms + ms);
+        let expires_at_ms = match expires_in_ms {
+            Some(ms) => match snapshot.now_ms.checked_add(ms) {
+                Some(expires_at) => Some(expires_at),
+                None => {
+                    return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
+                        InvitationGuardError::ExpirationOverflow {
+                            now_ms: snapshot.now_ms,
+                            expires_in_ms: ms,
+                        }
+                        .to_string(),
+                    ));
+                }
+            },
+            None => None,
+        };
 
         // Create the invitation fact
         let fact = InvitationFact::Sent {
@@ -353,7 +404,7 @@ impl InvitationService {
                 invitation_id,
             },
             EffectCommand::RecordReceipt {
-                operation: "send_invitation".to_string(),
+                operation: InvitationOperation::SendInvitation,
                 peer: Some(receiver_id),
             },
         ];
@@ -387,6 +438,7 @@ impl InvitationService {
 
         // Create acceptance fact
         let fact = InvitationFact::Accepted {
+            context_id: Some(snapshot.context_id),
             invitation_id: invitation_id.clone(),
             acceptor_id: snapshot.authority_id,
             accepted_at: PhysicalTime {
@@ -402,7 +454,7 @@ impl InvitationService {
             },
             EffectCommand::JournalAppend { fact },
             EffectCommand::RecordReceipt {
-                operation: "accept_invitation".to_string(),
+                operation: InvitationOperation::AcceptInvitation,
                 peer: None,
             },
         ];
@@ -436,6 +488,7 @@ impl InvitationService {
 
         // Create decline fact
         let fact = InvitationFact::Declined {
+            context_id: Some(snapshot.context_id),
             invitation_id: invitation_id.clone(),
             decliner_id: snapshot.authority_id,
             declined_at: PhysicalTime {
@@ -451,7 +504,7 @@ impl InvitationService {
             },
             EffectCommand::JournalAppend { fact },
             EffectCommand::RecordReceipt {
-                operation: "decline_invitation".to_string(),
+                operation: InvitationOperation::DeclineInvitation,
                 peer: None,
             },
         ];
@@ -485,6 +538,7 @@ impl InvitationService {
 
         // Create cancellation fact
         let fact = InvitationFact::Cancelled {
+            context_id: Some(snapshot.context_id),
             invitation_id: invitation_id.clone(),
             canceller_id: snapshot.authority_id,
             cancelled_at: PhysicalTime {
@@ -500,7 +554,7 @@ impl InvitationService {
             },
             EffectCommand::JournalAppend { fact },
             EffectCommand::RecordReceipt {
-                operation: "cancel_invitation".to_string(),
+                operation: InvitationOperation::CancelInvitation,
                 peer: None,
             },
         ];
@@ -634,6 +688,24 @@ mod tests {
     }
 
     #[test]
+    fn test_prepare_send_invitation_expiration_overflow() {
+        let service = InvitationService::new(test_authority(), InvitationConfig::default());
+        let mut snapshot = test_snapshot();
+        snapshot.now_ms = u64::MAX - 1;
+
+        let outcome = service.prepare_send_invitation(
+            &snapshot,
+            test_receiver(),
+            InvitationType::Contact { nickname: None },
+            None,
+            Some(10),
+            InvitationId::new("inv-123"),
+        );
+
+        assert!(outcome.is_denied());
+    }
+
+    #[test]
     fn test_prepare_accept_invitation_success() {
         let service = InvitationService::new(test_authority(), InvitationConfig::default());
         let snapshot = test_snapshot();
@@ -673,7 +745,7 @@ mod tests {
     fn test_invitation_type_as_string() {
         assert_eq!(
             InvitationType::Channel {
-                home_id: "b".to_string(),
+                home_id: ChannelId::from_bytes([1u8; 32]),
                 nickname_suggestion: None,
                 bootstrap: None,
             }
@@ -691,6 +763,19 @@ mod tests {
             InvitationType::Contact { nickname: None }.as_type_string(),
             "contact"
         );
+    }
+
+    #[test]
+    fn test_channel_invitation_type_rejects_invalid_home_id_on_decode() {
+        let value = serde_json::json!({
+            "Channel": {
+                "home_id": "not-a-channel-id",
+                "nickname_suggestion": null,
+                "bootstrap": null
+            }
+        });
+        let decoded: Result<InvitationType, _> = serde_json::from_value(value);
+        assert!(decoded.is_err());
     }
 
     #[test]

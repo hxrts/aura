@@ -38,7 +38,7 @@ pub(super) fn convert_invitation_type_to_bridge(
             nickname_suggestion,
             ..
         } => InvitationBridgeType::Channel {
-            home_id: home_id.clone(),
+            home_id: home_id.to_string(),
             nickname_suggestion: nickname_suggestion.clone(),
         },
         crate::handlers::invitation::InvitationType::DeviceEnrollment {
@@ -56,7 +56,7 @@ pub(super) fn convert_invitation_type_to_bridge(
             initiator_device_id: *initiator_device_id,
             device_id: *device_id,
             nickname_suggestion: nickname_suggestion.clone(),
-            ceremony_id: ceremony_id.to_string(),
+            ceremony_id: ceremony_id.clone(),
             pending_epoch: Epoch::new(*pending_epoch),
         },
     }

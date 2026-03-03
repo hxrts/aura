@@ -43,7 +43,7 @@ use aura_app::views::{
 };
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::identifiers::{AuthorityId, ChannelId};
+use aura_core::identifiers::{AuthorityId, CeremonyId, ChannelId};
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
@@ -613,7 +613,7 @@ async fn test_recovery_signal_state_tracking() {
         let mut recovery = core.read(&*RECOVERY_SIGNAL).await.unwrap();
 
         recovery.set_active_recovery(Some(RecoveryProcess {
-            id: "recovery-session-123".to_string(),
+            id: CeremonyId::new("recovery-session-123"),
             account_id: AuthorityId::new_from_entropy([0xAC; 32]),
             status: RecoveryProcessStatus::WaitingForApprovals,
             approvals_received: 0,
@@ -634,7 +634,7 @@ async fn test_recovery_signal_state_tracking() {
     {
         let recovery = wait_for_recovery(&app_core, |r| {
             r.active_recovery()
-                .is_some_and(|a| a.id == "recovery-session-123")
+                .is_some_and(|a| a.id == CeremonyId::new("recovery-session-123"))
         })
         .await;
 
@@ -642,7 +642,11 @@ async fn test_recovery_signal_state_tracking() {
             .active_recovery()
             .expect("Should have active recovery");
 
-        assert_eq!(active.id, "recovery-session-123", "Session ID should match");
+        assert_eq!(
+            active.id,
+            CeremonyId::new("recovery-session-123"),
+            "Session ID should match"
+        );
         assert_eq!(active.approvals_required, 2, "Should require 2 approvals");
         assert_eq!(active.approvals_received, 0, "No approvals yet");
         assert!(
@@ -772,7 +776,7 @@ async fn test_neighborhood_position_tracking() {
     let result = ctx
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "downtown".to_string(),
-            home_id: "library".to_string(),
+            home_id: ChannelId::from_bytes([17u8; 32]).to_string(),
             depth: "Full".to_string(),
         })
         .await;

@@ -96,6 +96,7 @@
 // =============================================================================
 
 #![allow(unpredictable_function_pointer_comparisons)]
+#![cfg_attr(test, allow(clippy::expect_used))]
 
 #[cfg(feature = "uniffi")]
 uniffi::setup_scaffolding!();

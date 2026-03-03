@@ -5,6 +5,7 @@
 use crate::core::{default_context_id_for_authority, AgentResult, AuthorityContext};
 use crate::runtime::{AuraEffectSystem, EffectContext};
 use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
+use aura_core::types::facts::FactTypeId;
 use aura_core::Hash32;
 use aura_journal::FactJournal;
 use serde::Serialize;
@@ -85,7 +86,7 @@ impl HandlerUtilities {
         authority: &AuthorityContext,
         effects: &AuraEffectSystem,
         context_id: ContextId,
-        binding_type: &str,
+        binding_type: FactTypeId,
         payload: &T,
     ) -> AgentResult<()> {
         let _ = authority; // Authority is implied by the effect system's configured identity.
@@ -107,7 +108,7 @@ impl HandlerUtilities {
         authority: &AuthorityContext,
         effects: &AuraEffectSystem,
         context_id: ContextId,
-        binding_type: &str,
+        binding_type: FactTypeId,
         binding_data: &[u8],
     ) -> AgentResult<()> {
         let _ = authority; // Authority is implied by the effect system's configured identity.

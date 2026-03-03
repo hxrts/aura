@@ -26,7 +26,47 @@ use aura_core::identifiers::{AuthorityId, CeremonyId, InvitationId};
 use aura_core::threshold::AgreementMode;
 use aura_journal::DomainFact;
 
-use crate::{InvitationFact, INVITATION_FACT_TYPE_ID};
+use crate::{
+    facts::CeremonyRelationshipId, InvitationFact, InvitationStatus, INVITATION_FACT_TYPE_ID,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InvitationDirection {
+    Inbound,
+    Outbound,
+    Observed,
+}
+
+impl InvitationDirection {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            InvitationDirection::Inbound => "inbound",
+            InvitationDirection::Outbound => "outbound",
+            InvitationDirection::Observed => "observed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CeremonyViewStatus {
+    Initiated,
+    AcceptanceReceived,
+    Committed,
+    Aborted,
+    Superseded,
+}
+
+impl CeremonyViewStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CeremonyViewStatus::Initiated => "initiated",
+            CeremonyViewStatus::AcceptanceReceived => "acceptance_received",
+            CeremonyViewStatus::Committed => "committed",
+            CeremonyViewStatus::Aborted => "aborted",
+            CeremonyViewStatus::Superseded => "superseded",
+        }
+    }
+}
 
 /// Delta type for invitation view updates.
 ///
@@ -38,9 +78,8 @@ pub enum InvitationDelta {
     /// A new invitation was created or received
     InvitationAdded {
         invitation_id: InvitationId,
-        /// Direction: "inbound" or "outbound"
-        direction: String,
-        other_party_id: String,
+        direction: InvitationDirection,
+        other_party_id: AuthorityId,
         other_party_name: String,
         /// Type: "guardian", "channel", "contact", "device"
         invitation_type: crate::InvitationType,
@@ -51,9 +90,8 @@ pub enum InvitationDelta {
     /// Invitation status changed
     InvitationStatusChanged {
         invitation_id: InvitationId,
-        old_status: String,
-        /// Status: "pending", "accepted", "declined", "expired", "cancelled"
-        new_status: String,
+        old_status: InvitationStatus,
+        new_status: InvitationStatus,
         changed_at: u64,
     },
     /// Invitation was removed/deleted
@@ -61,12 +99,11 @@ pub enum InvitationDelta {
     /// Ceremony status changed
     CeremonyStatusChanged {
         ceremony_id: CeremonyId,
-        /// Status: "initiated", "acceptance_received", "committed", "aborted", "superseded"
-        status: String,
+        status: CeremonyViewStatus,
         /// For "aborted" status, the reason
         reason: Option<String>,
         /// For "committed" status, the resulting relationship ID
-        relationship_id: Option<String>,
+        relationship_id: Option<CeremonyRelationshipId>,
         /// Agreement mode (A1/A2/A3) if available
         agreement_mode: Option<AgreementMode>,
         /// Whether reversion is still possible
@@ -233,16 +270,16 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 // Determine direction based on whether we sent or received the invitation
                 let (direction, other_party_id) = if let Some(own) = own_authority {
                     if sender_id == own {
-                        ("outbound".to_string(), format!("{receiver_id:?}"))
+                        (InvitationDirection::Outbound, receiver_id)
                     } else if receiver_id == own {
-                        ("inbound".to_string(), format!("{sender_id:?}"))
+                        (InvitationDirection::Inbound, sender_id)
                     } else {
                         // Neither sender nor receiver - this is a third-party observation
-                        ("observed".to_string(), format!("{receiver_id:?}"))
+                        (InvitationDirection::Observed, receiver_id)
                     }
                 } else {
                     // No authority context - default to outbound for Sent facts
-                    ("outbound".to_string(), format!("{receiver_id:?}"))
+                    (InvitationDirection::Outbound, receiver_id)
                 };
 
                 Some(InvitationDelta::InvitationAdded {
@@ -262,8 +299,8 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 ..
             } => Some(InvitationDelta::InvitationStatusChanged {
                 invitation_id,
-                old_status: "pending".to_string(),
-                new_status: "accepted".to_string(),
+                old_status: InvitationStatus::Pending,
+                new_status: InvitationStatus::Accepted,
                 changed_at: accepted_at.ts_ms,
             }),
             InvitationFact::Declined {
@@ -272,8 +309,8 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 ..
             } => Some(InvitationDelta::InvitationStatusChanged {
                 invitation_id,
-                old_status: "pending".to_string(),
-                new_status: "declined".to_string(),
+                old_status: InvitationStatus::Pending,
+                new_status: InvitationStatus::Declined,
                 changed_at: declined_at.ts_ms,
             }),
             InvitationFact::Cancelled { invitation_id, .. } => {
@@ -287,7 +324,7 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 ..
             } => Some(InvitationDelta::CeremonyStatusChanged {
                 ceremony_id,
-                status: "initiated".to_string(),
+                status: CeremonyViewStatus::Initiated,
                 reason: None,
                 relationship_id: None,
                 reversion_risk: !matches!(agreement_mode, Some(AgreementMode::ConsensusFinalized)),
@@ -301,7 +338,7 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 ..
             } => Some(InvitationDelta::CeremonyStatusChanged {
                 ceremony_id,
-                status: "acceptance_received".to_string(),
+                status: CeremonyViewStatus::AcceptanceReceived,
                 reason: None,
                 relationship_id: None,
                 reversion_risk: !matches!(agreement_mode, Some(AgreementMode::ConsensusFinalized)),
@@ -316,7 +353,7 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 ..
             } => Some(InvitationDelta::CeremonyStatusChanged {
                 ceremony_id,
-                status: "committed".to_string(),
+                status: CeremonyViewStatus::Committed,
                 reason: None,
                 relationship_id: Some(relationship_id),
                 reversion_risk: !matches!(agreement_mode, Some(AgreementMode::ConsensusFinalized)),
@@ -330,7 +367,7 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 ..
             } => Some(InvitationDelta::CeremonyStatusChanged {
                 ceremony_id,
-                status: "aborted".to_string(),
+                status: CeremonyViewStatus::Aborted,
                 reason: Some(reason),
                 relationship_id: None,
                 reversion_risk: true,
@@ -348,7 +385,7 @@ impl ViewDeltaReducer for InvitationViewReducer {
                     format!("{reason} (superseded by {superseding_ceremony_id})");
                 Some(InvitationDelta::CeremonyStatusChanged {
                     ceremony_id: superseded_ceremony_id,
-                    status: "superseded".to_string(),
+                    status: CeremonyViewStatus::Superseded,
                     reason: Some(superseded_reason),
                     relationship_id: None,
                     reversion_risk: true,
@@ -415,7 +452,7 @@ mod tests {
             panic!("Expected InvitationAdded delta");
         };
         assert_eq!(invitation_id.as_str(), "inv-123");
-        assert_eq!(direction, "outbound");
+        assert_eq!(*direction, InvitationDirection::Outbound);
         assert_matches!(
             invitation_type,
             crate::InvitationType::Contact { nickname: None }
@@ -455,7 +492,7 @@ mod tests {
             panic!("Expected InvitationAdded delta");
         };
         assert_eq!(invitation_id.as_str(), "inv-124");
-        assert_eq!(direction, "inbound");
+        assert_eq!(*direction, InvitationDirection::Inbound);
     }
 
     #[test]
@@ -483,8 +520,8 @@ mod tests {
             panic!("Expected InvitationStatusChanged delta");
         };
         assert_eq!(invitation_id.as_str(), "inv-456");
-        assert_eq!(old_status, "pending");
-        assert_eq!(new_status, "accepted");
+        assert_eq!(*old_status, InvitationStatus::Pending);
+        assert_eq!(*new_status, InvitationStatus::Accepted);
     }
 
     #[test]
@@ -520,18 +557,53 @@ mod tests {
     }
 
     #[test]
+    fn test_view_reducer_handles_legacy_ceremony_committed_payload() {
+        let reducer = InvitationViewReducer;
+        let legacy = serde_json::json!({
+            "CeremonyCommitted": {
+                "context_id": null,
+                "ceremony_id": "ceremony-legacy-view-1",
+                "relationship_id": "rel-0011223344556677",
+                "agreement_mode": null,
+                "trace_id": null,
+                "timestamp_ms": 123
+            }
+        });
+        let legacy_fact: InvitationFact = serde_json::from_value(legacy)
+            .unwrap_or_else(|error| panic!("legacy json should decode: {error}"));
+        let bytes = legacy_fact.to_bytes();
+        let deltas = reducer.reduce_fact(INVITATION_FACT_TYPE_ID, &bytes, None);
+
+        assert_eq!(deltas.len(), 1);
+        let delta = downcast_delta::<InvitationDelta>(&deltas[0]).unwrap();
+        let InvitationDelta::CeremonyStatusChanged {
+            status,
+            relationship_id,
+            ..
+        } = delta
+        else {
+            panic!("Expected CeremonyStatusChanged delta");
+        };
+        assert_eq!(*status, CeremonyViewStatus::Committed);
+        assert_eq!(
+            relationship_id.as_ref().map(|id| id.as_str()),
+            Some("rel-0011223344556677")
+        );
+    }
+
+    #[test]
     fn test_compact_deltas_merges_status_updates() {
         let deltas = vec![
             InvitationDelta::InvitationStatusChanged {
                 invitation_id: InvitationId::new("inv-1"),
-                old_status: "pending".to_string(),
-                new_status: "accepted".to_string(),
+                old_status: InvitationStatus::Pending,
+                new_status: InvitationStatus::Accepted,
                 changed_at: 100,
             },
             InvitationDelta::InvitationStatusChanged {
                 invitation_id: InvitationId::new("inv-1"),
-                old_status: "accepted".to_string(),
-                new_status: "cancelled".to_string(),
+                old_status: InvitationStatus::Accepted,
+                new_status: InvitationStatus::Cancelled,
                 changed_at: 200,
             },
         ];
@@ -546,7 +618,7 @@ mod tests {
         else {
             panic!("Expected InvitationStatusChanged after compaction");
         };
-        assert_eq!(new_status, "cancelled");
+        assert_eq!(*new_status, InvitationStatus::Cancelled);
         assert_eq!(*changed_at, 200);
     }
 }

@@ -45,14 +45,16 @@ pub use status_interpreter::{
 
 /// Fact type names for policy registration
 pub mod fact_types {
+    use aura_core::types::facts::FactTypeId;
+
     /// MessageSentSealed - encrypted AMP messages
-    pub const MESSAGE_SENT_SEALED: &str = "MessageSentSealed";
+    pub const MESSAGE_SENT_SEALED: FactTypeId = FactTypeId::new("MessageSentSealed");
     /// ChannelCreated - channel creation facts
-    pub const CHANNEL_CREATED: &str = "ChannelCreated";
+    pub const CHANNEL_CREATED: FactTypeId = FactTypeId::new("ChannelCreated");
     /// InvitationAccepted - accepted invitations
-    pub const INVITATION_ACCEPTED: &str = "InvitationAccepted";
+    pub const INVITATION_ACCEPTED: FactTypeId = FactTypeId::new("InvitationAccepted");
     /// GuardianBinding - guardian relationship facts
-    pub const GUARDIAN_BINDING: &str = "GuardianBinding";
+    pub const GUARDIAN_BINDING: FactTypeId = FactTypeId::new("GuardianBinding");
 }
 
 /// Create a policy registry with default policies for standard fact types.
@@ -74,16 +76,19 @@ pub fn create_default_policy_registry() -> PolicyRegistry {
     let mut registry = PolicyRegistry::new();
 
     // Messages need delivery confirmation
-    registry.register(fact_types::MESSAGE_SENT_SEALED, DropWhenFullyAcked);
+    registry.register(&fact_types::MESSAGE_SENT_SEALED, DropWhenFullyAcked);
 
     // Channels just need consensus
-    registry.register(fact_types::CHANNEL_CREATED, DropWhenFinalized);
+    registry.register(&fact_types::CHANNEL_CREATED, DropWhenFinalized);
 
     // Invitations just need consensus
-    registry.register(fact_types::INVITATION_ACCEPTED, DropWhenFinalized);
+    registry.register(&fact_types::INVITATION_ACCEPTED, DropWhenFinalized);
 
     // Guardian bindings are critical - need both
-    registry.register(fact_types::GUARDIAN_BINDING, DropWhenFinalizedAndFullyAcked);
+    registry.register(
+        &fact_types::GUARDIAN_BINDING,
+        DropWhenFinalizedAndFullyAcked,
+    );
 
     registry
 }

@@ -19,7 +19,11 @@ use crate::{
     AppCore,
 };
 use async_lock::RwLock;
-use aura_core::{identifiers::AuthorityId, types::FrostThreshold, AuraError, Hash32};
+use aura_core::{
+    identifiers::{AuthorityId, CeremonyId},
+    types::FrostThreshold,
+    AuraError, Hash32,
+};
 use aura_journal::fact::RelationalFact;
 use aura_journal::ProtocolRelationalFact;
 use std::future::Future;
@@ -41,16 +45,17 @@ use std::time::Duration;
 /// The ceremony is asynchronous; guardians can respond over time.
 pub async fn start_recovery(
     app_core: &Arc<RwLock<AppCore>>,
-    guardian_ids: Vec<String>,
+    guardian_ids: Vec<AuthorityId>,
     threshold_k: FrostThreshold,
-) -> Result<String, AuraError> {
+) -> Result<CeremonyId, AuraError> {
     let runtime = { require_runtime(app_core).await? };
 
     if guardian_ids.is_empty() {
         return Err(AuraError::invalid("Guardian list cannot be empty"));
     }
 
-    if guardian_ids.len() < threshold_k.value() as usize {
+    let threshold_required = usize::from(threshold_k.value());
+    if guardian_ids.len() < threshold_required {
         return Err(AuraError::invalid(format!(
             "Threshold {} exceeds guardian count {}",
             threshold_k.value(),
@@ -62,19 +67,23 @@ pub async fn start_recovery(
 
     let guardians = guardian_ids
         .iter()
-        .map(|id| {
-            parse_authority_id(id).map(|authority| crate::views::recovery::Guardian {
-                id: authority,
-                name: String::new(),
-                status: crate::views::recovery::GuardianStatus::Pending,
-                added_at: initiated_at,
-                last_seen: None,
-            })
+        .map(|authority| crate::views::recovery::Guardian {
+            id: *authority,
+            name: String::new(),
+            status: crate::views::recovery::GuardianStatus::Pending,
+            added_at: initiated_at,
+            last_seen: None,
         })
-        .collect::<Result<Vec<_>, AuraError>>()?;
+        .collect::<Vec<_>>();
 
     // Initiate guardian ceremony via runtime bridge
-    let total_n = guardian_ids.len() as u16;
+    let total_n = u16::try_from(guardian_ids.len()).map_err(|_| {
+        AuraError::invalid(format!(
+            "Guardian count {} exceeds supported maximum {}",
+            guardian_ids.len(),
+            u16::MAX
+        ))
+    })?;
     let ceremony_id = runtime
         .initiate_guardian_ceremony(threshold_k, total_n, &guardian_ids)
         .await
@@ -86,7 +95,7 @@ pub async fn start_recovery(
         account_id: runtime.authority_id(),
         status: RecoveryProcessStatus::WaitingForApprovals,
         approvals_received: 0,
-        approvals_required: threshold_k.value() as u32,
+        approvals_required: u32::from(threshold_k.value()),
         approved_by: Vec::new(),
         approvals: Vec::new(),
         initiated_at,
@@ -96,7 +105,7 @@ pub async fn start_recovery(
 
     let state = RecoveryState::from_parts(
         guardians,
-        threshold_k.value() as u32,
+        u32::from(threshold_k.value()),
         Some(recovery_process),
         Vec::new(), // pending_requests
         Vec::new(), // guardian_bindings
@@ -114,7 +123,7 @@ pub async fn start_recovery(
 /// **Signal pattern**: Updates RECOVERY_SIGNAL directly
 pub async fn start_recovery_from_state(
     app_core: &Arc<RwLock<AppCore>>,
-) -> Result<String, AuraError> {
+) -> Result<CeremonyId, AuraError> {
     let state = get_recovery_status(app_core).await?;
 
     if state.guardian_count() == 0 {
@@ -127,9 +136,15 @@ pub async fn start_recovery_from_state(
         return Err(AuraError::agent("Recovery already in progress"));
     }
 
-    let guardian_ids: Vec<String> = state.all_guardians().map(|g| g.id.to_string()).collect();
+    let guardian_ids: Vec<AuthorityId> = state.all_guardians().map(|g| g.id).collect();
 
-    let threshold = FrostThreshold::new(state.threshold() as u16).map_err(|e| {
+    let threshold_value = u16::try_from(state.threshold()).map_err(|_| {
+        AuraError::invalid(format!(
+            "Invalid recovery threshold {}: exceeds u16 range",
+            state.threshold()
+        ))
+    })?;
+    let threshold = FrostThreshold::new(threshold_value).map_err(|e| {
         AuraError::invalid(format!(
             "Invalid recovery threshold {}: {e}",
             state.threshold()
@@ -160,7 +175,7 @@ pub async fn toggle_guardian_contact(
             .map_err(|e| AuraError::agent(format!("Failed to create guardian invitation: {e}")))?;
     }
 
-    with_recovery_state(app_core, |state| {
+    with_recovery_state(app_core, |state| -> Result<(), AuraError> {
         if was_guardian {
             let _ = state.revoke_guardian(&contact);
         } else if let Some(existing) = state.guardian_mut(&contact) {
@@ -178,7 +193,13 @@ pub async fn toggle_guardian_contact(
             });
         }
 
-        let guardian_count = state.guardian_count() as u32;
+        let guardian_count = u32::try_from(state.guardian_count()).map_err(|_| {
+            AuraError::invalid(format!(
+                "Guardian count {} exceeds supported maximum {}",
+                state.guardian_count(),
+                u32::MAX
+            ))
+        })?;
         if guardian_count == 0 {
             state.set_threshold(0);
         } else if state.threshold() == 0 {
@@ -186,8 +207,10 @@ pub async fn toggle_guardian_contact(
         } else if state.threshold() > guardian_count {
             state.set_threshold(guardian_count);
         }
+
+        Ok(())
     })
-    .await?;
+    .await??;
 
     Ok(!was_guardian)
 }
@@ -199,7 +222,7 @@ pub async fn toggle_guardian_contact(
 /// **Signal pattern**: RuntimeBridge handles signal emission
 pub async fn approve_recovery(
     app_core: &Arc<RwLock<AppCore>>,
-    ceremony_id: &str,
+    ceremony_id: &CeremonyId,
 ) -> Result<(), AuraError> {
     let runtime = { require_runtime(app_core).await? };
 
@@ -237,7 +260,7 @@ pub async fn commit_guardian_binding(
 /// **Signal pattern**: RuntimeBridge handles signal emission
 pub async fn dispute_recovery(
     app_core: &Arc<RwLock<AppCore>>,
-    ceremony_id: &str,
+    ceremony_id: &CeremonyId,
     reason: String,
 ) -> Result<(), AuraError> {
     let runtime = { require_runtime(app_core).await? };
@@ -269,7 +292,7 @@ pub async fn get_recovery_status(
 /// approvals and ceremony completion state.
 pub async fn get_ceremony_status(
     app_core: &Arc<RwLock<AppCore>>,
-    ceremony_id: &str,
+    ceremony_id: &CeremonyId,
 ) -> Result<CeremonyStatus, AuraError> {
     let runtime = { require_runtime(app_core).await? };
 
@@ -292,7 +315,7 @@ impl CeremonyStatusLike for CeremonyStatus {
 /// Poll a recovery ceremony until completion or failure using a policy.
 pub async fn monitor_recovery_ceremony_with_policy<SleepFn, SleepFut>(
     app_core: &Arc<RwLock<AppCore>>,
-    ceremony_id: String,
+    ceremony_id: CeremonyId,
     policy: CeremonyPollPolicy,
     mut on_update: impl FnMut(&CeremonyStatus) + Send,
     mut sleep_fn: SleepFn,
@@ -383,7 +406,7 @@ mod tests {
             last_seen: Some(2000),
         }];
         let active_recovery = Some(RecoveryProcess {
-            id: "ceremony-123".to_string(),
+            id: CeremonyId::new("ceremony-123"),
             account_id: AuthorityId::new_from_entropy([1u8; 32]),
             status: RecoveryProcessStatus::WaitingForApprovals,
             approvals_received: 0,
@@ -402,6 +425,9 @@ mod tests {
         // Verify state was set
         let retrieved = get_recovery_status(&app_core).await.unwrap();
         assert!(retrieved.active_recovery().is_some());
-        assert_eq!(retrieved.active_recovery().unwrap().id, "ceremony-123");
+        assert_eq!(
+            retrieved.active_recovery().unwrap().id,
+            CeremonyId::new("ceremony-123")
+        );
     }
 }

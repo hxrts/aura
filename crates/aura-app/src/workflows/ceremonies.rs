@@ -10,6 +10,7 @@ use async_lock::RwLock;
 
 use crate::runtime_bridge::KeyRotationCeremonyStatus;
 use crate::AppCore;
+use aura_core::identifiers::{AuthorityId, CeremonyId};
 use aura_core::types::FrostThreshold;
 use aura_core::AuraError;
 use std::future::Future;
@@ -20,8 +21,8 @@ pub async fn start_guardian_ceremony(
     app_core: &Arc<RwLock<AppCore>>,
     threshold_k: FrostThreshold,
     total_n: u16,
-    guardian_ids: Vec<String>,
-) -> Result<String, AuraError> {
+    guardian_ids: Vec<AuthorityId>,
+) -> Result<CeremonyId, AuraError> {
     let core = app_core.read().await;
     core.initiate_guardian_ceremony(threshold_k, total_n, &guardian_ids)
         .await
@@ -34,7 +35,7 @@ pub async fn start_device_threshold_ceremony(
     threshold_k: FrostThreshold,
     total_n: u16,
     device_ids: Vec<String>,
-) -> Result<String, AuraError> {
+) -> Result<CeremonyId, AuraError> {
     let core = app_core.read().await;
     core.initiate_device_threshold_ceremony(threshold_k, total_n, &device_ids)
         .await
@@ -55,7 +56,7 @@ pub async fn start_device_threshold_ceremony(
 pub async fn start_device_enrollment_ceremony(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
-    invitee_authority_id: Option<String>,
+    invitee_authority_id: Option<AuthorityId>,
 ) -> Result<crate::runtime_bridge::DeviceEnrollmentStart, AuraError> {
     let core = app_core.read().await;
     core.initiate_device_enrollment_ceremony(nickname_suggestion, invitee_authority_id)
@@ -66,7 +67,7 @@ pub async fn start_device_enrollment_ceremony(
 pub async fn start_device_removal_ceremony(
     app_core: &Arc<RwLock<AppCore>>,
     device_id: String,
-) -> Result<String, AuraError> {
+) -> Result<CeremonyId, AuraError> {
     let core = app_core.read().await;
     core.initiate_device_removal_ceremony(device_id)
         .await
@@ -141,7 +142,7 @@ impl CeremonyStatusLike for KeyRotationCeremonyStatus {
 /// Get status of a key rotation ceremony (generic form).
 pub async fn get_key_rotation_ceremony_status(
     app_core: &Arc<RwLock<AppCore>>,
-    ceremony_id: &str,
+    ceremony_id: &CeremonyId,
 ) -> Result<KeyRotationCeremonyStatus, AuraError> {
     let core = app_core.read().await;
     core.get_key_rotation_ceremony_status(ceremony_id)
@@ -152,7 +153,7 @@ pub async fn get_key_rotation_ceremony_status(
 /// Cancel a key rotation ceremony (best effort).
 pub async fn cancel_key_rotation_ceremony(
     app_core: &Arc<RwLock<AppCore>>,
-    ceremony_id: &str,
+    ceremony_id: &CeremonyId,
 ) -> Result<(), AuraError> {
     let core = app_core.read().await;
     core.cancel_key_rotation_ceremony(ceremony_id)
@@ -166,7 +167,7 @@ pub async fn cancel_key_rotation_ceremony(
 /// Callers provide an `on_update` hook to receive intermediate statuses.
 pub async fn monitor_key_rotation_ceremony_with_policy<SleepFn, SleepFut>(
     app_core: &Arc<RwLock<AppCore>>,
-    ceremony_id: String,
+    ceremony_id: CeremonyId,
     policy: CeremonyPollPolicy,
     mut on_update: impl FnMut(&KeyRotationCeremonyStatus) + Send,
     mut sleep_fn: SleepFn,
@@ -233,7 +234,7 @@ where
 /// Callers provide an `on_update` hook to receive intermediate statuses.
 pub async fn monitor_key_rotation_ceremony<SleepFn, SleepFut>(
     app_core: &Arc<RwLock<AppCore>>,
-    ceremony_id: String,
+    ceremony_id: CeremonyId,
     poll_interval: Duration,
     mut on_update: impl FnMut(&KeyRotationCeremonyStatus) + Send,
     mut sleep_fn: SleepFn,

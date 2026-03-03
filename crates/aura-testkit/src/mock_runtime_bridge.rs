@@ -29,7 +29,7 @@ use aura_core::effects::amp::{
     ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
 };
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
+use aura_core::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::threshold::ThresholdConfig;
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::{Epoch, FrostThreshold};
@@ -237,6 +237,10 @@ impl MockRuntimeBridge {
     /// Generate a unique InvitationId
     fn next_invitation_id(&self) -> InvitationId {
         InvitationId::new(self.next_string_id())
+    }
+
+    fn next_ceremony_id(&self) -> CeremonyId {
+        CeremonyId::new(self.next_string_id())
     }
 
     fn now_ms(&self) -> u64 {
@@ -575,7 +579,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         &self,
         _threshold_k: FrostThreshold,
         _total_n: u16,
-        _guardian_ids: &[String],
+        _guardian_ids: &[AuthorityId],
     ) -> Result<(Epoch, Vec<Vec<u8>>, Vec<u8>), IntentError> {
         // Return mock key rotation data: (epoch, key_packages, public_key_package)
         let epoch = Epoch::new(1);
@@ -588,9 +592,9 @@ impl RuntimeBridge for MockRuntimeBridge {
         &self,
         _threshold_k: FrostThreshold,
         _total_n: u16,
-        _guardian_ids: &[String],
-    ) -> Result<String, IntentError> {
-        Ok(self.next_string_id())
+        _guardian_ids: &[AuthorityId],
+    ) -> Result<CeremonyId, IntentError> {
+        Ok(self.next_ceremony_id())
     }
 
     async fn initiate_device_threshold_ceremony(
@@ -598,17 +602,17 @@ impl RuntimeBridge for MockRuntimeBridge {
         _threshold_k: FrostThreshold,
         _total_n: u16,
         _device_ids: &[String],
-    ) -> Result<String, IntentError> {
-        Ok(self.next_string_id())
+    ) -> Result<CeremonyId, IntentError> {
+        Ok(self.next_ceremony_id())
     }
 
     async fn initiate_device_enrollment_ceremony(
         &self,
         nickname_suggestion: String,
-        _invitee_authority_id: Option<String>,
+        _invitee_authority_id: Option<AuthorityId>,
     ) -> Result<DeviceEnrollmentStart, IntentError> {
         Ok(DeviceEnrollmentStart {
-            ceremony_id: self.next_string_id(),
+            ceremony_id: self.next_ceremony_id(),
             enrollment_code: format!("aura-enroll:mock:{nickname_suggestion}"),
             pending_epoch: Epoch::new(1),
             device_id: DeviceId::new_from_entropy([3u8; 32]),
@@ -618,13 +622,16 @@ impl RuntimeBridge for MockRuntimeBridge {
     async fn initiate_device_removal_ceremony(
         &self,
         _device_id: String,
-    ) -> Result<String, IntentError> {
-        Ok(self.next_string_id())
+    ) -> Result<CeremonyId, IntentError> {
+        Ok(self.next_ceremony_id())
     }
 
-    async fn get_ceremony_status(&self, ceremony_id: &str) -> Result<CeremonyStatus, IntentError> {
+    async fn get_ceremony_status(
+        &self,
+        ceremony_id: &CeremonyId,
+    ) -> Result<CeremonyStatus, IntentError> {
         Ok(CeremonyStatus {
-            ceremony_id: ceremony_id.to_string(),
+            ceremony_id: ceremony_id.clone(),
             accepted_count: 0,
             total_count: 3,
             threshold: 2,
@@ -640,10 +647,10 @@ impl RuntimeBridge for MockRuntimeBridge {
 
     async fn get_key_rotation_ceremony_status(
         &self,
-        ceremony_id: &str,
+        ceremony_id: &CeremonyId,
     ) -> Result<KeyRotationCeremonyStatus, IntentError> {
         Ok(KeyRotationCeremonyStatus {
-            ceremony_id: ceremony_id.to_string(),
+            ceremony_id: ceremony_id.clone(),
             kind: CeremonyKind::GuardianRotation,
             accepted_count: 0,
             total_count: 3,
@@ -658,17 +665,20 @@ impl RuntimeBridge for MockRuntimeBridge {
         })
     }
 
-    async fn cancel_key_rotation_ceremony(&self, _ceremony_id: &str) -> Result<(), IntentError> {
+    async fn cancel_key_rotation_ceremony(
+        &self,
+        _ceremony_id: &CeremonyId,
+    ) -> Result<(), IntentError> {
         Ok(())
     }
 
-    async fn get_invited_peer_ids(&self) -> Vec<String> {
+    async fn get_invited_peer_ids(&self) -> Vec<AuthorityId> {
         Vec::new()
     }
 
     async fn respond_to_guardian_ceremony(
         &self,
-        _ceremony_id: &str,
+        _ceremony_id: &CeremonyId,
         _accept: bool,
         _reason: Option<String>,
     ) -> Result<(), IntentError> {

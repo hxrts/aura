@@ -1,6 +1,6 @@
 //! # Neighborhood View State
 
-use aura_core::identifiers::ChannelId;
+use aura_core::identifiers::{AuthorityId, ChannelId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -79,7 +79,7 @@ pub struct NeighborhoodState {
     ///
     /// Managed by the network workflow - terminals should not maintain local peer state.
     #[serde(default)]
-    connected_peers: HashSet<String>,
+    connected_peers: HashSet<AuthorityId>,
 }
 
 impl NeighborhoodState {
@@ -216,7 +216,7 @@ impl NeighborhoodState {
 
     /// Get all connected peers
     #[must_use]
-    pub fn connected_peers(&self) -> &HashSet<String> {
+    pub fn connected_peers(&self) -> &HashSet<AuthorityId> {
         &self.connected_peers
     }
 
@@ -228,17 +228,17 @@ impl NeighborhoodState {
 
     /// Check if a peer is connected
     #[must_use]
-    pub fn has_connected_peer(&self, peer_id: &str) -> bool {
+    pub fn has_connected_peer(&self, peer_id: &AuthorityId) -> bool {
         self.connected_peers.contains(peer_id)
     }
 
     /// Add a connected peer. Returns true if newly added.
-    pub fn add_connected_peer(&mut self, peer_id: String) -> bool {
+    pub fn add_connected_peer(&mut self, peer_id: AuthorityId) -> bool {
         self.connected_peers.insert(peer_id)
     }
 
     /// Remove a connected peer. Returns true if was present.
-    pub fn remove_connected_peer(&mut self, peer_id: &str) -> bool {
+    pub fn remove_connected_peer(&mut self, peer_id: &AuthorityId) -> bool {
         self.connected_peers.remove(peer_id)
     }
 

@@ -485,11 +485,8 @@ use crate::views::invitations::InvitationType;
 /// like whether it's a "contact" (default) invitation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InvitationRoleValue {
-    /// Contact invitation (default for unknown roles)
-    Contact {
-        /// Optional nickname for the contact
-        nickname: Option<String>,
-    },
+    /// Contact invitation.
+    Contact,
     /// Guardian invitation
     Guardian,
     /// Channel/Chat invitation
@@ -501,7 +498,7 @@ impl InvitationRoleValue {
     #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Contact { .. } => "contact",
+            Self::Contact => "contact",
             Self::Guardian => "guardian",
             Self::Channel => "channel",
         }
@@ -511,7 +508,7 @@ impl InvitationRoleValue {
     #[must_use]
     pub fn to_invitation_type(&self) -> InvitationType {
         match self {
-            Self::Contact { .. } => InvitationType::Home,
+            Self::Contact => InvitationType::Home,
             Self::Guardian => InvitationType::Guardian,
             Self::Channel => InvitationType::Chat,
         }
@@ -521,20 +518,40 @@ impl InvitationRoleValue {
 impl std::fmt::Display for InvitationRoleValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Contact {
-                nickname: Some(name),
-            } => write!(f, "contact (nickname: {name})"),
-            Self::Contact { nickname: None } => write!(f, "contact"),
+            Self::Contact => write!(f, "contact"),
             Self::Guardian => write!(f, "guardian"),
             Self::Channel => write!(f, "channel"),
         }
     }
 }
 
+/// Strict invitation role parse errors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InvitationRoleParseError {
+    /// Role input was empty.
+    Empty,
+    /// Role input does not match a supported role.
+    InvalidRole(String),
+}
+
+impl std::fmt::Display for InvitationRoleParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Empty => write!(f, "role cannot be empty"),
+            Self::InvalidRole(role) => write!(
+                f,
+                "invalid invitation role '{role}' (expected one of: contact, guardian, channel)"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for InvitationRoleParseError {}
+
 /// Parse an invitation role string into a portable value.
 ///
-/// Recognizes "guardian" and "channel" (case-insensitive).
-/// Any other value is treated as a contact role with the input as nickname.
+/// Recognizes "contact", "guardian", and "channel" (case-insensitive).
+/// Unknown roles are rejected with a parse error.
 ///
 /// # Examples
 ///
@@ -542,31 +559,32 @@ impl std::fmt::Display for InvitationRoleValue {
 /// use aura_app::workflows::invitation::parse_invitation_role;
 ///
 /// // Known roles
-/// let guardian = parse_invitation_role("guardian");
+/// let guardian = parse_invitation_role("guardian").unwrap();
 /// assert!(matches!(guardian, InvitationRoleValue::Guardian));
 ///
-/// let channel = parse_invitation_role("CHANNEL");
+/// let channel = parse_invitation_role("CHANNEL").unwrap();
 /// assert!(matches!(channel, InvitationRoleValue::Channel));
 ///
-/// // Unknown roles become contact with nickname
-/// let custom = parse_invitation_role("friend");
-/// assert!(matches!(custom, InvitationRoleValue::Contact { nickname: Some(n) } if n == "friend"));
+/// // Invalid roles fail
+/// assert!(parse_invitation_role("friend").is_err());
 /// ```
-#[must_use]
-pub fn parse_invitation_role(role: &str) -> InvitationRoleValue {
-    if role.eq_ignore_ascii_case("guardian") {
-        InvitationRoleValue::Guardian
-    } else if role.eq_ignore_ascii_case("channel") {
-        InvitationRoleValue::Channel
-    } else {
-        // Default: treat as contact with optional nickname
-        let nickname = if role.is_empty() {
-            None
-        } else {
-            Some(role.to_string())
-        };
-        InvitationRoleValue::Contact { nickname }
+pub fn parse_invitation_role(role: &str) -> Result<InvitationRoleValue, InvitationRoleParseError> {
+    let normalized = role.trim();
+    if normalized.is_empty() {
+        return Err(InvitationRoleParseError::Empty);
     }
+    if normalized.eq_ignore_ascii_case("contact") {
+        return Ok(InvitationRoleValue::Contact);
+    }
+    if normalized.eq_ignore_ascii_case("guardian") {
+        return Ok(InvitationRoleValue::Guardian);
+    }
+    if normalized.eq_ignore_ascii_case("channel") {
+        return Ok(InvitationRoleValue::Channel);
+    }
+    Err(InvitationRoleParseError::InvalidRole(
+        normalized.to_string(),
+    ))
 }
 
 /// Format an invitation type for human-readable display.
@@ -678,85 +696,80 @@ mod tests {
 
     #[test]
     fn test_parse_invitation_role_guardian() {
-        let result = parse_invitation_role("guardian");
+        let result = parse_invitation_role("guardian")
+            .unwrap_or_else(|error| panic!("guardian role should parse: {error}"));
         assert_eq!(result, InvitationRoleValue::Guardian);
     }
 
     #[test]
     fn test_parse_invitation_role_guardian_case_insensitive() {
         assert_eq!(
-            parse_invitation_role("GUARDIAN"),
+            parse_invitation_role("GUARDIAN")
+                .unwrap_or_else(|error| panic!("guardian role should parse: {error}")),
             InvitationRoleValue::Guardian
         );
         assert_eq!(
-            parse_invitation_role("Guardian"),
+            parse_invitation_role("Guardian")
+                .unwrap_or_else(|error| panic!("guardian role should parse: {error}")),
             InvitationRoleValue::Guardian
         );
     }
 
     #[test]
     fn test_parse_invitation_role_channel() {
-        let result = parse_invitation_role("channel");
+        let result = parse_invitation_role("channel")
+            .unwrap_or_else(|error| panic!("channel role should parse: {error}"));
         assert_eq!(result, InvitationRoleValue::Channel);
     }
 
     #[test]
     fn test_parse_invitation_role_channel_case_insensitive() {
         assert_eq!(
-            parse_invitation_role("CHANNEL"),
+            parse_invitation_role("CHANNEL")
+                .unwrap_or_else(|error| panic!("channel role should parse: {error}")),
             InvitationRoleValue::Channel
         );
         assert_eq!(
-            parse_invitation_role("Channel"),
+            parse_invitation_role("Channel")
+                .unwrap_or_else(|error| panic!("channel role should parse: {error}")),
             InvitationRoleValue::Channel
         );
     }
 
     #[test]
-    fn test_parse_invitation_role_contact_default() {
+    fn test_parse_invitation_role_contact() {
+        let result = parse_invitation_role("contact")
+            .unwrap_or_else(|error| panic!("contact role should parse: {error}"));
+        assert_eq!(result, InvitationRoleValue::Contact);
+    }
+
+    #[test]
+    fn test_parse_invitation_role_rejects_invalid_role() {
         let result = parse_invitation_role("friend");
         assert!(matches!(
             result,
-            InvitationRoleValue::Contact { nickname: Some(n) } if n == "friend"
+            Err(InvitationRoleParseError::InvalidRole(role)) if role == "friend"
         ));
     }
 
     #[test]
-    fn test_parse_invitation_role_empty_is_contact_no_nickname() {
+    fn test_parse_invitation_role_rejects_empty_role() {
         let result = parse_invitation_role("");
-        assert!(matches!(
-            result,
-            InvitationRoleValue::Contact { nickname: None }
-        ));
+        assert_eq!(result, Err(InvitationRoleParseError::Empty));
     }
 
     #[test]
     fn test_invitation_role_as_str() {
         assert_eq!(InvitationRoleValue::Guardian.as_str(), "guardian");
         assert_eq!(InvitationRoleValue::Channel.as_str(), "channel");
-        assert_eq!(
-            InvitationRoleValue::Contact { nickname: None }.as_str(),
-            "contact"
-        );
+        assert_eq!(InvitationRoleValue::Contact.as_str(), "contact");
     }
 
     #[test]
     fn test_invitation_role_display() {
         assert_eq!(format!("{}", InvitationRoleValue::Guardian), "guardian");
         assert_eq!(format!("{}", InvitationRoleValue::Channel), "channel");
-        assert_eq!(
-            format!("{}", InvitationRoleValue::Contact { nickname: None }),
-            "contact"
-        );
-        assert_eq!(
-            format!(
-                "{}",
-                InvitationRoleValue::Contact {
-                    nickname: Some("Alice".to_string())
-                }
-            ),
-            "contact (nickname: Alice)"
-        );
+        assert_eq!(format!("{}", InvitationRoleValue::Contact), "contact");
     }
 
     #[test]
@@ -770,7 +783,7 @@ mod tests {
             InvitationType::Chat
         );
         assert_eq!(
-            InvitationRoleValue::Contact { nickname: None }.to_invitation_type(),
+            InvitationRoleValue::Contact.to_invitation_type(),
             InvitationType::Home
         );
     }

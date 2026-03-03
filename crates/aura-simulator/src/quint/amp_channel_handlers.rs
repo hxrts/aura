@@ -251,7 +251,7 @@ impl AmpChannelHarness {
             .map_err(|e| AuraError::internal(format!("import invitation: {e}")))?;
 
         if let InvitationType::Channel { home_id, .. } = &invitation.invitation_type {
-            let invite_channel = channel_id_from_input(home_id);
+            let invite_channel = *home_id;
             if invite_channel != channel {
                 return Err(AuraError::invalid("invitation channel mismatch for accept"));
             }

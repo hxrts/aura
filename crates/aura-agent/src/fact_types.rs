@@ -7,6 +7,7 @@ use aura_authentication::AUTH_FACT_TYPE_ID;
 use aura_authorization::WOT_FACT_TYPE_ID;
 use aura_chat::CHAT_FACT_TYPE_ID;
 use aura_consensus::facts::CONSENSUS_FACT_TYPE_ID;
+use aura_core::types::facts::FactTypeId;
 use aura_invitation::INVITATION_FACT_TYPE_ID;
 use aura_maintenance::MAINTENANCE_FACT_TYPE_ID;
 use aura_recovery::RECOVERY_FACT_TYPE_ID;
@@ -25,6 +26,24 @@ use aura_social::moderation::facts::{
 use aura_store::STORAGE_FACT_TYPE_ID;
 use aura_transport::TRANSPORT_FACT_TYPE_ID;
 use once_cell::sync::Lazy;
+
+pub const AUTH_AUTHENTICATED_FACT_TYPE_ID: FactTypeId = FactTypeId::new("auth_authenticated");
+
+pub const RECOVERY_INITIATED_FACT_TYPE_ID: FactTypeId = FactTypeId::new("recovery_initiated");
+pub const RECOVERY_GUARDIAN_APPROVED_FACT_TYPE_ID: FactTypeId =
+    FactTypeId::new("recovery_guardian_approved");
+pub const RECOVERY_COMPLETED_FACT_TYPE_ID: FactTypeId = FactTypeId::new("recovery_completed");
+pub const RECOVERY_CANCELLED_FACT_TYPE_ID: FactTypeId = FactTypeId::new("recovery_cancelled");
+
+pub const SESSION_CREATED_FACT_TYPE_ID: FactTypeId = FactTypeId::new("session_created");
+pub const SESSION_INVITATION_SENT_FACT_TYPE_ID: FactTypeId =
+    FactTypeId::new("session_invitation_sent");
+pub const SESSION_METADATA_UPDATED_FACT_TYPE_ID: FactTypeId =
+    FactTypeId::new("session_metadata_updated");
+pub const SESSION_PARTICIPANT_ADDED_FACT_TYPE_ID: FactTypeId =
+    FactTypeId::new("session_participant_added");
+pub const SESSION_PARTICIPANT_REMOVED_FACT_TYPE_ID: FactTypeId =
+    FactTypeId::new("session_participant_removed");
 
 pub static FACT_TYPE_IDS: Lazy<Vec<&'static str>> = Lazy::new(|| {
     vec![

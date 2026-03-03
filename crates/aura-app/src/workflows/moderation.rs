@@ -8,7 +8,7 @@
 
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::{cooperative_yield, require_runtime};
-use crate::workflows::{channel_ref::ChannelRef, snapshot_policy::chat_snapshot};
+use crate::workflows::{channel_ref::ChannelSelector, snapshot_policy::chat_snapshot};
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::{
@@ -35,8 +35,8 @@ struct ModerationScope {
     peers: Vec<aura_core::identifiers::AuthorityId>,
 }
 
-fn parse_channel_hint(channel: &str) -> ChannelId {
-    ChannelRef::parse(channel).to_channel_id()
+fn parse_channel_hint(channel: &str) -> Result<ChannelSelector, AuraError> {
+    ChannelSelector::parse(channel)
 }
 
 fn best_home_for_context(
@@ -63,15 +63,38 @@ fn parse_channel_id_from_message_id(message_id: &str) -> Option<ChannelId> {
     encoded_channel.parse::<ChannelId>().ok()
 }
 
-async fn resolve_channel_id(app_core: &Arc<RwLock<AppCore>>, channel: &str) -> ChannelId {
-    let parsed = parse_channel_hint(channel);
+async fn resolve_channel_id(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel: &str,
+) -> Result<ChannelId, AuraError> {
+    let parsed = parse_channel_hint(channel)?;
     let chat = chat_snapshot(app_core).await;
-    let resolved = chat
-        .all_channels()
-        .find(|entry| entry.id == parsed || entry.name.eq_ignore_ascii_case(channel))
-        .map(|entry| entry.id)
-        .unwrap_or(parsed);
-    resolved
+    let homes = {
+        let core = app_core.read().await;
+        core.views().get_homes()
+    };
+    match parsed {
+        ChannelSelector::Id(channel_id) => {
+            if chat.channel(&channel_id).is_some() || homes.home_state(&channel_id).is_some() {
+                Ok(channel_id)
+            } else {
+                Err(AuraError::not_found(format!(
+                    "Unknown channel scope: {channel_id}"
+                )))
+            }
+        }
+        ChannelSelector::Name(name) => chat
+            .all_channels()
+            .find(|entry| entry.name.eq_ignore_ascii_case(&name))
+            .map(|entry| entry.id)
+            .or_else(|| {
+                homes
+                    .iter()
+                    .find(|(_, home)| home.name.eq_ignore_ascii_case(&name))
+                    .map(|(home_id, _)| *home_id)
+            })
+            .ok_or_else(|| AuraError::not_found(format!("Unknown channel scope: {channel}"))),
+    }
 }
 
 #[cfg(test)]
@@ -85,12 +108,11 @@ async fn resolve_scope(
         core.views().get_homes()
     };
 
-    let hinted_channel = channel_hint.map(|hint| {
-        chat.all_channels()
-            .find(|entry| entry.name.eq_ignore_ascii_case(hint))
-            .map(|entry| entry.id)
-            .unwrap_or_else(|| parse_channel_hint(hint))
-    });
+    let hinted_channel = if let Some(hint) = channel_hint {
+        Some(resolve_channel_id(app_core, hint).await?)
+    } else {
+        None
+    };
 
     let context_from_channel = hinted_channel.and_then(|channel_id| {
         chat.channel(&channel_id)
@@ -133,8 +155,8 @@ async fn resolve_scope(
                 peers,
             )
         } else if let Some(context_id) = context_from_channel {
-            let fallback_home = ChannelRef::parse("home").to_channel_id();
-            let home_id = hinted_channel.unwrap_or(fallback_home);
+            let home_id = hinted_channel
+                .ok_or_else(|| AuraError::not_found("Channel hint missing for moderation scope"))?;
             let peers = homes
                 .current_home()
                 .map(|home| home.residents.iter().map(|resident| resident.id).collect())
@@ -342,7 +364,7 @@ pub async fn kick_user(
     reason: Option<&str>,
     kicked_at_ms: u64,
 ) -> Result<(), AuraError> {
-    let channel_id = resolve_channel_id(app_core, channel).await;
+    let channel_id = resolve_channel_id(app_core, channel).await?;
     let target_id = resolve_target_authority(app_core, target).await?;
     kick_user_resolved(app_core, channel_id, target_id, reason, kicked_at_ms).await
 }
@@ -395,7 +417,10 @@ pub async fn ban_user(
     banned_at_ms: u64,
 ) -> Result<(), AuraError> {
     let target_id = resolve_target_authority(app_core, target).await?;
-    let channel_id = channel_hint.map(parse_channel_hint);
+    let channel_id = match channel_hint {
+        Some(hint) => Some(resolve_channel_id(app_core, hint).await?),
+        None => None,
+    };
     ban_user_resolved(app_core, channel_id, target_id, reason, banned_at_ms).await
 }
 
@@ -452,7 +477,10 @@ pub async fn unban_user(
     target: &str,
 ) -> Result<(), AuraError> {
     let target_id = resolve_target_authority(app_core, target).await?;
-    let channel_id = channel_hint.map(parse_channel_hint);
+    let channel_id = match channel_hint {
+        Some(hint) => Some(resolve_channel_id(app_core, hint).await?),
+        None => None,
+    };
     unban_user_resolved(app_core, channel_id, target_id).await
 }
 
@@ -499,7 +527,10 @@ pub async fn mute_user(
     muted_at_ms: u64,
 ) -> Result<(), AuraError> {
     let target_id = resolve_target_authority(app_core, target).await?;
-    let channel_id = channel_hint.map(parse_channel_hint);
+    let channel_id = match channel_hint {
+        Some(hint) => Some(resolve_channel_id(app_core, hint).await?),
+        None => None,
+    };
     mute_user_resolved(app_core, channel_id, target_id, duration_secs, muted_at_ms).await
 }
 
@@ -559,7 +590,10 @@ pub async fn unmute_user(
     target: &str,
 ) -> Result<(), AuraError> {
     let target_id = resolve_target_authority(app_core, target).await?;
-    let channel_id = channel_hint.map(parse_channel_hint);
+    let channel_id = match channel_hint {
+        Some(hint) => Some(resolve_channel_id(app_core, hint).await?),
+        None => None,
+    };
     unmute_user_resolved(app_core, channel_id, target_id).await
 }
 

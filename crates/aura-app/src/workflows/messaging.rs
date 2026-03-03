@@ -3,12 +3,12 @@
 //! This module contains messaging operations that are portable across all frontends.
 //! Uses typed reactive signals for state reads/writes.
 
-use crate::workflows::channel_ref::ChannelRef;
+use crate::workflows::channel_ref::{ChannelRef, ChannelSelector};
 use crate::workflows::chat_commands::normalize_channel_name;
 use crate::workflows::context::current_home_context_or_fallback;
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::{cooperative_yield, require_runtime};
-use crate::workflows::signals::read_signal;
+use crate::workflows::signals::{emit_signal, read_signal};
 use crate::workflows::snapshot_policy::{chat_snapshot, contacts_snapshot};
 use crate::workflows::state_helpers::with_chat_state;
 use crate::{
@@ -83,22 +83,23 @@ fn pair_dm_context_id(left: AuthorityId, right: AuthorityId) -> ContextId {
 }
 
 /// Parse a channel string into a ChannelRef.
-fn parse_channel_ref(channel: &str) -> ChannelRef {
-    ChannelRef::parse(channel)
+fn parse_channel_ref(channel: &str) -> Result<ChannelSelector, AuraError> {
+    ChannelSelector::parse(channel)
 }
 
-fn channel_id_from_input(channel: &str) -> ChannelId {
-    parse_channel_ref(channel).to_channel_id()
+fn channel_id_from_input(channel: &str) -> Result<ChannelId, AuraError> {
+    Ok(parse_channel_ref(channel)?.to_channel_id())
 }
 
 async fn resolve_channel_id_from_state_or_input(
     app_core: &Arc<RwLock<AppCore>>,
     channel_input: &str,
-) -> ChannelId {
-    let raw = channel_input.trim();
-    if raw.is_empty() {
-        return channel_id_from_input(channel_input);
+) -> Result<ChannelId, AuraError> {
+    let selector = parse_channel_ref(channel_input)?;
+    if let ChannelSelector::Id(channel_id) = &selector {
+        return Ok(*channel_id);
     }
+    let raw = channel_input.trim();
 
     let normalized_name = raw.trim_start_matches('#').trim();
     let normalized_lower = normalized_name.to_ascii_lowercase();
@@ -116,7 +117,7 @@ async fn resolve_channel_id_from_state_or_input(
             || format!("home:{}", channel.id).eq_ignore_ascii_case(raw)
             || channel.name.to_ascii_lowercase() == normalized_lower
     }) {
-        return existing.id;
+        return Ok(existing.id);
     }
 
     let homes = {
@@ -137,10 +138,10 @@ async fn resolve_channel_id_from_state_or_input(
         .max_by_key(|(_, is_admin, resident_count)| (u8::from(*is_admin), *resident_count))
         .map(|(home_id, _, _)| home_id)
     {
-        return home_id;
+        return Ok(home_id);
     }
 
-    channel_id_from_input(channel_input)
+    Ok(selector.to_channel_id())
 }
 
 async fn matching_channel_ids(
@@ -344,7 +345,7 @@ pub async fn current_home_channel_id(
     }
 
     // Fallback: derive a default channel ID from "home" string
-    Ok(channel_id_from_input("home"))
+    channel_id_from_input("home")
 }
 
 /// Get current home channel reference string (e.g., "home:<id>") for display.
@@ -670,74 +671,90 @@ async fn ensure_home_state_for_channel(
     members: &[AuthorityId],
     now_ms: u64,
 ) -> Result<(), AuraError> {
-    let mut core = app_core.write().await;
-    let mut homes = core.views().get_homes();
+    let mut changed = false;
+    let homes_state = {
+        let mut core = app_core.write().await;
+        let mut homes = core.views().get_homes();
 
-    if let Some(home) = homes.home_mut(&channel_id) {
-        if home.context_id.is_none() {
-            home.context_id = Some(context_id);
-        }
-        if let Some(member) = home.resident_mut(&owner_id) {
-            member.role = HomeRole::Member;
+        if let Some(home) = homes.home_mut(&channel_id) {
+            if home.context_id.is_none() {
+                home.context_id = Some(context_id);
+                changed = true;
+            }
+            if let Some(member) = home.resident_mut(&owner_id) {
+                if member.role != HomeRole::Member {
+                    member.role = HomeRole::Member;
+                    changed = true;
+                }
+            } else {
+                home.add_resident(Resident {
+                    id: owner_id,
+                    name: owner_id.to_string(),
+                    role: HomeRole::Member,
+                    is_online: true,
+                    joined_at: now_ms,
+                    last_seen: Some(now_ms),
+                    storage_allocated: HomeState::RESIDENT_ALLOCATION,
+                });
+                changed = true;
+            }
+
+            for member in members {
+                if *member == owner_id || home.resident(member).is_some() {
+                    continue;
+                }
+                home.add_resident(Resident {
+                    id: *member,
+                    name: member.to_string(),
+                    role: HomeRole::Participant,
+                    is_online: true,
+                    joined_at: now_ms,
+                    last_seen: Some(now_ms),
+                    storage_allocated: HomeState::RESIDENT_ALLOCATION,
+                });
+                changed = true;
+            }
         } else {
-            home.add_resident(Resident {
-                id: owner_id,
-                name: owner_id.to_string(),
-                role: HomeRole::Member,
-                is_online: true,
-                joined_at: now_ms,
-                last_seen: Some(now_ms),
-                storage_allocated: HomeState::RESIDENT_ALLOCATION,
-            });
+            let mut home = HomeState::new(
+                channel_id,
+                Some(channel_name.to_string()),
+                owner_id,
+                now_ms,
+                context_id,
+            );
+            for member in members {
+                if *member == owner_id || home.resident(member).is_some() {
+                    continue;
+                }
+                home.add_resident(Resident {
+                    id: *member,
+                    name: member.to_string(),
+                    role: HomeRole::Participant,
+                    is_online: true,
+                    joined_at: now_ms,
+                    last_seen: Some(now_ms),
+                    storage_allocated: HomeState::RESIDENT_ALLOCATION,
+                });
+            }
+            homes.add_home_with_auto_select(home);
+            changed = true;
         }
 
-        for member in members {
-            if *member == owner_id || home.resident(member).is_some() {
-                continue;
-            }
-            home.add_resident(Resident {
-                id: *member,
-                name: member.to_string(),
-                role: HomeRole::Participant,
-                is_online: true,
-                joined_at: now_ms,
-                last_seen: Some(now_ms),
-                storage_allocated: HomeState::RESIDENT_ALLOCATION,
-            });
+        if homes.current_home_id().is_none() {
+            homes.select_home(Some(channel_id));
+            changed = true;
         }
-    } else {
-        let mut home = HomeState::new(
-            channel_id,
-            Some(channel_name.to_string()),
-            owner_id,
-            now_ms,
-            context_id,
-        );
-        for member in members {
-            if *member == owner_id || home.resident(member).is_some() {
-                continue;
-            }
-            home.add_resident(Resident {
-                id: *member,
-                name: member.to_string(),
-                role: HomeRole::Participant,
-                is_online: true,
-                joined_at: now_ms,
-                last_seen: Some(now_ms),
-                storage_allocated: HomeState::RESIDENT_ALLOCATION,
-            });
-        }
-        homes.add_home_with_auto_select(home);
+
+        core.views_mut().set_homes(homes.clone());
+        homes
+    };
+
+    if changed {
+        emit_signal(app_core, &*HOMES_SIGNAL, homes_state, HOMES_SIGNAL_NAME).await?;
     }
 
-    if homes.current_home_id().is_none() {
-        homes.select_home(Some(channel_id));
-    }
-
-    core.views_mut().set_homes(homes);
     Ok(())
 }
-
 async fn recipient_peers_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
@@ -857,7 +874,9 @@ pub async fn create_channel(
         channel_owner = Some(runtime.authority_id());
         let context_id = current_home_context_or_fallback(app_core).await?;
         channel_context = Some(context_id);
-        let channel_hint = (!name.trim().is_empty()).then(|| channel_id_from_input(name));
+        let channel_hint = (!name.trim().is_empty())
+            .then(|| channel_id_from_input(name))
+            .transpose()?;
         let params = ChannelCreateParams {
             context: context_id,
             channel: channel_hint,
@@ -913,7 +932,7 @@ pub async fn create_channel(
             )));
         }
     } else if !name.trim().is_empty() {
-        channel_id = channel_id_from_input(name);
+        channel_id = channel_id_from_input(name)?;
     }
 
     // Update UI state for responsiveness; reactive reductions may also update this later.
@@ -1077,7 +1096,7 @@ pub async fn join_channel_by_name(
         return Err(AuraError::invalid("Channel name cannot be empty"));
     }
 
-    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_name).await;
+    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_name).await?;
     let channel_exists_locally = {
         let chat = chat_snapshot(app_core).await;
         chat.channel(&channel_id).is_some()
@@ -1198,7 +1217,7 @@ pub async fn leave_channel_by_name(
 ) -> Result<(), AuraError> {
     let mut candidate_ids = matching_channel_ids(app_core, channel_name).await;
     if candidate_ids.is_empty() {
-        candidate_ids.push(resolve_channel_id_from_state_or_input(app_core, channel_name).await);
+        candidate_ids.push(resolve_channel_id_from_state_or_input(app_core, channel_name).await?);
     }
 
     // Channel views can transiently carry duplicate IDs for the same display name
@@ -1267,7 +1286,7 @@ pub async fn close_channel_by_name(
     channel_name: &str,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
-    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_name).await;
+    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_name).await?;
     close_channel(app_core, channel_id, timestamp_ms).await
 }
 
@@ -1299,7 +1318,7 @@ pub async fn set_topic_by_name(
     text: &str,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
-    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_name).await;
+    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_name).await?;
     set_topic(app_core, channel_id, text, timestamp_ms).await
 }
 
@@ -1341,7 +1360,7 @@ pub async fn send_message_by_name(
     content: &str,
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
-    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_name).await;
+    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_name).await?;
     let channel_ref = ChannelRef::Id(channel_id);
     send_message_ref(app_core, channel_ref, content, timestamp_ms).await
 }
@@ -1725,7 +1744,7 @@ pub async fn invite_user_to_channel(
 ) -> Result<InvitationId, AuraError> {
     // Resolve via contacts first so command targets can use IDs or contact names.
     let receiver = resolve_target_authority_for_invite(app_core, target_user_id).await?;
-    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_id).await;
+    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_id).await?;
 
     invite_authority_to_channel(app_core, receiver, channel_id, message, ttl_ms).await
 }
@@ -2034,9 +2053,15 @@ mod tests {
         .await
         .unwrap();
 
-        let by_name = resolve_channel_id_from_state_or_input(&app_core, "slash-lab").await;
-        let by_hash = resolve_channel_id_from_state_or_input(&app_core, "#slash-lab").await;
-        let by_spaced_hash = resolve_channel_id_from_state_or_input(&app_core, "# slash-lab").await;
+        let by_name = resolve_channel_id_from_state_or_input(&app_core, "slash-lab")
+            .await
+            .expect("name selector should resolve");
+        let by_hash = resolve_channel_id_from_state_or_input(&app_core, "#slash-lab")
+            .await
+            .expect("#name selector should resolve");
+        let by_spaced_hash = resolve_channel_id_from_state_or_input(&app_core, "# slash-lab")
+            .await
+            .expect("# spaced selector should resolve");
 
         assert_eq!(by_name, channel_id);
         assert_eq!(by_hash, channel_id);
@@ -2068,7 +2093,9 @@ mod tests {
             core.views_mut().set_homes(homes);
         }
 
-        let resolved = resolve_channel_id_from_state_or_input(&app_core, "#slash-lab").await;
+        let resolved = resolve_channel_id_from_state_or_input(&app_core, "#slash-lab")
+            .await
+            .expect("home projection selector should resolve");
         assert_eq!(resolved, home_id);
     }
 
@@ -2105,7 +2132,9 @@ mod tests {
             .await
             .expect("leave projection should preserve canonical channel entry");
 
-        let resolved = resolve_channel_id_from_state_or_input(&app_core, "slash-lab").await;
+        let resolved = resolve_channel_id_from_state_or_input(&app_core, "slash-lab")
+            .await
+            .expect("name selector should resolve");
         assert_eq!(resolved, channel_id);
 
         let chat = chat_snapshot(&app_core).await;

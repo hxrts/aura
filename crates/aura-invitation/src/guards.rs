@@ -29,7 +29,7 @@ use aura_core::FlowCost;
 use aura_guards::types;
 
 use crate::facts::InvitationFact;
-use crate::InvitationType;
+use crate::{InvitationOperation, InvitationType};
 
 // =============================================================================
 // Guard Cost Constants
@@ -193,8 +193,8 @@ pub enum EffectCommand {
 
     /// Record receipt for operation
     RecordReceipt {
-        /// Operation name
-        operation: String,
+        /// Typed invitation operation
+        operation: InvitationOperation,
         /// Peer involved (if any)
         peer: Option<AuthorityId>,
     },

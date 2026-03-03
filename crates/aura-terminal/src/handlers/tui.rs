@@ -165,23 +165,9 @@ async fn try_load_account(
     let config: AccountConfig = serde_json::from_slice(&bytes)
         .map_err(|e| AuraError::internal(format!("Failed to parse account config: {e}")))?;
 
-    // Parse authority ID from hex string (16 bytes = UUID)
-    let authority_bytes: [u8; 16] = hex::decode(&config.authority_id)
-        .map_err(|e| AuraError::internal(format!("Invalid authority_id hex: {e}")))?
-        .try_into()
-        .map_err(|_| AuraError::internal("Invalid authority_id length (expected 16 bytes)"))?;
-    let authority_id = AuthorityId::from_uuid(uuid::Uuid::from_bytes(authority_bytes));
-
-    // Parse context ID from hex string (16 bytes = UUID)
-    let context_bytes: [u8; 16] = hex::decode(&config.context_id)
-        .map_err(|e| AuraError::internal(format!("Invalid context_id hex: {e}")))?
-        .try_into()
-        .map_err(|_| AuraError::internal("Invalid context_id length (expected 16 bytes)"))?;
-    let context_id = ContextId::from_uuid(uuid::Uuid::from_bytes(context_bytes));
-
     Ok(AccountLoadResult::Loaded {
-        authority: authority_id,
-        context: context_id,
+        authority: config.authority_id,
+        context: config.context_id,
     })
 }
 
@@ -217,8 +203,8 @@ async fn persist_account_config(
         .ts_ms;
 
     let config = AccountConfig {
-        authority_id: hex::encode(authority_id.to_bytes()),
-        context_id: hex::encode(context_id.to_bytes()),
+        authority_id,
+        context_id,
         nickname_suggestion,
         created_at,
     };
@@ -377,19 +363,8 @@ pub async fn import_account_backup(
     // Parse and validate backup using portable function
     let backup = parse_backup_code(backup_code)?;
 
-    // Parse authority ID from validated backup
-    let authority_bytes: [u8; 16] = hex::decode(&backup.account.authority_id)
-        .map_err(|e| AuraError::internal(format!("Invalid authority_id in backup: {e}")))?
-        .try_into()
-        .map_err(|_| AuraError::internal("Invalid authority_id length in backup"))?;
-    let authority_id = AuthorityId::from_uuid(uuid::Uuid::from_bytes(authority_bytes));
-
-    // Parse context ID from validated backup
-    let context_bytes: [u8; 16] = hex::decode(&backup.account.context_id)
-        .map_err(|e| AuraError::internal(format!("Invalid context_id in backup: {e}")))?
-        .try_into()
-        .map_err(|_| AuraError::internal("Invalid context_id length in backup"))?;
-    let context_id = ContextId::from_uuid(uuid::Uuid::from_bytes(context_bytes));
+    let authority_id = backup.account.authority_id;
+    let context_id = backup.account.context_id;
 
     // Check for existing account
     if storage

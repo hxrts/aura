@@ -10,9 +10,123 @@
 
 use aura_core::identifiers::{AuthorityId, InvitationId};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Maximum transport hints per descriptor.
 pub const TRANSPORT_HINTS_MAX: usize = 8;
+
+/// Typed direct endpoint address for invitation transport hints.
+///
+/// Serialized as a standard socket-address string (e.g. `192.168.1.1:8443`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DirectEndpointAddr {
+    address: String,
+    port: u16,
+}
+
+impl DirectEndpointAddr {
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        let trimmed = raw.trim();
+        if trimmed != raw {
+            return Err(format!(
+                "invalid direct endpoint address '{raw}': address contains leading/trailing whitespace"
+            ));
+        }
+
+        let port = parse_direct_endpoint_port(trimmed)
+            .map_err(|reason| format!("invalid direct endpoint address '{raw}': {reason}"))?;
+
+        Ok(Self {
+            address: trimmed.to_string(),
+            port,
+        })
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.address
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+}
+
+impl fmt::Display for DirectEndpointAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.address)
+    }
+}
+
+impl Serialize for DirectEndpointAddr {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for DirectEndpointAddr {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        DirectEndpointAddr::parse(&raw).map_err(serde::de::Error::custom)
+    }
+}
+
+fn parse_direct_endpoint_port(addr: &str) -> Result<u16, &'static str> {
+    if addr.is_empty() {
+        return Err("address is empty");
+    }
+
+    if addr.chars().any(|c| c.is_whitespace()) {
+        return Err("address contains whitespace");
+    }
+
+    if addr.contains("://") {
+        return Err("address must not include a scheme");
+    }
+
+    let (host, port_str) = if let Some(remainder) = addr.strip_prefix('[') {
+        let end = remainder
+            .find(']')
+            .ok_or("IPv6 address missing closing ']'")?;
+        let host = &remainder[..end];
+        let after = &remainder[end + 1..];
+        let port_str = after
+            .strip_prefix(':')
+            .ok_or("missing port separator ':'")?;
+        if host.is_empty() {
+            return Err("IPv6 host is empty");
+        }
+        (host, port_str)
+    } else {
+        let idx = addr.rfind(':').ok_or("missing port separator ':'")?;
+        let host = &addr[..idx];
+        let port_str = &addr[idx + 1..];
+        if host.is_empty() {
+            return Err("host is empty");
+        }
+        if host.contains(':') {
+            return Err("IPv6 addresses must be enclosed in brackets");
+        }
+        (host, port_str)
+    };
+
+    if host.contains('/') {
+        return Err("host must not contain '/'");
+    }
+
+    if port_str.is_empty() {
+        return Err("port is empty");
+    }
+
+    port_str
+        .parse::<u16>()
+        .map_err(|_| "port must be a valid u16 value")
+}
 
 /// Transport hint for establishing a connection.
 ///
@@ -22,12 +136,12 @@ pub enum TransportHint {
     /// Direct QUIC connection.
     QuicDirect {
         /// Socket address (e.g., "192.168.1.1:8443").
-        addr: String,
+        addr: DirectEndpointAddr,
     },
     /// QUIC via STUN-discovered reflexive address.
     QuicReflexive {
         /// Reflexive address discovered via STUN.
-        addr: String,
+        addr: DirectEndpointAddr,
         /// STUN server used for discovery.
         stun_server: String,
     },
@@ -39,7 +153,7 @@ pub enum TransportHint {
     /// TCP direct connection.
     TcpDirect {
         /// Socket address.
-        addr: String,
+        addr: DirectEndpointAddr,
     },
 }
 
@@ -121,7 +235,8 @@ mod tests {
             authority_id: test_authority(),
             invitation_id: test_invitation(),
             transport_hints: vec![TransportHint::QuicDirect {
-                addr: "192.168.1.1:8443".to_string(),
+                addr: DirectEndpointAddr::parse("192.168.1.1:8443")
+                    .unwrap_or_else(|error| panic!("valid socket address: {error}")),
             }],
             nickname_suggestion: Some("Alice".to_string()),
             psk_commitment: [0u8; 32],
@@ -156,5 +271,11 @@ mod tests {
         assert_eq!(desc.ttl_ms(1500), 500);
         assert_eq!(desc.ttl_ms(2000), 0);
         assert_eq!(desc.ttl_ms(3000), 0);
+    }
+
+    #[test]
+    fn test_reject_invalid_direct_endpoint() {
+        let parsed = DirectEndpointAddr::parse("not-an-address");
+        assert!(parsed.is_err());
     }
 }

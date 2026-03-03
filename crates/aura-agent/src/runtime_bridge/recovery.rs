@@ -7,20 +7,19 @@ use aura_recovery::guardian_ceremony::CeremonyResponse;
 
 pub(super) async fn respond_to_guardian_ceremony(
     bridge: &AgentRuntimeBridge,
-    ceremony_id: &str,
+    ceremony_id: &CeremonyId,
     accept: bool,
     _reason: Option<String>,
 ) -> Result<(), IntentError> {
     // Verify the ceremony exists and get tracker
     let runner = bridge.agent.ceremony_runner().await;
-    let ceremony_id = CeremonyId::new(ceremony_id.to_string());
     let tracker = bridge.agent.ceremony_tracker().await;
     let ceremony_state = tracker
-        .get(&ceremony_id)
+        .get(ceremony_id)
         .await
         .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
     let _status = runner
-        .status(&ceremony_id)
+        .status(ceremony_id)
         .await
         .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
 
@@ -28,7 +27,7 @@ pub(super) async fn respond_to_guardian_ceremony(
         // Record acceptance in ceremony tracker
         runner
             .record_response(
-                &ceremony_id,
+                ceremony_id,
                 ParticipantIdentity::guardian(bridge.agent.authority_id()),
             )
             .await
@@ -39,7 +38,7 @@ pub(super) async fn respond_to_guardian_ceremony(
         // Mark ceremony as failed due to decline
         runner
             .abort(
-                &ceremony_id,
+                ceremony_id,
                 Some("Guardian declined invitation".to_string()),
             )
             .await

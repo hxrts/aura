@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 use aura_app::ui::prelude::*;
+use aura_core::identifiers::AuthorityId;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
@@ -30,15 +31,27 @@ pub async fn handle_settings(
             nickname_suggestion,
             invitee_authority_id,
         } => {
+            let invitee_authority_id = match invitee_authority_id
+                .as_ref()
+                .map(|id| id.parse::<AuthorityId>())
+                .transpose()
+            {
+                Ok(value) => value,
+                Err(e) => {
+                    return Some(Err(super::types::OpError::Failed(format!(
+                        "Invalid authority id: {e}"
+                    ))))
+                }
+            };
             match start_device_enrollment_ceremony(
                 app_core,
                 nickname_suggestion.clone(),
-                invitee_authority_id.clone(),
+                invitee_authority_id,
             )
             .await
             {
                 Ok(start) => Some(Ok(OpResponse::DeviceEnrollmentStarted {
-                    ceremony_id: start.ceremony_id,
+                    ceremony_id: start.ceremony_id.to_string(),
                     enrollment_code: start.enrollment_code,
                     pending_epoch: start.pending_epoch,
                     device_id: start.device_id.to_string(),
@@ -49,7 +62,9 @@ pub async fn handle_settings(
 
         EffectCommand::RemoveDevice { device_id } => {
             match start_device_removal_ceremony(app_core, device_id.clone()).await {
-                Ok(ceremony_id) => Some(Ok(OpResponse::DeviceRemovalStarted { ceremony_id })),
+                Ok(ceremony_id) => Some(Ok(OpResponse::DeviceRemovalStarted {
+                    ceremony_id: ceremony_id.to_string(),
+                })),
                 Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
             }
         }

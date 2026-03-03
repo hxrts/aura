@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use aura_core::effects::network::PeerEventStream;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{
-    NetworkCoreEffects, NetworkError, NetworkExtendedEffects, TransportEffects, TransportError,
+    NetworkCoreEffects, NetworkError, NetworkExtendedEffects, RandomExtendedEffects,
+    TransportEffects, TransportError,
 };
 use aura_core::identifiers::AuthorityId;
 use aura_protocol::amp::deserialize_amp_message;
@@ -14,11 +15,35 @@ use std::collections::HashSet;
 #[cfg(not(target_arch = "wasm32"))]
 use std::net::SocketAddr;
 #[cfg(not(target_arch = "wasm32"))]
-use std::str::FromStr;
-#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 
 const NETWORK_CONTENT_TYPE: &str = "application/aura-network";
+const CONNECTION_ID_PREFIX: &str = "conn-";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ConnectionId(uuid::Uuid);
+
+impl ConnectionId {
+    fn new(id: uuid::Uuid) -> Self {
+        Self(id)
+    }
+
+    fn as_uuid(&self) -> uuid::Uuid {
+        self.0
+    }
+
+    fn to_wire(self) -> String {
+        format!("{CONNECTION_ID_PREFIX}{}", self.0)
+    }
+
+    fn parse_wire(value: &str) -> Result<Self, NetworkError> {
+        let raw = value.strip_prefix(CONNECTION_ID_PREFIX).unwrap_or(value);
+        let id = uuid::Uuid::parse_str(raw).map_err(|e| {
+            NetworkError::ConnectionFailed(format!("invalid connection id `{value}`: {e}"))
+        })?;
+        Ok(Self(id))
+    }
+}
 
 // Implementation of NetworkEffects
 #[async_trait]
@@ -223,14 +248,18 @@ impl NetworkExtendedEffects for AuraEffectSystem {
                 let _ = _address;
                 Err(NetworkError::NotImplemented)
             } else {
-                // For now, treat the address as a TCP endpoint and validate connectivity.
-                let addr = _address.to_string();
-                let socket_addr = SocketAddr::from_str(&addr)
+                let socket_addr = _address
+                    .parse::<SocketAddr>()
                     .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
                 let _stream = tokio::net::TcpStream::connect(socket_addr)
                     .await
                     .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
-                Ok(addr)
+
+                let connection_id = ConnectionId::new(self.random_uuid().await);
+                self.network_connections
+                    .write()
+                    .insert(connection_id.as_uuid(), socket_addr);
+                Ok(connection_id.to_wire())
             }
         }
     }
@@ -246,10 +275,15 @@ impl NetworkExtendedEffects for AuraEffectSystem {
                 let _ = (_connection_id, _data);
                 Err(NetworkError::NotImplemented)
             } else {
-                let socket_addr =
-                    SocketAddr::from_str(_connection_id).map_err(|e| NetworkError::SendFailed {
+                let connection_id = ConnectionId::parse_wire(_connection_id)?;
+                let socket_addr = self
+                    .network_connections
+                    .read()
+                    .get(&connection_id.as_uuid())
+                    .copied()
+                    .ok_or_else(|| NetworkError::SendFailed {
                         peer_id: None,
-                        reason: format!("Invalid connection address: {e}"),
+                        reason: format!("Unknown connection id `{_connection_id}`"),
                     })?;
 
                 let config = aura_effects::transport::TransportConfig::default();
@@ -295,6 +329,110 @@ impl NetworkExtendedEffects for AuraEffectSystem {
         if self.execution_mode.is_deterministic() {
             self.ensure_mock_network()?;
         }
+        cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _ = _connection_id;
+            } else {
+                let connection_id = ConnectionId::parse_wire(_connection_id)?;
+                let removed = self
+                    .network_connections
+                    .write()
+                    .remove(&connection_id.as_uuid());
+                if removed.is_none() {
+                    return Err(NetworkError::ConnectionFailed(format!(
+                        "unknown connection id `{_connection_id}`"
+                    )));
+                }
+            }
+        }
         Ok(())
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[allow(clippy::disallowed_methods)]
+mod tests {
+    use super::*;
+    use crate::core::AgentConfig;
+    use tokio::io::AsyncReadExt;
+
+    fn production_config_for_tests() -> AgentConfig {
+        let mut config = AgentConfig::default();
+        let path =
+            std::env::temp_dir().join(format!("aura-agent-network-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&path);
+        config.storage.base_path = path;
+        config
+    }
+
+    #[test]
+    fn connection_id_round_trip() {
+        let original = ConnectionId::new(uuid::Uuid::from_u128(
+            0x1234_5678_9abc_def0_1234_5678_9abc_def0,
+        ));
+        let wire = original.to_wire();
+        let parsed = ConnectionId::parse_wire(&wire).expect("parse connection id");
+        assert_eq!(parsed, original);
+    }
+
+    #[tokio::test]
+    async fn send_rejects_invalid_connection_handle() {
+        let effects = AuraEffectSystem::production(production_config_for_tests())
+            .expect("create production effects");
+        let err = effects
+            .send("not-a-connection-id", vec![1, 2, 3])
+            .await
+            .expect_err("invalid connection handle should fail");
+        assert!(matches!(err, NetworkError::ConnectionFailed(_)));
+    }
+
+    #[tokio::test]
+    async fn typed_connection_lifecycle_open_send_close() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("local addr");
+
+        let receiver = tokio::spawn(async move {
+            // open() does a connectivity check, consuming one accept.
+            let (_warmup, _) = listener.accept().await.expect("accept warmup");
+            let (mut stream, _) = listener.accept().await.expect("accept payload");
+            let mut len = [0u8; 4];
+            stream.read_exact(&mut len).await.expect("read length");
+            let payload_len = u32::from_be_bytes(len) as usize;
+            let mut payload = vec![0u8; payload_len];
+            stream.read_exact(&mut payload).await.expect("read payload");
+            payload
+        });
+
+        let effects = AuraEffectSystem::production(production_config_for_tests())
+            .expect("create production effects");
+        let connection_id = effects
+            .open(&addr.to_string())
+            .await
+            .expect("open connection");
+        assert!(
+            connection_id.starts_with(CONNECTION_ID_PREFIX),
+            "open should return opaque connection handle"
+        );
+
+        let payload = b"typed-handle-payload".to_vec();
+        effects
+            .send(&connection_id, payload.clone())
+            .await
+            .expect("send payload");
+        effects
+            .close(&connection_id)
+            .await
+            .expect("close connection");
+
+        let received = receiver.await.expect("join receiver");
+        assert_eq!(received, payload);
+
+        let close_err = effects
+            .close(&connection_id)
+            .await
+            .expect_err("closing an already closed handle should fail");
+        assert!(matches!(close_err, NetworkError::ConnectionFailed(_)));
     }
 }

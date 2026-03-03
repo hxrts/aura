@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 use aura_app::ui::prelude::*;
+use aura_core::identifiers::CeremonyId;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
@@ -37,7 +38,8 @@ pub async fn handle_recovery(
         EffectCommand::SubmitGuardianApproval { guardian_id } => {
             // Approve a pending recovery request.
             // The guardian_id here is actually the ceremony_id/request_id.
-            match approve_recovery(app_core, guardian_id).await {
+            let ceremony_id = CeremonyId::new(guardian_id.clone());
+            match approve_recovery(app_core, &ceremony_id).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(OpError::Failed(format!(
                     "Failed to approve recovery: {e}"

@@ -6,7 +6,6 @@
 //! Peer state is managed through AppCore signals - terminals should not maintain local
 //! peer state.
 
-use crate::workflows::parse::parse_authority_id;
 use crate::workflows::signals::emit_signal;
 use crate::workflows::signals::read_signal_or_default;
 use crate::workflows::state_helpers::with_neighborhood_state;
@@ -36,7 +35,7 @@ use std::{collections::HashSet, sync::Arc};
 /// Terminals should call this instead of maintaining local peer state.
 pub async fn add_peer(
     app_core: &Arc<RwLock<AppCore>>,
-    peer_id: String,
+    peer_id: AuthorityId,
 ) -> Result<usize, AuraError> {
     let count = with_neighborhood_state(app_core, |state| {
         state.add_connected_peer(peer_id);
@@ -59,7 +58,7 @@ pub async fn add_peer(
 /// Terminals should call this instead of maintaining local peer state.
 pub async fn remove_peer(
     app_core: &Arc<RwLock<AppCore>>,
-    peer_id: &str,
+    peer_id: &AuthorityId,
 ) -> Result<usize, AuraError> {
     let count = with_neighborhood_state(app_core, |state| {
         state.remove_connected_peer(peer_id);
@@ -77,7 +76,7 @@ pub async fn remove_peer(
 ///
 /// **What it does**: Returns the current connected peer set from NeighborhoodState
 /// **Signal pattern**: Read-only operation (no emission)
-pub async fn get_connected_peers(app_core: &Arc<RwLock<AppCore>>) -> HashSet<String> {
+pub async fn get_connected_peers(app_core: &Arc<RwLock<AppCore>>) -> HashSet<AuthorityId> {
     let state = read_signal_or_default(app_core, &*crate::signal_defs::NEIGHBORHOOD_SIGNAL).await;
     state.connected_peers().clone()
 }
@@ -104,13 +103,13 @@ pub async fn list_peers(
     let sync_peers = app_core_guard
         .sync_peers()
         .await
-        .unwrap_or_else(|_e| vec![]);
+        .map_err(|e| AuraError::agent(format!("Failed to query sync peers: {e}")))?;
 
     // Get discovered peers (AuthorityIds from rendezvous)
     let discovered_peers = app_core_guard
         .discover_peers()
         .await
-        .unwrap_or_else(|_e| vec![]);
+        .map_err(|e| AuraError::agent(format!("Failed to query discovered peers: {e}")))?;
 
     // Combine into a list of strings
     let mut peer_list: Vec<String> = sync_peers.iter().map(|d| format!("sync:{d}")).collect();
@@ -140,8 +139,8 @@ pub async fn discover_peers(
     let discovered_count = app_core_guard
         .discover_peers()
         .await
-        .map(|peers| peers.len())
-        .unwrap_or(0);
+        .map_err(|e| AuraError::agent(format!("Failed to discover peers: {e}")))?
+        .len();
 
     // Emit discovered peers signal
     emit_discovered_peers_signal(app_core, timestamp_ms).await?;
@@ -236,7 +235,7 @@ pub async fn get_discovered_peers(app_core: &Arc<RwLock<AppCore>>) -> Discovered
 /// Use this instead of `get_discovered_peers()` when you need to refresh from
 /// the runtime (e.g. after contact acceptance changes the invited set).
 pub async fn refresh_discovered_peers(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
-    let timestamp_ms = super::time::current_time_ms(app_core).await.unwrap_or(0);
+    let timestamp_ms = super::time::current_time_ms(app_core).await?;
     emit_discovered_peers_signal(app_core, timestamp_ms).await
 }
 
@@ -257,17 +256,15 @@ async fn emit_discovered_peers_signal(
 ) -> Result<(), AuraError> {
     let app_core_guard = app_core.read().await;
     // Get both rendezvous and LAN peers
-    let rendezvous_peers = app_core_guard.discover_peers().await.unwrap_or_default();
+    let rendezvous_peers = app_core_guard
+        .discover_peers()
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to refresh discovered peers: {e}")))?;
     let lan_peers = app_core_guard.get_lan_peers().await;
 
     // Get invited peer IDs to mark peers as invited
     let invited_ids: HashSet<AuthorityId> = if let Some(runtime) = app_core_guard.runtime() {
-        runtime
-            .get_invited_peer_ids()
-            .await
-            .into_iter()
-            .filter_map(|id| parse_authority_id(&id).ok())
-            .collect()
+        runtime.get_invited_peer_ids().await.into_iter().collect()
     } else {
         HashSet::new()
     };

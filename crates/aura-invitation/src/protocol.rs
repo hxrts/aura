@@ -3,10 +3,13 @@
 //! MPST choreography definitions for invitation exchange and guardian invitation.
 //! These define the message flow and guard annotations for invitation ceremonies.
 
+use crate::facts::CeremonyRelationshipId;
 use crate::InvitationType;
 use aura_core::identifiers::{AuthorityId, CeremonyId, InvitationId};
 use aura_core::DeviceId;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 
 // =============================================================================
 // Protocol Message Types
@@ -42,6 +45,58 @@ pub struct InvitationResponse {
     pub signature: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InvitationAckStatus {
+    Accepted,
+    Declined,
+}
+
+impl InvitationAckStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            InvitationAckStatus::Accepted => "accepted",
+            InvitationAckStatus::Declined => "declined",
+        }
+    }
+}
+
+impl fmt::Display for InvitationAckStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl FromStr for InvitationAckStatus {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "accepted" | "relationship_established" => Ok(Self::Accepted),
+            "declined" | "declined_noted" => Ok(Self::Declined),
+            _ => Err(format!("invalid invitation ack status: {value}")),
+        }
+    }
+}
+
+impl Serialize for InvitationAckStatus {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for InvitationAckStatus {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        InvitationAckStatus::from_str(&raw).map_err(serde::de::Error::custom)
+    }
+}
+
 /// Invitation acknowledgment message (confirms response received)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvitationAck {
@@ -49,8 +104,8 @@ pub struct InvitationAck {
     pub invitation_id: InvitationId,
     /// Whether the response was successfully processed
     pub success: bool,
-    /// Result status (e.g., "relationship_established", "declined_noted")
-    pub status: String,
+    /// Result status
+    pub status: InvitationAckStatus,
 }
 
 /// Guardian invitation request (specialized for guardian relationships)
@@ -96,7 +151,7 @@ pub struct GuardianConfirm {
     /// Relationship established successfully
     pub established: bool,
     /// Resulting relationship identifier
-    pub relationship_id: Option<String>,
+    pub relationship_id: Option<CeremonyRelationshipId>,
 }
 
 /// Device enrollment invitation request (adds a device to an account authority).
@@ -276,7 +331,9 @@ pub enum GuardianInvitationState {
     /// Guardian declined
     Declined { reason: Option<String> },
     /// Relationship confirmed and established
-    Confirmed { relationship_id: String },
+    Confirmed {
+        relationship_id: CeremonyRelationshipId,
+    },
     /// Protocol failed
     Failed { reason: String },
 }
@@ -289,7 +346,7 @@ pub enum DeviceEnrollmentState {
     /// Enrollment request sent
     RequestSent,
     /// Enrollment accepted by invitee
-    Accepted { device_id: String },
+    Accepted { device_id: DeviceId },
     /// Enrollment declined by invitee
     Declined { reason: Option<String> },
     /// Enrollment confirmed and established
@@ -472,10 +529,11 @@ mod tests {
         }
 
         state = GuardianInvitationState::Confirmed {
-            relationship_id: "rel-789".to_string(),
+            relationship_id: CeremonyRelationshipId::parse("rel-0011223344556677")
+                .unwrap_or_else(|error| panic!("valid relationship: {error}")),
         };
         if let GuardianInvitationState::Confirmed { relationship_id } = state {
-            assert_eq!(relationship_id, "rel-789");
+            assert_eq!(relationship_id.as_str(), "rel-0011223344556677");
         }
     }
 
@@ -500,7 +558,7 @@ mod tests {
         let ack = InvitationAck {
             invitation_id: InvitationId::new("inv-123"),
             success: true,
-            status: "relationship_established".to_string(),
+            status: InvitationAckStatus::Accepted,
         };
 
         let bytes = to_vec(&ack).unwrap();
@@ -508,7 +566,19 @@ mod tests {
 
         assert_eq!(restored.invitation_id.as_str(), "inv-123");
         assert!(restored.success);
-        assert_eq!(restored.status, "relationship_established");
+        assert_eq!(restored.status, InvitationAckStatus::Accepted);
+    }
+
+    #[test]
+    fn test_invitation_ack_rejects_invalid_status() {
+        let invalid = serde_json::json!({
+            "invitation_id": "inv-123",
+            "success": true,
+            "status": "unknown-status"
+        });
+        let bytes = serde_json::to_vec(&invalid).unwrap();
+        let restored = from_slice::<InvitationAck>(&bytes);
+        assert!(restored.is_err());
     }
 
     #[test]
@@ -530,7 +600,10 @@ mod tests {
         let confirm = GuardianConfirm {
             invitation_id: InvitationId::new("guard-456"),
             established: true,
-            relationship_id: Some("rel-789".to_string()),
+            relationship_id: Some(
+                CeremonyRelationshipId::parse("rel-0011223344556677")
+                    .unwrap_or_else(|error| panic!("valid relationship id: {error}")),
+            ),
         };
 
         let bytes = to_vec(&confirm).unwrap();
@@ -538,7 +611,13 @@ mod tests {
 
         assert_eq!(restored.invitation_id.as_str(), "guard-456");
         assert!(restored.established);
-        assert_eq!(restored.relationship_id, Some("rel-789".to_string()));
+        assert_eq!(
+            restored.relationship_id,
+            Some(
+                CeremonyRelationshipId::parse("rel-0011223344556677")
+                    .unwrap_or_else(|error| panic!("valid relationship id: {error}"))
+            )
+        );
     }
 
     #[test]
