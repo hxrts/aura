@@ -1,6 +1,6 @@
 # System Architecture
 
-This document gives an intuitive overview of Aura's architecture. It covers the core abstractions, data flow patterns, and component interactions that define the system. Formal definitions live in [Theoretical Model](002_theoretical_model.md), an overview of the implementation can be found in [Project Structure](docs/999_project_structure.md).
+This document gives an intuitive overview of Aura's architecture. It covers the core abstractions, data flow patterns, and component interactions that define the system. Formal definitions live in [Theoretical Model](002_theoretical_model.md), an overview of the implementation can be found in [Project Structure](999_project_structure.md).
 
 ## Overview
 
