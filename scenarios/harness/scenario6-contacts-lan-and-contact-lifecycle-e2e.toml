@@ -113,6 +113,20 @@ key = "esc"
 timeout_ms = 2000
 
 [[steps]]
+id = "alice-copy-toast-visible"
+action = "expect_toast"
+instance = "alice"
+contains = "Copied to clipboard"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-dismiss-copy-toast"
+action = "send_key"
+instance = "alice"
+key = "esc"
+timeout_ms = 1000
+
+[[steps]]
 id = "bob-open-accept-modal"
 action = "send_keys"
 instance = "bob"

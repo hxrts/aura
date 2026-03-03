@@ -29,6 +29,27 @@ use super::super::views::{
 };
 use super::super::TuiState;
 
+fn dismiss_on_escape(state: &mut TuiState, code: &KeyCode) -> bool {
+    if matches!(code, KeyCode::Esc) {
+        state.modal_queue.dismiss();
+        true
+    } else {
+        false
+    }
+}
+
+fn list_nav_from_key(code: &KeyCode) -> Option<NavKey> {
+    match code {
+        KeyCode::Up | KeyCode::Char('k') => Some(NavKey::Up),
+        KeyCode::Down | KeyCode::Char('j') => Some(NavKey::Down),
+        _ => None,
+    }
+}
+
+fn warn_no_selection(state: &mut TuiState, entity: &str) {
+    state.toast_warning(format!("No {entity} selected"));
+}
+
 /// Handle queue-based modal key events (unified dispatcher)
 ///
 /// This routes key events to the appropriate handler based on the QueuedModal variant.
@@ -292,26 +313,20 @@ fn handle_neighborhood_moderator_modal_key_queue(
     key: KeyEvent,
     modal_state: ModeratorAssignmentModalState,
 ) {
+    if dismiss_on_escape(state, &key.code) {
+        return;
+    }
+
+    if let Some(nav) = list_nav_from_key(&key.code) {
+        state.modal_queue.update_active(|modal| {
+            if let QueuedModal::NeighborhoodModeratorAssignment(ref mut s) = modal {
+                s.selected_index = navigate_list(s.selected_index, s.contacts.len(), nav);
+            }
+        });
+        return;
+    }
+
     match key.code {
-        KeyCode::Esc => {
-            state.modal_queue.dismiss();
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::NeighborhoodModeratorAssignment(ref mut s) = modal {
-                    s.selected_index =
-                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Up);
-                }
-            });
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::NeighborhoodModeratorAssignment(ref mut s) = modal {
-                    s.selected_index =
-                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Down);
-                }
-            });
-        }
         KeyCode::Tab => {
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::NeighborhoodModeratorAssignment(ref mut s) = modal {
@@ -328,7 +343,7 @@ fn handle_neighborhood_moderator_modal_key_queue(
                     },
                 ));
             } else {
-                state.toast_warning("No contact selected");
+                warn_no_selection(state, "contact");
             }
         }
         _ => {}
@@ -341,26 +356,20 @@ fn handle_neighborhood_access_override_modal_key_queue(
     key: KeyEvent,
     modal_state: AccessOverrideModalState,
 ) {
+    if dismiss_on_escape(state, &key.code) {
+        return;
+    }
+
+    if let Some(nav) = list_nav_from_key(&key.code) {
+        state.modal_queue.update_active(|modal| {
+            if let QueuedModal::NeighborhoodAccessOverride(ref mut s) = modal {
+                s.selected_index = navigate_list(s.selected_index, s.contacts.len(), nav);
+            }
+        });
+        return;
+    }
+
     match key.code {
-        KeyCode::Esc => {
-            state.modal_queue.dismiss();
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::NeighborhoodAccessOverride(ref mut s) = modal {
-                    s.selected_index =
-                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Up);
-                }
-            });
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::NeighborhoodAccessOverride(ref mut s) = modal {
-                    s.selected_index =
-                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Down);
-                }
-            });
-        }
         KeyCode::Tab => {
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::NeighborhoodAccessOverride(ref mut s) = modal {
@@ -377,7 +386,7 @@ fn handle_neighborhood_access_override_modal_key_queue(
                     },
                 ));
             } else {
-                state.toast_warning("No contact selected");
+                warn_no_selection(state, "contact");
             }
         }
         _ => {}
@@ -482,26 +491,20 @@ fn handle_guardian_select_key_queue(
     key: KeyEvent,
     modal_state: ContactSelectModalState,
 ) {
+    if dismiss_on_escape(state, &key.code) {
+        return;
+    }
+
+    if let Some(nav) = list_nav_from_key(&key.code) {
+        state.modal_queue.update_active(|modal| {
+            if let QueuedModal::GuardianSelect(ref mut s) = modal {
+                s.selected_index = navigate_list(s.selected_index, s.contacts.len(), nav);
+            }
+        });
+        return;
+    }
+
     match key.code {
-        KeyCode::Esc => {
-            state.modal_queue.dismiss();
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::GuardianSelect(ref mut s) = modal {
-                    s.selected_index =
-                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Up);
-                }
-            });
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::GuardianSelect(ref mut s) = modal {
-                    s.selected_index =
-                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Down);
-                }
-            });
-        }
         KeyCode::Enter => {
             if let Some((contact_id, _)) = modal_state.contacts.get(modal_state.selected_index) {
                 commands.push(TuiCommand::Dispatch(DispatchCommand::AddGuardian {
@@ -521,27 +524,21 @@ fn handle_contact_select_key_queue(
     key: KeyEvent,
     modal_state: ContactSelectModalState,
 ) {
+    if dismiss_on_escape(state, &key.code) {
+        return;
+    }
+
+    if let Some(nav) = list_nav_from_key(&key.code) {
+        state.modal_queue.update_active(|modal| {
+            if let QueuedModal::ContactSelect(ref mut s) = modal {
+                s.selected_index = navigate_list(s.selected_index, s.contacts.len(), nav);
+            }
+        });
+        return;
+    }
+
     let contact_count = modal_state.contacts.len();
     match key.code {
-        KeyCode::Esc => {
-            state.modal_queue.dismiss();
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::ContactSelect(ref mut s) = modal {
-                    s.selected_index =
-                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Up);
-                }
-            });
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::ContactSelect(ref mut s) = modal {
-                    s.selected_index =
-                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Down);
-                }
-            });
-        }
         KeyCode::Enter => {
             if contact_count > 0 {
                 commands.push(TuiCommand::Dispatch(
@@ -1497,27 +1494,21 @@ fn handle_authority_picker_key_queue(
     key: KeyEvent,
     modal_state: ContactSelectModalState,
 ) {
+    if dismiss_on_escape(state, &key.code) {
+        return;
+    }
+
+    if let Some(nav) = list_nav_from_key(&key.code) {
+        state.modal_queue.update_active(|modal| {
+            if let QueuedModal::AuthorityPicker(ref mut s) = modal {
+                s.selected_index = navigate_list(s.selected_index, s.contacts.len(), nav);
+            }
+        });
+        return;
+    }
+
     let item_count = modal_state.contacts.len();
     match key.code {
-        KeyCode::Esc => {
-            state.modal_queue.dismiss();
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::AuthorityPicker(ref mut s) = modal {
-                    s.selected_index =
-                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Up);
-                }
-            });
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::AuthorityPicker(ref mut s) = modal {
-                    s.selected_index =
-                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Down);
-                }
-            });
-        }
         KeyCode::Enter => {
             if item_count > 0 {
                 if let Some((authority_id, _)) =
@@ -1545,10 +1536,11 @@ fn handle_device_select_key_queue(
     key: KeyEvent,
     modal_state: DeviceSelectModalState,
 ) {
+    if dismiss_on_escape(state, &key.code) {
+        return;
+    }
+
     match key.code {
-        KeyCode::Esc => {
-            state.modal_queue.dismiss();
-        }
         KeyCode::Up | KeyCode::Char('k') => {
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::SettingsDeviceSelect(ref mut s) = modal {
