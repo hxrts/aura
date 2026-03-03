@@ -146,7 +146,7 @@ struct HomeHeaderProps {
 #[component]
 fn HomeHeader(props: &HomeHeaderProps) -> impl Into<AnyElement<'static>> {
     let status_line = format!(
-        "Residents: {} • {} • {}",
+        "Members/Participants: {} • {} • {}",
         props.resident_count, props.storage_text, props.moderator_label
     );
     let name_line = format!("Name: {}", props.home_name);
@@ -233,7 +233,7 @@ fn ResidentList(props: &ResidentListProps) -> impl Into<AnyElement<'static>> {
             padding_right: 1,
         ) {
             View(flex_direction: FlexDirection::Row, gap: 1) {
-                Text(content: "Residents", weight: Weight::Bold, color: Theme::PRIMARY)
+                Text(content: "Members & Participants", weight: Weight::Bold, color: Theme::PRIMARY)
                 #(if props.moderator_actions_enabled {
                     Some(element! { Text(content: "⚖︎ Moderator", color: Theme::WARNING) })
                 } else {
@@ -243,7 +243,7 @@ fn ResidentList(props: &ResidentListProps) -> impl Into<AnyElement<'static>> {
             View(flex_direction: FlexDirection::Column, gap: 0) {
                 #(if residents.is_empty() {
                     vec![element! {
-                        View { Text(content: "No residents", color: Theme::TEXT_MUTED) }
+                        View { Text(content: "No members or participants", color: Theme::TEXT_MUTED) }
                     }]
                 } else {
                     residents.iter().enumerate().map(|(idx, r)| {
@@ -310,30 +310,35 @@ fn SocialStatusPanel(props: &SocialStatusProps) -> impl Into<AnyElement<'static>
         ) {
             Text(content: "Social View", weight: Weight::Bold, color: Theme::PRIMARY)
             Text(content: format!("Neighborhood: {}", props.neighborhood_name), color: Theme::TEXT)
-            Text(content: format!("Selected block: {}", props.selected_home_name), color: Theme::TEXT)
+            Text(content: format!("Selected home: {}", props.selected_home_name), color: Theme::TEXT)
             Text(content: format!("Home ID: {}", props.selected_home_id), color: Theme::TEXT_MUTED)
-            Text(content: format!("Traversal: {} • {}", props.enter_depth.label(), entered_text), color: Theme::TEXT_MUTED)
+            Text(content: format!("Access: {} ({}) • {}", props.enter_depth.label(), hop_distance_hint(props.enter_depth), entered_text), color: Theme::TEXT_MUTED)
             Text(content: format!("Known homes: {}", props.homes_count), color: Theme::TEXT_MUTED)
             Text(content: format!("Channels: {} • Focus: #{}", props.channel_count, props.selected_channel_name), color: Theme::TEXT_MUTED)
-            Text(content: format!("Residents in view: {}", props.resident_count), color: Theme::TEXT_MUTED)
+            Text(content: format!("Members/participants in view: {}", props.resident_count), color: Theme::TEXT_MUTED)
             Text(content: format!("Moderator actions: {}", moderator_text), color: Theme::TEXT_MUTED)
         }
     }
 }
 
-fn is_moderator_role(role: aura_app::ui::types::home::HomeRole) -> bool {
-    matches!(
-        role,
-        aura_app::ui::types::home::HomeRole::Moderator
-            | aura_app::ui::types::home::HomeRole::Member
-    )
+fn hop_distance_hint(access_level: AccessLevel) -> &'static str {
+    match access_level {
+        AccessLevel::Full => "0-hop",
+        AccessLevel::Partial => "1-hop",
+        AccessLevel::Limited => "2+ hops/disconnected",
+    }
 }
 
 fn convert_resident(r: &aura_app::ui::types::home::Resident) -> Resident {
+    let role_label = match r.role {
+        aura_app::ui::types::home::HomeRole::Member => "Member",
+        aura_app::ui::types::home::HomeRole::Moderator => "Member + Moderator",
+        aura_app::ui::types::home::HomeRole::Participant => "Participant",
+    };
     Resident {
         id: r.id.to_string(),
-        name: r.name.clone(),
-        is_moderator: is_moderator_role(r.role),
+        name: format!("{} ({role_label})", r.name),
+        is_moderator: r.is_moderator(),
         is_self: false,
     }
 }
@@ -601,7 +606,7 @@ pub fn NeighborhoodScreen(
                                                 padding_bottom: 1,
                                             ) {
                                                 Text(
-                                                    content: "Partial/Limited view: full channel and resident details are hidden",
+                                                    content: "Partial/Limited view: full channel and membership details are hidden",
                                                     color: Theme::TEXT_MUTED,
                                                 )
                                             }

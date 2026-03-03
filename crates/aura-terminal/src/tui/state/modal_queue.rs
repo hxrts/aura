@@ -7,10 +7,11 @@ use std::collections::VecDeque;
 use crate::tui::screens::Screen;
 
 use super::views::{
-    AccountSetupModalState, AddDeviceModalState, ChannelInfoModalState, ConfirmRemoveModalState,
-    CreateChannelModalState, CreateInvitationModalState, DeviceEnrollmentCeremonyModalState,
-    DeviceSelectModalState, GuardianSetupModalState, HomeCreateModalState,
-    ImportInvitationModalState, InvitationCodeModalState, NicknameModalState,
+    AccessOverrideModalState, AccountSetupModalState, AddDeviceModalState, ChannelInfoModalState,
+    ConfirmRemoveModalState, CreateChannelModalState, CreateInvitationModalState,
+    DeviceEnrollmentCeremonyModalState, DeviceSelectModalState, GuardianSetupModalState,
+    HomeCapabilityConfigModalState, HomeCreateModalState, ImportInvitationModalState,
+    InvitationCodeModalState, ModeratorAssignmentModalState, NicknameModalState,
     NicknameSuggestionModalState, TopicModalState,
 };
 
@@ -123,6 +124,12 @@ pub enum QueuedModal {
     // ========================================================================
     /// Create a new home
     NeighborhoodHomeCreate(HomeCreateModalState),
+    /// Assign/revoke moderator designations for home members
+    NeighborhoodModeratorAssignment(ModeratorAssignmentModalState),
+    /// Apply bounded access-level overrides (Partial/Limited)
+    NeighborhoodAccessOverride(AccessOverrideModalState),
+    /// Configure Full/Partial/Limited capability sets
+    NeighborhoodCapabilityConfig(HomeCapabilityConfigModalState),
 }
 
 /// Action to perform on confirmation

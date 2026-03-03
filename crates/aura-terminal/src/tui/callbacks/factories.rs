@@ -1066,6 +1066,7 @@ pub struct NeighborhoodCallbacks {
     pub on_enter_home: Arc<dyn Fn(String, AccessLevel) + Send + Sync>,
     pub on_go_home: GoHomeCallback,
     pub on_back_to_street: GoHomeCallback,
+    pub on_set_moderator: SetModeratorCallback,
     pub on_create_home: CreateHomeCallback,
     pub on_create_neighborhood: CreateNeighborhoodCallback,
     pub on_add_home_to_neighborhood: NeighborhoodHomeCallback,
@@ -1079,6 +1080,7 @@ impl NeighborhoodCallbacks {
             on_enter_home: Self::make_enter_home(ctx.clone(), tx.clone()),
             on_go_home: Self::make_go_home(ctx.clone(), tx.clone()),
             on_back_to_street: Self::make_back_to_street(ctx.clone(), tx.clone()),
+            on_set_moderator: Self::make_set_moderator(ctx.clone(), tx.clone()),
             on_create_home: Self::make_create_home(ctx.clone(), tx.clone()),
             on_create_neighborhood: Self::make_create_neighborhood(ctx.clone(), tx.clone()),
             on_add_home_to_neighborhood: Self::make_add_home_to_neighborhood(
@@ -1165,6 +1167,43 @@ impl NeighborhoodCallbacks {
                 }
             });
         })
+    }
+
+    fn make_set_moderator(ctx: Arc<IoContext>, tx: UiUpdateSender) -> SetModeratorCallback {
+        Arc::new(
+            move |home_id: Option<String>, target_id: String, assign: bool| {
+                let ctx = ctx.clone();
+                let tx = tx.clone();
+                let cmd = if assign {
+                    EffectCommand::GrantModerator {
+                        channel: home_id,
+                        target: target_id.clone(),
+                    }
+                } else {
+                    EffectCommand::RevokeModerator {
+                        channel: home_id,
+                        target: target_id.clone(),
+                    }
+                };
+                spawn_ctx(ctx.clone(), async move {
+                    match ctx.dispatch(cmd).await {
+                        Ok(_) => {
+                            let action = if assign { "granted" } else { "revoked" };
+                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
+                                "moderation",
+                                format!("Moderator designation {action} for {target_id}"),
+                            )));
+                        }
+                        Err(e) => {
+                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                                "moderation",
+                                format!("Failed to update moderator designation: {e}"),
+                            )));
+                        }
+                    }
+                });
+            },
+        )
     }
 
     fn make_create_home(ctx: Arc<IoContext>, tx: UiUpdateSender) -> CreateHomeCallback {

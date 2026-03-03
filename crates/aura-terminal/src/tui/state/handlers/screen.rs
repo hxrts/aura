@@ -364,6 +364,33 @@ pub fn handle_neighborhood_key(
                 state.neighborhood.insert_mode = true;
                 state.neighborhood.insert_mode_entry_char = Some('i');
             }
+            KeyCode::Char('o') => {
+                if state.neighborhood.moderator_actions_enabled {
+                    commands.push(TuiCommand::Dispatch(
+                        DispatchCommand::OpenModeratorAssignmentModal,
+                    ));
+                } else {
+                    state.toast_warning("Moderator permissions required");
+                }
+            }
+            KeyCode::Char('x') => {
+                if state.neighborhood.moderator_actions_enabled {
+                    commands.push(TuiCommand::Dispatch(
+                        DispatchCommand::OpenAccessOverrideModal,
+                    ));
+                } else {
+                    state.toast_warning("Moderator permissions required");
+                }
+            }
+            KeyCode::Char('p') => {
+                if state.neighborhood.moderator_actions_enabled {
+                    commands.push(TuiCommand::Dispatch(
+                        DispatchCommand::OpenHomeCapabilityConfigModal,
+                    ));
+                } else {
+                    state.toast_warning("Moderator permissions required");
+                }
+            }
             _ => {}
         },
     }

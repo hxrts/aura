@@ -141,6 +141,14 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
                 }
                 return;
             }
+            QueuedModal::NeighborhoodCapabilityConfig(modal_state) => {
+                match modal_state.active_field {
+                    0 => modal_state.full_caps.push_str(text),
+                    1 => modal_state.partial_caps.push_str(text),
+                    _ => modal_state.limited_caps.push_str(text),
+                }
+                return;
+            }
 
             // These modals don't have direct text input
             QueuedModal::AccountSetup(_)
@@ -159,7 +167,9 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
             | QueuedModal::SettingsDeviceSelect(_)
             | QueuedModal::SettingsRemoveDevice(_)
             | QueuedModal::AuthorityPicker(_)
-            | QueuedModal::ChatMemberSelect(_) => {}
+            | QueuedModal::ChatMemberSelect(_)
+            | QueuedModal::NeighborhoodModeratorAssignment(_)
+            | QueuedModal::NeighborhoodAccessOverride(_) => {}
         }
     }
 

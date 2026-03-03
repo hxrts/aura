@@ -83,6 +83,8 @@ pub type CreateHomeCallback = StringOptStringCallback;
 pub type CreateNeighborhoodCallback = IdCallback;
 /// Neighborhood home operation callback: (home_id)
 pub type NeighborhoodHomeCallback = IdCallback;
+/// Set moderator callback: (optional_home_id, target_authority_id, assign)
+pub type SetModeratorCallback = Arc<dyn Fn(Option<String>, String, bool) + Send + Sync>;
 
 // --- App Screen ---
 pub type CreateAccountCallback = IdCallback;

@@ -33,11 +33,14 @@ fn test_home_creator_is_regular_member() {
     );
 
     assert_eq!(home.my_role, HomeRole::Member);
-    let creator_entry = home
+    let creator_entry = match home
         .residents
         .iter()
         .find(|resident| resident.id == creator)
-        .expect("creator should exist in residents");
+    {
+        Some(entry) => entry,
+        None => panic!("creator should exist in residents"),
+    };
     assert_eq!(creator_entry.role, HomeRole::Member);
 }
 
@@ -88,10 +91,10 @@ fn test_moderator_can_kick() {
         kicked_at: 1_700_000_000_300,
     });
 
-    let latest = home
-        .kick_log
-        .last()
-        .expect("kick log should contain record");
+    let latest = match home.kick_log.last() {
+        Some(entry) => entry,
+        None => panic!("kick log should contain record"),
+    };
     assert_eq!(latest.authority_id, participant);
     assert_eq!(latest.actor, moderator);
 }

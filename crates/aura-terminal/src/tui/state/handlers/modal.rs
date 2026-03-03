@@ -20,10 +20,11 @@ use super::super::modal_queue::{
 };
 use super::super::toast::{QueuedToast, ToastLevel};
 use super::super::views::{
-    AccountSetupModalState, AddDeviceField, AddDeviceModalState, ConfirmRemoveModalState,
-    CreateChannelModalState, CreateInvitationField, CreateInvitationModalState,
-    DeviceEnrollmentCeremonyModalState, DeviceSelectModalState, GuardianSetupModalState,
-    GuardianSetupStep, ImportInvitationModalState, NicknameModalState,
+    AccessOverrideModalState, AccountSetupModalState, AddDeviceField, AddDeviceModalState,
+    ConfirmRemoveModalState, CreateChannelModalState, CreateInvitationField,
+    CreateInvitationModalState, DeviceEnrollmentCeremonyModalState, DeviceSelectModalState,
+    GuardianSetupModalState, GuardianSetupStep, HomeCapabilityConfigModalState,
+    ImportInvitationModalState, ModeratorAssignmentModalState, NicknameModalState,
     NicknameSuggestionModalState, TopicModalState,
 };
 use super::super::TuiState;
@@ -182,6 +183,20 @@ pub fn handle_queued_modal_key(
                 _ => {}
             }
         }
+        QueuedModal::NeighborhoodModeratorAssignment(modal_state) => {
+            handle_neighborhood_moderator_modal_key_queue(state, commands, key, modal_state);
+        }
+        QueuedModal::NeighborhoodAccessOverride(modal_state) => {
+            handle_neighborhood_access_override_modal_key_queue(state, commands, key, modal_state);
+        }
+        QueuedModal::NeighborhoodCapabilityConfig(modal_state) => {
+            handle_neighborhood_capability_config_modal_key_queue(
+                state,
+                commands,
+                key,
+                modal_state,
+            );
+        }
     }
 }
 
@@ -266,6 +281,152 @@ fn handle_help_modal_key_queue(state: &mut TuiState, key: KeyEvent) {
         KeyCode::Down | KeyCode::Char('j') => {
             state.help.scroll =
                 navigate_list(state.help.scroll, state.help.scroll_max, NavKey::Down);
+        }
+        _ => {}
+    }
+}
+
+fn handle_neighborhood_moderator_modal_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: ModeratorAssignmentModalState,
+) {
+    match key.code {
+        KeyCode::Esc => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::NeighborhoodModeratorAssignment(ref mut s) = modal {
+                    s.selected_index =
+                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Up);
+                }
+            });
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::NeighborhoodModeratorAssignment(ref mut s) = modal {
+                    s.selected_index =
+                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Down);
+                }
+            });
+        }
+        KeyCode::Tab => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::NeighborhoodModeratorAssignment(ref mut s) = modal {
+                    s.toggle_mode();
+                }
+            });
+        }
+        KeyCode::Enter => {
+            if let Some(target_id) = modal_state.selected_contact_id() {
+                commands.push(TuiCommand::Dispatch(
+                    DispatchCommand::SubmitModeratorAssignment {
+                        target_id: target_id.to_string(),
+                        assign: modal_state.assign,
+                    },
+                ));
+            } else {
+                state.toast_warning("No contact selected");
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_neighborhood_access_override_modal_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: AccessOverrideModalState,
+) {
+    match key.code {
+        KeyCode::Esc => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::NeighborhoodAccessOverride(ref mut s) = modal {
+                    s.selected_index =
+                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Up);
+                }
+            });
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::NeighborhoodAccessOverride(ref mut s) = modal {
+                    s.selected_index =
+                        navigate_list(s.selected_index, s.contacts.len(), NavKey::Down);
+                }
+            });
+        }
+        KeyCode::Tab => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::NeighborhoodAccessOverride(ref mut s) = modal {
+                    s.toggle_access_level();
+                }
+            });
+        }
+        KeyCode::Enter => {
+            if let Some(target_id) = modal_state.selected_contact_id() {
+                commands.push(TuiCommand::Dispatch(
+                    DispatchCommand::SubmitAccessOverride {
+                        target_id: target_id.to_string(),
+                        access_level: modal_state.access_level,
+                    },
+                ));
+            } else {
+                state.toast_warning("No contact selected");
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_neighborhood_capability_config_modal_key_queue(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: HomeCapabilityConfigModalState,
+) {
+    match key.code {
+        KeyCode::Esc => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Tab => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::NeighborhoodCapabilityConfig(ref mut s) = modal {
+                    s.next_field();
+                }
+            });
+        }
+        KeyCode::Enter => {
+            if modal_state.can_submit() {
+                commands.push(TuiCommand::Dispatch(
+                    DispatchCommand::SubmitHomeCapabilityConfig {
+                        full_caps: modal_state.full_caps,
+                        partial_caps: modal_state.partial_caps,
+                        limited_caps: modal_state.limited_caps,
+                    },
+                ));
+            } else {
+                state.toast_warning("All capability fields must be non-empty");
+            }
+        }
+        KeyCode::Char(c) => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::NeighborhoodCapabilityConfig(ref mut s) = modal {
+                    s.push_char(c);
+                }
+            });
+        }
+        KeyCode::Backspace => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::NeighborhoodCapabilityConfig(ref mut s) = modal {
+                    s.pop_char();
+                }
+            });
         }
         _ => {}
     }

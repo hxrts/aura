@@ -182,6 +182,8 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
                 .into_any(),
             element! { KeyValue(label: "Status".to_string(), value: status_label.to_string()) }
                 .into_any(),
+            element! { KeyValue(label: "Authority".to_string(), value: "User/Home/Neighborhood".to_string()) }
+                .into_any(),
             element! { KeyValue(label: "Guardian".to_string(), value: guardian.to_string()) }
                 .into_any(),
             element! { KeyValue(label: "Read Receipts".to_string(), value: read_receipts.to_string()) }

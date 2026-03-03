@@ -23,7 +23,7 @@ use crate::tui::state::{
     ChatFocus, ContactsListFocus, CreateInvitationField, DetailFocus, GuardianCeremonyResponse,
     GuardianSetupStep, NeighborhoodMode, QueuedModal, TuiState,
 };
-use crate::tui::types::{AccessLevel, Device};
+use crate::tui::types::{AccessLevel, Contact, Device};
 use aura_core::threshold::AgreementMode;
 use tracing::warn;
 
@@ -739,6 +739,23 @@ pub struct NeighborhoodViewProps {
     pub home_create_modal_active_field: usize,
     pub home_create_modal_error: Option<String>,
     pub home_create_modal_creating: bool,
+    // Moderator assignment modal
+    pub moderator_modal_visible: bool,
+    pub moderator_modal_contacts: Vec<Contact>,
+    pub moderator_modal_selected_index: usize,
+    pub moderator_modal_assign: bool,
+    // Access override modal
+    pub access_override_modal_visible: bool,
+    pub access_override_modal_contacts: Vec<Contact>,
+    pub access_override_modal_selected_index: usize,
+    pub access_override_modal_level: AccessLevel,
+    // Home capability configuration modal
+    pub capability_config_modal_visible: bool,
+    pub capability_config_modal_full_caps: String,
+    pub capability_config_modal_partial_caps: String,
+    pub capability_config_modal_limited_caps: String,
+    pub capability_config_modal_active_field: usize,
+    pub capability_config_modal_error: Option<String>,
 }
 
 /// Extract NeighborhoodScreen view props from TuiState
@@ -761,6 +778,49 @@ pub fn extract_neighborhood_view_props(state: &TuiState) -> NeighborhoodViewProp
             s.creating,
         ),
         _ => (false, String::new(), String::new(), 0, None, false),
+    };
+
+    let (
+        moderator_modal_visible,
+        moderator_modal_contacts,
+        moderator_modal_selected_index,
+        moderator_modal_assign,
+    ) = match state.modal_queue.current() {
+        Some(QueuedModal::NeighborhoodModeratorAssignment(s)) => {
+            (true, s.contacts.clone(), s.selected_index, s.assign)
+        }
+        _ => (false, Vec::new(), 0, true),
+    };
+
+    let (
+        access_override_modal_visible,
+        access_override_modal_contacts,
+        access_override_modal_selected_index,
+        access_override_modal_level,
+    ) = match state.modal_queue.current() {
+        Some(QueuedModal::NeighborhoodAccessOverride(s)) => {
+            (true, s.contacts.clone(), s.selected_index, s.access_level)
+        }
+        _ => (false, Vec::new(), 0, AccessLevel::Limited),
+    };
+
+    let (
+        capability_config_modal_visible,
+        capability_config_modal_full_caps,
+        capability_config_modal_partial_caps,
+        capability_config_modal_limited_caps,
+        capability_config_modal_active_field,
+        capability_config_modal_error,
+    ) = match state.modal_queue.current() {
+        Some(QueuedModal::NeighborhoodCapabilityConfig(s)) => (
+            true,
+            s.full_caps.clone(),
+            s.partial_caps.clone(),
+            s.limited_caps.clone(),
+            s.active_field,
+            s.error.clone(),
+        ),
+        _ => (false, String::new(), String::new(), String::new(), 0, None),
     };
 
     NeighborhoodViewProps {
@@ -791,6 +851,20 @@ pub fn extract_neighborhood_view_props(state: &TuiState) -> NeighborhoodViewProp
         home_create_modal_active_field: home_create_active_field,
         home_create_modal_error: home_create_error,
         home_create_modal_creating: home_create_creating,
+        moderator_modal_visible,
+        moderator_modal_contacts,
+        moderator_modal_selected_index,
+        moderator_modal_assign,
+        access_override_modal_visible,
+        access_override_modal_contacts,
+        access_override_modal_selected_index,
+        access_override_modal_level,
+        capability_config_modal_visible,
+        capability_config_modal_full_caps,
+        capability_config_modal_partial_caps,
+        capability_config_modal_limited_caps,
+        capability_config_modal_active_field,
+        capability_config_modal_error,
     }
 }
 

@@ -3,7 +3,7 @@
 //! Commands produced by state transitions to be executed by the runtime.
 
 use crate::tui::screens::Screen;
-use crate::tui::types::MfaPolicy;
+use crate::tui::types::{AccessLevel, MfaPolicy};
 
 use super::toast::ToastLevel;
 
@@ -177,6 +177,28 @@ pub enum DispatchCommand {
     BackToStreet,
     /// Open home creation flow
     OpenHomeCreate,
+    /// Open moderator assignment/revocation modal
+    OpenModeratorAssignmentModal,
+    /// Submit moderator assignment/revocation for the selected member
+    SubmitModeratorAssignment {
+        target_id: String,
+        assign: bool,
+    },
+    /// Open per-user access override modal
+    OpenAccessOverrideModal,
+    /// Submit per-user access override
+    SubmitAccessOverride {
+        target_id: String,
+        access_level: AccessLevel,
+    },
+    /// Open home capability configuration modal
+    OpenHomeCapabilityConfigModal,
+    /// Submit home capability configuration
+    SubmitHomeCapabilityConfig {
+        full_caps: String,
+        partial_caps: String,
+        limited_caps: String,
+    },
     /// Create a new home
     CreateHome {
         name: String,

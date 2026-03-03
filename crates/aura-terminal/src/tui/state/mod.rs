@@ -265,6 +265,8 @@ impl TuiState {
             Some(QueuedModal::ContactsImport(_)) => true,
             Some(QueuedModal::SettingsNicknameSuggestion(_)) => true,
             Some(QueuedModal::SettingsAddDevice(_)) => true,
+            Some(QueuedModal::NeighborhoodHomeCreate(_)) => true,
+            Some(QueuedModal::NeighborhoodCapabilityConfig(_)) => true,
             _ => false,
         }
     }

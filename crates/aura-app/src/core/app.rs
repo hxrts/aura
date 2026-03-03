@@ -509,8 +509,16 @@ impl AppCore {
                     )));
                 };
 
-                if matches!(resident.role, crate::views::HomeRole::Member) {
-                    return Err(IntentError::validation_failed("Cannot modify Owner role"));
+                if matches!(resident.role, crate::views::HomeRole::Moderator) {
+                    return Err(IntentError::validation_failed(
+                        "Target already has moderator designation",
+                    ));
+                }
+
+                if !matches!(resident.role, crate::views::HomeRole::Member) {
+                    return Err(IntentError::validation_failed(
+                        "Only members can be designated as moderators",
+                    ));
                 }
             }
             Intent::RevokeModerator { home_id, target_id } => {
@@ -540,9 +548,7 @@ impl AppCore {
                 };
 
                 if !matches!(resident.role, crate::views::HomeRole::Moderator) {
-                    return Err(IntentError::validation_failed(
-                        "Can only revoke Admin role, not Owner or Resident",
-                    ));
+                    return Err(IntentError::validation_failed("Target is not a moderator"));
                 }
             }
             _ => {}

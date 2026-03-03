@@ -2,7 +2,7 @@
 
 use crate::tui::navigation::GridNav;
 use crate::tui::state::form::{Validatable, ValidationError};
-use crate::tui::types::AccessLevel;
+use crate::tui::types::{AccessLevel, Contact};
 
 /// Neighborhood screen mode
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -174,6 +174,159 @@ impl HomeCreateModalState {
         } else {
             Some(&self.description)
         }
+    }
+}
+
+/// State for moderator assignment modal.
+#[derive(Clone, Debug, Default)]
+pub struct ModeratorAssignmentModalState {
+    /// Candidate contacts (typically home members).
+    pub contacts: Vec<Contact>,
+    /// Selected candidate index.
+    pub selected_index: usize,
+    /// True = grant moderator, false = revoke moderator.
+    pub assign: bool,
+}
+
+impl ModeratorAssignmentModalState {
+    /// Create a modal preloaded with candidate contacts.
+    #[must_use]
+    pub fn new(contacts: Vec<Contact>) -> Self {
+        Self {
+            contacts,
+            selected_index: 0,
+            assign: true,
+        }
+    }
+
+    /// Toggle grant/revoke mode.
+    pub fn toggle_mode(&mut self) {
+        self.assign = !self.assign;
+    }
+
+    /// Return currently selected contact ID.
+    #[must_use]
+    pub fn selected_contact_id(&self) -> Option<&str> {
+        self.contacts
+            .get(self.selected_index)
+            .map(|contact| contact.id.as_str())
+    }
+}
+
+/// State for access-level override modal.
+#[derive(Clone, Debug)]
+pub struct AccessOverrideModalState {
+    /// Candidate contacts to override.
+    pub contacts: Vec<Contact>,
+    /// Selected candidate index.
+    pub selected_index: usize,
+    /// Override level (bounded to Partial/Limited).
+    pub access_level: AccessLevel,
+}
+
+impl Default for AccessOverrideModalState {
+    fn default() -> Self {
+        Self {
+            contacts: Vec::new(),
+            selected_index: 0,
+            access_level: AccessLevel::Limited,
+        }
+    }
+}
+
+impl AccessOverrideModalState {
+    /// Create a modal preloaded with candidate contacts.
+    #[must_use]
+    pub fn new(contacts: Vec<Contact>) -> Self {
+        Self {
+            contacts,
+            selected_index: 0,
+            access_level: AccessLevel::Limited,
+        }
+    }
+
+    /// Toggle bounded override level (Limited <-> Partial).
+    pub fn toggle_access_level(&mut self) {
+        self.access_level = match self.access_level {
+            AccessLevel::Limited => AccessLevel::Partial,
+            _ => AccessLevel::Limited,
+        };
+    }
+
+    /// Return currently selected contact ID.
+    #[must_use]
+    pub fn selected_contact_id(&self) -> Option<&str> {
+        self.contacts
+            .get(self.selected_index)
+            .map(|contact| contact.id.as_str())
+    }
+}
+
+/// State for per-home Full/Partial/Limited capability configuration.
+#[derive(Clone, Debug)]
+pub struct HomeCapabilityConfigModalState {
+    /// Comma-separated Full capabilities.
+    pub full_caps: String,
+    /// Comma-separated Partial capabilities.
+    pub partial_caps: String,
+    /// Comma-separated Limited capabilities.
+    pub limited_caps: String,
+    /// Active field (0=Full, 1=Partial, 2=Limited).
+    pub active_field: usize,
+    /// Optional validation error.
+    pub error: Option<String>,
+}
+
+impl Default for HomeCapabilityConfigModalState {
+    fn default() -> Self {
+        Self {
+            full_caps: "send_dm,manage_channel,grant_moderator".to_string(),
+            partial_caps: "send_dm,read_channels".to_string(),
+            limited_caps: "send_dm".to_string(),
+            active_field: 0,
+            error: None,
+        }
+    }
+}
+
+impl HomeCapabilityConfigModalState {
+    /// Advance to the next editable capability level.
+    pub fn next_field(&mut self) {
+        self.active_field = (self.active_field + 1) % 3;
+    }
+
+    /// Append a typed character to the active field.
+    pub fn push_char(&mut self, c: char) {
+        match self.active_field {
+            0 => self.full_caps.push(c),
+            1 => self.partial_caps.push(c),
+            _ => self.limited_caps.push(c),
+        }
+        self.error = None;
+    }
+
+    /// Delete one character from the active field.
+    pub fn pop_char(&mut self) {
+        match self.active_field {
+            0 => {
+                self.full_caps.pop();
+            }
+            1 => {
+                self.partial_caps.pop();
+            }
+            _ => {
+                self.limited_caps.pop();
+            }
+        }
+        self.error = None;
+    }
+
+    /// Return true if all capability fields have content.
+    #[must_use]
+    pub fn can_submit(&self) -> bool {
+        !(self.full_caps.trim().is_empty()
+            || self.partial_caps.trim().is_empty()
+            || self.limited_caps.trim().is_empty())
     }
 }
 

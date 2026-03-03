@@ -1218,7 +1218,7 @@ impl From<aura_app::ui::types::contacts::ReadReceiptPolicy> for ReadReceiptPolic
 }
 
 /// A contact
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Contact {
     pub id: String,
     pub nickname: String,

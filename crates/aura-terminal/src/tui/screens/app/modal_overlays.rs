@@ -615,3 +615,119 @@ pub fn render_home_create_modal(
         None
     }
 }
+
+pub fn render_moderator_assignment_modal(
+    neighborhood: &NeighborhoodViewProps,
+) -> Option<AnyElement<'static>> {
+    if neighborhood.moderator_modal_visible {
+        let title = if neighborhood.moderator_modal_assign {
+            "Assign Moderator"
+        } else {
+            "Revoke Moderator"
+        };
+        let hint = if neighborhood.moderator_modal_contacts.is_empty() {
+            "No candidates available".to_string()
+        } else if neighborhood.moderator_modal_assign {
+            "Enter=apply • Tab=toggle revoke • Esc=cancel".to_string()
+        } else {
+            "Enter=apply • Tab=toggle assign • Esc=cancel".to_string()
+        };
+
+        Some(
+            element! {
+                ModalFrame {
+                    ContactSelectModal(
+                        visible: true,
+                        title: title.to_string(),
+                        contacts: neighborhood.moderator_modal_contacts.clone(),
+                        selected_index: neighborhood.moderator_modal_selected_index,
+                        error: hint,
+                        selected_ids: Vec::new(),
+                        multi_select: false,
+                    )
+                }
+            }
+            .into_any(),
+        )
+    } else {
+        None
+    }
+}
+
+pub fn render_access_override_modal(
+    neighborhood: &NeighborhoodViewProps,
+) -> Option<AnyElement<'static>> {
+    if neighborhood.access_override_modal_visible {
+        let hint = format!(
+            "Override: {} • Enter=apply • Tab=toggle • Esc=cancel",
+            neighborhood.access_override_modal_level.label()
+        );
+        Some(
+            element! {
+                ModalFrame {
+                    ContactSelectModal(
+                        visible: true,
+                        title: "Access Override".to_string(),
+                        contacts: neighborhood.access_override_modal_contacts.clone(),
+                        selected_index: neighborhood.access_override_modal_selected_index,
+                        error: hint,
+                        selected_ids: Vec::new(),
+                        multi_select: false,
+                    )
+                }
+            }
+            .into_any(),
+        )
+    } else {
+        None
+    }
+}
+
+pub fn render_capability_config_modal(
+    neighborhood: &NeighborhoodViewProps,
+) -> Option<AnyElement<'static>> {
+    if neighborhood.capability_config_modal_visible {
+        let current_field = match neighborhood.capability_config_modal_active_field {
+            0 => "Full",
+            1 => "Partial",
+            _ => "Limited",
+        };
+        let error = neighborhood
+            .capability_config_modal_error
+            .clone()
+            .unwrap_or_default();
+
+        Some(
+            element! {
+                ModalFrame {
+                    View(
+                        flex_direction: FlexDirection::Column,
+                        border_style: BorderStyle::Round,
+                        border_color: crate::tui::theme::Theme::PRIMARY,
+                        width: 82,
+                        padding_left: 1,
+                        padding_right: 1,
+                        padding_top: 1,
+                        padding_bottom: 1,
+                        gap: 1,
+                    ) {
+                        Text(content: "Home Capability Configuration", weight: Weight::Bold, color: crate::tui::theme::Theme::PRIMARY)
+                        Text(content: "Tab=next field • Enter=save • Esc=cancel", color: crate::tui::theme::Theme::TEXT_MUTED)
+                        Text(content: format!("Editing: {}", current_field), color: crate::tui::theme::Theme::SECONDARY)
+                        Text(content: format!("Full: {}", neighborhood.capability_config_modal_full_caps), color: crate::tui::theme::Theme::TEXT)
+                        Text(content: format!("Partial: {}", neighborhood.capability_config_modal_partial_caps), color: crate::tui::theme::Theme::TEXT)
+                        Text(content: format!("Limited: {}", neighborhood.capability_config_modal_limited_caps), color: crate::tui::theme::Theme::TEXT)
+                        #(if error.is_empty() {
+                            None
+                        } else {
+                            Some(element! { Text(content: error, color: crate::tui::theme::Theme::ERROR) })
+                        })
+                    }
+                }
+            }
+            .into_any(),
+        )
+    } else {
+        None
+    }
+}

@@ -11,12 +11,13 @@
 #![allow(clippy::manual_map)]
 
 use super::modal_overlays::{
-    render_account_setup_modal, render_add_device_modal, render_channel_info_modal,
-    render_chat_create_modal, render_confirm_modal, render_contact_modal,
-    render_contacts_code_modal, render_contacts_create_modal, render_contacts_import_modal,
-    render_device_enrollment_modal, render_device_import_modal, render_device_select_modal,
-    render_guardian_modal, render_guardian_setup_modal, render_help_modal,
-    render_home_create_modal, render_mfa_setup_modal, render_nickname_modal,
+    render_access_override_modal, render_account_setup_modal, render_add_device_modal,
+    render_capability_config_modal, render_channel_info_modal, render_chat_create_modal,
+    render_confirm_modal, render_contact_modal, render_contacts_code_modal,
+    render_contacts_create_modal, render_contacts_import_modal, render_device_enrollment_modal,
+    render_device_import_modal, render_device_select_modal, render_guardian_modal,
+    render_guardian_setup_modal, render_help_modal, render_home_create_modal,
+    render_mfa_setup_modal, render_moderator_assignment_modal, render_nickname_modal,
     render_nickname_suggestion_modal, render_remove_device_modal, render_topic_modal,
     GlobalModalProps,
 };
@@ -1606,6 +1607,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             KeyHint::new("n", "New"),
             KeyHint::new("m", "Neighborhood"),
             KeyHint::new("v", "Join"),
+            KeyHint::new("o", "Mod"),
+            KeyHint::new("x", "Override"),
+            KeyHint::new("p", "Caps"),
         ],
         Screen::Notifications => vec![KeyHint::new("j/k", "Move"), KeyHint::new("h/l", "Focus")],
         Screen::Settings => vec![
@@ -2652,6 +2656,68 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             ),
                                         );
                                     }
+                                    DispatchCommand::OpenModeratorAssignmentModal => {
+                                        let contacts = shared_contacts_for_dispatch
+                                            .read()
+                                            .map(|guard| guard.clone())
+                                            .unwrap_or_default();
+                                        new_state.modal_queue.enqueue(
+                                            crate::tui::state_machine::QueuedModal::NeighborhoodModeratorAssignment(
+                                                crate::tui::state_machine::ModeratorAssignmentModalState::new(
+                                                    contacts,
+                                                ),
+                                            ),
+                                        );
+                                    }
+                                    DispatchCommand::SubmitModeratorAssignment { target_id, assign } => {
+                                        (cb.neighborhood.on_set_moderator)(
+                                            new_state.neighborhood.entered_home_id.clone(),
+                                            target_id.clone(),
+                                            assign,
+                                        );
+                                        new_state.modal_queue.dismiss();
+                                    }
+                                    DispatchCommand::OpenAccessOverrideModal => {
+                                        let contacts = shared_contacts_for_dispatch
+                                            .read()
+                                            .map(|guard| guard.clone())
+                                            .unwrap_or_default();
+                                        new_state.modal_queue.enqueue(
+                                            crate::tui::state_machine::QueuedModal::NeighborhoodAccessOverride(
+                                                crate::tui::state_machine::AccessOverrideModalState::new(
+                                                    contacts,
+                                                ),
+                                            ),
+                                        );
+                                    }
+                                    DispatchCommand::SubmitAccessOverride {
+                                        target_id,
+                                        access_level,
+                                    } => {
+                                        new_state.toast_info(format!(
+                                            "Access override preview: {} -> {}",
+                                            target_id,
+                                            access_level.label()
+                                        ));
+                                        new_state.modal_queue.dismiss();
+                                    }
+                                    DispatchCommand::OpenHomeCapabilityConfigModal => {
+                                        new_state.modal_queue.enqueue(
+                                            crate::tui::state_machine::QueuedModal::NeighborhoodCapabilityConfig(
+                                                crate::tui::state_machine::HomeCapabilityConfigModalState::default(),
+                                            ),
+                                        );
+                                    }
+                                    DispatchCommand::SubmitHomeCapabilityConfig {
+                                        full_caps,
+                                        partial_caps,
+                                        limited_caps,
+                                    } => {
+                                        new_state.toast_success(format!(
+                                            "Capability config saved (Full: {full_caps}; Partial: {partial_caps}; Limited: {limited_caps})"
+                                        ));
+                                        new_state.modal_queue.dismiss();
+                                    }
                                     DispatchCommand::CreateHome { name, description } => {
                                         (cb.neighborhood.on_create_home)(name, description);
                                         new_state.modal_queue.dismiss();
@@ -2879,6 +2945,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // === NEIGHBORHOOD SCREEN MODALS ===
             // Rendered via modal_overlays module for maintainability
             #(render_home_create_modal(&neighborhood_props))
+            #(render_moderator_assignment_modal(&neighborhood_props))
+            #(render_access_override_modal(&neighborhood_props))
+            #(render_capability_config_modal(&neighborhood_props))
 
             // === TOAST OVERLAY ===
             // Toast notifications overlay the footer when active
