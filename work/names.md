@@ -416,18 +416,18 @@ This section contains the implementation plan for the terminology and architectu
 
 ### 4.1 Missing Functionality
 
-- [ ] **Moderator designation system**
+- [x] **Moderator designation system**
   - Add `ModeratorDesignation` to home membership
   - Implement assign/unassign operations (Category B)
   - Enforce rule: only `Member` can hold `ModeratorDesignation`
   - Define moderator capabilities (kick, mute, ban)
 
-- [ ] **Access level override system**
+- [x] **Access level override system**
   - Store per-user access overrides
   - 2-hop → Partial upgrade
   - 1-hop → Limited downgrade
 
-- [ ] **Access level capability configuration**
+- [x] **Access level capability configuration**
   - Per-home configuration of what Full/Partial/Limited can do
   - Default capability sets
 
@@ -437,7 +437,7 @@ This section contains the implementation plan for the terminology and architectu
 
 ### 4.2 Phase 4 Checkpoint
 
-- [ ] **Run full CI checks**
+- [x] **Run full CI checks**
   ```bash
   just fmt-check
   just clippy

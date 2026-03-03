@@ -269,6 +269,16 @@ impl HomeState {
         matches!(self.my_role, HomeRole::Moderator | HomeRole::Member)
     }
 
+    /// Check if current user holds moderator designation.
+    pub fn is_moderator(&self) -> bool {
+        matches!(self.my_role, HomeRole::Moderator)
+    }
+
+    /// Check if current user can execute moderation actions (kick/ban/mute/pin).
+    pub fn can_moderate(&self) -> bool {
+        self.is_moderator()
+    }
+
     /// Set home name
     pub fn set_name(&mut self, name: String) {
         self.name = name;

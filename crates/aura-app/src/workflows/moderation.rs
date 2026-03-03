@@ -31,7 +31,7 @@ const MODERATION_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
 struct ModerationScope {
     context_id: ContextId,
     home_id: ChannelId,
-    is_admin: bool,
+    can_moderate: bool,
     peers: Vec<aura_core::identifiers::AuthorityId>,
 }
 
@@ -49,7 +49,7 @@ fn best_home_for_context(
         .map(|(home_id, home)| (*home_id, home.clone()))
         .max_by_key(|(_, home)| {
             (
-                u8::from(home.is_admin()),
+                u8::from(home.can_moderate()),
                 u8::from(!home.residents.is_empty()),
                 home.resident_count,
             )
@@ -100,9 +100,9 @@ async fn resolve_scope(
     let home_from_channel = hinted_channel.and_then(|channel_id| {
         if let Some(home) = homes.home_state(&channel_id) {
             if let Some(context_id) = home.context_id {
-                if !home.is_admin() {
+                if !home.can_moderate() {
                     if let Some((best_id, best_home)) = best_home_for_context(&homes, context_id) {
-                        if best_home.is_admin() {
+                        if best_home.can_moderate() {
                             return Some((best_id, best_home));
                         }
                     }
@@ -117,7 +117,7 @@ async fn resolve_scope(
         best_home_for_context(&homes, context_id)
     });
 
-    let (context_id, home_id, is_admin, peers) =
+    let (context_id, home_id, can_moderate, peers) =
         if let Some((home_id, home_state)) = home_from_channel {
             let peers = home_state
                 .residents
@@ -129,7 +129,7 @@ async fn resolve_scope(
                     .context_id
                     .ok_or_else(|| AuraError::not_found("Home has no context ID"))?,
                 home_id,
-                home_state.is_admin(),
+                home_state.can_moderate(),
                 peers,
             )
         } else if let Some(context_id) = context_from_channel {
@@ -139,18 +139,18 @@ async fn resolve_scope(
                 .current_home()
                 .map(|home| home.residents.iter().map(|resident| resident.id).collect())
                 .unwrap_or_default();
-            let is_admin = homes
+            let can_moderate = homes
                 .current_home()
-                .map(|home| home.is_admin())
-                .unwrap_or(true);
-            (context_id, home_id, is_admin, peers)
+                .map(|home| home.can_moderate())
+                .unwrap_or(false);
+            (context_id, home_id, can_moderate, peers)
         } else if let Some(fallback) = homes.current_home() {
             (
                 fallback
                     .context_id
                     .ok_or_else(|| AuraError::not_found("Home has no context ID"))?,
                 fallback.id,
-                fallback.is_admin(),
+                fallback.can_moderate(),
                 fallback
                     .residents
                     .iter()
@@ -166,7 +166,7 @@ async fn resolve_scope(
     Ok(ModerationScope {
         context_id,
         home_id,
-        is_admin,
+        can_moderate,
         peers,
     })
 }
@@ -189,7 +189,7 @@ async fn resolve_scope_by_channel_id(
         Ok(ModerationScope {
             context_id,
             home_id,
-            is_admin: home.is_admin(),
+            can_moderate: home.can_moderate(),
             peers,
         })
     };
@@ -197,9 +197,9 @@ async fn resolve_scope_by_channel_id(
     if let Some(channel_id) = channel_hint {
         if let Some(home) = homes.home_state(&channel_id) {
             if let Some(context_id) = home.context_id {
-                if !home.is_admin() {
+                if !home.can_moderate() {
                     if let Some((best_id, best_home)) = best_home_for_context(&homes, context_id) {
-                        if best_home.is_admin() {
+                        if best_home.can_moderate() {
                             return from_home(best_id, &best_home);
                         }
                     }
@@ -356,9 +356,9 @@ pub async fn kick_user_resolved(
     kicked_at_ms: u64,
 ) -> Result<(), AuraError> {
     let scope = resolve_scope_by_channel_id(app_core, Some(channel_id)).await?;
-    if !scope.is_admin {
+    if !scope.can_moderate {
         return Err(AuraError::permission_denied(
-            "Only moderators can kick residents",
+            "Only moderators with kick capability can kick residents",
         ));
     }
 
@@ -408,9 +408,9 @@ pub async fn ban_user_resolved(
     banned_at_ms: u64,
 ) -> Result<(), AuraError> {
     let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
-    if !scope.is_admin {
+    if !scope.can_moderate {
         return Err(AuraError::permission_denied(
-            "Only moderators can ban residents",
+            "Only moderators with ban capability can ban residents",
         ));
     }
 
@@ -463,9 +463,9 @@ pub async fn unban_user_resolved(
     target_id: aura_core::identifiers::AuthorityId,
 ) -> Result<(), AuraError> {
     let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
-    if !scope.is_admin {
+    if !scope.can_moderate {
         return Err(AuraError::permission_denied(
-            "Only moderators can unban residents",
+            "Only moderators with ban capability can unban residents",
         ));
     }
 
@@ -512,9 +512,9 @@ pub async fn mute_user_resolved(
     muted_at_ms: u64,
 ) -> Result<(), AuraError> {
     let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
-    if !scope.is_admin {
+    if !scope.can_moderate {
         return Err(AuraError::permission_denied(
-            "Only moderators can mute residents",
+            "Only moderators with mute capability can mute residents",
         ));
     }
 
@@ -570,9 +570,9 @@ pub async fn unmute_user_resolved(
     target_id: aura_core::identifiers::AuthorityId,
 ) -> Result<(), AuraError> {
     let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
-    if !scope.is_admin {
+    if !scope.can_moderate {
         return Err(AuraError::permission_denied(
-            "Only moderators can unmute residents",
+            "Only moderators with mute capability can unmute residents",
         ));
     }
 
@@ -615,9 +615,9 @@ pub async fn pin_message(
     message_id: &str,
 ) -> Result<(), AuraError> {
     let scope = scope_for_message(app_core, message_id).await?;
-    if !scope.is_admin {
+    if !scope.can_moderate {
         return Err(AuraError::permission_denied(
-            "Only moderators can pin messages",
+            "Only moderators with pin capability can pin messages",
         ));
     }
 
@@ -643,9 +643,9 @@ pub async fn unpin_message(
     message_id: &str,
 ) -> Result<(), AuraError> {
     let scope = scope_for_message(app_core, message_id).await?;
-    if !scope.is_admin {
+    if !scope.can_moderate {
         return Err(AuraError::permission_denied(
-            "Only moderators can unpin messages",
+            "Only moderators with pin capability can unpin messages",
         ));
     }
 

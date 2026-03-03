@@ -4,11 +4,12 @@
 //! the social topology.
 
 use crate::facts::{
-    AccessLevel, AccessOverrideFact, HomeId, TraversalAllowedFact, TraversalPosition,
+    AccessLevel, AccessLevelCapabilityConfig, AccessLevelCapabilityConfigFact, AccessOverrideFact,
+    HomeId, TraversalAllowedFact, TraversalPosition,
 };
 use crate::{error::SocialError, Home, Neighborhood};
 use aura_core::identifiers::AuthorityId;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 /// Service for checking traversal permissions.
 pub struct TraversalService {
@@ -131,10 +132,56 @@ pub fn determine_access_level(
     neighborhoods: &[Neighborhood],
     overrides: &[AccessOverrideFact],
 ) -> AccessLevel {
-    if let Some(level) = latest_override_level(home.home_id, authority_id, overrides) {
+    let default_level = determine_default_access_level(home, authority_home, neighborhoods);
+    if let Some(level) =
+        latest_valid_override_level(home.home_id, authority_id, default_level, overrides)
+    {
         return level;
     }
-    determine_default_access_level(home, authority_home, neighborhoods)
+    default_level
+}
+
+/// Resolve the effective capability configuration for a home.
+///
+/// If no config fact exists, returns the default capability mapping.
+pub fn resolve_access_level_capability_config(
+    home_id: HomeId,
+    configs: &[AccessLevelCapabilityConfigFact],
+) -> AccessLevelCapabilityConfig {
+    latest_capability_config(home_id, configs)
+        .map(|config| config.config.clone())
+        .unwrap_or_default()
+}
+
+/// Resolve effective capabilities for an authority in the target home.
+pub fn resolve_access_capabilities(
+    home: &Home,
+    authority_id: AuthorityId,
+    authority_home: Option<HomeId>,
+    neighborhoods: &[Neighborhood],
+    overrides: &[AccessOverrideFact],
+    configs: &[AccessLevelCapabilityConfigFact],
+) -> BTreeSet<String> {
+    let level =
+        determine_access_level(home, authority_id, authority_home, neighborhoods, overrides);
+    let config = resolve_access_level_capability_config(home.home_id, configs);
+    config.capabilities_for(level).clone()
+}
+
+/// Check whether an authority has a specific configured access capability.
+pub fn has_access_capability(
+    home: &Home,
+    authority_id: AuthorityId,
+    authority_home: Option<HomeId>,
+    neighborhoods: &[Neighborhood],
+    overrides: &[AccessOverrideFact],
+    configs: &[AccessLevelCapabilityConfigFact],
+    capability: &str,
+) -> bool {
+    let level =
+        determine_access_level(home, authority_id, authority_home, neighborhoods, overrides);
+    let config = resolve_access_level_capability_config(home.home_id, configs);
+    config.allows(level, capability)
 }
 
 /// Compute the minimum hop distance between two homes in the committed graph.
@@ -195,9 +242,10 @@ fn build_home_graph(neighborhoods: &[Neighborhood]) -> HashMap<HomeId, HashSet<H
     graph
 }
 
-fn latest_override_level(
+fn latest_valid_override_level(
     target_home: HomeId,
     authority_id: AuthorityId,
+    default_level: AccessLevel,
     overrides: &[AccessOverrideFact],
 ) -> Option<AccessLevel> {
     overrides
@@ -205,8 +253,19 @@ fn latest_override_level(
         .filter(|override_fact| {
             override_fact.home_id == target_home && override_fact.authority_id == authority_id
         })
+        .filter(|override_fact| override_fact.is_valid_for_default(default_level))
         .max_by_key(|override_fact| override_fact.set_at.to_index_ms().value())
         .map(|override_fact| override_fact.access_level)
+}
+
+fn latest_capability_config(
+    home_id: HomeId,
+    configs: &[AccessLevelCapabilityConfigFact],
+) -> Option<&AccessLevelCapabilityConfigFact> {
+    configs
+        .iter()
+        .filter(|config| config.home_id == home_id)
+        .max_by_key(|config| config.configured_at.to_index_ms().value())
 }
 
 fn default_access_level_for_hops(hops: Option<u32>) -> AccessLevel {
@@ -224,6 +283,7 @@ mod tests {
         identifiers::{AuthorityId, ContextId},
         time::{PhysicalTime, TimeStamp},
     };
+    use std::collections::BTreeSet;
 
     fn test_timestamp() -> TimeStamp {
         TimeStamp::PhysicalClock(PhysicalTime {
@@ -357,5 +417,168 @@ mod tests {
             &[override_fact],
         );
         assert_eq!(level, AccessLevel::Limited);
+    }
+
+    #[test]
+    fn test_determine_access_level_applies_valid_upgrade_override() {
+        let home_a = HomeId::from_bytes([1u8; 32]);
+        let home_b = HomeId::from_bytes([2u8; 32]);
+        let authority = AuthorityId::new_from_entropy([8u8; 32]);
+        let home_instance = Home::new_empty(home_a);
+
+        // Default is Limited for disconnected/2+-hop.
+        let override_fact = AccessOverrideFact {
+            authority_id: authority,
+            home_id: home_a,
+            access_level: AccessLevel::Partial,
+            set_at: test_timestamp(),
+        };
+
+        let level = determine_access_level(
+            &home_instance,
+            authority,
+            Some(home_b),
+            &[],
+            &[override_fact],
+        );
+        assert_eq!(level, AccessLevel::Partial);
+    }
+
+    #[test]
+    fn test_determine_access_level_ignores_invalid_override_transition() {
+        let home_a = HomeId::from_bytes([1u8; 32]);
+        let authority = AuthorityId::new_from_entropy([7u8; 32]);
+        let home_instance = Home::new_empty(home_a);
+
+        // Default is Full (same home). Full -> Limited override is invalid.
+        let invalid_override = AccessOverrideFact {
+            authority_id: authority,
+            home_id: home_a,
+            access_level: AccessLevel::Limited,
+            set_at: test_timestamp(),
+        };
+
+        let level = determine_access_level(
+            &home_instance,
+            authority,
+            Some(home_a),
+            &[],
+            &[invalid_override],
+        );
+        assert_eq!(level, AccessLevel::Full);
+    }
+
+    #[test]
+    fn test_determine_access_level_applies_valid_downgrade_override() {
+        let home_a = HomeId::from_bytes([1u8; 32]);
+        let home_b = HomeId::from_bytes([2u8; 32]);
+        let neighborhood_id = crate::facts::NeighborhoodId::from_bytes([3u8; 32]);
+        let authority = AuthorityId::new_from_entropy([6u8; 32]);
+        let home_instance = Home::new_empty(home_a);
+
+        let mut neighborhood = Neighborhood::new_empty(neighborhood_id);
+        neighborhood.member_homes = vec![home_a, home_b];
+
+        // Default is Partial (1-hop). Partial -> Limited override is valid.
+        let override_fact = AccessOverrideFact {
+            authority_id: authority,
+            home_id: home_a,
+            access_level: AccessLevel::Limited,
+            set_at: test_timestamp(),
+        };
+
+        let level = determine_access_level(
+            &home_instance,
+            authority,
+            Some(home_b),
+            &[neighborhood],
+            &[override_fact],
+        );
+        assert_eq!(level, AccessLevel::Limited);
+    }
+
+    #[test]
+    fn test_resolve_access_level_capability_config_defaults_when_missing() {
+        let home_a = HomeId::from_bytes([1u8; 32]);
+        let config = resolve_access_level_capability_config(home_a, &[]);
+        assert!(config.allows(AccessLevel::Full, "send_message"));
+        assert!(config.allows(AccessLevel::Partial, "send_message"));
+        assert!(!config.allows(AccessLevel::Limited, "send_message"));
+    }
+
+    #[test]
+    fn test_resolve_access_level_capability_config_uses_latest_fact() {
+        let home_a = HomeId::from_bytes([1u8; 32]);
+        let old_at = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 100,
+            uncertainty: None,
+        });
+        let new_at = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 200,
+            uncertainty: None,
+        });
+
+        let mut old_partial = BTreeSet::new();
+        old_partial.insert("view_members".to_string());
+        let mut new_partial = BTreeSet::new();
+        new_partial.insert("send_dm".to_string());
+
+        let old = AccessLevelCapabilityConfigFact {
+            home_id: home_a,
+            config: AccessLevelCapabilityConfig {
+                full: BTreeSet::new(),
+                partial: old_partial,
+                limited: BTreeSet::new(),
+            },
+            configured_at: old_at,
+        };
+        let new = AccessLevelCapabilityConfigFact {
+            home_id: home_a,
+            config: AccessLevelCapabilityConfig {
+                full: BTreeSet::new(),
+                partial: new_partial,
+                limited: BTreeSet::new(),
+            },
+            configured_at: new_at,
+        };
+
+        let resolved = resolve_access_level_capability_config(home_a, &[old, new]);
+        assert!(resolved.allows(AccessLevel::Partial, "send_dm"));
+        assert!(!resolved.allows(AccessLevel::Partial, "view_members"));
+    }
+
+    #[test]
+    fn test_has_access_capability_uses_effective_level_and_config() {
+        let home_a = HomeId::from_bytes([1u8; 32]);
+        let home_b = HomeId::from_bytes([2u8; 32]);
+        let authority = AuthorityId::new_from_entropy([5u8; 32]);
+        let home_instance = Home::new_empty(home_a);
+
+        let override_fact = AccessOverrideFact {
+            authority_id: authority,
+            home_id: home_a,
+            access_level: AccessLevel::Partial,
+            set_at: test_timestamp(),
+        };
+
+        let config = AccessLevelCapabilityConfigFact {
+            home_id: home_a,
+            config: AccessLevelCapabilityConfig {
+                full: BTreeSet::new(),
+                partial: ["can_partial".to_string()].into_iter().collect(),
+                limited: BTreeSet::new(),
+            },
+            configured_at: test_timestamp(),
+        };
+
+        assert!(has_access_capability(
+            &home_instance,
+            authority,
+            Some(home_b),
+            &[],
+            &[override_fact],
+            &[config],
+            "can_partial"
+        ));
     }
 }

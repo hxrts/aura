@@ -126,16 +126,16 @@ pub fn role_has_capability(role: Option<HomeRole>, capability: &CommandCapabilit
         | CommandCapability::ViewMembers
         | CommandCapability::JoinChannel
         | CommandCapability::LeaveContext => true,
-        // Moderation/admin capabilities - require Admin or Owner
+        // Moderation capabilities require moderator designation.
         CommandCapability::ModerateKick
         | CommandCapability::ModerateBan
         | CommandCapability::ModerateMute
-        | CommandCapability::Invite
         | CommandCapability::ManageChannel
-        | CommandCapability::PinContent
-        | CommandCapability::GrantModerator => {
-            matches!(role, HomeRole::Moderator | HomeRole::Member)
-        }
+        | CommandCapability::PinContent => matches!(role, HomeRole::Moderator),
+        // Invites remain a home membership/governance operation.
+        CommandCapability::Invite => matches!(role, HomeRole::Moderator | HomeRole::Member),
+        // Grant/revoke moderator designation is a home-governance action.
+        CommandCapability::GrantModerator => matches!(role, HomeRole::Moderator | HomeRole::Member),
     }
 }
 
@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn test_role_has_capability_moderation() {
-        // Moderation requires Admin or Owner
+        // Kick/Ban/Mute are moderator-only capabilities.
         assert!(!role_has_capability(
             Some(HomeRole::Participant),
             &CommandCapability::ModerateKick
@@ -266,7 +266,7 @@ mod tests {
             Some(HomeRole::Moderator),
             &CommandCapability::ModerateKick
         ));
-        assert!(role_has_capability(
+        assert!(!role_has_capability(
             Some(HomeRole::Member),
             &CommandCapability::ModerateKick
         ));
@@ -278,6 +278,24 @@ mod tests {
         assert!(role_has_capability(
             Some(HomeRole::Moderator),
             &CommandCapability::GrantModerator
+        ));
+        assert!(role_has_capability(
+            Some(HomeRole::Member),
+            &CommandCapability::GrantModerator
+        ));
+
+        // Invites are home-governance actions for members or moderators.
+        assert!(!role_has_capability(
+            Some(HomeRole::Participant),
+            &CommandCapability::Invite
+        ));
+        assert!(role_has_capability(
+            Some(HomeRole::Moderator),
+            &CommandCapability::Invite
+        ));
+        assert!(role_has_capability(
+            Some(HomeRole::Member),
+            &CommandCapability::Invite
         ));
     }
 

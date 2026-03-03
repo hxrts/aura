@@ -5,11 +5,12 @@
 
 use crate::error::SocialError;
 use crate::facts::{
-    HomeConfigFact, HomeFact, HomeId, HomeStorageBudget, ModeratorCapabilities, ModeratorFact,
-    ResidentFact,
+    HomeConfigFact, HomeFact, HomeId, HomeStorageBudget, ModeratorCapabilities,
+    ModeratorCapability, ModeratorDesignation, ModeratorFact, ResidentFact,
 };
 use aura_core::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Materialized view of a home, aggregated from journal facts.
 ///
@@ -27,8 +28,8 @@ pub struct Home {
     pub neighborhood_limit: u8,
     /// Current residents (authority IDs)
     pub residents: Vec<AuthorityId>,
-    /// Current moderators with their capabilities
-    pub moderators: Vec<(AuthorityId, ModeratorCapabilities)>,
+    /// Current moderator designations with capability bundles.
+    pub moderator_designations: Vec<ModeratorDesignation>,
     /// Current storage budget tracking
     pub storage_budget: HomeStorageBudget,
 }
@@ -56,6 +57,27 @@ impl Home {
 
         let mut storage_budget = HomeStorageBudget::new(home_fact.home_id);
         storage_budget.resident_storage_spent = resident_storage_spent;
+        let resident_set: BTreeSet<AuthorityId> =
+            residents.iter().map(|r| r.authority_id).collect();
+        let mut designation_by_authority: BTreeMap<AuthorityId, ModeratorDesignation> =
+            BTreeMap::new();
+        for moderator in moderators {
+            // Invariant: Moderator ⊆ Member. Ignore stale/non-member grants in materialized view.
+            if !resident_set.contains(&moderator.authority_id) {
+                continue;
+            }
+            let designation = ModeratorDesignation::from(moderator);
+            let should_replace = designation_by_authority
+                .get(&designation.authority_id)
+                .map(|existing| {
+                    designation.designated_at.to_index_ms().value()
+                        >= existing.designated_at.to_index_ms().value()
+                })
+                .unwrap_or(true);
+            if should_replace {
+                designation_by_authority.insert(designation.authority_id, designation);
+            }
+        }
 
         Self {
             home_id: home_fact.home_id,
@@ -63,10 +85,7 @@ impl Home {
             max_residents: config.max_residents,
             neighborhood_limit: config.neighborhood_limit,
             residents: residents.iter().map(|r| r.authority_id).collect(),
-            moderators: moderators
-                .iter()
-                .map(|s| (s.authority_id, s.capabilities.clone()))
-                .collect(),
+            moderator_designations: designation_by_authority.into_values().collect(),
             storage_budget,
         }
     }
@@ -79,7 +98,7 @@ impl Home {
             max_residents: HomeConfigFact::V1_MAX_RESIDENTS,
             neighborhood_limit: HomeConfigFact::V1_NEIGHBORHOOD_LIMIT,
             residents: Vec::new(),
-            moderators: Vec::new(),
+            moderator_designations: Vec::new(),
             storage_budget: HomeStorageBudget::new(home_id),
         }
     }
@@ -96,7 +115,9 @@ impl Home {
 
     /// Check if an authority is a moderator of this home.
     pub fn is_moderator(&self, authority: &AuthorityId) -> bool {
-        self.moderators.iter().any(|(a, _)| a == authority)
+        self.moderator_designations
+            .iter()
+            .any(|designation| designation.authority_id == *authority)
     }
 
     /// Get moderator capabilities for an authority, if they are a moderator.
@@ -104,10 +125,69 @@ impl Home {
         &self,
         authority: &AuthorityId,
     ) -> Option<&ModeratorCapabilities> {
-        self.moderators
+        self.moderator_designations
             .iter()
-            .find(|(a, _)| a == authority)
-            .map(|(_, caps)| caps)
+            .find(|designation| designation.authority_id == *authority)
+            .map(|designation| &designation.capabilities)
+    }
+
+    /// Check if an authority has a specific moderator capability.
+    pub fn has_moderator_capability(
+        &self,
+        authority: &AuthorityId,
+        capability: ModeratorCapability,
+    ) -> bool {
+        self.moderator_capabilities(authority)
+            .map(|caps| caps.allows(capability))
+            .unwrap_or(false)
+    }
+
+    /// Assign moderator designation to an existing home member.
+    ///
+    /// Returns `NotResident` if the target is not a member.
+    pub fn assign_moderator_designation(
+        &mut self,
+        authority: AuthorityId,
+        capabilities: ModeratorCapabilities,
+        designated_at: aura_core::time::TimeStamp,
+    ) -> Result<(), SocialError> {
+        if !self.is_resident(&authority) {
+            return Err(SocialError::not_resident(self.home_id));
+        }
+
+        if let Some(designation) = self
+            .moderator_designations
+            .iter_mut()
+            .find(|designation| designation.authority_id == authority)
+        {
+            designation.capabilities = capabilities;
+            designation.designated_at = designated_at;
+            return Ok(());
+        }
+
+        self.moderator_designations.push(ModeratorDesignation {
+            authority_id: authority,
+            home_id: self.home_id,
+            designated_at,
+            capabilities,
+        });
+        Ok(())
+    }
+
+    /// Remove moderator designation from an authority.
+    pub fn unassign_moderator_designation(
+        &mut self,
+        authority: &AuthorityId,
+    ) -> Result<(), SocialError> {
+        let Some(index) = self
+            .moderator_designations
+            .iter()
+            .position(|designation| designation.authority_id == *authority)
+        else {
+            return Err(SocialError::not_moderator(self.home_id));
+        };
+        self.moderator_designations.remove(index);
+        Ok(())
     }
 
     /// Get the number of current residents.
@@ -195,6 +275,73 @@ mod tests {
         assert!(!home_instance.is_resident(&test_authority(3)));
         assert!(home_instance.is_moderator(&test_authority(1)));
         assert!(!home_instance.is_moderator(&test_authority(2)));
+    }
+
+    #[test]
+    fn test_moderator_designation_requires_resident_membership() {
+        let home_id = HomeId::from_bytes([9u8; 32]);
+        let mut home_instance = Home::new_empty(home_id);
+        let member = test_authority(1);
+        let outsider = test_authority(2);
+
+        home_instance.residents.push(member);
+        assert!(home_instance
+            .assign_moderator_designation(
+                member,
+                ModeratorCapabilities::default(),
+                test_timestamp()
+            )
+            .is_ok());
+        assert!(home_instance.is_moderator(&member));
+
+        let result = home_instance.assign_moderator_designation(
+            outsider,
+            ModeratorCapabilities::default(),
+            test_timestamp(),
+        );
+        assert!(matches!(result, Err(SocialError::NotResident { .. })));
+    }
+
+    #[test]
+    fn test_unassign_moderator_designation() {
+        let home_id = HomeId::from_bytes([10u8; 32]);
+        let mut home_instance = Home::new_empty(home_id);
+        let member = test_authority(1);
+
+        home_instance.residents.push(member);
+        let assigned = home_instance.assign_moderator_designation(
+            member,
+            ModeratorCapabilities::default(),
+            test_timestamp(),
+        );
+        assert!(assigned.is_ok());
+        assert!(home_instance.is_moderator(&member));
+
+        let revoked = home_instance.unassign_moderator_designation(&member);
+        assert!(revoked.is_ok());
+        assert!(!home_instance.is_moderator(&member));
+    }
+
+    #[test]
+    fn test_has_moderator_capability() {
+        let home_id = HomeId::from_bytes([11u8; 32]);
+        let mut home_instance = Home::new_empty(home_id);
+        let member = test_authority(1);
+
+        home_instance.residents.push(member);
+        let assigned = home_instance.assign_moderator_designation(
+            member,
+            ModeratorCapabilities::default(),
+            test_timestamp(),
+        );
+        assert!(assigned.is_ok());
+
+        assert!(home_instance.has_moderator_capability(&member, ModeratorCapability::Kick));
+        assert!(home_instance.has_moderator_capability(&member, ModeratorCapability::Ban));
+        assert!(home_instance.has_moderator_capability(&member, ModeratorCapability::Mute));
+        assert!(
+            !home_instance.has_moderator_capability(&member, ModeratorCapability::GrantModerator)
+        );
     }
 
     #[test]

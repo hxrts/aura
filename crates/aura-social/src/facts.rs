@@ -179,11 +179,32 @@ impl ResidentFact {
     }
 }
 
-/// Moderator capability bundle
+/// Individual moderator capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum ModeratorCapability {
+    /// Can kick users from channels/home.
+    Kick,
+    /// Can ban users from channels/home.
+    Ban,
+    /// Can mute users in channels/home.
+    Mute,
+    /// Can pin and unpin messages.
+    PinContent,
+    /// Can grant/revoke moderator designation.
+    GrantModerator,
+    /// Can manage channel modes/settings.
+    ManageChannel,
+}
+
+/// Moderator capability bundle.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ModeratorCapabilities {
-    /// Can moderate content and users
-    pub moderation: bool,
+    /// Can kick users.
+    pub kick: bool,
+    /// Can ban users.
+    pub ban: bool,
+    /// Can mute users.
+    pub mute: bool,
     /// Can pin/unpin content
     pub pin_content: bool,
     /// Can grant moderator capabilities to others
@@ -197,7 +218,9 @@ pub struct ModeratorCapabilities {
 impl Default for ModeratorCapabilities {
     fn default() -> Self {
         Self {
-            moderation: true,
+            kick: true,
+            ban: true,
+            mute: true,
             pin_content: true,
             grant_moderator: false,
             manage_channel: true,
@@ -210,7 +233,9 @@ impl ModeratorCapabilities {
     /// Create full moderator capabilities
     pub fn full() -> Self {
         Self {
-            moderation: true,
+            kick: true,
+            ban: true,
+            mute: true,
             pin_content: true,
             grant_moderator: true,
             manage_channel: true,
@@ -218,11 +243,29 @@ impl ModeratorCapabilities {
         }
     }
 
+    /// Check whether this bundle allows a specific moderator capability.
+    pub fn allows(&self, capability: ModeratorCapability) -> bool {
+        match capability {
+            ModeratorCapability::Kick => self.kick,
+            ModeratorCapability::Ban => self.ban,
+            ModeratorCapability::Mute => self.mute,
+            ModeratorCapability::PinContent => self.pin_content,
+            ModeratorCapability::GrantModerator => self.grant_moderator,
+            ModeratorCapability::ManageChannel => self.manage_channel,
+        }
+    }
+
     /// Convert to a capability string set for Biscuit
     pub fn to_capability_set(&self) -> BTreeSet<String> {
         let mut caps = BTreeSet::new();
-        if self.moderation {
-            caps.insert("moderation".to_string());
+        if self.kick {
+            caps.insert("moderate:kick".to_string());
+        }
+        if self.ban {
+            caps.insert("moderate:ban".to_string());
+        }
+        if self.mute {
+            caps.insert("moderate:mute".to_string());
         }
         if self.pin_content {
             caps.insert("pin_content".to_string());
@@ -275,6 +318,49 @@ impl ModeratorFact {
             self.granted_at.to_index_ms(),
             caps_str.join(", ")
         )
+    }
+}
+
+/// Moderator designation attached to an existing home member.
+///
+/// This models moderator as a designation, not a membership tier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModeratorDesignation {
+    /// Authority holding moderator designation.
+    pub authority_id: AuthorityId,
+    /// Home where designation applies.
+    pub home_id: HomeId,
+    /// When designation was applied.
+    pub designated_at: TimeStamp,
+    /// Capability bundle for this moderator.
+    pub capabilities: ModeratorCapabilities,
+}
+
+impl ModeratorDesignation {
+    /// Create a designation with default moderator capabilities.
+    pub fn new(authority_id: AuthorityId, home_id: HomeId, designated_at: TimeStamp) -> Self {
+        Self {
+            authority_id,
+            home_id,
+            designated_at,
+            capabilities: ModeratorCapabilities::default(),
+        }
+    }
+
+    /// Check whether this designation grants a specific capability.
+    pub fn allows(&self, capability: ModeratorCapability) -> bool {
+        self.capabilities.allows(capability)
+    }
+}
+
+impl From<&ModeratorFact> for ModeratorDesignation {
+    fn from(value: &ModeratorFact) -> Self {
+        Self {
+            authority_id: value.authority_id,
+            home_id: value.home_id,
+            designated_at: value.granted_at.clone(),
+            capabilities: value.capabilities.clone(),
+        }
     }
 }
 
@@ -497,6 +583,22 @@ pub enum AccessLevel {
     Full,
 }
 
+impl AccessLevel {
+    /// Check if an explicit override from `self` to `target` is allowed.
+    ///
+    /// Policy:
+    /// - Limited -> Partial (upgrade) is allowed.
+    /// - Partial -> Limited (downgrade) is allowed.
+    /// - All other transitions are rejected.
+    pub fn allows_override_to(self, target: AccessLevel) -> bool {
+        matches!(
+            (self, target),
+            (AccessLevel::Limited, AccessLevel::Partial)
+                | (AccessLevel::Partial, AccessLevel::Limited)
+        )
+    }
+}
+
 /// Per-authority access-level override for a specific home.
 ///
 /// Overrides are applied after deterministic default mapping.
@@ -513,6 +615,32 @@ pub struct AccessOverrideFact {
 }
 
 impl AccessOverrideFact {
+    /// Create an override fact, validating that the override transition is allowed.
+    pub fn new_validated(
+        authority_id: AuthorityId,
+        home_id: HomeId,
+        default_level: AccessLevel,
+        access_level: AccessLevel,
+        set_at: TimeStamp,
+    ) -> Result<Self, SocialFactError> {
+        if !default_level.allows_override_to(access_level) {
+            return Err(SocialFactError::InvalidFact(format!(
+                "invalid access override transition: {default_level:?} -> {access_level:?}"
+            )));
+        }
+        Ok(Self {
+            authority_id,
+            home_id,
+            access_level,
+            set_at,
+        })
+    }
+
+    /// Check whether this override is valid for the computed default level.
+    pub fn is_valid_for_default(&self, default_level: AccessLevel) -> bool {
+        default_level.allows_override_to(self.access_level)
+    }
+
     /// Convert to Datalog fact string.
     pub fn to_datalog(&self) -> String {
         format!(
@@ -521,6 +649,118 @@ impl AccessOverrideFact {
             self.home_id,
             self.access_level,
             self.set_at.to_index_ms()
+        )
+    }
+}
+
+/// Per-home capability configuration for Full/Partial/Limited access levels.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccessLevelCapabilityConfig {
+    /// Capabilities granted to Full access users.
+    pub full: BTreeSet<String>,
+    /// Capabilities granted to Partial access users.
+    pub partial: BTreeSet<String>,
+    /// Capabilities granted to Limited access users.
+    pub limited: BTreeSet<String>,
+}
+
+impl Default for AccessLevelCapabilityConfig {
+    fn default() -> Self {
+        let full = [
+            "send_dm",
+            "send_message",
+            "update_contact",
+            "view_members",
+            "join_channel",
+            "leave_context",
+            "invite",
+            "manage_channel",
+            "pin_content",
+            "moderate:kick",
+            "moderate:ban",
+            "moderate:mute",
+            "grant_moderator",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+        let partial = [
+            "send_dm",
+            "send_message",
+            "update_contact",
+            "view_members",
+            "join_channel",
+            "leave_context",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+        let limited = ["send_dm", "view_members"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+
+        Self {
+            full,
+            partial,
+            limited,
+        }
+    }
+}
+
+impl AccessLevelCapabilityConfig {
+    /// Return capabilities granted for the given level.
+    pub fn capabilities_for(&self, level: AccessLevel) -> &BTreeSet<String> {
+        match level {
+            AccessLevel::Full => &self.full,
+            AccessLevel::Partial => &self.partial,
+            AccessLevel::Limited => &self.limited,
+        }
+    }
+
+    /// Check whether a capability is granted at the given access level.
+    pub fn allows(&self, level: AccessLevel, capability: &str) -> bool {
+        self.capabilities_for(level).contains(capability)
+    }
+}
+
+/// Fact storing per-home access-level capability configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccessLevelCapabilityConfigFact {
+    /// Home where this configuration applies.
+    pub home_id: HomeId,
+    /// Capability configuration payload.
+    pub config: AccessLevelCapabilityConfig,
+    /// When this configuration was set.
+    pub configured_at: TimeStamp,
+}
+
+impl AccessLevelCapabilityConfigFact {
+    /// Create default capability config for a home.
+    pub fn default_for_home(home_id: HomeId, configured_at: TimeStamp) -> Self {
+        Self {
+            home_id,
+            config: AccessLevelCapabilityConfig::default(),
+            configured_at,
+        }
+    }
+
+    /// Convert to Datalog fact string.
+    pub fn to_datalog(&self) -> String {
+        let render_caps = |caps: &BTreeSet<String>| {
+            caps.iter()
+                .map(|cap| format!("\"{cap}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
+        format!(
+            "access_level_capabilities(\"{}\", [{}], [{}], [{}], \"{}\");",
+            self.home_id,
+            render_caps(&self.config.full),
+            render_caps(&self.config.partial),
+            render_caps(&self.config.limited),
+            self.configured_at.to_index_ms()
         )
     }
 }
@@ -1190,7 +1430,9 @@ mod tests {
     fn test_moderator_capabilities() {
         let caps = ModeratorCapabilities::full();
         let cap_set = caps.to_capability_set();
-        assert!(cap_set.contains("moderation"));
+        assert!(cap_set.contains("moderate:kick"));
+        assert!(cap_set.contains("moderate:ban"));
+        assert!(cap_set.contains("moderate:mute"));
         assert!(cap_set.contains("grant_moderator"));
     }
 
@@ -1256,5 +1498,38 @@ mod tests {
     fn test_access_level_ordering() {
         assert!(AccessLevel::Limited < AccessLevel::Partial);
         assert!(AccessLevel::Partial < AccessLevel::Full);
+    }
+
+    #[test]
+    fn test_access_override_validation_rules() {
+        let authority_id = AuthorityId::new_from_entropy([33u8; 32]);
+        let home_id = HomeId::from_bytes([44u8; 32]);
+        let now = test_timestamp();
+
+        let valid_upgrade = AccessOverrideFact::new_validated(
+            authority_id,
+            home_id,
+            AccessLevel::Limited,
+            AccessLevel::Partial,
+            now.clone(),
+        );
+        assert!(valid_upgrade.is_ok());
+
+        let invalid = AccessOverrideFact::new_validated(
+            authority_id,
+            home_id,
+            AccessLevel::Full,
+            AccessLevel::Limited,
+            now,
+        );
+        assert!(invalid.is_err());
+    }
+
+    #[test]
+    fn test_access_level_capability_config_defaults() {
+        let config = AccessLevelCapabilityConfig::default();
+        assert!(config.allows(AccessLevel::Full, "moderate:kick"));
+        assert!(config.allows(AccessLevel::Partial, "send_message"));
+        assert!(!config.allows(AccessLevel::Limited, "send_message"));
     }
 }

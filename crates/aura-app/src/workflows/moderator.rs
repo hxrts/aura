@@ -312,6 +312,10 @@ pub async fn grant_moderator_resolved(
 
     // Local state mutation.
     let mut core = app_core.write().await;
+    let local_authority = core
+        .runtime()
+        .map(|runtime| runtime.authority_id())
+        .or_else(|| core.authority().copied());
     let mut homes = core.views().get_homes();
     if !homes.has_home(&scope.home_id) {
         homes.add_home_with_auto_select(scope.home_state.clone());
@@ -336,6 +340,9 @@ pub async fn grant_moderator_resolved(
     }
 
     resident.role = HomeRole::Moderator;
+    if local_authority == Some(target_id) {
+        home_state.my_role = HomeRole::Moderator;
+    }
     core.views_mut().set_homes(homes);
 
     Ok(())
@@ -405,6 +412,10 @@ pub async fn revoke_moderator_resolved(
     }
 
     let mut core = app_core.write().await;
+    let local_authority = core
+        .runtime()
+        .map(|runtime| runtime.authority_id())
+        .or_else(|| core.authority().copied());
     let mut homes = core.views().get_homes();
     if !homes.has_home(&scope.home_id) {
         homes.add_home_with_auto_select(scope.home_state.clone());
@@ -422,6 +433,9 @@ pub async fn revoke_moderator_resolved(
     }
 
     resident.role = HomeRole::Member;
+    if local_authority == Some(target_id) {
+        home_state.my_role = HomeRole::Member;
+    }
     core.views_mut().set_homes(homes);
 
     Ok(())

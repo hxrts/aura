@@ -98,7 +98,9 @@ pub fn operation_category(operation: &str) -> Option<&'static str> {
 
 // Re-export primary types
 pub use access::{
-    determine_access_level, determine_default_access_level, minimum_hop_distance, TraversalService,
+    determine_access_level, determine_default_access_level, has_access_capability,
+    minimum_hop_distance, resolve_access_capabilities, resolve_access_level_capability_config,
+    TraversalService,
 };
 pub use availability::{HomeAvailability, NeighborhoodAvailability};
 pub use error::SocialError;
@@ -116,8 +118,9 @@ pub use topology::{DiscoveryLayer, SocialTopology};
 
 // Re-export fact types for convenience
 pub use crate::facts::{
-    AccessLevel, AccessOverrideFact, HomeConfigFact, HomeFact, HomeId, HomeMemberFact,
-    HomeMessageMemberFact, HomeStorageBudget, ModeratorCapabilities, ModeratorFact,
+    AccessLevel, AccessLevelCapabilityConfig, AccessLevelCapabilityConfigFact, AccessOverrideFact,
+    HomeConfigFact, HomeFact, HomeId, HomeMemberFact, HomeMessageMemberFact, HomeStorageBudget,
+    ModeratorCapabilities, ModeratorCapability, ModeratorDesignation, ModeratorFact,
     NeighborhoodFact, NeighborhoodId, OneHopLinkFact, PinnedFact, ResidentFact, SocialFactError,
     TraversalAllowedFact, TraversalPosition,
 };

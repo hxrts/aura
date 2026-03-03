@@ -865,6 +865,21 @@ async fn test_lan_group_channel_invitation_roundtrip_plaintext() -> TestResult {
 async fn test_lan_strong_command_mute_blocks_cross_instance_delivery_until_unmute() -> TestResult {
     let (agent_a, agent_b, app_a, app_b, channel_id) =
         setup_lan_group_channel_pair(70, 71, "lan-strong").await?;
+    // Under the Member+Moderator model, moderation actions require moderator designation.
+    let promote_self = execute_strong_command(
+        &app_a,
+        agent_a.authority_id(),
+        channel_id,
+        strong_command_workflow::ParsedCommand::Op {
+            target: agent_a.authority_id().to_string(),
+        },
+    )
+    .await?;
+    assert_eq!(
+        promote_self.consistency_state,
+        strong_command_workflow::ConsistencyState::Enforced
+    );
+
     let bob_target = {
         let contacts: aura_app::views::ContactsState = {
             let core = app_a.read().await;
