@@ -23,6 +23,53 @@ use std::sync::Arc;
 use crate::workflows::signals::emit_signal;
 use crate::workflows::time::current_time_ms;
 
+const MISSING_ACTIVE_HOME_MESSAGE: &str =
+    "No active home selected. Open Neighborhood and create or select a home.";
+
+/// Source of active-home resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActiveHomeSource {
+    /// Home resolved from an explicit caller hint.
+    ExplicitHint,
+    /// Home resolved from the currently selected home.
+    Selected,
+    /// Home resolved from deterministic fallback ordering.
+    Fallback,
+}
+
+/// Active-home resolution result shared by context-dependent workflows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActiveHomeResolution {
+    /// Resolved home identifier.
+    pub home_id: ChannelId,
+    /// Resolved relational context identifier.
+    pub context_id: ContextId,
+    /// Resolution source.
+    pub source: ActiveHomeSource,
+}
+
+fn resolution_from_home(
+    home_id: ChannelId,
+    home_state: &HomeState,
+    source: ActiveHomeSource,
+) -> Result<ActiveHomeResolution, AuraError> {
+    let context_id = home_state
+        .context_id
+        .ok_or_else(|| AuraError::not_found(format!("Home {home_id} has no context ID")))?;
+    Ok(ActiveHomeResolution {
+        home_id,
+        context_id,
+        source,
+    })
+}
+
+fn fallback_home(homes: &HomesState) -> Option<(ChannelId, HomeState)> {
+    homes
+        .iter()
+        .min_by(|(lhs, _), (rhs, _)| lhs.as_bytes().cmp(rhs.as_bytes()))
+        .map(|(home_id, home)| (*home_id, home.clone()))
+}
+
 /// Set active context for navigation and command targeting
 ///
 /// **What it does**: Sets the active context ID
@@ -400,23 +447,48 @@ pub async fn get_neighborhood_state(app_core: &Arc<RwLock<AppCore>>) -> Neighbor
     core.views().get_neighborhood()
 }
 
+/// Return the canonical missing-active-home guidance.
+pub const fn missing_active_home_message() -> &'static str {
+    MISSING_ACTIVE_HOME_MESSAGE
+}
+
+/// Resolve an active home/context with deterministic fallback behavior.
+pub async fn resolve_active_home(
+    app_core: &Arc<RwLock<AppCore>>,
+    home_hint: Option<ChannelId>,
+) -> Result<ActiveHomeResolution, AuraError> {
+    let core = app_core.read().await;
+    let homes = core.views().get_homes();
+
+    if let Some(home_id) = home_hint {
+        if let Some(home_state) = homes.home_state(&home_id) {
+            return resolution_from_home(home_id, home_state, ActiveHomeSource::ExplicitHint);
+        }
+    }
+
+    if let Some(home_state) = homes.current_home() {
+        return resolution_from_home(home_state.id, home_state, ActiveHomeSource::Selected);
+    }
+
+    if let Some((home_id, home_state)) = fallback_home(&homes) {
+        return resolution_from_home(home_id, &home_state, ActiveHomeSource::Fallback);
+    }
+
+    Err(AuraError::not_found(MISSING_ACTIVE_HOME_MESSAGE))
+}
+
+/// Resolve the active home id with deterministic fallback behavior.
+pub async fn current_home_id_or_fallback(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<ChannelId, AuraError> {
+    Ok(resolve_active_home(app_core, None).await?.home_id)
+}
+
 /// Get current home context id with a deterministic fallback.
 pub async fn current_home_context_or_fallback(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<ContextId, AuraError> {
-    let core = app_core.read().await;
-    let homes = core.views().get_homes();
-    if let Some(home_state) = homes.current_home() {
-        if let Some(ctx_id) = home_state.context_id {
-            return Ok(ctx_id);
-        }
-        return Err(AuraError::not_found(format!(
-            "Current home {} has no context ID",
-            home_state.id
-        )));
-    }
-
-    Err(AuraError::not_found("No current home selected"))
+    Ok(resolve_active_home(app_core, None).await?.context_id)
 }
 
 /// Stable fallback context for relational facts that should not depend on UI selection.
@@ -510,6 +582,91 @@ mod tests {
 
         let state = get_neighborhood_state(&app_core).await;
         assert!(state.neighbors_is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_active_home_uses_selected_home() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let authority = aura_core::identifiers::AuthorityId::new_from_entropy([21u8; 32]);
+
+        let selected_home = ChannelId::from_bytes(hash(b"selected-home"));
+        let selected_ctx = ContextId::new_from_entropy(hash(b"selected-ctx"));
+
+        {
+            let mut core = app_core.write().await;
+            let mut homes = core.views().get_homes();
+            homes.add_home_with_auto_select(HomeState::new(
+                selected_home,
+                Some("Selected".to_string()),
+                authority,
+                1,
+                selected_ctx,
+            ));
+            core.views_mut().set_homes(homes);
+        }
+
+        let resolved = resolve_active_home(&app_core, None).await.unwrap();
+        assert_eq!(resolved.home_id, selected_home);
+        assert_eq!(resolved.context_id, selected_ctx);
+        assert_eq!(resolved.source, ActiveHomeSource::Selected);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_active_home_uses_deterministic_fallback() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let authority = aura_core::identifiers::AuthorityId::new_from_entropy([22u8; 32]);
+
+        let home_a = ChannelId::from_bytes(hash(b"home-z"));
+        let home_b = ChannelId::from_bytes(hash(b"home-a"));
+        let ctx_a = ContextId::new_from_entropy(hash(b"ctx-z"));
+        let ctx_b = ContextId::new_from_entropy(hash(b"ctx-a"));
+        let expected_home = if home_a.as_bytes() <= home_b.as_bytes() {
+            home_a
+        } else {
+            home_b
+        };
+        let expected_ctx = if expected_home == home_a {
+            ctx_a
+        } else {
+            ctx_b
+        };
+
+        {
+            let mut core = app_core.write().await;
+            let mut homes = core.views().get_homes();
+            homes.add_home(HomeState::new(
+                home_a,
+                Some("Zeta".to_string()),
+                authority,
+                1,
+                ctx_a,
+            ));
+            homes.add_home(HomeState::new(
+                home_b,
+                Some("Alpha".to_string()),
+                authority,
+                2,
+                ctx_b,
+            ));
+            homes.select_home(None);
+            core.views_mut().set_homes(homes);
+        }
+
+        let resolved = resolve_active_home(&app_core, None).await.unwrap();
+        assert_eq!(resolved.home_id, expected_home);
+        assert_eq!(resolved.context_id, expected_ctx);
+        assert_eq!(resolved.source, ActiveHomeSource::Fallback);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_active_home_returns_guidance_when_missing() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+
+        let error = resolve_active_home(&app_core, None).await.unwrap_err();
+        assert!(error.to_string().contains(MISSING_ACTIVE_HOME_MESSAGE));
     }
 
     #[tokio::test]

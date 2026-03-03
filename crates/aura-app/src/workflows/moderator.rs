@@ -157,11 +157,7 @@ async fn resolve_scope(
     let context_id = home_state
         .context_id
         .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
-    let peers = home_state
-        .members
-        .iter()
-        .map(|member| member.id)
-        .collect();
+    let peers = home_state.members.iter().map(|member| member.id).collect();
 
     Ok(ModeratorScope {
         home_id,
@@ -185,11 +181,7 @@ async fn resolve_scope_by_channel_id(
         let context_id = home_state
             .context_id
             .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
-        let peers = home_state
-            .members
-            .iter()
-            .map(|member| member.id)
-            .collect();
+        let peers = home_state.members.iter().map(|member| member.id).collect();
         Ok(ModeratorScope {
             home_id,
             context_id,
@@ -226,8 +218,12 @@ async fn resolve_scope_by_channel_id(
         )));
     }
 
-    if let Some(current_home) = homes.current_home() {
-        return from_home(current_home.id, current_home);
+    if let Ok(active_home_id) =
+        crate::workflows::context::current_home_id_or_fallback(app_core).await
+    {
+        if let Some(home_state) = homes.home_state(&active_home_id) {
+            return from_home(active_home_id, home_state);
+        }
     }
 
     Err(AuraError::permission_denied(
@@ -320,9 +316,9 @@ pub async fn grant_moderator_resolved(
     if !homes.has_home(&scope.home_id) {
         homes.add_home_with_auto_select(scope.home_state.clone());
     }
-    let home_state = homes
-        .home_mut(&scope.home_id)
-        .ok_or_else(|| AuraError::not_found("No current home selected"))?;
+    let home_state = homes.home_mut(&scope.home_id).ok_or_else(|| {
+        AuraError::not_found(format!("Resolved home scope missing: {}", scope.home_id))
+    })?;
 
     let member = home_state
         .member_mut(&target_id)
@@ -420,9 +416,9 @@ pub async fn revoke_moderator_resolved(
     if !homes.has_home(&scope.home_id) {
         homes.add_home_with_auto_select(scope.home_state.clone());
     }
-    let home_state = homes
-        .home_mut(&scope.home_id)
-        .ok_or_else(|| AuraError::not_found("No current home selected"))?;
+    let home_state = homes.home_mut(&scope.home_id).ok_or_else(|| {
+        AuraError::not_found(format!("Resolved home scope missing: {}", scope.home_id))
+    })?;
 
     let member = home_state
         .member_mut(&target_id)

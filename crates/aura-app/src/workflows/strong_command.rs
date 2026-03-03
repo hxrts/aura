@@ -1226,16 +1226,12 @@ async fn consistency_invariant_holds(
                 None => return false,
             };
             match &plan.operation.command {
-                ResolvedCommand::Op { target } => {
-                    home.member(&target.0).is_some_and(|member| {
-                        matches!(member.role, crate::views::home::HomeRole::Moderator)
-                    })
-                }
-                ResolvedCommand::Deop { target } => {
-                    home.member(&target.0).is_some_and(|member| {
-                        matches!(member.role, crate::views::home::HomeRole::Participant)
-                    })
-                }
+                ResolvedCommand::Op { target } => home.member(&target.0).is_some_and(|member| {
+                    matches!(member.role, crate::views::home::HomeRole::Moderator)
+                }),
+                ResolvedCommand::Deop { target } => home.member(&target.0).is_some_and(|member| {
+                    matches!(member.role, crate::views::home::HomeRole::Participant)
+                }),
                 ResolvedCommand::Mode { flags, .. } => home.mode_flags.as_ref() == Some(flags),
                 _ => false,
             }
@@ -1553,13 +1549,7 @@ fn optional_scope_channel_id(scope: &CommandScope) -> Option<ChannelId> {
 
 #[cfg(feature = "signals")]
 async fn current_home_id_string(app_core: &Arc<RwLock<AppCore>>) -> Result<String, AuraError> {
-    let core = app_core.read().await;
-    let homes = core.views().get_homes();
-    let home_id = homes
-        .current_home_id()
-        .copied()
-        .or_else(|| homes.first_home_id())
-        .ok_or_else(|| AuraError::not_found("No active home/channel to invite to"))?;
+    let home_id = context::current_home_id_or_fallback(app_core).await?;
     Ok(home_id.to_string())
 }
 

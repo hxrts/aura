@@ -28,14 +28,14 @@ timeout_ms = 15000
 id = "alice-ready"
 action = "wait_for"
 instance = "alice"
-pattern = "Welcome to Aura"
+pattern = "Neighborhood"
 timeout_ms = 30000
 
 [[steps]]
 id = "bob-ready"
 action = "wait_for"
 instance = "bob"
-pattern = "Welcome to Aura"
+pattern = "Neighborhood"
 timeout_ms = 30000
 
 [[steps]]
@@ -56,14 +56,14 @@ timeout_ms = 3000
 id = "alice-map-ready"
 action = "wait_for"
 instance = "alice"
-pattern = "Map → Limited"
+pattern = "Neighborhood"
 timeout_ms = 30000
 
 [[steps]]
 id = "bob-map-ready"
 action = "wait_for"
 instance = "bob"
-pattern = "Map → Limited"
+pattern = "Neighborhood"
 timeout_ms = 30000
 
 [[steps]]
