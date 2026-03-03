@@ -812,7 +812,7 @@ impl HomeStorageBudget {
 
     /// Calculate remaining shared storage
     ///
-    /// Formula: Total (10 MB) - Resident - Neighborhood Allocations - Pinned
+    /// Formula: Total (10 MB) - Member - Neighborhood Allocations - Pinned
     pub fn remaining_shared_storage(&self) -> u64 {
         let total = HomeFact::DEFAULT_STORAGE_LIMIT;
         let spent =

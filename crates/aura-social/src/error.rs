@@ -44,7 +44,7 @@ pub enum SocialError {
 
     /// Authority is not a member of the home.
     #[error("authority is not a member of home {home_id}")]
-    NotResident {
+    NotMember {
         /// The home in question
         home_id: HomeId,
     },
@@ -56,9 +56,9 @@ pub enum SocialError {
         home_id: HomeId,
     },
 
-    /// Authority is already a member.
+    /// Authority is already a member of the home.
     #[error("authority is already a member of home {home_id}")]
-    AlreadyResident {
+    AlreadyHomeMember {
         /// The home in question
         home_id: HomeId,
     },
@@ -112,7 +112,7 @@ impl SocialError {
 
     /// Create a not member error.
     pub fn not_member(home_id: HomeId) -> Self {
-        Self::NotResident { home_id }
+        Self::NotMember { home_id }
     }
 
     /// Create a not moderator error.

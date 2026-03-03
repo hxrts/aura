@@ -45,7 +45,7 @@ pub async fn handle_query(
                     };
 
                     let info = format!(
-                        "User: {}\nID: {}\nOnline: {}\nGuardian: {}\nResident: {}",
+                        "User: {}\nID: {}\nOnline: {}\nGuardian: {}\nMember: {}",
                         effective_name,
                         id_str,
                         if contact.is_online { "Yes" } else { "No" },

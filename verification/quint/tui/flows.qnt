@@ -60,9 +60,9 @@ module tui_flows {
   type HomeFlowPhase =
     | HomeNone                      // No home
     | HomeCreated                   // Home created by owner
-    | HomeInvitationSent            // Resident invitation sent
-    | HomeResidentJoined            // Resident accepted invitation
-    | HomeModeratorPromoted           // Resident promoted to moderator
+    | HomeInvitationSent            // Member invitation sent
+    | HomeMemberJoined            // Member accepted invitation
+    | HomeModeratorPromoted           // Member promoted to moderator
     | HomeFull                      // Home at capacity (8 members)
 
   // Flow 3: Neighborhood formation phases
@@ -107,7 +107,7 @@ module tui_flows {
   type InvitationType =
     | GuardianInvitation             // Become a guardian
     | ContactInvitation              // Simple contact
-    | HomeResidentInvitation(HomeId) // Join a home as member
+    | HomeMemberInvitation(HomeId) // Join a home as member
 
   // ============ AGENT STATE ============
 
@@ -908,7 +908,7 @@ module tui_flows {
           ...ownerState,
           lastEmittedSignals: Set(HomeSignal)
         }),
-      homeFlowPhase' = homeFlowPhase.set(member, HomeResidentJoined),
+      homeFlowPhase' = homeFlowPhase.set(member, HomeMemberJoined),
       // Unchanged
       allAgents' = allAgents,
       invitations' = invitations,
@@ -1218,7 +1218,7 @@ module tui_flows {
     agentState.contacts.filter(c => home.members.contains(c))
 
   // Pure function: Check if a contact is a member of a given home
-  pure def isContactResident(agentState: AgentState, contactId: AgentId, home: HomeRecord): bool =
+  pure def isContactMember(agentState: AgentState, contactId: AgentId, home: HomeRecord): bool =
     agentState.contacts.contains(contactId) and home.members.contains(contactId)
 
   // ============ NON-DETERMINISTIC STEP ============
@@ -1333,7 +1333,7 @@ module tui_flows {
     })
 
   // Moderators must be members
-  val moderatorsAreResidents: bool =
+  val moderatorsAreMembers: bool =
     homes.keys().forall(bid => {
       val home = homes.get(bid)
       home.moderators.subseteq(home.members)
@@ -1364,7 +1364,7 @@ module tui_flows {
     })
 
   // Social Graph: Home members must have accounts
-  val blockResidentsHaveAccounts: bool =
+  val homeMembersHaveAccounts: bool =
     homes.keys().forall(bid => {
       val home = homes.get(bid)
       home.members.forall(member => {
@@ -1388,10 +1388,10 @@ module tui_flows {
     signalEmissionInvariant and
     recoveryPhaseConsistency and
     homeCapacityInvariant and
-    moderatorsAreResidents and
+    moderatorsAreMembers and
     invitationConsistency and
     contactHomeMappingConsistency and
-    blockResidentsHaveAccounts and
+    homeMembersHaveAccounts and
     nicknamesOnlyForContacts
 
   // ============ TEST SCENARIOS ============
@@ -1612,7 +1612,7 @@ module tui_flows {
     .then(all {
       // Alice is contact and member
       assert(getAgent(agents, "bob").contacts.contains("alice")),
-      assert(isContactResident(getAgent(agents, "bob"), "alice", homes.get("social-home"))),
+      assert(isContactMember(getAgent(agents, "bob"), "alice", homes.get("social-home"))),
       // Nickname persists
       assert(getAgent(agents, "bob").contactNicknames.get("alice") == "My Guardian Alice"),
       // Social graph flow phase updated

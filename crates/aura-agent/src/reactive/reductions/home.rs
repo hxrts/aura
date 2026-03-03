@@ -20,13 +20,13 @@ pub enum HomeDelta {
         creator_id: String,
     },
     /// A member joined the home
-    ResidentAdded {
+    MemberAdded {
         authority_id: String,
         name: String,
         joined_at: u64,
     },
     /// A member left the home
-    ResidentRemoved { authority_id: String, left_at: u64 },
+    MemberRemoved { authority_id: String, left_at: u64 },
     /// Home storage statistics updated
     StorageUpdated {
         used_bytes: u64,
@@ -65,21 +65,21 @@ impl ViewReduction<HomeDelta> for HomeReduction {
                             created_at: created_at.ts_ms,
                             creator_id: creator_id.to_string(),
                         }),
-                        SocialFact::ResidentJoined {
+                        SocialFact::MemberJoined {
                             authority_id,
                             joined_at,
                             name,
                             ..
-                        } => Some(HomeDelta::ResidentAdded {
+                        } => Some(HomeDelta::MemberAdded {
                             authority_id: authority_id.to_string(),
                             name,
                             joined_at: joined_at.ts_ms,
                         }),
-                        SocialFact::ResidentLeft {
+                        SocialFact::MemberLeft {
                             authority_id,
                             left_at,
                             ..
-                        } => Some(HomeDelta::ResidentRemoved {
+                        } => Some(HomeDelta::MemberRemoved {
                             authority_id: authority_id.to_string(),
                             left_at: left_at.ts_ms,
                         }),
@@ -161,6 +161,6 @@ mod tests {
         let deltas = reduction.reduce(&facts, None);
         assert_eq!(deltas.len(), 2);
         assert!(matches!(&deltas[0], HomeDelta::HomeCreated { name, .. } if name == "Test Home"));
-        assert!(matches!(&deltas[1], HomeDelta::ResidentAdded { name, .. } if name == "Alice"));
+        assert!(matches!(&deltas[1], HomeDelta::MemberAdded { name, .. } if name == "Alice"));
     }
 }

@@ -144,7 +144,7 @@ impl Home {
 
     /// Assign moderator designation to an existing home member.
     ///
-    /// Returns `NotResident` if the target is not a member.
+    /// Returns `NotMember` if the target is not a member.
     pub fn assign_moderator_designation(
         &mut self,
         authority: AuthorityId,
@@ -203,7 +203,7 @@ impl Home {
     /// Validate that an authority can join this home.
     pub fn validate_join(&self, authority: &AuthorityId) -> Result<(), SocialError> {
         if self.is_member(authority) {
-            return Err(SocialError::AlreadyResident {
+            return Err(SocialError::AlreadyHomeMember {
                 home_id: self.home_id,
             });
         }
@@ -299,7 +299,7 @@ mod tests {
             ModeratorCapabilities::default(),
             test_timestamp(),
         );
-        assert!(matches!(result, Err(SocialError::NotResident { .. })));
+        assert!(matches!(result, Err(SocialError::NotMember { .. })));
     }
 
     #[test]
@@ -372,7 +372,7 @@ mod tests {
         // Can't join twice
         home_instance.members.push(authority);
         let result = home_instance.validate_join(&authority);
-        assert!(matches!(result, Err(SocialError::AlreadyResident { .. })));
+        assert!(matches!(result, Err(SocialError::AlreadyHomeMember { .. })));
 
         // Fill home
         for i in 2..9u8 {
