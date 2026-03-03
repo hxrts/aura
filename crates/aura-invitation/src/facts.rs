@@ -37,6 +37,7 @@
 //! ```
 
 use crate::InvitationType;
+use aura_core::crypto::hash;
 use aura_core::identifiers::{AuthorityId, CeremonyId, ContextId, InvitationId};
 use aura_core::threshold::AgreementMode;
 use aura_core::time::PhysicalTime;
@@ -46,9 +47,69 @@ use aura_journal::{
 };
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 
 /// Type identifier for invitation facts
 pub const INVITATION_FACT_TYPE_ID: &str = "invitation";
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CeremonyRelationshipId(String);
+
+impl CeremonyRelationshipId {
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        let Some(hex_part) = raw.strip_prefix("rel-") else {
+            return Err("relationship id must start with 'rel-'".to_string());
+        };
+        if hex_part.len() != 16 {
+            return Err(format!(
+                "relationship id must have 16 hex chars after 'rel-' (got {})",
+                hex_part.len()
+            ));
+        }
+        if !hex_part.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err("relationship id must be lowercase/uppercase hex".to_string());
+        }
+        Ok(Self(raw.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for CeremonyRelationshipId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for CeremonyRelationshipId {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
+impl Serialize for CeremonyRelationshipId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for CeremonyRelationshipId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        CeremonyRelationshipId::parse(&raw).map_err(serde::de::Error::custom)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InvitationFactKey {
@@ -64,7 +125,7 @@ pub struct InvitationFactKey {
 #[domain_fact(
     type_id = "invitation",
     schema_version = 1,
-    context_fn = "context_id_or_default"
+    context_fn = "context_id_for_fact"
 )]
 #[allow(clippy::large_enum_variant)] // Sent variant contains rich invitation data
 pub enum InvitationFact {
@@ -89,6 +150,9 @@ pub enum InvitationFact {
     },
     /// Invitation accepted
     Accepted {
+        /// Relational context for invitation lifecycle facts (optional for legacy payloads)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_id: Option<ContextId>,
         /// Invitation being accepted
         invitation_id: InvitationId,
         /// Authority accepting the invitation
@@ -98,6 +162,9 @@ pub enum InvitationFact {
     },
     /// Invitation declined
     Declined {
+        /// Relational context for invitation lifecycle facts (optional for legacy payloads)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_id: Option<ContextId>,
         /// Invitation being declined
         invitation_id: InvitationId,
         /// Authority declining the invitation
@@ -107,6 +174,9 @@ pub enum InvitationFact {
     },
     /// Invitation cancelled by sender
     Cancelled {
+        /// Relational context for invitation lifecycle facts (optional for legacy payloads)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_id: Option<ContextId>,
         /// Invitation being cancelled
         invitation_id: InvitationId,
         /// Authority cancelling the invitation (must be sender)
@@ -120,10 +190,14 @@ pub enum InvitationFact {
     // =========================================================================
     /// Ceremony initiated by sender
     CeremonyInitiated {
+        /// Relational context for ceremony facts (optional for legacy payloads)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_id: Option<ContextId>,
         /// Unique ceremony identifier
         ceremony_id: CeremonyId,
         /// Authority initiating the ceremony
-        sender: String,
+        #[serde(with = "authority_id_display_serde")]
+        sender: AuthorityId,
         /// Agreement mode at initiation (A1)
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agreement_mode: Option<AgreementMode>,
@@ -136,6 +210,9 @@ pub enum InvitationFact {
 
     /// Acceptance received from acceptor
     CeremonyAcceptanceReceived {
+        /// Relational context for ceremony facts (optional for legacy payloads)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_id: Option<ContextId>,
         /// Ceremony identifier
         ceremony_id: CeremonyId,
         /// Agreement mode after acceptance (A2)
@@ -150,10 +227,13 @@ pub enum InvitationFact {
 
     /// Ceremony committed (relationship established)
     CeremonyCommitted {
+        /// Relational context for ceremony facts (optional for legacy payloads)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_id: Option<ContextId>,
         /// Ceremony identifier
         ceremony_id: CeremonyId,
         /// Resulting relationship identifier
-        relationship_id: String,
+        relationship_id: CeremonyRelationshipId,
         /// Agreement mode after commit (A3)
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agreement_mode: Option<AgreementMode>,
@@ -166,6 +246,9 @@ pub enum InvitationFact {
 
     /// Ceremony aborted
     CeremonyAborted {
+        /// Relational context for ceremony facts (optional for legacy payloads)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_id: Option<ContextId>,
         /// Ceremony identifier
         ceremony_id: CeremonyId,
         /// Reason for abortion
@@ -182,6 +265,9 @@ pub enum InvitationFact {
     /// Emitted when a new ceremony replaces an existing one. The old ceremony
     /// should stop processing immediately. Supersession propagates via anti-entropy.
     CeremonySuperseded {
+        /// Relational context for ceremony facts (optional for legacy payloads)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_id: Option<ContextId>,
         /// The ceremony being superseded (old ceremony)
         superseded_ceremony_id: CeremonyId,
         /// The ceremony that supersedes it (new ceremony)
@@ -227,28 +313,29 @@ impl InvitationFact {
     pub fn context_id_opt(&self) -> Option<ContextId> {
         match self {
             InvitationFact::Sent { context_id, .. } => Some(*context_id),
-            InvitationFact::Accepted { .. }
-            | InvitationFact::Declined { .. }
-            | InvitationFact::Cancelled { .. }
-            | InvitationFact::CeremonyInitiated { .. }
-            | InvitationFact::CeremonyAcceptanceReceived { .. }
-            | InvitationFact::CeremonyCommitted { .. }
-            | InvitationFact::CeremonyAborted { .. }
-            | InvitationFact::CeremonySuperseded { .. } => None,
+            InvitationFact::Accepted { context_id, .. }
+            | InvitationFact::Declined { context_id, .. }
+            | InvitationFact::Cancelled { context_id, .. }
+            | InvitationFact::CeremonyInitiated { context_id, .. }
+            | InvitationFact::CeremonyAcceptanceReceived { context_id, .. }
+            | InvitationFact::CeremonyCommitted { context_id, .. }
+            | InvitationFact::CeremonyAborted { context_id, .. }
+            | InvitationFact::CeremonySuperseded { context_id, .. } => *context_id,
         }
     }
 
-    /// Context ID with a default sentinel for non-context facts.
-    pub fn context_id_or_default(&self) -> ContextId {
+    /// Context ID used for storage/reduction.
+    ///
+    /// Facts with explicit context use it directly.
+    /// Legacy/contextless facts derive a deterministic context from stable IDs.
+    pub fn context_id_for_fact(&self) -> ContextId {
         self.context_id_opt()
-            .unwrap_or_else(|| ContextId::new_from_entropy([0u8; 32]))
+            .unwrap_or_else(|| derived_context_id(self))
     }
 
     /// Validate that this fact can be reduced under the provided context.
     pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
-        self.context_id_opt()
-            .map(|fact_context_id| fact_context_id == context_id)
-            .unwrap_or(true)
+        self.context_id_for_fact() == context_id
     }
 
     /// Get the timestamp in milliseconds (backward compatibility)
@@ -356,6 +443,7 @@ impl InvitationFact {
         accepted_at_ms: u64,
     ) -> Self {
         Self::Accepted {
+            context_id: None,
             invitation_id,
             acceptor_id,
             accepted_at: PhysicalTime {
@@ -372,6 +460,7 @@ impl InvitationFact {
         declined_at_ms: u64,
     ) -> Self {
         Self::Declined {
+            context_id: None,
             invitation_id,
             decliner_id,
             declined_at: PhysicalTime {
@@ -388,6 +477,7 @@ impl InvitationFact {
         cancelled_at_ms: u64,
     ) -> Self {
         Self::Cancelled {
+            context_id: None,
             invitation_id,
             canceller_id,
             cancelled_at: PhysicalTime {
@@ -395,6 +485,84 @@ impl InvitationFact {
                 uncertainty: None,
             },
         }
+    }
+}
+
+fn derived_context_id(fact: &InvitationFact) -> ContextId {
+    let mut material = Vec::with_capacity(128);
+    material.extend_from_slice(b"invitation-fact-context:v1:");
+    match fact {
+        InvitationFact::Sent {
+            invitation_id,
+            sender_id,
+            receiver_id,
+            ..
+        } => {
+            material.extend_from_slice(b"sent:");
+            material.extend_from_slice(invitation_id.as_str().as_bytes());
+            material.extend_from_slice(sender_id.to_string().as_bytes());
+            material.extend_from_slice(receiver_id.to_string().as_bytes());
+        }
+        InvitationFact::Accepted { invitation_id, .. } => {
+            material.extend_from_slice(b"accepted:");
+            material.extend_from_slice(invitation_id.as_str().as_bytes());
+        }
+        InvitationFact::Declined { invitation_id, .. } => {
+            material.extend_from_slice(b"declined:");
+            material.extend_from_slice(invitation_id.as_str().as_bytes());
+        }
+        InvitationFact::Cancelled { invitation_id, .. } => {
+            material.extend_from_slice(b"cancelled:");
+            material.extend_from_slice(invitation_id.as_str().as_bytes());
+        }
+        InvitationFact::CeremonyInitiated { ceremony_id, .. } => {
+            material.extend_from_slice(b"ceremony-initiated:");
+            material.extend_from_slice(ceremony_id.as_str().as_bytes());
+        }
+        InvitationFact::CeremonyAcceptanceReceived { ceremony_id, .. } => {
+            material.extend_from_slice(b"ceremony-acceptance:");
+            material.extend_from_slice(ceremony_id.as_str().as_bytes());
+        }
+        InvitationFact::CeremonyCommitted { ceremony_id, .. } => {
+            material.extend_from_slice(b"ceremony-committed:");
+            material.extend_from_slice(ceremony_id.as_str().as_bytes());
+        }
+        InvitationFact::CeremonyAborted { ceremony_id, .. } => {
+            material.extend_from_slice(b"ceremony-aborted:");
+            material.extend_from_slice(ceremony_id.as_str().as_bytes());
+        }
+        InvitationFact::CeremonySuperseded {
+            superseded_ceremony_id,
+            superseding_ceremony_id,
+            ..
+        } => {
+            material.extend_from_slice(b"ceremony-superseded:");
+            material.extend_from_slice(superseded_ceremony_id.as_str().as_bytes());
+            material.extend_from_slice(b":");
+            material.extend_from_slice(superseding_ceremony_id.as_str().as_bytes());
+        }
+    }
+    ContextId::new_from_entropy(hash::hash(&material))
+}
+
+mod authority_id_display_serde {
+    use aura_core::identifiers::AuthorityId;
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::str::FromStr;
+
+    pub fn serialize<S>(value: &AuthorityId, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<AuthorityId, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        AuthorityId::from_str(&raw).map_err(serde::de::Error::custom)
     }
 }
 
@@ -646,5 +814,115 @@ mod tests {
             3333333333,
         );
         assert_eq!(cancelled.timestamp_ms(), 3333333333);
+    }
+
+    #[test]
+    fn test_decode_rejects_invalid_ceremony_sender_id() {
+        let fact = InvitationFact::CeremonyInitiated {
+            context_id: None,
+            ceremony_id: CeremonyId::new("ceremony-1"),
+            sender: test_authority_id(1),
+            agreement_mode: None,
+            trace_id: None,
+            timestamp_ms: 42,
+        };
+        let mut value = serde_json::to_value(&fact)
+            .unwrap_or_else(|error| panic!("serialize initiated fact: {error}"));
+        let initiated = value
+            .get_mut("CeremonyInitiated")
+            .and_then(serde_json::Value::as_object_mut)
+            .unwrap_or_else(|| panic!("initiated payload missing"));
+        initiated.insert(
+            "sender".to_string(),
+            serde_json::Value::String("not-an-authority".to_string()),
+        );
+        let bytes =
+            serde_json::to_vec(&value).unwrap_or_else(|error| panic!("encode json: {error}"));
+        let decoded = serde_json::from_slice::<InvitationFact>(&bytes);
+        assert!(decoded.is_err());
+    }
+
+    #[test]
+    fn test_decode_rejects_invalid_relationship_id() {
+        let fact = InvitationFact::CeremonyCommitted {
+            context_id: None,
+            ceremony_id: CeremonyId::new("ceremony-2"),
+            relationship_id: CeremonyRelationshipId::parse("rel-0011223344556677")
+                .unwrap_or_else(|error| panic!("valid relationship id: {error}")),
+            agreement_mode: Some(AgreementMode::ConsensusFinalized),
+            trace_id: None,
+            timestamp_ms: 84,
+        };
+        let mut value = serde_json::to_value(&fact)
+            .unwrap_or_else(|error| panic!("serialize committed fact: {error}"));
+        let committed = value
+            .get_mut("CeremonyCommitted")
+            .and_then(serde_json::Value::as_object_mut)
+            .unwrap_or_else(|| panic!("committed payload missing"));
+        committed.insert(
+            "relationship_id".to_string(),
+            serde_json::Value::String("rel-not-hex".to_string()),
+        );
+        let bytes =
+            serde_json::to_vec(&value).unwrap_or_else(|error| panic!("encode json: {error}"));
+        let decoded = serde_json::from_slice::<InvitationFact>(&bytes);
+        assert!(decoded.is_err());
+    }
+
+    #[test]
+    fn test_decode_rejects_invalid_context_id() {
+        let fact = InvitationFact::CeremonyInitiated {
+            context_id: Some(ContextId::new_from_entropy([6u8; 32])),
+            ceremony_id: CeremonyId::new("ceremony-ctx"),
+            sender: test_authority_id(1),
+            agreement_mode: None,
+            trace_id: None,
+            timestamp_ms: 1,
+        };
+        let mut value = serde_json::to_value(&fact)
+            .unwrap_or_else(|error| panic!("serialize initiated fact: {error}"));
+        let initiated = value
+            .get_mut("CeremonyInitiated")
+            .and_then(serde_json::Value::as_object_mut)
+            .unwrap_or_else(|| panic!("initiated payload missing"));
+        initiated.insert(
+            "context_id".to_string(),
+            serde_json::Value::String("invalid-context".to_string()),
+        );
+        let bytes =
+            serde_json::to_vec(&value).unwrap_or_else(|error| panic!("encode json: {error}"));
+        let decoded = serde_json::from_slice::<InvitationFact>(&bytes);
+        assert!(decoded.is_err());
+    }
+
+    #[test]
+    fn test_decode_legacy_ceremony_string_fields() {
+        let legacy = serde_json::json!({
+            "CeremonyCommitted": {
+                "context_id": null,
+                "ceremony_id": "ceremony-legacy-1",
+                "relationship_id": "rel-0011223344556677",
+                "agreement_mode": null,
+                "trace_id": null,
+                "timestamp_ms": 99
+            }
+        });
+        let bytes = serde_json::to_vec(&legacy)
+            .unwrap_or_else(|error| panic!("encode legacy json: {error}"));
+        let decoded: InvitationFact = serde_json::from_slice(&bytes)
+            .unwrap_or_else(|error| panic!("legacy payload should decode: {error}"));
+        match decoded {
+            InvitationFact::CeremonyCommitted {
+                context_id,
+                ceremony_id,
+                relationship_id,
+                ..
+            } => {
+                assert!(context_id.is_none());
+                assert_eq!(ceremony_id.as_str(), "ceremony-legacy-1");
+                assert_eq!(relationship_id.as_str(), "rel-0011223344556677");
+            }
+            other => panic!("unexpected decoded fact: {other:?}"),
+        }
     }
 }

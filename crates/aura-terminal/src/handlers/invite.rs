@@ -208,7 +208,8 @@ async fn create_invitation(
     let expires_ms = ttl_secs.map(|s| s * 1000);
 
     // Use portable parsing from aura_app
-    let parsed_role = parse_invitation_role(role);
+    let parsed_role = parse_invitation_role(role)
+        .map_err(|e| TerminalError::Input(format!("invalid invitation role: {e}")))?;
 
     match parsed_role {
         InvitationRoleValue::Guardian => service
@@ -219,8 +220,8 @@ async fn create_invitation(
             .invite_to_channel(receiver_id, "channel".to_string(), None, None, expires_ms)
             .await
             .map_err(|e| TerminalError::Operation(e.to_string())),
-        InvitationRoleValue::Contact { nickname } => service
-            .invite_as_contact(receiver_id, nickname, None, expires_ms)
+        InvitationRoleValue::Contact => service
+            .invite_as_contact(receiver_id, None, None, expires_ms)
             .await
             .map_err(|e| TerminalError::Operation(e.to_string())),
     }
@@ -230,7 +231,7 @@ async fn create_invitation(
 mod tests {
     use super::*;
     use aura_agent::handlers::InvitationType;
-    use aura_core::identifiers::InvitationId;
+    use aura_core::identifiers::{ChannelId, InvitationId};
 
     fn test_shareable(invitation_type: InvitationType) -> ShareableInvitation {
         ShareableInvitation {
@@ -273,12 +274,13 @@ mod tests {
 
     #[test]
     fn test_format_invitation_type_channel() {
+        let home_id = ChannelId::from_bytes([13u8; 32]);
         let shareable = test_shareable(InvitationType::Channel {
-            home_id: "home-123".to_string(),
+            home_id,
             nickname_suggestion: None,
             bootstrap: None,
         });
         let result = format_invitation_type(&shareable);
-        assert_eq!(result, "Channel (home: home-123)");
+        assert_eq!(result, format!("Channel (home: {home_id})"));
     }
 }

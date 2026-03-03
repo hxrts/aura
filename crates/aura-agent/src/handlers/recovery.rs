@@ -5,6 +5,10 @@
 
 use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
+use crate::fact_types::{
+    RECOVERY_CANCELLED_FACT_TYPE_ID, RECOVERY_COMPLETED_FACT_TYPE_ID,
+    RECOVERY_GUARDIAN_APPROVED_FACT_TYPE_ID, RECOVERY_INITIATED_FACT_TYPE_ID,
+};
 use crate::runtime::services::RecoveryManager;
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::RandomExtendedEffects;
@@ -244,7 +248,7 @@ impl RecoveryHandler {
             &self.context.authority,
             effects,
             self.context.effect_context.context_id(),
-            "recovery_initiated",
+            RECOVERY_INITIATED_FACT_TYPE_ID,
             &serde_json::json!({
                 "recovery_id": recovery_id,
                 "account_authority": self.context.authority.authority_id(),
@@ -338,7 +342,7 @@ impl RecoveryHandler {
             &self.context.authority,
             effects,
             self.context.effect_context.context_id(),
-            "recovery_guardian_approved",
+            RECOVERY_GUARDIAN_APPROVED_FACT_TYPE_ID,
             &serde_json::json!({
                 "recovery_id": approval.recovery_id,
                 "guardian_id": approval.guardian_id,
@@ -456,7 +460,7 @@ impl RecoveryHandler {
             &self.context.authority,
             effects,
             self.context.effect_context.context_id(),
-            "recovery_completed",
+            RECOVERY_COMPLETED_FACT_TYPE_ID,
             &serde_json::json!({
                 "recovery_id": recovery_id,
                 "approvals_count": collected,
@@ -534,7 +538,7 @@ impl RecoveryHandler {
             &self.context.authority,
             effects,
             self.context.effect_context.context_id(),
-            "recovery_cancelled",
+            RECOVERY_CANCELLED_FACT_TYPE_ID,
             &serde_json::json!({
                 "recovery_id": recovery_id,
                 "reason": reason,

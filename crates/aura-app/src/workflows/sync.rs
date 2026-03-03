@@ -11,12 +11,14 @@
 //! - `parse_peer_list()`: Parse comma-separated peer list string
 //! - `SyncConfigDefaults`: Portable config defaults struct
 
+use crate::workflows::parse::parse_authority_id;
 use crate::workflows::signals::{emit_signal, read_signal_or_default};
 use crate::{
     signal_defs::{SyncStatus, SYNC_STATUS_SIGNAL, SYNC_STATUS_SIGNAL_NAME},
     AppCore,
 };
 use async_lock::RwLock;
+use aura_core::identifiers::AuthorityId;
 use aura_core::AuraError;
 use std::sync::Arc;
 use std::time::Duration;
@@ -230,7 +232,7 @@ pub async fn force_sync(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError
 /// 3. Emits SYNC_STATUS_SIGNAL with Synced or Failed state
 pub async fn request_state(
     app_core: &Arc<RwLock<AppCore>>,
-    peer_id: &str,
+    peer_id: AuthorityId,
 ) -> Result<(), AuraError> {
     // Update sync status signal to show syncing
     emit_signal(
@@ -244,7 +246,7 @@ pub async fn request_state(
     // Trigger peer-targeted sync through RuntimeBridge
     let result = {
         let core = app_core.read().await;
-        core.sync_with_peer(peer_id)
+        core.sync_with_peer(&peer_id.to_string())
             .await
             .map_err(|e| AuraError::agent(format!("Failed to sync with peer: {e}")))
     };
@@ -274,6 +276,15 @@ pub async fn request_state(
     }
 
     result
+}
+
+/// Request state from a peer using a string authority ID at the UI boundary.
+pub async fn request_state_by_str(
+    app_core: &Arc<RwLock<AppCore>>,
+    peer_id: &str,
+) -> Result<(), AuraError> {
+    let peer_id = parse_authority_id(peer_id)?;
+    request_state(app_core, peer_id).await
 }
 
 /// Get current sync status
@@ -373,5 +384,17 @@ mod tests {
 
         let status = get_sync_status(&app_core).await;
         assert!(matches!(status, SyncStatus::Idle));
+    }
+
+    #[tokio::test]
+    async fn test_request_state_by_str_rejects_invalid_authority_id() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+
+        let error = match request_state_by_str(&app_core, "not-an-authority-id").await {
+            Ok(value) => panic!("invalid authority IDs must fail at parse boundary: {value:?}"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("Invalid authority ID"));
     }
 }

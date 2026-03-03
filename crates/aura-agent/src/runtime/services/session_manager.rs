@@ -9,15 +9,25 @@ use tokio::sync::RwLock;
 
 #[derive(Debug, Default)]
 struct SessionState {
-    participants: HashMap<SessionId, Vec<DeviceId>>,
-    metadata: HashMap<SessionId, HashMap<String, Value>>,
+    sessions: HashMap<SessionId, SessionRecord>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct SessionRecord {
+    participants: Vec<DeviceId>,
+    metadata: HashMap<String, Value>,
 }
 
 impl SessionState {
     fn validate(&self) -> Result<(), String> {
-        for session_id in self.participants.keys() {
-            if !self.metadata.contains_key(session_id) {
-                return Err(format!("Missing metadata entry for session {}", session_id));
+        for (session_id, record) in &self.sessions {
+            let mut dedup = std::collections::HashSet::new();
+            for device_id in &record.participants {
+                if !dedup.insert(*device_id) {
+                    return Err(format!(
+                        "Duplicate participant {device_id} in session {session_id}"
+                    ));
+                }
             }
         }
         Ok(())
@@ -43,13 +53,12 @@ impl SessionManager {
             &self.state,
             |state| {
                 state
-                    .participants
+                    .sessions
                     .entry(session_id)
-                    .or_insert_with(|| participants);
-                state
-                    .metadata
-                    .entry(session_id)
-                    .or_insert_with(HashMap::new);
+                    .or_insert_with(|| SessionRecord {
+                        participants,
+                        metadata: HashMap::new(),
+                    });
             },
             |state| state.validate(),
         )
@@ -65,11 +74,11 @@ impl SessionManager {
             &self.state,
             |state| {
                 let entry = state
-                    .metadata
+                    .sessions
                     .entry(session_id)
-                    .or_insert_with(HashMap::new);
-                entry.extend(metadata);
-                entry.clone()
+                    .or_insert_with(SessionRecord::default);
+                entry.metadata.extend(metadata);
+                entry.metadata.clone()
             },
             |state| state.validate(),
         )
@@ -85,17 +94,13 @@ impl SessionManager {
             &self.state,
             |state| {
                 let participants = state
-                    .participants
+                    .sessions
                     .entry(session_id)
-                    .or_insert_with(Vec::new);
-                if !participants.contains(&device_id) {
-                    participants.push(device_id);
+                    .or_insert_with(SessionRecord::default);
+                if !participants.participants.contains(&device_id) {
+                    participants.participants.push(device_id);
                 }
-                state
-                    .metadata
-                    .entry(session_id)
-                    .or_insert_with(HashMap::new);
-                participants.clone()
+                participants.participants.clone()
             },
             |state| state.validate(),
         )
@@ -110,9 +115,9 @@ impl SessionManager {
         with_state_mut_validated(
             &self.state,
             |state| {
-                if let Some(participants) = state.participants.get_mut(&session_id) {
-                    participants.retain(|id| id != &device_id);
-                    return Some(participants.clone());
+                if let Some(record) = state.sessions.get_mut(&session_id) {
+                    record.participants.retain(|id| id != &device_id);
+                    return Some(record.participants.clone());
                 }
                 None
             },

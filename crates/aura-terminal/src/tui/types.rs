@@ -1134,7 +1134,7 @@ pub struct PendingRequest {
 impl From<&AppRecoveryProcess> for PendingRequest {
     fn from(p: &AppRecoveryProcess) -> Self {
         Self {
-            id: p.id.clone(),
+            id: p.id.to_string(),
             account_name: p.account_id.to_string(), // Will be resolved to name by UI if possible
             approvals_received: p.approvals_received,
             approvals_required: p.approvals_required,

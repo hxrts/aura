@@ -23,6 +23,7 @@
 //! ```
 
 use super::{boxed, BoxedPolicy, DeliveryPolicy, DropWhenFinalized};
+use aura_core::types::facts::FactTypeId;
 use std::any::TypeId;
 use std::collections::HashMap;
 
@@ -35,7 +36,7 @@ use std::collections::HashMap;
 /// Use this for runtime registration where fact types are identified by string.
 #[derive(Clone)]
 pub struct PolicyRegistry {
-    policies: HashMap<String, BoxedPolicy>,
+    policies: HashMap<FactTypeId, BoxedPolicy>,
     default_policy: BoxedPolicy,
 }
 
@@ -63,30 +64,54 @@ impl PolicyRegistry {
     }
 
     /// Register a policy for a fact type
-    pub fn register<P: DeliveryPolicy + 'static>(&mut self, fact_type: &str, policy: P) {
-        self.policies.insert(fact_type.to_string(), boxed(policy));
+    pub fn register<P: DeliveryPolicy + 'static>(&mut self, fact_type: &FactTypeId, policy: P) {
+        self.policies.insert(fact_type.clone(), boxed(policy));
     }
 
     /// Register a boxed policy for a fact type
-    pub fn register_boxed(&mut self, fact_type: &str, policy: BoxedPolicy) {
-        self.policies.insert(fact_type.to_string(), policy);
+    pub fn register_boxed(&mut self, fact_type: &FactTypeId, policy: BoxedPolicy) {
+        self.policies.insert(fact_type.clone(), policy);
     }
 
     /// Get the policy for a fact type
     ///
     /// Returns the registered policy, or the default if not registered.
-    pub fn get_policy(&self, fact_type: &str) -> &BoxedPolicy {
+    pub fn get_policy(&self, fact_type: &FactTypeId) -> &BoxedPolicy {
         self.policies.get(fact_type).unwrap_or(&self.default_policy)
     }
 
     /// Check if a policy is registered for a fact type
-    pub fn has_policy(&self, fact_type: &str) -> bool {
+    pub fn has_policy(&self, fact_type: &FactTypeId) -> bool {
         self.policies.contains_key(fact_type)
     }
 
     /// Remove a policy registration
-    pub fn unregister(&mut self, fact_type: &str) -> Option<BoxedPolicy> {
+    pub fn unregister(&mut self, fact_type: &FactTypeId) -> Option<BoxedPolicy> {
         self.policies.remove(fact_type)
+    }
+
+    /// Compatibility shim for string fact type registration.
+    pub fn register_str<P: DeliveryPolicy + 'static>(&mut self, fact_type: &str, policy: P) {
+        let typed = FactTypeId::from(fact_type);
+        self.register(&typed, policy);
+    }
+
+    /// Compatibility shim for string fact type lookup.
+    pub fn get_policy_str(&self, fact_type: &str) -> &BoxedPolicy {
+        let typed = FactTypeId::from(fact_type);
+        self.get_policy(&typed)
+    }
+
+    /// Compatibility shim for string fact type checks.
+    pub fn has_policy_str(&self, fact_type: &str) -> bool {
+        let typed = FactTypeId::from(fact_type);
+        self.has_policy(&typed)
+    }
+
+    /// Compatibility shim for string fact type unregistration.
+    pub fn unregister_str(&mut self, fact_type: &str) -> Option<BoxedPolicy> {
+        let typed = FactTypeId::from(fact_type);
+        self.unregister(&typed)
     }
 
     /// Get the default policy
@@ -110,8 +135,8 @@ impl PolicyRegistry {
     }
 
     /// Iterate over registered fact types
-    pub fn fact_types(&self) -> impl Iterator<Item = &str> {
-        self.policies.keys().map(|s| s.as_str())
+    pub fn fact_types(&self) -> impl Iterator<Item = &FactTypeId> {
+        self.policies.keys()
     }
 }
 
@@ -119,7 +144,14 @@ impl std::fmt::Debug for PolicyRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PolicyRegistry")
             .field("registered_count", &self.policies.len())
-            .field("fact_types", &self.policies.keys().collect::<Vec<_>>())
+            .field(
+                "fact_types",
+                &self
+                    .policies
+                    .keys()
+                    .map(FactTypeId::as_str)
+                    .collect::<Vec<_>>(),
+            )
             .finish()
     }
 }
@@ -218,42 +250,47 @@ mod tests {
     #[test]
     fn test_policy_registry_register_and_get() {
         let mut registry = PolicyRegistry::new();
+        let message_sent = FactTypeId::from("MessageSent");
+        let invitation_accepted = FactTypeId::from("InvitationAccepted");
+        let unknown = FactTypeId::from("Unknown");
 
-        registry.register("MessageSent", DropWhenFullyAcked);
-        registry.register("InvitationAccepted", DropWhenFinalized);
+        registry.register(&message_sent, DropWhenFullyAcked);
+        registry.register(&invitation_accepted, DropWhenFinalized);
 
-        assert!(registry.has_policy("MessageSent"));
-        assert!(registry.has_policy("InvitationAccepted"));
-        assert!(!registry.has_policy("Unknown"));
+        assert!(registry.has_policy(&message_sent));
+        assert!(registry.has_policy(&invitation_accepted));
+        assert!(!registry.has_policy(&unknown));
 
-        let policy = registry.get_policy("MessageSent");
+        let policy = registry.get_policy(&message_sent);
         assert_eq!(policy.name(), "DropWhenFullyAcked");
 
-        let policy = registry.get_policy("InvitationAccepted");
+        let policy = registry.get_policy(&invitation_accepted);
         assert_eq!(policy.name(), "DropWhenFinalized");
 
         // Unknown gets default
-        let policy = registry.get_policy("Unknown");
+        let policy = registry.get_policy(&unknown);
         assert_eq!(policy.name(), "DropWhenFinalized");
     }
 
     #[test]
     fn test_policy_registry_custom_default() {
         let registry = PolicyRegistry::with_default(DropWhenFullyAcked);
+        let unknown = FactTypeId::from("Unknown");
 
-        let policy = registry.get_policy("Unknown");
+        let policy = registry.get_policy(&unknown);
         assert_eq!(policy.name(), "DropWhenFullyAcked");
     }
 
     #[test]
     fn test_policy_registry_unregister() {
         let mut registry = PolicyRegistry::new();
+        let message_sent = FactTypeId::from("MessageSent");
 
-        registry.register("MessageSent", DropWhenFullyAcked);
-        assert!(registry.has_policy("MessageSent"));
+        registry.register(&message_sent, DropWhenFullyAcked);
+        assert!(registry.has_policy(&message_sent));
 
-        registry.unregister("MessageSent");
-        assert!(!registry.has_policy("MessageSent"));
+        registry.unregister(&message_sent);
+        assert!(!registry.has_policy(&message_sent));
     }
 
     #[test]
@@ -276,8 +313,10 @@ mod tests {
     #[test]
     fn test_registry_debug() {
         let mut registry = PolicyRegistry::new();
-        registry.register("Foo", DropWhenFinalized);
-        registry.register("Bar", DropWhenFullyAcked);
+        let foo = FactTypeId::from("Foo");
+        let bar = FactTypeId::from("Bar");
+        registry.register(&foo, DropWhenFinalized);
+        registry.register(&bar, DropWhenFullyAcked);
 
         let debug = format!("{registry:?}");
         assert!(debug.contains("PolicyRegistry"));

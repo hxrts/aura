@@ -34,7 +34,7 @@
 //! ```
 
 use aura_core::domain::{Acknowledgment, Consistency};
-use aura_core::identifiers::AuthorityId;
+use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_journal::Fact;
 use std::sync::Arc;
 
@@ -69,13 +69,13 @@ pub trait DeliveryPolicy: Send + Sync {
 /// Provides access to app-level state needed for policy decisions.
 pub trait PolicyContext: Send + Sync {
     /// Get the members of a channel (for message delivery)
-    fn channel_members(&self, channel_id: &str) -> Vec<AuthorityId>;
+    fn channel_members(&self, channel_id: &ChannelId) -> Vec<AuthorityId>;
 
     /// Get the guardians for an authority (for critical operations)
     fn guardians(&self, authority_id: &AuthorityId) -> Vec<AuthorityId>;
 
     /// Get all known peers in a context
-    fn context_peers(&self, context_id: &str) -> Vec<AuthorityId>;
+    fn context_peers(&self, context_id: &ContextId) -> Vec<AuthorityId>;
 }
 
 // =============================================================================
@@ -202,7 +202,7 @@ pub fn boxed<P: DeliveryPolicy + 'static>(policy: P) -> BoxedPolicy {
 // =============================================================================
 
 /// Type alias for channel ID extractor functions
-pub type ChannelIdExtractor = Box<dyn Fn(&Fact) -> Option<String> + Send + Sync>;
+pub type ChannelIdExtractor = Box<dyn Fn(&Fact) -> Option<ChannelId> + Send + Sync>;
 
 /// Policy that delivers to all channel members.
 ///
@@ -216,7 +216,7 @@ impl<P: DeliveryPolicy> ChannelMembersPolicy<P> {
     /// Create a new channel members policy
     pub fn new(
         inner: P,
-        channel_id_extractor: impl Fn(&Fact) -> Option<String> + Send + Sync + 'static,
+        channel_id_extractor: impl Fn(&Fact) -> Option<ChannelId> + Send + Sync + 'static,
     ) -> Self {
         Self {
             inner,
@@ -252,7 +252,7 @@ impl<P: DeliveryPolicy> DeliveryPolicy for ChannelMembersPolicy<P> {
 pub struct NoOpPolicyContext;
 
 impl PolicyContext for NoOpPolicyContext {
-    fn channel_members(&self, _channel_id: &str) -> Vec<AuthorityId> {
+    fn channel_members(&self, _channel_id: &ChannelId) -> Vec<AuthorityId> {
         Vec::new()
     }
 
@@ -260,7 +260,7 @@ impl PolicyContext for NoOpPolicyContext {
         Vec::new()
     }
 
-    fn context_peers(&self, _context_id: &str) -> Vec<AuthorityId> {
+    fn context_peers(&self, _context_id: &ContextId) -> Vec<AuthorityId> {
         Vec::new()
     }
 }

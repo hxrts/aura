@@ -792,11 +792,17 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
         .parse()
         .map_err(|_| format!("invalid number: {num_str}"))?;
 
+    let checked_mul = |value: u64, factor: u64| {
+        value
+            .checked_mul(factor)
+            .ok_or_else(|| format!("duration overflow: {value} * {factor}"))
+    };
+
     let secs = match unit {
         's' => num,
-        'm' => num * 60,
-        'h' => num * 3600,
-        'd' => num * 86400,
+        'm' => checked_mul(num, 60)?,
+        'h' => checked_mul(num, 3600)?,
+        'd' => checked_mul(num, 86400)?,
         _ => return Err(format!("unknown unit: {unit}")),
     };
 
@@ -1460,6 +1466,7 @@ mod tests {
         assert!(parse_duration("").is_err());
         assert!(parse_duration("abc").is_err());
         assert!(parse_duration("5x").is_err());
+        assert!(parse_duration(&format!("{}d", u64::MAX)).is_err());
     }
 
     #[test]

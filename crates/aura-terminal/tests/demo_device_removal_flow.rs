@@ -220,7 +220,7 @@ async fn demo_device_removal_flow_removes_device_from_settings() {
 
     let status = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
         env.ctx_a.app_core_raw(),
-        start.ceremony_id.clone(),
+        aura_core::CeremonyId::new(start.ceremony_id.clone()),
         Duration::from_millis(50),
         |_| {},
         tokio::time::sleep,
@@ -244,7 +244,7 @@ async fn demo_device_removal_flow_removes_device_from_settings() {
 
     let removal_status = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
         env.ctx_a.app_core_raw(),
-        removal_ceremony_id,
+        aura_core::CeremonyId::new(removal_ceremony_id),
         Duration::from_millis(50),
         |_| {},
         tokio::time::sleep,

@@ -14,7 +14,7 @@ use aura_agent::handlers::{InvitationServiceApi, InvitationType, ShareableInvita
 use aura_agent::{AgentBuilder, AuraAgent, EffectContext, ExecutionMode};
 use aura_core::effects::ThresholdSigningEffects;
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
+use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
 use aura_core::threshold::ParticipantIdentity;
 use aura_journal::fact::{FactContent, RelationalFact};
 use aura_journal::ProtocolRelationalFact;
@@ -397,6 +397,7 @@ async fn test_guardian_invitation() -> TestResult {
 async fn test_channel_invitation() -> TestResult {
     let agent = create_test_agent(60).await?;
     let invitee = AuthorityId::new_from_entropy([61u8; 32]);
+    let home_id = ChannelId::from_bytes([61u8; 32]).to_string();
 
     let invitations = agent.invitations()?;
 
@@ -404,7 +405,7 @@ async fn test_channel_invitation() -> TestResult {
     let invitation = invitations
         .invite_to_channel(
             invitee,
-            "channel-xyz-123".to_string(),
+            home_id.clone(),
             None,
             Some("Join our discussion channel".to_string()),
             None,
@@ -418,7 +419,7 @@ async fn test_channel_invitation() -> TestResult {
 
     match shareable.invitation_type {
         InvitationType::Channel { home_id, .. } => {
-            assert_eq!(home_id, "channel-xyz-123");
+            assert_eq!(home_id, ChannelId::from_bytes([61u8; 32]));
         }
         _ => panic!("Expected Channel invitation type"),
     }

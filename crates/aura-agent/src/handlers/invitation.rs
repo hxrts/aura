@@ -59,7 +59,7 @@ use aura_invitation::protocol::device_enrollment::telltale_session_types_invitat
 use aura_invitation::{
     DeviceEnrollmentAccept, DeviceEnrollmentConfirm, DeviceEnrollmentRequest,
     GuardianAccept, GuardianConfirm, GuardianRequest, InvitationAck, InvitationOffer,
-    InvitationResponse,
+    InvitationOperation, InvitationResponse,
 };
 use aura_journal::fact::{FactContent, RelationalFact};
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
@@ -73,6 +73,7 @@ use aura_core::util::serialization::from_slice;
 use crate::runtime::choreography_adapter::AuraProtocolAdapter;
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
 use std::collections::{BTreeSet, HashMap, HashSet};
+#[cfg(test)]
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -115,8 +116,13 @@ struct ChannelInviteDetails {
     bootstrap: Option<ChannelBootstrapPackage>,
 }
 
-fn channel_id_from_home_id(home_id: &str) -> ChannelId {
-    ChannelId::from_str(home_id).unwrap_or_else(|_| ChannelId::from_bytes(hash(home_id.as_bytes())))
+#[cfg(test)]
+fn channel_id_from_home_id(home_id: &str) -> AgentResult<ChannelId> {
+    ChannelId::from_str(home_id).map_err(|e| {
+        AgentError::invalid(format!(
+            "invalid channel/home id `{home_id}`: expected canonical ChannelId format ({e})"
+        ))
+    })
 }
 
 /// Invitation handler
@@ -500,7 +506,7 @@ impl InvitationHandler {
             effects
                 .commit_generic_fact_bytes(
                     invitation.context_id,
-                    CONTACT_FACT_TYPE_ID,
+                    CONTACT_FACT_TYPE_ID.into(),
                     contact_fact.to_bytes(),
                 )
                 .await
@@ -610,7 +616,7 @@ impl InvitationHandler {
             );
 
             effects
-                .commit_generic_fact_bytes(context_id, CONTACT_FACT_TYPE_ID, fact.to_bytes())
+                .commit_generic_fact_bytes(context_id, CONTACT_FACT_TYPE_ID.into(), fact.to_bytes())
                 .await
                 .map_err(|e| {
                     crate::core::AgentError::effects(format!("commit contact fact: {e}"))
@@ -658,10 +664,14 @@ impl InvitationHandler {
             );
         }
 
-        if let Some(channel_invite) = self
+        if let Some(mut channel_invite) = self
             .resolve_channel_invitation(effects.as_ref(), invitation_id)
             .await?
         {
+            channel_invite.context_id = self
+                .resolve_channel_context_from_chat_facts(effects.as_ref(), &channel_invite)
+                .await;
+
             if let Some(package) = channel_invite.bootstrap.clone() {
                 let ChannelBootstrapPackage { bootstrap_id, key } = package;
 
@@ -1038,7 +1048,7 @@ impl InvitationHandler {
                 effects
                     .commit_generic_fact_bytes(
                         context_id,
-                        CONTACT_FACT_TYPE_ID,
+                        CONTACT_FACT_TYPE_ID.into(),
                         contact_fact.to_bytes(),
                     )
                     .await
@@ -1446,11 +1456,11 @@ impl InvitationHandler {
             {
                 let home_name = nickname_suggestion
                     .clone()
-                    .unwrap_or_else(|| home_id.clone());
+                    .unwrap_or_else(|| home_id.to_string());
                 return Ok(Some(ChannelInviteDetails {
                     context_id: inv.context_id,
-                    channel_id: channel_id_from_home_id(home_id),
-                    home_id: home_id.clone(),
+                    channel_id: *home_id,
+                    home_id: home_id.to_string(),
                     home_name,
                     sender_id: inv.sender_id,
                     bootstrap: bootstrap.clone(),
@@ -1467,13 +1477,13 @@ impl InvitationHandler {
                 bootstrap,
             } = shareable.invitation_type
             {
-                let home_name = nickname_suggestion.unwrap_or_else(|| home_id.clone());
+                let home_name = nickname_suggestion.unwrap_or_else(|| home_id.to_string());
                 return Ok(Some(ChannelInviteDetails {
                     context_id: shareable
                         .context_id
                         .unwrap_or_else(|| default_context_id_for_authority(shareable.sender_id)),
-                    channel_id: channel_id_from_home_id(&home_id),
-                    home_id,
+                    channel_id: home_id,
+                    home_id: home_id.to_string(),
                     home_name,
                     sender_id: shareable.sender_id,
                     bootstrap,
@@ -1525,11 +1535,11 @@ impl InvitationHandler {
                 bootstrap,
             } = invitation_type
             {
-                let home_name = nickname_suggestion.unwrap_or_else(|| home_id.clone());
+                let home_name = nickname_suggestion.unwrap_or_else(|| home_id.to_string());
                 return Ok(Some(ChannelInviteDetails {
                     context_id,
-                    channel_id: channel_id_from_home_id(&home_id),
-                    home_id,
+                    channel_id: home_id,
+                    home_id: home_id.to_string(),
                     home_name,
                     sender_id,
                     bootstrap,
@@ -1578,6 +1588,44 @@ impl InvitationHandler {
         }
 
         false
+    }
+
+    async fn resolve_channel_context_from_chat_facts(
+        &self,
+        effects: &AuraEffectSystem,
+        invite: &ChannelInviteDetails,
+    ) -> ContextId {
+        let own_id = self.context.authority.authority_id();
+        let Ok(facts) = effects.load_committed_facts(own_id).await else {
+            return invite.context_id;
+        };
+
+        for fact in facts.into_iter().rev() {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
+            else {
+                continue;
+            };
+
+            if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
+                continue;
+            }
+
+            let Some(ChatFact::ChannelCreated {
+                context_id,
+                channel_id,
+                creator_id,
+                ..
+            }) = ChatFact::from_envelope(&envelope)
+            else {
+                continue;
+            };
+
+            if channel_id == invite.channel_id && creator_id == invite.sender_id {
+                return context_id;
+            }
+        }
+
+        invite.context_id
     }
 
     async fn materialize_home_signal_for_channel_invitation(
@@ -2120,11 +2168,15 @@ impl InvitationHandler {
                         }
                     }
                 }
-                let status = if accepted { "accepted" } else { "declined" };
+                let status = if accepted {
+                    aura_invitation::InvitationAckStatus::Accepted
+                } else {
+                    aura_invitation::InvitationAckStatus::Declined
+                };
                 let ack = ExchangeInvitationAck(InvitationAck {
                     invitation_id: invitation_id.clone(),
                     success: true,
-                    status: status.to_string(),
+                    status,
                 });
                 return Some(Box::new(ack));
             }
@@ -2820,7 +2872,7 @@ async fn execute_journal_append(
         authority,
         effects,
         context_id,
-        "invitation",
+        INVITATION_FACT_TYPE_ID.into(),
         &fact.to_bytes(),
     )
     .await
@@ -2971,7 +3023,7 @@ fn transport_receipt_from_flow(receipt: Receipt) -> TransportReceipt {
 }
 
 async fn execute_record_receipt(
-    operation: String,
+    operation: InvitationOperation,
     peer: Option<AuthorityId>,
     context_id: ContextId,
     receipt: Option<Receipt>,
@@ -2992,7 +3044,13 @@ async fn execute_record_receipt(
     };
 
     let peer_id = peer.unwrap_or(receipt.dst);
-    let operation_key = operation.replace(' ', "_");
+    let operation_key = match operation {
+        InvitationOperation::SendInvitation => "send_invitation",
+        InvitationOperation::AcceptInvitation => "accept_invitation",
+        InvitationOperation::DeclineInvitation => "decline_invitation",
+        InvitationOperation::CancelInvitation => "cancel_invitation",
+        InvitationOperation::Ceremony => "invitation_ceremony",
+    };
     let key = format!(
         "invitation/receipts/{}/{}/{}/{}",
         receipt.ctx, peer_id, operation_key, receipt.nonce
@@ -3032,6 +3090,10 @@ mod tests {
             ..Default::default()
         };
         Arc::new(AuraEffectSystem::testing(&config).unwrap())
+    }
+
+    fn canonical_home_id(seed: u8) -> ChannelId {
+        ChannelId::from_bytes([seed; 32])
     }
 
     #[tokio::test]
@@ -3105,7 +3167,7 @@ mod tests {
         let effects = effects_for(&authority);
 
         let outcome = GuardOutcome::allowed(vec![EffectCommand::RecordReceipt {
-            operation: "send_invitation".to_string(),
+            operation: InvitationOperation::SendInvitation,
             peer: Some(AuthorityId::new_from_entropy([137u8; 32])),
         }]);
 
@@ -3128,7 +3190,7 @@ mod tests {
                 invitation_id: InvitationId::new("inv-multi"),
             },
             EffectCommand::RecordReceipt {
-                operation: "send_invitation".to_string(),
+                operation: InvitationOperation::SendInvitation,
                 peer: Some(peer),
             },
         ]);
@@ -3202,13 +3264,14 @@ mod tests {
         let handler = InvitationHandler::new(authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([97u8; 32]);
+        let home_id = canonical_home_id(11);
 
         let invitation = handler
             .create_invitation(
                 effects.clone(),
                 receiver_id,
                 InvitationType::Channel {
-                    home_id: "home-123".to_string(),
+                    home_id,
                     nickname_suggestion: None,
                     bootstrap: None,
                 },
@@ -3225,6 +3288,13 @@ mod tests {
 
         assert!(result.success);
         assert_eq!(result.new_status, Some(InvitationStatus::Declined));
+    }
+
+    #[test]
+    fn malformed_home_id_rejected_at_string_boundary() {
+        let err =
+            channel_id_from_home_id("oak-house").expect_err("malformed home id should be rejected");
+        assert!(matches!(err, AgentError::Config(_)));
     }
 
     #[tokio::test]
@@ -3472,7 +3542,7 @@ mod tests {
         effects
             .commit_generic_fact_bytes(
                 context_id,
-                CONTACT_FACT_TYPE_ID,
+                CONTACT_FACT_TYPE_ID.into(),
                 existing_contact.to_bytes(),
             )
             .await
@@ -3821,13 +3891,14 @@ mod tests {
         let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
 
         let invitation_id = InvitationId::new("inv-envelope-home-1");
+        let home_id = canonical_home_id(12);
         let shareable = ShareableInvitation {
             version: ShareableInvitation::CURRENT_VERSION,
             invitation_id: invitation_id.clone(),
             sender_id,
             context_id: None,
             invitation_type: InvitationType::Channel {
-                home_id: "home-envelope-1".to_string(),
+                home_id,
                 nickname_suggestion: Some("Maple House".to_string()),
                 bootstrap: None,
             },
@@ -3891,13 +3962,14 @@ mod tests {
         let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
 
         let invitation_id = InvitationId::new("inv-materialize-home-1");
+        let home_id = canonical_home_id(13);
         let shareable = ShareableInvitation {
             version: ShareableInvitation::CURRENT_VERSION,
             invitation_id: invitation_id.clone(),
             sender_id,
             context_id: None,
             invitation_type: InvitationType::Channel {
-                home_id: "oak-house".to_string(),
+                home_id,
                 nickname_suggestion: Some("Oak House".to_string()),
                 bootstrap: None,
             },
@@ -3916,7 +3988,7 @@ mod tests {
             .unwrap();
 
         let expected_context = default_context_id_for_authority(sender_id);
-        let expected_channel = channel_id_from_home_id("oak-house");
+        let expected_channel = home_id;
 
         let committed = effects.load_committed_facts(receiver_id).await.unwrap();
         let found_channel_fact = committed.iter().any(|fact| {
@@ -3965,6 +4037,7 @@ mod tests {
         let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
 
         let invitation_id = InvitationId::new("inv-materialize-bootstrap-1");
+        let home_id = canonical_home_id(14);
         let bootstrap_key = [7u8; 32];
         let bootstrap_id = Hash32::from_bytes(&bootstrap_key);
         let shareable = ShareableInvitation {
@@ -3973,7 +4046,7 @@ mod tests {
             sender_id,
             context_id: None,
             invitation_type: InvitationType::Channel {
-                home_id: "elm-house".to_string(),
+                home_id,
                 nickname_suggestion: Some("Elm House".to_string()),
                 bootstrap: Some(ChannelBootstrapPackage {
                     bootstrap_id,
@@ -3995,7 +4068,7 @@ mod tests {
             .unwrap();
 
         let expected_context = default_context_id_for_authority(sender_id);
-        let expected_channel = channel_id_from_home_id("elm-house");
+        let expected_channel = home_id;
 
         let state = aura_protocol::amp::get_channel_state(
             effects.as_ref(),
@@ -4035,13 +4108,14 @@ mod tests {
 
         let invitation_id = InvitationId::new("inv-materialize-home-context");
         let custom_context = ContextId::new_from_entropy([55u8; 32]);
+        let home_id = canonical_home_id(15);
         let shareable = ShareableInvitation {
             version: ShareableInvitation::CURRENT_VERSION,
             invitation_id: invitation_id.clone(),
             sender_id,
             context_id: Some(custom_context),
             invitation_type: InvitationType::Channel {
-                home_id: "birch-house".to_string(),
+                home_id,
                 nickname_suggestion: Some("Birch House".to_string()),
                 bootstrap: None,
             },
@@ -4065,7 +4139,7 @@ mod tests {
             .await
             .unwrap();
 
-        let expected_channel = channel_id_from_home_id("birch-house");
+        let expected_channel = home_id;
         let committed = effects.load_committed_facts(receiver_id).await.unwrap();
         let found_channel_fact = committed.iter().any(|fact| {
             let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
@@ -4356,13 +4430,14 @@ mod tests {
     fn shareable_invitation_roundtrip_channel() {
         let sender_id = AuthorityId::new_from_entropy([45u8; 32]);
         let context_id = ContextId::new_from_entropy([56u8; 32]);
+        let home_id = ChannelId::from_bytes([21u8; 32]);
         let shareable = ShareableInvitation {
             version: ShareableInvitation::CURRENT_VERSION,
             invitation_id: InvitationId::new("inv-channel-789"),
             sender_id,
             context_id: Some(context_id),
             invitation_type: InvitationType::Channel {
-                home_id: "home-xyz".to_string(),
+                home_id,
                 nickname_suggestion: None,
                 bootstrap: None,
             },
@@ -4380,7 +4455,7 @@ mod tests {
                 nickname_suggestion: _,
                 bootstrap: _,
             } => {
-                assert_eq!(home_id, "home-xyz");
+                assert_eq!(home_id, ChannelId::from_bytes([21u8; 32]));
             }
             _ => panic!("wrong invitation type"),
         }

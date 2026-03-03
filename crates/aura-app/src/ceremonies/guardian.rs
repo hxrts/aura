@@ -75,7 +75,7 @@ impl GuardianCandidates {
     /// Returns an error if there aren't enough contacts to satisfy
     /// the n value of the threshold.
     pub fn validate_for_threshold(&self, threshold_n: u8) -> Result<&Self, GuardianSetupError> {
-        let required = threshold_n as usize;
+        let required = usize::from(threshold_n);
         let available = self.contacts.len();
         if available < required {
             return Err(GuardianSetupError::InsufficientContacts {
@@ -103,7 +103,8 @@ impl GuardianCandidates {
 
     /// Get maximum possible n value for threshold
     pub fn max_threshold_n(&self) -> u8 {
-        self.contacts.len().min(255) as u8
+        let capped = self.contacts.len().min(usize::from(u8::MAX));
+        u8::try_from(capped).unwrap_or(u8::MAX)
     }
 }
 

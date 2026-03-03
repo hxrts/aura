@@ -397,7 +397,7 @@ impl RendezvousHandler {
             &self.context.authority,
             effects,
             context_id,
-            RENDEZVOUS_FACT_TYPE_ID,
+            RENDEZVOUS_FACT_TYPE_ID.into(),
             &fact.to_bytes(),
         )
         .await?;
@@ -807,7 +807,7 @@ async fn execute_journal_append(
         authority,
         effects,
         context_id,
-        RENDEZVOUS_FACT_TYPE_ID,
+        RENDEZVOUS_FACT_TYPE_ID.into(),
         &fact.to_bytes(),
     )
     .await

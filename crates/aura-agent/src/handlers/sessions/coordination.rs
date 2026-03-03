@@ -4,6 +4,7 @@
 
 use super::shared::*;
 use crate::core::{AgentError, AgentResult, AuthorityContext};
+use crate::fact_types::{SESSION_CREATED_FACT_TYPE_ID, SESSION_INVITATION_SENT_FACT_TYPE_ID};
 use crate::handlers::shared::HandlerUtilities;
 use crate::runtime::choreography_adapter::{AuraProtocolAdapter, ReceivedMessage};
 use crate::runtime::services::SessionManager;
@@ -45,14 +46,16 @@ pub struct SessionRequest {
     pub session_type: SessionType,
     pub participants: Vec<DeviceId>,
     pub initiator_id: DeviceId,
-    pub session_id: String,
+    #[serde(with = "session_id_serde")]
+    pub session_id: SessionId,
     pub metadata: HashMap<String, serde_json::Value>,
 }
 
 /// Participant invitation message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParticipantInvitation {
-    pub session_id: String,
+    #[serde(with = "session_id_serde")]
+    pub session_id: SessionId,
     pub session_type: SessionType,
     pub initiator_id: DeviceId,
     pub invited_participants: Vec<DeviceId>,
@@ -61,7 +64,8 @@ pub struct ParticipantInvitation {
 /// Session acceptance message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionDecision {
-    pub session_id: String,
+    #[serde(with = "session_id_serde")]
+    pub session_id: SessionId,
     pub participant_id: DeviceId,
     pub accepted: bool,
     pub reason: Option<String>,
@@ -71,14 +75,16 @@ pub struct SessionDecision {
 /// Session creation success message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionCreated {
-    pub session_id: String,
+    #[serde(with = "session_id_serde")]
+    pub session_id: SessionId,
     pub session_handle: SessionHandle,
     pub created_at: u64,
 }
 
 #[derive(Debug, Serialize)]
 struct SessionCreatedFact {
-    session_id: String,
+    #[serde(with = "session_id_serde")]
+    session_id: SessionId,
     session_type: SessionType,
     participants: Vec<DeviceId>,
     initiator: DeviceId,
@@ -87,29 +93,55 @@ struct SessionCreatedFact {
 #[derive(Debug, Serialize)]
 #[allow(dead_code)]
 struct SessionParticipantsFact {
-    session_id: String,
+    #[serde(with = "session_id_serde")]
+    session_id: SessionId,
     participants: Vec<DeviceId>,
 }
 
 #[derive(Debug, Serialize)]
 #[allow(dead_code)]
 struct SessionMetadataFact {
-    session_id: String,
+    #[serde(with = "session_id_serde")]
+    session_id: SessionId,
     metadata: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
 struct SessionInvitationFact {
-    session_id: String,
+    #[serde(with = "session_id_serde")]
+    session_id: SessionId,
     participant: DeviceId,
 }
 
 /// Session creation failure message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionCreationFailed {
-    pub session_id: String,
+    #[serde(with = "session_id_serde")]
+    pub session_id: SessionId,
     pub reason: String,
     pub failed_at: u64,
+}
+
+mod session_id_serde {
+    use aura_core::identifiers::SessionId;
+    use serde::{de::Error, Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(session_id: &SessionId, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&session_id.to_string())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<SessionId, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        value
+            .parse::<SessionId>()
+            .map_err(|e| D::Error::custom(format!("invalid session id `{value}`: {e}")))
+    }
 }
 
 /// Session operations handler with authority-first design and choreographic patterns
@@ -182,7 +214,7 @@ impl SessionOperations {
 
     pub(super) async fn persist_participants(
         &self,
-        session_id: &str,
+        session_id: SessionId,
         participants: &[DeviceId],
     ) -> AgentResult<()> {
         let key = format!("session/{session_id}/participants");
@@ -196,7 +228,7 @@ impl SessionOperations {
 
     pub(super) async fn persist_metadata(
         &self,
-        session_id: &str,
+        session_id: SessionId,
         metadata: &HashMap<String, serde_json::Value>,
     ) -> AgentResult<()> {
         let key = format!("session/{session_id}/metadata");
@@ -295,14 +327,13 @@ impl SessionOperations {
         // Generate unique session ID
         let session_uuid = self.effects.random_uuid().await;
         let session_id = SessionId::from_uuid(session_uuid);
-        let session_id_string = session_id.to_string();
 
         // Create session request message for choreography with provided metadata
         let session_request = SessionRequest {
             session_type: session_type.clone(),
             participants: participants.clone(),
             initiator_id: device_id,
-            session_id: session_id_string.clone(),
+            session_id,
             metadata,
         };
 
@@ -320,9 +351,9 @@ impl SessionOperations {
                     &self.authority_context,
                     &self.effects,
                     self.guard_context(),
-                    "session_created",
+                    SESSION_CREATED_FACT_TYPE_ID,
                     &SessionCreatedFact {
-                        session_id: session_id_string.clone(),
+                        session_id,
                         session_type,
                         participants: participants.clone(),
                         initiator: device_id,
@@ -434,7 +465,7 @@ impl SessionOperations {
                 .await?;
 
             let invitation = ParticipantInvitation {
-                session_id: request.session_id.clone(),
+                session_id: request.session_id,
                 session_type: request.session_type.clone(),
                 initiator_id: request.initiator_id,
                 invited_participants: request.participants.clone(),
@@ -449,7 +480,7 @@ impl SessionOperations {
                 metadata: {
                     let mut metadata = HashMap::new();
                     metadata.insert("type".to_string(), "session_invitation".to_string());
-                    metadata.insert("session_id".to_string(), request.session_id.clone());
+                    metadata.insert("session_id".to_string(), request.session_id.to_string());
                     metadata
                 },
                 receipt: None,
@@ -473,9 +504,9 @@ impl SessionOperations {
                 &self.authority_context,
                 effects,
                 self.guard_context(),
-                "session_invitation_sent",
+                SESSION_INVITATION_SENT_FACT_TYPE_ID,
                 &SessionInvitationFact {
-                    session_id: request.session_id.clone(),
+                    session_id: request.session_id,
                     participant: *participant_id,
                 },
             )
@@ -508,7 +539,7 @@ impl SessionOperations {
         let my_role = ChoreographicRole::new(device_id, role_index);
 
         let session_handle = SessionHandle {
-            session_id: request.session_id.clone(),
+            session_id: request.session_id,
             session_type: request.session_type.clone(),
             participants: request.participants.clone(),
             my_role,
@@ -546,16 +577,16 @@ impl SessionOperations {
         let failed_type = std::any::type_name::<SessionCreationFailed>();
 
         let created = SessionCreated {
-            session_id: session_request.session_id.clone(),
+            session_id: session_request.session_id,
             session_handle: placeholder_session_handle(
-                &session_request.session_id,
+                session_request.session_id,
                 session_request.session_type.clone(),
                 authority_id,
             ),
             created_at: self.effects.current_timestamp().await.unwrap_or(0),
         };
         let failed = SessionCreationFailed {
-            session_id: session_request.session_id.clone(),
+            session_id: session_request.session_id,
             reason: "session_creation_failed".to_string(),
             failed_at: self.effects.current_timestamp().await.unwrap_or(0),
         };
@@ -584,7 +615,7 @@ impl SessionOperations {
             None
         });
 
-        let session_uuid = session_coordination_session_id(&session_request.session_id);
+        let session_uuid = session_coordination_session_id(&session_request.session_id)?;
         adapter
             .start_session(session_uuid)
             .await
@@ -657,7 +688,7 @@ impl SessionOperations {
             }
         });
 
-        let session_uuid = session_coordination_session_id(&invitation.session_id);
+        let session_uuid = session_coordination_session_id(&invitation.session_id)?;
         adapter
             .start_session(session_uuid)
             .await
@@ -704,7 +735,7 @@ impl SessionOperations {
                     None
                 });
 
-        let session_uuid = session_coordination_session_id(&decision.session_id);
+        let session_uuid = session_coordination_session_id(&decision.session_id)?;
         adapter
             .start_session(session_uuid)
             .await
@@ -719,11 +750,16 @@ impl SessionOperations {
     }
 }
 
-fn session_coordination_session_id(session_id: &str) -> uuid::Uuid {
-    let digest = hash::hash(session_id.as_bytes());
-    let mut bytes = [0u8; 16];
-    bytes.copy_from_slice(&digest[..16]);
-    uuid::Uuid::from_bytes(bytes)
+fn parse_session_id(session_id: &str) -> AgentResult<SessionId> {
+    session_id.parse::<SessionId>().map_err(|e| {
+        AgentError::invalid(format!(
+            "invalid session id `{session_id}` for session coordination: {e}"
+        ))
+    })
+}
+
+fn session_coordination_session_id(session_id: &SessionId) -> AgentResult<uuid::Uuid> {
+    Ok(session_id.uuid())
 }
 
 fn build_session_role_map(
@@ -763,13 +799,13 @@ fn session_participant_role(
 }
 
 fn placeholder_session_handle(
-    session_id: &str,
+    session_id: SessionId,
     session_type: SessionType,
     authority_id: AuthorityId,
 ) -> SessionHandle {
     let role_index = RoleIndex::new(0).expect("role index");
     SessionHandle {
-        session_id: session_id.to_string(),
+        session_id,
         session_type,
         participants: vec![DeviceId::from_uuid(authority_id.0)],
         my_role: ChoreographicRole::new(DeviceId::from_uuid(authority_id.0), role_index),
@@ -805,17 +841,7 @@ struct ParticipantResponse {
 impl SessionOperations {
     /// Get session information
     pub async fn get_session(&self, session_id: &str) -> AgentResult<Option<SessionHandle>> {
-        // Convert string to SessionId by parsing the UUID part
-        let session_id_typed = if let Some(uuid_str) = session_id.strip_prefix("session-") {
-            match uuid::Uuid::parse_str(uuid_str) {
-                Ok(uuid) => aura_core::identifiers::SessionId::from_uuid(uuid),
-                Err(_) => aura_core::identifiers::SessionId::new_from_entropy(hash::hash(
-                    session_id.as_bytes(),
-                )),
-            }
-        } else {
-            aura_core::identifiers::SessionId::new_from_entropy(hash::hash(session_id.as_bytes()))
-        };
+        let session_id_typed = parse_session_id(session_id)?;
 
         // Implement session status lookup via effects system
         match self
@@ -911,7 +937,7 @@ impl SessionOperations {
 
         let device_id = self.device_id();
         Ok(SessionHandle {
-            session_id: session_id.to_string(),
+            session_id: parse_session_id(session_id)?,
             session_type: SessionType::Coordination,
             participants: vec![device_id],
             my_role: ChoreographicRole::new(device_id, RoleIndex::new(0).expect("role index")),
@@ -996,7 +1022,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(!handle.session_id.is_empty());
+        assert!(!handle.session_id.to_string().is_empty());
         assert_eq!(handle.participants, participants);
         assert_eq!(handle.my_role.device_id, device_id);
     }
@@ -1055,5 +1081,23 @@ mod tests {
         let stored = effects.retrieve(&storage_key).await.unwrap();
 
         assert!(stored.is_some(), "session handle persisted to storage");
+    }
+
+    #[tokio::test]
+    async fn invalid_session_id_is_rejected() {
+        let authority_context = AuthorityContext::new(AuthorityId::new_from_entropy([72u8; 32]));
+        let account_id = AccountId::new_from_entropy([15u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let sessions = SessionOperations::new(effects, authority_context, account_id);
+
+        let err = sessions
+            .get_session("not-a-session-id")
+            .await
+            .expect_err("invalid session id should be rejected");
+        assert!(
+            matches!(err, AgentError::Config(_)),
+            "expected invalid/config error, got {err:?}"
+        );
     }
 }

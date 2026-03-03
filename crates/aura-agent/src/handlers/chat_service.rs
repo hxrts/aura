@@ -225,7 +225,7 @@ impl ChatServiceApi {
                     self.effects
                         .commit_generic_fact_bytes(
                             fact.context_id(),
-                            CHAT_FACT_TYPE_ID,
+                            CHAT_FACT_TYPE_ID.into(),
                             fact.to_bytes(),
                         )
                         .await
@@ -782,7 +782,7 @@ impl ChatServiceApi {
         );
 
         self.effects
-            .commit_generic_fact_bytes(context_id, CHAT_FACT_TYPE_ID, edit_fact.to_bytes())
+            .commit_generic_fact_bytes(context_id, CHAT_FACT_TYPE_ID.into(), edit_fact.to_bytes())
             .await
             .map_err(|e| AgentError::effects(format!("Failed to commit edit fact: {e}")))?;
 
@@ -833,7 +833,7 @@ impl ChatServiceApi {
         );
 
         self.effects
-            .commit_generic_fact_bytes(context_id, CHAT_FACT_TYPE_ID, delete_fact.to_bytes())
+            .commit_generic_fact_bytes(context_id, CHAT_FACT_TYPE_ID.into(), delete_fact.to_bytes())
             .await
             .map_err(|e| AgentError::effects(format!("Failed to commit delete fact: {e}")))?;
 
@@ -884,7 +884,7 @@ impl ChatServiceApi {
         );
 
         self.effects
-            .commit_generic_fact_bytes(context_id, CHAT_FACT_TYPE_ID, update_fact.to_bytes())
+            .commit_generic_fact_bytes(context_id, CHAT_FACT_TYPE_ID.into(), update_fact.to_bytes())
             .await
             .map_err(|e| AgentError::effects(format!("Failed to commit update fact: {e}")))?;
 

@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 use aura_app::ui::prelude::*;
+use aura_core::identifiers::AuthorityId;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
@@ -23,8 +24,16 @@ pub async fn handle_network(
 ) -> Option<OpResult> {
     match command {
         EffectCommand::AddPeer { peer_id } => {
+            let parsed_peer = match peer_id.parse::<AuthorityId>() {
+                Ok(peer) => peer,
+                Err(error) => {
+                    return Some(Err(OpError::Failed(format!(
+                        "Invalid peer authority ID '{peer_id}': {error}"
+                    ))));
+                }
+            };
             // Delegate to workflow - it manages peer state in AppCore signals
-            match aura_app::ui::workflows::network::add_peer(app_core, peer_id.clone()).await {
+            match aura_app::ui::workflows::network::add_peer(app_core, parsed_peer).await {
                 Ok(count) => {
                     tracing::info!("Added peer: {} (total: {})", peer_id, count);
                     Some(Ok(OpResponse::Ok))
@@ -37,8 +46,16 @@ pub async fn handle_network(
         }
 
         EffectCommand::RemovePeer { peer_id } => {
+            let parsed_peer = match peer_id.parse::<AuthorityId>() {
+                Ok(peer) => peer,
+                Err(error) => {
+                    return Some(Err(OpError::Failed(format!(
+                        "Invalid peer authority ID '{peer_id}': {error}"
+                    ))));
+                }
+            };
             // Delegate to workflow - it manages peer state in AppCore signals
-            match aura_app::ui::workflows::network::remove_peer(app_core, peer_id).await {
+            match aura_app::ui::workflows::network::remove_peer(app_core, &parsed_peer).await {
                 Ok(count) => {
                     tracing::info!("Removed peer: {} (remaining: {})", peer_id, count);
                     Some(Ok(OpResponse::Ok))

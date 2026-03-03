@@ -1210,7 +1210,8 @@ mod tests {
         ));
         assert!(matches!(
             &deltas[1],
-            InvitationDelta::InvitationStatusChanged { new_status, .. } if new_status == "accepted"
+            InvitationDelta::InvitationStatusChanged { new_status, .. }
+                if *new_status == aura_invitation::InvitationStatus::Accepted
         ));
     }
 

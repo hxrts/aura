@@ -51,7 +51,7 @@ mod tests {
     use aura_composition::IntoViewDelta;
     use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
-    use aura_invitation::InvitationFact;
+    use aura_invitation::{InvitationDirection, InvitationFact, InvitationStatus};
     use aura_journal::DomainFact;
 
     fn test_context_id() -> ContextId {
@@ -103,8 +103,8 @@ mod tests {
         let view_deltas = vec![
             InvitationDelta::InvitationAdded {
                 invitation_id: InvitationId::new("inv-1"),
-                direction: "outbound".to_string(),
-                other_party_id: "other".to_string(),
+                direction: InvitationDirection::Outbound,
+                other_party_id: AuthorityId::new_from_entropy([7u8; 32]),
                 other_party_name: "Other".to_string(),
                 invitation_type: aura_invitation::InvitationType::Contact { nickname: None },
                 created_at: 1,
@@ -114,8 +114,8 @@ mod tests {
             .into_view_delta(),
             InvitationDelta::InvitationStatusChanged {
                 invitation_id: InvitationId::new("inv-1"),
-                old_status: "pending".to_string(),
-                new_status: "accepted".to_string(),
+                old_status: InvitationStatus::Pending,
+                new_status: InvitationStatus::Accepted,
                 changed_at: 2,
             }
             .into_view_delta(),

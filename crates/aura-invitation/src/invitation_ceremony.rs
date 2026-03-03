@@ -55,8 +55,9 @@ use aura_core::{AuraError, AuraResult, Hash32};
 use aura_journal::DomainFact;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 
-use crate::facts::InvitationFact;
+use crate::facts::{CeremonyRelationshipId, InvitationFact};
 use crate::InvitationOffer;
 
 // =============================================================================
@@ -125,7 +126,52 @@ pub enum AcceptanceResponse {
 #[derive(Debug, Clone)]
 pub enum InvitationCeremonyCommand {
     /// Append a ceremony fact to the journal.
-    JournalAppend { key: String, fact: InvitationFact },
+    JournalAppend {
+        key: CeremonyJournalKey,
+        fact: InvitationFact,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CeremonyJournalKeyKind {
+    Initiated,
+    Accepted,
+    Committed,
+    Aborted,
+}
+
+impl CeremonyJournalKeyKind {
+    fn as_segment(self) -> &'static str {
+        match self {
+            CeremonyJournalKeyKind::Initiated => "initiated",
+            CeremonyJournalKeyKind::Accepted => "accepted",
+            CeremonyJournalKeyKind::Committed => "committed",
+            CeremonyJournalKeyKind::Aborted => "aborted",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CeremonyJournalKey(String);
+
+impl CeremonyJournalKey {
+    fn for_ceremony(kind: CeremonyJournalKeyKind, ceremony_id_hex: &str) -> Self {
+        Self(format!(
+            "ceremony:{}:{}",
+            kind.as_segment(),
+            ceremony_id_hex
+        ))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for CeremonyJournalKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
 /// Current status of an invitation ceremony.
@@ -413,7 +459,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
     pub async fn commit_ceremony(
         &mut self,
         ceremony_id: InvitationCeremonyId,
-    ) -> AuraResult<String> {
+    ) -> AuraResult<CeremonyRelationshipId> {
         let timestamp_ms = self
             .effects
             .physical_time()
@@ -463,7 +509,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         &mut self,
         ceremony_id: InvitationCeremonyId,
         timestamp_ms: u64,
-    ) -> AuraResult<(String, Vec<InvitationCeremonyCommand>)> {
+    ) -> AuraResult<(CeremonyRelationshipId, Vec<InvitationCeremonyCommand>)> {
         let policy = policy_for(CeremonyFlow::Invitation);
         if !policy.allows_mode(AgreementMode::ConsensusFinalized) {
             return Err(AuraError::invalid(
@@ -618,13 +664,14 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         &self,
         ceremony_id: InvitationCeremonyId,
         acceptance: &AcceptanceProposal,
-    ) -> String {
+    ) -> CeremonyRelationshipId {
         // Build input for hashing: ceremony_id + acceptor UUID bytes
         let mut input = Vec::with_capacity(32 + 16);
         input.extend_from_slice(ceremony_id.0.as_bytes());
         input.extend_from_slice(acceptance.acceptor.uuid().as_bytes());
         let hash = Hash32::from_bytes(&input);
-        format!("rel-{}", hex::encode(&hash.as_bytes()[..8]))
+        CeremonyRelationshipId::parse(&format!("rel-{}", hex::encode(&hash.as_bytes()[..8])))
+            .unwrap_or_else(|error| panic!("generated relationship id must be valid: {error}"))
     }
 
     fn ceremony_id_hex(ceremony_id: InvitationCeremonyId) -> String {
@@ -638,14 +685,18 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
     ) -> InvitationCeremonyCommand {
         let ceremony_id_hex = Self::ceremony_id_hex(ceremony_id);
         let fact = InvitationFact::CeremonyInitiated {
+            context_id: None,
             ceremony_id: CeremonyId::new(ceremony_id_hex.clone()),
-            sender: sender.to_string(),
+            sender,
             agreement_mode: None,
             trace_id: Some(ceremony_id_hex.clone()),
             timestamp_ms,
         };
         InvitationCeremonyCommand::JournalAppend {
-            key: format!("ceremony:initiated:{ceremony_id_hex}"),
+            key: CeremonyJournalKey::for_ceremony(
+                CeremonyJournalKeyKind::Initiated,
+                &ceremony_id_hex,
+            ),
             fact,
         }
     }
@@ -656,32 +707,40 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
     ) -> InvitationCeremonyCommand {
         let ceremony_id_hex = Self::ceremony_id_hex(ceremony_id);
         let fact = InvitationFact::CeremonyAcceptanceReceived {
+            context_id: None,
             ceremony_id: CeremonyId::new(ceremony_id_hex.clone()),
             agreement_mode: None,
             trace_id: Some(ceremony_id_hex.clone()),
             timestamp_ms,
         };
         InvitationCeremonyCommand::JournalAppend {
-            key: format!("ceremony:accepted:{ceremony_id_hex}"),
+            key: CeremonyJournalKey::for_ceremony(
+                CeremonyJournalKeyKind::Accepted,
+                &ceremony_id_hex,
+            ),
             fact,
         }
     }
 
     fn build_ceremony_committed_command(
         ceremony_id: InvitationCeremonyId,
-        relationship_id: &str,
+        relationship_id: &CeremonyRelationshipId,
         timestamp_ms: u64,
     ) -> InvitationCeremonyCommand {
         let ceremony_id_hex = Self::ceremony_id_hex(ceremony_id);
         let fact = InvitationFact::CeremonyCommitted {
+            context_id: None,
             ceremony_id: CeremonyId::new(ceremony_id_hex.clone()),
-            relationship_id: relationship_id.to_string(),
+            relationship_id: relationship_id.clone(),
             agreement_mode: Some(AgreementMode::ConsensusFinalized),
             trace_id: Some(ceremony_id_hex.clone()),
             timestamp_ms,
         };
         InvitationCeremonyCommand::JournalAppend {
-            key: format!("ceremony:committed:{ceremony_id_hex}"),
+            key: CeremonyJournalKey::for_ceremony(
+                CeremonyJournalKeyKind::Committed,
+                &ceremony_id_hex,
+            ),
             fact,
         }
     }
@@ -693,13 +752,17 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
     ) -> InvitationCeremonyCommand {
         let ceremony_id_hex = Self::ceremony_id_hex(ceremony_id);
         let fact = InvitationFact::CeremonyAborted {
+            context_id: None,
             ceremony_id: CeremonyId::new(ceremony_id_hex.clone()),
             reason: reason.to_string(),
             trace_id: Some(ceremony_id_hex.clone()),
             timestamp_ms,
         };
         InvitationCeremonyCommand::JournalAppend {
-            key: format!("ceremony:aborted:{ceremony_id_hex}"),
+            key: CeremonyJournalKey::for_ceremony(
+                CeremonyJournalKeyKind::Aborted,
+                &ceremony_id_hex,
+            ),
             fact,
         }
     }
@@ -708,9 +771,10 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         match command {
             InvitationCeremonyCommand::JournalAppend { key, fact } => {
                 let mut journal = self.effects.get_journal().await?;
-                journal
-                    .facts
-                    .insert(key, FactValue::Bytes(DomainFact::to_bytes(&fact)))?;
+                journal.facts.insert(
+                    key.to_string(),
+                    FactValue::Bytes(DomainFact::to_bytes(&fact)),
+                )?;
                 self.effects.persist_journal(&journal).await?;
                 Ok(())
             }
@@ -816,5 +880,30 @@ mod tests {
 
         assert_eq!(restored.invitation_id.as_str(), "inv-123");
         assert_eq!(restored.message, Some("Accepting".to_string()));
+    }
+
+    #[test]
+    fn test_ceremony_journal_key_determinism() {
+        let ceremony_hex = "00112233445566778899aabbccddeeff";
+        let key1 =
+            CeremonyJournalKey::for_ceremony(CeremonyJournalKeyKind::Committed, ceremony_hex);
+        let key2 =
+            CeremonyJournalKey::for_ceremony(CeremonyJournalKeyKind::Committed, ceremony_hex);
+        assert_eq!(key1, key2);
+        assert_eq!(
+            key1.as_str(),
+            "ceremony:committed:00112233445566778899aabbccddeeff"
+        );
+    }
+
+    #[test]
+    fn test_ceremony_journal_key_segments() {
+        let ceremony_hex = "cafebabedeadbeef";
+        let initiated =
+            CeremonyJournalKey::for_ceremony(CeremonyJournalKeyKind::Initiated, ceremony_hex);
+        let accepted =
+            CeremonyJournalKey::for_ceremony(CeremonyJournalKeyKind::Accepted, ceremony_hex);
+        assert_eq!(initiated.as_str(), "ceremony:initiated:cafebabedeadbeef");
+        assert_eq!(accepted.as_str(), "ceremony:accepted:cafebabedeadbeef");
     }
 }

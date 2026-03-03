@@ -907,25 +907,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
         &self,
         threshold_k: FrostThreshold,
         total_n: u16,
-        guardian_ids: &[String],
+        guardian_ids: &[AuthorityId],
     ) -> Result<(Epoch, Vec<Vec<u8>>, Vec<u8>), IntentError> {
         let authority = self.agent.authority_id();
         let signing_service = self.agent.threshold_signing();
 
         let participants = guardian_ids
             .iter()
-            .map(|id_str| {
-                id_str
-                    .parse::<AuthorityId>()
-                    .map(aura_core::threshold::ParticipantIdentity::guardian)
-                    .map_err(|_| {
-                        IntentError::validation_failed(format!(
-                            "Failed to parse guardian id as AuthorityId: {}",
-                            id_str
-                        ))
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+            .copied()
+            .map(aura_core::threshold::ParticipantIdentity::guardian)
+            .collect::<Vec<_>>();
 
         // Rotate keys to a new threshold configuration
         // The service returns (new_epoch, key_packages, public_key_bytes)
@@ -1003,8 +994,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
         &self,
         threshold_k: FrostThreshold,
         total_n: u16,
-        guardian_ids: &[String],
-    ) -> Result<String, IntentError> {
+        guardian_ids: &[AuthorityId],
+    ) -> Result<aura_core::identifiers::CeremonyId, IntentError> {
         use aura_core::hash::hash;
         use aura_core::threshold::{
             policy_for, CeremonyFlow, KeyGenerationPolicy, ParticipantIdentity,
@@ -1012,19 +1003,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         use aura_recovery::guardian_ceremony::GuardianState;
         use aura_recovery::{CeremonyId as GuardianCeremonyId, GuardianRotationOp};
 
-        // Convert String guardian IDs to AuthorityIds for the ceremony protocol
-        let all_guardian_authority_ids: Vec<AuthorityId> = guardian_ids
-            .iter()
-            .filter_map(|id_str| id_str.parse().ok())
-            .collect();
-
-        if all_guardian_authority_ids.len() != guardian_ids.len() {
-            return Err(IntentError::validation_failed(
-                "Failed to parse one or more guardian IDs as AuthorityIds".to_string(),
-            ));
-        }
-
-        let participants = all_guardian_authority_ids
+        let participants = guardian_ids
             .iter()
             .copied()
             .map(aura_core::threshold::ParticipantIdentity::guardian)
@@ -1084,7 +1063,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let operation = GuardianRotationOp {
             threshold_k: threshold_k_value,
             total_n,
-            guardian_ids: all_guardian_authority_ids.clone(),
+            guardian_ids: guardian_ids.to_vec(),
             new_epoch: new_epoch.value(),
         };
         let operation_hash = operation.compute_hash();
@@ -1195,7 +1174,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 ceremony_id_hash,
                 prestate_hash,
                 operation.clone(),
-                all_guardian_authority_ids.clone(),
+                guardian_ids.to_vec(),
                 key_packages.clone(),
             )
             .await
@@ -1256,7 +1235,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             }
         }
 
-        Ok(ceremony_id.to_string())
+        Ok(ceremony_id)
     }
 
     /// Initiate a device threshold (multifactor) ceremony with cross-authority envelope routing.
@@ -1315,7 +1294,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         threshold_k: FrostThreshold,
         total_n: u16,
         device_ids: &[String],
-    ) -> Result<String, IntentError> {
+    ) -> Result<aura_core::identifiers::CeremonyId, IntentError> {
         use aura_core::effects::{
             SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
             ThresholdSigningEffects,
@@ -1609,13 +1588,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
             })?;
         }
 
-        Ok(ceremony_id.to_string())
+        Ok(ceremony_id)
     }
 
     async fn initiate_device_enrollment_ceremony(
         &self,
         nickname_suggestion: String,
-        invitee_authority_id: Option<String>,
+        invitee_authority_id: Option<AuthorityId>,
     ) -> Result<aura_app::runtime_bridge::DeviceEnrollmentStart, IntentError> {
         use aura_core::effects::{
             SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
@@ -1961,21 +1940,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .invitations()
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
-        let receiver_id =
-            match invitee_authority_id {
-                Some(invitee_auth_str) => invitee_auth_str
-                    .parse::<aura_core::AuthorityId>()
-                    .map_err(|e| {
-                        IntentError::validation_failed(format!(
-                            "Invalid invitee authority ID '{}': {e}",
-                            invitee_auth_str
-                        ))
-                    })?,
-                None => {
-                    // Legacy behavior: self-addressed invitation (bearer token)
-                    authority_id
-                }
-            };
+        let receiver_id = invitee_authority_id.unwrap_or(authority_id);
 
         let invitation = invitation_service
             .invite_device_enrollment(
@@ -1998,7 +1963,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let enrollment_code = InvitationServiceApi::export_invitation(&invitation);
 
         Ok(aura_app::runtime_bridge::DeviceEnrollmentStart {
-            ceremony_id: ceremony_id.to_string(),
+            ceremony_id: ceremony_id.clone(),
             enrollment_code,
             pending_epoch,
             device_id: new_device_id,
@@ -2008,7 +1973,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn initiate_device_removal_ceremony(
         &self,
         device_id: String,
-    ) -> Result<String, IntentError> {
+    ) -> Result<aura_core::identifiers::CeremonyId, IntentError> {
         use aura_core::effects::ThresholdSigningEffects;
         use aura_core::hash::hash;
         use aura_core::threshold::ParticipantIdentity;
@@ -2420,11 +2385,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 .await;
         }
 
-        Ok(ceremony_id.to_string())
+        Ok(ceremony_id)
     }
     async fn get_ceremony_status(
         &self,
-        ceremony_id: &str,
+        ceremony_id: &aura_core::identifiers::CeremonyId,
     ) -> Result<aura_app::runtime_bridge::CeremonyStatus, IntentError> {
         // Ensure ceremony progress is driven even when the caller only polls status.
         //
@@ -2436,30 +2401,28 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         let runner = self.agent.ceremony_runner().await;
         let tracker = self.agent.ceremony_tracker().await;
-        let ceremony_id = aura_core::identifiers::CeremonyId::new(ceremony_id.to_string());
-
         let _status = runner
-            .status(&ceremony_id)
+            .status(ceremony_id)
             .await
             .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
-        let _timed_out = runner.is_timed_out(&ceremony_id).await.unwrap_or(false);
+        let _timed_out = runner.is_timed_out(ceremony_id).await.unwrap_or(false);
 
         let state = tracker
-            .get(&ceremony_id)
+            .get(ceremony_id)
             .await
             .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
 
-        let accepted_guardians: Vec<String> = state
+        let accepted_guardians: Vec<AuthorityId> = state
             .accepted_participants
             .iter()
             .filter_map(|p| match p {
-                aura_core::threshold::ParticipantIdentity::Guardian(id) => Some(id.to_string()),
+                aura_core::threshold::ParticipantIdentity::Guardian(id) => Some(*id),
                 _ => None,
             })
             .collect();
 
         Ok(aura_app::runtime_bridge::CeremonyStatus {
-            ceremony_id: ceremony_id.to_string(),
+            ceremony_id: ceremony_id.clone(),
             accepted_count: accepted_guardians.len() as u16,
             total_count: state.total_n,
             threshold: state.threshold_k,
@@ -2475,7 +2438,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn get_key_rotation_ceremony_status(
         &self,
-        ceremony_id: &str,
+        ceremony_id: &aura_core::identifiers::CeremonyId,
     ) -> Result<aura_app::runtime_bridge::KeyRotationCeremonyStatus, IntentError> {
         // Ensure acceptances are processed so polling drives progress in demo/simulation mode.
         if let Err(e) = self.agent.process_ceremony_acceptances().await {
@@ -2484,19 +2447,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         let runner = self.agent.ceremony_runner().await;
         let tracker = self.agent.ceremony_tracker().await;
-        let ceremony_id = aura_core::identifiers::CeremonyId::new(ceremony_id.to_string());
         let _status = runner
-            .status(&ceremony_id)
+            .status(ceremony_id)
             .await
             .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
-        let _timed_out = runner.is_timed_out(&ceremony_id).await.unwrap_or(false);
+        let _timed_out = runner.is_timed_out(ceremony_id).await.unwrap_or(false);
         let state = tracker
-            .get(&ceremony_id)
+            .get(ceremony_id)
             .await
             .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
 
         Ok(aura_app::runtime_bridge::KeyRotationCeremonyStatus {
-            ceremony_id: ceremony_id.to_string(),
+            ceremony_id: ceremony_id.clone(),
             kind: state.kind,
             accepted_count: state.accepted_participants.len() as u16,
             total_count: state.total_n,
@@ -2511,7 +2473,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         })
     }
 
-    async fn cancel_key_rotation_ceremony(&self, ceremony_id: &str) -> Result<(), IntentError> {
+    async fn cancel_key_rotation_ceremony(
+        &self,
+        ceremony_id: &aura_core::identifiers::CeremonyId,
+    ) -> Result<(), IntentError> {
         // Ensure acceptances are processed so state is up-to-date.
         if let Err(e) = self.agent.process_ceremony_acceptances().await {
             tracing::debug!("Failed to process ceremony acceptances: {}", e);
@@ -2519,8 +2484,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         let runner = self.agent.ceremony_runner().await;
         let tracker = self.agent.ceremony_tracker().await;
-        let ceremony_id = aura_core::identifiers::CeremonyId::new(ceremony_id.to_string());
-        let state = tracker.get(&ceremony_id).await?;
+        let state = tracker.get(ceremony_id).await?;
 
         // Best-effort: rollback pending epoch if present and not committed.
         if !state.is_committed {
@@ -2529,7 +2493,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
 
         runner
-            .abort(&ceremony_id, Some("Canceled".to_string()))
+            .abort(ceremony_id, Some("Canceled".to_string()))
             .await?;
 
         Ok(())
@@ -2721,7 +2685,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         Ok(convert_invitation_to_bridge_info(&invitation))
     }
 
-    async fn get_invited_peer_ids(&self) -> Vec<String> {
+    async fn get_invited_peer_ids(&self) -> Vec<AuthorityId> {
         // Get pending invitations where we are the sender
         if let Ok(invitation_service) = self.agent.invitations() {
             let our_authority = self.agent.authority_id();
@@ -2730,7 +2694,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 .await
                 .iter()
                 .filter(|inv| inv.sender_id == our_authority)
-                .map(|inv| inv.receiver_id.to_string())
+                .map(|inv| inv.receiver_id)
                 .collect()
         } else {
             Vec::new()
@@ -2895,7 +2859,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn respond_to_guardian_ceremony(
         &self,
-        ceremony_id: &str,
+        ceremony_id: &aura_core::identifiers::CeremonyId,
         accept: bool,
         _reason: Option<String>,
     ) -> Result<(), IntentError> {

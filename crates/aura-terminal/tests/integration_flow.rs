@@ -43,6 +43,7 @@ use aura_app::signal_defs::{
     CHAT_SIGNAL, CONTACTS_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
     RECOVERY_SIGNAL,
 };
+use aura_app::ui::types::AccountConfig;
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::StorageCoreEffects;
@@ -55,14 +56,6 @@ use aura_effects::{
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
-
-/// Account config structure matching the account.json format
-#[derive(serde::Deserialize)]
-struct AccountConfig {
-    authority_id: String,
-    #[allow(dead_code)]
-    context_id: String,
-}
 
 static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -143,12 +136,7 @@ impl TestAgent {
         let config: AccountConfig = serde_json::from_slice(&bytes)
             .map_err(|e| format!("Failed to parse account config: {e}"))?;
 
-        // Parse authority_id from hex string
-        let authority_bytes: [u8; 16] = hex::decode(&config.authority_id)
-            .map_err(|e| format!("Invalid authority_id hex: {e}"))?
-            .try_into()
-            .map_err(|_| "Invalid authority_id length")?;
-        let authority_id = AuthorityId::from_uuid(uuid::Uuid::from_bytes(authority_bytes));
+        let authority_id = config.authority_id;
 
         // Set authority on AppCore
         self.app_core.write().await.set_authority(authority_id);

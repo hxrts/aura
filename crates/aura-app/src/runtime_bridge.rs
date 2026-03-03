@@ -42,7 +42,7 @@ use aura_core::effects::amp::{
     ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
 };
 use aura_core::effects::task::{CancellationToken, TaskSpawner};
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
+use aura_core::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::threshold::{
     AgreementMode, ParticipantIdentity, SigningContext, ThresholdConfig, ThresholdSignature,
 };
@@ -112,7 +112,7 @@ pub enum CeremonyKind {
 #[derive(Debug, Clone)]
 pub struct DeviceEnrollmentStart {
     /// Ceremony identifier for status polling / cancellation.
-    pub ceremony_id: String,
+    pub ceremony_id: CeremonyId,
     /// Shareable enrollment code (e.g. QR/copy-paste) to import on the new device.
     pub enrollment_code: String,
     /// Pending epoch created during prepare.
@@ -128,7 +128,7 @@ pub struct DeviceEnrollmentStart {
 #[derive(Debug, Clone)]
 pub struct KeyRotationCeremonyStatus {
     /// Ceremony identifier
-    pub ceremony_id: String,
+    pub ceremony_id: CeremonyId,
     /// What kind of ceremony this is
     pub kind: CeremonyKind,
     /// Number of participants who have accepted
@@ -157,7 +157,7 @@ pub struct KeyRotationCeremonyStatus {
 #[derive(Debug, Clone)]
 pub struct CeremonyStatus {
     /// Ceremony identifier
-    pub ceremony_id: String,
+    pub ceremony_id: CeremonyId,
     /// Number of guardians who have accepted
     pub accepted_count: u16,
     /// Total number of guardians
@@ -169,7 +169,7 @@ pub struct CeremonyStatus {
     /// Whether the ceremony has failed
     pub has_failed: bool,
     /// List of guardian IDs who have accepted
-    pub accepted_guardians: Vec<String>,
+    pub accepted_guardians: Vec<AuthorityId>,
     /// Optional error message if failed
     pub error_message: Option<String>,
     /// Pending epoch for key rotation
@@ -223,7 +223,7 @@ pub enum InvitationBridgeType {
         initiator_device_id: DeviceId,
         device_id: DeviceId,
         nickname_suggestion: Option<String>,
-        ceremony_id: String,
+        ceremony_id: CeremonyId,
         pending_epoch: Epoch,
     },
 }
@@ -642,7 +642,7 @@ pub trait RuntimeBridge: Send + Sync {
         &self,
         threshold_k: FrostThreshold,
         total_n: u16,
-        guardian_ids: &[String],
+        guardian_ids: &[AuthorityId],
     ) -> Result<(Epoch, Vec<Vec<u8>>, Vec<u8>), IntentError>;
 
     /// Commit a guardian key rotation after successful ceremony
@@ -679,8 +679,8 @@ pub trait RuntimeBridge: Send + Sync {
         &self,
         threshold_k: FrostThreshold,
         total_n: u16,
-        guardian_ids: &[String],
-    ) -> Result<String, IntentError>;
+        guardian_ids: &[AuthorityId],
+    ) -> Result<CeremonyId, IntentError>;
 
     /// Initiate a device threshold (multifactor) ceremony.
     ///
@@ -699,7 +699,7 @@ pub trait RuntimeBridge: Send + Sync {
         threshold_k: FrostThreshold,
         total_n: u16,
         device_ids: &[String],
-    ) -> Result<String, IntentError>;
+    ) -> Result<CeremonyId, IntentError>;
 
     /// Initiate a device enrollment ("add device") ceremony.
     ///
@@ -719,7 +719,7 @@ pub trait RuntimeBridge: Send + Sync {
     async fn initiate_device_enrollment_ceremony(
         &self,
         nickname_suggestion: String,
-        invitee_authority_id: Option<String>,
+        invitee_authority_id: Option<AuthorityId>,
     ) -> Result<DeviceEnrollmentStart, IntentError>;
 
     /// Initiate a device removal ("remove device") ceremony.
@@ -729,7 +729,7 @@ pub trait RuntimeBridge: Send + Sync {
     async fn initiate_device_removal_ceremony(
         &self,
         device_id: String,
-    ) -> Result<String, IntentError>;
+    ) -> Result<CeremonyId, IntentError>;
 
     /// Get status of a guardian ceremony
     ///
@@ -743,12 +743,15 @@ pub trait RuntimeBridge: Send + Sync {
     ///
     /// # Returns
     /// CeremonyStatus with current state
-    async fn get_ceremony_status(&self, ceremony_id: &str) -> Result<CeremonyStatus, IntentError>;
+    async fn get_ceremony_status(
+        &self,
+        ceremony_id: &CeremonyId,
+    ) -> Result<CeremonyStatus, IntentError>;
 
     /// Get status of a key rotation ceremony (generic form).
     async fn get_key_rotation_ceremony_status(
         &self,
-        ceremony_id: &str,
+        ceremony_id: &CeremonyId,
     ) -> Result<KeyRotationCeremonyStatus, IntentError>;
 
     /// Cancel an in-progress key rotation ceremony (best effort).
@@ -756,7 +759,10 @@ pub trait RuntimeBridge: Send + Sync {
     /// Implementations should:
     /// - mark the ceremony failed/canceled
     /// - rollback any pending epoch (if present)
-    async fn cancel_key_rotation_ceremony(&self, ceremony_id: &str) -> Result<(), IntentError>;
+    async fn cancel_key_rotation_ceremony(
+        &self,
+        ceremony_id: &CeremonyId,
+    ) -> Result<(), IntentError>;
 
     // =========================================================================
     // Invitation Operations
@@ -836,7 +842,7 @@ pub trait RuntimeBridge: Send + Sync {
     ///
     /// Returns a set of authority IDs for peers that have pending invitations
     /// from us. Used to mark discovered peers as "invited" in the UI.
-    async fn get_invited_peer_ids(&self) -> Vec<String>;
+    async fn get_invited_peer_ids(&self) -> Vec<AuthorityId>;
 
     // =========================================================================
     // Settings Operations
@@ -868,7 +874,7 @@ pub trait RuntimeBridge: Send + Sync {
     /// * `reason` - Optional reason (used when declining)
     async fn respond_to_guardian_ceremony(
         &self,
-        ceremony_id: &str,
+        ceremony_id: &CeremonyId,
         accept: bool,
         reason: Option<String>,
     ) -> Result<(), IntentError>;
@@ -1199,7 +1205,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         &self,
         _threshold_k: FrostThreshold,
         _total_n: u16,
-        _guardian_ids: &[String],
+        _guardian_ids: &[AuthorityId],
     ) -> Result<(Epoch, Vec<Vec<u8>>, Vec<u8>), IntentError> {
         Err(IntentError::no_agent(
             "Key rotation not available in offline mode",
@@ -1225,8 +1231,8 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         &self,
         _threshold_k: FrostThreshold,
         _total_n: u16,
-        _guardian_ids: &[String],
-    ) -> Result<String, IntentError> {
+        _guardian_ids: &[AuthorityId],
+    ) -> Result<CeremonyId, IntentError> {
         Err(IntentError::no_agent(
             "Guardian ceremony not available in offline mode",
         ))
@@ -1237,7 +1243,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         _threshold_k: FrostThreshold,
         _total_n: u16,
         _device_ids: &[String],
-    ) -> Result<String, IntentError> {
+    ) -> Result<CeremonyId, IntentError> {
         Err(IntentError::no_agent(
             "Device threshold ceremony not available in offline mode",
         ))
@@ -1246,7 +1252,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn initiate_device_enrollment_ceremony(
         &self,
         _nickname_suggestion: String,
-        _invitee_authority_id: Option<String>,
+        _invitee_authority_id: Option<AuthorityId>,
     ) -> Result<DeviceEnrollmentStart, IntentError> {
         Err(IntentError::no_agent(
             "Device enrollment not available in offline mode",
@@ -1256,13 +1262,16 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn initiate_device_removal_ceremony(
         &self,
         _device_id: String,
-    ) -> Result<String, IntentError> {
+    ) -> Result<CeremonyId, IntentError> {
         Err(IntentError::no_agent(
             "Device removal not available in offline mode",
         ))
     }
 
-    async fn get_ceremony_status(&self, _ceremony_id: &str) -> Result<CeremonyStatus, IntentError> {
+    async fn get_ceremony_status(
+        &self,
+        _ceremony_id: &CeremonyId,
+    ) -> Result<CeremonyStatus, IntentError> {
         Err(IntentError::no_agent(
             "Guardian ceremony not available in offline mode",
         ))
@@ -1270,14 +1279,17 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     async fn get_key_rotation_ceremony_status(
         &self,
-        _ceremony_id: &str,
+        _ceremony_id: &CeremonyId,
     ) -> Result<KeyRotationCeremonyStatus, IntentError> {
         Err(IntentError::no_agent(
             "Key rotation ceremonies not available in offline mode",
         ))
     }
 
-    async fn cancel_key_rotation_ceremony(&self, _ceremony_id: &str) -> Result<(), IntentError> {
+    async fn cancel_key_rotation_ceremony(
+        &self,
+        _ceremony_id: &CeremonyId,
+    ) -> Result<(), IntentError> {
         Err(IntentError::no_agent(
             "Key rotation ceremonies not available in offline mode",
         ))
@@ -1354,7 +1366,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
-    async fn get_invited_peer_ids(&self) -> Vec<String> {
+    async fn get_invited_peer_ids(&self) -> Vec<AuthorityId> {
         Vec::new()
     }
 
@@ -1380,7 +1392,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     async fn respond_to_guardian_ceremony(
         &self,
-        _ceremony_id: &str,
+        _ceremony_id: &CeremonyId,
         _accept: bool,
         _reason: Option<String>,
     ) -> Result<(), IntentError> {

@@ -55,7 +55,7 @@ async fn next_toast(rx: &mut UiUpdateReceiver) -> aura_terminal::tui::components
 }
 
 async fn ensure_chat_channel(ctx: &Arc<IoContext>) {
-    create_channel(ctx.app_core_raw(), "channel:general", None, &[], 0, 0)
+    create_channel(ctx.app_core_raw(), "general", None, &[], 0, 0)
         .await
         .expect("Failed to create chat channel for tests");
 }
@@ -67,7 +67,7 @@ async fn slash_who_emits_participants_toast() {
     ensure_chat_channel(&ctx).await;
 
     let on_send = callbacks.on_send.clone();
-    on_send("channel:general".to_string(), "/who".to_string());
+    on_send("general".to_string(), "/who".to_string());
 
     let toast = next_toast(&mut rx).await;
     assert_eq!(toast.id, "command");
@@ -88,10 +88,7 @@ async fn slash_whois_emits_whois_toast() {
     ensure_chat_channel(&ctx).await;
 
     let on_send = callbacks.on_send.clone();
-    on_send(
-        "channel:general".to_string(),
-        "/whois test-user".to_string(),
-    );
+    on_send("general".to_string(), "/whois test-user".to_string());
 
     let toast = next_toast(&mut rx).await;
     assert_eq!(toast.id, "command");

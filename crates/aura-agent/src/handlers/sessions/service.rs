@@ -171,7 +171,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(!handle.session_id.is_empty());
+        assert!(!handle.session_id.to_string().is_empty());
         assert_eq!(handle.participants, participants);
     }
 

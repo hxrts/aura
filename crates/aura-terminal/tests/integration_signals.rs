@@ -19,7 +19,7 @@ use aura_app::signal_defs::{
 use aura_app::views::{Message, MessageDeliveryStatus, RecoveryProcess, RecoveryProcessStatus};
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::identifiers::{AuthorityId, ChannelId};
+use aura_core::identifiers::{AuthorityId, CeremonyId, ChannelId};
 
 /// Helper to create a test AppCore with signals initialized
 async fn test_app_core() -> Arc<RwLock<AppCore>> {
@@ -174,7 +174,7 @@ async fn test_recovery_signal_state_updates() {
     // Create recovery state with active session
     let mut updated_state = initial.clone();
     updated_state.set_active_recovery(Some(RecoveryProcess {
-        id: "recovery-123".to_string(),
+        id: CeremonyId::new("recovery-123"),
         account_id: AuthorityId::new_from_entropy([0x45; 32]),
         status: RecoveryProcessStatus::WaitingForApprovals,
         approvals_received: 0,
@@ -194,7 +194,7 @@ async fn test_recovery_signal_state_updates() {
     let read_state = wait_for_recovery_signal(&app_core, |r| r.active_recovery().is_some()).await;
     assert!(read_state.active_recovery().is_some());
     let active = read_state.active_recovery().unwrap();
-    assert_eq!(active.id, "recovery-123");
+    assert_eq!(active.id, CeremonyId::new("recovery-123"));
     assert_eq!(active.approvals_required, 2);
 }
 

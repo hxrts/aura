@@ -17,7 +17,7 @@ use aura_agent::{
     AgentBuilder, AuthorityId, EffectContext, ExecutionMode, InvitationStatus, InvitationType,
 };
 use aura_core::hash::hash;
-use aura_core::identifiers::{ContextId, InvitationId};
+use aura_core::identifiers::{ChannelId, ContextId, InvitationId};
 
 /// Create a test effect context for async tests
 fn test_context(authority_id: AuthorityId) -> EffectContext {
@@ -123,17 +123,41 @@ async fn test_invite_to_channel_via_agent() -> Result<(), Box<dyn std::error::Er
     let invitations = agent.invitations()?;
 
     let receiver_id = AuthorityId::new_from_entropy([41u8; 32]);
+    let home_id = ChannelId::from_bytes([41u8; 32]).to_string();
     let invitation = invitations
-        .invite_to_channel(receiver_id, "channel-123".to_string(), None, None, None)
+        .invite_to_channel(receiver_id, home_id.clone(), None, None, None)
         .await?;
 
     assert!(invitation.invitation_id.as_str().starts_with("inv-"));
     match &invitation.invitation_type {
         InvitationType::Channel { home_id, .. } => {
-            assert_eq!(home_id, "channel-123");
+            assert_eq!(home_id, &ChannelId::from_bytes([41u8; 32]));
         }
         _ => panic!("Expected Channel invitation type"),
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_invite_to_channel_rejects_invalid_home_id() -> Result<(), Box<dyn std::error::Error>>
+{
+    let authority_id = AuthorityId::new_from_entropy([49u8; 32]);
+    let ctx = test_context(authority_id);
+    let agent = AgentBuilder::new()
+        .with_authority(authority_id)
+        .build_testing_async(&ctx)
+        .await?;
+    let invitations = agent.invitations()?;
+
+    let receiver_id = AuthorityId::new_from_entropy([48u8; 32]);
+    let err = match invitations
+        .invite_to_channel(receiver_id, "channel-123".to_string(), None, None, None)
+        .await
+    {
+        Ok(value) => panic!("invalid home id should be rejected: {value:?}"),
+        Err(error) => error,
+    };
+    assert!(err.to_string().contains("invalid channel/home id"));
     Ok(())
 }
 

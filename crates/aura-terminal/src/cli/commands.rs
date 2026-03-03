@@ -316,7 +316,7 @@ fn invite_command() -> impl Parser<Commands> {
         let role = long("role")
             .help("Role granted to the invitee")
             .argument::<String>("ROLE")
-            .fallback("device".to_string());
+            .fallback("contact".to_string());
         let ttl = long("ttl")
             .help("Optional TTL in seconds")
             .argument::<u64>("SECONDS")

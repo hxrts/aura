@@ -103,7 +103,13 @@ pub fn validate_guardian_set(guardian_count: usize, threshold: u32) -> Result<()
         )));
     }
 
-    if threshold as usize > guardian_count {
+    let threshold_usize = usize::try_from(threshold).map_err(|_| {
+        AuraError::invalid(format!(
+            "Threshold {threshold} exceeds supported platform size limits"
+        ))
+    })?;
+
+    if threshold_usize > guardian_count {
         return Err(AuraError::invalid(format!(
             "Threshold {threshold} exceeds guardian count {guardian_count}"
         )));

@@ -9,13 +9,14 @@ use crate::{
         home::{HomeState, HomesState},
         neighborhood::{NeighborHome, NeighborhoodState, OneHopLinkType, TraversalPosition},
     },
+    workflows::channel_ref::HomeSelector,
     AppCore,
 };
 use async_lock::RwLock;
 use aura_core::{
     crypto::hash::hash,
     identifiers::{ChannelId, ContextId},
-    AuraError, EffectContext,
+    AuraError,
 };
 use std::sync::Arc;
 
@@ -75,21 +76,8 @@ pub async fn move_position(
     let mut homes = core.views().get_homes();
 
     // Determine target home ID
-    let target_home_id = if home_id == "home" {
-        neighborhood.home_home_id
-    } else if home_id == "current" {
-        // Stay on current home, just change depth
-        neighborhood
-            .position
-            .as_ref()
-            .map(|p| p.current_home_id)
-            .unwrap_or(neighborhood.home_home_id)
-    } else {
-        // Parse home_id as ChannelId, fall back to home if invalid
-        home_id
-            .parse::<ChannelId>()
-            .unwrap_or(neighborhood.home_home_id)
-    };
+    let target_selector = HomeSelector::parse(home_id)?;
+    let target_home_id = resolve_target_home_id(&neighborhood, target_selector)?;
 
     // Get home name from neighbors or use the ID
     let home_name = neighborhood
@@ -128,22 +116,17 @@ pub async fn move_position(
 
 fn resolve_target_home_id(
     neighborhood: &NeighborhoodState,
-    home_id: &str,
+    home_id: HomeSelector,
 ) -> Result<ChannelId, AuraError> {
-    if home_id == "home" {
-        return Ok(neighborhood.home_home_id);
-    }
-    if home_id == "current" {
-        return Ok(neighborhood
+    match home_id {
+        HomeSelector::Home => Ok(neighborhood.home_home_id),
+        HomeSelector::Current => Ok(neighborhood
             .position
             .as_ref()
             .map(|p| p.current_home_id)
-            .unwrap_or(neighborhood.home_home_id));
+            .unwrap_or(neighborhood.home_home_id)),
+        HomeSelector::Id(home_id) => Ok(home_id),
     }
-
-    home_id
-        .parse::<ChannelId>()
-        .map_err(|_| AuraError::invalid(format!("Invalid home ID: {home_id}")))
 }
 
 fn resolve_home_name(
@@ -227,7 +210,7 @@ pub async fn add_home_to_neighborhood(
         let mut homes = core.views().get_homes();
         let mut neighborhood = core.views().get_neighborhood();
 
-        let target_home_id = resolve_target_home_id(&neighborhood, home_id)?;
+        let target_home_id = resolve_target_home_id(&neighborhood, HomeSelector::parse(home_id)?)?;
         let target_home_name = resolve_home_name(&homes, &neighborhood, target_home_id);
         let target_resident_count = homes
             .home_state(&target_home_id)
@@ -282,7 +265,7 @@ pub async fn link_home_one_hop_link(
         let homes = core.views().get_homes();
         let mut neighborhood = core.views().get_neighborhood();
 
-        let target_home_id = resolve_target_home_id(&neighborhood, home_id)?;
+        let target_home_id = resolve_target_home_id(&neighborhood, HomeSelector::parse(home_id)?)?;
         if target_home_id == neighborhood.home_home_id {
             return Err(AuraError::invalid(
                 "Cannot create one_hop_link from home to itself",
@@ -427,12 +410,10 @@ pub async fn current_home_context_or_fallback(
         if let Some(ctx_id) = home_state.context_id {
             return Ok(ctx_id);
         }
-    }
-
-    // Fallback: when no home is selected yet (common in demos/tests), use a
-    // deterministic per-authority context id so messaging can still function.
-    if let Some(runtime) = core.runtime() {
-        return Ok(EffectContext::with_authority(runtime.authority_id()).context_id());
+        return Err(AuraError::not_found(format!(
+            "Current home {} has no context ID",
+            home_state.id
+        )));
     }
 
     Err(AuraError::not_found("No current home selected"))
@@ -440,7 +421,7 @@ pub async fn current_home_context_or_fallback(
 
 /// Stable fallback context for relational facts that should not depend on UI selection.
 pub fn default_relational_context() -> ContextId {
-    ContextId::new_from_entropy([2u8; 32])
+    ContextId::new_from_entropy(hash(b"relational-context:default"))
 }
 
 /// Get current traversal position

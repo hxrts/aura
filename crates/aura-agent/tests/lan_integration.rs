@@ -5,10 +5,11 @@ use aura_agent::{
     AgentBuilder, AgentConfig, AuraAgent, EffectContext, ExecutionMode, RendezvousManagerConfig,
     SyncManagerConfig,
 };
+use aura_app::runtime_bridge::InvitationBridgeType;
 use aura_app::ui::signals::{CHAT_SIGNAL, CONTACTS_SIGNAL};
 use aura_app::ui::workflows::{
-    invitation as invitation_workflow, messaging as messaging_workflow,
-    strong_command as strong_command_workflow,
+    context as context_workflow, invitation as invitation_workflow,
+    messaging as messaging_workflow, strong_command as strong_command_workflow,
 };
 use aura_app::{AppConfig, AppCore};
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
@@ -261,32 +262,46 @@ async fn wait_for_chat_signal_message(
     sender_id: AuthorityId,
     expected_content: &str,
 ) -> TestResult {
-    timeout(Duration::from_secs(8), async {
-        loop {
-            let state: aura_app::views::ChatState = {
-                let core = app.read().await;
-                core.read(&*CHAT_SIGNAL).await.unwrap_or_default()
-            };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
 
-            let mut found = false;
-            for message in state.all_messages() {
-                if message.sender_id == sender_id && message.content == expected_content {
-                    found = true;
-                    break;
-                }
-            }
+    loop {
+        let state: aura_app::views::ChatState = {
+            let core = app.read().await;
+            core.read(&*CHAT_SIGNAL).await.unwrap_or_default()
+        };
 
-            if found {
-                break;
-            }
+        let observed: Vec<String> = state
+            .all_messages()
+            .into_iter()
+            .map(|message| {
+                format!(
+                    "sender={} content={}",
+                    message.sender_id,
+                    message.content.replace('\n', "\\n")
+                )
+            })
+            .take(8)
+            .collect();
 
-            sleep(Duration::from_millis(100)).await;
+        if state
+            .all_messages()
+            .into_iter()
+            .any(|message| message.sender_id == sender_id && message.content == expected_content)
+        {
+            return Ok(());
         }
-    })
-    .await
-    .map_err(|_| "timed out waiting for chat signal message".into())
-}
 
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!(
+                "timed out waiting for chat signal message; expected sender={sender_id} content={expected_content}; observed=[{}]",
+                observed.join(" | ")
+            )
+            .into());
+        }
+
+        sleep(Duration::from_millis(100)).await;
+    }
+}
 async fn ensure_chat_signal_message_absent(
     app: &Arc<RwLock<AppCore>>,
     sender_id: AuthorityId,
@@ -357,6 +372,43 @@ async fn wait_for_channel_signal(app: &Arc<RwLock<AppCore>>, channel_id: Channel
     .map_err(|_| "timed out waiting for channel in chat signal".into())
 }
 
+async fn accept_pending_channel_invitation(
+    app: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+) -> TestResult<bool> {
+    timeout(Duration::from_secs(4), async {
+        loop {
+            let pending = invitation_workflow::list_pending_invitations(app).await;
+            if let Some(invitation) = pending.into_iter().find(|invitation| {
+                matches!(
+                    &invitation.invitation_type,
+                    InvitationBridgeType::Channel { home_id, .. }
+                        if home_id.parse::<ChannelId>().ok() == Some(channel_id)
+                )
+            }) {
+                invitation_workflow::accept_invitation(app, &invitation.invitation_id).await?;
+                return Ok(true);
+            }
+
+            sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap_or(Ok(false))
+}
+
+async fn ensure_current_home(app: &Arc<RwLock<AppCore>>) -> TestResult {
+    if context_workflow::current_home_context_or_fallback(app)
+        .await
+        .is_ok()
+    {
+        return Ok(());
+    }
+
+    let _ = context_workflow::create_home(app, Some("lan-home".to_string()), None).await?;
+    Ok(())
+}
+
 async fn setup_lan_group_channel_pair(
     seed_a: u8,
     seed_b: u8,
@@ -382,6 +434,7 @@ async fn setup_lan_group_channel_pair(
 
     let app_a = create_runtime_app(agent_a.clone()).await?;
     let app_b = create_runtime_app(agent_b.clone()).await?;
+    ensure_current_home(&app_a).await?;
 
     let invite = invitation_workflow::create_contact_invitation(
         &app_a,
@@ -415,6 +468,7 @@ async fn setup_lan_group_channel_pair(
 
     wait_for_contact_signal(&app_a, agent_b.authority_id()).await?;
     wait_for_contact_signal(&app_b, agent_a.authority_id()).await?;
+    context_workflow::move_position(&app_a, "home", "partial").await?;
 
     let members = vec![agent_b.authority_id().to_string()];
     let channel_id = messaging_workflow::create_channel(
@@ -439,6 +493,9 @@ async fn setup_lan_group_channel_pair(
         )
     })
     .await?;
+    let _accepted_channel_invite = accept_pending_channel_invitation(&app_b, channel_id).await?;
+    messaging_workflow::join_channel(&app_a, channel_id).await?;
+    messaging_workflow::join_channel(&app_b, channel_id).await?;
 
     wait_for_channel_signal(&app_a, channel_id).await?;
     wait_for_channel_signal(&app_b, channel_id).await?;
@@ -800,6 +857,8 @@ async fn test_lan_group_channel_invitation_roundtrip_plaintext() -> TestResult {
     })
     .await
     .map_err(|_| "timed out waiting for sender-side descriptor cache")?;
+    ensure_current_home(&app_a).await?;
+    context_workflow::move_position(&app_a, "home", "partial").await?;
 
     // Alice creates a group channel and invites Bob.
     let members = vec![agent_b.authority_id().to_string()];
@@ -834,13 +893,26 @@ async fn test_lan_group_channel_invitation_roundtrip_plaintext() -> TestResult {
         }
         _ => return Err("expected relational generic fact for channel create".into()),
     };
-
+    let _accepted_channel_invite = accept_pending_channel_invitation(&app_b, channel_id).await?;
+    messaging_workflow::join_channel(&app_a, channel_id).await?;
+    messaging_workflow::join_channel(&app_b, channel_id).await?;
     aura_protocol::amp::get_channel_state(&*effects_b, channel_context, channel_id)
         .await
         .map_err(|e| format!("recipient AMP channel state missing before send: {e}"))?;
 
     let msg_text = "lan-group-a1";
     messaging_workflow::send_message(&app_a, channel_id, msg_text, 1_700_000_100_010).await?;
+    wait_for_matching_chat_fact(&effects_b, agent_b.authority_id(), |fact| {
+        matches!(
+            fact,
+            ChatFact::MessageSentSealed {
+                sender_id,
+                channel_id: seen_channel_id,
+                ..
+            } if *sender_id == agent_a.authority_id() && *seen_channel_id == channel_id
+        )
+    })
+    .await?;
     wait_for_chat_signal_message(&app_b, agent_a.authority_id(), msg_text).await?;
 
     let reply_text = "lan-group-b1";
@@ -856,6 +928,17 @@ async fn test_lan_group_channel_invitation_roundtrip_plaintext() -> TestResult {
         )
         .into());
     }
+    wait_for_matching_chat_fact(&effects_a, agent_a.authority_id(), |fact| {
+        matches!(
+            fact,
+            ChatFact::MessageSentSealed {
+                sender_id,
+                channel_id: seen_channel_id,
+                ..
+            } if *sender_id == agent_b.authority_id() && *seen_channel_id == channel_id
+        )
+    })
+    .await?;
     wait_for_chat_signal_message(&app_a, agent_b.authority_id(), reply_text).await?;
 
     Ok(())

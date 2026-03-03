@@ -196,7 +196,7 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
 
     let status_b = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
         env.ctx_a.app_core_raw(),
-        start_b.ceremony_id.clone(),
+        aura_core::CeremonyId::new(start_b.ceremony_id.clone()),
         Duration::from_millis(50),
         |_| {},
         tokio::time::sleep,
@@ -274,7 +274,7 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
 
     let status_c = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
         env.ctx_a.app_core_raw(),
-        start_c.ceremony_id.clone(),
+        aura_core::CeremonyId::new(start_c.ceremony_id.clone()),
         Duration::from_millis(50),
         |_| {},
         tokio::time::sleep,

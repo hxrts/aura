@@ -37,6 +37,7 @@ use aura_app::ui::workflows::ceremonies::{
 };
 use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::identifiers::{AuthorityId, CeremonyId};
 use aura_core::types::FrostThreshold;
 
 use crate::tui::callbacks::CallbackRegistry;
@@ -2244,9 +2245,24 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         tasks_handle.spawn(async move {
                                             let app = app_core.raw();
 
-                                            match start_guardian_ceremony(app, threshold, n, ids.clone())
-                                                .await
-                                            {
+                                            let guardian_ids = ids
+                                                .iter()
+                                                .map(|id| id.parse::<AuthorityId>())
+                                                .collect::<Result<Vec<_>, _>>();
+                                            let guardian_ids = match guardian_ids {
+                                                Ok(value) => value,
+                                                Err(e) => {
+                                                    if let Some(tx) = update_tx.clone() {
+                                                        let _ = tx.try_send(UiUpdate::operation_failed(
+                                                            "Guardian ceremony",
+                                                            format!("Invalid guardian authority id: {e}"),
+                                                        ));
+                                                    }
+                                                    return;
+                                                }
+                                            };
+
+                                            match start_guardian_ceremony(app, threshold, n, guardian_ids).await {
                                                 Ok(ceremony_id) => {
                                                     let k = threshold.value();
                                                     tracing::info!(
@@ -2267,7 +2283,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                         // Prime the modal with an initial status update so `ceremony_id` is
                                                         // available immediately for UI cancel.
                                                         let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
-                                                            ceremony_id: ceremony_id.clone(),
+                                                            ceremony_id: ceremony_id.to_string(),
                                                             kind: aura_app::ui::types::CeremonyKind::GuardianRotation,
                                                             accepted_count: 0,
                                                             total_count: n,
@@ -2298,7 +2314,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                             |status| {
                                                                 if let Some(tx) = update_tx_monitor.clone() {
                                                                     let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
-                                                                        ceremony_id: status.ceremony_id.clone(),
+                                                                        ceremony_id: status.ceremony_id.to_string(),
                                                                         kind: status.kind,
                                                                         accepted_count: status.accepted_count,
                                                                         total_count: status.total_count,
@@ -2396,7 +2412,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                                     if let Some(tx) = update_tx.clone() {
                                                         let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
-                                                            ceremony_id: ceremony_id.clone(),
+                                                            ceremony_id: ceremony_id.to_string(),
                                                             kind: aura_app::ui::types::CeremonyKind::DeviceRotation,
                                                             accepted_count: 0,
                                                             total_count: n,
@@ -2426,7 +2442,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                             |status| {
                                                                 if let Some(tx) = update_tx_monitor.clone() {
                                                                     let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
-                                                                        ceremony_id: status.ceremony_id.clone(),
+                                                                        ceremony_id: status.ceremony_id.to_string(),
                                                                         kind: status.kind,
                                                                         accepted_count: status.accepted_count,
                                                                         total_count: status.total_count,
@@ -2472,9 +2488,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         tasks.spawn(async move {
                                             let app = app_core.raw();
 
-                                            if let Err(e) =
-                                                cancel_key_rotation_ceremony(app, &ceremony_id).await
-                                            {
+                                            let ceremony_id_typed = CeremonyId::new(ceremony_id.clone());
+                                            if let Err(e) = cancel_key_rotation_ceremony(app, &ceremony_id_typed).await {
                                                 tracing::error!("Failed to cancel guardian ceremony: {}", e);
                                                 if let Some(tx) = update_tx.clone() {
                                                     let _ = tx.try_send(UiUpdate::operation_failed(
@@ -2503,9 +2518,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         tasks.spawn(async move {
                                             let app = app_core.raw();
 
-                                            if let Err(e) =
-                                                cancel_key_rotation_ceremony(app, &ceremony_id).await
-                                            {
+                                            let ceremony_id_typed = CeremonyId::new(ceremony_id.clone());
+                                            if let Err(e) = cancel_key_rotation_ceremony(app, &ceremony_id_typed).await {
                                                 tracing::error!("Failed to cancel ceremony: {}", e);
                                                 if let Some(tx) = update_tx.clone() {
                                                     let _ = tx.try_send(UiUpdate::operation_failed(

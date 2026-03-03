@@ -203,7 +203,7 @@ impl ReactiveView for InvitationsSignalView {
                 } => {
                     tracing::info!(
                         ceremony_id = %ceremony_id,
-                        relationship_id,
+                        relationship_id = %relationship_id,
                         timestamp_ms,
                         "Invitation ceremony committed - relationship established"
                     );

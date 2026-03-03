@@ -1,6 +1,6 @@
 //! # Recovery View State
 
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::identifiers::{AuthorityId, CeremonyId, ContextId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -367,7 +367,7 @@ pub struct RecoveryApproval {
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct RecoveryProcess {
     /// Recovery context ID
-    pub id: String,
+    pub id: CeremonyId,
     /// Account being recovered
     pub account_id: AuthorityId,
     /// Current status
@@ -571,7 +571,7 @@ impl RecoveryState {
     /// Initiate a recovery process.
     pub fn initiate_recovery(
         &mut self,
-        session_id: String,
+        session_id: CeremonyId,
         account_id: AuthorityId,
         initiated_at: u64,
     ) {
@@ -902,7 +902,7 @@ mod tests {
 
     fn create_test_recovery_process() -> RecoveryProcess {
         RecoveryProcess {
-            id: "test-ceremony".to_string(),
+            id: CeremonyId::new("test-ceremony"),
             account_id: AuthorityId::new_from_entropy([1u8; 32]),
             status: RecoveryProcessStatus::WaitingForApprovals,
             approvals_received: 0,

@@ -5,6 +5,7 @@
 
 use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
+use crate::fact_types::AUTH_AUTHENTICATED_FACT_TYPE_ID;
 use crate::runtime::services::AuthManager;
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::{
@@ -219,7 +220,7 @@ impl AuthHandler {
                 &self.context.authority,
                 effects,
                 self.context.effect_context.context_id(),
-                "auth_authenticated",
+                AUTH_AUTHENTICATED_FACT_TYPE_ID,
                 &AuthenticatedFact {
                     authority_id: self.context.authority.authority_id(),
                     device_id,
@@ -456,7 +457,7 @@ impl AuthHandler {
             &self.context.authority,
             effects,
             self.context.effect_context.context_id(),
-            "auth_authenticated",
+            AUTH_AUTHENTICATED_FACT_TYPE_ID,
             &serde_json::json!({ "authority": self.context.authority.authority_id() }),
         )
         .await?;

@@ -3,51 +3,69 @@
 //! Handlers for session metadata operations and participant management.
 
 use super::coordination::SessionOperations;
-use crate::core::AgentResult;
+use crate::core::{AgentError, AgentResult};
+use crate::fact_types::{
+    SESSION_METADATA_UPDATED_FACT_TYPE_ID, SESSION_PARTICIPANT_ADDED_FACT_TYPE_ID,
+    SESSION_PARTICIPANT_REMOVED_FACT_TYPE_ID,
+};
 use crate::handlers::shared::HandlerUtilities;
-use aura_core::hash;
 use aura_core::identifiers::{DeviceId, SessionId};
 use serde::Serialize;
 use std::collections::HashMap;
 
 #[derive(Debug, Serialize)]
 struct SessionParticipantsFact {
-    session_id: String,
+    #[serde(with = "session_id_serde")]
+    session_id: SessionId,
     participants: Vec<DeviceId>,
 }
 
 #[derive(Debug, Serialize)]
 struct SessionMetadataFact {
-    session_id: String,
+    #[serde(with = "session_id_serde")]
+    session_id: SessionId,
     metadata: HashMap<String, serde_json::Value>,
 }
 
+mod session_id_serde {
+    use aura_core::identifiers::SessionId;
+    use serde::Serializer;
+
+    pub fn serialize<S>(session_id: &SessionId, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&session_id.to_string())
+    }
+}
+
 impl SessionOperations {
-    fn session_id_from_str(session_id: &str) -> SessionId {
-        session_id
-            .parse::<SessionId>()
-            .unwrap_or_else(|_| SessionId::new_from_entropy(hash::hash(session_id.as_bytes())))
+    fn session_id_from_str(session_id: &str) -> AgentResult<SessionId> {
+        session_id.parse::<SessionId>().map_err(|e| {
+            AgentError::invalid(format!(
+                "invalid session id `{session_id}` for session metadata: {e}"
+            ))
+        })
     }
 
     /// Update session metadata
     pub async fn update_session_metadata(
         &self,
-        _session_id: &str,
-        _metadata: HashMap<String, serde_json::Value>,
+        session_id: SessionId,
+        metadata: HashMap<String, serde_json::Value>,
     ) -> AgentResult<()> {
-        let session_id_typed = Self::session_id_from_str(_session_id);
         let updated = self
             .session_manager
-            .update_metadata(session_id_typed, _metadata)
+            .update_metadata(session_id, metadata)
             .await;
-        self.persist_metadata(_session_id, &updated).await?;
+        self.persist_metadata(session_id, &updated).await?;
         HandlerUtilities::append_relational_fact(
             &self.authority_context,
             self.effects(),
             self.guard_context(),
-            "session_metadata_updated",
+            SESSION_METADATA_UPDATED_FACT_TYPE_ID,
             &SessionMetadataFact {
-                session_id: _session_id.to_string(),
+                session_id,
                 metadata: updated.clone(),
             },
         )
@@ -56,26 +74,34 @@ impl SessionOperations {
         Ok(())
     }
 
+    /// Update session metadata from a string session identifier.
+    pub async fn update_session_metadata_from_str(
+        &self,
+        session_id: &str,
+        metadata: HashMap<String, serde_json::Value>,
+    ) -> AgentResult<()> {
+        self.update_session_metadata(Self::session_id_from_str(session_id)?, metadata)
+            .await
+    }
+
     /// Add participant to session
     pub async fn add_participant(
         &self,
-        _session_id: &str,
-        _device_id: DeviceId,
+        session_id: SessionId,
+        device_id: DeviceId,
     ) -> AgentResult<()> {
-        let session_id_typed = Self::session_id_from_str(_session_id);
         let participants = self
             .session_manager
-            .add_participant(session_id_typed, _device_id)
+            .add_participant(session_id, device_id)
             .await;
-        self.persist_participants(_session_id, &participants)
-            .await?;
+        self.persist_participants(session_id, &participants).await?;
         HandlerUtilities::append_relational_fact(
             &self.authority_context,
             self.effects(),
             self.guard_context(),
-            "session_participant_added",
+            SESSION_PARTICIPANT_ADDED_FACT_TYPE_ID,
             &SessionParticipantsFact {
-                session_id: _session_id.to_string(),
+                session_id,
                 participants: participants.clone(),
             },
         )
@@ -87,24 +113,22 @@ impl SessionOperations {
     /// Remove participant from session
     pub async fn remove_participant(
         &self,
-        _session_id: &str,
-        _device_id: DeviceId,
+        session_id: SessionId,
+        device_id: DeviceId,
     ) -> AgentResult<()> {
-        let session_id_typed = Self::session_id_from_str(_session_id);
         if let Some(participants) = self
             .session_manager
-            .remove_participant(session_id_typed, _device_id)
+            .remove_participant(session_id, device_id)
             .await
         {
-            self.persist_participants(_session_id, &participants)
-                .await?;
+            self.persist_participants(session_id, &participants).await?;
             HandlerUtilities::append_relational_fact(
                 &self.authority_context,
                 self.effects(),
                 self.guard_context(),
-                "session_participant_removed",
+                SESSION_PARTICIPANT_REMOVED_FACT_TYPE_ID,
                 &SessionParticipantsFact {
-                    session_id: _session_id.to_string(),
+                    session_id,
                     participants: participants.clone(),
                 },
             )
@@ -152,7 +176,7 @@ mod tests {
 
         // Should complete without error
         sessions
-            .update_session_metadata(&handle.session_id, metadata)
+            .update_session_metadata(handle.session_id, metadata)
             .await
             .unwrap();
     }
@@ -182,12 +206,12 @@ mod tests {
 
         // Should complete without error
         sessions
-            .add_participant(&handle.session_id, new_device)
+            .add_participant(handle.session_id, new_device)
             .await
             .unwrap();
 
         sessions
-            .remove_participant(&handle.session_id, new_device)
+            .remove_participant(handle.session_id, new_device)
             .await
             .unwrap();
     }
@@ -220,10 +244,52 @@ mod tests {
             serde_json::Value::String("demo".to_string()),
         );
         sessions
-            .update_session_metadata(&handle.session_id, metadata)
+            .update_session_metadata(handle.session_id, metadata)
             .await
             .unwrap();
 
         // No-op journaling path; presence not asserted here.
+    }
+
+    #[tokio::test]
+    async fn invalid_session_id_is_rejected_without_persisting() {
+        use crate::core::{AgentConfig, AgentError};
+        use crate::runtime::effects::AuraEffectSystem;
+        use aura_core::effects::StorageCoreEffects;
+
+        let authority_id = AuthorityId::new_from_entropy([85u8; 32]);
+        let authority_context = AuthorityContext::new(authority_id);
+        let account_id = AccountId::new_from_entropy([13u8; 32]);
+
+        let config = AgentConfig::default();
+        let effect_system = AuraEffectSystem::testing(&config).unwrap();
+        let effects = Arc::new(effect_system);
+
+        let sessions = SessionOperations::new(effects.clone(), authority_context, account_id);
+
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "label".to_string(),
+            serde_json::Value::String("demo".to_string()),
+        );
+
+        let invalid_session_id = "not-a-session-id";
+        let err = sessions
+            .update_session_metadata_from_str(invalid_session_id, metadata)
+            .await
+            .expect_err("invalid session id should be rejected");
+        assert!(
+            matches!(err, AgentError::Config(_)),
+            "expected invalid/config error, got {err:?}"
+        );
+
+        let stored = effects
+            .retrieve(&format!("session/{invalid_session_id}/metadata"))
+            .await
+            .expect("storage lookup should succeed");
+        assert!(
+            stored.is_none(),
+            "invalid session id should not persist metadata"
+        );
     }
 }

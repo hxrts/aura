@@ -15,9 +15,10 @@ use crate::runtime::AuraEffectSystem;
 use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, CeremonyId, InvitationId};
+use aura_core::identifiers::{AuthorityId, CeremonyId, ChannelId, InvitationId};
 use aura_core::DeviceId;
 use aura_core::Hash32;
+use std::str::FromStr;
 use std::sync::Arc;
 
 /// Invitation service API
@@ -132,6 +133,12 @@ impl InvitationServiceApi {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
+        let home_id = ChannelId::from_str(&home_id).map_err(|e| {
+            AgentError::invalid(format!(
+                "invalid channel/home id `{home_id}`: expected canonical ChannelId format ({e})"
+            ))
+        })?;
+
         let invitation = self
             .handler
             .create_invitation(
@@ -578,8 +585,9 @@ mod tests {
         let service = InvitationServiceApi::new(effects, authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([116u8; 32]);
+        let home_id = ChannelId::from_bytes([116u8; 32]).to_string();
         let invitation = service
-            .invite_to_channel(receiver_id, "channel-123".to_string(), None, None, None)
+            .invite_to_channel(receiver_id, home_id, None, None, None)
             .await
             .unwrap();
 

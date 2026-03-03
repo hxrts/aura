@@ -51,6 +51,8 @@ use std::sync::Arc;
 use std::sync::Once;
 #[cfg(debug_assertions)]
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+use std::{collections::HashMap, net::SocketAddr};
 use tokio::sync::mpsc;
 
 use super::shared_transport::SharedTransport;
@@ -155,6 +157,13 @@ pub struct AuraEffectSystem {
 
     /// Cached Biscuit token for guard chain authorization.
     biscuit_cache: parking_lot::RwLock<Option<BiscuitCache>>,
+
+    /// Runtime-managed connection handles for `NetworkExtendedEffects::open/send/close`.
+    ///
+    /// The key is an opaque connection handle UUID, not the remote address.
+    /// Addresses are parsed and validated once during `open`.
+    #[cfg(not(target_arch = "wasm32"))]
+    network_connections: parking_lot::RwLock<HashMap<uuid::Uuid, SocketAddr>>,
 }
 
 #[derive(Clone, Default)]
@@ -394,6 +403,8 @@ impl AuraEffectSystem {
             lan_transport: parking_lot::RwLock::new(None),
             rendezvous_manager: parking_lot::RwLock::new(None),
             biscuit_cache: parking_lot::RwLock::new(initial_biscuit_cache),
+            #[cfg(not(target_arch = "wasm32"))]
+            network_connections: parking_lot::RwLock::new(HashMap::new()),
         }
     }
 
@@ -717,11 +728,11 @@ impl AuraEffectSystem {
     pub async fn commit_generic_fact_bytes(
         &self,
         context_id: ContextId,
-        binding_type: &str,
+        binding_type: aura_core::types::facts::FactTypeId,
         binding_data: Vec<u8>,
     ) -> Result<TypedFact, AuraError> {
         let envelope = aura_core::types::facts::FactEnvelope {
-            type_id: aura_core::types::facts::FactTypeId::from(binding_type),
+            type_id: binding_type,
             schema_version: 1,
             encoding: aura_core::types::facts::FactEncoding::DagCbor,
             payload: binding_data,

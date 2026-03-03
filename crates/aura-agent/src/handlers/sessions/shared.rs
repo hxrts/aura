@@ -3,7 +3,7 @@
 //! Common types and utilities used across all session management modules.
 
 use aura_core::effects::SessionType;
-use aura_core::identifiers::{AccountId, DeviceId};
+use aura_core::identifiers::{AccountId, DeviceId, SessionId};
 use aura_protocol::effects::ChoreographicRole;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -12,7 +12,8 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionHandle {
     /// Session ID
-    pub session_id: String,
+    #[serde(with = "session_id_serde")]
+    pub session_id: SessionId,
     /// Session type
     pub session_type: SessionType,
     /// Participating devices
@@ -116,13 +117,15 @@ pub struct SessionCreateRequest {
     pub participants: Vec<DeviceId>,
     pub initiator: DeviceId,
     pub account_id: AccountId,
-    pub session_id: String,
+    #[serde(with = "session_id_serde")]
+    pub session_id: SessionId,
     pub metadata: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInvitation {
-    pub session_id: String,
+    #[serde(with = "session_id_serde")]
+    pub session_id: SessionId,
     pub session_type: SessionType,
     pub initiator: DeviceId,
     pub role: ChoreographicRole,
@@ -131,7 +134,8 @@ pub struct SessionInvitation {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionResponse {
-    pub session_id: String,
+    #[serde(with = "session_id_serde")]
+    pub session_id: SessionId,
     pub participant: DeviceId,
     pub accepted: bool,
     pub reason: Option<String>,
@@ -139,7 +143,8 @@ pub struct SessionResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionEstablished {
-    pub session_id: String,
+    #[serde(with = "session_id_serde")]
+    pub session_id: SessionId,
     pub participants: Vec<DeviceId>,
     pub start_time: u64,
     pub my_role: ChoreographicRole,
@@ -147,46 +152,60 @@ pub struct SessionEstablished {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionFailed {
-    pub session_id: String,
+    #[serde(with = "session_id_serde")]
+    pub session_id: SessionId,
     pub reason: String,
     pub failed_participants: Vec<DeviceId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetadataUpdate {
-    pub session_id: String,
+    #[serde(with = "session_id_serde")]
+    pub session_id: SessionId,
     pub metadata_changes: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetadataSync {
-    pub session_id: String,
+    #[serde(with = "session_id_serde")]
+    pub session_id: SessionId,
     pub updated_metadata: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParticipantChange {
-    pub session_id: String,
-    pub operation: String, // "add" or "remove"
+    #[serde(with = "session_id_serde")]
+    pub session_id: SessionId,
+    pub operation: ParticipantOperation,
     pub target_participant: DeviceId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParticipantUpdate {
-    pub session_id: String,
+    #[serde(with = "session_id_serde")]
+    pub session_id: SessionId,
     pub updated_participants: Vec<DeviceId>,
-    pub operation: String,
+    pub operation: ParticipantOperation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ParticipantOperation {
+    Add,
+    Remove,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionEnd {
-    pub session_id: String,
+    #[serde(with = "session_id_serde")]
+    pub session_id: SessionId,
     pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionTerminated {
-    pub session_id: String,
+    #[serde(with = "session_id_serde")]
+    pub session_id: SessionId,
     pub end_time: u64,
     pub reason: String,
 }
@@ -205,5 +224,109 @@ pub fn session_type_suffix(session_type: &SessionType) -> &'static str {
         SessionType::Rendezvous => "rendezvous",
         SessionType::Sync => "sync",
         SessionType::Custom(_) => "custom",
+    }
+}
+
+mod session_id_serde {
+    use aura_core::identifiers::SessionId;
+    use serde::{de::Error, Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(session_id: &SessionId, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&session_id.to_string())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<SessionId, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        value
+            .parse::<SessionId>()
+            .map_err(|e| D::Error::custom(format!("invalid session id `{value}`: {e}")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ParticipantChange, ParticipantOperation, SessionHandle};
+    use aura_core::effects::SessionType;
+    use aura_core::identifiers::DeviceId;
+    use aura_protocol::effects::{ChoreographicRole, RoleIndex};
+    use std::collections::HashMap;
+
+    #[test]
+    fn participant_operation_serializes_as_legacy_strings() {
+        let change = ParticipantChange {
+            session_id: "session-123e4567-e89b-12d3-a456-426614174000"
+                .parse()
+                .expect("parse session id"),
+            operation: ParticipantOperation::Add,
+            target_participant: DeviceId::new_from_entropy([1u8; 32]),
+        };
+
+        let value = serde_json::to_value(&change).expect("serialize participant change");
+        assert_eq!(value["operation"], "add");
+    }
+
+    #[test]
+    fn participant_operation_rejects_invalid_strings() {
+        let payload = serde_json::json!({
+            "session_id": "session-123e4567-e89b-12d3-a456-426614174000",
+            "operation": "append",
+            "target_participant": DeviceId::new_from_entropy([2u8; 32]),
+        });
+
+        let decoded = serde_json::from_value::<ParticipantChange>(payload);
+        assert!(decoded.is_err(), "invalid operation should fail to decode");
+    }
+
+    #[test]
+    fn session_handle_deserializes_prefixed_session_id() {
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
+        let handle = SessionHandle {
+            session_id: "123e4567-e89b-12d3-a456-426614174000"
+                .parse()
+                .expect("parse session id"),
+            session_type: SessionType::Coordination,
+            participants: vec![device_id],
+            my_role: ChoreographicRole::new(device_id, RoleIndex::new(1).expect("role index")),
+            epoch: 0,
+            start_time: 0,
+            metadata: HashMap::new(),
+        };
+        let mut payload = serde_json::to_value(handle).expect("serialize handle");
+        payload["session_id"] =
+            serde_json::Value::String("session-123e4567-e89b-12d3-a456-426614174000".to_string());
+
+        let decoded = serde_json::from_value::<SessionHandle>(payload).expect("decode handle");
+        assert_eq!(
+            decoded.session_id.to_string(),
+            "session-123e4567-e89b-12d3-a456-426614174000"
+        );
+    }
+
+    #[test]
+    fn session_handle_serializes_session_id_as_string() {
+        let device_id = DeviceId::new_from_entropy([4u8; 32]);
+        let handle = SessionHandle {
+            session_id: "session-123e4567-e89b-12d3-a456-426614174000"
+                .parse()
+                .expect("parse session id"),
+            session_type: SessionType::Coordination,
+            participants: vec![device_id],
+            my_role: ChoreographicRole::new(device_id, RoleIndex::new(1).expect("role index")),
+            epoch: 0,
+            start_time: 0,
+            metadata: HashMap::new(),
+        };
+
+        let value = serde_json::to_value(&handle).expect("serialize handle");
+        assert_eq!(
+            value["session_id"],
+            serde_json::Value::String("session-123e4567-e89b-12d3-a456-426614174000".to_string())
+        );
     }
 }
