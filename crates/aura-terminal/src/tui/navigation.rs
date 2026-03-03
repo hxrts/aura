@@ -301,6 +301,20 @@ pub fn navigate_list(current: usize, count: usize, key: NavKey) -> usize {
     }
 }
 
+/// Clamp a list selection index to the current list size.
+///
+/// This is the shared invariant for list-like UI state:
+/// - `count == 0` -> `index == 0`
+/// - otherwise `index < count`
+#[must_use]
+pub fn clamp_list_index(index: usize, count: usize) -> usize {
+    if count == 0 {
+        0
+    } else {
+        index.min(count.saturating_sub(1))
+    }
+}
+
 /// Navigate within a 2D grid with wrap-around
 #[must_use]
 pub fn navigate_grid(current: usize, cols: usize, total: usize, key: NavKey) -> usize {

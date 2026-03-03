@@ -47,6 +47,7 @@ use crate::tui::components::{
 use crate::tui::context::IoContext;
 use crate::tui::hooks::{AppCoreContext, CallbackContext};
 use crate::tui::layout::dim;
+use crate::tui::navigation::clamp_list_index;
 use crate::tui::screens::app::subscriptions::{
     use_authority_id_subscription, use_channels_subscription, use_contacts_subscription,
     use_devices_subscription, use_discovered_peers_subscription, use_messages_subscription,
@@ -295,11 +296,8 @@ fn sync_neighborhood_navigation_state(
         0
     };
     state.neighborhood.channel_count = channel_count;
-    if channel_count == 0 {
-        state.neighborhood.selected_channel = 0;
-    } else if state.neighborhood.selected_channel >= channel_count {
-        state.neighborhood.selected_channel = channel_count.saturating_sub(1);
-    }
+    state.neighborhood.selected_channel =
+        clamp_list_index(state.neighborhood.selected_channel, channel_count);
 
     let home_meta = shared_home_meta
         .read()
@@ -316,11 +314,8 @@ fn sync_neighborhood_navigation_state(
     } else {
         false
     };
-    if member_count == 0 {
-        state.neighborhood.selected_member = 0;
-    } else if state.neighborhood.selected_member >= member_count {
-        state.neighborhood.selected_member = member_count.saturating_sub(1);
-    }
+    state.neighborhood.selected_member =
+        clamp_list_index(state.neighborhood.selected_member, member_count);
 }
 
 #[allow(clippy::field_reassign_with_default)] // Large struct with many conditional fields
@@ -1016,10 +1011,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     state.chat.selected_channel >= channel_count;
 
                                 if current_selection_invalid {
-                                    let mut idx = selected_index.unwrap_or(0);
-                                    if idx >= channel_count {
-                                        idx = channel_count.saturating_sub(1);
-                                    }
+                                    let idx = clamp_list_index(selected_index.unwrap_or(0), channel_count);
                                     state.chat.selected_channel = idx;
                                     // Reset scroll when switching channels
                                     state.chat.message_scroll = 0;
@@ -1276,11 +1268,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // Contacts
                         // =========================================================================
                         UiUpdate::ContactCountChanged(count) => {
-                            let needs_update = tui.state.read().contacts.contact_count != count;
+                            let needs_update = {
+                                let state = tui.state.read();
+                                state.contacts.contact_count != count
+                                    || state.contacts.selected_index
+                                        != clamp_list_index(state.contacts.selected_index, count)
+                            };
                             if needs_update {
-                                // Update contact count for keyboard navigation (navigate_list)
                                 tui.with_mut(|state| {
                                     state.contacts.contact_count = count;
+                                    state.contacts.selected_index =
+                                        clamp_list_index(state.contacts.selected_index, count);
                                 });
                             }
                         }
@@ -1288,17 +1286,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             let needs_update = {
                                 let state = tui.state.read();
                                 state.notifications.item_count != count
-                                    || (count == 0 && state.notifications.selected_index != 0)
-                                    || (count > 0 && state.notifications.selected_index >= count)
+                                    || state.notifications.selected_index
+                                        != clamp_list_index(state.notifications.selected_index, count)
                             };
                             if needs_update {
                                 tui.with_mut(|state| {
                                     state.notifications.item_count = count;
-                                    if count == 0 {
-                                        state.notifications.selected_index = 0;
-                                    } else if state.notifications.selected_index >= count {
-                                        state.notifications.selected_index = count.saturating_sub(1);
-                                    }
+                                    state.notifications.selected_index =
+                                        clamp_list_index(state.notifications.selected_index, count);
                                 });
                             }
                         }
@@ -1325,24 +1320,23 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             let needs_update = {
                                 let state = tui.state.read();
                                 state.contacts.lan_peer_count != count
+                                    || state.contacts.lan_selected_index
+                                        != clamp_list_index(state.contacts.lan_selected_index, count)
                                     || (count == 0
-                                        && (state.contacts.lan_selected_index != 0
-                                            || !matches!(
-                                                state.contacts.list_focus,
-                                                crate::tui::state_machine::ContactsListFocus::Contacts
-                                            )))
-                                    || (count > 0 && state.contacts.lan_selected_index >= count)
+                                        && !matches!(
+                                            state.contacts.list_focus,
+                                            crate::tui::state_machine::ContactsListFocus::Contacts
+                                        ))
                             };
                             if needs_update {
                                 tui.with_mut(|state| {
                                     state.contacts.lan_peer_count = count;
                                     if count == 0 {
-                                        state.contacts.lan_selected_index = 0;
                                         state.contacts.list_focus =
                                             crate::tui::state_machine::ContactsListFocus::Contacts;
-                                    } else if state.contacts.lan_selected_index >= count {
-                                        state.contacts.lan_selected_index = count.saturating_sub(1);
                                     }
+                                    state.contacts.lan_selected_index =
+                                        clamp_list_index(state.contacts.lan_selected_index, count);
                                 });
                             }
                         }
