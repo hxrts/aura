@@ -1,0 +1,50 @@
+schema_version = 1
+
+[run]
+name = "terminology-test"
+pty_rows = 40
+pty_cols = 120
+seed = 5555
+artifact_dir = "artifacts/harness/terminology-test"
+
+[[instances]]
+id = "alice"
+mode = "local"
+data_dir = ".tmp/harness/terminology/alice"
+device_id = "alice-dev-terminology"
+bind_address = "127.0.0.1:42001"
+demo_mode = false
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "127.0.0.1"
+broadcast_addr = "127.0.0.1"
+port = 19541
+
+[[instances]]
+id = "bob"
+mode = "local"
+data_dir = ".tmp/harness/terminology/bob"
+device_id = "bob-dev-terminology"
+bind_address = "127.0.0.1:42002"
+demo_mode = false
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "127.0.0.1"
+broadcast_addr = "127.0.0.1"
+port = 19542
+
+[[instances]]
+id = "carol"
+mode = "local"
+data_dir = ".tmp/harness/terminology/carol"
+device_id = "carol-dev-terminology"
+bind_address = "127.0.0.1:42003"
+demo_mode = false
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "127.0.0.1"
+broadcast_addr = "127.0.0.1"
+port = 19543

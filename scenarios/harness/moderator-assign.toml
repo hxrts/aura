@@ -1,0 +1,432 @@
+schema_version = 1
+id = "moderator-assign-flow"
+goal = "Verify moderator designation enforces Member-only targets and moderator kick flow."
+execution_mode = "scripted"
+required_capabilities = ["local"]
+
+[[steps]]
+id = "launch"
+action = "launch_instances"
+timeout_ms = 15000
+
+[[steps]]
+id = "alice-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Welcome to Aura"
+timeout_ms = 30000
+
+[[steps]]
+id = "bob-ready"
+action = "wait_for"
+instance = "bob"
+pattern = "Welcome to Aura"
+timeout_ms = 30000
+
+[[steps]]
+id = "carol-ready"
+action = "wait_for"
+instance = "carol"
+pattern = "Welcome to Aura"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-create-account"
+action = "send_keys"
+instance = "alice"
+keys = "Alice\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-create-account"
+action = "send_keys"
+instance = "bob"
+keys = "Bob\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "carol-create-account"
+action = "send_keys"
+instance = "carol"
+keys = "Carol\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-map-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Can enter:"
+timeout_ms = 30000
+
+[[steps]]
+id = "bob-map-ready"
+action = "wait_for"
+instance = "bob"
+pattern = "Can enter:"
+timeout_ms = 30000
+
+[[steps]]
+id = "carol-map-ready"
+action = "wait_for"
+instance = "carol"
+pattern = "Can enter:"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-open-contacts"
+action = "send_keys"
+instance = "alice"
+keys = "3"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-open-contacts"
+action = "send_keys"
+instance = "bob"
+keys = "3"
+timeout_ms = 2000
+
+[[steps]]
+id = "carol-open-contacts"
+action = "send_keys"
+instance = "carol"
+keys = "3"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-open-invite-modal-bob"
+action = "send_keys"
+instance = "alice"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-create-invitation-bob"
+action = "send_key"
+instance = "alice"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-invitation-visible-bob"
+action = "wait_for"
+instance = "alice"
+pattern = "Invitation Created"
+timeout_ms = 10000
+
+[[steps]]
+id = "alice-copy-invitation-bob"
+action = "send_keys"
+instance = "alice"
+keys = "c"
+timeout_ms = 2000
+
+[[steps]]
+id = "copy-propagated-bob"
+action = "fault_delay"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-close-invitation-bob"
+action = "send_key"
+instance = "alice"
+key = "esc"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-open-accept-modal"
+action = "send_keys"
+instance = "bob"
+keys = "a"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-import-invitation"
+action = "send_clipboard"
+instance = "bob"
+source_instance = "alice"
+timeout_ms = 12000
+
+[[steps]]
+id = "bob-submit-invitation"
+action = "send_key"
+instance = "bob"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-open-invite-modal-carol"
+action = "send_keys"
+instance = "alice"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-create-invitation-carol"
+action = "send_key"
+instance = "alice"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-invitation-visible-carol"
+action = "wait_for"
+instance = "alice"
+pattern = "Invitation Created"
+timeout_ms = 10000
+
+[[steps]]
+id = "alice-copy-invitation-carol"
+action = "send_keys"
+instance = "alice"
+keys = "c"
+timeout_ms = 2000
+
+[[steps]]
+id = "copy-propagated-carol"
+action = "fault_delay"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-close-invitation-carol"
+action = "send_key"
+instance = "alice"
+key = "esc"
+timeout_ms = 2000
+
+[[steps]]
+id = "carol-open-accept-modal"
+action = "send_keys"
+instance = "carol"
+keys = "a"
+timeout_ms = 2000
+
+[[steps]]
+id = "carol-import-invitation"
+action = "send_clipboard"
+instance = "carol"
+source_instance = "alice"
+timeout_ms = 12000
+
+[[steps]]
+id = "carol-submit-invitation"
+action = "send_key"
+instance = "carol"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-contacts-linked"
+action = "wait_for"
+instance = "alice"
+pattern = "Contacts (2)"
+timeout_ms = 12000
+
+[[steps]]
+id = "bob-authority-id"
+action = "get_authority_id"
+instance = "bob"
+var = "bob_id"
+timeout_ms = 4000
+
+[[steps]]
+id = "carol-authority-id"
+action = "get_authority_id"
+instance = "carol"
+var = "carol_id"
+timeout_ms = 4000
+
+[[steps]]
+id = "alice-create-neighborhood"
+action = "send_chat_command"
+instance = "alice"
+command = "neighborhood ModeratorFlow"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-create-neighborhood-result"
+action = "expect_command_result"
+instance = "alice"
+contains = "neighborhood updated"
+consistency = "accepted"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-add-home-to-neighborhood"
+action = "send_chat_command"
+instance = "alice"
+command = "nhadd home"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-add-home-to-neighborhood-result"
+action = "expect_command_result"
+instance = "alice"
+contains = "home added to neighborhood"
+consistency = "accepted"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-open-chat"
+action = "send_keys"
+instance = "alice"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-open-chat"
+action = "send_keys"
+instance = "bob"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
+id = "carol-open-chat"
+action = "send_keys"
+instance = "carol"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-join"
+action = "send_chat_command"
+instance = "alice"
+command = "join mod-lab"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-join-result"
+action = "expect_command_result"
+instance = "alice"
+contains = "membership updated"
+consistency = "replicated"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-homeinvite-bob"
+action = "send_chat_command"
+instance = "alice"
+command = "homeinvite ${bob_id}"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-homeinvite-bob-result"
+action = "expect_toast"
+instance = "alice"
+contains = "home invitation"
+timeout_ms = 12000
+
+[[steps]]
+id = "bob-homeaccept"
+action = "send_chat_command"
+instance = "bob"
+command = "homeaccept"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-homeaccept-result"
+action = "expect_toast"
+instance = "bob"
+contains = "home invitation"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-invite-bob"
+action = "send_chat_command"
+instance = "alice"
+command = "invite ${bob_id}"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-invite-bob-result"
+action = "expect_command_result"
+instance = "alice"
+contains = "invitation sent"
+consistency = "enforced"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-invite-carol"
+action = "send_chat_command"
+instance = "alice"
+command = "invite ${carol_id}"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-invite-carol-result"
+action = "expect_command_result"
+instance = "alice"
+contains = "invitation sent"
+consistency = "enforced"
+timeout_ms = 12000
+
+[[steps]]
+id = "bob-join"
+action = "send_chat_command"
+instance = "bob"
+command = "join mod-lab"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-join-result"
+action = "expect_command_result"
+instance = "bob"
+contains = "membership updated"
+consistency = "replicated"
+timeout_ms = 12000
+
+[[steps]]
+id = "carol-join"
+action = "send_chat_command"
+instance = "carol"
+command = "join mod-lab"
+timeout_ms = 2000
+
+[[steps]]
+id = "carol-join-result"
+action = "expect_command_result"
+instance = "carol"
+contains = "membership updated"
+consistency = "replicated"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-op-bob"
+action = "send_chat_command"
+instance = "alice"
+command = "op ${bob_id}"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-op-bob-result"
+action = "expect_denied"
+instance = "alice"
+contains = "only members can be designated as moderators"
+timeout_ms = 12000
+
+[[steps]]
+id = "bob-kick-carol"
+action = "send_chat_command"
+instance = "bob"
+command = "kick ${carol_id} moderator-flow-kick"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-kick-carol-result"
+action = "expect_denied"
+instance = "bob"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-kick-carol"
+action = "send_chat_command"
+instance = "alice"
+command = "kick ${carol_id} moderator-flow-kick"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-kick-carol-result"
+action = "expect_toast"
+instance = "alice"
+contains = "kick"
+timeout_ms = 12000

@@ -1,0 +1,232 @@
+schema_version = 1
+id = "access-override-flow"
+goal = "Verify access override modal supports bounded Partial/Limited override operations."
+execution_mode = "scripted"
+required_capabilities = ["local"]
+
+[[steps]]
+id = "launch"
+action = "launch_instances"
+timeout_ms = 15000
+
+[[steps]]
+id = "alice-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Welcome to Aura"
+timeout_ms = 30000
+
+[[steps]]
+id = "bob-ready"
+action = "wait_for"
+instance = "bob"
+pattern = "Welcome to Aura"
+timeout_ms = 30000
+
+[[steps]]
+id = "carol-ready"
+action = "wait_for"
+instance = "carol"
+pattern = "Welcome to Aura"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-create-account"
+action = "send_keys"
+instance = "alice"
+keys = "Alice\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-create-account"
+action = "send_keys"
+instance = "bob"
+keys = "Bob\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "carol-create-account"
+action = "send_keys"
+instance = "carol"
+keys = "Carol\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-map-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Can enter:"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-open-home-create"
+action = "send_keys"
+instance = "alice"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-home-create-modal"
+action = "wait_for"
+instance = "alice"
+pattern = "Create New Home"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-home-create-name"
+action = "send_keys"
+instance = "alice"
+keys = "OverrideHome"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-home-create-submit"
+action = "send_key"
+instance = "alice"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-home-created"
+action = "expect_toast"
+instance = "alice"
+contains = "Home 'OverrideHome' created"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-open-contacts"
+action = "send_keys"
+instance = "alice"
+keys = "3"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-open-contacts"
+action = "send_keys"
+instance = "bob"
+keys = "3"
+timeout_ms = 2000
+
+[[steps]]
+id = "carol-open-contacts"
+action = "send_keys"
+instance = "carol"
+keys = "3"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-open-invite-modal-bob"
+action = "send_keys"
+instance = "alice"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-create-invitation-bob"
+action = "send_key"
+instance = "alice"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-invitation-visible-bob"
+action = "wait_for"
+instance = "alice"
+pattern = "Invitation Created"
+timeout_ms = 10000
+
+[[steps]]
+id = "alice-copy-invitation-bob"
+action = "send_keys"
+instance = "alice"
+keys = "c"
+timeout_ms = 2000
+
+[[steps]]
+id = "copy-propagated-bob"
+action = "fault_delay"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-close-invitation-bob"
+action = "send_key"
+instance = "alice"
+key = "esc"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-open-accept-modal"
+action = "send_keys"
+instance = "bob"
+keys = "a"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-import-invitation"
+action = "send_clipboard"
+instance = "bob"
+source_instance = "alice"
+timeout_ms = 12000
+
+[[steps]]
+id = "bob-submit-invitation"
+action = "send_key"
+instance = "bob"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-one-contact"
+action = "wait_for"
+instance = "alice"
+pattern = "Contacts (1)"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-back-neighborhood"
+action = "send_keys"
+instance = "alice"
+keys = "1"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-enter-depth-full"
+action = "send_keys"
+instance = "alice"
+keys = "dd"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-enter-home"
+action = "send_key"
+instance = "alice"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-home-detail"
+action = "wait_for"
+instance = "alice"
+pattern = "Access:"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-open-access-override"
+action = "send_keys"
+instance = "alice"
+keys = "x"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-access-override-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "Access Override"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-close-access-override"
+action = "send_key"
+instance = "alice"
+key = "esc"
+timeout_ms = 2000

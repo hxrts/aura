@@ -1,0 +1,59 @@
+schema_version = 1
+id = "home-roles-flow"
+goal = "Verify home role labels use Member terminology and not legacy owner semantics."
+execution_mode = "scripted"
+required_capabilities = ["local"]
+
+[[steps]]
+id = "launch"
+action = "launch_instances"
+timeout_ms = 15000
+
+[[steps]]
+id = "alice-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Welcome to Aura"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-create-account"
+action = "send_keys"
+instance = "alice"
+keys = "Alice\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-map-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Can enter:"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-enter-depth-full"
+action = "send_keys"
+instance = "alice"
+keys = "dd"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-enter-home"
+action = "send_key"
+instance = "alice"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-detail-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "Members & Participants"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-member-label"
+action = "wait_for"
+instance = "alice"
+pattern = "Member"
+timeout_ms = 12000

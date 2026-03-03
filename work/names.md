@@ -540,7 +540,7 @@ Reference: `docs/804_testing_guide.md`
   ```bash
   just test
   ```
-- [ ] **Stage and commit Phase 5 changes**
+- [x] **Stage and commit Phase 5 changes**
   ```bash
   git add crates/
   git commit -m "test: add property tests for access levels and home roles
@@ -560,7 +560,7 @@ Reference: `docs/804_testing_guide.md`, `docs/805_simulation_guide.md`
 
 ### 6.1 Access Level E2E Tests
 
-- [ ] **Hop distance calculation**
+- [x] **Hop distance calculation**
   ```rust
   #[aura_test]
   async fn test_hop_distance_through_neighborhood() {
@@ -569,7 +569,7 @@ Reference: `docs/804_testing_guide.md`, `docs/805_simulation_guide.md`
   }
   ```
 
-- [ ] **Access level enforcement**
+- [x] **Access level enforcement**
   ```rust
   #[aura_test]
   async fn test_limited_cannot_access_full_content() {
@@ -580,7 +580,7 @@ Reference: `docs/804_testing_guide.md`, `docs/805_simulation_guide.md`
 
 ### 6.2 Home Role E2E Tests
 
-- [ ] **Member creation (no Owner special status)**
+- [x] **Member creation (no Owner special status)**
   ```rust
   #[aura_test]
   async fn test_home_creator_is_regular_member() {
@@ -589,7 +589,7 @@ Reference: `docs/804_testing_guide.md`, `docs/805_simulation_guide.md`
   }
   ```
 
-- [ ] **Moderator operations**
+- [x] **Moderator operations**
   ```rust
   #[aura_test]
   async fn test_moderator_can_kick() {
@@ -601,7 +601,7 @@ Reference: `docs/804_testing_guide.md`, `docs/805_simulation_guide.md`
 
 ### 6.3 Simulation Tests
 
-- [ ] **TOML scenario: Home with role transitions**
+- [x] **TOML scenario: Home with role transitions**
   ```toml
   [[phases]]
   name = "role_transitions"
@@ -619,29 +619,29 @@ Reference: `docs/804_testing_guide.md`, `docs/805_simulation_guide.md`
 
 ### 6.4 Acceptance Test Matrix (Required)
 
-- [ ] **Role semantics**
+- [x] **Role semantics**
   - `Member` vs `Participant` behavior validated in UI + protocol tests.
-- [ ] **Moderator authorization**
+- [x] **Moderator authorization**
   - Only `Member` can be moderator.
   - Moderator assignment/removal follows authority policy path.
-- [ ] **Access mapping**
+- [x] **Access mapping**
   - Full/Partial/Limited mapping validated for 0/1/2+ hops and disconnected graph.
-- [ ] **Contact establishment matrix**
+- [x] **Contact establishment matrix**
   - Contact establishment succeeds (or fails with explicit rule) for each supported authority pair type.
-- [ ] **Determinism**
+- [x] **Determinism**
   - Identical fact sets produce identical access computation and relationship views.
 
 ### 6.5 Phase 6 Checkpoint
 
-- [ ] **Run full test suite including integration tests**
+- [x] **Run full test suite including integration tests**
   ```bash
   just test
   ```
-- [ ] **Run simulation scenarios**
+- [x] **Run simulation scenarios**
   ```bash
   cargo run -p aura-terminal -- scenario run scenarios/role_transitions.toml
   ```
-- [ ] **Stage and commit Phase 6 changes**
+- [x] **Stage and commit Phase 6 changes**
   ```bash
   git add crates/ scenarios/
   git commit -m "test: add E2E and simulation tests for new terminology
@@ -661,39 +661,39 @@ Reference: `docs/116_cli_tui.md`, `docs/807_system_internals_guide.md`
 
 ### 7.1 Update Existing Screens
 
-- [ ] **Home screen**
+- [x] **Home screen**
   - Replace Owner/Admin/Resident labels with Member/Moderator/Participant
   - Update role display logic
 
-- [ ] **Neighborhood screen**
+- [x] **Neighborhood screen**
   - Update terminology
   - Show hop distances if relevant
 
-- [ ] **Contacts screen**
+- [x] **Contacts screen**
   - Support contact creation with any authority type
 
 ### 7.2 New Screens/Flows
 
-- [ ] **Moderator assignment modal**
+- [x] **Moderator assignment modal**
   - Select member to assign/unassign moderator
   - Confirm operation
 
-- [ ] **Access level override modal**
+- [x] **Access level override modal**
   - Show current access level for user
   - Allow upgrade/downgrade within bounds
   - Confirm operation
 
-- [ ] **Home capability configuration screen**
+- [x] **Home capability configuration screen**
   - Configure what Full/Partial/Limited can do
   - Per-home settings
 
 ### 7.3 Signal Updates
 
-- [ ] **Update `HOME_SIGNAL`**
+- [x] **Update `HOME_SIGNAL`**
   - Include new role model (Member/Moderator/Participant)
   - Include moderator designations
 
-- [ ] **Update `CONTACTS_SIGNAL`**
+- [x] **Update `CONTACTS_SIGNAL`**
   - Support all authority type contacts
 
 **Success criteria:**
@@ -703,17 +703,17 @@ Reference: `docs/116_cli_tui.md`, `docs/807_system_internals_guide.md`
 
 ### 7.4 Phase 7 Checkpoint
 
-- [ ] **Run full CI checks**
+- [x] **Run full CI checks**
   ```bash
   just fmt-check
   just clippy
   just test
   ```
-- [ ] **Run TUI state machine tests**
+- [x] **Run TUI state machine tests**
   ```bash
   cargo test -p aura-terminal --test unit_state_machine
   ```
-- [ ] **Stage and commit Phase 7 changes**
+- [x] **Stage and commit Phase 7 changes**
   ```bash
   git add crates/aura-terminal/ crates/aura-app/
   git commit -m "feat(tui): update screens for new terminology and add moderation flows
@@ -733,7 +733,7 @@ Reference: `docs/804_testing_guide.md`
 
 ### 8.1 Harness Configuration
 
-- [ ] **Create `configs/harness/terminology-test.toml`**
+- [x] **Create `configs/harness/terminology-test.toml`**
   ```toml
   schema_version = 1
 
@@ -764,7 +764,7 @@ Reference: `docs/804_testing_guide.md`
 
 ### 8.2 User Flow: Home Creation with New Roles
 
-- [ ] **Scenario: `scenarios/harness/home-roles.toml`**
+- [x] **Scenario: `scenarios/harness/home-roles.toml`**
   ```toml
   schema_version = 1
   id = "home-roles-flow"
@@ -789,7 +789,7 @@ Reference: `docs/804_testing_guide.md`
 
 ### 8.3 User Flow: Moderator Assignment
 
-- [ ] **Scenario: `scenarios/harness/moderator-assign.toml`**
+- [x] **Scenario: `scenarios/harness/moderator-assign.toml`**
 
   Flow:
   1. Alice creates home (becomes Member)
@@ -804,7 +804,7 @@ Reference: `docs/804_testing_guide.md`
 
 ### 8.4 User Flow: Access Level Override
 
-- [ ] **Scenario: `scenarios/harness/access-override.toml`**
+- [x] **Scenario: `scenarios/harness/access-override.toml`**
 
   Flow:
   1. Alice's home in Neighborhood N
@@ -820,7 +820,7 @@ Reference: `docs/804_testing_guide.md`
 
 ### 8.5 User Flow: Shared Storage (renamed from Public Good Space)
 
-- [ ] **Scenario: `scenarios/harness/shared-storage.toml`**
+- [x] **Scenario: `scenarios/harness/shared-storage.toml`**
 
   Flow:
   1. Alice creates home
@@ -833,7 +833,7 @@ Reference: `docs/804_testing_guide.md`
 
 ### 8.6 User Flow: Cross-Authority Contact
 
-- [ ] **Scenario: `scenarios/harness/cross-authority-contact.toml`**
+- [x] **Scenario: `scenarios/harness/cross-authority-contact.toml`**
 
   Flow:
   1. Alice (User) creates contact with Home H
@@ -846,7 +846,7 @@ Reference: `docs/804_testing_guide.md`
 
 ### 8.7 Phase 8 Checkpoint
 
-- [ ] **Run harness lint on all scenarios**
+- [x] **Run harness lint on all scenarios**
   ```bash
   just harness-lint -- --config configs/harness/terminology-test.toml --scenario scenarios/harness/home-roles.toml
   just harness-lint -- --config configs/harness/terminology-test.toml --scenario scenarios/harness/moderator-assign.toml
@@ -854,7 +854,7 @@ Reference: `docs/804_testing_guide.md`
   just harness-lint -- --config configs/harness/terminology-test.toml --scenario scenarios/harness/shared-storage.toml
   just harness-lint -- --config configs/harness/terminology-test.toml --scenario scenarios/harness/cross-authority-contact.toml
   ```
-- [ ] **Run all harness scenarios**
+- [x] **Run all harness scenarios**
   ```bash
   just harness-run -- --config configs/harness/terminology-test.toml --scenario scenarios/harness/home-roles.toml
   just harness-run -- --config configs/harness/terminology-test.toml --scenario scenarios/harness/moderator-assign.toml
@@ -880,7 +880,7 @@ Reference: `docs/804_testing_guide.md`
 
 ### 9.1 Remove Discovery Script
 
-- [ ] **Delete `scripts/find-terminology.sh`**
+- [x] **Delete `scripts/find-terminology.sh`**
   - Script is no longer needed after all renames are complete
   ```bash
   rm scripts/find-terminology.sh
@@ -894,20 +894,20 @@ Reference: `docs/804_testing_guide.md`
 
 After completing all phases:
 
-- [ ] `just build` passes
-- [ ] `just check` passes
-- [ ] `just fmt-check` passes
-- [ ] `just clippy` passes
-- [ ] `just test` passes
-- [ ] Discovery script reports zero matches for old terms (before Phase 9 cleanup removes the script)
-- [ ] All property tests pass (10,000+ cases each)
-- [ ] All E2E tests pass
-- [ ] All simulation scenarios pass
-- [ ] All runtime harness scenarios pass
-- [ ] Manual TUI walkthrough confirms terminology changes
-- [ ] `docs/106_consensus.md` contains Witness rationale note
-- [ ] `CLAUDE.md` uses new terminology consistently
-- [ ] `.claude/skills/aura-quick-ref/SKILL.md` uses new terminology
+- [x] `just build` passes
+- [x] `just check` passes
+- [x] `just fmt-check` passes
+- [x] `just clippy` passes
+- [x] `just test` passes
+- [x] Discovery script reports zero matches for old terms (before Phase 9 cleanup removes the script)
+- [x] All property tests pass (10,000+ cases each)
+- [x] All E2E tests pass
+- [x] All simulation scenarios pass
+- [x] All runtime harness scenarios pass
+- [x] Manual TUI walkthrough confirms terminology changes
+- [x] `docs/106_consensus.md` contains Witness rationale note
+- [x] `CLAUDE.md` uses new terminology consistently
+- [x] `.claude/skills/aura-quick-ref/SKILL.md` uses new terminology
 
 ---
 

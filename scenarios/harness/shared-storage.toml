@@ -1,0 +1,102 @@
+schema_version = 1
+id = "shared-storage-flow"
+goal = "Verify shared storage terminology and pinned fact flow in runtime harness."
+execution_mode = "scripted"
+required_capabilities = ["local"]
+
+[[steps]]
+id = "launch"
+action = "launch_instances"
+timeout_ms = 15000
+
+[[steps]]
+id = "alice-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Welcome to Aura"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-create-account"
+action = "send_keys"
+instance = "alice"
+keys = "Alice\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-map-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Can enter:"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-open-chat"
+action = "send_keys"
+instance = "alice"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-join-shared-lab"
+action = "send_chat_command"
+instance = "alice"
+command = "join shared-lab"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-join-shared-lab-result"
+action = "expect_command_result"
+instance = "alice"
+contains = "membership updated"
+consistency = "replicated"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-pin-fact"
+action = "send_chat_command"
+instance = "alice"
+command = "pin shared-fact-001"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-pin-fact-result"
+action = "expect_denied"
+instance = "alice"
+contains = "permission denied"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-open-neighborhood"
+action = "send_keys"
+instance = "alice"
+keys = "1"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-enter-depth-full"
+action = "send_keys"
+instance = "alice"
+keys = "dd"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-enter-home"
+action = "send_key"
+instance = "alice"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-storage-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "Storage:"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-members-participants-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "Members/Participants:"
+timeout_ms = 12000
