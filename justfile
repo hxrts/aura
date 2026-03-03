@@ -520,6 +520,7 @@ watch-test:
 summary:
     #!/usr/bin/env bash
     set -euo pipefail
+    mkdir -p "${TMPDIR:-/tmp}"  # Ensure temp dir exists (nix-shell cleanup)
     docs="docs"; build_dir="$docs/book"; out="$docs/SUMMARY.md"
 
     get_title() {
@@ -564,6 +565,7 @@ summary:
 book: summary
     #!/usr/bin/env bash
     set -euo pipefail
+    mkdir -p "${TMPDIR:-/tmp}"  # Ensure temp dir exists (nix-shell cleanup)
     pgrep -x mdbook > /dev/null && { echo "Stopping existing mdbook server..."; pkill mdbook; sleep 1; }
     trap 'rm -f mermaid-init.js mermaid.min.js' EXIT
     AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command bash -c \
