@@ -10,6 +10,7 @@ use aura_journal::DomainFact;
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::fmt;
 use std::str::FromStr;
 
@@ -246,6 +247,19 @@ impl TransportAddress {
     pub fn port(&self) -> u16 {
         self.port
     }
+
+    /// Return the normalized host component without brackets.
+    pub fn host(&self) -> &str {
+        if let Some(rest) = self.address.strip_prefix('[') {
+            let end = rest.find(']').unwrap_or(rest.len());
+            &rest[..end]
+        } else {
+            self.address
+                .rsplit_once(':')
+                .map(|(host, _)| host)
+                .unwrap_or(self.address.as_str())
+        }
+    }
 }
 
 impl fmt::Display for TransportAddress {
@@ -379,27 +393,78 @@ fn parse_transport_port(addr: &str) -> Result<u16, TransportAddressError> {
 // Transport Hint
 // =============================================================================
 
+/// Local bound address provenance for direct/reflexive candidates.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct BoundLocalAddr(pub TransportAddress);
+
+/// Reflexive address observed externally.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct ReflexiveAddr(pub TransportAddress);
+
+/// Relay endpoint address.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct RelayAddr(pub TransportAddress);
+
+/// Remote candidate address for direct transport.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct RemoteCandidateAddr(pub TransportAddress);
+
+/// Snapshot of currently available local interfaces.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LocalInterfaces {
+    hosts: BTreeSet<String>,
+}
+
+impl LocalInterfaces {
+    /// Create an empty interface set.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Insert an interface host/address.
+    pub fn insert(&mut self, host: impl Into<String>) {
+        self.hosts.insert(host.into());
+    }
+
+    /// Returns true if the given local bound address is currently present.
+    pub fn contains_bound(&self, addr: &BoundLocalAddr) -> bool {
+        self.hosts.contains(addr.0.host())
+    }
+}
+
 /// Transport endpoint hint
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TransportHint {
     /// Direct QUIC connection
-    QuicDirect { addr: TransportAddress },
+    QuicDirect {
+        addr: TransportAddress,
+        #[serde(default)]
+        bound_local: Option<BoundLocalAddr>,
+    },
     /// QUIC via STUN-discovered reflexive address
     QuicReflexive {
         addr: TransportAddress,
         stun_server: TransportAddress,
+        #[serde(default)]
+        bound_local: Option<BoundLocalAddr>,
     },
     /// WebSocket relay through a relay authority
     WebSocketRelay { relay_authority: AuthorityId },
     /// TCP direct connection
-    TcpDirect { addr: TransportAddress },
+    TcpDirect {
+        addr: TransportAddress,
+        #[serde(default)]
+        bound_local: Option<BoundLocalAddr>,
+    },
 }
 
 impl TransportHint {
     /// Create a QuicDirect hint, validating the address.
     pub fn quic_direct(addr: &str) -> Result<Self, TransportAddressError> {
+        let addr = TransportAddress::new(addr)?;
         Ok(TransportHint::QuicDirect {
-            addr: TransportAddress::new(addr)?,
+            bound_local: Some(BoundLocalAddr(addr.clone())),
+            addr,
         })
     }
 
@@ -408,13 +473,16 @@ impl TransportHint {
         Ok(TransportHint::QuicReflexive {
             addr: TransportAddress::new(addr)?,
             stun_server: TransportAddress::new(stun_server)?,
+            bound_local: None,
         })
     }
 
     /// Create a TcpDirect hint, validating the address.
     pub fn tcp_direct(addr: &str) -> Result<Self, TransportAddressError> {
+        let addr = TransportAddress::new(addr)?;
         Ok(TransportHint::TcpDirect {
-            addr: TransportAddress::new(addr)?,
+            bound_local: Some(BoundLocalAddr(addr.clone())),
+            addr,
         })
     }
 
@@ -426,9 +494,9 @@ impl TransportHint {
     /// Get the primary address for this hint, if any.
     pub fn primary_address(&self) -> Option<&TransportAddress> {
         match self {
-            TransportHint::QuicDirect { addr } => Some(addr),
+            TransportHint::QuicDirect { addr, .. } => Some(addr),
             TransportHint::QuicReflexive { addr, .. } => Some(addr),
-            TransportHint::TcpDirect { addr } => Some(addr),
+            TransportHint::TcpDirect { addr, .. } => Some(addr),
             TransportHint::WebSocketRelay { .. } => None,
         }
     }
@@ -436,6 +504,21 @@ impl TransportHint {
     /// Get the address as a string, if this hint has an address.
     pub fn address_string(&self) -> Option<String> {
         self.primary_address().map(|a| a.to_string())
+    }
+
+    /// Determine if this transport hint is recoverable given current local interfaces.
+    ///
+    /// Recoverability is based on local binding/interface provenance rather than
+    /// reflexive external addresses.
+    pub fn is_recoverable(&self, interfaces: &LocalInterfaces) -> bool {
+        match self {
+            TransportHint::WebSocketRelay { .. } => true,
+            TransportHint::QuicDirect { bound_local, .. }
+            | TransportHint::QuicReflexive { bound_local, .. }
+            | TransportHint::TcpDirect { bound_local, .. } => bound_local
+                .as_ref()
+                .is_some_and(|bound| interfaces.contains_bound(bound)),
+        }
     }
 }
 

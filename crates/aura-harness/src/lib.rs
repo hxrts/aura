@@ -11,6 +11,7 @@ pub mod determinism;
 pub mod events;
 pub mod executor;
 pub mod introspection;
+pub mod network_lab;
 pub mod preflight;
 pub mod replay;
 pub mod resource_guards;

@@ -1,6 +1,6 @@
 # Rendezvous Architecture
 
-This document describes the rendezvous architecture in Aura. It explains peer discovery, descriptor propagation, transport selection, and channel establishment. It aligns with the authority and context model. It scopes all rendezvous behavior to relational contexts.
+This document describes the rendezvous architecture in Aura. It explains peer discovery, descriptor propagation, transport selection, channel establishment, and relay-to-direct holepunch upgrades. It aligns with the authority and context model. It scopes all rendezvous behavior to relational contexts.
 
 ## 1. Overview
 
@@ -49,6 +49,25 @@ The transport layer uses a priority sequence of connection attempts. Direct QUIC
 Aura uses relay-first fallback. Relays use guardians or peers designated to provide relay services. Relay traffic uses end-to-end encryption. Relay capabilities must be valid for the context.
 
 STUN discovery identifies the external address of each participant. Devices query STUN servers periodically. The reflexive address appears in rendezvous descriptors as a transport hint. STUN failure does not prevent rendezvous because relay is always available.
+
+### 3.1 Holepunching and Upgrade Policy
+
+Aura uses a relay-first, direct-upgrade model for NAT traversal:
+
+1. Start on relay as soon as both peers have a valid descriptor path.
+2. Exchange direct/reflexive candidates from descriptor facts.
+3. Launch bounded direct upgrade attempts (holepunch) in the background.
+4. Promote to direct when a recoverable direct path succeeds; otherwise remain on relay.
+
+Retry state is tracked with typed generations (`CandidateGeneration`, `NetworkGeneration`) and bounded backoff (`AttemptBudget`, `BackoffWindow`) in `PeerConnectionActor`. Generation changes reset retry budgets, which avoids stale retry loops after interface/NAT changes.
+
+Recoverability is evaluated from local binding/interface provenance, not from reflexive addresses alone. This prevents treating stale external mappings as viable direct paths.
+
+Operationally:
+
+- Relay path is the safety baseline.
+- Direct holepunch is an optimization path.
+- Network changes can trigger a fresh upgrade cycle without dropping relay connectivity.
 
 ## 4. Data Structures
 

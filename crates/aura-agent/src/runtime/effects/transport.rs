@@ -185,7 +185,7 @@ async fn resolve_peer_addr(
 
 fn descriptor_tcp_addr(descriptor: aura_rendezvous::RendezvousDescriptor) -> Option<String> {
     for hint in descriptor.transport_hints {
-        if let TransportHint::TcpDirect { addr } = hint {
+        if let TransportHint::TcpDirect { addr, .. } = hint {
             return Some(addr.to_string());
         }
     }

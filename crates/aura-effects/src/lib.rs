@@ -88,6 +88,7 @@ pub mod error;
 pub mod guard_interpreter;
 pub mod identifiers;
 pub mod leakage;
+pub mod network_monitor;
 pub mod noise;
 pub mod query;
 pub mod random;
@@ -132,6 +133,7 @@ pub use identifiers::{
     new_operation_id, new_session_id,
 };
 pub use leakage::ProductionLeakageHandler;
+pub use network_monitor::NetworkMonitorHandler;
 pub use noise::RealNoiseHandler;
 pub use query::{
     format_rule, format_value, parse_arg_to_value, parse_fact_to_row, CapabilityPolicy,

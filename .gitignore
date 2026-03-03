@@ -18,9 +18,6 @@ dist/
 *.wasm
 *_bg.wasm.d.ts
 
-# Stylance generated CSS modules
-console/styles/*.rs
-
 # IDE
 .vscode/
 .idea/
@@ -31,8 +28,7 @@ console/styles/*.rs
 .claude
 GEMINI.md
 
-# Aura data directories (mode-specific)
-# All data (leakage/, secure_store/, etc.) is now inside these directories
+# Aura
 .aura/
 aura-data/
 .aura-demo/

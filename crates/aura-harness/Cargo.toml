@@ -11,6 +11,10 @@ description = "Multi-instance runtime harness for Aura"
 [lints]
 workspace = true
 
+[features]
+default = []
+patchbay-backend = ["dep:patchbay"]
+
 [lib]
 path = "src/lib.rs"
 
@@ -20,6 +24,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -28,7 +33,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "rt", "macros", "time", "process", "net", "fs"] }
 portable-pty = "0.9"
 vt100 = "0.15"
 regex = "1.11"
@@ -38,6 +43,7 @@ rand_chacha = { workspace = true }
 sysinfo = { workspace = true }
 aura-core = { path = "../aura-core" }
 ctrlc = "3.4"
+patchbay = { git = "https://github.com/hxrts/patchbay", branch = "hxrts/aura", optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

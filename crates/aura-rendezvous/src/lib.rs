@@ -92,6 +92,7 @@ pub use aura_journal::CapabilityRef;
 
 // Re-export fact types (for journal integration)
 pub use facts::{
+    BoundLocalAddr, LocalInterfaces, ReflexiveAddr, RelayAddr, RemoteCandidateAddr,
     RendezvousDescriptor, RendezvousFact, RendezvousFactReducer, TransportAddress,
     TransportAddressError, TransportHint, RENDEZVOUS_FACT_TYPE_ID,
 };
