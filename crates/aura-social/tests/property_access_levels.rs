@@ -47,7 +47,11 @@ fn allocation_strategy() -> impl Strategy<Value = (u8, u8, u64)> {
         let neighborhood_spent = neighborhood_count as u64 * HomeMemberFact::DEFAULT_ALLOCATION;
         let max_pinned =
             HomeFact::DEFAULT_STORAGE_LIMIT.saturating_sub(resident_spent + neighborhood_spent);
-        (Just(resident_count), Just(neighborhood_count), 0u64..=max_pinned)
+        (
+            Just(resident_count),
+            Just(neighborhood_count),
+            0u64..=max_pinned,
+        )
     })
 }
 
@@ -65,7 +69,9 @@ fn neighborhoods_for_hops(hops: u8) -> (Home, Option<HomeId>, Vec<Neighborhood>)
         return (Home::new_empty(target), Some(target), Vec::new());
     }
 
-    let homes: Vec<HomeId> = (0..=hops).map(|step| home_id(step.saturating_add(1))).collect();
+    let homes: Vec<HomeId> = (0..=hops)
+        .map(|step| home_id(step.saturating_add(1)))
+        .collect();
     let mut neighborhoods = Vec::new();
 
     for step in 0..hops {

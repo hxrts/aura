@@ -290,12 +290,7 @@ fn execute_step(
                 context,
             )?;
             let field = parse_screen_field(step.from.as_deref().unwrap_or("screen"))?;
-            let payload = dispatch_payload(
-                tool_api,
-                ToolRequest::Screen {
-                    instance_id,
-                },
-            )?;
+            let payload = dispatch_payload(tool_api, ToolRequest::Screen { instance_id })?;
             let source = screen_field_value(&payload, field);
             let regex = Regex::new(&regex_pattern)
                 .map_err(|error| anyhow!("step {} invalid regex: {error}", step.id))?;
@@ -592,12 +587,7 @@ fn execute_step(
                 .var
                 .as_deref()
                 .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
-            let payload = dispatch_payload(
-                tool_api,
-                ToolRequest::GetAuthorityId {
-                    instance_id,
-                },
-            )?;
+            let payload = dispatch_payload(tool_api, ToolRequest::GetAuthorityId { instance_id })?;
             let authority_id = payload
                 .get("authority_id")
                 .and_then(serde_json::Value::as_str)
@@ -609,12 +599,7 @@ fn execute_step(
         }
         ScenarioAction::ListChannels => {
             let instance_id = resolve_required_instance(step, context)?;
-            let payload = dispatch_payload(
-                tool_api,
-                ToolRequest::ListChannels {
-                    instance_id,
-                },
-            )?;
+            let payload = dispatch_payload(tool_api, ToolRequest::ListChannels { instance_id })?;
             if let Some(var) = step.var.as_deref() {
                 let channels = payload
                     .get("channels")
@@ -637,12 +622,8 @@ fn execute_step(
         }
         ScenarioAction::CurrentSelection => {
             let instance_id = resolve_required_instance(step, context)?;
-            let payload = dispatch_payload(
-                tool_api,
-                ToolRequest::CurrentSelection {
-                    instance_id,
-                },
-            )?;
+            let payload =
+                dispatch_payload(tool_api, ToolRequest::CurrentSelection { instance_id })?;
             if let Some(var) = step.var.as_deref() {
                 let value = payload
                     .get("selection")
@@ -657,12 +638,7 @@ fn execute_step(
         }
         ScenarioAction::ListContacts => {
             let instance_id = resolve_required_instance(step, context)?;
-            let payload = dispatch_payload(
-                tool_api,
-                ToolRequest::ListContacts {
-                    instance_id,
-                },
-            )?;
+            let payload = dispatch_payload(tool_api, ToolRequest::ListContacts { instance_id })?;
             if let Some(var) = step.var.as_deref() {
                 let contacts = payload
                     .get("contacts")
