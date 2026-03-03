@@ -425,21 +425,21 @@ TCP-based transport with:
 
 ### Phase 1: Foundations (P0)
 
-- [ ] **Unify `telltale-theory` dependency policy**
+- [x] **Unify `telltale-theory` dependency policy**
   - Add `telltale-theory = "2.1"` to root `[workspace.dependencies]`.
   - Switch per-crate direct dependency declarations to `{ workspace = true }` where used.
   - Done when:
     - `cargo check -p aura-agent` passes.
     - `rg -n "telltale-theory" Cargo.toml crates/*/Cargo.toml` shows workspace-driven usage.
 
-- [ ] **Define deterministic coherence input model**
+- [x] **Define deterministic coherence input model**
   - Specify how `initial_delivery_env` is derived from parsed choreography.
   - Document this mapping in comments/docs adjacent to macro validation code.
   - Done when:
     - Macro-side unit tests cover at least: simple send, choice branch, and loop.
     - Validation behavior is deterministic across repeated runs.
 
-- [ ] **Add protocol validation helpers in `aura-testkit`**
+- [x] **Add protocol validation helpers in `aura-testkit`**
   - Add `crates/aura-testkit/src/protocol_validation.rs` (new) with:
     - `assert_protocol_coherent(...)`
     - `assert_orphan_free_for_all_roles(...)`
@@ -448,103 +448,135 @@ TCP-based transport with:
     - `cargo test -p aura-testkit` passes.
     - At least one consumer test in another crate uses the helper.
 
-- [ ] **Integrate coherence validation into choreography tooling**
+- [x] **Integrate coherence validation into choreography tooling**
   - Add coherence checks in `crates/aura-macros/src/choreography.rs` after parse/projection.
   - Emit compile-time diagnostics with actionable error context.
   - Done when:
     - `cargo test -p aura-macros` passes.
     - A negative test demonstrates macro failure on incoherent choreography.
 
-- [ ] **Add orphan-free tests to existing protocol suites**
+- [x] **Add orphan-free tests to existing protocol suites**
   - Recovery: extend `crates/aura-recovery/tests/recovery_protocol_tests.rs`.
   - Consensus: add assertions in an existing test file or a new dedicated test under `crates/aura-consensus/tests/`.
   - Done when:
     - `cargo test -p aura-recovery` passes.
     - `cargo test -p aura-consensus` passes.
 
-- [ ] **Phase 1 test gate: keep the workspace green**
+- [x] **Phase 1 test gate: keep the workspace green**
   - Run `just test` and `just check-arch`.
   - Done when:
     - Full workspace tests pass.
     - Architecture checks pass with no new violations.
+  - Current status (March 3, 2026): `just test` and `just check-arch` pass.
 
 ### Phase 2: Protocol Evolution Gate (P1)
 
-- [ ] **Design and document choreography compatibility policy**
+- [x] **Design and document choreography compatibility policy**
   - Define allowed vs. breaking changes in terms of `async_subtype` outcomes.
   - Update `docs/108_mpst_and_choreography.md` with version bump rules.
   - Done when:
     - Policy includes at least: additive branch, payload widening/narrowing, role changes.
     - A reviewer can classify a change without reading implementation code.
 
-- [ ] **Implement CI compatibility checker as tooling (not runtime)**
+- [x] **Implement CI compatibility checker as tooling (not runtime)**
   - Add `scripts/check-protocol-compat.sh` (new), or equivalent tooling command.
   - Compare baseline projections vs. current projections via `async_subtype`.
   - Done when:
     - Script exits non-zero on an intentionally breaking fixture.
     - Script exits zero on a known-compatible fixture.
 
-- [ ] **Wire compatibility checker into CI/Just workflow**
+- [x] **Wire compatibility checker into CI/Just workflow**
   - Add a `just` target (e.g., `ci-protocol-compat`) and integrate in CI.
   - Done when:
     - `just ci-protocol-compat` runs locally.
     - CI blocks PRs on compatibility failure.
 
-- [ ] **Phase 2 test gate: keep the workspace green**
+- [x] **Phase 2 test gate: keep the workspace green**
   - Run `just test` and `just check-arch`.
   - Done when:
     - Full workspace tests pass.
     - Architecture checks pass with no new violations.
+  - Current status (March 3, 2026): `just test` and `just check-arch` pass.
 
 ### Phase 3: Enhanced Simulation Coverage (P2)
 
-- [ ] **Gap assessment for Telltale fault patterns**
+- [x] **Gap assessment for Telltale fault patterns**
   - Compare current `aura-simulator` capabilities against Telltale fault taxonomy.
   - Capture adoption plan (what to port, what to skip, why) in this document.
   - Done when:
     - Decision table exists with rationale per fault type/trigger.
 
-- [ ] **Port selected fault and trigger abstractions**
+- [x] **Port selected fault and trigger abstractions**
   - Implement only high-value, non-duplicative patterns in `aura-simulator`.
   - Done when:
     - New simulator tests demonstrate each adopted fault type.
     - Existing simulator suite remains deterministic.
 
-- [ ] **Add runtime invariant monitor equivalent**
+- [x] **Add runtime invariant monitor equivalent**
   - Add property monitoring hooks tied to existing Aura invariant signals.
   - Done when:
     - At least one simulation test fails when an injected fault violates a monitored invariant.
 
-- [ ] **Phase 3 test gate: keep the workspace green**
+- [x] **Phase 3 test gate: keep the workspace green**
   - Run `just test` and `just check-arch`.
   - Done when:
     - Full workspace tests pass.
     - Architecture checks pass with no new violations.
+  - Current status (March 3, 2026): `just test` and `just check-arch` pass.
+
+#### Phase 3 Gap Assessment (Completed March 3, 2026)
+
+| Telltale Pattern | Aura Simulator Baseline | Decision | Rationale | Outcome |
+|------------------|-------------------------|----------|-----------|---------|
+| `MessageDrop` fault | Supported in `SimulationFaultHandler`, no dedicated scenario builder | Adopt | Common failure mode for delivery/liveness regressions | Added `ScenarioDefinition::telltale_message_drop(...)` + unit coverage |
+| `MessageDelay` fault | Already supported and exposed via scenario builder | Keep | Already useful and deterministic | Retained existing builder/test coverage |
+| `MessageCorruption` fault | Already supported and exposed via scenario builder | Keep | Already mapped to canonical `AuraFaultKind::MessageCorruption` | Retained existing builder/test coverage |
+| `NodeCrash` fault | Supported in canonical fault model, no dedicated scenario builder | Adopt | High-signal failure mode for coordinator/witness resilience | Added `ScenarioDefinition::telltale_node_crash(...)` + unit coverage |
+| `NetworkPartition` fault | Already supported and exposed via scenario builder | Keep | Matches existing consensus/liveness perturbation tests | Retained existing builder/test coverage |
+| Trigger `AtTick` | Present | Keep | Direct map from deterministic time domain | Retained |
+| Trigger `AfterStep` | Missing explicit variant | Adopt | Improves test readability and aligns with Telltale naming | Added `TriggerCondition::AfterStep(u64)` |
+| Trigger `OnEvent` | Type existed, activation path incomplete | Adopt | Needed for event-driven fault scheduling | Added deterministic event-trigger activation in scenario handler |
+| Trigger `Random` | Existing randomization toggle, no deterministic per-scenario trigger pass | Keep and tighten | Preserve reproducibility | Deterministic hash-based trigger evaluation per scenario/tick |
+| Trigger `Immediate` | Manual invocation path only | Keep manual | Avoid surprising auto-trigger on registration in existing tests | No behavior break; manual trigger remains explicit |
 
 ### Phase 4: Verification Expansion (P3)
 
-- [ ] **Evaluate `telltale-lean-bridge` overlap and ROI**
+- [x] **Evaluate `telltale-lean-bridge` overlap and ROI**
   - Compare with current `verification/lean` and `verification/quint` scope.
   - Decide: integrate now, defer, or reject.
   - Done when:
     - A written decision includes cost, overlap, and incremental assurance gained.
 
-- [ ] **If approved, add golden-file parity lane**
+- [x] **If approved, add golden-file parity lane**
   - Introduce bridge dependency and CI lane only after ROI decision.
   - Done when:
     - CI parity lane is reproducible and documented.
     - Failure output is actionable for protocol developers.
 
-- [ ] **Update verification docs**
+- [x] **Update verification docs**
   - Extend `docs/806_verification_guide.md` with any adopted Telltale verification workflow.
   - Done when:
     - Developer can run the full verification flow from docs without tribal knowledge.
 
-- [ ] **Phase 4 test gate: keep the workspace green**
+- [x] **Phase 4 test gate: keep the workspace green**
   - Run `just test`, `just check-arch`, and `just check-invariants`.
   - Done when:
     - Full workspace tests pass.
     - Architecture and invariant checks pass with no new violations.
+  - Current status (March 3, 2026): `just test`, `just check-arch`, and `just check-invariants` pass.
+
+#### Phase 4 ROI Decision (Completed March 3, 2026)
+
+Decision: **Defer integrating `telltale-lean-bridge` as a new dependency**.
+
+| Dimension | Assessment |
+|-----------|------------|
+| Cost | Medium-to-high maintenance cost (new dependency surface + CI lane ownership + triage burden) |
+| Overlap | High overlap with existing `just ci-lean-quint-bridge` and `just ci-simulator-telltale-parity` workflows already in Aura |
+| Incremental assurance | Low-to-medium incremental value right now relative to existing verification coverage |
+| Decision | Defer until a concrete verification blind spot is identified that existing lanes cannot cover |
+
+Interpretation for the conditional task: no new parity lane was added because ROI decision did **not** approve the integration at this time.
 
 ---
 
@@ -580,11 +612,11 @@ Version policy:
 
 | Feature | Priority | Effort | Status |
 |---------|----------|--------|--------|
-| Coherence checking | P0 | Medium | [ ] Design + implementation pending |
-| Orphan-free validation | P0 | Low | [ ] Not started |
-| Async subtyping CI gate | P1 | Medium | [ ] Not started |
-| Fault injection patterns | P2 | Medium | [ ] Not evaluated |
-| Lean bridge integration | P3 | High | [ ] Not evaluated |
+| Coherence checking | P0 | Medium | [x] Implemented in macro pipeline with deterministic model derivation and compile-fail coverage |
+| Orphan-free validation | P0 | Low | [x] Implemented via shared testkit helpers and recovery/consensus tests |
+| Async subtyping CI gate | P1 | Medium | [x] Implemented via `scripts/check-protocol-compat.sh` + CI/Just wiring |
+| Fault injection patterns | P2 | Medium | [x] Gap assessed and selected fault/trigger abstractions implemented in simulator |
+| Lean bridge integration | P3 | High | [x] Evaluated; deferred (no new dependency or lane added) |
 | RuntimeContracts/TheoremPack | P3 | High | [ ] Not needed yet |
 
 ---

@@ -275,6 +275,55 @@ just ci-conformance
 
 See [Testing Guide](804_testing_guide.md) for corpus policy details.
 
+## Telltale Verification Workflow in Aura
+
+Use this workflow for choreography and simulator-level verification that depends on Telltale-derived checks.
+
+### 1) Choreography compatibility gate (CI/tooling)
+
+Run:
+
+```bash
+nix develop --command scripts/check-protocol-compat.sh --self-test
+nix develop --command just ci-protocol-compat
+```
+
+This validates:
+- known-compatible fixture pairs pass async subtyping checks
+- known-breaking fixture pairs fail as expected
+- changed `.choreo` files stay backward-compatible unless intentionally breaking
+
+Fixture location:
+- `crates/aura-testkit/fixtures/protocol_compat/`
+
+### 2) Macro-time coherence gate
+
+Run:
+
+```bash
+nix develop --command cargo test -p aura-macros
+```
+
+This enforces compile-time coherence validation for choreographies, including negative compile-fail coverage.
+
+### 3) Simulator invariant monitoring under injected faults
+
+Run:
+
+```bash
+nix develop --command cargo test -p aura-simulator --test fault_invariant_monitor
+```
+
+This verifies that injected faults produce monitor-visible invariant violations (for example, `NoFaults` violations), and that a gate configured to require zero violations fails accordingly.
+
+### 4) Current `telltale-lean-bridge` decision
+
+As of March 3, 2026, Aura **defers** adding `telltale-lean-bridge` as a new dependency.
+
+Reason:
+- existing `just ci-lean-quint-bridge` and `just ci-simulator-telltale-parity` lanes already provide overlap for current assurance goals
+- additional bridge dependency cost is not justified until a specific verification blind spot is identified
+
 ## Lean-Quint Bridge
 
 The bridge connects Quint model checking with Telltale and Lean proof artifacts. It enables exporting Quint session models to a stable interchange format, importing Telltale and Lean properties back into Quint harnesses, and running cross-validation to detect divergence early in CI.

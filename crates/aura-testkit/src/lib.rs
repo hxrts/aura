@@ -126,6 +126,7 @@ pub mod mock_effects;
 pub mod mock_runtime_bridge;
 pub mod mocks;
 pub mod protocol_test; // Fluent protocol test API
+pub mod protocol_validation;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod replay; // Effect trace replay helpers for native parity/debug tooling
 pub mod simulation;
@@ -163,6 +164,7 @@ pub use protocol_test::{
     ExecutionMode, ParticipantState, ProtocolEvent, ProtocolTest, ProtocolTestObserver,
     ProtocolTestResult, ProtocolTestRunner, ProtocolTestStatistics, StepResult, SteppedParticipant,
 };
+pub use protocol_validation::*;
 
 // Re-export stateful effects (all items)
 pub use stateful_effects::*;

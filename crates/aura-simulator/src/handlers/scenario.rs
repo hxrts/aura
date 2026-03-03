@@ -10,7 +10,9 @@ use aura_core::frost::ThresholdSignature;
 use aura_core::{AuraError, AuraFault, AuraFaultKind, AuthorityId, CorruptionMode, FaultEdge};
 use aura_testkit::simulation::choreography::{test_threshold_group, ChoreographyTestHarness};
 use std::any::Any;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, HashMap};
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -270,6 +272,52 @@ impl ScenarioDefinition {
             priority: 10,
         }
     }
+
+    /// Build a scenario that injects a Telltale-style message drop fault.
+    pub fn telltale_message_drop(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        probability: f64,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            actions: vec![InjectionAction::TriggerFault {
+                fault: AuraFault::new(AuraFaultKind::MessageDrop {
+                    edge: FaultEdge::new("*", "*"),
+                    probability,
+                }),
+            }],
+            trigger: TriggerCondition::Immediate,
+            duration: None,
+            priority: 10,
+        }
+    }
+
+    /// Build a scenario that injects a Telltale-style node crash fault.
+    pub fn telltale_node_crash(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        node: impl Into<String>,
+        at_tick: Option<u64>,
+        duration: Option<Duration>,
+    ) -> Self {
+        let trigger = at_tick.map_or(TriggerCondition::Immediate, TriggerCondition::AtTick);
+        Self {
+            id: id.into(),
+            name: name.into(),
+            actions: vec![InjectionAction::TriggerFault {
+                fault: AuraFault::new(AuraFaultKind::NodeCrash {
+                    node: node.into(),
+                    at_tick,
+                    duration,
+                }),
+            }],
+            trigger,
+            duration,
+            priority: 10,
+        }
+    }
 }
 
 /// Conditions for triggering scenarios
@@ -281,6 +329,8 @@ pub enum TriggerCondition {
     AfterTime(Duration),
     /// Trigger when simulation reaches tick count
     AtTick(u64),
+    /// Trigger after a number of simulation steps (ticks)
+    AfterStep(u64),
     /// Trigger when specific event occurs
     OnEvent(String),
     /// Trigger randomly based on probability
@@ -308,6 +358,7 @@ struct ScenarioState {
     injection_probability: f64,
     max_concurrent_injections: usize,
     total_injections: u64,
+    trigger_counts: HashMap<String, u64>,
     seed: u64,
     // Multi-actor chat support
     chat_groups: HashMap<String, ChatGroup>,
@@ -438,6 +489,7 @@ impl SimulationScenarioHandler {
                 injection_probability: 0.1,
                 max_concurrent_injections: 3,
                 total_injections: 0,
+                trigger_counts: HashMap::new(),
                 seed,
                 chat_groups: HashMap::new(),
                 message_history: HashMap::new(),
@@ -475,34 +527,8 @@ impl SimulationScenarioHandler {
         let mut state = self.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
-
-        if state.active_injections.len() >= state.max_concurrent_injections {
-            return Err(TestingError::EventRecordingError {
-                event_type: "scenario_trigger".to_string(),
-                reason: "Maximum concurrent injections reached".to_string(),
-            });
-        }
-
-        let scenario =
-            state
-                .scenarios
-                .get(scenario_id)
-                .ok_or_else(|| TestingError::EventRecordingError {
-                    event_type: "scenario_trigger".to_string(),
-                    reason: format!("Scenario '{scenario_id}' not found"),
-                })?;
-
-        let injection = ActiveInjection {
-            scenario_id: scenario_id.to_string(),
-            start_tick: state.current_tick,
-            duration_ms: scenario.duration.map(|d| d.as_millis() as u64),
-            actions_applied: Vec::new(),
-        };
-
-        state.active_injections.push(injection);
-        state.total_injections += 1;
-
-        Ok(())
+        Self::cleanup_expired_injections_locked(&mut state);
+        Self::activate_scenario_locked(&mut state, scenario_id)
     }
 
     /// Advance simulated time by ticks
@@ -522,6 +548,8 @@ impl SimulationScenarioHandler {
             ]),
         });
         self.cleanup_expired_conditions(&mut state);
+        Self::cleanup_expired_injections_locked(&mut state);
+        Self::evaluate_scenario_triggers_locked(&mut state, None)?;
         Ok(())
     }
 
@@ -558,6 +586,8 @@ impl SimulationScenarioHandler {
                 ("duration_ticks".to_string(), duration_ticks.to_string()),
             ]),
         });
+        Self::cleanup_expired_injections_locked(&mut state);
+        Self::evaluate_scenario_triggers_locked(&mut state, Some("network_condition"))?;
 
         Ok(())
     }
@@ -1442,15 +1472,7 @@ impl SimulationScenarioHandler {
         let mut state = self.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
-
-        let now_tick = state.current_tick;
-        state.active_injections.retain(|injection| {
-            match injection.duration_ms {
-                Some(duration_ms) => now_tick.saturating_sub(injection.start_tick) < duration_ms,
-                None => true, // Permanent injections stay active
-            }
-        });
-
+        Self::cleanup_expired_injections_locked(&mut state);
         Ok(())
     }
 
@@ -1461,26 +1483,112 @@ impl SimulationScenarioHandler {
             .retain(|c| c.expires_at_tick > current_tick);
     }
 
-    /// Check if scenario should be randomly triggered
-    fn should_trigger_random_scenario(&self) -> Result<bool, TestingError> {
-        let state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
-        })?;
+    fn cleanup_expired_injections_locked(state: &mut ScenarioState) {
+        let now_tick = state.current_tick;
+        state.active_injections.retain(|injection| {
+            match injection.duration_ms {
+                Some(duration_ms) => now_tick.saturating_sub(injection.start_tick) < duration_ms,
+                None => true, // Permanent injections stay active
+            }
+        });
+    }
 
-        if !state.enable_randomization {
-            return Ok(false);
-        }
-
+    fn activate_scenario_locked(
+        state: &mut ScenarioState,
+        scenario_id: &str,
+    ) -> Result<(), TestingError> {
         if state.active_injections.len() >= state.max_concurrent_injections {
-            return Ok(false);
+            return Err(TestingError::EventRecordingError {
+                event_type: "scenario_trigger".to_string(),
+                reason: "Maximum concurrent injections reached".to_string(),
+            });
         }
 
-        // Use deterministic pseudo-random based on seed
-        let mut rng_state = state.seed;
-        rng_state = rng_state.wrapping_mul(1103515245).wrapping_add(12345);
-        let random_value = (rng_state >> 16) as f64 / u16::MAX as f64;
+        let scenario =
+            state
+                .scenarios
+                .get(scenario_id)
+                .ok_or_else(|| TestingError::EventRecordingError {
+                    event_type: "scenario_trigger".to_string(),
+                    reason: format!("Scenario '{scenario_id}' not found"),
+                })?;
 
-        Ok(random_value < state.injection_probability)
+        if state
+            .active_injections
+            .iter()
+            .any(|injection| injection.scenario_id == scenario_id)
+        {
+            return Ok(());
+        }
+
+        let injection = ActiveInjection {
+            scenario_id: scenario_id.to_string(),
+            start_tick: state.current_tick,
+            duration_ms: scenario.duration.map(|d| d.as_millis() as u64),
+            actions_applied: Vec::new(),
+        };
+
+        state.active_injections.push(injection);
+        state.total_injections += 1;
+        *state
+            .trigger_counts
+            .entry(scenario_id.to_string())
+            .or_insert(0) += 1;
+        Ok(())
+    }
+
+    fn trigger_matches(
+        state: &ScenarioState,
+        scenario_id: &str,
+        trigger: &TriggerCondition,
+        event_type: Option<&str>,
+    ) -> bool {
+        match trigger {
+            TriggerCondition::Immediate => false,
+            TriggerCondition::AfterTime(duration) => {
+                state.current_tick >= duration.as_millis() as u64
+            }
+            TriggerCondition::AtTick(tick) => state.current_tick >= *tick,
+            TriggerCondition::AfterStep(steps) => state.current_tick >= *steps,
+            TriggerCondition::OnEvent(event_name) => {
+                event_type.is_some_and(|evt| evt == event_name)
+            }
+            TriggerCondition::Random(probability) => {
+                if !state.enable_randomization {
+                    return false;
+                }
+                let mut hasher = DefaultHasher::new();
+                state.seed.hash(&mut hasher);
+                state.current_tick.hash(&mut hasher);
+                scenario_id.hash(&mut hasher);
+                let random_value = hasher.finish() as f64 / u64::MAX as f64;
+                random_value < probability.clamp(0.0, 1.0)
+            }
+        }
+    }
+
+    fn evaluate_scenario_triggers_locked(
+        state: &mut ScenarioState,
+        event_type: Option<&str>,
+    ) -> Result<(), TestingError> {
+        let mut candidates: Vec<(u32, String)> = state
+            .scenarios
+            .iter()
+            .filter(|(scenario_id, _)| !state.trigger_counts.contains_key(*scenario_id))
+            .filter(|(scenario_id, scenario)| {
+                Self::trigger_matches(state, scenario_id, &scenario.trigger, event_type)
+            })
+            .map(|(scenario_id, scenario)| (scenario.priority, scenario_id.clone()))
+            .collect();
+
+        candidates.sort_by(|left, right| right.0.cmp(&left.0).then(left.1.cmp(&right.1)));
+        for (_, scenario_id) in candidates {
+            if state.active_injections.len() >= state.max_concurrent_injections {
+                break;
+            }
+            Self::activate_scenario_locked(state, &scenario_id)?;
+        }
+        Ok(())
     }
 
     /// Create a chat group for multi-actor scenarios
@@ -1493,9 +1601,6 @@ impl SimulationScenarioHandler {
         let mut state = self.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
-
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
 
         let mut hasher = DefaultHasher::new();
         group_name.hash(&mut hasher);
@@ -1980,14 +2085,8 @@ impl SimulationScenarioHandler {
         };
 
         state.events.push(event);
-
-        // Check for scenario triggers based on events
-        if event_type == "scenario_trigger_request" {
-            self.cleanup_expired_injections()?;
-            if self.should_trigger_random_scenario()? {
-                // Could trigger a random scenario here
-            }
-        }
+        Self::cleanup_expired_injections_locked(&mut state);
+        Self::evaluate_scenario_triggers_locked(&mut state, Some(event_type))?;
 
         Ok(())
     }
@@ -2387,5 +2486,70 @@ mod tests {
             Some(InjectionAction::TriggerFault { fault })
                 if matches!(fault.fault, AuraFaultKind::MessageDelay { .. })
         ));
+
+        let drop = ScenarioDefinition::telltale_message_drop("drop", "Drop", 0.5);
+        assert!(matches!(
+            drop.actions.first(),
+            Some(InjectionAction::TriggerFault { fault })
+                if matches!(fault.fault, AuraFaultKind::MessageDrop { .. })
+        ));
+
+        let node_crash = ScenarioDefinition::telltale_node_crash(
+            "crash",
+            "Node Crash",
+            "coordinator",
+            Some(7),
+            Some(Duration::from_secs(3)),
+        );
+        assert!(matches!(
+            node_crash.actions.first(),
+            Some(InjectionAction::TriggerFault { fault })
+                if matches!(fault.fault, AuraFaultKind::NodeCrash { .. })
+        ));
+        assert!(matches!(node_crash.trigger, TriggerCondition::AtTick(7)));
+    }
+
+    #[test]
+    fn test_after_step_trigger_activates() {
+        let handler = SimulationScenarioHandler::new(321);
+        handler
+            .register_scenario(ScenarioDefinition {
+                id: "after_step".to_string(),
+                name: "AfterStep".to_string(),
+                actions: vec![],
+                trigger: TriggerCondition::AfterStep(5),
+                duration: Some(Duration::from_secs(5)),
+                priority: 5,
+            })
+            .expect("register scenario");
+
+        handler.wait_ticks(4).expect("advance ticks");
+        let before = handler.get_injection_stats().expect("stats");
+        assert_eq!(before.get("total_injections"), Some(&"0".to_string()));
+
+        handler.wait_ticks(1).expect("advance ticks");
+        let after = handler.get_injection_stats().expect("stats");
+        assert_eq!(after.get("total_injections"), Some(&"1".to_string()));
+    }
+
+    #[test]
+    fn test_on_event_trigger_activates() {
+        let handler = SimulationScenarioHandler::new(654);
+        handler
+            .register_scenario(ScenarioDefinition {
+                id: "on_event".to_string(),
+                name: "OnEvent".to_string(),
+                actions: vec![],
+                trigger: TriggerCondition::OnEvent("network_condition".to_string()),
+                duration: Some(Duration::from_secs(5)),
+                priority: 5,
+            })
+            .expect("register scenario");
+
+        handler
+            .apply_network_condition("partitioned", vec!["alice".to_string()], 3)
+            .expect("apply network condition");
+        let stats = handler.get_injection_stats().expect("stats");
+        assert_eq!(stats.get("total_injections"), Some(&"1".to_string()));
     }
 }

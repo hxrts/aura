@@ -16,7 +16,7 @@ protocol ParameterizedRolesAndParallel =
       @parallel
       Coordinator -> Auditors[*] : CommitNotice
     Abort ->
-      Coordinator -> Workers[*] : AbortNotice
+      Coordinator -> Auditors[*] : AbortNotice
 "#);
 
 fn main() {}

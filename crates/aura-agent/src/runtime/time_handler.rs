@@ -422,6 +422,26 @@ impl Default for EnhancedTimeHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::effects::TimeError;
+    use aura_core::time::PhysicalTime;
+
+    struct FixedTimeProvider {
+        ts_ms: u64,
+    }
+
+    #[async_trait::async_trait]
+    impl PhysicalTimeEffects for FixedTimeProvider {
+        async fn physical_time(&self) -> std::result::Result<PhysicalTime, TimeError> {
+            Ok(PhysicalTime {
+                ts_ms: self.ts_ms,
+                uncertainty: Some(0),
+            })
+        }
+
+        async fn sleep_ms(&self, _ms: u64) -> std::result::Result<(), TimeError> {
+            Ok(())
+        }
+    }
 
     #[tokio::test]
     async fn test_enhanced_time_handler_creation() {
@@ -435,7 +455,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_time_operations() {
-        let handler = EnhancedTimeHandler::default();
+        let fixed_ts = 1_772_576_325_465;
+        let handler = EnhancedTimeHandler::with_provider(Arc::new(FixedTimeProvider {
+            ts_ms: fixed_ts,
+        }));
 
         let current_epoch = handler.current_epoch().await.unwrap();
         let current_timestamp = handler.current_timestamp().await.unwrap();
@@ -444,6 +467,7 @@ mod tests {
         assert!(current_epoch > 0);
         assert!(current_timestamp > 0);
         assert!(current_timestamp_millis > 0);
+        assert_eq!(current_timestamp, fixed_ts);
         assert_eq!(current_epoch, current_timestamp_millis);
     }
 

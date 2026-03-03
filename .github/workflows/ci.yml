@@ -47,6 +47,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: test
@@ -74,6 +76,8 @@ jobs:
           CARGO_BUILD_JOBS: 4
           CARGO_PROFILE_DEV_DEBUG: 0
           CARGO_INCREMENTAL: 0
+      - name: Run protocol compatibility gate
+        run: nix develop --command just ci-protocol-compat
 
   holepunch-tier1:
     name: Holepunch Tier 1

@@ -20,9 +20,10 @@ use syn::{
     Attribute, Expr, ExprLit, ExprMacro, Ident, Lit, LitStr, Stmt, Type,
 };
 use telltale_choreography::{
-    ast::{Choreography, MessageType, Protocol},
+    ast::{Choreography, GlobalTypeCore, MessageType, PayloadSort, Protocol},
     compiler::{codegen::generate_choreography_code, parse_choreography_str, project},
 };
+use telltale_theory::check_coherent;
 
 // Import Biscuit-related types for the updated annotation system
 use aura_mpst::ast_extraction::{extract_aura_annotations, AuraEffect};
@@ -40,6 +41,233 @@ struct ChoreographyInput {
 struct ChoreographyMacroInput {
     attrs: Vec<Attribute>,
     expr: Expr,
+}
+
+type DeliveryEdge = (String, String, String);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CoherenceValidationInput {
+    global_type: GlobalTypeCore,
+    // Deterministic initial delivery environment (Coherent(G, D)):
+    // keys are (sender, receiver, label), all initialized to 0 buffered messages.
+    initial_delivery_env: BTreeMap<DeliveryEdge, usize>,
+}
+
+#[derive(Debug)]
+enum CoherenceModelError {
+    UnsupportedFeature {
+        feature: &'static str,
+        hint: &'static str,
+    },
+    InvalidChoice(String),
+}
+
+impl std::fmt::Display for CoherenceModelError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedFeature { feature, hint } => {
+                write!(
+                    f,
+                    "unsupported DSL feature for coherence conversion: {feature}. {hint}"
+                )
+            }
+            Self::InvalidChoice(reason) => write!(f, "{reason}"),
+        }
+    }
+}
+
+fn validate_protocol_coherence(choreography: &Choreography) -> Result<(), String> {
+    let coherence_input = build_coherence_validation_input(choreography)
+        .map_err(|err| format!("failed to derive theory model: {err}"))?;
+
+    let bundle = check_coherent(&coherence_input.global_type);
+    if bundle.is_coherent() {
+        return Ok(());
+    }
+
+    let mut failed = Vec::new();
+    if !bundle.size {
+        failed.push("size (every communication must have at least one branch)");
+    }
+    if !bundle.action {
+        failed.push("action (sender and receiver must differ)");
+    }
+    if !bundle.uniq_labels {
+        failed.push("uniq_labels (branch labels must be unique)");
+    }
+    if !bundle.projectable {
+        failed.push("projectable (every role must project successfully)");
+    }
+    if !bundle.good {
+        failed.push("good (enabled steps must be executable)");
+    }
+
+    let preview = coherence_input
+        .initial_delivery_env
+        .keys()
+        .take(6)
+        .map(|(src, dst, label)| format!("{src}->{dst}:{label}=0"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    Err(format!(
+        "Coherence validation failed for choreography `{}`.\n\
+         Failed predicates: {}.\n\
+         Deterministic initial_delivery_env channels: [{}].\n\
+         Hint: ensure choice branches are mergeable for non-participants and avoid self-sends.",
+        choreography.name,
+        failed.join(", "),
+        preview
+    ))
+}
+
+fn build_coherence_validation_input(
+    choreography: &Choreography,
+) -> Result<CoherenceValidationInput, CoherenceModelError> {
+    let mut next_loop_id = 0usize;
+    let global_type = protocol_to_global_for_coherence(&choreography.protocol, &mut next_loop_id)?;
+    let mut initial_delivery_env = BTreeMap::new();
+    collect_initial_delivery_env(&global_type, &mut initial_delivery_env);
+    Ok(CoherenceValidationInput {
+        global_type,
+        initial_delivery_env,
+    })
+}
+
+fn protocol_to_global_for_coherence(
+    protocol: &Protocol,
+    next_loop_id: &mut usize,
+) -> Result<GlobalTypeCore, CoherenceModelError> {
+    match protocol {
+        Protocol::End => Ok(GlobalTypeCore::End),
+        Protocol::Var(ident) => Ok(GlobalTypeCore::var(ident.to_string())),
+        Protocol::Rec { label, body } => Ok(GlobalTypeCore::mu(
+            label.to_string(),
+            protocol_to_global_for_coherence(body, next_loop_id)?,
+        )),
+        Protocol::Loop { body, .. } => {
+            let loop_var = format!("__loop_{}", *next_loop_id);
+            *next_loop_id += 1;
+            Ok(GlobalTypeCore::mu(
+                loop_var,
+                protocol_to_global_for_coherence(body, next_loop_id)?,
+            ))
+        }
+        Protocol::Send {
+            from,
+            to,
+            message,
+            continuation,
+            ..
+        } => Ok(GlobalTypeCore::send(
+            from.name().to_string(),
+            to.name().to_string(),
+            message_to_theory_label(message),
+            protocol_to_global_for_coherence(continuation, next_loop_id)?,
+        )),
+        Protocol::Choice { role, branches, .. } => {
+            let first_receiver = match &branches[0].protocol {
+                Protocol::Send { from, to, .. } if from.name() == role.name() => {
+                    to.name().to_string()
+                }
+                _ => {
+                    return Err(CoherenceModelError::InvalidChoice(format!(
+                        "invalid choice at role `{}`: branch `{}` does not start with send from decider",
+                        role.name(),
+                        branches[0].label
+                    )));
+                }
+            };
+
+            let mut mapped_branches = Vec::with_capacity(branches.len());
+            for branch in branches {
+                match &branch.protocol {
+                    Protocol::Send {
+                        from,
+                        to,
+                        message,
+                        continuation,
+                        ..
+                    } => {
+                        if from.name() != role.name() {
+                            return Err(CoherenceModelError::InvalidChoice(format!(
+                                "invalid choice at role `{}`: branch `{label}` starts from `{}`",
+                                role.name(),
+                                from.name(),
+                                label = branch.label
+                            )));
+                        }
+                        if to.name() != first_receiver.as_str() {
+                            return Err(CoherenceModelError::InvalidChoice(format!(
+                                "invalid choice at role `{}`: branch `{label}` sends to `{}` but expected `{}`",
+                                role.name(),
+                                to.name(),
+                                first_receiver,
+                                label = branch.label
+                            )));
+                        }
+                        mapped_branches.push((
+                            message_to_theory_label(message),
+                            protocol_to_global_for_coherence(continuation, next_loop_id)?,
+                        ));
+                    }
+                    _ => {
+                        return Err(CoherenceModelError::InvalidChoice(format!(
+                            "invalid choice at role `{}`: branch `{label}` must start with send",
+                            role.name(),
+                            label = branch.label
+                        )));
+                    }
+                }
+            }
+
+            Ok(GlobalTypeCore::comm(
+                role.name().to_string(),
+                first_receiver,
+                mapped_branches,
+            ))
+        }
+        Protocol::Broadcast { .. } => Err(CoherenceModelError::UnsupportedFeature {
+            feature: "Broadcast",
+            hint: "Desugar broadcast to point-to-point sends before coherence validation.",
+        }),
+        Protocol::Parallel { .. } => Err(CoherenceModelError::UnsupportedFeature {
+            feature: "Parallel",
+            hint: "Run coherence on a desugared sequential form or projected locals.",
+        }),
+        Protocol::Extension { .. } => Err(CoherenceModelError::UnsupportedFeature {
+            feature: "Extension",
+            hint: "Extensions do not have a direct theory-level global representation.",
+        }),
+    }
+}
+
+fn message_to_theory_label(message: &MessageType) -> telltale_choreography::ast::Label {
+    telltale_choreography::ast::Label::with_sort(message.name.to_string(), PayloadSort::Unit)
+}
+
+fn collect_initial_delivery_env(
+    global: &GlobalTypeCore,
+    initial_delivery_env: &mut BTreeMap<DeliveryEdge, usize>,
+) {
+    match global {
+        GlobalTypeCore::Comm {
+            sender,
+            receiver,
+            branches,
+        } => {
+            for (label, continuation) in branches {
+                initial_delivery_env
+                    .entry((sender.clone(), receiver.clone(), label.name.clone()))
+                    .or_insert(0);
+                collect_initial_delivery_env(continuation, initial_delivery_env);
+            }
+        }
+        GlobalTypeCore::Mu { body, .. } => {
+            collect_initial_delivery_env(body, initial_delivery_env);
+        }
+        GlobalTypeCore::Var(_) | GlobalTypeCore::End => {}
+    }
 }
 
 impl Parse for ChoreographyMacroInput {
@@ -91,6 +319,8 @@ fn parse_choreography_source(input: TokenStream) -> Result<ChoreographyInput, sy
     validate_link_annotations(&aura_annotations).map_err(|err| {
         syn::Error::new(span, format!("Link annotation validation failed: {err}"))
     })?;
+    validate_protocol_coherence(&choreography)
+        .map_err(|err| syn::Error::new(span, format!("Coherence validation failed: {err}")))?;
 
     Ok(ChoreographyInput {
         roles,
@@ -685,18 +915,12 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
     let message_type_names = extract_message_type_names(&parsed_input.choreography);
     let telltale_output =
         choreography_impl_namespace_aware(&parsed_input.choreography, &message_type_names)
-            .unwrap_or_else(|err| {
-                // If generation fails, emit a placeholder module so Aura wrapper compilation can continue.
-                let _error_msg = err.to_string();
-                quote! {
-                    /// Telltale integration failed - using Aura-only mode
-                    pub mod telltale_session_types {
-                        // Telltale integration error (this is expected in some cases):
-                        // #error_msg
-                        // Using Aura choreography system only.
-                    }
-                }
-            });
+            .map_err(|err| {
+                syn::Error::new(
+                    proc_macro2::Span::call_site(),
+                    format!("Telltale generation failed: {err}"),
+                )
+            })?;
 
     // Generate the Aura wrapper module with namespace support
     let namespace = parsed_input.namespace.clone();
@@ -1647,8 +1871,15 @@ fn generate_leakage_integration(annotations: &[AuraEffect]) -> TokenStream {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use super::validate_link_annotations;
+    use super::{
+        build_coherence_validation_input, validate_link_annotations, validate_protocol_coherence,
+    };
     use aura_mpst::ast_extraction::extract_aura_annotations;
+    use telltale_choreography::compiler::parse_choreography_str;
+
+    fn parse_test_choreography(dsl: &str) -> telltale_choreography::ast::Choreography {
+        parse_choreography_str(dsl).expect("choreography should parse")
+    }
 
     #[test]
     fn link_validation_accepts_exported_imports() {
@@ -1670,6 +1901,106 @@ mod tests {
         assert!(
             err.contains("chat.send"),
             "error should mention unresolved import"
+        );
+    }
+
+    #[test]
+    fn coherence_input_simple_send_is_deterministic() {
+        let dsl = r#"
+module simple_send exposing (SimpleSend)
+
+protocol SimpleSend =
+  roles A, B
+  A -> B : Ping
+"#;
+        let choreography = parse_test_choreography(dsl);
+        let input_a =
+            build_coherence_validation_input(&choreography).expect("coherence input should build");
+        let input_b =
+            build_coherence_validation_input(&choreography).expect("coherence input should build");
+
+        assert_eq!(
+            input_a, input_b,
+            "coherence input must be deterministic across repeated derivations"
+        );
+        assert_eq!(input_a.initial_delivery_env.len(), 1);
+        assert!(input_a.initial_delivery_env.contains_key(&(
+            "A".to_string(),
+            "B".to_string(),
+            "Ping".to_string()
+        )));
+        validate_protocol_coherence(&choreography).expect("simple protocol should be coherent");
+    }
+
+    #[test]
+    fn coherence_input_choice_is_deterministic() {
+        let dsl = r#"
+module simple_choice exposing (SimpleChoice)
+
+protocol SimpleChoice =
+  roles A, B
+  case choose A of
+    Accept ->
+      A -> B : AcceptMsg
+    Reject ->
+      A -> B : RejectMsg
+"#;
+        let choreography = parse_test_choreography(dsl);
+        let input_a =
+            build_coherence_validation_input(&choreography).expect("coherence input should build");
+        let input_b =
+            build_coherence_validation_input(&choreography).expect("coherence input should build");
+
+        assert_eq!(
+            input_a, input_b,
+            "choice coherence input must be deterministic across repeated derivations"
+        );
+        assert_eq!(input_a.initial_delivery_env.len(), 2);
+        validate_protocol_coherence(&choreography).expect("choice protocol should be coherent");
+    }
+
+    #[test]
+    fn coherence_input_loop_is_deterministic() {
+        let dsl = r#"
+module loop_proto exposing (LoopProto)
+
+protocol LoopProto =
+  roles Coordinator, Peer
+  loop decide by Coordinator
+    case choose Coordinator of
+      Continue ->
+        Coordinator -> Peer : Tick
+      Stop ->
+        Coordinator -> Peer : Stop
+"#;
+        let choreography = parse_test_choreography(dsl);
+        let input_a =
+            build_coherence_validation_input(&choreography).expect("coherence input should build");
+        let input_b =
+            build_coherence_validation_input(&choreography).expect("coherence input should build");
+
+        assert_eq!(
+            input_a, input_b,
+            "loop coherence input must be deterministic across repeated derivations"
+        );
+        assert_eq!(input_a.initial_delivery_env.len(), 2);
+        validate_protocol_coherence(&choreography).expect("loop protocol should be coherent");
+    }
+
+    #[test]
+    fn coherence_validation_rejects_self_send() {
+        let dsl = r#"
+module incoherent_self_send exposing (IncoherentSelfSend)
+
+protocol IncoherentSelfSend =
+  roles Alice
+  Alice -> Alice : Loopback
+"#;
+        let choreography = parse_test_choreography(dsl);
+        let err = validate_protocol_coherence(&choreography).expect_err("self send must fail");
+        assert!(
+            err.contains("action"),
+            "error should include failed action predicate"
         );
     }
 }
