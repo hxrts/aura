@@ -4,6 +4,7 @@
 //! The actual modal UI is in `components/help_modal.rs`.
 
 use crate::tui::commands::{all_command_help, CommandCategory};
+use crate::tui::keymap::{keyboard_help_bindings_for_screen, KeyBinding};
 
 /// A command help item
 #[derive(Clone, Debug)]
@@ -100,51 +101,17 @@ fn get_slash_commands() -> Vec<HelpCommand> {
     commands
 }
 
-/// Get all keyboard shortcuts organized by category
-#[must_use]
-pub fn get_help_commands() -> Vec<HelpCommand> {
+fn keyboard_binding_to_help_command(binding: &KeyBinding) -> HelpCommand {
+    HelpCommand::new(
+        binding.key,
+        binding.syntax,
+        binding.help_description,
+        binding.category,
+    )
+}
+
+fn neighborhood_depth_descriptions() -> Vec<HelpCommand> {
     vec![
-        // Global navigation
-        HelpCommand::new("1-5", "1, 2, 3, 4, 5", "Switch screens", "Navigation"),
-        HelpCommand::new("Tab", "Tab", "Next screen", "Navigation"),
-        HelpCommand::new("S-Tab", "Shift+Tab", "Previous screen", "Navigation"),
-        HelpCommand::new("?", "?", "Show/hide help", "Navigation"),
-        HelpCommand::new("q", "q", "Quit", "Navigation"),
-        HelpCommand::new("Esc", "Esc", "Cancel/close modal/toast", "Navigation"),
-        HelpCommand::new("y", "y", "Copy error to clipboard", "Navigation"),
-        HelpCommand::new("j/k", "j, k", "Move down/up in lists", "Navigation"),
-        HelpCommand::new("h/l", "h, l", "Switch panels (left/right)", "Navigation"),
-        // Chat screen
-        HelpCommand::new("i", "i", "Enter insert mode (type message)", "Chat"),
-        HelpCommand::new("n", "n", "Create new channel", "Chat"),
-        HelpCommand::new("o", "o", "Open channel info", "Chat"),
-        HelpCommand::new("t", "t", "Set channel topic", "Chat"),
-        HelpCommand::new("r", "r", "Retry failed message", "Chat"),
-        HelpCommand::new(
-            "Tab",
-            "Tab",
-            "Switch between channels/messages/input",
-            "Chat",
-        ),
-        // Contacts screen
-        HelpCommand::new("e", "e", "Edit contact nickname", "Contacts"),
-        HelpCommand::new("g", "g", "Open guardian setup", "Contacts"),
-        HelpCommand::new("c", "c", "Start chat with contact", "Contacts"),
-        HelpCommand::new("a", "a", "Accept invitation code", "Contacts"),
-        HelpCommand::new("n", "n", "Create invitation code", "Contacts"),
-        HelpCommand::new("p", "p", "Toggle LAN peers list", "Contacts"),
-        HelpCommand::new("d", "d", "Rescan LAN peers", "Contacts"),
-        HelpCommand::new("r", "r", "Remove contact", "Contacts"),
-        // Neighborhood screen
-        HelpCommand::new("Enter", "Enter", "Enter selected home", "Neighborhood"),
-        HelpCommand::new("Esc", "Esc", "Return to map view", "Neighborhood"),
-        HelpCommand::new("a", "a", "Accept invitation code", "Neighborhood"),
-        HelpCommand::new("d", "d", "Cycle traversal depth", "Neighborhood"),
-        HelpCommand::new("g", "g", "Go to primary home", "Neighborhood"),
-        HelpCommand::new("m", "m", "Create/select neighborhood", "Neighborhood"),
-        HelpCommand::new("v", "v", "Add selected home as member", "Neighborhood"),
-        HelpCommand::new("L", "Shift+l", "Link direct one_hop_link", "Neighborhood"),
-        // Traversal depth descriptions
         HelpCommand::new("Limited", "", "View blocks, no interaction", "Neighborhood"),
         HelpCommand::new(
             "Partial",
@@ -158,15 +125,16 @@ pub fn get_help_commands() -> Vec<HelpCommand> {
             "Full access to member/channel views",
             "Neighborhood",
         ),
-        // Settings screen
-        HelpCommand::new("h/l", "h, l", "Switch panels", "Settings"),
-        HelpCommand::new("j/k", "j, k", "Navigate sections/sub-sections", "Settings"),
-        HelpCommand::new("Space", "Space", "Toggle option/edit field", "Settings"),
-        HelpCommand::new("Enter", "Enter", "Confirm selection", "Settings"),
-        HelpCommand::new("s", "s", "Switch authority (if multiple)", "Settings"),
-        HelpCommand::new("m", "m", "Configure multifactor auth", "Settings"),
-        // Notifications screen
-        HelpCommand::new("j/k", "j, k", "Move through notifications", "Notifications"),
-        HelpCommand::new("h/l", "h, l", "Switch panels", "Notifications"),
     ]
+}
+
+/// Get all keyboard shortcuts organized by category
+#[must_use]
+pub fn get_help_commands() -> Vec<HelpCommand> {
+    let mut commands: Vec<HelpCommand> = keyboard_help_bindings_for_screen(None)
+        .iter()
+        .map(keyboard_binding_to_help_command)
+        .collect();
+    commands.extend(neighborhood_depth_descriptions());
+    commands
 }

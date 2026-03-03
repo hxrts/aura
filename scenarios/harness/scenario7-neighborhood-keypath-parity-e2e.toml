@@ -44,6 +44,13 @@ pattern = "Map"
 timeout_ms = 8000
 
 [[steps]]
+id = "alice-neighborhood-state-indicator-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "D:Lim M:Off P:0"
+timeout_ms = 8000
+
+[[steps]]
 id = "alice-create-neighborhood-keypath"
 action = "send_keys"
 instance = "alice"

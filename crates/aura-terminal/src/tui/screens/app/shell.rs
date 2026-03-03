@@ -46,6 +46,7 @@ use crate::tui::components::{
 };
 use crate::tui::context::IoContext;
 use crate::tui::hooks::{AppCoreContext, CallbackContext};
+use crate::tui::keymap::{global_footer_hints, screen_footer_hints};
 use crate::tui::layout::dim;
 use crate::tui::navigation::clamp_list_index;
 use crate::tui::screens::app::subscriptions::{
@@ -60,8 +61,7 @@ use crate::tui::screens::{
     ChatScreen, ContactsScreen, NeighborhoodScreen, NotificationsScreen, SettingsScreen,
 };
 use crate::tui::types::{
-    AccessLevel, Channel, Contact, Device, Guardian, HomeSummary, Invitation, KeyHint, Message,
-    MfaPolicy,
+    AccessLevel, Channel, Contact, Device, Guardian, HomeSummary, Invitation, Message, MfaPolicy,
 };
 
 // State machine integration
@@ -1570,48 +1570,25 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Extract toast state from queue (type-enforced single toast at a time)
     let queued_toast = tui_snapshot.toast_queue.current().cloned();
 
-    // Global hints that appear on all screens (bottom row)
-    let global_hints = vec![
-        KeyHint::new("↑↓←→", "Nav"),
-        KeyHint::new("Tab", "Next"),
-        KeyHint::new("?", "Help"),
-        KeyHint::new("q", "Quit"),
-    ];
+    // Global/screen hints come from one shared keybinding registry.
+    let global_hints = global_footer_hints();
+    let screen_hints = screen_footer_hints(current_screen);
 
-    // Build screen-specific hints based on current screen (top row)
-    let screen_hints: Vec<KeyHint> = match current_screen {
-        Screen::Chat => vec![
-            KeyHint::new("i", "Insert"),
-            KeyHint::new("n", "New"),
-            KeyHint::new("o", "Info"),
-            KeyHint::new("t", "Topic"),
-            KeyHint::new("r", "Retry"),
-        ],
-        Screen::Contacts => vec![
-            KeyHint::new("e", "Edit"),
-            KeyHint::new("c", "Chat"),
-            KeyHint::new("a", "Accept"),
-            KeyHint::new("n", "Invite"),
-            KeyHint::new("d", "Rescan"),
-        ],
-        Screen::Neighborhood => vec![
-            KeyHint::new("Enter", "Enter"),
-            KeyHint::new("Esc", "Map"),
-            KeyHint::new("a", "Accept"),
-            KeyHint::new("d", "Depth"),
-            KeyHint::new("n", "New"),
-            KeyHint::new("m", "Neighborhood"),
-            KeyHint::new("v", "Join"),
-            KeyHint::new("o", "Mod"),
-            KeyHint::new("x", "Override"),
-            KeyHint::new("p", "Caps"),
-        ],
-        Screen::Notifications => vec![KeyHint::new("j/k", "Move"), KeyHint::new("h/l", "Focus")],
-        Screen::Settings => vec![
-            KeyHint::new("Enter", "Select"),
-            KeyHint::new("Space", "Toggle"),
-        ],
+    let pending_actions = usize::from(tui_snapshot.modal_queue.is_active())
+        + tui_snapshot.modal_queue.pending_count()
+        + usize::from(tui_snapshot.toast_queue.is_active())
+        + tui_snapshot.toast_queue.pending_count();
+    let depth_label = match tui_snapshot.neighborhood.enter_depth {
+        AccessLevel::Limited => "Lim",
+        AccessLevel::Partial => "Par",
+        AccessLevel::Full => "Full",
     };
+    let moderator_label = if tui_snapshot.neighborhood.moderator_actions_enabled {
+        "On"
+    } else {
+        "Off"
+    };
+    let state_indicator = format!("D:{depth_label} M:{moderator_label} P:{pending_actions}");
 
     let tasks_for_events = tasks;
     hooks.use_terminal_events({
@@ -2916,6 +2893,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 now_ms: now_ms,
                 transport_peers: transport_peers,
                 known_online: known_online,
+                state_indicator: Some(state_indicator.clone()),
             )
 
             // === GLOBAL MODALS ===

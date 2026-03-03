@@ -529,9 +529,18 @@ keys = "d"
 timeout_ms = 1000
 
 [[steps]]
-id = "alice-depth-partial-toast"
-action = "fault_delay"
+id = "alice-dismiss-depth-partial-toast"
+action = "send_key"
+instance = "alice"
+key = "esc"
 timeout_ms = 1000
+
+[[steps]]
+id = "alice-depth-partial-indicator"
+action = "wait_for"
+instance = "alice"
+pattern = "D:Par"
+timeout_ms = 8000
 
 [[steps]]
 id = "alice-enter-home-partial"
@@ -542,13 +551,6 @@ timeout_ms = 1000
 
 [[steps]]
 id = "alice-partial-visible"
-action = "wait_for"
-instance = "alice"
-pattern = "Access: Partial"
-timeout_ms = 8000
-
-[[steps]]
-id = "alice-partial-restriction-visible"
 action = "wait_for"
 instance = "alice"
 pattern = "Access: Partial"
@@ -569,9 +571,18 @@ keys = "d"
 timeout_ms = 1000
 
 [[steps]]
-id = "alice-depth-full-toast"
-action = "fault_delay"
+id = "alice-dismiss-depth-full-toast"
+action = "send_key"
+instance = "alice"
+key = "esc"
 timeout_ms = 1000
+
+[[steps]]
+id = "alice-depth-full-indicator"
+action = "wait_for"
+instance = "alice"
+pattern = "D:Full"
+timeout_ms = 8000
 
 [[steps]]
 id = "alice-enter-home-full"
@@ -584,7 +595,7 @@ timeout_ms = 1000
 id = "alice-full-visible"
 action = "wait_for"
 instance = "alice"
-pattern = "Access: Partial"
+pattern = "Access: Full"
 timeout_ms = 8000
 
 [[steps]]

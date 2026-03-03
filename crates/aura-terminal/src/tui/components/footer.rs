@@ -39,6 +39,9 @@ pub struct FooterProps {
     pub transport_peers: usize,
     /// Online contacts (people you know who are currently online)
     pub known_online: usize,
+    /// Optional persistent state indicator text.
+    /// When provided, replaces row-3 status text (otherwise peer status is shown).
+    pub state_indicator: Option<String>,
 }
 
 /// Map StatusSeverity to theme colors.
@@ -96,6 +99,7 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
     // Format: "123 P, 45 On" - must fit in STATUS_COL_WIDTH (15 chars)
     // Max realistic: "999 P, 99 On" = 12 chars
     let peer_status = format!("{} P, {} On", props.transport_peers, props.known_online);
+    let bottom_status = props.state_indicator.clone().unwrap_or(peer_status.clone());
 
     element! {
         View(
@@ -169,7 +173,7 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
                     width: STATUS_COL_WIDTH,
                     height: 1u16,
                 ) {
-                    Text(content: peer_status.clone(), color: text_color)
+                    Text(content: bottom_status.clone(), color: text_color)
                 }
             }
         }
