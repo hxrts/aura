@@ -21,6 +21,18 @@ pub enum HomeRole {
     Moderator,
 }
 
+impl HomeRole {
+    /// Returns true when the role participates in the threshold authority.
+    pub const fn is_threshold_member(self) -> bool {
+        matches!(self, Self::Member | Self::Moderator)
+    }
+
+    /// Returns true for non-threshold participants.
+    pub const fn is_participant(self) -> bool {
+        matches!(self, Self::Participant)
+    }
+}
+
 /// A home resident
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
@@ -45,6 +57,11 @@ impl Resident {
     /// Check if this resident has moderator designation.
     pub fn is_moderator(&self) -> bool {
         matches!(self.role, HomeRole::Moderator)
+    }
+
+    /// Check if this resident participates in threshold authority membership.
+    pub fn is_threshold_member(&self) -> bool {
+        self.role.is_threshold_member()
     }
 }
 
@@ -561,5 +578,75 @@ impl HomesState {
             self.select_first_available();
         }
         result.removed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HomeRole, Resident};
+    use aura_core::identifiers::AuthorityId;
+    use proptest::prelude::*;
+
+    fn role_strategy() -> impl Strategy<Value = HomeRole> {
+        prop_oneof![
+            Just(HomeRole::Participant),
+            Just(HomeRole::Member),
+            Just(HomeRole::Moderator),
+        ]
+    }
+
+    fn home_strategy() -> impl Strategy<Value = Vec<Resident>> {
+        prop::collection::vec(role_strategy(), 1..40).prop_map(|roles| {
+            roles
+                .into_iter()
+                .enumerate()
+                .map(|(index, role)| {
+                    let mut entropy = [0u8; 32];
+                    entropy[0] = index as u8;
+                    Resident {
+                        id: AuthorityId::new_from_entropy(entropy),
+                        name: format!("resident-{index}"),
+                        role,
+                        is_online: true,
+                        joined_at: index as u64,
+                        last_seen: Some(index as u64),
+                        storage_allocated: 0,
+                    }
+                })
+                .collect()
+        })
+    }
+
+    proptest! {
+        #[test]
+        #[ignore = "property"]
+        fn property_members_are_threshold_participants(home in home_strategy()) {
+            for resident in &home {
+                if resident.role.is_participant() {
+                    prop_assert!(
+                        !resident.is_threshold_member(),
+                        "participant cannot be threshold member"
+                    );
+                } else {
+                    prop_assert!(
+                        resident.is_threshold_member(),
+                        "member/moderator must be threshold member"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        #[ignore = "property"]
+        fn property_only_members_can_be_moderators(home in home_strategy()) {
+            for resident in &home {
+                if resident.is_moderator() {
+                    prop_assert!(
+                        resident.is_threshold_member(),
+                        "moderator must be a threshold member"
+                    );
+                }
+            }
+        }
     }
 }

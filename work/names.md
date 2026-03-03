@@ -463,7 +463,7 @@ Reference: `docs/804_testing_guide.md`
 
 ### 5.1 AccessLevel Property Tests
 
-- [ ] **AccessLevel enum properties**
+- [x] **AccessLevel enum properties**
   ```rust
   proptest! {
       #[test]
@@ -478,7 +478,7 @@ Reference: `docs/804_testing_guide.md`
   }
   ```
 
-- [ ] **Access override properties**
+- [x] **Access override properties**
   ```rust
   proptest! {
       #[test]
@@ -493,7 +493,7 @@ Reference: `docs/804_testing_guide.md`
 
 ### 5.2 Home Role Property Tests
 
-- [ ] **Member/Participant distinction**
+- [x] **Member/Participant distinction**
   ```rust
   proptest! {
       #[test]
@@ -504,7 +504,7 @@ Reference: `docs/804_testing_guide.md`
   }
   ```
 
-- [ ] **Moderator designation**
+- [x] **Moderator designation**
   ```rust
   proptest! {
       #[test]
@@ -516,7 +516,7 @@ Reference: `docs/804_testing_guide.md`
 
 ### 5.3 Shared Storage Property Tests
 
-- [ ] **Allocation constraints**
+- [x] **Allocation constraints**
   ```rust
   proptest! {
       #[test]
@@ -532,11 +532,11 @@ Reference: `docs/804_testing_guide.md`
 
 ### 5.4 Phase 5 Checkpoint
 
-- [ ] **Run property tests with extended iterations**
+- [x] **Run property tests with extended iterations**
   ```bash
   PROPTEST_CASES=10000 cargo test --workspace -- --ignored property
   ```
-- [ ] **Run full test suite**
+- [x] **Run full test suite**
   ```bash
   just test
   ```
