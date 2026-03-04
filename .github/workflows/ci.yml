@@ -88,7 +88,7 @@ jobs:
         with:
           cache-name: holepunch-tier1
       - name: Run deterministic/property holepunch tests
-        run: nix develop --command just ci-holepunch-tier1
+        run: nix develop .#nightly --command just ci-holepunch-tier1
 
   holepunch-tier2:
     name: Holepunch Tier 2

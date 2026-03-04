@@ -77,3 +77,8 @@ artifacts/
 
 # Apalache model checker artifacts
 _apalache-out/
+
+# Patchbay
+.qemu-vm/
+.patchbay-work
+.patchbay-target

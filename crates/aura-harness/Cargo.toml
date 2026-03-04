@@ -24,6 +24,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+cfg-if = "1"
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 serde = { workspace = true }
@@ -47,3 +48,4 @@ patchbay = { git = "https://github.com/hxrts/patchbay", branch = "hxrts/aura", o
 
 [dev-dependencies]
 tempfile = { workspace = true }
+patchbay = { git = "https://github.com/hxrts/patchbay", branch = "hxrts/aura" }

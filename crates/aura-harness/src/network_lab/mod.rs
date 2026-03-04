@@ -5,6 +5,7 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
+use cfg_if::cfg_if;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 pub mod launcher;
@@ -571,23 +572,24 @@ fn binary_in_path(binary: &str) -> bool {
 }
 
 fn native_patchbay_supported() -> bool {
-    #[cfg(all(target_os = "linux", feature = "patchbay-backend"))]
-    {
-        let userns_ok = read_userns_clone_flag().unwrap_or(true);
-        userns_ok && patchbay::check_caps().is_ok()
-    }
-
-    #[cfg(not(all(target_os = "linux", feature = "patchbay-backend")))]
-    {
-        false
+    cfg_if! {
+        if #[cfg(all(target_os = "linux", feature = "patchbay-backend"))] {
+            let userns_ok = read_userns_clone_flag().unwrap_or(true);
+            userns_ok && patchbay::check_caps().is_ok()
+        } else {
+            false
+        }
     }
 }
 
-#[cfg(all(target_os = "linux", feature = "patchbay-backend"))]
-fn read_userns_clone_flag() -> Option<bool> {
-    let path = "/proc/sys/kernel/unprivileged_userns_clone";
-    let text = std::fs::read_to_string(path).ok()?;
-    Some(text.trim() == "1")
+cfg_if! {
+    if #[cfg(all(target_os = "linux", feature = "patchbay-backend"))] {
+        fn read_userns_clone_flag() -> Option<bool> {
+            let path = "/proc/sys/kernel/unprivileged_userns_clone";
+            let text = std::fs::read_to_string(path).ok()?;
+            Some(text.trim() == "1")
+        }
+    }
 }
 
 fn unix_time_ms() -> u64 {
