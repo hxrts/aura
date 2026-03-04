@@ -110,7 +110,7 @@
               lockFile = "${patchbay}/Cargo.lock";
             };
             cargoBuildFlags = [ "-p" "patchbay-vm" ];
-            nativeBuildInputs = with pkgs; [ pkg-config ];
+            nativeBuildInputs = with pkgs; [ pkg-config nodejs ]; # nodejs for patchbay-utils build
             buildInputs = with pkgs; [ openssl ];
             # Skip tests as they require network capabilities
             doCheck = false;
