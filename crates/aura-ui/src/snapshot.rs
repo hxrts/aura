@@ -17,7 +17,15 @@ pub fn render_canonical_snapshot(model: &UiModel) -> String {
     lines.push("┌────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐".to_string());
 
     for row_idx in 0..CONTENT_ROWS {
-        let (left, center, right) = panel_row(model, row_idx);
+        let (left, center, mut right) = panel_row(model, row_idx);
+        if row_idx == 0 {
+            let authority = format!("Authority: {} (local)", model.authority_id);
+            right = if right.is_empty() {
+                authority
+            } else {
+                format!("{right} {authority}")
+            };
+        }
         lines.push(format_panel_row(&left, &center, &right));
     }
 
@@ -43,7 +51,11 @@ fn panel_row(model: &UiModel, row_idx: usize) -> (String, String, String) {
 
 fn neighborhood_row(model: &UiModel, row_idx: usize) -> (String, String, String) {
     if row_idx == 0 {
-        return ("Neighborhood".to_string(), String::new(), String::new());
+        return (
+            "Neighborhood".to_string(),
+            String::new(),
+            "Welcome to Aura".to_string(),
+        );
     }
     if row_idx == 1 {
         return (
@@ -62,6 +74,23 @@ fn neighborhood_row(model: &UiModel, row_idx: usize) -> (String, String, String)
             "Create New Home".to_string(),
             model.modal_buffer.clone(),
         );
+    }
+    if row_idx == 2 {
+        return (
+            "Can enter: Neighborhood".to_string(),
+            String::new(),
+            String::new(),
+        );
+    }
+    if row_idx == 3 {
+        return (
+            "Members & Participants".to_string(),
+            String::new(),
+            String::new(),
+        );
+    }
+    if row_idx == 4 {
+        return ("Member".to_string(), String::new(), String::new());
     }
     (String::new(), String::new(), String::new())
 }

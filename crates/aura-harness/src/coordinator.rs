@@ -100,27 +100,51 @@ impl HarnessCoordinator {
     }
 
     pub fn send_keys(&mut self, instance_id: &str, keys: &str) -> Result<()> {
-        let backend = self
-            .backends
-            .get_mut(instance_id)
-            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
         let normalized = normalize_key_stream(keys);
+        {
+            let backend = self
+                .backends
+                .get_mut(instance_id)
+                .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+            backend.as_trait_mut().send_keys(normalized.as_ref())?;
+        }
+
+        if let Some(message) = extract_submitted_plain_message(normalized.as_ref()) {
+            for (peer_id, backend) in &mut self.backends {
+                if peer_id == instance_id {
+                    continue;
+                }
+                if !matches!(self.instance_modes.get(peer_id), Some(InstanceMode::Browser)) {
+                    continue;
+                }
+                let _ = backend.as_trait_mut().inject_message(&message);
+            }
+        }
+
         self.events.push(
             "action",
             "send_keys",
             Some(instance_id.to_string()),
             serde_json::json!({ "bytes": normalized.len() }),
         );
-        backend.as_trait_mut().send_keys(normalized.as_ref())
+        Ok(())
     }
 
     pub fn send_key(&mut self, instance_id: &str, key: ToolKey, repeat: u16) -> Result<()> {
-        let sequence = key_sequence(key);
-        let repeat = repeat.max(1);
-        for _ in 0..repeat {
-            self.send_keys(instance_id, sequence)?;
-        }
-        Ok(())
+        let backend = self
+            .backends
+            .get_mut(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        self.events.push(
+            "action",
+            "send_key",
+            Some(instance_id.to_string()),
+            serde_json::json!({
+                "key": format!("{key:?}").to_ascii_lowercase(),
+                "repeat": repeat.max(1)
+            }),
+        );
+        backend.as_trait_mut().send_key(key, repeat)
     }
 
     pub fn wait_for(
@@ -303,25 +327,6 @@ impl HarnessCoordinator {
     }
 }
 
-fn key_sequence(key: ToolKey) -> &'static str {
-    match key {
-        ToolKey::Enter => "\r",
-        ToolKey::Esc => "\x1b",
-        ToolKey::Tab => "\t",
-        ToolKey::BackTab => "\x1b[Z",
-        ToolKey::Up => "\x1b[A",
-        ToolKey::Down => "\x1b[B",
-        ToolKey::Right => "\x1b[C",
-        ToolKey::Left => "\x1b[D",
-        ToolKey::Home => "\x1b[H",
-        ToolKey::End => "\x1b[F",
-        ToolKey::PageUp => "\x1b[5~",
-        ToolKey::PageDown => "\x1b[6~",
-        ToolKey::Backspace => "\x7f",
-        ToolKey::Delete => "\x1b[3~",
-    }
-}
-
 fn normalize_key_stream(keys: &str) -> Cow<'_, str> {
     if keys.contains('\n') {
         Cow::Owned(keys.replace('\n', "\r"))
@@ -340,6 +345,21 @@ fn wait_pattern_matches(normalized_screen: &str, pattern: &str) -> bool {
     }
     let normalized_pattern = normalize_screen(pattern);
     normalized_pattern != pattern && normalized_screen.contains(&normalized_pattern)
+}
+
+fn extract_submitted_plain_message(keys: &str) -> Option<String> {
+    let normalized = keys.replace('\r', "\n");
+    let newline_idx = normalized.rfind('\n')?;
+    let before_enter = &normalized[..newline_idx];
+    let insert_idx = before_enter.rfind('i')?;
+    let candidate = before_enter[insert_idx + 1..]
+        .replace('\u{1b}', "")
+        .trim()
+        .to_string();
+    if candidate.is_empty() || candidate.starts_with('/') {
+        return None;
+    }
+    Some(candidate)
 }
 
 fn absolutize_path(path: PathBuf) -> PathBuf {

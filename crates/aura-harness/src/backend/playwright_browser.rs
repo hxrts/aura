@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 
 use crate::backend::InstanceBackend;
 use crate::config::InstanceConfig;
+use crate::tool_api::ToolKey;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum BackendState {
@@ -291,6 +292,20 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         })
     }
 
+    fn send_key(&mut self, key: ToolKey, repeat: u16) -> Result<()> {
+        self.with_session(|session| {
+            session.rpc_call(
+                "send_key",
+                json!({
+                    "instance_id": self.config.id,
+                    "key": tool_key_name(key),
+                    "repeat": repeat.max(1),
+                }),
+            )?;
+            Ok(())
+        })
+    }
+
     fn tail_log(&self, lines: usize) -> Result<Vec<String>> {
         let payload = self.with_session(|session| {
             session.rpc_call(
@@ -327,6 +342,19 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             merged = merged.split_off(merged.len() - lines);
         }
         Ok(merged)
+    }
+
+    fn inject_message(&mut self, message: &str) -> Result<()> {
+        self.with_session(|session| {
+            session.rpc_call(
+                "inject_message",
+                json!({
+                    "instance_id": self.config.id,
+                    "message": message,
+                }),
+            )?;
+            Ok(())
+        })
     }
 
     fn read_clipboard(&mut self) -> Result<String> {
@@ -449,6 +477,25 @@ fn default_driver_script_path() -> Result<PathBuf> {
         .join("playwright_driver.mjs");
     require_existing_path(&candidate, "playwright driver script")?;
     Ok(candidate)
+}
+
+fn tool_key_name(key: ToolKey) -> &'static str {
+    match key {
+        ToolKey::Enter => "enter",
+        ToolKey::Esc => "esc",
+        ToolKey::Tab => "tab",
+        ToolKey::BackTab => "backtab",
+        ToolKey::Up => "up",
+        ToolKey::Down => "down",
+        ToolKey::Right => "right",
+        ToolKey::Left => "left",
+        ToolKey::Home => "home",
+        ToolKey::End => "end",
+        ToolKey::PageUp => "pageup",
+        ToolKey::PageDown => "pagedown",
+        ToolKey::Backspace => "backspace",
+        ToolKey::Delete => "delete",
+    }
 }
 
 fn require_existing_path(path: &Path, label: &str) -> Result<()> {

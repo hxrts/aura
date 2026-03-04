@@ -43,3 +43,20 @@ jobs:
         with:
           cache-name: harness-replay
       - run: nix develop --command just ci-harness-replay
+
+  browser:
+    name: Browser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: harness-browser
+      - run: nix develop --command just ci-harness-browser
+      - name: Upload browser harness artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-browser-${{ github.run_id }}
+          path: artifacts/harness/browser
+          if-no-files-found: warn

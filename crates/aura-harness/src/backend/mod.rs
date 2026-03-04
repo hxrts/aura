@@ -5,6 +5,7 @@ pub mod ssh_tunnel;
 use anyhow::{bail, Result};
 
 use crate::config::{InstanceConfig, InstanceMode};
+use crate::tool_api::ToolKey;
 
 pub trait InstanceBackend {
     fn id(&self) -> &str;
@@ -13,7 +14,18 @@ pub trait InstanceBackend {
     fn stop(&mut self) -> Result<()>;
     fn snapshot(&self) -> Result<String>;
     fn send_keys(&mut self, keys: &str) -> Result<()>;
+    fn send_key(&mut self, key: ToolKey, repeat: u16) -> Result<()> {
+        let sequence = tool_key_sequence(key);
+        let repeat = repeat.max(1);
+        for _ in 0..repeat {
+            self.send_keys(sequence)?;
+        }
+        Ok(())
+    }
     fn tail_log(&self, lines: usize) -> Result<Vec<String>>;
+    fn inject_message(&mut self, _message: &str) -> Result<()> {
+        Ok(())
+    }
     fn read_clipboard(&mut self) -> Result<String> {
         bail!(
             "clipboard reads are not supported by backend {}",
@@ -28,6 +40,25 @@ pub trait InstanceBackend {
         self.start()
     }
     fn is_healthy(&self) -> bool;
+}
+
+fn tool_key_sequence(key: ToolKey) -> &'static str {
+    match key {
+        ToolKey::Enter => "\r",
+        ToolKey::Esc => "\x1b",
+        ToolKey::Tab => "\t",
+        ToolKey::BackTab => "\x1b[Z",
+        ToolKey::Up => "\x1b[A",
+        ToolKey::Down => "\x1b[B",
+        ToolKey::Right => "\x1b[C",
+        ToolKey::Left => "\x1b[D",
+        ToolKey::Home => "\x1b[H",
+        ToolKey::End => "\x1b[F",
+        ToolKey::PageUp => "\x1b[5~",
+        ToolKey::PageDown => "\x1b[6~",
+        ToolKey::Backspace => "\x7f",
+        ToolKey::Delete => "\x1b[3~",
+    }
 }
 
 pub enum BackendHandle {

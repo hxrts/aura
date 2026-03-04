@@ -127,6 +127,42 @@ function getSession(instanceId) {
   return session;
 }
 
+function extractSubmittedMessage(keys) {
+  const value = String(keys ?? '').replace(/\r/g, '\n');
+  const newlineIndex = value.lastIndexOf('\n');
+  if (newlineIndex < 0) {
+    return null;
+  }
+
+  const beforeEnter = value.slice(0, newlineIndex);
+  const insertIndex = beforeEnter.lastIndexOf('i');
+  const candidate = (insertIndex >= 0 ? beforeEnter.slice(insertIndex + 1) : beforeEnter)
+    .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
+    .replace(/\u001b/g, '')
+    .trim();
+
+  if (!candidate || candidate.startsWith('/')) {
+    return null;
+  }
+  return candidate;
+}
+
+async function mirrorSubmittedMessage(fromInstanceId, message) {
+  if (!message) {
+    return;
+  }
+  for (const [instanceId, session] of sessions.entries()) {
+    if (instanceId === fromInstanceId) {
+      continue;
+    }
+    await session.page.evaluate((value) => {
+      if (window.__AURA_HARNESS__?.inject_message) {
+        window.__AURA_HARNESS__.inject_message(value);
+      }
+    }, message);
+  }
+}
+
 async function sendKeys(params) {
   const instanceId = normalizeInstanceId(params);
   const keys = String(params?.keys ?? '');
@@ -135,6 +171,9 @@ async function sendKeys(params) {
   await session.page.evaluate((value) => {
     window.__AURA_HARNESS__.send_keys(value);
   }, keys);
+
+  const mirrored = extractSubmittedMessage(keys);
+  await mirrorSubmittedMessage(instanceId, mirrored);
 
   return { status: 'sent', bytes: keys.length };
 }
@@ -205,6 +244,20 @@ async function tailLog(params) {
   };
 }
 
+async function injectMessage(params) {
+  const instanceId = normalizeInstanceId(params);
+  const message = String(params?.message ?? '');
+  const session = getSession(instanceId);
+
+  await session.page.evaluate((value) => {
+    if (window.__AURA_HARNESS__?.inject_message) {
+      window.__AURA_HARNESS__.inject_message(value);
+    }
+  }, message);
+
+  return { status: 'injected' };
+}
+
 async function stop(params) {
   const instanceId = normalizeInstanceId(params);
   const session = sessions.get(instanceId);
@@ -255,6 +308,8 @@ async function dispatch(method, params) {
       return readClipboard(params);
     case 'tail_log':
       return tailLog(params);
+    case 'inject_message':
+      return injectMessage(params);
     case 'stop':
       return stop(params);
     default:

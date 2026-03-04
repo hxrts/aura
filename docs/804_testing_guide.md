@@ -475,6 +475,61 @@ When a scenario fails, triage in this order:
 4. Namespace/network dumps (`ip-*`, `nft*`) and `*.pcap` files for packet/routing diagnosis.
 5. Agent logs for authority-local failures and retry state transitions.
 
+## 14. Browser Harness Workflow (WASM + Playwright)
+
+Use this flow to run harness scenarios in browser mode:
+
+```bash
+# 1) Check wasm/frontend compilation
+just web-check
+
+# 2) Install/update Playwright driver deps
+cd tooling/playwright-driver
+npm ci
+npm run install-browsers
+npm test
+cd ../..
+
+# 3) Serve the web app
+just web-serve
+```
+
+In a second shell:
+
+```bash
+# Lint browser run/scenario config
+just harness-lint-browser scenarios/harness/local-discovery-smoke.toml
+
+# Run browser scenarios
+just harness-run-browser scenarios/harness/local-discovery-smoke.toml
+just harness-run-browser scenarios/harness/scenario1-invitation-chat-e2e.toml
+just harness-run-browser scenarios/harness/home-roles.toml
+
+# Replay the latest browser run bundle
+just harness-replay-browser
+```
+
+Browser harness artifacts are written under:
+
+```text
+artifacts/harness/browser/
+```
+
+Key files when debugging browser failures:
+
+1. `web-serve.log` for bundle/build/runtime startup issues.
+2. `preflight_report.json` for browser prerequisites (`node`, Playwright, app URL).
+3. `timeout_diagnostics.json` for authoritative/normalized snapshots and per-instance log tails.
+4. Playwright screenshots/traces under each instance `data_dir` (`playwright-artifacts/`).
+
+### Frontend Shell Roadmap
+
+`aura-ui` is the shared Dioxus UI core for web-first delivery today and future multi-target shells:
+
+1. `aura-web` (current): browser shell and harness bridge.
+2. `aura-desktop` (future): desktop shell reusing `aura-ui`.
+3. `aura-mobile` (future): mobile shell reusing `aura-ui`.
+
 ## Related Documentation
 
 - [Test Infrastructure Reference](117_testkit.md) - Infrastructure details

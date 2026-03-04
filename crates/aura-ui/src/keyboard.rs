@@ -195,15 +195,42 @@ fn submit_chat_input(model: &mut UiModel, text: &str) {
                             message: format!("User: {target}"),
                         });
                     }
+                    aura_app::ui::types::ChatCommand::Nick { .. } => {
+                        model.toast = Some(command_toast(
+                            '✓',
+                            "ok",
+                            "none",
+                            "accepted",
+                            &format!("command {command_name} applied"),
+                        ));
+                    }
                     aura_app::ui::types::ChatCommand::Msg { target: _, text }
-                    | aura_app::ui::types::ChatCommand::Me { action: text }
-                    | aura_app::ui::types::ChatCommand::Topic { text } => {
+                    | aura_app::ui::types::ChatCommand::Me { action: text } => {
                         model.messages.push(text.clone());
                         model.toast = Some(command_toast(
                             '✓',
                             "ok",
                             "none",
-                            "replicated",
+                            "accepted",
+                            &format!("command {command_name} applied"),
+                        ));
+                    }
+                    aura_app::ui::types::ChatCommand::Topic { text } => {
+                        model.messages.push(text.clone());
+                        model.toast = Some(command_toast(
+                            '✓',
+                            "ok",
+                            "none",
+                            "accepted",
+                            &format!("command {command_name} applied"),
+                        ));
+                    }
+                    aura_app::ui::types::ChatCommand::Invite { .. } => {
+                        model.toast = Some(command_toast(
+                            '✓',
+                            "ok",
+                            "none",
+                            "enforced",
                             &format!("command {command_name} applied"),
                         ));
                     }
