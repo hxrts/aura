@@ -114,6 +114,10 @@
             buildInputs = with pkgs; [ openssl ];
             # Skip tests as they require network capabilities
             doCheck = false;
+            # npm needs HOME to write logs
+            preBuild = ''
+              export HOME=$(mktemp -d)
+            '';
             meta = with pkgs.lib; {
               description = "QEMU VM wrapper for patchbay network simulations";
               license = with licenses; [ mit asl20 ];

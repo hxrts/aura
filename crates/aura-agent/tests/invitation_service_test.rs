@@ -134,7 +134,7 @@ async fn test_invite_to_channel_via_agent() -> TestResult {
     let receiver_id = AuthorityId::new_from_entropy([231u8; 32]);
     let home_id = ChannelId::from_bytes([232u8; 32]).to_string();
     let invitation = invitations
-        .invite_to_channel(receiver_id, home_id.clone(), None, None, None)
+        .invite_to_channel(receiver_id, home_id.clone(), None, None, None, None)
         .await?;
 
     assert!(invitation.invitation_id.as_str().starts_with("inv-"));
@@ -154,7 +154,7 @@ async fn test_invite_to_channel_rejects_invalid_home_id() -> TestResult {
 
     let receiver_id = AuthorityId::new_from_entropy([238u8; 32]);
     let err = match invitations
-        .invite_to_channel(receiver_id, "channel-123".to_string(), None, None, None)
+        .invite_to_channel(receiver_id, "channel-123".to_string(), None, None, None, None)
         .await
     {
         Ok(value) => panic!("invalid home id should be rejected: {value:?}"),
