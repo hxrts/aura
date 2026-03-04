@@ -277,6 +277,51 @@
           '';
         };
 
+        # Minimal CI shell - excludes heavy verification tools (Aeneas, Lean) that have
+        # flaky OCaml dependencies. Use for CI jobs that only need Rust + basic tools.
+        devShells.ci = pkgs.mkShell {
+          buildInputs = with pkgs; [
+            # Rust toolchain
+            rustToolchain
+
+            # Build tools
+            pkg-config
+            openssl
+
+            # Task runner
+            just
+
+            # Development tools
+            git
+            jq
+            ripgrep
+
+            # POSIX tools (for Justfile scripts)
+            coreutils
+            findutils
+            gawk
+            gnused
+
+            # WASM tools (for agent-wasm CI)
+            wasm-pack
+            wasm-bindgen-cli
+            trunk
+          ]
+          # Linux-only: patchbay network simulation dependencies
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            iproute2
+            nftables
+            iptables
+          ];
+
+          shellHook = ''
+            export RUST_BACKTRACE=1
+            export RUST_LOG=info
+            export MACOSX_DEPLOYMENT_TARGET=11.0
+            export AURA_PATH="$PWD"
+          '';
+        };
+
         devShells.nightly = pkgs.mkShell {
           buildInputs = with pkgs; [
             # Nightly Rust toolchain (required for Kani)

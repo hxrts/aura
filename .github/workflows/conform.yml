@@ -69,7 +69,8 @@ jobs:
         with:
           cache-name: choreo-parity
       - name: Run parity gates
-        run: nix develop --command just ci-choreo-parity
+        # Use minimal CI shell (excludes Aeneas/Lean which have flaky OCaml deps)
+        run: nix develop .#ci --command just ci-choreo-parity
         env:
           CARGO_BUILD_JOBS: 4
       - name: Upload artifacts
@@ -89,7 +90,8 @@ jobs:
         with:
           cache-name: property-monitor
       - name: Run property-monitored simulations
-        run: nix develop --command just ci-property-monitor
+        # Use minimal CI shell (excludes Aeneas/Lean which have flaky OCaml deps)
+        run: nix develop .#ci --command just ci-property-monitor
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -106,7 +108,8 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: effects
-      - run: nix develop --command just ci-effects
+      # Use minimal CI shell (excludes Aeneas/Lean which have flaky OCaml deps)
+      - run: nix develop .#ci --command just ci-effects
 
   agent-wasm:
     name: Agent WASM
@@ -117,6 +120,7 @@ jobs:
         with:
           cache-name: agent-wasm
       - name: Check WASM backends
-        run: nix develop --command just ci-agent-wasm
+        # Use minimal CI shell (excludes Aeneas/Lean which have flaky OCaml deps)
+        run: nix develop .#ci --command just ci-agent-wasm
         env:
           CARGO_BUILD_JOBS: 4
