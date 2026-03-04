@@ -51,8 +51,9 @@ use std::sync::Arc;
 use std::sync::Once;
 #[cfg(debug_assertions)]
 use std::time::Duration;
+use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
-use std::{collections::HashMap, net::SocketAddr};
+use std::net::SocketAddr;
 use tokio::sync::mpsc;
 
 use super::shared_transport::SharedTransport;
@@ -164,6 +165,9 @@ pub struct AuraEffectSystem {
     /// Addresses are parsed and validated once during `open`.
     #[cfg(not(target_arch = "wasm32"))]
     network_connections: parking_lot::RwLock<HashMap<uuid::Uuid, SocketAddr>>,
+    /// Browser websocket endpoints keyed by opaque connection handle UUID.
+    #[cfg(target_arch = "wasm32")]
+    network_connections: parking_lot::RwLock<HashMap<uuid::Uuid, String>>,
 }
 
 #[derive(Clone, Default)]
@@ -404,6 +408,8 @@ impl AuraEffectSystem {
             rendezvous_manager: parking_lot::RwLock::new(None),
             biscuit_cache: parking_lot::RwLock::new(initial_biscuit_cache),
             #[cfg(not(target_arch = "wasm32"))]
+            network_connections: parking_lot::RwLock::new(HashMap::new()),
+            #[cfg(target_arch = "wasm32")]
             network_connections: parking_lot::RwLock::new(HashMap::new()),
         }
     }

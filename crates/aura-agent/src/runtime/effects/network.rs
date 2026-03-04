@@ -8,14 +8,24 @@ use aura_core::effects::{
     TransportEffects, TransportError,
 };
 use aura_core::identifiers::AuthorityId;
+#[cfg(target_arch = "wasm32")]
+use futures::channel::oneshot;
+#[cfg(target_arch = "wasm32")]
+use futures::SinkExt;
+#[cfg(target_arch = "wasm32")]
+use gloo_net::websocket::{futures::WebSocket, Message};
 use aura_protocol::amp::deserialize_amp_message;
 use cfg_if::cfg_if;
 use std::collections::HashMap;
 use std::collections::HashSet;
+#[cfg(target_arch = "wasm32")]
+use std::future::Future;
 #[cfg(not(target_arch = "wasm32"))]
 use std::net::SocketAddr;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local;
 
 const NETWORK_CONTENT_TYPE: &str = "application/aura-network";
 const CONNECTION_ID_PREFIX: &str = "conn-";
@@ -245,8 +255,23 @@ impl NetworkExtendedEffects for AuraEffectSystem {
 
         cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                let _ = _address;
-                Err(NetworkError::NotImplemented)
+                let connection_id = ConnectionId::new(self.random_uuid().await);
+                let ws_url = normalize_ws_url(_address);
+
+                run_local_ws(move || async move {
+                    let ws = WebSocket::open(&ws_url)
+                        .map_err(|e| format!("WebSocket open failed ({ws_url}): {e}"))?;
+                    ws.close(None, None)
+                        .map_err(|e| format!("WebSocket close failed ({ws_url}): {e}"))?;
+                    Ok(())
+                })
+                .await
+                .map_err(NetworkError::ConnectionFailed)?;
+
+                self.network_connections
+                    .write()
+                    .insert(connection_id.as_uuid(), normalize_ws_url(_address));
+                Ok(connection_id.to_wire())
             } else {
                 let socket_addr = _address
                     .parse::<SocketAddr>()
@@ -272,8 +297,31 @@ impl NetworkExtendedEffects for AuraEffectSystem {
 
         cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                let _ = (_connection_id, _data);
-                Err(NetworkError::NotImplemented)
+                let connection_id = ConnectionId::parse_wire(_connection_id)?;
+                let ws_url = self
+                    .network_connections
+                    .read()
+                    .get(&connection_id.as_uuid())
+                    .cloned()
+                    .ok_or_else(|| NetworkError::SendFailed {
+                        peer_id: None,
+                        reason: format!("Unknown connection id `{_connection_id}`"),
+                    })?;
+
+                run_local_ws(move || async move {
+                    let mut ws = WebSocket::open(&ws_url)
+                        .map_err(|e| format!("WebSocket open failed ({ws_url}): {e}"))?;
+                    ws.send(Message::Bytes(_data))
+                        .await
+                        .map_err(|e| format!("WebSocket send failed ({ws_url}): {e}"))?;
+                    Ok(())
+                })
+                .await
+                .map_err(|reason| NetworkError::SendFailed {
+                    peer_id: None,
+                    reason,
+                })?;
+                Ok(())
             } else {
                 let connection_id = ConnectionId::parse_wire(_connection_id)?;
                 let socket_addr = self
@@ -331,7 +379,16 @@ impl NetworkExtendedEffects for AuraEffectSystem {
         }
         cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                let _ = _connection_id;
+                let connection_id = ConnectionId::parse_wire(_connection_id)?;
+                let removed = self
+                    .network_connections
+                    .write()
+                    .remove(&connection_id.as_uuid());
+                if removed.is_none() {
+                    return Err(NetworkError::ConnectionFailed(format!(
+                        "unknown connection id `{_connection_id}`"
+                    )));
+                }
             } else {
                 let connection_id = ConnectionId::parse_wire(_connection_id)?;
                 let removed = self
@@ -347,6 +404,30 @@ impl NetworkExtendedEffects for AuraEffectSystem {
         }
         Ok(())
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn normalize_ws_url(address: &str) -> String {
+    if address.starts_with("ws://") || address.starts_with("wss://") {
+        address.to_string()
+    } else {
+        format!("ws://{address}")
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn run_local_ws<Mk, Fut>(make_fut: Mk) -> Result<(), String>
+where
+    Mk: FnOnce() -> Fut + 'static,
+    Fut: Future<Output = Result<(), String>> + 'static,
+{
+    let (tx, rx) = oneshot::channel();
+    spawn_local(async move {
+        let _ = tx.send(make_fut().await);
+    });
+
+    rx.await
+        .map_err(|_| "WebSocket task dropped before completion".to_string())?
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
