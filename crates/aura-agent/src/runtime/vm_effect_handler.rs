@@ -7,7 +7,7 @@
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-use telltale_vm::effect::{AcquireDecision, EffectHandler};
+use telltale_vm::effect::{AcquireDecision, EffectHandler, TopologyPerturbation};
 use telltale_vm::{OutputConditionHint, SessionId, Value};
 
 use aura_core::effects::guard::EffectCommand;
@@ -125,6 +125,7 @@ pub struct AuraVmEffectHandler {
     telemetry: Mutex<AuraVmTelemetry>,
     events: Mutex<Vec<AuraVmEffectEvent>>,
     envelopes: Mutex<VecDeque<AuraVmEffectEnvelope>>,
+    topology_schedule: Mutex<BTreeMap<u64, Vec<TopologyPerturbation>>>,
     envelope_sink: Mutex<Option<EnvelopeSink>>,
 }
 
@@ -144,6 +145,7 @@ impl std::fmt::Debug for AuraVmEffectHandler {
             .field("telemetry", &*self.telemetry.lock())
             .field("events_len", &self.events.lock().len())
             .field("envelopes_len", &self.envelopes.lock().len())
+            .field("topology_ticks_len", &self.topology_schedule.lock().len())
             .finish()
     }
 }
@@ -168,6 +170,7 @@ impl AuraVmEffectHandler {
             telemetry: Mutex::new(AuraVmTelemetry::default()),
             events: Mutex::new(Vec::new()),
             envelopes: Mutex::new(VecDeque::new()),
+            topology_schedule: Mutex::new(BTreeMap::new()),
             envelope_sink: Mutex::new(None),
         }
     }
@@ -242,6 +245,33 @@ impl AuraVmEffectHandler {
         sink: impl Fn(&AuraVmEffectEnvelope) -> Result<(), String> + Send + Sync + 'static,
     ) {
         *self.envelope_sink.lock() = Some(Arc::new(sink));
+    }
+
+    /// Schedule one topology perturbation to be emitted at an exact scheduler tick.
+    pub fn schedule_topology_event(&self, tick: u64, event: TopologyPerturbation) {
+        self.topology_schedule
+            .lock()
+            .entry(tick)
+            .or_default()
+            .push(event);
+    }
+
+    /// Schedule multiple topology perturbations for one scheduler tick.
+    pub fn schedule_topology_events(
+        &self,
+        tick: u64,
+        events: impl IntoIterator<Item = TopologyPerturbation>,
+    ) {
+        self.topology_schedule
+            .lock()
+            .entry(tick)
+            .or_default()
+            .extend(events);
+    }
+
+    /// Remove all queued topology perturbations.
+    pub fn clear_topology_schedule(&self) {
+        self.topology_schedule.lock().clear();
     }
 
     fn record(&self, event: AuraVmEffectEvent) {
@@ -481,6 +511,16 @@ impl EffectHandler for AuraVmEffectHandler {
             witness_ref: Some(format!("role:{role}")),
         })
     }
+
+    fn topology_events(&self, tick: u64) -> Result<Vec<TopologyPerturbation>, String> {
+        let mut events = self
+            .topology_schedule
+            .lock()
+            .remove(&tick)
+            .unwrap_or_default();
+        events.sort_by_key(TopologyPerturbation::ordering_key);
+        Ok(events)
+    }
 }
 
 #[cfg(test)]
@@ -488,6 +528,8 @@ mod tests {
     use super::*;
     use aura_core::types::scope::{AuthorityOp, ResourceScope};
     use aura_core::AuthorityId;
+    use std::time::Duration;
+    use telltale_vm::effect::{CorruptionType, TopologyPerturbation};
     use uuid::Uuid;
 
     #[test]
@@ -567,5 +609,85 @@ mod tests {
         let snapshot = handler.guard_contention_snapshot();
         assert_eq!(snapshot.get("acquire_denied"), Some(&1));
         assert_eq!(snapshot.get("release_faults"), Some(&1));
+    }
+
+    #[test]
+    fn topology_schedule_is_sorted_and_drained_per_tick() {
+        let handler = AuraVmEffectHandler::default();
+        handler.schedule_topology_events(
+            3,
+            vec![
+                TopologyPerturbation::Timeout {
+                    site: "node-c".to_string(),
+                    duration: Duration::from_millis(50),
+                },
+                TopologyPerturbation::Partition {
+                    from: "node-b".to_string(),
+                    to: "node-c".to_string(),
+                },
+                TopologyPerturbation::Crash {
+                    site: "node-a".to_string(),
+                },
+                TopologyPerturbation::Corrupt {
+                    from: "node-d".to_string(),
+                    to: "node-e".to_string(),
+                    corruption: CorruptionType::PayloadErase,
+                },
+            ],
+        );
+
+        let first = handler.topology_events(3).expect("scheduled events");
+        assert_eq!(first.len(), 4);
+        assert_eq!(
+            first
+                .iter()
+                .map(TopologyPerturbation::ordering_key)
+                .collect::<Vec<_>>(),
+            {
+                let mut keys = first
+                    .iter()
+                    .map(TopologyPerturbation::ordering_key)
+                    .collect::<Vec<_>>();
+                keys.sort();
+                keys
+            }
+        );
+
+        let drained = handler.topology_events(3).expect("drained tick");
+        assert!(drained.is_empty());
+    }
+
+    #[test]
+    fn topology_schedule_is_isolated_by_tick() {
+        let handler = AuraVmEffectHandler::default();
+        handler.schedule_topology_event(
+            1,
+            TopologyPerturbation::Crash {
+                site: "tick-one".to_string(),
+            },
+        );
+        handler.schedule_topology_event(
+            2,
+            TopologyPerturbation::Crash {
+                site: "tick-two".to_string(),
+            },
+        );
+
+        let tick_one = handler.topology_events(1).expect("tick one");
+        let tick_two = handler.topology_events(2).expect("tick two");
+        assert_eq!(tick_one.len(), 1);
+        assert_eq!(tick_two.len(), 1);
+        assert_eq!(
+            tick_one[0],
+            TopologyPerturbation::Crash {
+                site: "tick-one".to_string()
+            }
+        );
+        assert_eq!(
+            tick_two[0],
+            TopologyPerturbation::Crash {
+                site: "tick-two".to_string()
+            }
+        );
     }
 }

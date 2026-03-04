@@ -11,6 +11,7 @@ use aura_agent::{
 };
 use telltale_types::{GlobalType, Label};
 use telltale_vm::effect::EffectHandler;
+use telltale_vm::effect::TopologyPerturbation;
 use telltale_vm::loader::CodeImage;
 use telltale_vm::output_condition::OutputConditionHint;
 use telltale_vm::vm::{ObsEvent, RunStatus};
@@ -200,5 +201,47 @@ fn run_emits_bound_exceeded_when_step_budget_is_exhausted() {
     assert!(
         matches!(err, AuraChoreoEngineError::BoundExceeded { .. }),
         "expected BoundExceeded, got: {err:?}"
+    );
+}
+
+#[test]
+fn prod_profile_topology_only_capture_records_topology_events() {
+    let config = build_vm_config(
+        AuraVmHardeningProfile::Prod,
+        AuraVmParityProfile::RuntimeDefault,
+    );
+    let handler = Arc::new(AuraVmEffectHandler::default());
+    for tick in 0..=8 {
+        handler.schedule_topology_event(
+            tick,
+            TopologyPerturbation::Crash {
+                site: "prod-topology-node".to_string(),
+            },
+        );
+    }
+    let mut engine = AuraChoreoEngine::new(config, Arc::clone(&handler));
+    let image = simple_send_image();
+
+    engine.open_session(&image).expect("open session");
+    let status = engine.run(32).expect("run should succeed");
+    assert_eq!(status, RunStatus::AllDone);
+
+    let effect_trace = engine.vm().effect_trace();
+    assert!(
+        !effect_trace.is_empty(),
+        "topology-only mode should still capture topology events"
+    );
+    assert!(
+        effect_trace
+            .iter()
+            .all(|entry| entry.effect_kind == "topology_event"),
+        "prod profile should capture topology events only"
+    );
+    assert!(
+        effect_trace.iter().any(|entry| matches!(
+            entry.topology,
+            Some(TopologyPerturbation::Crash { ref site }) if site == "prod-topology-node"
+        )),
+        "expected scheduled topology crash to appear in trace"
     );
 }

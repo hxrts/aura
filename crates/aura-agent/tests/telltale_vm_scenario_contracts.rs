@@ -5,11 +5,15 @@
 use std::fs;
 use std::path::PathBuf;
 
-use aura_agent::{build_vm_config, AuraVmHardeningProfile, AuraVmParityProfile};
+use aura_agent::{
+    build_vm_config, AuraVmEffectHandler, AuraVmHardeningProfile, AuraVmParityProfile,
+};
 use serde::Serialize;
+use std::collections::BTreeSet;
 use telltale_types::{GlobalType, Label, LocalTypeR};
 use telltale_vm::coroutine::Value;
 use telltale_vm::effect::EffectHandler;
+use telltale_vm::effect::TopologyPerturbation;
 use telltale_vm::loader::CodeImage;
 use telltale_vm::vm::{ObsEvent, RunStatus, VM};
 
@@ -22,6 +26,8 @@ struct ContractBundleSpec {
 }
 
 const CONTRACT_BUNDLES: &[ContractBundleSpec] = &[
+    // Synthetic-fast bundle contracts. A separate realistic lane below runs
+    // a real Aura choreography source with AuraVmEffectHandler.
     ContractBundleSpec {
         id: "consensus",
         build: consensus_fast_fallback_global,
@@ -92,6 +98,56 @@ fn project_locals(global: &GlobalType) -> std::collections::BTreeMap<String, Loc
         .expect("project global choreography to local session types")
         .into_iter()
         .collect()
+}
+
+fn strip_aura_annotations_for_parser(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    #[allow(clippy::while_let_on_iterator)]
+    while let Some(ch) = chars.next() {
+        if ch != '[' {
+            out.push(ch);
+            continue;
+        }
+
+        let mut depth = 1usize;
+        let mut buf = String::new();
+        let mut has_equals = false;
+
+        while let Some(next) = chars.next() {
+            if next == '[' {
+                depth += 1;
+            } else if next == ']' {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    break;
+                }
+            }
+            if next == '=' {
+                has_equals = true;
+            }
+            buf.push(next);
+        }
+
+        if !has_equals {
+            out.push('[');
+            out.push_str(&buf);
+            out.push(']');
+        }
+    }
+
+    out
+}
+
+fn invitation_exchange_global_from_source() -> GlobalType {
+    let source = strip_aura_annotations_for_parser(include_str!(
+        "../../aura-invitation/src/protocol.invitation_exchange.choreo"
+    ));
+    let choreography = aura_mpst::telltale_choreography::compiler::parse_choreography_str(&source)
+        .expect("parse invitation choreography source");
+    aura_mpst::telltale_choreography::ast::choreography_to_global(&choreography)
+        .expect("convert invitation choreography to global type")
 }
 
 fn consensus_fast_fallback_global(_seed: u64) -> GlobalType {
@@ -464,5 +520,49 @@ fn scenario_contract_bundles_hold_under_ci_profile() {
         violations.is_empty(),
         "scenario contract violations detected:\n{}",
         serde_json::to_string_pretty(&violations).expect("serialize scenario-contract violations")
+    );
+}
+
+#[test]
+fn scenario_contract_real_invitation_source_runs_with_non_noop_handler() {
+    let global = invitation_exchange_global_from_source();
+    let locals = project_locals(&global);
+    let image = CodeImage::from_local_types(&locals, &global);
+    let config = build_vm_config(
+        AuraVmHardeningProfile::Ci,
+        AuraVmParityProfile::NativeCooperative,
+    );
+    let mut vm = VM::new(config);
+    let handler = AuraVmEffectHandler::default();
+    for tick in 0..=4 {
+        handler.schedule_topology_event(
+            tick,
+            TopologyPerturbation::Crash {
+                site: "invitation-topology-node".to_string(),
+            },
+        );
+    }
+
+    vm.load_choreography(&image)
+        .expect("load real invitation choreography");
+    let status = vm.run(&handler, 128).expect("run invitation choreography");
+    assert_eq!(status, RunStatus::AllDone);
+
+    let effect_kinds = vm
+        .effect_trace()
+        .iter()
+        .map(|entry| entry.effect_kind.as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(
+        effect_kinds.contains("send_decision"),
+        "non-noop handler run should include send_decision effects"
+    );
+    assert!(
+        effect_kinds.contains("handle_recv"),
+        "non-noop handler run should include handle_recv effects"
+    );
+    assert!(
+        effect_kinds.contains("topology_event"),
+        "scheduled topology event should appear in effect trace"
     );
 }

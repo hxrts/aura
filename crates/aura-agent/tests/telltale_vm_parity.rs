@@ -16,6 +16,7 @@ struct ScenarioSpec {
 }
 
 const SCENARIOS: &[ScenarioSpec] = &[
+    // Synthetic-fast corpus for deterministic parity regression coverage.
     ScenarioSpec {
         name: "consensus_fast_fallback",
         build: consensus_fast_fallback_global,
@@ -416,28 +417,29 @@ mod native {
         native_repro_command, project_locals, selected_scenarios, selected_seed_corpus, NoOpHandler,
     };
     use aura_agent::{
-        build_vm_config, AuraEnvelopeParityPolicy, AuraVmHardeningProfile, AuraVmParityProfile,
+        build_vm_config, AuraEnvelopeParityPolicy, AuraVmEffectHandler, AuraVmHardeningProfile,
+        AuraVmParityProfile,
     };
     use aura_core::{
         assert_effect_kinds_classified, AuraConformanceArtifactV1, AuraConformanceRunMetadataV1,
         AuraConformanceSurfaceV1, ConformanceSurfaceName,
     };
-    use aura_testkit::{compare_artifacts, EnvelopeLawRegistry};
+    use aura_testkit::{compare_artifacts, EnvelopeLawRegistry, ReplayEffectSequence, ReplayTrace};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
+    use telltale_vm::effect::TopologyPerturbation;
     use telltale_vm::loader::CodeImage;
-    use telltale_vm::serialization::canonical_replay_fragment_v1;
+    use telltale_vm::serialization::CanonicalReplayFragmentV1;
     use telltale_vm::threaded::ThreadedVM;
     use telltale_vm::vm::{ObsEvent, RunStatus, VM};
-    use telltale_vm::{
-        CommunicationReplayMode, EffectDeterminismTier, EffectTraceEntry, EnvelopeDiff,
-    };
+    use telltale_vm::{EffectDeterminismTier, EffectTraceEntry, EnvelopeDiff};
 
     struct ParityRun {
         obs_trace: Vec<ObsEvent>,
         effect_trace: Vec<EffectTraceEntry>,
         scheduler_steps: usize,
+        canonical_fragment: CanonicalReplayFragmentV1,
     }
 
     fn normalize_handler_identity(trace: &[EffectTraceEntry]) -> Vec<EffectTraceEntry> {
@@ -463,6 +465,7 @@ mod native {
             obs_trace: vm.trace().to_vec(),
             effect_trace: vm.effect_trace().to_vec(),
             scheduler_steps: vm.scheduler_step_count(),
+            canonical_fragment: vm.canonical_replay_fragment(),
         };
         (status, run)
     }
@@ -491,6 +494,7 @@ mod native {
             obs_trace: vm.trace().to_vec(),
             effect_trace: vm.effect_trace().to_vec(),
             scheduler_steps: vm.trace().len(),
+            canonical_fragment: vm.canonical_replay_fragment(),
         }
     }
 
@@ -512,6 +516,7 @@ mod native {
             obs_trace: vm.trace().to_vec(),
             effect_trace: vm.effect_trace().to_vec(),
             scheduler_steps: vm.trace().len(),
+            canonical_fragment: vm.canonical_replay_fragment(),
         }
     }
 
@@ -533,7 +538,18 @@ mod native {
             obs_trace: vm.trace().to_vec(),
             effect_trace: vm.effect_trace().to_vec(),
             scheduler_steps: vm.trace().len(),
+            canonical_fragment: vm.canonical_replay_fragment(),
         }
+    }
+
+    fn normalized_fragment_without_handler_identity(
+        fragment: &CanonicalReplayFragmentV1,
+    ) -> CanonicalReplayFragmentV1 {
+        let mut normalized = fragment.clone();
+        for entry in &mut normalized.effect_trace {
+            entry.handler_identity.clear();
+        }
+        normalized
     }
 
     fn write_replay_lane_metrics(
@@ -733,30 +749,10 @@ mod native {
                 let _ = write_artifact(&cooperative_artifact, "native_coop", scenario.name, seed);
                 let _ = write_artifact(&threaded_artifact, "native_threaded", scenario.name, seed);
 
-                let cooperative_fragment = canonical_replay_fragment_v1(
-                    &cooperative.obs_trace,
-                    &cooperative.effect_trace,
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                    EffectDeterminismTier::StrictDeterministic,
-                    CommunicationReplayMode::Off,
-                    None,
-                    Vec::new(),
-                );
-                let threaded_fragment = canonical_replay_fragment_v1(
-                    &threaded.obs_trace,
-                    &threaded.effect_trace,
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                    EffectDeterminismTier::StrictDeterministic,
-                    CommunicationReplayMode::Off,
-                    None,
-                    Vec::new(),
-                );
+                let cooperative_fragment =
+                    normalized_fragment_without_handler_identity(&cooperative.canonical_fragment);
+                let threaded_fragment =
+                    normalized_fragment_without_handler_identity(&threaded.canonical_fragment);
                 let diff = EnvelopeDiff::from_replay_fragments(
                     "native_cooperative",
                     "native_threaded",
@@ -846,31 +842,73 @@ mod native {
                     normalize_handler_identity(&recorded.effect_trace);
                 let normalized_replayed_effects =
                     normalize_handler_identity(&replayed.effect_trace);
+                let normalized_replayed_threaded_effects =
+                    normalize_handler_identity(&replayed_threaded.effect_trace);
 
-                let recorded_fragment = canonical_replay_fragment_v1(
-                    &recorded.obs_trace,
-                    &normalized_recorded_effects,
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                    EffectDeterminismTier::ReplayDeterministic,
-                    CommunicationReplayMode::Off,
-                    None,
-                    Vec::new(),
-                );
-                let replayed_fragment = canonical_replay_fragment_v1(
-                    &replayed.obs_trace,
-                    &normalized_replayed_effects,
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                    EffectDeterminismTier::ReplayDeterministic,
-                    CommunicationReplayMode::Off,
-                    None,
-                    Vec::new(),
-                );
+                let expected_replay_trace = ReplayTrace::from_entries(normalized_recorded_effects);
+                let mut replay_verifier = ReplayEffectSequence::new(&expected_replay_trace);
+                for entry in &normalized_replayed_effects {
+                    replay_verifier.verify_next(entry).unwrap_or_else(|err| {
+                        panic!(
+                            "cooperative replay trace consumption mismatch for scenario={} seed={} ({err})\nrepro: {}",
+                            scenario.name,
+                            seed,
+                            native_repro_command(
+                                "native_replay_conformance_matches_recorded_trace_for_seed_corpus",
+                                scenario.name,
+                                seed
+                            )
+                        )
+                    });
+                }
+                replay_verifier.finish().unwrap_or_else(|err| {
+                    panic!(
+                        "cooperative replay trace did not fully consume expected entries for scenario={} seed={} ({err})\nrepro: {}",
+                        scenario.name,
+                        seed,
+                        native_repro_command(
+                            "native_replay_conformance_matches_recorded_trace_for_seed_corpus",
+                            scenario.name,
+                            seed
+                        )
+                    )
+                });
+
+                let mut threaded_replay_verifier =
+                    ReplayEffectSequence::new(&expected_replay_trace);
+                for entry in &normalized_replayed_threaded_effects {
+                    threaded_replay_verifier
+                        .verify_next(entry)
+                        .unwrap_or_else(|err| {
+                            panic!(
+                                "threaded replay trace consumption mismatch for scenario={} seed={} ({err})\nrepro: {}",
+                                scenario.name,
+                                seed,
+                                native_repro_command(
+                                    "native_replay_conformance_matches_recorded_trace_for_seed_corpus",
+                                    scenario.name,
+                                    seed
+                                )
+                            )
+                        });
+                }
+                threaded_replay_verifier.finish().unwrap_or_else(|err| {
+                    panic!(
+                        "threaded replay trace did not fully consume expected entries for scenario={} seed={} ({err})\nrepro: {}",
+                        scenario.name,
+                        seed,
+                        native_repro_command(
+                            "native_replay_conformance_matches_recorded_trace_for_seed_corpus",
+                            scenario.name,
+                            seed
+                        )
+                    )
+                });
+
+                let recorded_fragment =
+                    normalized_fragment_without_handler_identity(&recorded.canonical_fragment);
+                let replayed_fragment =
+                    normalized_fragment_without_handler_identity(&replayed.canonical_fragment);
 
                 assert_eq!(
                     recorded_fragment,
@@ -1018,6 +1056,76 @@ mod native {
             )
         );
     }
+
+    #[test]
+    fn native_topology_events_are_captured_for_parity_lanes() {
+        let scenario = selected_scenarios()
+            .into_iter()
+            .next()
+            .expect("at least one selected scenario");
+        let seed = selected_seed_corpus()
+            .into_iter()
+            .next()
+            .expect("at least one selected seed");
+
+        let global = (scenario.build)(seed);
+        let locals = project_locals(&global);
+        let image = CodeImage::from_local_types(&locals, &global);
+
+        let mut vm = VM::new(build_vm_config(
+            AuraVmHardeningProfile::Ci,
+            AuraVmParityProfile::NativeCooperative,
+        ));
+        let handler = AuraVmEffectHandler::default();
+        let crash = TopologyPerturbation::Crash {
+            site: "fault-node-a".to_string(),
+        };
+        let partition = TopologyPerturbation::Partition {
+            from: "fault-node-a".to_string(),
+            to: "fault-node-b".to_string(),
+        };
+        for tick in 0..=8 {
+            handler.schedule_topology_event(tick, partition.clone());
+            handler.schedule_topology_event(tick, crash.clone());
+        }
+
+        vm.load_choreography(&image).expect("load choreography");
+        let status = vm.run(&handler, 64).expect("run choreography");
+        assert_eq!(status, RunStatus::AllDone);
+
+        let topology_events = vm
+            .effect_trace()
+            .iter()
+            .filter_map(|entry| entry.topology.clone())
+            .collect::<Vec<_>>();
+        assert!(
+            !topology_events.is_empty(),
+            "expected at least one topology_event capture in effect trace\nrepro: {}",
+            native_repro_command(
+                "native_topology_events_are_captured_for_parity_lanes",
+                scenario.name,
+                seed
+            )
+        );
+        assert!(
+            topology_events.iter().any(|event| event == &crash),
+            "expected crash topology event in effect trace\nrepro: {}",
+            native_repro_command(
+                "native_topology_events_are_captured_for_parity_lanes",
+                scenario.name,
+                seed
+            )
+        );
+        assert!(
+            topology_events.iter().any(|event| event == &partition),
+            "expected partition topology event in effect trace\nrepro: {}",
+            native_repro_command(
+                "native_topology_events_are_captured_for_parity_lanes",
+                scenario.name,
+                seed
+            )
+        );
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1130,18 +1238,8 @@ mod wasm {
                     )
                 );
 
-                let native_fragment = canonical_replay_fragment_v1(
-                    &native_trace,
-                    &[],
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                    EffectDeterminismTier::StrictDeterministic,
-                    CommunicationReplayMode::Off,
-                    None,
-                    Vec::new(),
-                );
+                let mut native_fragment = native_vm.canonical_replay_fragment();
+                native_fragment.effect_trace.clear();
                 let wasm_fragment = canonical_replay_fragment_v1(
                     &wasm_trace,
                     &[],

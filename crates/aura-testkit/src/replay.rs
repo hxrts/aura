@@ -351,6 +351,49 @@ mod tests {
     }
 
     #[test]
+    fn replay_sequence_detects_under_consumption_on_finish() {
+        let trace = ReplayTrace::from_entries(vec![
+            sample_entry(0, "send_decision"),
+            sample_entry(1, "handle_recv"),
+        ]);
+        let mut verifier = ReplayEffectSequence::new(&trace);
+        verifier
+            .verify_next(&sample_entry(0, "send_decision"))
+            .expect("first entry should match");
+        let error = verifier
+            .finish()
+            .expect_err("finish must fail when expected entries remain");
+        assert!(matches!(
+            error,
+            ReplayTraceError::Divergence {
+                index: 1,
+                expected_kind: Some(_),
+                actual_kind: None
+            }
+        ));
+    }
+
+    #[test]
+    fn replay_sequence_detects_over_consumption() {
+        let trace = ReplayTrace::from_entries(vec![sample_entry(0, "send_decision")]);
+        let mut verifier = ReplayEffectSequence::new(&trace);
+        verifier
+            .verify_next(&sample_entry(0, "send_decision"))
+            .expect("first entry should match");
+        let error = verifier
+            .verify_next(&sample_entry(1, "handle_recv"))
+            .expect_err("over-consumption must fail once expected entries are exhausted");
+        assert!(matches!(
+            error,
+            ReplayTraceError::Divergence {
+                index: 1,
+                expected_kind: None,
+                actual_kind: Some(_)
+            }
+        ));
+    }
+
+    #[test]
     fn replay_bundle_roundtrip_with_faults() {
         let trace = ReplayTrace::from_entries_and_faults(
             vec![sample_entry(0, "send_decision")],

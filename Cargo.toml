@@ -115,7 +115,6 @@ socket2 = { version = "0.5", features = ["all"] }
 telltale = "2.1"
 telltale-choreography = "2.1"
 telltale-vm = "2.1"
-telltale-simulator = "2.1"
 telltale-types = "2.0"
 telltale-theory = "2.1"
 signature = "2.2"

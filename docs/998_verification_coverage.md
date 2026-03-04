@@ -16,7 +16,7 @@ See [Formal Verification Reference](119_verification.md#assurance-summary) for t
 | Quint Specifications | 41 |
 | Quint Invariants | 191 |
 | Quint Temporal Properties | 11 |
-| Quint Type Definitions | 366 |
+| Quint Type Definitions | 362 |
 | Lean Source Files | 38 |
 | Lean Theorems | 118 |
 | Conformance Fixtures | 4 |

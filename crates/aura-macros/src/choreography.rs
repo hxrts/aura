@@ -20,7 +20,9 @@ use syn::{
     Attribute, Expr, ExprLit, ExprMacro, Ident, Lit, LitStr, Stmt, Type,
 };
 use telltale_choreography::{
-    ast::{Choreography, GlobalTypeCore, MessageType, PayloadSort, Protocol},
+    ast::{
+        choreography_to_global, Choreography, GlobalTypeCore, MessageType, PayloadSort, Protocol,
+    },
     compiler::{codegen::generate_choreography_code, parse_choreography_str, project},
 };
 use telltale_theory::check_coherent;
@@ -60,6 +62,9 @@ enum CoherenceModelError {
         hint: &'static str,
     },
     InvalidChoice(String),
+    ConversionDrift {
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for CoherenceModelError {
@@ -72,6 +77,7 @@ impl std::fmt::Display for CoherenceModelError {
                 )
             }
             Self::InvalidChoice(reason) => write!(f, "{reason}"),
+            Self::ConversionDrift { detail } => write!(f, "{detail}"),
         }
     }
 }
@@ -126,6 +132,13 @@ fn build_coherence_validation_input(
 ) -> Result<CoherenceValidationInput, CoherenceModelError> {
     let mut next_loop_id = 0usize;
     let global_type = protocol_to_global_for_coherence(&choreography.protocol, &mut next_loop_id)?;
+    if let Ok(authoritative_global) = choreography_to_global(choreography) {
+        if global_type != authoritative_global {
+            return Err(CoherenceModelError::ConversionDrift {
+                detail: "custom coherence conversion drifted from telltale_choreography::ast::choreography_to_global for a supported DSL subset".to_string(),
+            });
+        }
+    }
     let mut initial_delivery_env = BTreeMap::new();
     collect_initial_delivery_env(&global_type, &mut initial_delivery_env);
     Ok(CoherenceValidationInput {
@@ -2002,5 +2015,41 @@ protocol IncoherentSelfSend =
             err.contains("action"),
             "error should include failed action predicate"
         );
+    }
+
+    #[test]
+    fn coherence_validation_rejects_broadcast_with_stable_error() {
+        let dsl = r#"
+module broadcast_proto exposing (BroadcastProto)
+
+protocol BroadcastProto =
+  roles A, B, C
+  A ->* : Ping
+"#;
+        let choreography = parse_test_choreography(dsl);
+        let err = build_coherence_validation_input(&choreography)
+            .expect_err("broadcast should fail coherence conversion");
+        assert!(
+            err.to_string().contains("Broadcast"),
+            "error should mention unsupported Broadcast feature"
+        );
+    }
+
+    #[test]
+    fn coherence_supported_subset_matches_authoritative_conversion() {
+        let dsl = r#"
+module subset_proto exposing (SubsetProto)
+
+protocol SubsetProto =
+  roles A, B
+  case choose A of
+    Accept ->
+      A -> B : AcceptMsg
+    Reject ->
+      A -> B : RejectMsg
+"#;
+        let choreography = parse_test_choreography(dsl);
+        build_coherence_validation_input(&choreography)
+            .expect("supported subset should pass drift check");
     }
 }
