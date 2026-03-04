@@ -56,8 +56,9 @@ fn orphan_free_status_for_all_roles(source: &str) -> BTreeMap<String, bool> {
     for role in &choreography.roles {
         let local = project(&choreography, role)
             .unwrap_or_else(|err| panic!("projection failed for role {}: {err}", role.name()));
-        let local_r = local_to_local_r(&local)
-            .unwrap_or_else(|err| panic!("local conversion failed for role {}: {err}", role.name()));
+        let local_r = local_to_local_r(&local).unwrap_or_else(|err| {
+            panic!("local conversion failed for role {}: {err}", role.name())
+        });
         status.insert(role.name().to_string(), orphan_free(&local_r));
     }
     status

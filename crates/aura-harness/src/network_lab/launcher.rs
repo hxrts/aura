@@ -4,7 +4,8 @@ use std::io::Read;
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tokio::time::Instant;
 
 use anyhow::{anyhow, bail, Context, Result};
 
@@ -86,7 +87,7 @@ impl StandardAgentLauncher {
     fn ensure_log_path(&self, authority_id: &str) -> Result<PathBuf> {
         fs::create_dir_all(&self.log_root)
             .with_context(|| format!("create log root {}", self.log_root.display()))?;
-        Ok(self.log_root.join(format!("{}.log", authority_id)))
+        Ok(self.log_root.join(format!("{authority_id}.log")))
     }
 }
 

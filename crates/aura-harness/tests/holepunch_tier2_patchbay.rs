@@ -91,15 +91,14 @@ async fn provision(
 }
 
 #[tokio::test]
-async fn home_to_home_succeeds_with_relay_first_policy() {
+async fn home_to_home_succeeds_with_relay_first_policy() -> anyhow::Result<()> {
     let (mut backend, runtime, _temp, artifact_root) = provision(topology(
         "home-home",
         NatPreset::Home,
         NatPreset::Home,
         FirewallPreset::Home,
     ))
-    .await
-    .expect("provision tier2 backend");
+    .await?;
 
     assert_eq!(runtime.authorities.len(), 3);
 
@@ -109,87 +108,74 @@ async fn home_to_home_succeeds_with_relay_first_policy() {
             right_node: "home-a".to_string(),
             condition: LinkConditionPreset::Wifi,
         })
-        .await
-        .expect("apply link condition");
+        .await?;
     assert_eq!(receipt.event_type, "set_link_condition");
 
-    let bundle = backend
-        .collect_artifacts(&artifact_root)
-        .await
-        .expect("collect artifacts");
+    let bundle = backend.collect_artifacts(&artifact_root).await?;
     assert!(bundle.root.exists());
+    Ok(())
 }
 
 #[tokio::test]
-async fn home_to_corporate_keeps_relay_path() {
+async fn home_to_corporate_keeps_relay_path() -> anyhow::Result<()> {
     let (mut backend, _runtime, _temp, artifact_root) = provision(topology(
         "home-corporate",
         NatPreset::Home,
         NatPreset::Corporate,
         FirewallPreset::Corporate,
     ))
-    .await
-    .expect("provision tier2 backend");
+    .await?;
 
     let receipt = backend
         .apply_event(NetworkEvent::SetFirewall {
             router: "edge-b".to_string(),
             preset: FirewallPreset::Corporate,
         })
-        .await
-        .expect("apply firewall");
+        .await?;
     assert_eq!(receipt.event_type, "set_firewall");
 
-    let bundle = backend
-        .collect_artifacts(&artifact_root)
-        .await
-        .expect("collect artifacts");
+    let bundle = backend.collect_artifacts(&artifact_root).await?;
     assert!(bundle.root.exists());
+    Ok(())
 }
 
 #[tokio::test]
-async fn double_nat_handles_nat_flush_event() {
+async fn double_nat_handles_nat_flush_event() -> anyhow::Result<()> {
     let (mut backend, _runtime, _temp, artifact_root) = provision(topology(
         "double-nat",
         NatPreset::Cgnat,
         NatPreset::Home,
         FirewallPreset::Home,
     ))
-    .await
-    .expect("provision tier2 backend");
+    .await?;
 
     let receipt = backend
         .apply_event(NetworkEvent::FlushNat {
             router: "edge-b".to_string(),
         })
-        .await
-        .expect("flush NAT state");
+        .await?;
     assert_eq!(receipt.event_type, "nat_flush");
-    let bundle = backend
-        .collect_artifacts(&artifact_root)
-        .await
-        .expect("collect artifacts");
+    let bundle = backend.collect_artifacts(&artifact_root).await?;
     assert!(bundle.root.exists());
+    Ok(())
 }
 
 #[tokio::test]
-async fn network_handoff_recovers_after_link_down_up() {
+async fn network_handoff_recovers_after_link_down_up() -> anyhow::Result<()> {
     let (mut backend, _runtime, _temp, artifact_root) = provision(topology(
         "handoff",
         NatPreset::Home,
         NatPreset::Cgnat,
         FirewallPreset::Home,
     ))
-    .await
-    .expect("provision tier2 backend");
+    .await?;
 
     let down = backend
         .apply_event(NetworkEvent::LinkDown {
             authority_id: "alice".to_string(),
             iface: "eth0".to_string(),
         })
-        .await
-        .expect("apply link down");
+        .await?;
     assert_eq!(down.event_type, "link_toggle");
 
     let up = backend
@@ -197,63 +183,52 @@ async fn network_handoff_recovers_after_link_down_up() {
             authority_id: "alice".to_string(),
             iface: "eth0".to_string(),
         })
-        .await
-        .expect("apply link up");
+        .await?;
     assert_eq!(up.event_type, "link_toggle");
-    let bundle = backend
-        .collect_artifacts(&artifact_root)
-        .await
-        .expect("collect artifacts");
+    let bundle = backend.collect_artifacts(&artifact_root).await?;
     assert!(bundle.root.exists());
+    Ok(())
 }
 
 #[tokio::test]
-async fn nat_timeout_scenario_flushes_router_state() {
+async fn nat_timeout_scenario_flushes_router_state() -> anyhow::Result<()> {
     let (mut backend, _runtime, _temp, artifact_root) = provision(topology(
         "nat-timeout",
         NatPreset::Home,
         NatPreset::Home,
         FirewallPreset::Home,
     ))
-    .await
-    .expect("provision tier2 backend");
+    .await?;
 
     let receipt = backend
         .apply_event(NetworkEvent::FlushNat {
             router: "home-a".to_string(),
         })
-        .await
-        .expect("flush NAT state");
+        .await?;
     assert_eq!(receipt.event_type, "nat_flush");
-    let bundle = backend
-        .collect_artifacts(&artifact_root)
-        .await
-        .expect("collect artifacts");
+    let bundle = backend.collect_artifacts(&artifact_root).await?;
     assert!(bundle.root.exists());
+    Ok(())
 }
 
 #[tokio::test]
-async fn restrictive_firewall_scenario_still_runs_with_relay_available() {
+async fn restrictive_firewall_scenario_still_runs_with_relay_available() -> anyhow::Result<()> {
     let (mut backend, _runtime, _temp, artifact_root) = provision(topology(
         "firewall",
         NatPreset::Home,
         NatPreset::Corporate,
         FirewallPreset::UdpBlocked,
     ))
-    .await
-    .expect("provision tier2 backend");
+    .await?;
 
     let receipt = backend
         .apply_event(NetworkEvent::SetFirewall {
             router: "edge-b".to_string(),
             preset: FirewallPreset::UdpBlocked,
         })
-        .await
-        .expect("apply firewall preset");
+        .await?;
     assert_eq!(receipt.event_type, "set_firewall");
-    let bundle = backend
-        .collect_artifacts(&artifact_root)
-        .await
-        .expect("collect artifacts");
+    let bundle = backend.collect_artifacts(&artifact_root).await?;
     assert!(bundle.root.exists());
+    Ok(())
 }

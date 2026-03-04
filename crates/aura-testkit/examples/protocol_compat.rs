@@ -1,3 +1,5 @@
+//! Example harness for protocol compatibility fixture checks.
+
 use std::env;
 use std::fs;
 

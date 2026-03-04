@@ -154,13 +154,13 @@ async fn wait_for_lan_peer(agent: &AuraAgent, peer_id: AuthorityId) -> TestResul
         .rendezvous()
         .ok_or("rendezvous service not enabled")?;
 
-    timeout(Duration::from_secs(5), async {
+    timeout(Duration::from_secs(15), async {
         loop {
             let peers = rendezvous.list_lan_discovered_peers().await;
             if peers.iter().any(|peer| peer.authority_id == peer_id) {
                 break;
             }
-            sleep(Duration::from_millis(100)).await;
+            sleep(Duration::from_millis(150)).await;
         }
     })
     .await

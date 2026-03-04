@@ -456,9 +456,8 @@ mod tests {
     #[tokio::test]
     async fn test_time_operations() {
         let fixed_ts = 1_772_576_325_465;
-        let handler = EnhancedTimeHandler::with_provider(Arc::new(FixedTimeProvider {
-            ts_ms: fixed_ts,
-        }));
+        let handler =
+            EnhancedTimeHandler::with_provider(Arc::new(FixedTimeProvider { ts_ms: fixed_ts }));
 
         let current_epoch = handler.current_epoch().await.unwrap();
         let current_timestamp = handler.current_timestamp().await.unwrap();

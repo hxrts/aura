@@ -42,7 +42,9 @@ fn path_selection_prefers_recoverable_relay_then_direct() {
     ];
     actor.on_candidates_changed(CandidateGeneration(1), &candidates);
 
-    let selected = actor.selected_path().expect("selected path");
+    let Some(selected) = actor.selected_path() else {
+        panic!("selected path");
+    };
     assert_eq!(selected.kind(), CandidateKind::Relay);
 
     let mut actor = new_actor();
@@ -58,7 +60,9 @@ fn path_selection_prefers_recoverable_relay_then_direct() {
     ];
     actor.on_candidates_changed(CandidateGeneration(2), &candidates);
 
-    let selected = actor.selected_path().expect("selected path");
+    let Some(selected) = actor.selected_path() else {
+        panic!("selected path");
+    };
     assert_eq!(selected.kind(), CandidateKind::Direct);
 }
 

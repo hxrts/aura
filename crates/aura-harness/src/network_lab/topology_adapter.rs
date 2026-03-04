@@ -249,7 +249,7 @@ mod tests {
                 gateway_router: "home-a".to_string(),
                 bind_address: "10.0.0.10:44001".to_string(),
                 relay_capable: true,
-                env: Default::default(),
+                env: std::collections::BTreeMap::default(),
             }],
             required_relay_authority: Some("alice".to_string()),
         }
