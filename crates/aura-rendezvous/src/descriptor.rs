@@ -6,10 +6,7 @@
 use crate::facts::{RendezvousDescriptor, TransportAddress, TransportHint};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult};
-use aura_transport::protocols::stun::StunMessage;
 use sha2::{Digest, Sha256};
-use std::net::SocketAddr;
-use std::time::Duration;
 
 /// Convert an AuthorityId to a 32-byte hash for commitment/indexing purposes.
 fn authority_hash_bytes(authority: &AuthorityId) -> [u8; 32] {
@@ -318,47 +315,11 @@ impl TransportProber {
 
     /// Perform STUN probe to discover reflexive address
     pub async fn stun_probe(&self, stun_server: &str) -> AuraResult<String> {
-        let server: SocketAddr = stun_server
-            .parse()
+        TransportAddress::new(stun_server)
             .map_err(|e| AuraError::invalid(format!("invalid STUN server address: {e}")))?;
-
-        let socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
-            .await
-            .map_err(|e| AuraError::network(format!("failed to bind STUN socket: {e}")))?;
-        let request = StunMessage::binding_request();
-        let payload = serde_json::to_vec(&request)
-            .map_err(|e| AuraError::internal(format!("failed to encode STUN request: {e}")))?;
-
-        tokio::time::timeout(
-            Duration::from_millis(self.timeout_ms),
-            socket.send_to(&payload, server),
-        )
-        .await
-        .map_err(|_| AuraError::network("stun_probe send timeout"))?
-        .map_err(|e| AuraError::network(format!("failed to send STUN request: {e}")))?;
-
-        let mut buf = [0u8; 4096];
-        let (n, _) = tokio::time::timeout(
-            Duration::from_millis(self.timeout_ms),
-            socket.recv_from(&mut buf),
-        )
-        .await
-        .map_err(|_| AuraError::network("stun_probe recv timeout"))?
-        .map_err(|e| AuraError::network(format!("failed to receive STUN response: {e}")))?;
-
-        let response: StunMessage = serde_json::from_slice(&buf[..n])
-            .map_err(|e| AuraError::invalid(format!("failed to decode STUN response: {e}")))?;
-
-        if response.transaction_id != request.transaction_id {
-            return Err(AuraError::invalid(
-                "STUN transaction_id mismatch in response".to_string(),
-            ));
-        }
-
-        response
-            .mapped_address()
-            .map(|addr| addr.to_string())
-            .ok_or_else(|| AuraError::not_found("STUN response missing mapped address"))
+        Err(AuraError::network(
+            "stun_probe unavailable in aura-rendezvous layer; perform probing via runtime NetworkEffects",
+        ))
     }
 
     /// Probe all hints in a descriptor and return reachable ones

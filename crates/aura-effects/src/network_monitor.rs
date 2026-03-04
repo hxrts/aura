@@ -109,25 +109,25 @@ impl NetworkChangeStream for DebouncedNetworkChangeStream {
 mod tests {
     use std::{collections::VecDeque, sync::Arc};
 
-    use tokio::sync::Mutex;
+    use tokio::sync::Mutex as AsyncMutex;
 
     use super::*;
 
     #[derive(Clone, Default)]
     struct MemoryNetworkEffects {
-        queue: Arc<Mutex<VecDeque<NetworkChange>>>,
+        queue: Arc<AsyncMutex<VecDeque<NetworkChange>>>,
     }
 
     impl MemoryNetworkEffects {
         fn new(changes: Vec<NetworkChange>) -> Self {
             Self {
-                queue: Arc::new(Mutex::new(changes.into_iter().collect())),
+                queue: Arc::new(AsyncMutex::new(changes.into_iter().collect())),
             }
         }
     }
 
     struct MemoryStream {
-        queue: Arc<Mutex<VecDeque<NetworkChange>>>,
+        queue: Arc<AsyncMutex<VecDeque<NetworkChange>>>,
     }
 
     #[async_trait]

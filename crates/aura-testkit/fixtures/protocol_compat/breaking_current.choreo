@@ -1,0 +1,6 @@
+module break_current exposing (BreakCurrent)
+
+protocol BreakCurrent =
+  roles A, B
+  A -> B : Ping2
+  B -> A : Pong

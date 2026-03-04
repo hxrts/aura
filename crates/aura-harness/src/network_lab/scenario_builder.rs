@@ -157,14 +157,11 @@ fn ensure_relay_requirement(spec: &TopologySpec) -> Result<()> {
         .iter()
         .find(|authority| authority.authority_id == *required)
     else {
-        bail!("required relay authority {} is not mapped", required);
+        bail!("required relay authority {required} is not mapped");
     };
 
     if !authority.relay_capable {
-        bail!(
-            "required relay authority {} is not marked relay_capable",
-            required
-        );
+        bail!("required relay authority {required} is not marked relay_capable");
     }
 
     Ok(())
@@ -201,14 +198,21 @@ fn validate_graph_connectivity(spec: &TopologySpec) -> Result<()> {
 
     for router in &spec.routers {
         if let Some(upstream) = &router.upstream {
-            adjacency
-                .get_mut(router.name.as_str())
-                .expect("router key exists")
-                .insert(upstream.as_str());
-            adjacency
-                .get_mut(upstream.as_str())
-                .expect("upstream key exists")
-                .insert(router.name.as_str());
+            let Some(router_neighbors) = adjacency.get_mut(router.name.as_str()) else {
+                bail!(
+                    "internal topology adjacency missing router {}",
+                    router.name.as_str()
+                );
+            };
+            router_neighbors.insert(upstream.as_str());
+
+            let Some(upstream_neighbors) = adjacency.get_mut(upstream.as_str()) else {
+                bail!(
+                    "internal topology adjacency missing upstream {}",
+                    upstream.as_str()
+                );
+            };
+            upstream_neighbors.insert(router.name.as_str());
         }
     }
 
@@ -263,7 +267,7 @@ mod tests {
             gateway_router: gateway.to_string(),
             bind_address: "10.0.0.1:44001".to_string(),
             relay_capable: relay,
-            env: Default::default(),
+            env: std::collections::BTreeMap::default(),
         }
     }
 

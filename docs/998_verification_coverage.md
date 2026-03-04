@@ -21,7 +21,7 @@ See [Formal Verification Reference](119_verification.md#assurance-summary) for t
 | Lean Theorems | 118 |
 | Conformance Fixtures | 4 |
 | ITF Trace Harnesses | 8 |
-| Testkit Tests | 111 |
+| Testkit Tests | 113 |
 | Bridge Modules | 4 |
 | CI Verification Gates | 11 |
 | Telltale Parity Modules | 1 |

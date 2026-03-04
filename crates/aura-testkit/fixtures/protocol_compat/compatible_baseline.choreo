@@ -1,0 +1,6 @@
+module compat_baseline exposing (CompatBaseline)
+
+protocol CompatBaseline =
+  roles A, B
+  A -> B : Ping
+  B -> A : Pong

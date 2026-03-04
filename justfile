@@ -124,6 +124,11 @@ audit:
 check-arch *FLAGS:
     scripts/check-arch.sh {{FLAGS}}
 
+# Check invariant-focused lanes (docs + runtime property monitor)
+check-invariants:
+    scripts/check-arch.sh --invariants
+    just ci-property-monitor
+
 # Quick architecture checks by category
 check-arch-layers:
     scripts/check-arch.sh --layers || true
@@ -191,6 +196,11 @@ ci-harness-replay:
 # Test suite
 ci-test:
     cargo test --workspace -q
+
+# Protocol evolution compatibility gate (async_subtype)
+ci-protocol-compat:
+    scripts/check-protocol-compat.sh --self-test
+    scripts/check-protocol-compat.sh
 
 # Tier 1 deterministic/property tests for holepunch decision logic
 ci-holepunch-tier1:
@@ -506,20 +516,21 @@ ci-dry-run:
     echo ""
 
     # Run CI steps (same as GitHub workflows)
-    run_step "1/13" "Format"             "just ci-format"
-    run_step "2/13" "Clippy"             "just ci-clippy"
-    run_step "3/13" "Build"              "just ci-build"
-    run_step "4/13" "Test"               "just ci-test"
-    run_step "5/13" "Choreo Parity"      "just ci-choreo-parity"
-    run_step "6/13" "Effects"            "just ci-effects"
-    run_step "7/13" "Choreo"             "just ci-choreo"
-    run_step "8/13" "Doc Links"          "just ci-crates-doc-links"
-    run_step "9/13" "Verify Coverage"    "just ci-verification-coverage"
-    run_step "10/13" "Conformance Policy" "just ci-conformance-policy"
-    run_step "11/13" "Harness Replay"     "just ci-harness-replay"
+    run_step "1/14" "Format"              "just ci-format"
+    run_step "2/14" "Clippy"              "just ci-clippy"
+    run_step "3/14" "Build"               "just ci-build"
+    run_step "4/14" "Test"                "just ci-test"
+    run_step "5/14" "Protocol Compat"     "just ci-protocol-compat"
+    run_step "6/14" "Choreo Parity"       "just ci-choreo-parity"
+    run_step "7/14" "Effects"             "just ci-effects"
+    run_step "8/14" "Choreo"              "just ci-choreo"
+    run_step "9/14" "Doc Links"           "just ci-crates-doc-links"
+    run_step "10/14" "Verify Coverage"    "just ci-verification-coverage"
+    run_step "11/14" "Conformance Policy" "just ci-conformance-policy"
+    run_step "12/14" "Harness Replay"     "just ci-harness-replay"
 
     # Quint (optional - skip if not installed)
-    printf "[12/13] Quint... "
+    printf "[13/14] Quint... "
     if command -v quint &>/dev/null; then
         if just ci-quint-typecheck >/dev/null 2>&1; then
             echo -e "${GREEN}OK${NC}"
@@ -532,7 +543,7 @@ ci-dry-run:
     fi
 
     # Architecture check (warning only)
-    printf "[13/13] Architecture... "
+    printf "[14/14] Architecture... "
     if ./scripts/check-arch.sh --quick >/dev/null 2>&1; then
         echo -e "${GREEN}OK${NC}"
     else

@@ -3,15 +3,15 @@
 //! Tests for the InvitationServiceApi public API exposed through AuraAgent.
 //!
 //! Each test uses a distinct entropy range to ensure test isolation:
-//! - test_invitation_service_via_agent: 10-19
-//! - test_invite_as_contact_via_agent: 20-29
-//! - test_invite_as_guardian_via_agent: 30-39
-//! - test_invite_to_channel_via_agent: 40-49
-//! - test_accept_invitation_via_agent: 50-59
-//! - test_decline_invitation_via_agent: 60-69
-//! - test_cancel_invitation_via_agent: 70-79
-//! - test_list_pending_via_agent: 80-89
-//! - test_get_invitation_via_agent: 90-99
+//! - test_invitation_service_via_agent: 200-209
+//! - test_invite_as_contact_via_agent: 210-219
+//! - test_invite_as_guardian_via_agent: 220-229
+//! - test_invite_to_channel_via_agent: 230-239
+//! - test_accept_invitation_via_agent: 240-241
+//! - test_decline_invitation_via_agent: 242-243
+//! - test_cancel_invitation_via_agent: 244-245
+//! - test_list_pending_via_agent: 246-249
+//! - test_get_invitation_via_agent: 250-251
 
 use aura_agent::{
     AgentBuilder, AuthorityId, EffectContext, ExecutionMode, InvitationStatus, InvitationType,
@@ -31,8 +31,8 @@ fn test_context(authority_id: AuthorityId) -> EffectContext {
 
 #[tokio::test]
 async fn test_invitation_service_via_agent() -> Result<(), Box<dyn std::error::Error>> {
-    // Entropy range: 10-19
-    let authority_id = AuthorityId::new_from_entropy([10u8; 32]);
+    // Entropy range: 200-209
+    let authority_id = AuthorityId::new_from_entropy([200u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
@@ -49,8 +49,8 @@ async fn test_invitation_service_via_agent() -> Result<(), Box<dyn std::error::E
 
 #[tokio::test]
 async fn test_invite_as_contact_via_agent() -> Result<(), Box<dyn std::error::Error>> {
-    // Entropy range: 20-29
-    let authority_id = AuthorityId::new_from_entropy([20u8; 32]);
+    // Entropy range: 210-219
+    let authority_id = AuthorityId::new_from_entropy([210u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
@@ -59,7 +59,7 @@ async fn test_invite_as_contact_via_agent() -> Result<(), Box<dyn std::error::Er
 
     let invitations = agent.invitations()?;
 
-    let receiver_id = AuthorityId::new_from_entropy([21u8; 32]);
+    let receiver_id = AuthorityId::new_from_entropy([211u8; 32]);
     let invitation = invitations
         .invite_as_contact(
             receiver_id,
@@ -79,8 +79,8 @@ async fn test_invite_as_contact_via_agent() -> Result<(), Box<dyn std::error::Er
 
 #[tokio::test]
 async fn test_invite_as_guardian_via_agent() -> Result<(), Box<dyn std::error::Error>> {
-    // Entropy range: 30-39
-    let authority_id = AuthorityId::new_from_entropy([30u8; 32]);
+    // Entropy range: 220-229
+    let authority_id = AuthorityId::new_from_entropy([220u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
@@ -89,7 +89,7 @@ async fn test_invite_as_guardian_via_agent() -> Result<(), Box<dyn std::error::E
 
     let invitations = agent.invitations()?;
 
-    let receiver_id = AuthorityId::new_from_entropy([31u8; 32]);
+    let receiver_id = AuthorityId::new_from_entropy([221u8; 32]);
     let invitation = invitations
         .invite_as_guardian(
             receiver_id,
@@ -112,8 +112,8 @@ async fn test_invite_as_guardian_via_agent() -> Result<(), Box<dyn std::error::E
 
 #[tokio::test]
 async fn test_invite_to_channel_via_agent() -> Result<(), Box<dyn std::error::Error>> {
-    // Entropy range: 40-49
-    let authority_id = AuthorityId::new_from_entropy([40u8; 32]);
+    // Entropy range: 230-239
+    let authority_id = AuthorityId::new_from_entropy([230u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
@@ -122,8 +122,8 @@ async fn test_invite_to_channel_via_agent() -> Result<(), Box<dyn std::error::Er
 
     let invitations = agent.invitations()?;
 
-    let receiver_id = AuthorityId::new_from_entropy([41u8; 32]);
-    let home_id = ChannelId::from_bytes([41u8; 32]).to_string();
+    let receiver_id = AuthorityId::new_from_entropy([231u8; 32]);
+    let home_id = ChannelId::from_bytes([232u8; 32]).to_string();
     let invitation = invitations
         .invite_to_channel(receiver_id, home_id.clone(), None, None, None)
         .await?;
@@ -131,7 +131,7 @@ async fn test_invite_to_channel_via_agent() -> Result<(), Box<dyn std::error::Er
     assert!(invitation.invitation_id.as_str().starts_with("inv-"));
     match &invitation.invitation_type {
         InvitationType::Channel { home_id, .. } => {
-            assert_eq!(home_id, &ChannelId::from_bytes([41u8; 32]));
+            assert_eq!(home_id, &ChannelId::from_bytes([232u8; 32]));
         }
         _ => panic!("Expected Channel invitation type"),
     }
@@ -141,7 +141,7 @@ async fn test_invite_to_channel_via_agent() -> Result<(), Box<dyn std::error::Er
 #[tokio::test]
 async fn test_invite_to_channel_rejects_invalid_home_id() -> Result<(), Box<dyn std::error::Error>>
 {
-    let authority_id = AuthorityId::new_from_entropy([49u8; 32]);
+    let authority_id = AuthorityId::new_from_entropy([239u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
@@ -149,7 +149,7 @@ async fn test_invite_to_channel_rejects_invalid_home_id() -> Result<(), Box<dyn 
         .await?;
     let invitations = agent.invitations()?;
 
-    let receiver_id = AuthorityId::new_from_entropy([48u8; 32]);
+    let receiver_id = AuthorityId::new_from_entropy([238u8; 32]);
     let err = match invitations
         .invite_to_channel(receiver_id, "channel-123".to_string(), None, None, None)
         .await
@@ -163,8 +163,8 @@ async fn test_invite_to_channel_rejects_invalid_home_id() -> Result<(), Box<dyn 
 
 #[tokio::test]
 async fn test_accept_invitation_via_agent() -> Result<(), Box<dyn std::error::Error>> {
-    // Entropy range: 50-59
-    let authority_id = AuthorityId::new_from_entropy([50u8; 32]);
+    // Entropy range: 240-241
+    let authority_id = AuthorityId::new_from_entropy([240u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
@@ -173,7 +173,7 @@ async fn test_accept_invitation_via_agent() -> Result<(), Box<dyn std::error::Er
 
     let invitations = agent.invitations()?;
 
-    let receiver_id = AuthorityId::new_from_entropy([51u8; 32]);
+    let receiver_id = AuthorityId::new_from_entropy([241u8; 32]);
     let invitation = invitations
         .invite_as_contact(receiver_id, None, None, None)
         .await?;
@@ -187,8 +187,8 @@ async fn test_accept_invitation_via_agent() -> Result<(), Box<dyn std::error::Er
 
 #[tokio::test]
 async fn test_decline_invitation_via_agent() -> Result<(), Box<dyn std::error::Error>> {
-    // Entropy range: 60-69
-    let authority_id = AuthorityId::new_from_entropy([60u8; 32]);
+    // Entropy range: 242-243
+    let authority_id = AuthorityId::new_from_entropy([242u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
@@ -197,7 +197,7 @@ async fn test_decline_invitation_via_agent() -> Result<(), Box<dyn std::error::E
 
     let invitations = agent.invitations()?;
 
-    let receiver_id = AuthorityId::new_from_entropy([61u8; 32]);
+    let receiver_id = AuthorityId::new_from_entropy([243u8; 32]);
     let invitation = invitations
         .invite_as_contact(receiver_id, None, None, None)
         .await?;
@@ -211,8 +211,8 @@ async fn test_decline_invitation_via_agent() -> Result<(), Box<dyn std::error::E
 
 #[tokio::test]
 async fn test_cancel_invitation_via_agent() -> Result<(), Box<dyn std::error::Error>> {
-    // Entropy range: 70-79
-    let authority_id = AuthorityId::new_from_entropy([70u8; 32]);
+    // Entropy range: 244-245
+    let authority_id = AuthorityId::new_from_entropy([244u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
@@ -221,7 +221,7 @@ async fn test_cancel_invitation_via_agent() -> Result<(), Box<dyn std::error::Er
 
     let invitations = agent.invitations()?;
 
-    let receiver_id = AuthorityId::new_from_entropy([71u8; 32]);
+    let receiver_id = AuthorityId::new_from_entropy([245u8; 32]);
     let invitation = invitations
         .invite_as_contact(receiver_id, None, None, None)
         .await?;
@@ -241,8 +241,8 @@ async fn test_cancel_invitation_via_agent() -> Result<(), Box<dyn std::error::Er
 
 #[tokio::test]
 async fn test_list_pending_via_agent() -> Result<(), Box<dyn std::error::Error>> {
-    // Entropy range: 80-89
-    let authority_id = AuthorityId::new_from_entropy([80u8; 32]);
+    // Entropy range: 246-249
+    let authority_id = AuthorityId::new_from_entropy([246u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
@@ -253,15 +253,15 @@ async fn test_list_pending_via_agent() -> Result<(), Box<dyn std::error::Error>>
 
     // Create 3 invitations with distinct deterministic IDs
     let inv1 = invitations
-        .invite_as_contact(AuthorityId::new_from_entropy([81u8; 32]), None, None, None)
+        .invite_as_contact(AuthorityId::new_from_entropy([247u8; 32]), None, None, None)
         .await?;
 
     let inv2 = invitations
-        .invite_as_contact(AuthorityId::new_from_entropy([82u8; 32]), None, None, None)
+        .invite_as_contact(AuthorityId::new_from_entropy([248u8; 32]), None, None, None)
         .await?;
 
     let _inv3 = invitations
-        .invite_as_contact(AuthorityId::new_from_entropy([83u8; 32]), None, None, None)
+        .invite_as_contact(AuthorityId::new_from_entropy([249u8; 32]), None, None, None)
         .await?;
 
     // All 3 should be pending
@@ -282,8 +282,8 @@ async fn test_list_pending_via_agent() -> Result<(), Box<dyn std::error::Error>>
 
 #[tokio::test]
 async fn test_get_invitation_via_agent() -> Result<(), Box<dyn std::error::Error>> {
-    // Entropy range: 90-99
-    let authority_id = AuthorityId::new_from_entropy([90u8; 32]);
+    // Entropy range: 250-251
+    let authority_id = AuthorityId::new_from_entropy([250u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
@@ -292,7 +292,7 @@ async fn test_get_invitation_via_agent() -> Result<(), Box<dyn std::error::Error
 
     let invitations = agent.invitations()?;
 
-    let receiver_id = AuthorityId::new_from_entropy([91u8; 32]);
+    let receiver_id = AuthorityId::new_from_entropy([251u8; 32]);
     let invitation = invitations
         .invite_as_contact(
             receiver_id,

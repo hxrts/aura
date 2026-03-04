@@ -17,6 +17,17 @@ use aura_recovery::{
 // ============================================================================
 
 #[test]
+fn recovery_protocol_choreography_is_coherent_and_orphan_free() {
+    let source = include_str!("../src/recovery_protocol.choreo");
+    aura_testkit::assert_protocol_coherent(source);
+    let orphan_free = aura_testkit::orphan_free_status_for_all_roles(source);
+    assert!(
+        orphan_free.values().any(|ok| !ok),
+        "expected at least one non-orphan-free role in recovery choreography"
+    );
+}
+
+#[test]
 fn ceremony_id_is_deterministic() {
     let prestate = Hash32([1u8; 32]);
     let operation = Hash32([2u8; 32]);

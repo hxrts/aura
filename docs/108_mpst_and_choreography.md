@@ -126,6 +126,34 @@ Aura treats protocol reconfiguration as a first-class choreography concern. Stat
 
 This model is used by device migration and guardian handoff flows: session ownership moves without restarting the full choreography, while invariants remain checkable from persisted facts.
 
+### Protocol Evolution Compatibility Policy
+
+Aura classifies choreography evolution by comparing **baseline** and **candidate**
+projections with `async_subtype(new_local, old_local)` for every shared role.
+
+Compatibility rule:
+- Compatible if `async_subtype` succeeds for every shared role.
+- Breaking if `async_subtype` fails for any shared role.
+
+Version bump rules:
+- **Patch**: no projection-shape change (comments, docs, metadata-only updates).
+- **Minor**: projection changes are present, but compatibility check passes for all shared roles.
+- **Major**: any compatibility failure, role-set change, or protocol namespace replacement.
+
+Reviewer decision table:
+
+| Change type | Default classification | Required action |
+|---|---|---|
+| Additive branch (existing roles unchanged) | Minor if async-subtype passes | Run compatibility checker; bump minor on pass, major on fail |
+| Payload narrowing/widening | Minor or Major based on async-subtype result | Treat checker as source of truth; bump major on any role failure |
+| Role added/removed/renamed | Major | Bump major and treat as new protocol contract |
+| Namespace change with same semantics | Major (new contract surface) | Register as new protocol namespace and keep old baseline until migration completes |
+
+Operational notes:
+- Compatibility checks are tooling/CI gates, never runtime hot-path logic.
+- New protocol files without a baseline are not auto-classified; reviewers must explicitly approve initial versioning.
+- Baseline/current checks are implemented by `scripts/check-protocol-compat.sh` and `just ci-protocol-compat`.
+
 ### Quantitative Termination Budgets
 
 Aura derives deterministic step budgets from Telltale's weighted measure:
