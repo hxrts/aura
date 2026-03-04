@@ -94,17 +94,6 @@ fn to_patchbay_nat(nat: NatPreset) -> patchbay::Nat {
     }
 }
 
-fn to_patchbay_link_condition(condition: LinkConditionPreset) -> patchbay::LinkCondition {
-    match condition {
-        LinkConditionPreset::Lan => patchbay::LinkCondition::Lan,
-        LinkConditionPreset::Wifi => patchbay::LinkCondition::Wifi,
-        LinkConditionPreset::WifiBad => patchbay::LinkCondition::WifiBad,
-        LinkConditionPreset::Mobile4G => patchbay::LinkCondition::Mobile4G,
-        LinkConditionPreset::Mobile3G => patchbay::LinkCondition::Mobile3G,
-        LinkConditionPreset::Satellite => patchbay::LinkCondition::Satellite,
-    }
-}
-
 fn to_patchbay_impair_token(condition: LinkConditionPreset) -> &'static str {
     match condition {
         LinkConditionPreset::Lan => "lan",

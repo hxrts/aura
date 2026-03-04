@@ -193,9 +193,9 @@ ci-harness-replay:
     AURA_HARNESS_AURA_BIN="$PWD/target/debug/aura" cargo run -p aura-harness --bin aura-harness -- run --config configs/harness/local-loopback.toml --scenario scenarios/harness/local-discovery-smoke.toml
     AURA_HARNESS_AURA_BIN="$PWD/target/debug/aura" cargo run -p aura-harness --bin aura-harness -- replay --bundle artifacts/harness/local-loopback-smoke/replay_bundle.json
 
-# Test suite
+# Test suite (excludes patchbay tests which run in ci-holepunch-tier2)
 ci-test:
-    cargo test --workspace -q
+    cargo test --workspace -q -- --skip patchbay
 
 # Protocol evolution compatibility gate (async_subtype)
 ci-protocol-compat:
@@ -210,7 +210,7 @@ ci-holepunch-tier1:
 ci-holepunch-tier2:
     mkdir -p artifacts/holepunch/tier2
     AURA_HOLEPUNCH_ARTIFACT_DIR="${PWD}/artifacts/holepunch/tier2" \
-      cargo test -p aura-harness --test holepunch_tier2_patchbay -q
+      cargo test -p aura-harness --test holepunch_tier2_patchbay --test holepunch_e2e_runtime_patchbay -q
 
 # Daily smoke for hole-punch paths with flake tracking output
 ci-holepunch-daily-smoke:
