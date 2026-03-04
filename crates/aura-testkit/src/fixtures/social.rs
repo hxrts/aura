@@ -7,8 +7,8 @@ use aura_core::effects::relay::RelayRelationship;
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_social::facts::{
-    HomeConfigFact, HomeFact, HomeId, NeighborhoodMemberFact, ModeratorFact, NeighborhoodFact,
-    NeighborhoodId, OneHopLinkFact, HomeMemberFact,
+    HomeConfigFact, HomeFact, HomeId, HomeMemberFact, ModeratorFact, NeighborhoodFact,
+    NeighborhoodId, NeighborhoodMemberFact, OneHopLinkFact,
 };
 use aura_social::{Home, Neighborhood, SocialTopology};
 
@@ -235,7 +235,8 @@ pub fn create_neighborhood_topology(
     // Add our home to the neighborhood
     let timestamp = test_timestamp();
     neighborhood.member_homes.push(home.home_id);
-    let member_fact = NeighborhoodMemberFact::new(home.home_id, neighborhood.neighborhood_id, timestamp);
+    let member_fact =
+        NeighborhoodMemberFact::new(home.home_id, neighborhood.neighborhood_id, timestamp);
     let _ = member_fact; // Use fact in production code
 
     let topology = SocialTopology::new(moderator, Some(home.clone()), vec![neighborhood.clone()]);

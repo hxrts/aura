@@ -583,7 +583,7 @@ impl HomesState {
 
 #[cfg(test)]
 mod tests {
-    use super::{HomeRole, HomeMember};
+    use super::{HomeMember, HomeRole};
     use aura_core::identifiers::AuthorityId;
     use proptest::prelude::*;
 

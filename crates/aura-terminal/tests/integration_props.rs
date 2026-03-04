@@ -151,10 +151,7 @@ mod neighborhood_screen {
         harness.state.neighborhood.selected_member = 1;
 
         let props = extract_neighborhood_view_props(&harness.state);
-        assert_eq!(
-            props.selected_member, 1,
-            "Selected member must reach props"
-        );
+        assert_eq!(props.selected_member, 1, "Selected member must reach props");
     }
 }
 

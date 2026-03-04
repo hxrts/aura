@@ -2235,10 +2235,7 @@ mod tests {
 
         let result =
             enforce_home_moderation_for_sender(&app_core, context_id, home_id, sender, 1_000).await;
-        assert!(
-            result.is_ok(),
-            "empty member list should not block sender"
-        );
+        assert!(result.is_ok(), "empty member list should not block sender");
     }
 
     #[tokio::test]

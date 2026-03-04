@@ -1532,9 +1532,7 @@ mod tests {
 
         let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
         let home_state = updated.current_home().unwrap();
-        let member = home_state
-            .member(&target)
-            .expect("target member exists");
+        let member = home_state.member(&target).expect("target member exists");
         assert!(matches!(
             member.role,
             aura_app::views::home::HomeRole::Moderator
@@ -1549,9 +1547,7 @@ mod tests {
 
         let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
         let home_state = updated.current_home().unwrap();
-        let member = home_state
-            .member(&target)
-            .expect("target member exists");
+        let member = home_state.member(&target).expect("target member exists");
         assert!(matches!(
             member.role,
             aura_app::views::home::HomeRole::Member

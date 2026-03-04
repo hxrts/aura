@@ -3,7 +3,7 @@
 //! Provides storage budget enforcement and allocation policies.
 
 use crate::error::SocialError;
-use crate::facts::{HomeFact, HomeMemberFact, NeighborhoodMemberFact, HomeStorageBudget};
+use crate::facts::{HomeFact, HomeMemberFact, HomeStorageBudget, NeighborhoodMemberFact};
 
 /// Service for storage budget calculations and validation.
 pub struct StorageService;

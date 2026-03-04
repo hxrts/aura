@@ -343,10 +343,7 @@ fn convert_member(r: &aura_app::ui::types::home::HomeMember) -> HomeMember {
     }
 }
 
-fn convert_budget(
-    storage: &aura_app::ui::types::HomeFlowBudget,
-    member_count: u32,
-) -> HomeBudget {
+fn convert_budget(storage: &aura_app::ui::types::HomeFlowBudget, member_count: u32) -> HomeBudget {
     HomeBudget {
         total: storage.total_allocation(),
         used: storage.total_used(),
@@ -459,11 +456,8 @@ pub fn NeighborhoodScreen(
         async move {
             subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |home_state| {
                 if let Some(current_home) = home_state.current_home() {
-                    let members: Vec<HomeMember> = current_home
-                        .members
-                        .iter()
-                        .map(convert_member)
-                        .collect();
+                    let members: Vec<HomeMember> =
+                        current_home.members.iter().map(convert_member).collect();
                     let budget = convert_budget(&current_home.storage, current_home.member_count);
                     reactive_members.set(members);
                     reactive_budget.set(budget);

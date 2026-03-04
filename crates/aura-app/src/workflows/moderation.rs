@@ -173,11 +173,7 @@ async fn resolve_scope(
                     .ok_or_else(|| AuraError::not_found("Home has no context ID"))?,
                 fallback.id,
                 fallback.can_moderate(),
-                fallback
-                    .members
-                    .iter()
-                    .map(|member| member.id)
-                    .collect(),
+                fallback.members.iter().map(|member| member.id).collect(),
             )
         } else {
             return Err(AuraError::permission_denied(

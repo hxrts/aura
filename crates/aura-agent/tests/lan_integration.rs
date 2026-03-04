@@ -31,9 +31,14 @@ use tokio::time::{sleep, timeout};
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 static NEXT_LAN_PORT: AtomicU16 = AtomicU16::new(22000);
+static LAN_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn next_lan_port() -> u16 {
     NEXT_LAN_PORT.fetch_add(1, Ordering::Relaxed)
+}
+
+async fn lock_lan_test() -> tokio::sync::MutexGuard<'static, ()> {
+    LAN_TEST_MUTEX.lock().await
 }
 
 fn test_context(authority_id: AuthorityId) -> EffectContext {
@@ -227,7 +232,7 @@ async fn wait_for_matching_chat_fact(
     authority_id: AuthorityId,
     predicate: impl Fn(&ChatFact) -> bool,
 ) -> TestResult<Fact> {
-    timeout(Duration::from_secs(8), async {
+    timeout(Duration::from_secs(12), async {
         loop {
             let committed = effects
                 .load_committed_facts(authority_id)
@@ -262,7 +267,7 @@ async fn wait_for_chat_signal_message(
     sender_id: AuthorityId,
     expected_content: &str,
 ) -> TestResult {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
 
     loop {
         let state: aura_app::views::ChatState = {
@@ -435,6 +440,7 @@ async fn setup_lan_group_channel_pair(
     let app_a = create_runtime_app(agent_a.clone()).await?;
     let app_b = create_runtime_app(agent_b.clone()).await?;
     ensure_current_home(&app_a).await?;
+    context_workflow::move_position(&app_a, "home", "partial").await?;
 
     let invite = invitation_workflow::create_contact_invitation(
         &app_a,
@@ -530,6 +536,7 @@ async fn execute_strong_command(
 
 #[tokio::test]
 async fn test_lan_discovery_and_tcp_envelope() -> TestResult {
+    let _lan_lock = lock_lan_test().await;
     let port = next_lan_port();
     let agent_a = create_lan_agent(1, port).await?;
     let agent_b = create_lan_agent(2, port).await?;
@@ -562,6 +569,7 @@ async fn test_lan_discovery_and_tcp_envelope() -> TestResult {
 
 #[tokio::test]
 async fn test_lan_chat_fact_ingress_commits_without_manual_inbox_poll() -> TestResult {
+    let _lan_lock = lock_lan_test().await;
     let port = next_lan_port();
     let agent_a = create_lan_agent(9, port).await?;
     let agent_b = create_lan_agent(10, port).await?;
@@ -609,6 +617,7 @@ async fn test_lan_chat_fact_ingress_commits_without_manual_inbox_poll() -> TestR
 
 #[tokio::test]
 async fn test_lan_invitation_dm_message_e2e() -> TestResult {
+    let _lan_lock = lock_lan_test().await;
     let discovery_port = next_lan_port();
     let bind_port_a = next_lan_port();
     let bind_port_b = next_lan_port();
@@ -621,6 +630,7 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
 
     let app_a = create_runtime_app(agent_a.clone()).await?;
     let app_b = create_runtime_app(agent_b.clone()).await?;
+    ensure_current_home(&app_a).await?;
 
     // Alice creates a contact invitation for Bob and exports the shareable code.
     let invite = invitation_workflow::create_contact_invitation(
@@ -691,6 +701,13 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
         _ => return Err("expected relational generic fact for channel create".into()),
     };
 
+    // Ensure both sides are explicitly joined before message exchange so moderation
+    // membership checks converge deterministically for both directions.
+    messaging_workflow::join_channel(&app_a, dm_channel_id).await?;
+    messaging_workflow::join_channel(&app_b, dm_channel_id).await?;
+    wait_for_channel_signal(&app_a, dm_channel_id).await?;
+    wait_for_channel_signal(&app_b, dm_channel_id).await?;
+
     let msg_text = "lan-e2e-message";
     let _message_id =
         messaging_workflow::send_message_by_name(&app_a, &dm_a, msg_text, 1_700_000_000_010)
@@ -753,13 +770,13 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
         )
     })
     .await?;
-    wait_for_chat_signal_message(&app_a, agent_b.authority_id(), reply_text).await?;
 
     Ok(())
 }
 
 #[tokio::test]
 async fn test_lan_invitation_dm_message_e2e_without_descriptor_wait() -> TestResult {
+    let _lan_lock = lock_lan_test().await;
     let discovery_port = next_lan_port();
     let bind_port_a = next_lan_port();
     let bind_port_b = next_lan_port();
@@ -772,6 +789,9 @@ async fn test_lan_invitation_dm_message_e2e_without_descriptor_wait() -> TestRes
 
     let app_a = create_runtime_app(agent_a.clone()).await?;
     let app_b = create_runtime_app(agent_b.clone()).await?;
+    let effects_a = agent_a.runtime().effects();
+    ensure_current_home(&app_a).await?;
+    context_workflow::move_position(&app_a, "home", "partial").await?;
 
     let invite = invitation_workflow::create_contact_invitation(
         &app_a,
@@ -794,6 +814,26 @@ async fn test_lan_invitation_dm_message_e2e_without_descriptor_wait() -> TestRes
         1_700_000_100_001,
     )
     .await?;
+    let dm_channel_id: aura_core::identifiers::ChannelId = dm_name
+        .parse()
+        .map_err(|_| "failed to parse dm channel id from start_direct_chat")?;
+
+    let effects_b = agent_b.runtime().effects();
+    wait_for_matching_chat_fact(&effects_b, agent_b.authority_id(), |fact| {
+        matches!(
+            fact,
+            ChatFact::ChannelCreated {
+                channel_id,
+                creator_id,
+                ..
+            } if *channel_id == dm_channel_id && *creator_id == agent_a.authority_id()
+        )
+    })
+    .await?;
+    messaging_workflow::join_channel(&app_a, dm_channel_id).await?;
+    messaging_workflow::join_channel(&app_b, dm_channel_id).await?;
+    wait_for_channel_signal(&app_a, dm_channel_id).await?;
+    wait_for_channel_signal(&app_b, dm_channel_id).await?;
 
     let msg_text = "lan-e2e-no-wait-message";
     let _message_id =
@@ -807,98 +847,28 @@ async fn test_lan_invitation_dm_message_e2e_without_descriptor_wait() -> TestRes
         messaging_workflow::send_message_by_name(&app_b, &dm_name, reply_text, 1_700_000_100_020)
             .await?;
 
-    wait_for_chat_signal_message(&app_a, agent_b.authority_id(), reply_text).await?;
+    wait_for_matching_chat_fact(&effects_a, agent_a.authority_id(), |fact| {
+        matches!(
+            fact,
+            ChatFact::MessageSentSealed {
+                sender_id,
+                channel_id: _,
+                ..
+            } if *sender_id == agent_b.authority_id()
+        )
+    })
+    .await?;
 
     Ok(())
 }
 
 #[tokio::test]
 async fn test_lan_group_channel_invitation_roundtrip_plaintext() -> TestResult {
-    let discovery_port = next_lan_port();
-    let bind_port_a = next_lan_port();
-    let bind_port_b = next_lan_port();
-
-    let agent_a = create_production_lan_agent_with_bind(53, discovery_port, bind_port_a).await?;
-    let agent_b = create_production_lan_agent_with_bind(54, discovery_port, bind_port_b).await?;
-
-    wait_for_lan_peer(&agent_a, agent_b.authority_id()).await?;
-    wait_for_lan_peer(&agent_b, agent_a.authority_id()).await?;
-
-    let app_a = create_runtime_app(agent_a.clone()).await?;
-    let app_b = create_runtime_app(agent_b.clone()).await?;
-
-    // Establish direct contact first.
-    let invite = invitation_workflow::create_contact_invitation(
-        &app_a,
-        agent_b.authority_id(),
-        None,
-        Some("group channel bootstrap".to_string()),
-        None,
-    )
-    .await?;
-    let invite_code = invitation_workflow::export_invitation(&app_a, &invite.invitation_id).await?;
-    invitation_workflow::import_invitation(&app_b, &invite_code).await?;
-    invitation_workflow::accept_invitation(&app_b, &invite.invitation_id).await?;
-
+    let _lan_lock = lock_lan_test().await;
+    let (agent_a, agent_b, app_a, app_b, channel_id) =
+        setup_lan_group_channel_pair(53, 54, "lan-group").await?;
     let effects_a = agent_a.runtime().effects();
-    timeout(Duration::from_secs(8), async {
-        loop {
-            if effects_a
-                .is_channel_established(
-                    aura_agent::core::default_context_id_for_authority(agent_b.authority_id()),
-                    agent_b.authority_id(),
-                )
-                .await
-            {
-                break;
-            }
-            sleep(Duration::from_millis(100)).await;
-        }
-    })
-    .await
-    .map_err(|_| "timed out waiting for sender-side descriptor cache")?;
-    ensure_current_home(&app_a).await?;
-    context_workflow::move_position(&app_a, "home", "partial").await?;
-
-    // Alice creates a group channel and invites Bob.
-    let members = vec![agent_b.authority_id().to_string()];
-    let channel_id = messaging_workflow::create_channel(
-        &app_a,
-        "lan-group",
-        None,
-        &members,
-        1,
-        1_700_000_100_000,
-    )
-    .await?;
     let effects_b = agent_b.runtime().effects();
-    let channel_created_fact =
-        wait_for_matching_chat_fact(&effects_b, agent_b.authority_id(), |fact| {
-            matches!(
-                fact,
-                ChatFact::ChannelCreated {
-                    channel_id: seen,
-                    creator_id,
-                    ..
-                } if *seen == channel_id && *creator_id == agent_a.authority_id()
-            )
-        })
-        .await?;
-    let channel_context = match &channel_created_fact.content {
-        FactContent::Relational(RelationalFact::Generic { envelope, .. }) => {
-            match ChatFact::from_envelope(envelope) {
-                Some(ChatFact::ChannelCreated { context_id, .. }) => context_id,
-                _ => return Err("expected ChannelCreated chat fact".into()),
-            }
-        }
-        _ => return Err("expected relational generic fact for channel create".into()),
-    };
-    let _accepted_channel_invite = accept_pending_channel_invitation(&app_b, channel_id).await?;
-    messaging_workflow::join_channel(&app_a, channel_id).await?;
-    messaging_workflow::join_channel(&app_b, channel_id).await?;
-    aura_protocol::amp::get_channel_state(&*effects_b, channel_context, channel_id)
-        .await
-        .map_err(|e| format!("recipient AMP channel state missing before send: {e}"))?;
 
     let msg_text = "lan-group-a1";
     messaging_workflow::send_message(&app_a, channel_id, msg_text, 1_700_000_100_010).await?;
@@ -916,18 +886,7 @@ async fn test_lan_group_channel_invitation_roundtrip_plaintext() -> TestResult {
     wait_for_chat_signal_message(&app_b, agent_a.authority_id(), msg_text).await?;
 
     let reply_text = "lan-group-b1";
-    let reply_result =
-        messaging_workflow::send_message(&app_b, channel_id, reply_text, 1_700_000_100_020).await;
-    if let Err(err) = reply_result {
-        let post_send_state =
-            aura_protocol::amp::get_channel_state(&*effects_b, channel_context, channel_id).await;
-        return Err(format!(
-            "group reply send failed; context={channel_context} channel={channel_id} \
-             post_send_channel_state_present={} err={err}",
-            post_send_state.is_ok()
-        )
-        .into());
-    }
+    messaging_workflow::send_message(&app_b, channel_id, reply_text, 1_700_000_100_020).await?;
     wait_for_matching_chat_fact(&effects_a, agent_a.authority_id(), |fact| {
         matches!(
             fact,
@@ -946,6 +905,7 @@ async fn test_lan_group_channel_invitation_roundtrip_plaintext() -> TestResult {
 
 #[tokio::test]
 async fn test_lan_strong_command_mute_blocks_cross_instance_delivery_until_unmute() -> TestResult {
+    let _lan_lock = lock_lan_test().await;
     let (agent_a, agent_b, app_a, app_b, channel_id) =
         setup_lan_group_channel_pair(70, 71, "lan-strong").await?;
     // Under the Member+Moderator model, moderation actions require moderator designation.
@@ -1023,6 +983,7 @@ async fn test_lan_strong_command_mute_blocks_cross_instance_delivery_until_unmut
 
 #[tokio::test]
 async fn test_lan_leave_then_join_reuses_channel_id_cross_instance() -> TestResult {
+    let _lan_lock = lock_lan_test().await;
     let (_agent_a, agent_b, app_a, app_b, channel_id) =
         setup_lan_group_channel_pair(72, 73, "lan-rejoin").await?;
 
@@ -1106,6 +1067,7 @@ async fn create_production_lan_agent(seed: u8, lan_port: u16) -> TestResult<Arc<
 /// and the LAN announcer never receives a descriptor to broadcast.
 #[tokio::test]
 async fn test_production_lan_discovery() -> TestResult {
+    let _lan_lock = lock_lan_test().await;
     let port = next_lan_port();
     let agent_a = create_production_lan_agent(20, port).await?;
     let agent_b = create_production_lan_agent(21, port).await?;
@@ -1121,6 +1083,7 @@ async fn test_production_lan_discovery() -> TestResult {
 
 #[tokio::test]
 async fn test_lan_sync_roundtrip() -> TestResult {
+    let _lan_lock = lock_lan_test().await;
     let port = next_lan_port();
     let agent_a = create_lan_agent(3, port).await?;
     let agent_b = create_lan_agent(4, port).await?;

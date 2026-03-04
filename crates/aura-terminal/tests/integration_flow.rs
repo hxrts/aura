@@ -844,10 +844,7 @@ async fn test_social_graph_flow() {
     let bob_home_final = env.get_agent("bob").read_home().await;
     println!("  Home ID: {id}", id = bob_home_final.id);
     println!("  Home name: {name}", name = bob_home_final.name);
-    println!(
-        "  Members: {count}",
-        count = bob_home_final.members.len()
-    );
+    println!("  Members: {count}", count = bob_home_final.members.len());
     println!("  My role: {role:?}", role = bob_home_final.my_role);
 
     let bob_contacts_final = env.get_agent("bob").read_contacts().await;

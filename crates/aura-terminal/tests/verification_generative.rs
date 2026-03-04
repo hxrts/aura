@@ -571,9 +571,9 @@ impl FlowTraceReplayer {
             if all_moderators_are_members {
                 results.passed_count += 1;
             } else {
-                results.failures.push(format!(
-                    "Home {home_id} has moderators who are not members"
-                ));
+                results
+                    .failures
+                    .push(format!("Home {home_id} has moderators who are not members"));
             }
         }
 

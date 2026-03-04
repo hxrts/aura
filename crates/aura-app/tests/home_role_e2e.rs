@@ -33,11 +33,7 @@ fn test_home_creator_is_regular_member() {
     );
 
     assert_eq!(home.my_role, HomeRole::Member);
-    let creator_entry = match home
-        .members
-        .iter()
-        .find(|member| member.id == creator)
-    {
+    let creator_entry = match home.members.iter().find(|member| member.id == creator) {
         Some(entry) => entry,
         None => panic!("creator should exist in members"),
     };

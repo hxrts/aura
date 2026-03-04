@@ -5,8 +5,8 @@
 
 use crate::error::SocialError;
 use crate::facts::{
-    HomeConfigFact, HomeFact, HomeId, HomeStorageBudget, ModeratorCapabilities,
-    ModeratorCapability, ModeratorDesignation, ModeratorFact, HomeMemberFact,
+    HomeConfigFact, HomeFact, HomeId, HomeMemberFact, HomeStorageBudget, ModeratorCapabilities,
+    ModeratorCapability, ModeratorDesignation, ModeratorFact,
 };
 use aura_core::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
@@ -57,8 +57,7 @@ impl Home {
 
         let mut storage_budget = HomeStorageBudget::new(home_fact.home_id);
         storage_budget.member_storage_spent = member_storage_spent;
-        let member_set: BTreeSet<AuthorityId> =
-            members.iter().map(|r| r.authority_id).collect();
+        let member_set: BTreeSet<AuthorityId> = members.iter().map(|r| r.authority_id).collect();
         let mut designation_by_authority: BTreeMap<AuthorityId, ModeratorDesignation> =
             BTreeMap::new();
         for moderator in moderators {

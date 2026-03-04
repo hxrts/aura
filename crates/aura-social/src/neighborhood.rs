@@ -3,7 +3,9 @@
 //! Provides a materialized view of a neighborhood aggregated from journal facts.
 
 use crate::error::SocialError;
-use crate::facts::{HomeId, NeighborhoodMemberFact, NeighborhoodFact, NeighborhoodId, OneHopLinkFact};
+use crate::facts::{
+    HomeId, NeighborhoodFact, NeighborhoodId, NeighborhoodMemberFact, OneHopLinkFact,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 

@@ -10,8 +10,8 @@ use aura_core::effects::relay::RelayRelationship;
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_social::facts::{
-    HomeFact, HomeId, NeighborhoodMemberFact, ModeratorFact, NeighborhoodFact, NeighborhoodId,
-    OneHopLinkFact, HomeMemberFact,
+    HomeFact, HomeId, HomeMemberFact, ModeratorFact, NeighborhoodFact, NeighborhoodId,
+    NeighborhoodMemberFact, OneHopLinkFact,
 };
 use aura_social::{
     DiscoveryLayer, Home, Neighborhood, ReachabilityChecker, RelayCandidateBuilder, SocialTopology,

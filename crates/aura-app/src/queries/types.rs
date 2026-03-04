@@ -699,10 +699,7 @@ impl Query for ContactsQuery {
         if self.members_only {
             body.push(DatalogFact::new(
                 "eq",
-                vec![
-                    DatalogValue::var("is_member"),
-                    DatalogValue::Boolean(true),
-                ],
+                vec![DatalogValue::var("is_member"), DatalogValue::Boolean(true)],
             ));
         }
 

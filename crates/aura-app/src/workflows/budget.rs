@@ -163,8 +163,7 @@ impl HomeFlowBudget {
 
     /// Check if home can add another member
     pub fn can_add_member(&self) -> bool {
-        self.member_count < MAX_MEMBERS
-            && self.member_storage_remaining() >= MEMBER_ALLOCATION
+        self.member_count < MAX_MEMBERS && self.member_storage_remaining() >= MEMBER_ALLOCATION
     }
 
     /// Check if home can join another neighborhood
@@ -199,9 +198,7 @@ impl HomeFlowBudget {
             return Err(BudgetError::NoMembersToRemove);
         }
         self.member_count -= 1;
-        self.member_storage_spent = self
-            .member_storage_spent
-            .saturating_sub(MEMBER_ALLOCATION);
+        self.member_storage_spent = self.member_storage_spent.saturating_sub(MEMBER_ALLOCATION);
         Ok(())
     }
 

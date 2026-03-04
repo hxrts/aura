@@ -216,12 +216,8 @@ impl ChatCallbacks {
                         Ok(command) => command,
                         Err(e) => {
                             let (status, reason) = classify_command_error(&e.to_string());
-                            let message = command_outcome_message(
-                                e.to_string(),
-                                status,
-                                reason,
-                                None,
-                            );
+                            let message =
+                                command_outcome_message(e.to_string(), status, reason, None);
                             let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
                                 "command", message,
                             )));

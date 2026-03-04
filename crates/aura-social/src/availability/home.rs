@@ -223,7 +223,7 @@ struct RetrieveResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::facts::{HomeFact, ModeratorFact, HomeMemberFact};
+    use crate::facts::{HomeFact, HomeMemberFact, ModeratorFact};
     use aura_core::effects::{
         network::NetworkError, storage::StorageError, NetworkCoreEffects, NetworkExtendedEffects,
         StorageCoreEffects, StorageExtendedEffects,

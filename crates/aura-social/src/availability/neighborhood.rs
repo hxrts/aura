@@ -250,7 +250,7 @@ struct RetrieveResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::facts::{NeighborhoodMemberFact, NeighborhoodFact};
+    use crate::facts::{NeighborhoodFact, NeighborhoodMemberFact};
     use aura_core::effects::{
         network::NetworkError, storage::StorageError, NetworkCoreEffects, NetworkExtendedEffects,
         StorageCoreEffects, StorageExtendedEffects,
