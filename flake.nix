@@ -17,6 +17,11 @@
       url = "github:AeneasVerif/aeneas";
       # Don't follow nixpkgs - Aeneas has specific OCaml/Coq version requirements
     };
+    # Patchbay: Network simulation for holepunch testing
+    patchbay = {
+      url = "github:hxrts/patchbay/hxrts/aura";
+      flake = false; # Use as source, not as flake (no packages exported)
+    };
   };
 
   outputs =
@@ -27,6 +32,7 @@
       rust-overlay,
       crate2nix,
       aeneas,
+      patchbay,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -92,6 +98,29 @@
             platforms = platforms.unix;
           };
         };
+
+        # patchbay-vm: QEMU wrapper for running patchbay network simulations
+        # Only available on Linux (requires QEMU and network namespace support)
+        patchbay-vm = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux (
+          pkgs.rustPlatform.buildRustPackage {
+            pname = "patchbay-vm";
+            version = "0.1.0";
+            src = patchbay;
+            cargoLock = {
+              lockFile = "${patchbay}/Cargo.lock";
+            };
+            cargoBuildFlags = [ "-p" "patchbay-vm" ];
+            nativeBuildInputs = with pkgs; [ pkg-config ];
+            buildInputs = with pkgs; [ openssl ];
+            # Skip tests as they require network capabilities
+            doCheck = false;
+            meta = with pkgs.lib; {
+              description = "QEMU VM wrapper for patchbay network simulations";
+              license = with licenses; [ mit asl20 ];
+              platforms = platforms.linux;
+            };
+          }
+        );
 
         # Import generated Cargo.nix with CC crate fix and other overrides
         cargoNix = import ./Cargo.nix {
@@ -312,6 +341,11 @@
             iproute2
             nftables
             iptables
+            qemu  # For patchbay-vm
+          ]
+          # patchbay-vm binary (Linux only)
+          ++ pkgs.lib.optionals (pkgs.stdenv.isLinux && patchbay-vm != {}) [
+            patchbay-vm
           ];
 
           shellHook = ''

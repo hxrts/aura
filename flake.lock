@@ -848,6 +848,23 @@
         "type": "github"
       }
     },
+    "patchbay": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1772565225,
+        "narHash": "sha256-8JowrPjo9wcwkYsK5rKLGLz1wBzaGknd+LLV70J6W5U=",
+        "owner": "hxrts",
+        "repo": "patchbay",
+        "rev": "96e2c2f42628b20c79f5a351d261333964c8959d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "hxrts",
+        "ref": "hxrts/aura",
+        "repo": "patchbay",
+        "type": "github"
+      }
+    },
     "pre-commit-hooks": {
       "inputs": {
         "flake-compat": [
@@ -954,6 +971,7 @@
         "crate2nix": "crate2nix",
         "flake-utils": "flake-utils_8",
         "nixpkgs": "nixpkgs_8",
+        "patchbay": "patchbay",
         "rust-overlay": "rust-overlay_2"
       }
     },
