@@ -213,6 +213,12 @@
             # Nix tools and formatting
             nixpkgs-fmt
             crate2nix.packages.${system}.default
+          ]
+          # Linux-only: patchbay network simulation dependencies
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            iproute2  # tc command for traffic control
+            nftables  # nft command for NAT rules
+            iptables  # iptables-legacy for some nftables compat
           ];
 
           shellHook = ''

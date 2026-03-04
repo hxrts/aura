@@ -98,6 +98,13 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: holepunch-tier2
+      - name: Enable unprivileged user namespaces for patchbay
+        run: |
+          # Ubuntu 24.04+ with AppArmor restricts unprivileged user namespaces by default.
+          # Patchbay requires user namespaces for network simulation without root.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          # Verify the setting
+          echo "AppArmor userns restriction: $(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)"
       - name: Run Patchbay NAT traversal scenarios
         run: nix develop --command just ci-holepunch-tier2
       - name: Upload holepunch artifacts

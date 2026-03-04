@@ -21,6 +21,8 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: holepunch-daily-smoke
+      - name: Enable unprivileged user namespaces for patchbay
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Run daily smoke and flake report
         run: nix develop --command just ci-holepunch-daily-smoke
       - name: Upload daily smoke artifacts
@@ -40,6 +42,8 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: holepunch-nightly
+      - name: Enable unprivileged user namespaces for patchbay
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Run Tier 3 nightly stress suites
         run: nix develop --command just ci-holepunch-nightly-stress
       - name: Upload nightly artifacts

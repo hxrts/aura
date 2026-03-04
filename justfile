@@ -207,12 +207,12 @@ ci-holepunch-tier1:
     cargo test -p aura-testkit --test holepunch_tier1 -q
 
 # Tier 2 Patchbay NAT traversal integration scenarios
-# Note: holepunch_e2e_runtime_patchbay requires native patchbay VM capabilities
-# and is excluded from regular CI. It runs only in dedicated patchbay environments.
+# Requires: Linux with unprivileged user namespaces enabled, tc, nft in PATH
+# CI enables userns via: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 ci-holepunch-tier2:
     mkdir -p artifacts/holepunch/tier2
     AURA_HOLEPUNCH_ARTIFACT_DIR="${PWD}/artifacts/holepunch/tier2" \
-      cargo test -p aura-harness --test holepunch_tier2_patchbay -q
+      cargo test -p aura-harness --test holepunch_tier2_patchbay --test holepunch_e2e_runtime_patchbay -q
 
 # Daily smoke for hole-punch paths with flake tracking output
 ci-holepunch-daily-smoke:
