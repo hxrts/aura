@@ -6,7 +6,7 @@
 // - Progress guarantees under synchrony
 // - Message delivery semantics
 //
-// See: docs/107_mpst_and_choreography.md, crates/aura-mpst
+// See: docs/108_mpst_and_choreography.md, crates/aura-mpst
 //
 // == Rust Correspondence ==
 // - ChoreographicEffects: crates/aura-protocol/src/effects.rs

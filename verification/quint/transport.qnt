@@ -25,7 +25,7 @@
 // - Effects: crates/aura-core/src/effects/transport.rs
 // - Guards: crates/aura-guards/src/
 //
-// See: docs/108_transport_and_information_flow.md
+// See: docs/109_transport_and_information_flow.md
 
 module transport {
   // ==================== TYPE DEFINITIONS ====================

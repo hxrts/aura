@@ -12,7 +12,7 @@
 // Safety: New shares reconstruct to same secret; old shares invalidated.
 // Liveness: Requires threshold old participants to approve and contribute.
 //
-// See: docs/116_crypto.md
+// See: docs/100_crypto.md
 
 module protocol_resharing {
   // ============ TYPE DEFINITIONS ============

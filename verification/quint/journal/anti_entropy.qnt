@@ -10,7 +10,7 @@
 // - Monotonicity: State only grows (no rollback)
 // - Idempotency: Re-applying deltas is safe
 //
-// See: docs/111_maintenance.md, docs/102_journal.md
+// See: docs/115_maintenance.md, docs/103_journal.md
 
 module protocol_anti_entropy {
     // ==================== TYPE DEFINITIONS ====================

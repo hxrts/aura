@@ -24,7 +24,7 @@
 // - Effects: crates/aura-core/src/effects/*.rs
 // - State machine: crates/aura-protocol/src/runtime.rs
 //
-// See: docs/100_authority_and_identity.md, docs/103_relational_contexts.md
+// See: docs/102_authority_and_identity.md, docs/112_relational_contexts.md
 
 module protocol_core {
 
@@ -124,12 +124,12 @@ module protocol_core {
   // ProtocolEffect enumerates all observable side effects a protocol can emit.
   // The guard chain validates these before they reach the network/journal.
   type ProtocolEffect =
-    | Send(MessageEffect)         // Point-to-point message
-    | Broadcast(MessageEffect)    // Multi-recipient message
+    | Send(MessageEffect)           // Point-to-point message
+    | Broadcast(MessageEffect)      // Multi-recipient message
     | AppendJournal(JournalEffect)  // Persist fact to journal
-    | ScheduleTimer(TimerEffect)  // Set timeout
-    | CancelTimer(TimerId)        // Cancel pending timeout
-    | Trace(TraceEffect)          // Debug logging
+    | ScheduleTimer(TimerEffect)    // Set timeout
+    | CancelTimer(TimerId)          // Cancel pending timeout
+    | Trace(TraceEffect)            // Debug logging
     | UpdateCounter(CounterEffect)  // Lease counter range
 
   // ProtocolInput enumerates all events that can drive protocol state forward.

@@ -4,7 +4,7 @@
 // analysis. The slow path can complete when k honest witnesses are in the same
 // connected component, regardless of timing.
 //
-// See: docs/004_distributed_systems_contract.md §4, docs/104_consensus.md §16
+// See: docs/004_distributed_systems_contract.md §4, docs/106_consensus.md §16
 
 module protocol_liveness_connectivity {
     import protocol_consensus as core from "../consensus/core"

@@ -27,7 +27,7 @@
 // - Fallback logic: crates/aura-consensus/src/consensus/fallback.rs
 // - Gossip: crates/aura-sync/src/protocols/anti_entropy.rs
 //
-// See: docs/004_distributed_systems_contract.md §4, docs/104_consensus.md
+// See: docs/004_distributed_systems_contract.md §4, docs/106_consensus.md
 //
 // Key Liveness Properties:
 // 1. Fast path terminates in 1 RTT when all witnesses have valid nonces (after GST)

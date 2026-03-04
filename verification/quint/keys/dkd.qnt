@@ -11,7 +11,7 @@
 // Safety: Derived key incorporates contributions from all revealed parties.
 // Liveness: Requires threshold participants to commit and reveal.
 //
-// See: docs/116_crypto.md
+// See: docs/100_crypto.md
 
 module protocol_dkd {
   // ============ TYPE DEFINITIONS ============

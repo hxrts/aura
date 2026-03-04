@@ -26,7 +26,7 @@
 // - Types: SigningSession, Share, SignatureShare
 // - Functions: aggregate
 //
-// See: docs/116_crypto.md
+// See: docs/100_crypto.md
 
 module protocol_frost {
     // ==================== TYPE DEFINITIONS ====================

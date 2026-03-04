@@ -13,7 +13,7 @@
 // Safety: Compromised authorities cannot create new sessions.
 // Liveness: Active sessions with recent tickets persist across epochs.
 //
-// See: docs/100_authority_and_identity.md, docs/108_transport_and_information_flow.md
+// See: docs/102_authority_and_identity.md, docs/109_transport_and_information_flow.md
 
 module protocol_sessions {
   // ============ TYPE DEFINITIONS ============

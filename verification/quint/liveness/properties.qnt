@@ -10,7 +10,7 @@
 // NOTE: This module defines PURE property predicates. State variables are passed
 // as parameters to enable model checking from the main liveness module.
 //
-// See: docs/004_distributed_systems_contract.md §4, docs/104_consensus.md
+// See: docs/004_distributed_systems_contract.md §4, docs/106_consensus.md
 
 module protocol_liveness_properties {
     import protocol_consensus as core from "../consensus/core"

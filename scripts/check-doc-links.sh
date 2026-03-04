@@ -2,11 +2,15 @@
 # Validate docs link integrity.
 #
 # Checks:
-# 1. All markdown links in crates/, AGENTS.md, CLAUDE.md, and .claude/skills/
-#    that reference docs/ resolve to existing files
+# 1. All markdown links in non-gitignored directories that reference docs/
+#    resolve to existing files. Directories checked:
+#    - crates/, docs/, scripts/, tests/, examples/, scenarios/, .github/
+#    - verification/ (Quint/Lean comment patterns)
+#    - AGENTS.md, CLAUDE.md at root
+#    - .claude/skills/ (skipped in CI since .claude/ is gitignored)
 # 2. docs/000_project_overview.md contains links to all docs/*.md files
 #    (except itself and SUMMARY.md)
-# 3. No links in docs/ or crates/ reference work/ (scratch directory)
+# 3. No links in checked directories reference work/ (scratch directory)
 #
 # Note: .claude/skills/ is skipped in CI (detected via CI or GITHUB_ACTIONS env vars)
 # because .claude/ is gitignored.
@@ -118,10 +122,38 @@ while IFS= read -r record; do
     echo "missing docs link: $src_file:$src_line -> $target (resolved: ${resolved#$ROOT/})"
   fi
 done < <(
-  # Check crates/
+  # Check markdown files in crates/
   while IFS= read -r -d '' file; do
     perl -ne 'while (/\[[^\]]+\]\(([^)]+)\)/g) { print "$ARGV\t$.\t$1\n"; }' "$file"
   done < <(rg -l -0 --pcre2 '\[[^\]]+\]\([^)]*docs/' crates)
+
+  # Check markdown files in docs/ (internal cross-references)
+  while IFS= read -r -d '' file; do
+    perl -ne 'while (/\[[^\]]+\]\(([^)]+)\)/g) { print "$ARGV\t$.\t$1\n"; }' "$file"
+  done < <(rg -l -0 --pcre2 '\[[^\]]+\]\([^)]*docs/' docs)
+
+  # Check markdown files in tests/, examples/, scenarios/, .github/
+  for dir in tests examples scenarios .github; do
+    if [[ -d "$ROOT/$dir" ]]; then
+      while IFS= read -r -d '' file; do
+        perl -ne 'while (/\[[^\]]+\]\(([^)]+)\)/g) { print "$ARGV\t$.\t$1\n"; }' "$file"
+      done < <(rg -l -0 --pcre2 '\[[^\]]+\]\([^)]*docs/' "$dir" 2>/dev/null || true)
+    fi
+  done
+
+  # Check scripts/ for docs references in comments or strings
+  # Match patterns like "docs/..." in any context
+  if [[ -d "$ROOT/scripts" ]]; then
+    while IFS= read -r -d '' file; do
+      perl -ne 'while (/(docs\/[0-9]+_[^\s,)\"'\'']+\.md)/g) { print "$ARGV\t$.\t$1\n"; }' "$file"
+    done < <(rg -l -0 'docs/' scripts)
+  fi
+
+  # Check verification/ (Quint and Lean files with docs/ references in comments)
+  # Match patterns like "See: docs/..." or "See docs/..." or "File: docs/..."
+  while IFS= read -r -d '' file; do
+    perl -ne 'while (/(?:See:?\s*|File:\s*)(docs\/[^\s,)]+)/g) { print "$ARGV\t$.\t$1\n"; }' "$file"
+  done < <(rg -l -0 'docs/' verification)
 
   # Check AGENTS.md and CLAUDE.md at root (use relative paths)
   for root_file in AGENTS.md CLAUDE.md; do
@@ -219,8 +251,8 @@ echo "SUMMARY.md links to all docs files"
 # Check for links to work/ (scratch directory)
 work_links=0
 
-# Build search paths
-search_paths=(docs crates)
+# Build search paths (all non-gitignored directories)
+search_paths=(docs crates verification scripts tests examples scenarios .github)
 for root_file in AGENTS.md CLAUDE.md; do
   [[ -f "$ROOT/$root_file" ]] && search_paths+=("$root_file")
 done
@@ -228,11 +260,17 @@ if [[ -z "$IN_CI" && -d "$ROOT/.claude/skills" ]]; then
   search_paths+=(.claude/skills)
 fi
 
+# Filter to existing paths only
+existing_paths=()
+for p in "${search_paths[@]}"; do
+  [[ -e "$ROOT/$p" || -e "$p" ]] && existing_paths+=("$p")
+done
+
 while IFS= read -r match; do
   [[ -z "$match" ]] && continue
   work_links=$((work_links + 1))
   echo "link to work/ found: $match"
-done < <(rg --no-heading -n '\[[^\]]+\]\([^)]*work/' "${search_paths[@]}" 2>/dev/null || true)
+done < <(rg --no-heading -n '\[[^\]]+\]\([^)]*work/' "${existing_paths[@]}" 2>/dev/null || true)
 
 if [[ "$work_links" -gt 0 ]]; then
   echo ""

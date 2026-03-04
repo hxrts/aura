@@ -10,7 +10,7 @@
 // Safety: Recovery requires threshold guardian approvals + cooldown.
 // Liveness: Progress requires threshold guardians to respond.
 //
-// See: docs/103_relational_contexts.md
+// See: docs/112_relational_contexts.md
 
 module protocol_recovery {
   // ============ TYPE DEFINITIONS ============
