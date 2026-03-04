@@ -217,7 +217,14 @@ async fn create_invitation(
             .await
             .map_err(|e| TerminalError::Operation(e.to_string())),
         InvitationRoleValue::Channel => service
-            .invite_to_channel(receiver_id, "channel".to_string(), None, None, expires_ms)
+            .invite_to_channel(
+                receiver_id,
+                "channel".to_string(),
+                None,
+                None,
+                None,
+                expires_ms,
+            )
             .await
             .map_err(|e| TerminalError::Operation(e.to_string())),
         InvitationRoleValue::Contact => service

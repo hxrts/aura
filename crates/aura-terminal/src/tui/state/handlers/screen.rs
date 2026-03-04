@@ -184,7 +184,7 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 state.next_toast_id += 1;
                 state.toast_queue.enqueue(QueuedToast::new(
                     state.next_toast_id,
-                    "[DEMO] Auto-fill: Ctrl+a for Alice, Ctrl+l for Carol",
+                    "[DEMO] Auto-fill: 1/A/Ctrl+a for Alice, 2/L/Ctrl+l for Carol",
                     ToastLevel::Info,
                 ));
             }

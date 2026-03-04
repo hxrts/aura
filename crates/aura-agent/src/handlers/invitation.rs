@@ -298,8 +298,12 @@ impl InvitationHandler {
         &self.context.authority
     }
 
-    /// Build a guard snapshot from the current context and effects
-    async fn build_snapshot(&self, effects: &AuraEffectSystem) -> GuardSnapshot {
+    /// Build a guard snapshot from the provided context and effects.
+    async fn build_snapshot_for_context(
+        &self,
+        effects: &AuraEffectSystem,
+        context_id: ContextId,
+    ) -> GuardSnapshot {
         let now_ms = effects.current_timestamp().await.unwrap_or(0);
 
         // Build capabilities list - in testing mode, grant all capabilities
@@ -329,12 +333,62 @@ impl InvitationHandler {
 
         GuardSnapshot::new(
             self.context.authority.authority_id(),
-            self.context.effect_context.context_id(),
+            context_id,
             FlowCost::new(100), // Default flow budget
             capabilities,
             1, // Default epoch
             now_ms,
         )
+    }
+
+    /// Build a guard snapshot from the handler's default context.
+    async fn build_snapshot(&self, effects: &AuraEffectSystem) -> GuardSnapshot {
+        self.build_snapshot_for_context(effects, self.context.effect_context.context_id())
+            .await
+    }
+
+    /// Resolve the effective invitation context for the outgoing invitation type.
+    async fn resolve_invitation_context(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_type: &InvitationType,
+    ) -> ContextId {
+        let fallback_context = self.context.effect_context.context_id();
+        let InvitationType::Channel { home_id, .. } = invitation_type else {
+            return fallback_context;
+        };
+
+        let own_id = self.context.authority.authority_id();
+        let Ok(facts) = effects.load_committed_facts(own_id).await else {
+            return fallback_context;
+        };
+
+        for fact in facts.into_iter().rev() {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
+            else {
+                continue;
+            };
+
+            if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
+                continue;
+            }
+
+            let Some(ChatFact::ChannelCreated {
+                context_id,
+                channel_id,
+                creator_id,
+                ..
+            }) = ChatFact::from_envelope(&envelope)
+            else {
+                continue;
+            };
+
+            if channel_id == *home_id && creator_id == own_id {
+                return context_id;
+            }
+        }
+
+        fallback_context
     }
 
     async fn validate_cached_invitation_accept(
@@ -445,6 +499,27 @@ impl InvitationHandler {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
+        self.create_invitation_with_context(
+            effects,
+            receiver_id,
+            invitation_type,
+            None,
+            message,
+            expires_in_ms,
+        )
+        .await
+    }
+
+    /// Create an invitation with an optional explicit context override.
+    pub async fn create_invitation_with_context(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        receiver_id: AuthorityId,
+        invitation_type: InvitationType,
+        context_override: Option<ContextId>,
+        message: Option<String>,
+        expires_in_ms: Option<u64>,
+    ) -> AgentResult<Invitation> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
         // Generate unique invitation ID
@@ -453,8 +528,25 @@ impl InvitationHandler {
         let current_time = effects.current_timestamp().await.unwrap_or(0);
         let expires_at = expires_in_ms.map(|ms| current_time + ms);
 
-        // Build snapshot and prepare through service
-        let snapshot = self.build_snapshot(effects.as_ref()).await;
+        let invitation_context = if let Some(context_id) = context_override {
+            context_id
+        } else {
+            self.resolve_invitation_context(effects.as_ref(), &invitation_type)
+                .await
+        };
+        tracing::debug!(
+            receiver_id = %receiver_id,
+            invitation_type = ?invitation_type,
+            "Preparing invitation with resolved context override={:?} context={}",
+            context_override,
+            invitation_context
+        );
+        // Build snapshot and prepare through service.
+        // For channel invitations this must use the channel context so the
+        // generated invitation facts and transport metadata are scoped correctly.
+        let snapshot = self
+            .build_snapshot_for_context(effects.as_ref(), invitation_context)
+            .await;
 
         let outcome = self.service.prepare_send_invitation(
             &snapshot,
@@ -470,7 +562,7 @@ impl InvitationHandler {
 
         let invitation = Invitation {
             invitation_id: invitation_id.clone(),
-            context_id: self.context.effect_context.context_id(),
+            context_id: invitation_context,
             sender_id: self.context.authority.authority_id(),
             receiver_id,
             invitation_type,
@@ -1843,7 +1935,8 @@ impl InvitationHandler {
             invitation_id = %shareable.invitation_id,
             sender = %shareable.sender_id,
             invitation_type = ?shareable.invitation_type,
-            "Importing invitation code"
+            "Importing invitation code with context={:?}",
+            shareable.context_id
         );
 
         // Persist the shareable invitation so later operations (accept/decline) can resolve it
@@ -2990,6 +3083,12 @@ async fn execute_notify_peer(
     metadata.insert(
         "invitation-context".to_string(),
         invitation_context.to_string(),
+    );
+    tracing::debug!(
+        destination = %peer,
+        invitation_context = %invitation_context,
+        code_has_context_field = code.contains("\"context_id\""),
+        "Sending invitation envelope"
     );
 
     let envelope = TransportEnvelope {

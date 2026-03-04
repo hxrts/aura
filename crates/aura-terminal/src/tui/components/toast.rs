@@ -291,7 +291,7 @@ pub fn ToastContainer(props: &ToastContainerProps) -> impl Into<AnyElement<'stat
     let color = toast.level.color();
 
     // Truncate long messages to fit in footer width
-    let max_msg_len = 60; // Leave room for icon and dismiss hint
+    let max_msg_len = 180; // Keep errors readable while preserving footer controls
     let message = if toast.message.len() > max_msg_len {
         format!("{}...", &toast.message[..max_msg_len - 3])
     } else {

@@ -15,6 +15,7 @@ use async_lock::RwLock;
 use aura_app::ui::prelude::*;
 use aura_app::ui::signals::CHAT_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
+use tracing::error;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
@@ -27,6 +28,16 @@ pub use aura_app::ui::workflows::messaging::{
     leave_channel_by_name, send_action_by_name, send_direct_message, send_message,
     send_message_by_name, set_topic_by_name, start_direct_chat,
 };
+
+fn compact_send_error(error: &aura_core::AuraError) -> String {
+    let raw = error.to_string();
+    raw.rsplit(": ")
+        .next()
+        .map(str::trim)
+        .filter(|tail| !tail.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or(raw)
+}
 
 async fn resolve_channel_id(
     app_core: &Arc<RwLock<AppCore>>,
@@ -91,9 +102,17 @@ pub async fn handle_messaging(
             };
             match result {
                 Ok(message_id) => Some(Ok(OpResponse::Data(format!("Message sent: {message_id}")))),
-                Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to send message: {e}"
-                )))),
+                Err(e) => {
+                    let compact = compact_send_error(&e);
+                    error!(
+                        channel = %channel,
+                        error = %e,
+                        "tui send_message failed"
+                    );
+                    Some(Err(super::types::OpError::Failed(format!(
+                        "Failed to send message: {compact}"
+                    ))))
+                }
             }
         }
 

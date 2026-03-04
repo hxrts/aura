@@ -404,8 +404,16 @@ fn execute_step(
             dispatch(
                 tool_api,
                 ToolRequest::SendKeys {
+                    instance_id: instance_id.clone(),
+                    keys: "i".to_string(),
+                },
+            )?;
+            std::thread::sleep(Duration::from_millis(60));
+            dispatch(
+                tool_api,
+                ToolRequest::SendKeys {
                     instance_id,
-                    keys: format!("i{command}\n"),
+                    keys: format!("{command}\n"),
                 },
             )?;
             Ok(())

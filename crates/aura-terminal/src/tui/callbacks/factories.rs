@@ -24,6 +24,12 @@ where
     ctx.tasks().spawn(fut);
 }
 
+async fn send_ui_update_reliable(tx: &UiUpdateSender, update: UiUpdate) {
+    if tx.try_send(update.clone()).is_err() {
+        let _ = tx.send(update).await;
+    }
+}
+
 #[derive(Clone, Copy)]
 enum CommandOutcomeStatus {
     Ok,
@@ -218,9 +224,11 @@ impl ChatCallbacks {
                             let (status, reason) = classify_command_error(&e.to_string());
                             let message =
                                 command_outcome_message(e.to_string(), status, reason, None);
-                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                "command", message,
-                            )));
+                            send_ui_update_reliable(
+                                &tx,
+                                UiUpdate::ToastAdded(ToastMessage::error("command", message)),
+                            )
+                            .await;
                             return;
                         }
                     };
@@ -246,21 +254,33 @@ impl ChatCallbacks {
                                         &normalized,
                                     )
                                 {
-                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
-                                        "help",
-                                        format!("{} — {}", help.syntax, help.description),
-                                    )));
+                                    send_ui_update_reliable(
+                                        &tx,
+                                        UiUpdate::ToastAdded(ToastMessage::info(
+                                            "help",
+                                            format!("{} — {}", help.syntax, help.description),
+                                        )),
+                                    )
+                                    .await;
                                 } else {
-                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                        "help",
-                                        format!("Unknown command: /{normalized}"),
-                                    )));
+                                    send_ui_update_reliable(
+                                        &tx,
+                                        UiUpdate::ToastAdded(ToastMessage::error(
+                                            "help",
+                                            format!("Unknown command: /{normalized}"),
+                                        )),
+                                    )
+                                    .await;
                                 }
                             } else {
-                                let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
-                                    "help",
-                                    "Use ? for TUI help. Run /help <command> for details. Core commands: /msg /me /nick /who /whois /join /leave /topic /invite /homeinvite /homeaccept /kick /ban /unban /mute /unmute /pin /unpin /op /deop /mode /neighborhood /nhadd /nhlink",
-                                )));
+                                send_ui_update_reliable(
+                                    &tx,
+                                    UiUpdate::ToastAdded(ToastMessage::info(
+                                        "help",
+                                        "Use ? for TUI help. Run /help <command> for details. Core commands: /msg /me /nick /who /whois /join /leave /topic /invite /homeinvite /homeaccept /kick /ban /unban /mute /unmute /pin /unpin /op /deop /mode /neighborhood /nhadd /nhlink",
+                                    )),
+                                )
+                                .await;
                             }
                             return;
                         }
@@ -284,9 +304,13 @@ impl ChatCallbacks {
                                         reason,
                                         None,
                                     );
-                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                        "command", message,
-                                    )));
+                                    send_ui_update_reliable(
+                                        &tx,
+                                        UiUpdate::ToastAdded(ToastMessage::error(
+                                            "command", message,
+                                        )),
+                                    )
+                                    .await;
                                     return;
                                 }
                             };
@@ -305,9 +329,13 @@ impl ChatCallbacks {
                                         reason,
                                         None,
                                     );
-                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                        "command", message,
-                                    )));
+                                    send_ui_update_reliable(
+                                        &tx,
+                                        UiUpdate::ToastAdded(ToastMessage::error(
+                                            "command", message,
+                                        )),
+                                    )
+                                    .await;
                                     return;
                                 }
                             };
@@ -339,12 +367,14 @@ impl ChatCallbacks {
                                             CommandReasonCode::Internal,
                                             Some(state_label),
                                         );
-                                        let _ = tx.try_send(UiUpdate::ToastAdded(
-                                            ToastMessage::error(
+                                        send_ui_update_reliable(
+                                            &tx,
+                                            UiUpdate::ToastAdded(ToastMessage::error(
                                                 "command",
                                                 message,
-                                            ),
-                                        ));
+                                            )),
+                                        )
+                                        .await;
                                     } else if let Some(details) = result.details {
                                         let message = command_outcome_message(
                                             format!("{details} ({state_label})"),
@@ -352,12 +382,14 @@ impl ChatCallbacks {
                                             CommandReasonCode::None,
                                             Some(state_label),
                                         );
-                                        let _ = tx.try_send(UiUpdate::ToastAdded(
-                                            ToastMessage::info(
+                                        send_ui_update_reliable(
+                                            &tx,
+                                            UiUpdate::ToastAdded(ToastMessage::info(
                                                 "command",
                                                 message,
-                                            ),
-                                        ));
+                                            )),
+                                        )
+                                        .await;
                                     } else {
                                         let message = command_outcome_message(
                                             format!("/{irc_name} ({state_label})"),
@@ -365,12 +397,14 @@ impl ChatCallbacks {
                                             CommandReasonCode::None,
                                             Some(state_label),
                                         );
-                                        let _ = tx.try_send(UiUpdate::ToastAdded(
-                                            ToastMessage::success(
+                                        send_ui_update_reliable(
+                                            &tx,
+                                            UiUpdate::ToastAdded(ToastMessage::success(
                                                 "command",
                                                 message,
-                                            ),
-                                        ));
+                                            )),
+                                        )
+                                        .await;
                                     }
                                 }
                                 Err(e) => {
@@ -381,9 +415,13 @@ impl ChatCallbacks {
                                         reason,
                                         None,
                                     );
-                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                        "command", message,
-                                    )));
+                                    send_ui_update_reliable(
+                                        &tx,
+                                        UiUpdate::ToastAdded(ToastMessage::error(
+                                            "command", message,
+                                        )),
+                                    )
+                                    .await;
                                 }
                             }
                             return;

@@ -15,7 +15,7 @@ use crate::runtime::AuraEffectSystem;
 use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, CeremonyId, ChannelId, InvitationId};
+use aura_core::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::DeviceId;
 use aura_core::Hash32;
 use std::str::FromStr;
@@ -129,6 +129,7 @@ impl InvitationServiceApi {
         &self,
         receiver_id: AuthorityId,
         home_id: String,
+        context_id: Option<ContextId>,
         bootstrap: Option<ChannelBootstrapPackage>,
         message: Option<String>,
         expires_in_ms: Option<u64>,
@@ -141,7 +142,7 @@ impl InvitationServiceApi {
 
         let invitation = self
             .handler
-            .create_invitation(
+            .create_invitation_with_context(
                 self.effects.clone(),
                 receiver_id,
                 InvitationType::Channel {
@@ -149,6 +150,7 @@ impl InvitationServiceApi {
                     nickname_suggestion: None,
                     bootstrap,
                 },
+                context_id,
                 message,
                 expires_in_ms,
             )
@@ -587,7 +589,7 @@ mod tests {
         let receiver_id = AuthorityId::new_from_entropy([116u8; 32]);
         let home_id = ChannelId::from_bytes([116u8; 32]).to_string();
         let invitation = service
-            .invite_to_channel(receiver_id, home_id, None, None, None)
+            .invite_to_channel(receiver_id, home_id, None, None, None, None)
             .await
             .unwrap();
 

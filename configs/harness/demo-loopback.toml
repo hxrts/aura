@@ -1,0 +1,19 @@
+schema_version = 1
+
+[run]
+name = "demo-loopback"
+pty_rows = 40
+pty_cols = 300
+artifact_dir = "artifacts/harness/demo-loopback"
+
+[[instances]]
+id = "bob"
+mode = "local"
+data_dir = ".tmp/harness/demo-bob-s11"
+device_id = "demo-bob-dev-01"
+bind_address = "127.0.0.1:42001"
+demo_mode = true
+log_path = "artifacts/harness/demo-loopback/bob.log"
+env = [
+  "RUST_LOG=aura_app::workflows::messaging=debug,aura_terminal::demo=debug,aura_terminal::tui=info",
+]

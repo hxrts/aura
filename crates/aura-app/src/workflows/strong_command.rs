@@ -1489,7 +1489,7 @@ async fn execute_general(
         ResolvedCommand::HomeInvite { target } => {
             let home_id = current_home_id_string(app_core).await?;
             let _info = invitation::create_channel_invitation(
-                app_core, target.0, home_id, None, None, None,
+                app_core, target.0, home_id, None, None, None, None,
             )
             .await?;
             Ok(Some("home invitation sent".to_string()))

@@ -460,6 +460,7 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
                             .invite_to_channel(
                                 receiver_id,
                                 channel.to_string(),
+                                None,
                                 Some(bootstrap),
                                 None,
                                 None,

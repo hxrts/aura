@@ -16,12 +16,14 @@ use tokio::time::{interval, Duration};
 use aura_agent::core::{AgentBuilder, AgentConfig};
 use aura_agent::handlers::InvitationType;
 use aura_agent::{AuraAgent, AuraEffectSystem, EffectContext, SharedTransport};
+use aura_app::ui::workflows::context::default_relational_context;
 use aura_chat::ChatFact;
 use aura_core::effects::{
-    AmpChannelEffects, ChannelJoinParams, ChannelSendParams, ExecutionMode, PhysicalTimeEffects,
+    AmpChannelEffects, ChannelCreateParams, ChannelJoinParams, ChannelSendParams, ExecutionMode,
+    PhysicalTimeEffects,
     TimeEffects, TransportEffects,
 };
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_effects::time::PhysicalTimeHandler;
@@ -31,6 +33,7 @@ use aura_journal::fact::{
 };
 use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
+use aura_relational::ContactFact;
 use aura_recovery::guardian_ceremony::{CeremonyProposal, CeremonyResponse, CeremonyResponseMsg};
 use serde::Serialize;
 
@@ -46,6 +49,34 @@ struct GuardianAcceptance {
     timestamp: TimeStamp,
 }
 
+const EXTENDED_DEMO_PEER_NAMES: [&str; 13] = [
+    "Dave", "Eve", "Frank", "Grace", "Heidi", "Ivan", "Judy", "Mallory", "Niaj", "Olivia", "Peggy",
+    "Rupert", "Sybil",
+];
+
+const ALICE_CONTACT_EXCHANGE_NAMES: [&str; 4] = ["Dave", "Grace", "Judy", "Olivia"];
+const CAROL_CONTACT_EXCHANGE_NAMES: [&str; 4] = ["Eve", "Heidi", "Mallory", "Peggy"];
+
+#[derive(Clone)]
+struct NamedDemoPeer {
+    name: String,
+    agent: Arc<AuraAgent>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct PeerObservedMessage {
+    message_id: String,
+    context: ContextId,
+    channel: ChannelId,
+}
+
+/// Public peer metadata for rich demo seeding in the TUI layer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DemoPeerProfile {
+    pub name: String,
+    pub authority_id: AuthorityId,
+}
+
 /// Demo simulator that manages Alice, Carol, and Mobile peer runtimes.
 pub struct DemoSimulator {
     seed: u64,
@@ -54,6 +85,7 @@ pub struct DemoSimulator {
     alice: Arc<AuraAgent>,
     carol: Arc<AuraAgent>,
     mobile: Arc<AuraAgent>,
+    social_peers: Vec<NamedDemoPeer>,
     event_loop_handle: Option<JoinHandle<()>>,
     shutdown_tx: Option<mpsc::Sender<()>>,
 }
@@ -122,6 +154,7 @@ impl DemoSimulator {
             alice,
             carol,
             mobile,
+            social_peers: Vec::new(),
             event_loop_handle: None,
             shutdown_tx: None,
         })
@@ -165,6 +198,108 @@ impl DemoSimulator {
         self.mobile.runtime().device_id()
     }
 
+    /// Build additional named peers used by the richer TUI demo world.
+    ///
+    /// This is intentionally opt-in so simulator-heavy tests can continue using
+    /// the minimal Alice/Carol/Mobile topology.
+    pub async fn enable_realistic_world(&mut self, base_path: PathBuf) -> TerminalResult<()> {
+        if !self.social_peers.is_empty() {
+            return Ok(());
+        }
+
+        let peers_root = base_path.join("peers").join("community");
+        let mut social_peers = Vec::with_capacity(EXTENDED_DEMO_PEER_NAMES.len());
+
+        for (idx, name) in EXTENDED_DEMO_PEER_NAMES.iter().enumerate() {
+            let peer_seed = self.seed + 10 + idx as u64;
+            let authority_id = ids::authority_id(&format!("demo:{}:{}:authority", peer_seed, name));
+            let device_id = ids::device_id(&format!("demo:{}:{}:device", peer_seed, name));
+            let context_id = ids::context_id(&format!("demo:{}:{}:context", peer_seed, name));
+            let storage_dir = peers_root.join(name.to_ascii_lowercase());
+
+            let agent = build_demo_peer_agent(
+                peer_seed,
+                name,
+                authority_id,
+                context_id,
+                device_id,
+                storage_dir,
+                self.shared_transport.clone(),
+            )
+            .await?;
+
+            social_peers.push(NamedDemoPeer {
+                name: (*name).to_string(),
+                agent,
+            });
+        }
+
+        self.social_peers = social_peers;
+        self.seed_peer_contact_exchanges().await?;
+        Ok(())
+    }
+
+    /// Extra social peers (beyond Alice/Carol/Mobile) for UI seeding.
+    pub fn social_peer_profiles(&self) -> Vec<DemoPeerProfile> {
+        self.social_peers
+            .iter()
+            .map(|peer| DemoPeerProfile {
+                name: peer.name.clone(),
+                authority_id: peer.agent.authority_id(),
+            })
+            .collect()
+    }
+
+    fn social_peer_by_name(&self, name: &str) -> Option<&NamedDemoPeer> {
+        self.social_peers.iter().find(|peer| peer.name == name)
+    }
+
+    async fn seed_peer_contact_exchanges(&self) -> TerminalResult<()> {
+        let mut exchange_count: usize = 0;
+
+        for peer_name in ALICE_CONTACT_EXCHANGE_NAMES {
+            if let Some(peer) = self.social_peer_by_name(peer_name) {
+                match establish_contact_exchange("Alice", &self.alice, peer_name, &peer.agent)
+                    .await
+                {
+                    Ok(()) => {
+                        exchange_count += 1;
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            "Demo world: failed to seed Alice <-> {peer_name} contact exchange: {error}"
+                        );
+                    }
+                }
+            }
+        }
+
+        for peer_name in CAROL_CONTACT_EXCHANGE_NAMES {
+            if let Some(peer) = self.social_peer_by_name(peer_name) {
+                match establish_contact_exchange("Carol", &self.carol, peer_name, &peer.agent)
+                    .await
+                {
+                    Ok(()) => {
+                        exchange_count += 1;
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            "Demo world: failed to seed Carol <-> {peer_name} contact exchange: {error}"
+                        );
+                    }
+                }
+            }
+        }
+
+        if exchange_count == 0 {
+            tracing::warn!(
+                "Demo world: no peer contact exchanges were seeded; continuing with base topology"
+            );
+        }
+
+        Ok(())
+    }
+
     /// Start background automation loops for peer runtimes.
     pub async fn start(&mut self) -> TerminalResult<()> {
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
@@ -173,20 +308,70 @@ impl DemoSimulator {
         let alice = self.alice.clone();
         let carol = self.carol.clone();
         let mobile = self.mobile.clone();
+        let social_peers = self.social_peers.clone();
         let bob_authority = self.bob_authority;
         self.event_loop_handle = Some(tokio::spawn(async move {
+            let mut mirrored_echoes: HashSet<(String, String)> = HashSet::new();
             let mut tick = interval(Duration::from_millis(100));
             loop {
                 tokio::select! {
                     _ = shutdown_rx.recv() => break,
                     _ = tick.tick() => {
-                        let _ = process_peer_transport_messages("Alice", &alice, bob_authority).await;
-                        let _ = process_peer_transport_messages("Carol", &carol, bob_authority).await;
+                        let alice_observed = process_peer_transport_messages("Alice", &alice, bob_authority)
+                            .await
+                            .unwrap_or_default();
+                        let carol_observed = process_peer_transport_messages("Carol", &carol, bob_authority)
+                            .await
+                            .unwrap_or_default();
+
+                        let carol_seen: HashSet<&str> =
+                            carol_observed.iter().map(|msg| msg.message_id.as_str()).collect();
+                        for observed in &alice_observed {
+                            if carol_seen.contains(observed.message_id.as_str()) {
+                                continue;
+                            }
+                            if mirrored_echoes.insert((
+                                observed.message_id.clone(),
+                                "Carol".to_string(),
+                            )) {
+                                let _ = force_peer_echo(
+                                    "Carol",
+                                    &carol,
+                                    observed.context,
+                                    observed.channel,
+                                )
+                                .await;
+                            }
+                        }
+
+                        let alice_seen: HashSet<&str> =
+                            alice_observed.iter().map(|msg| msg.message_id.as_str()).collect();
+                        for observed in &carol_observed {
+                            if alice_seen.contains(observed.message_id.as_str()) {
+                                continue;
+                            }
+                            if mirrored_echoes.insert((
+                                observed.message_id.clone(),
+                                "Alice".to_string(),
+                            )) {
+                                let _ = force_peer_echo(
+                                    "Alice",
+                                    &alice,
+                                    observed.context,
+                                    observed.channel,
+                                )
+                                .await;
+                            }
+                        }
 
                         // Mobile processes transport messages for device enrollment choreography
                         // and ceremony messages for key package installation.
                         let _ = process_peer_transport_messages("Mobile", &mobile, bob_authority).await;
                         let _ = mobile.process_ceremony_acceptances().await;
+
+                        for peer in &social_peers {
+                            let _ = process_peer_transport_messages(&peer.name, &peer.agent, bob_authority).await;
+                        }
                     }
                 }
             }
@@ -233,13 +418,55 @@ async fn build_demo_peer_agent(
     Ok(Arc::new(agent))
 }
 
+async fn establish_contact_exchange(
+    left_name: &str,
+    left: &Arc<AuraAgent>,
+    right_name: &str,
+    right: &Arc<AuraAgent>,
+) -> TerminalResult<()> {
+    let relational_context = default_relational_context();
+
+    let left_timestamp = left.runtime().effects().current_timestamp_ms().await;
+    let right_timestamp = right.runtime().effects().current_timestamp_ms().await;
+
+    let left_contact = ContactFact::added_with_timestamp_ms(
+        relational_context,
+        left.authority_id(),
+        right.authority_id(),
+        right_name.to_string(),
+        left_timestamp,
+    )
+    .to_generic();
+
+    let right_contact = ContactFact::added_with_timestamp_ms(
+        relational_context,
+        right.authority_id(),
+        left.authority_id(),
+        left_name.to_string(),
+        right_timestamp,
+    )
+    .to_generic();
+
+    left.clone()
+        .as_runtime_bridge()
+        .commit_relational_facts(&[left_contact])
+        .await?;
+    right.clone()
+        .as_runtime_bridge()
+        .commit_relational_facts(&[right_contact])
+        .await?;
+
+    Ok(())
+}
+
 /// Peer-side automation: currently only guardian setup auto-acceptance.
 async fn process_peer_transport_messages(
     name: &str,
     agent: &AuraAgent,
     bob_authority: AuthorityId,
-) -> TerminalResult<()> {
+) -> TerminalResult<Vec<PeerObservedMessage>> {
     let effects = agent.runtime().effects();
+    let mut observed_messages = Vec::new();
 
     async fn accept_channel_invitation(
         name: &str,
@@ -329,7 +556,11 @@ async fn process_peer_transport_messages(
         }
     }
 
-    loop {
+    // Keep per-tick processing bounded so a single requeued envelope cannot
+    // monopolize the loop and starve other traffic (e.g. AMP echoes).
+    const MAX_ENVELOPES_PER_TICK: usize = 128;
+
+    for _ in 0..MAX_ENVELOPES_PER_TICK {
         let envelope = match effects.receive_envelope().await {
             Ok(env) => env,
             Err(aura_core::effects::TransportError::NoMessage) => break,
@@ -426,6 +657,118 @@ async fn process_peer_transport_messages(
                         .await;
                     }
                 }
+                "application/aura-chat-fact" => {
+                    let relational_fact = match from_slice::<RelationalFact>(&envelope.payload) {
+                        Ok(fact) => fact,
+                        Err(err) => {
+                            tracing::warn!(
+                                "{name} received invalid chat fact envelope payload: {err}"
+                            );
+                            continue;
+                        }
+                    };
+
+                    let parsed_chat_fact = match &relational_fact {
+                        RelationalFact::Generic {
+                            envelope: chat_envelope,
+                            ..
+                        } => ChatFact::from_envelope(chat_envelope),
+                        _ => None,
+                    };
+
+                    if let Some(ChatFact::ChannelCreated {
+                        context_id,
+                        channel_id,
+                        creator_id,
+                        ..
+                    }) = parsed_chat_fact.as_ref()
+                    {
+                        if let Err(err) = effects
+                            .create_channel(ChannelCreateParams {
+                                context: *context_id,
+                                channel: Some(*channel_id),
+                                skip_window: None,
+                                topic: None,
+                            })
+                            .await
+                        {
+                            let lowered = err.to_string().to_ascii_lowercase();
+                            if !lowered.contains("already") && !lowered.contains("exists") {
+                                tracing::warn!(
+                                    "{name} failed to provision channel {} in context {} from chat fact: {err}",
+                                    channel_id,
+                                    context_id
+                                );
+                            }
+                        }
+
+                        let local_authority = agent.authority_id();
+                        let mut participants = vec![local_authority];
+                        if *creator_id != local_authority {
+                            participants.push(*creator_id);
+                        }
+                        for participant in participants {
+                            if let Err(err) = effects
+                                .join_channel(ChannelJoinParams {
+                                    context: *context_id,
+                                    channel: *channel_id,
+                                    participant,
+                                })
+                                .await
+                            {
+                                tracing::debug!(
+                                    "{name} failed to join participant {} in channel {} context {}: {err}",
+                                    participant,
+                                    channel_id,
+                                    context_id
+                                );
+                            }
+                        }
+                    }
+
+                    if let Err(err) = effects
+                        .commit_relational_facts(vec![relational_fact.clone()])
+                        .await
+                    {
+                        tracing::warn!("{name} failed to commit inbound chat fact: {err}");
+                        continue;
+                    }
+
+                    if envelope.source != bob_authority {
+                        continue;
+                    }
+
+                    if let Some(ChatFact::MessageSentSealed {
+                        context_id,
+                        channel_id,
+                        message_id,
+                        ..
+                    }) = parsed_chat_fact.as_ref()
+                    {
+                        observed_messages.push(PeerObservedMessage {
+                            message_id: message_id.clone(),
+                            context: *context_id,
+                            channel: *channel_id,
+                        });
+
+                        let params = ChannelSendParams {
+                            context: *context_id,
+                            channel: *channel_id,
+                            sender: agent.authority_id(),
+                            plaintext: format!("{name} acknowledged").into_bytes(),
+                            reply_to: None,
+                        };
+
+                        if let Err(err) = effects.send_message(params).await {
+                            tracing::warn!(
+                                "{name} failed to echo chat-fact message in channel {}: {err}",
+                                channel_id
+                            );
+                        } else {
+                            tracing::debug!("{name} echoed chat-fact message back to Bob");
+                        }
+                    }
+                }
                 "application/aura-amp" => {
                     // Only respond to Bob's messages in demo mode.
                     if envelope.source != bob_authority {
@@ -460,6 +803,16 @@ async fn process_peer_transport_messages(
                             continue;
                         }
                     };
+
+                    observed_messages.push(PeerObservedMessage {
+                        message_id: format!(
+                            "amp:{}:{}",
+                            context,
+                            message.header.channel
+                        ),
+                        context,
+                        channel: message.header.channel,
+                    });
 
                     let params = ChannelSendParams {
                         context,
@@ -597,7 +950,7 @@ async fn process_peer_transport_messages(
                             "{name} received choreography message (not recognized), requeuing"
                         );
                         effects.requeue_envelope(envelope);
-                        break;
+                        continue;
                     }
                 }
                 _ => {}
@@ -622,6 +975,68 @@ async fn process_peer_transport_messages(
                 .await;
             }
         }
+    }
+
+    Ok(observed_messages)
+}
+
+async fn force_peer_echo(
+    name: &str,
+    agent: &AuraAgent,
+    context: ContextId,
+    channel: ChannelId,
+) -> TerminalResult<()> {
+    let effects = agent.runtime().effects();
+
+    if let Err(err) = effects
+        .create_channel(ChannelCreateParams {
+            context,
+            channel: Some(channel),
+            skip_window: None,
+            topic: None,
+        })
+        .await
+    {
+        let lowered = err.to_string().to_ascii_lowercase();
+        if !lowered.contains("already") && !lowered.contains("exists") {
+            tracing::debug!(
+                "{name} failed to mirror-provision channel {} in context {}: {err}",
+                channel,
+                context
+            );
+        }
+    }
+
+    if let Err(err) = effects
+        .join_channel(ChannelJoinParams {
+            context,
+            channel,
+            participant: agent.authority_id(),
+        })
+        .await
+    {
+        tracing::debug!(
+            "{name} failed to mirror-join channel {} in context {}: {err}",
+            channel,
+            context
+        );
+    }
+
+    if let Err(err) = effects
+        .send_message(ChannelSendParams {
+            context,
+            channel,
+            sender: agent.authority_id(),
+            plaintext: format!("{name} acknowledged").into_bytes(),
+            reply_to: None,
+        })
+        .await
+    {
+        tracing::debug!(
+            "{name} failed to mirror-echo in channel {} context {}: {err}",
+            channel,
+            context
+        );
     }
 
     Ok(())
@@ -655,7 +1070,10 @@ pub fn spawn_amp_inbox_listener(
         loop {
             tick.tick().await;
 
-            loop {
+            // Keep per-tick processing bounded so non-AMP envelopes do not
+            // block AMP updates from simulated peers.
+            const MAX_ENVELOPES_PER_TICK: usize = 128;
+            for _ in 0..MAX_ENVELOPES_PER_TICK {
                 let envelope = match effects.receive_envelope().await {
                     Ok(env) => env,
                     Err(aura_core::effects::TransportError::NoMessage) => break,
@@ -667,12 +1085,12 @@ pub fn spawn_amp_inbox_listener(
 
                 let Some(content_type) = envelope.metadata.get("content-type").cloned() else {
                     effects.requeue_envelope(envelope);
-                    break;
+                    continue;
                 };
 
                 if content_type.as_str() != "application/aura-amp" {
                     effects.requeue_envelope(envelope);
-                    break;
+                    continue;
                 }
 
                 // Ignore messages sent by Bob (self)

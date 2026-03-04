@@ -68,7 +68,7 @@ verification/lean/build/
 verification/lean/Generated/
 verification/lean/.lean_build/
 
-# Quint ITF trace outputs (generated, but keep .gitkeep)
+# Quint ITF trace outputs
 verification/quint/traces/*.itf.json
 verification/quint/traces/*.json
 
@@ -82,3 +82,5 @@ _apalache-out/
 .qemu-vm/
 .patchbay-work
 .patchbay-target
+
+target-codex

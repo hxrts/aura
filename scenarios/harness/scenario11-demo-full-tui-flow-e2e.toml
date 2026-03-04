@@ -1,0 +1,447 @@
+schema_version = 1
+id = "scenario11-demo-full-tui-flow-e2e"
+goal = "Run the end-to-end TUI demo flow: add Alice/Carol contacts, channel messaging, home formation, and neighborhood join."
+execution_mode = "scripted"
+required_capabilities = ["local"]
+
+# User flow:
+# 1) Bob runs in demo mode, imports Alice and Carol as contacts via demo shortcuts.
+# 2) Bob creates a shared chat channel, invites Alice/Carol, sends a message, and receives both replies.
+# 3) Bob creates a home, invites Alice/Carol to join it, then waits for propagation.
+# 4) Bob selects the pre-seeded "Tri-Neighborhood Demo" and adds the trio home.
+# 5) Demo auto-accept should confirm neighborhood join acceptance from existing homes.
+
+[[steps]]
+id = "launch"
+action = "launch_instances"
+timeout_ms = 15000
+
+[[steps]]
+id = "bob-runtime-bootstrap"
+action = "wait_for"
+instance = "bob"
+pattern = "Welcome to Aura"
+timeout_ms = 180000
+
+[[steps]]
+id = "bob-create-account"
+action = "send_keys"
+instance = "bob"
+keys = "Bob\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-main-ready"
+action = "wait_for"
+instance = "bob"
+pattern = "Map → Limited"
+timeout_ms = 120000
+
+[[steps]]
+id = "bob-open-neighborhood-bootstrap"
+action = "send_keys"
+instance = "bob"
+keys = "1"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-clear-toasts-before-home-create"
+action = "send_key"
+instance = "bob"
+key = "esc"
+repeat = 3
+timeout_ms = 1500
+
+[[steps]]
+id = "bob-settle-before-home-create"
+action = "fault_delay"
+timeout_ms = 1200
+
+[[steps]]
+id = "bob-open-home-create-modal-attempt1"
+action = "send_keys"
+instance = "bob"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-clear-toast-before-home-create-retry"
+action = "send_key"
+instance = "bob"
+key = "esc"
+timeout_ms = 1000
+
+[[steps]]
+id = "bob-open-home-create-modal-attempt2"
+action = "send_keys"
+instance = "bob"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-home-create-title"
+action = "wait_for"
+instance = "bob"
+pattern = "Create New Home"
+timeout_ms = 8000
+
+[[steps]]
+id = "bob-create-home"
+action = "send_keys"
+instance = "bob"
+keys = "DemoTrioHome\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-home-created"
+action = "wait_for"
+instance = "bob"
+pattern = "DemoTrioHome"
+timeout_ms = 20000
+
+[[steps]]
+id = "bob-clear-home-created-toast"
+action = "send_key"
+instance = "bob"
+key = "esc"
+repeat = 2
+timeout_ms = 1500
+
+[[steps]]
+id = "bob-open-contacts"
+action = "send_keys"
+instance = "bob"
+keys = "3"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-clear-contact-toasts"
+action = "send_key"
+instance = "bob"
+key = "esc"
+repeat = 3
+timeout_ms = 1500
+
+[[steps]]
+id = "bob-open-accept-alice"
+action = "send_keys"
+instance = "bob"
+keys = "a"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-accept-modal-alice-visible"
+action = "wait_for"
+instance = "bob"
+pattern = "Accept Invitation"
+timeout_ms = 8000
+
+[[steps]]
+id = "bob-fill-alice-invite"
+action = "send_keys"
+instance = "bob"
+keys = "1"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-alice-code-filled"
+action = "wait_for"
+instance = "bob"
+pattern = "aura:v1:"
+timeout_ms = 5000
+
+[[steps]]
+id = "bob-settle-alice-code"
+action = "fault_delay"
+timeout_ms = 1200
+
+[[steps]]
+id = "bob-submit-alice-invite"
+action = "send_key"
+instance = "bob"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-clear-alice-result-toast"
+action = "send_key"
+instance = "bob"
+key = "esc"
+repeat = 2
+timeout_ms = 1200
+
+[[steps]]
+id = "bob-open-accept-carol"
+action = "send_keys"
+instance = "bob"
+keys = "a"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-accept-modal-carol-visible"
+action = "wait_for"
+instance = "bob"
+pattern = "Accept Invitation"
+timeout_ms = 8000
+
+[[steps]]
+id = "bob-autofill-carol-invite"
+action = "send_keys"
+instance = "bob"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-carol-code-filled"
+action = "wait_for"
+instance = "bob"
+pattern = "aura:v1:"
+timeout_ms = 5000
+
+[[steps]]
+id = "bob-settle-carol-code"
+action = "fault_delay"
+timeout_ms = 1200
+
+[[steps]]
+id = "bob-submit-carol-invite"
+action = "send_key"
+instance = "bob"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-contacts-show-alice-and-carol"
+action = "wait_for"
+instance = "bob"
+pattern = "Carol"
+timeout_ms = 120000
+
+[[steps]]
+id = "bob-open-chat"
+action = "send_keys"
+instance = "bob"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-chat-ready"
+action = "wait_for"
+instance = "bob"
+pattern = "Channels"
+timeout_ms = 8000
+
+[[steps]]
+id = "bob-clear-toasts-before-channel-create"
+action = "send_key"
+instance = "bob"
+key = "esc"
+repeat = 3
+timeout_ms = 1500
+
+[[steps]]
+id = "bob-open-chat-create-modal"
+action = "send_keys"
+instance = "bob"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-chat-create-modal-visible"
+action = "wait_for"
+instance = "bob"
+pattern = "New Chat Group"
+timeout_ms = 8000
+
+[[steps]]
+id = "bob-chat-create-name"
+action = "send_keys"
+instance = "bob"
+keys = "demo-trio-room"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-chat-create-to-members"
+action = "send_key"
+instance = "bob"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-chat-create-members-step"
+action = "wait_for"
+instance = "bob"
+pattern = "Invite Contacts"
+timeout_ms = 8000
+
+[[steps]]
+id = "bob-chat-create-select-alice"
+action = "send_keys"
+instance = "bob"
+keys = " "
+timeout_ms = 1000
+
+[[steps]]
+id = "bob-chat-create-select-carol"
+action = "send_keys"
+instance = "bob"
+keys = "j "
+timeout_ms = 1000
+
+[[steps]]
+id = "bob-chat-create-to-threshold"
+action = "send_key"
+instance = "bob"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-chat-create-threshold-step"
+action = "wait_for"
+instance = "bob"
+pattern = "Group Threshold"
+timeout_ms = 8000
+
+[[steps]]
+id = "bob-chat-create-submit"
+action = "send_key"
+instance = "bob"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-channel-created-membership"
+action = "expect_membership"
+instance = "bob"
+channel = "demo-trio-room"
+present = true
+timeout_ms = 15000
+
+[[steps]]
+id = "bob-clear-channel-create-toast"
+action = "send_key"
+instance = "bob"
+key = "esc"
+repeat = 2
+timeout_ms = 1200
+
+[[steps]]
+id = "bob-select-demo-channel"
+action = "select_channel"
+instance = "bob"
+channel = "demo-trio-room"
+timeout_ms = 8000
+
+[[steps]]
+id = "bob-clear-chat-toast"
+action = "send_key"
+instance = "bob"
+key = "esc"
+timeout_ms = 1000
+
+[[steps]]
+id = "bob-enter-chat-insert-mode"
+action = "send_keys"
+instance = "bob"
+keys = "i"
+timeout_ms = 1000
+
+[[steps]]
+id = "bob-settle-chat-insert-mode"
+action = "fault_delay"
+timeout_ms = 120
+
+[[steps]]
+id = "bob-send-demo-message"
+action = "send_keys"
+instance = "bob"
+keys = "demo-e2e-trio-token\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-message-visible"
+action = "wait_for"
+instance = "bob"
+pattern = "demo-e2e-trio-token"
+timeout_ms = 15000
+
+[[steps]]
+id = "bob-alice-reply-visible"
+action = "wait_for"
+instance = "bob"
+pattern = "Alice"
+timeout_ms = 20000
+
+[[steps]]
+id = "bob-carol-reply-visible"
+action = "wait_for"
+instance = "bob"
+pattern = "Carol"
+timeout_ms = 20000
+
+[[steps]]
+id = "bob-homeinvite-alice"
+action = "send_chat_command"
+instance = "bob"
+command = "homeinvite authority-b3bbb5d4-038c-af56-1290-91aad8316de9"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-homeinvite-alice-result"
+action = "expect_command_result"
+instance = "bob"
+status = "ok"
+reason_code = "none"
+timeout_ms = 15000
+
+[[steps]]
+id = "bob-homeinvite-carol"
+action = "send_chat_command"
+instance = "bob"
+command = "homeinvite authority-d670f534-dd47-ceef-891f-3614b1c555f7"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-homeinvite-carol-result"
+action = "expect_command_result"
+instance = "bob"
+status = "ok"
+reason_code = "none"
+timeout_ms = 15000
+
+[[steps]]
+id = "bob-home-invite-settle"
+action = "fault_delay"
+timeout_ms = 4000
+
+[[steps]]
+id = "bob-select-tri-neighborhood"
+action = "send_chat_command"
+instance = "bob"
+command = "neighborhood Tri-Neighborhood Demo"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-select-tri-neighborhood-result"
+action = "expect_command_result"
+instance = "bob"
+status = "ok"
+reason_code = "none"
+contains = "neighborhood updated"
+timeout_ms = 15000
+
+[[steps]]
+id = "bob-add-home-to-tri-neighborhood"
+action = "send_chat_command"
+instance = "bob"
+command = "nhadd home"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-add-home-to-tri-neighborhood-result"
+action = "expect_command_result"
+instance = "bob"
+status = "ok"
+reason_code = "none"
+contains = "Join request accepted by"
+timeout_ms = 20000

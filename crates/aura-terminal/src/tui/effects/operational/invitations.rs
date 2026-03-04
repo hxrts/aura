@@ -168,6 +168,7 @@ pub async fn handle_invitations(
                         receiver,
                         home_id,
                         None,
+                        None,
                         message.clone(),
                         ttl_ms,
                     )
@@ -212,7 +213,9 @@ pub async fn handle_invitations(
                     Err(error) => return Some(Err(OpError::InvalidArgument(error.to_string()))),
                 };
 
-            match create_channel_invitation(app_core, receiver, home_id, None, None, None).await {
+            match create_channel_invitation(app_core, receiver, home_id, None, None, None, None)
+                .await
+            {
                 Ok(info) => Some(Ok(OpResponse::Data(format!(
                     "Home invitation sent: {}",
                     info.invitation_id.as_str()
