@@ -189,15 +189,24 @@ pub use verification::{MerkleComparison, MerkleVerifier, VerificationResult, Ver
 // Integration Documentation
 // =============================================================================
 
-/// Integration documentation and patterns
+/// Integration documentation and patterns.
 ///
-/// Contains comprehensive documentation on how aura-sync integrates with
-/// other crates in the Aura ecosystem, following the 8-layer architecture.
-#[doc = include_str!("INTEGRATION.md")]
+/// This module is intentionally inline so `aura-sync` does not depend on an
+/// external markdown file being present at compile time.
 pub mod integration_docs {
-    // This module exists only to include the integration documentation
-    // in the generated rustdoc. The actual integration patterns are
-    // implemented throughout the crate.
+    //! `aura-sync` integration summary.
+    //!
+    //! - Layer: L5 feature crate.
+    //! - Runtime wiring is owned by L6 (`aura-agent`), not by this crate.
+    //! - TUI/CLI surfaces operations through `aura-app` workflows.
+    //!
+    //! Primary operation categories:
+    //!
+    //! - `sync:anti-entropy` (`A`)
+    //! - `sync:journal-sync` (`A`)
+    //! - `sync:snapshot` (`A`)
+    //! - `sync:ota-ceremony` (`C`)
+    //! - `sync:receipt-verify` (`A`)
 }
 
 // =============================================================================

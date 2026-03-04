@@ -5,7 +5,6 @@ use aura_testkit::{load_conformance_artifact_file, replay_conformance_artifact};
 #[test]
 fn golden_conformance_fixtures_load_and_validate() {
     let fixture_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
         .join("fixtures")
         .join("conformance");
     let fixture_names = ["consensus", "sync", "recovery", "invitation"];
