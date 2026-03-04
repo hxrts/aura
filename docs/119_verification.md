@@ -409,77 +409,8 @@ async fn send_step() {
 
 Annotations generate guard chain invocations. The Telltale compiler verifies annotation consistency.
 
-## Correspondence Map
-
-The correspondence map links verification across systems.
-
-### Type Correspondence
-
-| Quint Type | Lean Type | Rust Type |
-|------------|-----------|-----------|
-| `ConsensusId` | `Aura.Consensus.Types.ConsensusId` | `consensus::ConsensusId` |
-| `AuthorityId` | `Aura.Types.AuthorityId` | `aura_core::AuthorityId` |
-| `ShareData` | `Aura.Consensus.Types.SignatureShare` | `consensus::SignatureShare` |
-| `CommitFact` | `Aura.Consensus.Types.CommitFact` | `consensus::CommitFact` |
-
-### Invariant Correspondence
-
-| Quint Invariant | Lean Theorem |
-|-----------------|--------------|
-| `UniqueCommitPerInstance` | `Agreement.unique_commit` |
-| `CommitRequiresThreshold` | `Validity.commit_has_threshold` |
-| `EquivocationDetected` | `Equivocation.detection_soundness` |
-| `EquivocatorsExcluded` | `Equivocation.exclusion_correctness` |
-
-Correspondence enables cross-verification. Quint model checks finite instances. Lean proves universal properties.
-
-## Running Verification
-
-### Quint Commands
-
-```bash
-# Type check specification
-quint typecheck verification/quint/consensus/core.qnt
-
-# Run simulation
-quint run --main=harness_consensus verification/quint/consensus/core.qnt
-
-# Check invariant
-quint run --invariant=UniqueCommitPerInstance verification/quint/consensus/core.qnt
-
-# Generate ITF trace
-quint run --out-itf=trace.itf.json verification/quint/consensus/core.qnt
-
-# Model check with Apalache
-quint verify --max-steps=10 --invariant=allInvariants verification/quint/consensus/core.qnt
-```
-
-### Lean Commands
-
-```bash
-# Build proofs
-cd verification/lean && lake build
-
-# Check proof status
-just lean-status
-
-# Build verifier oracle
-just lean-oracle-build
-
-# Run differential tests
-just test-differential
-```
-
-### Justfile Commands
-
-```bash
-just quint-verify-models    # Run Apalache model checking
-just quint-check-types      # Check Quint-Rust type drift
-just verify-conformance     # Run ITF conformance tests
-just verify-lean            # Build and check Lean proofs
-just verify-all             # Run all verification
-```
-
 ## Related Documentation
 
-See [Verification Guide](806_verification_guide.md) for verification workflows. See [Simulation Infrastructure Reference](118_simulator.md) for ITF trace format and generative simulation.
+- [Verification Guide](806_verification_guide.md) — Practical workflows, commands, and Quint-Lean correspondence tables
+- [Verification Coverage](998_verification_coverage.md) — Current metrics, file inventories, and CI gates
+- [Simulation Infrastructure Reference](118_simulator.md) — ITF trace format and generative simulation
