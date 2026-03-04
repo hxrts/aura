@@ -375,6 +375,29 @@ impl InstanceBackend for LocalPtyBackend {
         Ok(result)
     }
 
+    fn read_clipboard(&mut self) -> Result<String> {
+        let path = Self::env_value("AURA_CLIPBOARD_FILE", &self.config.env)
+            .map(PathBuf::from)
+            .map(Self::absolutize_path)
+            .unwrap_or_else(|| {
+                Self::absolutize_path(self.config.data_dir.join(".harness-clipboard.txt"))
+            });
+        let mut text = fs::read_to_string(&path).map_err(|error| {
+            anyhow::anyhow!(
+                "failed reading clipboard file {} for instance {}: {error}",
+                path.display(),
+                self.config.id
+            )
+        })?;
+        while matches!(text.chars().last(), Some('\n' | '\r')) {
+            text.pop();
+        }
+        if text.is_empty() {
+            anyhow::bail!("clipboard for instance {} is empty", self.config.id);
+        }
+        Ok(text)
+    }
+
     fn health_check(&self) -> Result<bool> {
         Ok(self.state == BackendState::Running && self.session.is_some())
     }

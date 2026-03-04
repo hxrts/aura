@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
 use std::fs;
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::path::Path;
+use std::process::Command;
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -45,18 +47,28 @@ pub fn run_preflight(
         .iter()
         .filter(|instance| matches!(instance.mode, InstanceMode::Local))
         .collect();
-    validate_storage_isolation(&local_instances)?;
+    let browser_instances: Vec<_> = run_config
+        .instances
+        .iter()
+        .filter(|instance| matches!(instance.mode, InstanceMode::Browser))
+        .collect();
+    let storage_instances = local_instances
+        .iter()
+        .chain(browser_instances.iter())
+        .copied()
+        .collect::<Vec<_>>();
+    validate_storage_isolation(&storage_instances)?;
     checks.push(PreflightCheck {
         name: "storage_isolation".to_string(),
         ok: true,
-        details: "all local data_dir values are unique".to_string(),
+        details: "all local/browser data_dir values are unique".to_string(),
     });
 
-    validate_writable_dirs(&local_instances)?;
+    validate_writable_dirs(&storage_instances)?;
     checks.push(PreflightCheck {
         name: "writable_data_dirs".to_string(),
         ok: true,
-        details: "local data_dir paths are writable".to_string(),
+        details: "local/browser data_dir paths are writable".to_string(),
     });
 
     validate_binaries(run_config)?;
@@ -80,25 +92,32 @@ pub fn run_preflight(
         details: "strict host key checks and fingerprint policy validated".to_string(),
     });
 
+    validate_browser_runtime(&browser_instances)?;
+    checks.push(PreflightCheck {
+        name: "browser_runtime".to_string(),
+        ok: true,
+        details: "browser mode has node/playwright/app-url prerequisites".to_string(),
+    });
+
     Ok(PreflightReport {
         checks,
         capabilities,
     })
 }
 
-fn validate_storage_isolation(local_instances: &[&crate::config::InstanceConfig]) -> Result<()> {
+fn validate_storage_isolation(instances: &[&crate::config::InstanceConfig]) -> Result<()> {
     let mut dirs = BTreeSet::new();
-    for instance in local_instances {
+    for instance in instances {
         if !dirs.insert(instance.data_dir.clone()) {
             bail!(
-                "preflight rejected duplicate local data_dir {}",
+                "preflight rejected duplicate local/browser data_dir {}",
                 instance.data_dir.display()
             );
         }
     }
 
     let mut demo_dirs = BTreeSet::new();
-    for instance in local_instances {
+    for instance in instances {
         if instance.demo_mode
             && instance.data_dir.to_string_lossy().contains(".aura-demo")
             && !demo_dirs.insert(instance.data_dir.clone())
@@ -113,11 +132,11 @@ fn validate_storage_isolation(local_instances: &[&crate::config::InstanceConfig]
     Ok(())
 }
 
-fn validate_writable_dirs(local_instances: &[&crate::config::InstanceConfig]) -> Result<()> {
-    for instance in local_instances {
+fn validate_writable_dirs(instances: &[&crate::config::InstanceConfig]) -> Result<()> {
+    for instance in instances {
         fs::create_dir_all(&instance.data_dir).with_context(|| {
             format!(
-                "failed to create local data_dir {}",
+                "failed to create local/browser data_dir {}",
                 instance.data_dir.display()
             )
         })?;
@@ -140,6 +159,13 @@ fn validate_binaries(run_config: &RunConfig) -> Result<()> {
         .any(|instance| matches!(instance.mode, InstanceMode::Ssh));
     if needs_ssh {
         require_binary("ssh")?;
+    }
+    let needs_browser = run_config
+        .instances
+        .iter()
+        .any(|instance| matches!(instance.mode, InstanceMode::Browser));
+    if needs_browser {
+        require_binary("node")?;
     }
 
     for instance in run_config
@@ -199,6 +225,139 @@ fn validate_ssh_defaults(run_config: &RunConfig) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn validate_browser_runtime(browser_instances: &[&crate::config::InstanceConfig]) -> Result<()> {
+    if browser_instances.is_empty() {
+        return Ok(());
+    }
+
+    let default_driver = default_playwright_driver_path();
+    if let Some(path) = &default_driver {
+        if !path.exists() {
+            bail!(
+                "browser preflight missing default Playwright driver script {}",
+                path.display()
+            );
+        }
+    }
+
+    for instance in browser_instances {
+        let app_url = browser_app_url(instance);
+        ensure_app_url_reachable(&app_url).with_context(|| {
+            format!(
+                "browser preflight failed app_url reachability for instance {}",
+                instance.id
+            )
+        })?;
+
+        if instance.command.is_none() {
+            let path = default_driver.as_ref().ok_or_else(|| {
+                anyhow!("failed to resolve default Playwright driver path from cwd")
+            })?;
+            if !path.exists() {
+                bail!(
+                    "browser instance {} requires default driver script {}",
+                    instance.id,
+                    path.display()
+                );
+            }
+        }
+    }
+
+    validate_playwright_chromium_available()?;
+    Ok(())
+}
+
+fn browser_app_url(instance: &crate::config::InstanceConfig) -> String {
+    env_value("AURA_HARNESS_BROWSER_APP_URL", &instance.env)
+        .or_else(|| env_value("AURA_WEB_APP_URL", &instance.env))
+        .or_else(|| std::env::var("AURA_HARNESS_BROWSER_APP_URL").ok())
+        .or_else(|| std::env::var("AURA_WEB_APP_URL").ok())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "http://127.0.0.1:4173".to_string())
+}
+
+fn env_value(key: &str, env_entries: &[String]) -> Option<String> {
+    env_entries.iter().find_map(|item| {
+        let (entry_key, entry_value) = item.split_once('=')?;
+        if entry_key.trim() == key {
+            Some(entry_value.trim().to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn default_playwright_driver_path() -> Option<std::path::PathBuf> {
+    std::env::current_dir()
+        .ok()
+        .map(|cwd| cwd.join("tooling/playwright-driver/playwright_driver.mjs"))
+}
+
+fn ensure_app_url_reachable(app_url: &str) -> Result<()> {
+    let (host, port) = parse_http_host_port(app_url)?;
+    let addrs: Vec<_> = (host.as_str(), port)
+        .to_socket_addrs()
+        .with_context(|| format!("failed to resolve app_url host: {host}"))?
+        .collect();
+    if addrs.is_empty() {
+        bail!("no socket addresses resolved for app_url host: {host}");
+    }
+    let timeout = Duration::from_millis(1200);
+    for addr in addrs {
+        if TcpStream::connect_timeout(&addr, timeout).is_ok() {
+            return Ok(());
+        }
+    }
+    bail!("failed to connect to app_url endpoint {host}:{port}");
+}
+
+fn parse_http_host_port(app_url: &str) -> Result<(String, u16)> {
+    let trimmed = app_url.trim();
+    let (rest, default_port) = if let Some(value) = trimmed.strip_prefix("http://") {
+        (value, 80_u16)
+    } else if let Some(value) = trimmed.strip_prefix("https://") {
+        (value, 443_u16)
+    } else {
+        bail!("unsupported app_url scheme for browser preflight: {trimmed}");
+    };
+    let authority = rest.split('/').next().unwrap_or_default();
+    if authority.is_empty() {
+        bail!("invalid app_url authority: {trimmed}");
+    }
+
+    if let Some((host, port)) = authority.rsplit_once(':') {
+        let port = port
+            .parse::<u16>()
+            .with_context(|| format!("invalid app_url port in {trimmed}"))?;
+        if host.is_empty() {
+            bail!("invalid app_url host in {trimmed}");
+        }
+        return Ok((host.to_string(), port));
+    }
+
+    Ok((authority.to_string(), default_port))
+}
+
+fn validate_playwright_chromium_available() -> Result<()> {
+    let script = "const { chromium } = require('playwright'); const p = chromium.executablePath(); if (!p) process.exit(2); process.stdout.write(p);";
+    let mut command = Command::new("node");
+    command.args(["-e", script]);
+    if let Ok(cwd) = std::env::current_dir() {
+        command.current_dir(cwd.join("tooling/playwright-driver"));
+    }
+    let output = command
+        .output()
+        .context("failed to execute node check for Playwright chromium")?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    bail!(
+        "Playwright chromium is unavailable (run npm ci and npm run install-browsers in tooling/playwright-driver): {}",
+        stderr.trim()
+    )
 }
 
 fn normalize_bind_address(raw: &str) -> Result<String> {
@@ -267,7 +426,9 @@ mod tests {
             Ok(_) => panic!("preflight must fail"),
             Err(error) => error,
         };
-        assert!(error.to_string().contains("duplicate local data_dir"));
+        assert!(error
+            .to_string()
+            .contains("duplicate local/browser data_dir"));
     }
 
     fn local_only_run() -> RunConfig {
