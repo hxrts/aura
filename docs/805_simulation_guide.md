@@ -183,6 +183,81 @@ handler.register_scenario(ScenarioDefinition {
 
 Triggered scenarios inject faults at specific times or protocol states.
 
+## Integrating Feature Crates
+
+Layer 5 feature crates (sync, recovery, chat, etc.) integrate with simulation through the effect system. This section covers patterns for wiring feature crates into simulation environments.
+
+### Required Effects
+
+Feature crates are generic over effect traits. Common requirements include:
+
+| Effect Trait | Purpose |
+|--------------|---------|
+| `NetworkEffects` | Transport and peer communication |
+| `JournalEffects` | Fact retrieval and commits |
+| `CryptoEffects` | Hashing and signature verification |
+| `PhysicalTimeEffects` | Timeouts and scheduling |
+| `RandomEffects` | Nonce generation |
+
+Pass the effect system from `aura-simulator` or `aura-testkit` for deterministic testing. In production, use `aura-agent`'s runtime effects.
+
+### Configuration for Simulation
+
+Feature crates typically provide testing configurations that minimize timeouts and remove jitter:
+
+```rust
+use aura_sync::SyncConfig;
+
+// Production: conservative timeouts, adaptive scheduling
+let prod_config = SyncConfig::for_production();
+
+// Testing: fast timeouts, no jitter, predictable behavior
+let test_config = SyncConfig::for_testing();
+
+// Validate before use
+test_config.validate()?;
+```
+
+Environment variables (prefixed per-crate, e.g., `AURA_SYNC_*`) allow per-process tuning without code changes.
+
+### Guard Chain Integration
+
+Feature crates assume the guard chain is active when running protocols:
+
+```
+CapGuard → FlowGuard → LeakageTracker → JournalCoupler → Transport
+```
+
+For simulation:
+- Capability checks rely on Biscuit tokens evaluated by `AuthorizationEffects`
+- Guard evaluators must be provided by the runtime before sync operations
+- Validation occurs before sending or applying any protocol data
+
+### Observability in Simulation
+
+Connect feature crates to `MetricsCollector` for simulation diagnostics:
+
+```rust
+use aura_core::metrics::MetricsCollector;
+
+let metrics = MetricsCollector::new();
+// Protocol timings, retries, and failure reasons flow to metrics
+// Log transport and authorization failures for debugging
+```
+
+### Safety Requirements
+
+Feature crates must follow effect system rules:
+- No direct runtime calls (all I/O and timing through effects)
+- Validate Biscuit tokens before accepting peer data
+- Enforce flow budgets and leakage constraints at transport boundaries
+
+Verify compliance before simulation:
+
+```bash
+just ci-effects
+```
+
 ## Debugging Simulations
 
 ### Deterministic Configuration
