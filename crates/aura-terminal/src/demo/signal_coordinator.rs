@@ -169,9 +169,10 @@ impl DemoSignalCoordinator {
         // Check if a new recovery session started
         if let Some(active) = recovery_state.active_recovery() {
             let session_id = &active.id;
+            let session_id_str = session_id.to_string();
 
             // Only forward if this is a new session
-            if last_state.as_ref() != Some(session_id)
+            if last_state.as_ref() != Some(&session_id_str)
                 && matches!(
                     active.status,
                     RecoveryProcessStatus::Initiated | RecoveryProcessStatus::WaitingForApprovals
@@ -181,12 +182,12 @@ impl DemoSignalCoordinator {
                 let context_id = crate::ids::context_id("demo-recovery-context");
                 let agent_event = AgentEvent::RecoveryRequested {
                     account: self.bob_authority,
-                    session_id: session_id.clone(),
+                    session_id: session_id_str.clone(),
                     context_id,
                 };
                 self.sim_bridge.send_agent_event(agent_event);
                 tracing::info!("Demo: Forwarded recovery request to agents");
-                *last_state = Some(session_id.clone());
+                *last_state = Some(session_id_str);
             }
         } else {
             // No active recovery - reset tracking
@@ -266,7 +267,9 @@ impl DemoSignalCoordinator {
                 let mut recovery = core.read(&*RECOVERY_SIGNAL).await.unwrap_or_default();
 
                 if let Some(active) = recovery.active_recovery_mut() {
-                    if active.id == session_id && !active.approved_by.contains(&authority_id) {
+                    if active.id.as_str() == session_id
+                        && !active.approved_by.contains(&authority_id)
+                    {
                         recovery.add_guardian_approval(authority_id.clone()).ok();
 
                         if let Some(active) = recovery.active_recovery() {

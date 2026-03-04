@@ -21,8 +21,7 @@ use aura_core::effects::{
     AmpChannelEffects, ChannelJoinParams, ChannelSendParams, ExecutionMode, PhysicalTimeEffects,
     TimeEffects, TransportEffects,
 };
-use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_effects::time::PhysicalTimeHandler;
@@ -34,7 +33,6 @@ use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
 use aura_recovery::guardian_ceremony::{CeremonyProposal, CeremonyResponse, CeremonyResponseMsg};
 use serde::Serialize;
-use std::str::FromStr;
 
 use crate::error::TerminalResult;
 use crate::ids;
@@ -266,8 +264,7 @@ async fn process_peer_transport_messages(
             return;
         };
 
-        let channel_id = ChannelId::from_str(&home_id)
-            .unwrap_or_else(|_| ChannelId::from_bytes(hash(home_id.as_bytes())));
+        let channel_id = home_id;
 
         // Ensure AMP channel state exists locally for decryption.
         if let Some(package) = bootstrap {
