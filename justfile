@@ -43,6 +43,15 @@ build-terminal-release:
 build-app-host:
     cargo build -p aura-app --bin app-host --features host --release
 
+# Check Aura web shell + shared UI core for wasm target
+web-check:
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0" cargo check -p aura-ui
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0" cargo check -p aura-web --target wasm32-unknown-unknown
+
+# Serve Aura web shell locally for harness/browser runs
+web-serve:
+    dx serve --platform web --package aura-web --port 4173
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Test
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,27 @@
+[package]
+name = "aura-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Shared Dioxus UI core for Aura frontends"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+
+[dependencies]
+aura-app = { path = "../aura-app" }
+async-lock = { workspace = true }
+cfg-if = "1"
+dioxus = { version = "0.7", default-features = false, features = ["macro", "hooks", "signals", "html"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[build-dependencies]
+toml = "0.8"
