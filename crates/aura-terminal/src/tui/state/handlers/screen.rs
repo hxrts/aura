@@ -402,26 +402,12 @@ pub fn handle_neighborhood_key(
 pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: KeyEvent) {
     let previous_section = state.settings.section;
 
-    // Handle Authority panel sub-section navigation specially
-    let in_authority_detail =
-        state.settings.section == SettingsSection::Authority && state.settings.focus.is_detail();
-
     match key.code {
         KeyCode::Left | KeyCode::Char('h') => {
-            if in_authority_detail {
-                // Navigate between sub-sections within Authority panel
-                state.settings.authority_sub_section = state.settings.authority_sub_section.prev();
-            } else {
-                state.settings.focus = state.settings.focus.toggle();
-            }
+            state.settings.focus = state.settings.focus.toggle();
         }
         KeyCode::Right | KeyCode::Char('l') => {
-            if in_authority_detail {
-                // Navigate between sub-sections within Authority panel
-                state.settings.authority_sub_section = state.settings.authority_sub_section.next();
-            } else {
-                state.settings.focus = state.settings.focus.toggle();
-            }
+            state.settings.focus = state.settings.focus.toggle();
         }
         KeyCode::Up | KeyCode::Char('k') => {
             // Always allow section navigation with Up/Down
@@ -438,11 +424,6 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 state.settings.focus = state.settings.focus.toggle();
             }
             state.settings.section = state.settings.section.next();
-        }
-        KeyCode::Char(' ') => {
-            if state.settings.section == SettingsSection::Authority {
-                commands.push(TuiCommand::Dispatch(DispatchCommand::OpenMfaSetup));
-            }
         }
         KeyCode::Char('m') => {
             if state.settings.section == SettingsSection::Authority {
@@ -478,21 +459,7 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                     commands.push(TuiCommand::Dispatch(DispatchCommand::StartRecovery));
                 }
                 SettingsSection::Authority => {
-                    // Action depends on sub-section
-                    use crate::tui::types::AuthoritySubSection;
-                    match state.settings.authority_sub_section {
-                        AuthoritySubSection::Info => {
-                            // Open authority picker if multiple authorities (app-global)
-                            if state.authorities.len() > 1 {
-                                commands.push(TuiCommand::Dispatch(
-                                    DispatchCommand::OpenAuthorityPicker,
-                                ));
-                            }
-                        }
-                        AuthoritySubSection::Mfa => {
-                            commands.push(TuiCommand::Dispatch(DispatchCommand::OpenMfaSetup));
-                        }
-                    }
+                    commands.push(TuiCommand::Dispatch(DispatchCommand::OpenMfaSetup));
                 }
                 _ => {}
             }

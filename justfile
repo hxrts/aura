@@ -880,10 +880,26 @@ lean-init:
     @echo "Initializing Lean project..."
     cd verification/lean && lake update
 
-# Build Lean verification modules
-lean-build jobs="2": lean-init
-    @echo "Building Lean verification modules (threads={{jobs}})..."
+# Verify Lean proofs (canonical command)
+verify-lean jobs="2": lean-init
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GREEN='\033[0;32m' YELLOW='\033[1;33m' NC='\033[0m'
+    echo "Lean Formal Verification"
+    echo "========================"
+    echo "Building Lean verification modules (threads={{jobs}})..."
     cd verification/lean && nice -n 15 lake build -K env.LEAN_THREADS={{jobs}}
+    cd ../..
+    if grep -r "sorry" verification/lean/Aura --include="*.lean" > /tmp/sorry-check.txt 2>/dev/null; then
+        count=$(wc -l < /tmp/sorry-check.txt | tr -d ' ')
+        echo -e "${YELLOW}⚠ Found $count incomplete proofs (sorry)${NC}"
+        head -10 /tmp/sorry-check.txt | sed 's/^/  /'
+    else
+        echo -e "${GREEN}✓ All proofs complete${NC}"
+    fi
+
+# Backward-compatibility alias (prefer `just verify-lean`)
+lean-build jobs="2": (verify-lean jobs)
 
 # Build the Lean oracle verifier CLI for differential testing
 lean-oracle-build: lean-init
@@ -900,25 +916,14 @@ test-differential: lean-oracle-build
     cargo test -p aura-testkit --features lean --test lean_differential -- --ignored --nocapture
 
 # Check Lean proofs for completeness
-lean-check jobs="4": (lean-build jobs)
-    #!/usr/bin/env bash
-    set -uo pipefail
-    GREEN='\033[0;32m' YELLOW='\033[1;33m' NC='\033[0m'
-    echo "Checking Lean proof status..."
-    if grep -r "sorry" verification/lean/Aura --include="*.lean" > /tmp/sorry-check.txt 2>/dev/null; then
-        count=$(wc -l < /tmp/sorry-check.txt | tr -d ' ')
-        echo -e "${YELLOW}⚠ Found $count incomplete proofs (sorry)${NC}"
-        head -10 /tmp/sorry-check.txt | sed 's/^/  /'
-    else
-        echo -e "${GREEN}✓ All proofs complete${NC}"
-    fi
+lean-check jobs="4": (verify-lean jobs)
 
 # Clean Lean build artifacts
 lean-clean:
     cd verification/lean && lake clean
 
 # Full Lean workflow (clean, build, verify)
-lean-full: lean-clean lean-build lean-check
+lean-full jobs="2": lean-clean (verify-lean jobs)
     @echo "Lean verification complete!"
 
 # Show Lean proof status summary
@@ -994,22 +999,6 @@ kani-suite:
 # ═══════════════════════════════════════════════════════════════════════════════
 # Combined Verification
 # ═══════════════════════════════════════════════════════════════════════════════
-
-# Lean formal verification (matches CI lean-proofs job)
-verify-lean:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    GREEN='\033[0;32m' RED='\033[0;31m' NC='\033[0m'
-    echo "Lean Formal Verification"
-    echo "========================"
-    cd verification/lean
-    lake build && echo -e "${GREEN}[OK]${NC} Lean proofs build" || { echo -e "${RED}[FAIL]${NC}"; exit 1; }
-    cd ../..
-    if grep -r "sorry" verification/lean/Aura --include="*.lean" 2>/dev/null; then
-        echo "[WARNING] Found incomplete proofs (sorry)"
-    else
-        echo -e "${GREEN}[OK]${NC} All proofs complete"
-    fi
 
 # Consensus conformance tests (matches CI)
 verify-conformance:

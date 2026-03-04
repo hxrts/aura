@@ -35,9 +35,7 @@ use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::SettingsViewProps;
 use crate::tui::theme::Theme;
-use crate::tui::types::{
-    AuthorityInfo, AuthoritySubSection, Device, MfaPolicy, RecoveryStatus, SettingsSection,
-};
+use crate::tui::types::{AuthorityInfo, Device, MfaPolicy, RecoveryStatus, SettingsSection};
 
 // =============================================================================
 // Callback Types (specialized, kept local)
@@ -405,72 +403,57 @@ pub fn SettingsScreen(
             ]
         }
         SettingsSection::Authority => {
-            // Get authority state - use reactive authorities from signal, UI state from props
-            let authority_sub = props.view.authority_sub_section;
+            // Use app-global authority context from reactive settings signal.
             let current_auth_idx = props.view.current_authority_index;
 
             // Get current authority info if available (from reactive state)
             let current_auth = authorities.get(current_auth_idx);
             let has_multiple = authorities.len() > 1;
+            let mut lines = vec![];
 
-            match authority_sub {
-                AuthoritySubSection::Info => {
-                    let mut lines = vec![];
-
-                    // Show current authority info
-                    if let Some(auth) = current_auth {
-                        let local_suffix = if auth.is_current { " (Local)" } else { "" };
-                        lines.push((
-                            format!("Authority: {}{}", auth.id, local_suffix),
-                            Theme::SECONDARY,
-                        ));
-                    } else {
-                        lines.push(("No authority configured".into(), Theme::WARNING));
-                    }
-
-                    lines.push((String::new(), Theme::TEXT));
-                    lines.push((
-                        "Authorities are cryptographic actors that".into(),
-                        Theme::TEXT_MUTED,
-                    ));
-                    lines.push((
-                        "can participate in authenticated actions.".into(),
-                        Theme::TEXT_MUTED,
-                    ));
-
-                    // Switch authority hint (if multiple)
-                    if has_multiple {
-                        lines.push((String::new(), Theme::TEXT));
-                        lines.push((
-                            format!("{} authorities available", authorities.len()),
-                            Theme::TEXT_MUTED,
-                        ));
-                        lines.push(("[s] Switch authority".into(), Theme::SECONDARY));
-                    }
-
-                    lines.push((String::new(), Theme::TEXT));
-                    lines.push(("[←/h] [→/l] Navigate sections".into(), Theme::TEXT_MUTED));
-
-                    lines
-                }
-                AuthoritySubSection::Mfa => {
-                    vec![
-                        ("Multifactor Authentication".into(), Theme::SECONDARY),
-                        (String::new(), Theme::TEXT),
-                        (
-                            "Create a threshold signer set across your devices".into(),
-                            Theme::TEXT_MUTED,
-                        ),
-                        ("to approve sensitive operations.".into(), Theme::TEXT_MUTED),
-                        (String::new(), Theme::TEXT),
-                        (format!("Policy: {}", current_mfa.name()), Theme::TEXT),
-                        (current_mfa.description().into(), Theme::TEXT_MUTED),
-                        (String::new(), Theme::TEXT),
-                        ("[Enter] Configure multifactor".into(), Theme::SECONDARY),
-                        ("[←/h] [→/l] Navigate sections".into(), Theme::TEXT_MUTED),
-                    ]
-                }
+            // Show current authority info.
+            if let Some(auth) = current_auth {
+                let local_suffix = if auth.is_current { " (Local)" } else { "" };
+                lines.push((
+                    format!("Authority: {}{}", auth.id, local_suffix),
+                    Theme::SECONDARY,
+                ));
+            } else {
+                lines.push(("No authority configured".into(), Theme::WARNING));
             }
+
+            lines.push((String::new(), Theme::TEXT));
+            lines.push((
+                "Authorities are cryptographic actors that".into(),
+                Theme::TEXT_MUTED,
+            ));
+            lines.push((
+                "participate in authenticated actions.".into(),
+                Theme::TEXT_MUTED,
+            ));
+            lines.push((String::new(), Theme::TEXT));
+            lines.push((format!("Policy: {}", current_mfa.name()), Theme::TEXT));
+            lines.push((current_mfa.description().into(), Theme::TEXT_MUTED));
+            lines.push((String::new(), Theme::TEXT));
+
+            if has_multiple {
+                lines.push((
+                    format!("{} authorities available", authorities.len()),
+                    Theme::TEXT_MUTED,
+                ));
+                lines.push(("[s] Switch authority".into(), Theme::SECONDARY));
+            } else {
+                lines.push((
+                    "Switch authority requires multiple authorities".into(),
+                    Theme::TEXT_MUTED,
+                ));
+                lines.push(("[s] Switch authority".into(), Theme::TEXT_MUTED));
+            }
+
+            lines.push(("[m] Configure multifactor".into(), Theme::SECONDARY));
+            lines.push(("[Enter] Configure multifactor".into(), Theme::TEXT_MUTED));
+
+            lines
         }
         SettingsSection::Observability => {
             let (network_label, network_color, last_sync_ms) = match network_status {

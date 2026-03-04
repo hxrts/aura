@@ -3,7 +3,7 @@
 use super::KeyRotationCeremonyUiState;
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::state::form::{Validatable, ValidationError};
-use crate::tui::types::{AuthoritySubSection, Device, MfaPolicy, SettingsSection};
+use crate::tui::types::{Device, MfaPolicy, SettingsSection};
 use aura_core::types::Epoch;
 
 /// Settings screen state
@@ -28,10 +28,6 @@ pub struct SettingsViewState {
     pub demo_mobile_authority_id: String,
     /// Whether to auto-fill the next device enrollment code into the import modal
     pub pending_mobile_enrollment_autofill: bool,
-
-    // === Authority panel state (screen-local navigation) ===
-    /// Sub-section within Authority panel (Info or Mfa)
-    pub authority_sub_section: AuthoritySubSection,
     // Note: Modal state is now stored in ModalQueue, not here.
     // Use modal_queue.enqueue(QueuedModal::SettingsDisplayName/AddDevice/RemoveDevice(...)) to show modals.
     // For threshold/guardian changes, use OpenGuardianSetup dispatch which shows GuardianSetup modal.

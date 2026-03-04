@@ -670,41 +670,6 @@ impl SettingsSection {
     }
 }
 
-/// Sub-section within the Authority panel
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum AuthoritySubSection {
-    #[default]
-    Info,
-    Mfa,
-}
-
-impl AuthoritySubSection {
-    pub fn all() -> &'static [Self] {
-        &[Self::Info, Self::Mfa]
-    }
-
-    pub fn title(self) -> &'static str {
-        match self {
-            Self::Info => "Authority Info",
-            Self::Mfa => "Multifactor Auth",
-        }
-    }
-
-    pub fn next(self) -> Self {
-        match self {
-            Self::Info => Self::Mfa,
-            Self::Mfa => Self::Info,
-        }
-    }
-
-    pub fn prev(self) -> Self {
-        match self {
-            Self::Info => Self::Mfa,
-            Self::Mfa => Self::Info,
-        }
-    }
-}
-
 /// Authority information for display
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AuthorityInfo {

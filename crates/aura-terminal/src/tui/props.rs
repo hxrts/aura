@@ -428,7 +428,7 @@ pub fn extract_notifications_view_props(state: &TuiState) -> NotificationsViewPr
 // Settings Screen Props Extraction
 // ============================================================================
 
-use crate::tui::types::{AuthorityInfo, AuthoritySubSection, MfaPolicy, SettingsSection};
+use crate::tui::types::{AuthorityInfo, MfaPolicy, SettingsSection};
 
 /// View state extracted from TuiState for SettingsScreen
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -437,8 +437,6 @@ pub struct SettingsViewProps {
     pub section: SettingsSection,
     pub selected_index: usize,
     pub mfa_policy: MfaPolicy,
-    // Authority panel state
-    pub authority_sub_section: AuthoritySubSection,
     pub authorities: Vec<AuthorityInfo>,
     pub current_authority_index: usize,
     // Authority picker modal
@@ -648,8 +646,6 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         section: state.settings.section,
         selected_index: state.settings.selected_index,
         mfa_policy: state.settings.mfa_policy,
-        // Authority panel state
-        authority_sub_section: state.settings.authority_sub_section,
         // Authority context is app-global, in TuiState root
         authorities: state.authorities.clone(),
         current_authority_index: state.current_authority_index,

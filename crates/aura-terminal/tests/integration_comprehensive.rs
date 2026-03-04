@@ -638,7 +638,7 @@ mod settings_screen {
     }
 
     #[test]
-    fn test_settings_authority_mfa_cycle() {
+    fn test_settings_authority_mfa_hotkey() {
         let mut tui = TestTui::new();
         tui.go_to_screen(Screen::Settings);
 
@@ -648,9 +648,9 @@ mod settings_screen {
         }
         assert_eq!(tui.state.settings.section, SettingsSection::Authority);
 
-        // Space opens MFA setup
+        // 'm' opens MFA setup
         tui.clear_commands();
-        tui.send_char(' ');
+        tui.send_char('m');
         assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::OpenMfaSetup)));
     }
 

@@ -465,7 +465,7 @@ quint verify --max-steps=10 spec.qnt # Model check
 ### Lean Commands
 
 ```bash
-just lean-build        # Build proofs
+just verify-lean       # Build proofs
 just lean-status       # Check status
 just test-differential # Rust vs Lean tests
 ```
