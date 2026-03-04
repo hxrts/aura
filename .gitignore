@@ -83,4 +83,7 @@ _apalache-out/
 .patchbay-work
 .patchbay-target
 
+<<<<<<< HEAD
 target-codex
+# Node
+node_modules/
