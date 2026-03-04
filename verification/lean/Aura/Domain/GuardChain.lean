@@ -4,7 +4,7 @@
 Types and evaluation functions for the guard chain security layer.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_capability_properties.qnt
+- File: verification/quint/authorization.qnt
 - Section: TYPES, OPERATIONS
 
 ## Rust Correspondence

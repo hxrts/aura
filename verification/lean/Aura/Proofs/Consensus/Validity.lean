@@ -8,7 +8,7 @@ Proves that a committed value was proposed by an honest initiator and has
 valid prestate binding. This ensures consensus only commits well-formed values.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_consensus.qnt
+- File: verification/quint/consensus/core.qnt
 - Section: INVARIANTS
 - Invariant: `InvariantCommitRequiresThreshold`
 - Invariant: `InvariantPrestateBinding` (implicit)

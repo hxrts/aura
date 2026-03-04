@@ -7,7 +7,7 @@ Proves that context-specific key derivation is injective, ensuring
 different contexts always yield different keys for relational isolation.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_dkd.qnt
+- File: verification/quint/keys/dkd.qnt
 - Section: INVARIANTS
 - Properties: Key derivation context isolation
 

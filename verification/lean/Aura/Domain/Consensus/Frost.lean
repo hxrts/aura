@@ -4,7 +4,7 @@
 Types and operations for FROST threshold signature orchestration.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_frost.qnt
+- File: verification/quint/consensus/frost.qnt
 - Section: TYPE DEFINITIONS
 - Types: SessionId, Round, Share, AggregatorState
 

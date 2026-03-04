@@ -9,7 +9,7 @@ Liveness properties are verified via Quint model checking; this file
 documents the assumptions and provides Lean-side type definitions.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_consensus_liveness.qnt
+- File: verification/quint/liveness/properties.qnt
 - Properties: isSynchronous, canMakeProgress, isTerminal, hasQuorumOnline
 - Temporal: FastPathProgressCheck, SlowPathProgressCheck, ActiveMakesProgress
 
@@ -47,7 +47,7 @@ After GST: all messages delivered within bound Δ.
 -/
 
 /-- Logical time units (abstract, not wall-clock).
-    Quint: protocol_consensus_liveness.qnt Time -/
+    Quint: liveness/properties.qnt Time -/
 abbrev Time := Nat
 
 /-- Message delay bound after GST.
@@ -153,7 +153,7 @@ that Lean cannot directly express. Verification is done in Quint.
 
 /-- Axiom: Under partial synchrony with honest quorum, consensus terminates.
     This is the fundamental liveness assumption for distributed consensus.
-    Verified in: protocol_consensus_liveness.qnt -/
+    Verified in: liveness/properties.qnt -/
 axiom liveness_under_synchrony :
   ∀ (sync : SynchronyState) (threshold byzantineCount : Nat),
     isSynchronous sync →
@@ -162,7 +162,7 @@ axiom liveness_under_synchrony :
 
 /-- Axiom: Fast path is faster than fallback when nonces are cached.
     This justifies the pipelining optimization.
-    Verified in: protocol_consensus_liveness.qnt -/
+    Verified in: liveness/properties.qnt -/
 axiom fast_path_faster :
   delta < fallbackTimeout
 

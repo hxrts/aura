@@ -13,12 +13,13 @@
 // - protocol_liveness_properties: Invariants, temporal properties
 //
 // == Lean Correspondence ==
-// Module: Aura.Consensus.* (verification/lean/Aura/Consensus/)
+// Types: Aura.Domain.Consensus.* (verification/lean/Aura/Domain/Consensus/)
+// Proofs: Aura.Proofs.Consensus.* (verification/lean/Aura/Proofs/Consensus/)
 // - Liveness is not directly proven in Lean (state machine model checking in Quint)
 // - Safety invariants that support liveness:
-//   - Aura.Consensus.Agreement.agreement (unique commit per instance)
-//   - Aura.Consensus.Validity.honest_participation (honest majority can commit)
-//   - Aura.Consensus.Frost.aggregation_threshold (threshold requirement)
+//   - Aura.Proofs.Consensus.Agreement.agreement (unique commit per instance)
+//   - Aura.Proofs.Consensus.Validity.honest_participation (honest majority can commit)
+//   - Aura.Proofs.Consensus.Frost.aggregation_threshold (threshold requirement)
 // - Byzantine threshold: Aura.Assumptions.byzantine_threshold
 //
 // == Rust Correspondence ==

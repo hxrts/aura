@@ -6,7 +6,7 @@ import Aura.Domain.Journal.Types
 Operations on the journal CRDT: merge, reduce, and equivalence relations.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_journal.qnt
+- File: verification/quint/journal/core.qnt
 - Section: OPERATIONS
 - Properties: Journal merge accumulates facts from both sources
 

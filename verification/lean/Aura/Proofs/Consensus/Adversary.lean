@@ -8,7 +8,7 @@ Defines the Byzantine adversary model for consensus security verification.
 Proves that honest majority can commit despite Byzantine behavior.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_consensus_adversary.qnt
+- File: verification/quint/consensus/adversary.qnt
 - Properties: isByzantine, canEquivocate, byzantineThresholdOk
 - Invariants: InvariantByzantineThreshold, InvariantEquivocationDetected
 

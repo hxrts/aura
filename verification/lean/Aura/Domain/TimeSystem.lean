@@ -4,7 +4,7 @@
 Types and comparison functions for the multi-domain timestamp system.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_core.qnt
+- File: verification/quint/time_system.qnt
 - Section: TYPE DEFINITIONS
 
 ## Rust Correspondence

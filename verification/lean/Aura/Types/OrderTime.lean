@@ -11,7 +11,7 @@ Opaque 32-byte total ordering key for deterministic fact ordering.
 - Trait: Derived `Ord` uses lexicographic comparison
 
 ## Quint Correspondence
-- File: verification/quint/protocol_journal.qnt
+- File: verification/quint/journal/core.qnt
 - Property: Facts ordered by opaque OrderTime, not semantic timestamp
 
 ## Expose
@@ -96,16 +96,14 @@ theorem compare_antisym (a b : OrderTime) (h : compare a b = .eq) : a = b := by
   cases a; cases b
   simp_all
 
-/-- Transitivity for less-than.
-    TODO: Complete by delegating to ByteArray32 proof. -/
+/-- Transitivity for less-than. -/
 theorem compare_trans_lt (a b c : OrderTime)
     (hab : compare a b = .lt) (hbc : compare b c = .lt) :
     compare a c = .lt := by
   unfold compare at hab hbc ⊢
   exact Aura.Types.ByteArray32.compare_trans_lt a.value b.value c.value hab hbc
 
-/-- Transitivity for greater-than.
-    TODO: Complete by delegating to ByteArray32 proof. -/
+/-- Transitivity for greater-than. -/
 theorem compare_trans_gt (a b c : OrderTime)
     (hab : compare a b = .gt) (hbc : compare b c = .gt) :
     compare a c = .gt := by

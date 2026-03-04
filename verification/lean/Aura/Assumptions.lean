@@ -6,7 +6,7 @@ security proofs. Reviewers should audit these axioms carefully - they represent
 the trust boundary of the formal verification.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_consensus.qnt
+- File: verification/quint/consensus/core.qnt
 - These axioms justify invariants that Quint model checking assumes
 
 ## Rust Correspondence
@@ -167,7 +167,7 @@ opaque maxByzantine : Nat
 The number of Byzantine witnesses is strictly less than the signing threshold.
 This ensures honest witnesses can always reach agreement.
 
-Quint: Enforced by `byzantineThresholdOk` in protocol_consensus_adversary.qnt
+Quint: Enforced by `byzantineThresholdOk` in consensus/adversary.qnt
 -/
 axiom byzantine_threshold : maxByzantine < threshold
 

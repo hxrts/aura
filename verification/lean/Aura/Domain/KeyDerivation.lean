@@ -4,7 +4,7 @@
 Types for context-specific key derivation ensuring relational isolation.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_dkd.qnt
+- File: verification/quint/keys/dkd.qnt
 - Section: TYPE DEFINITIONS
 
 ## Rust Correspondence

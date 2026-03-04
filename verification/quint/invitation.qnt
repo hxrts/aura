@@ -15,7 +15,7 @@
 // - Ceremony supersession maintains consistency
 //
 // == Lean Correspondence ==
-// Module: Aura.Invitation (verification/lean/Aura/Invitation/)
+// NOTE: Lean modules for invitation are planned but not yet implemented.
 //
 // == Rust Correspondence ==
 // - Types: crates/aura-invitation/src/service.rs

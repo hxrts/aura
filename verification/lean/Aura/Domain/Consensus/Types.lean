@@ -7,7 +7,7 @@ Core data structures for Aura Consensus verification. These types model
 the protocol state and messages for threshold agreement.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_consensus.qnt
+- File: verification/quint/consensus/core.qnt
 - Section: TYPES
 
 ## Rust Correspondence
@@ -132,7 +132,7 @@ These correspond to Quint `str` types and Rust newtype wrappers.
 
 /-- Unique identifier for a consensus instance.
     Rust: crates/aura-consensus/src/consensus/types.rs::ConsensusId
-    Quint: protocol_consensus.qnt::ConsensusId -/
+    Quint: consensus/core.qnt::ConsensusId -/
 structure ConsensusId where
   value : String
   deriving BEq, Repr, DecidableEq, Hashable
@@ -151,7 +151,7 @@ instance : LawfulBEq ConsensusId where
 
 /-- Identifier for a witness (threshold signing participant).
     Rust: aura-core/src/domain/types.rs::AuthorityId
-    Quint: protocol_consensus.qnt::AuthorityId -/
+    Quint: consensus/core.qnt::AuthorityId -/
 structure AuthorityId where
   value : String
   deriving BEq, Repr, DecidableEq, Hashable
@@ -170,7 +170,7 @@ instance : LawfulBEq AuthorityId where
 
 /-- Hash of prestate for deterministic binding.
     Rust: crates/aura-consensus/src/consensus/types.rs (PrestateHash)
-    Quint: protocol_consensus.qnt::PrestateHash -/
+    Quint: consensus/core.qnt::PrestateHash -/
 structure PrestateHash where
   value : String
   deriving BEq, Repr, DecidableEq, Hashable
@@ -189,7 +189,7 @@ instance : LawfulBEq PrestateHash where
 
 /-- Identifier for a proposed result value.
     Rust: crates/aura-consensus/src/consensus/types.rs (ResultId)
-    Quint: protocol_consensus.qnt::ResultId -/
+    Quint: consensus/core.qnt::ResultId -/
 structure ResultId where
   value : String
   deriving BEq, Repr, DecidableEq, Hashable
@@ -214,7 +214,7 @@ Models the state machine phases from the Quint specification.
 
 /-- Protocol phase enumeration.
     Rust: crates/aura-consensus/src/consensus/messages.rs::ConsensusPhase
-    Quint: protocol_consensus.qnt::ConsensusPhase -/
+    Quint: consensus/core.qnt::ConsensusPhase -/
 inductive ConsensusPhase where
   | Pending      : ConsensusPhase  -- Waiting to start
   | FastPathActive : ConsensusPhase  -- Fast path with cached nonces
@@ -231,7 +231,7 @@ These model the threshold signature shares and witness votes.
 
 /-- Abstract signature share data.
     Rust: Uses frost-secp256k1 SignatureShare
-    Quint: protocol_consensus.qnt::ShareData -/
+    Quint: consensus/core.qnt::ShareData -/
 structure ShareData where
   shareValue : String      -- Abstract share value
   nonceBinding : String    -- Nonce commitment binding
@@ -248,7 +248,7 @@ instance : LawfulBEq ShareData where
 
 /-- A witness's vote on a consensus instance.
     Rust: crates/aura-consensus/src/consensus/types.rs::WitnessVote
-    Quint: protocol_consensus.qnt::ShareProposal -/
+    Quint: consensus/core.qnt::ShareProposal -/
 structure WitnessVote where
   witness : AuthorityId
   consensusId : ConsensusId
@@ -267,7 +267,7 @@ instance : LawfulBEq WitnessVote where
 
 /-- Aggregated threshold signature.
     Rust: Uses frost-secp256k1 Signature
-    Quint: protocol_consensus.qnt::ThresholdSignature -/
+    Quint: consensus/core.qnt::ThresholdSignature -/
 structure ThresholdSignature where
   sigValue : String
   boundCid : ConsensusId
@@ -285,7 +285,7 @@ These are the key types for agreement proofs.
 /-- A committed consensus result with threshold signature.
     This is the output of successful consensus.
     Rust: crates/aura-consensus/src/consensus/types.rs::CommitFact
-    Quint: protocol_consensus.qnt::CommitFact -/
+    Quint: consensus/core.qnt::CommitFact -/
 structure CommitFact where
   consensusId : ConsensusId
   resultId : ResultId
@@ -296,7 +296,7 @@ structure CommitFact where
 /-- Proof that a witness equivocated (signed conflicting values).
     Used for Byzantine fault detection.
     Rust: crates/aura-consensus/src/consensus/types.rs::ConflictFact
-    Quint: protocol_consensus_adversary.qnt (equivocators set) -/
+    Quint: consensus/adversary.qnt (equivocators set) -/
 structure EquivocationProof where
   witness : AuthorityId
   consensusId : ConsensusId
@@ -308,7 +308,7 @@ structure EquivocationProof where
 /-- Evidence gathered during consensus (CRDT-mergeable).
     Forms a join-semilattice under merge.
     Rust: Would be part of consensus state
-    Quint: protocol_consensus.qnt::ConsensusInstance (proposals, equivocators) -/
+    Quint: consensus/core.qnt::ConsensusInstance (proposals, equivocators) -/
 structure Evidence where
   consensusId : ConsensusId
   votes : List WitnessVote
@@ -323,7 +323,7 @@ These predicates are used in theorem statements and must be stable.
 -/
 
 /-- Detect equivocation: two votes from same witness with different results.
-    Quint: protocol_consensus.qnt::witnessEquivocated -/
+    Quint: consensus/core.qnt::witnessEquivocated -/
 def detectEquivocation (v1 v2 : WitnessVote) : Option EquivocationProof :=
   if h : v1.witness = v2.witness ∧ v1.consensusId = v2.consensusId ∧ v1.resultId ≠ v2.resultId then
     some {

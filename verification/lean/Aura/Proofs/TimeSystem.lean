@@ -7,7 +7,7 @@ Proves comparison reflexivity, transitivity, and privacy guarantees for
 the multi-domain timestamp system.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_core.qnt
+- File: verification/quint/time_system.qnt
 - Section: INVARIANTS
 - Properties: Timestamp ordering is transitive and reflexive
 

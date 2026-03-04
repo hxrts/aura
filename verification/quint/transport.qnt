@@ -14,10 +14,11 @@
 // - State validity: connections never transition backward
 //
 // == Lean Correspondence ==
-// Module: Aura.Transport (verification/lean/Aura/Transport/)
-// - Types: Aura.Transport.Types
-// - Privacy: Aura.Transport.Privacy
-// - Guards: Aura.Transport.Guards
+// NOTE: Lean modules for transport are planned but not yet implemented.
+// When implemented, they would be in: Aura.Domain.Transport.*
+// Related existing modules:
+// - Guard chain: Aura.Domain.GuardChain, Aura.Proofs.GuardChain
+// - Flow budgets: Aura.Domain.FlowBudget, Aura.Proofs.FlowBudget
 //
 // == Rust Correspondence ==
 // - Types: crates/aura-transport/src/types.rs

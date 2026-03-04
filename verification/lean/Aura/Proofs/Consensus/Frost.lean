@@ -9,8 +9,8 @@ Proves session/round consistency for threshold signature aggregation
 and FROST integration with consensus.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_frost.qnt
-- File: verification/quint/protocol_consensus.qnt
+- File: verification/quint/consensus/frost.qnt
+- File: verification/quint/consensus/core.qnt
 - Section: INVARIANTS
 - Invariant: `InvariantCommitRequiresThreshold`
 - Properties: Aggregate only combines shares from same session/round

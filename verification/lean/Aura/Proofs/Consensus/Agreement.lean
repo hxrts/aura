@@ -8,7 +8,7 @@ Proves that all honest witnesses that commit to an instance commit to the same v
 This is the fundamental safety property of consensus.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_consensus.qnt
+- File: verification/quint/consensus/core.qnt
 - Section: INVARIANTS
 - Invariant: `InvariantUniqueCommitPerInstance`
 
@@ -73,7 +73,7 @@ the same result and prestate. This follows from:
 - Aggregation only succeeds if all shares have consistent bindings
 - Therefore, the aggregated signature inherits this binding
 
-Quint: This is enforced by `sharesConsistent` in protocol_consensus.qnt
+Quint: This is enforced by `sharesConsistent` in consensus/core.qnt
 -/
 axiom signature_binding_agreement :
   forall (sig1 sig2 : ThresholdSignature),

@@ -12,13 +12,14 @@
 // Liveness: Progress requires threshold honest participants with valid key shares.
 //
 // == Lean Correspondence ==
-// Module: Aura.Frost (verification/lean/Aura/Frost.lean)
-// - SessionId: Aura.Frost.SessionId
-// - Round: Aura.Frost.Round
-// - Share: Aura.Frost.Share
-// - canAggregate: Aura.Frost.canAggregate
-// - aggregate: Aura.Frost.aggregate
-// - aggregate_same_session_round: Aura.Frost.aggregate_same_session_round
+// Types: Aura.Domain.Consensus.Frost (verification/lean/Aura/Domain/Consensus/Frost.lean)
+// Proofs: Aura.Proofs.Consensus.Frost (verification/lean/Aura/Proofs/Consensus/Frost.lean)
+// - SessionId: Aura.Domain.Consensus.Frost.SessionId
+// - Round: Aura.Domain.Consensus.Frost.Round
+// - Share: Aura.Domain.Consensus.Frost.Share
+// - canAggregate: Aura.Domain.Consensus.Frost.canAggregate
+// - aggregate: Aura.Domain.Consensus.Frost.aggregate
+// - aggregate_same_session_round: Aura.Proofs.Consensus.Frost.aggregate_same_session_round
 //
 // == Rust Correspondence ==
 // - File: crates/aura-core/src/crypto/tree_signing.rs
@@ -296,7 +297,7 @@ module protocol_frost {
     // ==================== INVARIANTS ====================
     // Safety properties that must hold in every reachable state.
 
-    // Lean: Aura.Frost.aggregate_same_session_round (threshold requirement)
+    // Lean: Aura.Proofs.Consensus.Frost.aggregate_same_session_round (threshold requirement)
     // Completion requires threshold participants in both rounds.
     val InvariantThreshold = frostSessions.keys().forall(sid =>
         val session = frostSessions.get(sid)
@@ -306,21 +307,21 @@ module protocol_frost {
         )
     )
 
-    // Lean: Aura.Frost.commitment_before_signing
+    // Lean: Aura.Proofs.Consensus.Frost.commitment_before_signing
     // Participants must commit before signing (Round 1 before Round 2).
     val InvariantCommitmentBeforeSigning = frostParticipants.keys().forall(key =>
         val participant = frostParticipants.get(key)
         participant.hasSigned implies participant.hasCommitted
     )
 
-    // Lean: Aura.Frost.shares_from_committed
+    // Lean: Aura.Proofs.Consensus.Frost.shares_from_committed
     // Signature shares only from participants who committed.
     val InvariantSharesFromCommitted = frostSessions.keys().forall(sid =>
         val session = frostSessions.get(sid)
         session.signatureShares.keys().subseteq(session.commitments.keys())
     )
 
-    // Lean: Aura.Frost.valid_signature
+    // Lean: Aura.Proofs.Consensus.Frost.valid_signature
     // Completed sessions have valid signatures.
     val InvariantValidSignature = frostSessions.keys().forall(sid =>
         val session = frostSessions.get(sid)
@@ -331,7 +332,7 @@ module protocol_frost {
     // ==================== STRENGTHENED INVARIANTS (T3c.12) ====================
     // CRITICAL: Nonce uniqueness - nonces must never be reused across sessions.
     // In FROST, nonce reuse allows private key extraction via Schnorr signature attack.
-    // Lean: Aura.Frost.nonce_uniqueness (axiom based on RNG security)
+    // Lean: Aura.Assumptions.nonce_uniqueness (axiom based on RNG security)
     //
     // NOTE: This invariant cannot be model-checked with deterministic nonce generation.
     // The mock generateCommitment() produces the same nonce per participant regardless

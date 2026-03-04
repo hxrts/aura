@@ -7,7 +7,7 @@ Proves cost calculation correctness and evaluation determinism for
 the guard chain security enforcement layer.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_capability_properties.qnt
+- File: verification/quint/authorization.qnt
 - Section: INVARIANTS
 - Properties: Guard evaluation is pure and deterministic
 

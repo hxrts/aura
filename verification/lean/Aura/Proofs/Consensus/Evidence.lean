@@ -7,7 +7,7 @@ Proves that consensus Evidence forms a join-semilattice under merge.
 This ensures replicas can merge evidence in any order and converge.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_consensus.qnt
+- File: verification/quint/consensus/core.qnt
 - Section: INVARIANTS (evidence-related)
 - Predicates: Evidence is implicitly a CRDT through proposals/equivocators sets
 

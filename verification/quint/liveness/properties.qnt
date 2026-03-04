@@ -75,7 +75,7 @@ module protocol_liveness_properties {
     // ════════════════════════════════════════════════════════════════════════
 
     // Progress: Under synchrony with honest quorum, active instances make progress
-    // Lean support: Aura.Consensus.Validity.honest_participation
+    // Lean support: Aura.Proofs.Consensus.Validity.honest_participation
     pure def invariantProgressUnderSynchrony(
         instances: core::ConsensusId -> core::ConsensusInstance,
         instanceTiming: core::ConsensusId -> timing::InstanceTimingState,

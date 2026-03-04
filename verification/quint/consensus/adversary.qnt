@@ -13,12 +13,12 @@
 // Security assumption: At most f < k Byzantine witnesses (f < threshold).
 //
 // == Lean Correspondence ==
-// Module: Aura.Consensus.Equivocation (verification/lean/Aura/Consensus/Equivocation.lean)
-// - Equivocation detection: Aura.Consensus.Equivocation.hasEquivocated
-// - Detection soundness: Aura.Consensus.Equivocation.detection_soundness
-// - Detection completeness: Aura.Consensus.Equivocation.detection_completeness
-// - Exclusion correctness: Aura.Consensus.Equivocation.exclusion_correctness
-// - Honest protection: Aura.Consensus.Equivocation.honest_never_detected
+// Module: Aura.Proofs.Consensus.Equivocation (verification/lean/Aura/Proofs/Consensus/Equivocation.lean)
+// - Equivocation detection: Aura.Proofs.Consensus.Equivocation.hasEquivocated
+// - Detection soundness: Aura.Proofs.Consensus.Equivocation.detection_soundness
+// - Detection completeness: Aura.Proofs.Consensus.Equivocation.detection_completeness
+// - Exclusion correctness: Aura.Proofs.Consensus.Equivocation.exclusion_correctness
+// - Honest protection: Aura.Proofs.Consensus.Equivocation.honest_never_detected
 // Axioms: Aura.Assumptions (byzantine_threshold)
 //
 // == Rust Correspondence ==
@@ -76,7 +76,7 @@ module protocol_consensus_adversary {
         byzantines.contains(witness)
 
     /// Check if a Byzantine witness can equivocate for a consensus instance.
-    /// Lean: Aura.Consensus.Equivocation.hasEquivocated precondition
+    /// Lean: Aura.Proofs.Consensus.Equivocation.hasEquivocated precondition
     pure def canEquivocate(
         witness: core::AuthorityId,
         inst: core::ConsensusInstance,
@@ -362,7 +362,7 @@ module protocol_consensus_adversary {
 
     // ==================== ADVERSARY INVARIANTS ====================
     // Safety properties for Byzantine fault tolerance.
-    // Lean correspondence: Aura.Consensus.Equivocation, Aura.Assumptions
+    // Lean correspondence: Aura.Proofs.Consensus.Equivocation, Aura.Assumptions
 
     // Safety: Byzantine count never exceeds f < k bound.
     // Lean: Aura.Assumptions.byzantine_threshold (threshold > maxByzantine)
@@ -373,7 +373,7 @@ module protocol_consensus_adversary {
         })
 
     // Safety: Equivocators are always detected and excluded.
-    // Lean: Aura.Consensus.Equivocation.detection_soundness, detection_completeness
+    // Lean: Aura.Proofs.Consensus.Equivocation.detection_soundness, detection_completeness
     val InvariantEquivocationDetected =
         core::instances.keys().forall(cid => {
             val inst = core::instances.get(cid)
@@ -394,7 +394,7 @@ module protocol_consensus_adversary {
 
     // Security: Despite Byzantine behavior, honest majority can still commit.
     // If k - f honest witnesses participate, consensus can complete.
-    // Lean: Aura.Consensus.Validity.honest_participation
+    // Lean: Aura.Proofs.Consensus.Validity.honest_participation
     val InvariantHonestMajorityCanCommit =
         core::instances.keys().forall(cid => {
             val inst = core::instances.get(cid)

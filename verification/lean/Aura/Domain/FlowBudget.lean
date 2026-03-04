@@ -4,7 +4,7 @@
 Types and operations for the flow budget rate limiting system.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_capability_properties.qnt
+- File: verification/quint/authorization.qnt
 - Section: TYPES, OPERATIONS
 
 ## Rust Correspondence

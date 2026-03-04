@@ -8,7 +8,7 @@ Proves that equivocation (Byzantine double-voting) is correctly detected and
 that honest witnesses are never falsely accused.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_consensus_adversary.qnt
+- File: verification/quint/consensus/adversary.qnt
 - Section: INVARIANTS
 - Invariant: `InvariantEquivocationDetected`
 - Action: `byzantineEquivocate`

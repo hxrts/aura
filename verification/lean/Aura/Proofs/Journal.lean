@@ -8,7 +8,7 @@ Proves that the journal forms a join-semilattice under merge, ensuring
 replicas can merge in any order and converge to the same state.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_journal.qnt
+- File: verification/quint/journal/core.qnt
 - Section: INVARIANTS
 - Properties: Journal merge forms a CRDT with set-union semantics
 

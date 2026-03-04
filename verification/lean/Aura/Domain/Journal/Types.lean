@@ -12,7 +12,7 @@ import Aura.Types.FactContent
 Core type definitions for the journal CRDT system.
 
 ## Quint Correspondence
-- File: verification/quint/protocol_journal.qnt
+- File: verification/quint/journal/core.qnt
 - Types: Fact, Journal
 
 ## Rust Correspondence
