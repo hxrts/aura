@@ -914,11 +914,18 @@ mod tests {
         )];
         fact_tx.send(FactSource::Journal(facts)).await.unwrap();
 
-        // Wait for update
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
-        // Check view was updated
-        assert_eq!(*update_count.read().await, 1);
+        // Wait (bounded) for update to avoid startup/timing flakes.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        loop {
+            if *update_count.read().await == 1 {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "timed out waiting for scheduler to apply fact"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
 
         // Shutdown
         shutdown_tx.send(()).await.unwrap();

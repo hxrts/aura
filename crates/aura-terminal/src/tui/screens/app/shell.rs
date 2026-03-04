@@ -2893,7 +2893,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 now_ms: now_ms,
                 transport_peers: transport_peers,
                 known_online: known_online,
-                state_indicator: Some(state_indicator.clone()),
+                state_indicator: Some(state_indicator),
             )
 
             // === GLOBAL MODALS ===

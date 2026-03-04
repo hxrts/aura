@@ -99,7 +99,7 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
     // Format: "123 P, 45 On" - must fit in STATUS_COL_WIDTH (15 chars)
     // Max realistic: "999 P, 99 On" = 12 chars
     let peer_status = format!("{} P, {} On", props.transport_peers, props.known_online);
-    let bottom_status = props.state_indicator.clone().unwrap_or(peer_status.clone());
+    let bottom_status = props.state_indicator.clone().unwrap_or(peer_status);
 
     element! {
         View(

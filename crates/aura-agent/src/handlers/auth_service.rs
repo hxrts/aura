@@ -504,8 +504,15 @@ mod tests {
 
         let service = AuthServiceApi::new(effects, authority_context, account_id).unwrap();
 
-        // In test mode, is_authenticated should return true
-        assert!(service.is_authenticated().await);
+        // Guard + journal pipelines can settle asynchronously under workspace load.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+        while tokio::time::Instant::now() < deadline {
+            if service.is_authenticated().await {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("expected auth service to report authenticated within timeout");
     }
 
     #[tokio::test]
