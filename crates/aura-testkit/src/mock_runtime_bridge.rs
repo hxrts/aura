@@ -826,6 +826,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         &self,
         receiver: AuthorityId,
         home_id: String,
+        _context_id: Option<ContextId>,
         _bootstrap: Option<ChannelBootstrapPackage>,
         message: Option<String>,
         ttl_ms: Option<u64>,
@@ -1102,6 +1103,13 @@ impl RuntimeBridge for MockRuntimeBridge {
         // This is important for message deduplication (message IDs include timestamp)
         let time = self.current_time_ms.fetch_add(1, Ordering::SeqCst);
         Ok(time)
+    }
+
+    async fn sleep_ms(&self, ms: u64) {
+        // Mock bridge advances virtual time instead of sleeping
+        self.current_time_ms.fetch_add(ms, Ordering::SeqCst);
+        // Yield to allow other tasks to run
+        tokio::task::yield_now().await;
     }
 }
 

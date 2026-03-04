@@ -8,13 +8,13 @@
 //! ## Design
 //!
 //! ```text
-//! aura-app (pure)          aura-agent (runtime)
-//! ┌─────────────────┐      ┌─────────────────┐
-//! │ AppCore         │      │ AuraAgent       │
-//! │   ┌───────────┐ │      │   implements    │
-//! │   │RuntimeBridge│◄─────│   RuntimeBridge │
-//! │   └───────────┘ │      │                 │
-//! └─────────────────┘      └─────────────────┘
+//!  aura-app (pure)         aura-agent (runtime)
+//! ┌───────────────────┐    ┌──────────────────┐
+//! │ AppCore           │    │ AuraAgent        │
+//! │   ┌─────────────┐ │    │   implements     │
+//! │   │RuntimeBridge│◄─────│   RuntimeBridge  │
+//! │   └─────────────┘ │    │                  │
+//! └───────────────────┘    └──────────────────┘
 //! ```
 //!
 //! ## Usage
@@ -809,6 +809,7 @@ pub trait RuntimeBridge: Send + Sync {
     /// # Arguments
     /// * `receiver` - Authority to invite to channel
     /// * `home_id` - Home/channel identifier
+    /// * `context_id` - Optional explicit channel context override
     /// * `bootstrap` - Optional bootstrap key package for provisional AMP
     /// * `message` - Optional message to include
     /// * `ttl_ms` - Optional time-to-live in milliseconds
@@ -816,6 +817,7 @@ pub trait RuntimeBridge: Send + Sync {
         &self,
         receiver: AuthorityId,
         home_id: String,
+        context_id: Option<ContextId>,
         bootstrap: Option<ChannelBootstrapPackage>,
         message: Option<String>,
         ttl_ms: Option<u64>,
@@ -921,6 +923,13 @@ pub trait RuntimeBridge: Send + Sync {
     /// Production implementations use wall-clock time; test implementations
     /// can provide controlled time for reproducible tests.
     async fn current_time_ms(&self) -> Result<u64, IntentError>;
+
+    /// Sleep for the specified number of milliseconds.
+    ///
+    /// This provides a runtime-agnostic sleep mechanism. Production implementations
+    /// delegate to the runtime's sleep primitive; simulation implementations can
+    /// use virtual time.
+    async fn sleep_ms(&self, ms: u64);
 
     /// Get overall runtime status
     async fn get_status(&self) -> RuntimeStatus {
@@ -1329,6 +1338,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         &self,
         _receiver: AuthorityId,
         _home_id: String,
+        _context_id: Option<ContextId>,
         _bootstrap: Option<ChannelBootstrapPackage>,
         _message: Option<String>,
         _ttl_ms: Option<u64>,
@@ -1411,6 +1421,13 @@ impl RuntimeBridge for OfflineRuntimeBridge {
             .elapsed()
             .map_err(|err| IntentError::internal_error(format!("System clock error: {err}")))?;
         Ok(now.as_millis() as u64)
+    }
+
+    async fn sleep_ms(&self, ms: u64) {
+        // Offline bridge yields without actual sleep since there's no runtime.
+        // In practice, offline mode doesn't execute retry loops.
+        let _ = ms;
+        crate::workflows::runtime::cooperative_yield().await;
     }
 }
 

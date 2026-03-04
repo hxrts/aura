@@ -2566,6 +2566,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         &self,
         receiver: AuthorityId,
         home_id: String,
+        context_id: Option<ContextId>,
         bootstrap: Option<ChannelBootstrapPackage>,
         message: Option<String>,
         ttl_ms: Option<u64>,
@@ -2576,7 +2577,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
         let invitation = invitation_service
-            .invite_to_channel(receiver, home_id, bootstrap, message, ttl_ms)
+            .invite_to_channel(receiver, home_id, context_id, bootstrap, message, ttl_ms)
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to create channel invitation: {}", e))
@@ -2877,6 +2878,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
             .map_err(|e| service_unavailable_with_detail("physical_time", e))?;
         Ok(time.ts_ms)
+    }
+
+    async fn sleep_ms(&self, ms: u64) {
+        let effects = self.agent.runtime().effects();
+        let _ = effects.sleep_ms(ms).await;
     }
 
     // =========================================================================

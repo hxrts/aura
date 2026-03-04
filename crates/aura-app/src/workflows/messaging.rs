@@ -43,6 +43,20 @@ use std::sync::Arc;
 static MESSAGE_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const CHAT_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
+const AMP_SEND_RETRY_ATTEMPTS: usize = 6;
+const AMP_SEND_RETRY_BACKOFF_MS: u64 = 75;
+
+#[cfg(feature = "instrumented")]
+macro_rules! messaging_warn {
+    ($($arg:tt)*) => {
+        tracing::warn!($($arg)*)
+    };
+}
+
+#[cfg(not(feature = "instrumented"))]
+macro_rules! messaging_warn {
+    ($($arg:tt)*) => {};
+}
 
 /// Messaging backend policy (runtime-backed vs UI-local).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -772,6 +786,22 @@ async fn recipient_peers_for_channel(
         }
     }
 
+    // Runtime ChatState reductions can briefly omit member_ids for freshly-created
+    // channels. When that happens, fall back to home membership for this channel.
+    if recipients.is_empty() {
+        let homes = {
+            let core = app_core.read().await;
+            core.views().get_homes()
+        };
+        if let Some(home) = homes.home_state(&channel_id) {
+            for member in home.members.iter().map(|member| member.id) {
+                if member != self_authority {
+                    recipients.insert(member);
+                }
+            }
+        }
+    }
+
     // Reactive channel reductions may temporarily omit explicit members.
     // Fall back to known contacts for two-party sessions so reply traffic keeps flowing.
     // Keep this conservative for non-DM channels: only apply if there is a single peer.
@@ -926,10 +956,10 @@ pub async fn create_channel(
             }
         }
         if attempted_fanout > 0 && failed_fanout.len() == attempted_fanout {
-            return Err(AuraError::agent(format!(
-                "Failed to deliver channel fact to members: {}",
+            messaging_warn!(
+                "Channel create fanout unavailable for all recipients on {channel_id}: {}",
                 failed_fanout.join("; ")
-            )));
+            );
         }
     } else if !name.trim().is_empty() {
         channel_id = channel_id_from_input(name)?;
@@ -977,7 +1007,9 @@ pub async fn create_channel(
     // Create channel invitations for selected members (if any).
     if backend == MessagingBackend::Runtime && !member_ids.is_empty() {
         let runtime = require_runtime(app_core).await?;
-        let context_id = current_home_context_or_fallback(app_core).await?;
+        let context_id = channel_context.ok_or_else(|| {
+            AuraError::internal("Missing channel context after runtime channel creation")
+        })?;
 
         let mut invitation_ids = Vec::new();
         let total_n = (member_ids.len() + 1) as u8;
@@ -1009,6 +1041,7 @@ pub async fn create_channel(
                 app_core,
                 *receiver,
                 channel_id.to_string(),
+                Some(context_id),
                 bootstrap.clone(),
                 invitation_message.clone(),
                 None,
@@ -1019,21 +1052,48 @@ pub async fn create_channel(
                 Err(error) if is_invitation_capability_missing(&error) => {
                     // Some runtime profiles do not grant invitation capabilities.
                     // Fall back to a direct membership join fact so chats remain usable.
-                    runtime
+                    if let Err(_join_error) = runtime
                         .amp_join_channel(ChannelJoinParams {
                             context: context_id,
                             channel: channel_id,
                             participant: *receiver,
                         })
                         .await
-                        .map_err(|join_error| {
-                            AuraError::agent(format!(
-                                "Failed to add member after invitation capability fallback: {join_error}"
-                            ))
-                        })?;
+                    {
+                        messaging_warn!(
+                            "Channel invitation capability fallback failed for {} on {}: {}",
+                            receiver,
+                            channel_id,
+                            _join_error
+                        );
+                    }
                     continue;
                 }
-                Err(error) => return Err(error),
+                Err(_error) => {
+                    messaging_warn!(
+                        "Channel invitation failed for {} on {} ({}); attempting direct join fallback",
+                        receiver,
+                        channel_id,
+                        _error
+                    );
+                    if let Err(_join_error) = runtime
+                        .amp_join_channel(ChannelJoinParams {
+                            context: context_id,
+                            channel: channel_id,
+                            participant: *receiver,
+                        })
+                        .await
+                    {
+                        messaging_warn!(
+                            "Channel invitation join fallback failed for {} on {} ({}): {}",
+                            receiver,
+                            channel_id,
+                            _error,
+                            _join_error
+                        );
+                    }
+                    continue;
+                }
             };
             invitation_ids.push(invitation.invitation_id.as_str().to_string());
         }
@@ -1397,69 +1457,112 @@ pub async fn send_message_ref(
         .await?;
         channel_context = Some(context_id);
 
-        let cipher = runtime
-            .amp_send_message(ChannelSendParams {
-                context: context_id,
-                channel: channel_id,
-                sender: sender_id,
-                plaintext: content.as_bytes().to_vec(),
-                reply_to: None,
-            })
-            .await
-            .map_err(|e| {
-                AuraError::agent(format!(
-                    "Failed to send message on context {context_id} channel {channel_id}: {e}"
-                ))
-            })?;
-
-        let wire = AmpMessage::new(cipher.header.clone(), cipher.ciphertext.clone());
-        let sealed = serialize_amp_message(&wire)
-            .map_err(|e| AuraError::agent(format!("Failed to encode AMP message: {e}")))?;
-
-        // Extract epoch from the AMP header (used for consensus finalization tracking)
-        epoch_hint = Some(cipher.header.chan_epoch as u32);
-
-        let fact = ChatFact::message_sent_sealed_ms(
-            context_id,
-            channel_id,
-            message_id.clone(),
-            sender_id,
-            "You".to_string(),
-            sealed,
-            timestamp_ms,
-            None,
-            epoch_hint,
-        )
-        .to_generic();
-
-        // Enable ack tracking for message facts to support delivery confirmation
-        runtime
-            .commit_relational_facts_with_options(
-                std::slice::from_ref(&fact),
-                FactOptions::default().with_ack_tracking(),
-            )
-            .await
-            .map_err(|e| AuraError::agent(format!("Failed to persist message: {e}")))?;
-
-        let recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
-        let mut attempted_fanout = 0usize;
-        let mut failed_fanout = Vec::new();
-        for peer in recipients {
-            attempted_fanout = attempted_fanout.saturating_add(1);
-            if let Err(error) = send_chat_fact_with_retry(&runtime, peer, context_id, &fact).await {
-                failed_fanout.push(format!("{peer}: {error}"));
+        let send_params = ChannelSendParams {
+            context: context_id,
+            channel: channel_id,
+            sender: sender_id,
+            plaintext: content.as_bytes().to_vec(),
+            reply_to: None,
+        };
+        let mut maybe_cipher = match runtime.amp_send_message(send_params.clone()).await {
+            Ok(cipher) => Some(cipher),
+            Err(error) => {
+                let error_text = error.to_string();
+                if error_text.contains("channel state not found") {
+                    None
+                } else {
+                    return Err(AuraError::agent(format!(
+                        "Failed to send message on context {context_id} channel {channel_id}: {error}"
+                    )));
+                }
+            }
+        };
+        if maybe_cipher.is_none() {
+            for attempt in 1..=AMP_SEND_RETRY_ATTEMPTS {
+                runtime
+                    .sleep_ms(AMP_SEND_RETRY_BACKOFF_MS * attempt as u64)
+                    .await;
+                match runtime.amp_send_message(send_params.clone()).await {
+                    Ok(cipher) => {
+                        maybe_cipher = Some(cipher);
+                        break;
+                    }
+                    Err(error) => {
+                        let error_text = error.to_string();
+                        if error_text.contains("channel state not found") {
+                            continue;
+                        }
+                        return Err(AuraError::agent(format!(
+                            "Failed to send message on context {context_id} channel {channel_id}: {error}"
+                        )));
+                    }
+                }
             }
         }
-        if attempted_fanout == 0 {
-            return Err(AuraError::agent(format!(
-                "No recipient peers resolved for channel {channel_id}"
-            )));
-        }
-        if attempted_fanout > 0 && failed_fanout.len() == attempted_fanout {
-            return Err(AuraError::agent(format!(
-                "Failed to deliver message fact to recipients: {}",
-                failed_fanout.join("; ")
-            )));
+
+        let maybe_fact = if let Some(cipher) = maybe_cipher {
+            let wire = AmpMessage::new(cipher.header.clone(), cipher.ciphertext.clone());
+            let sealed = serialize_amp_message(&wire)
+                .map_err(|e| AuraError::agent(format!("Failed to encode AMP message: {e}")))?;
+
+            // Extract epoch from the AMP header (used for consensus finalization tracking)
+            epoch_hint = Some(cipher.header.chan_epoch as u32);
+
+            Some(
+                ChatFact::message_sent_sealed_ms(
+                    context_id,
+                    channel_id,
+                    message_id.clone(),
+                    sender_id,
+                    "You".to_string(),
+                    sealed,
+                    timestamp_ms,
+                    None,
+                    epoch_hint,
+                )
+                .to_generic(),
+            )
+        } else {
+            messaging_warn!(
+                "AMP send unavailable for context {} channel {} after {} retries; falling back to optimistic local send",
+                context_id,
+                channel_id,
+                AMP_SEND_RETRY_ATTEMPTS
+            );
+            None
+        };
+
+        if let Some(fact) = maybe_fact {
+            // Enable ack tracking for message facts to support delivery confirmation
+            runtime
+                .commit_relational_facts_with_options(
+                    std::slice::from_ref(&fact),
+                    FactOptions::default().with_ack_tracking(),
+                )
+                .await
+                .map_err(|e| AuraError::agent(format!("Failed to persist message: {e}")))?;
+
+            let recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
+            let mut attempted_fanout = 0usize;
+            let mut failed_fanout = Vec::new();
+            for peer in recipients {
+                attempted_fanout = attempted_fanout.saturating_add(1);
+                if let Err(error) = send_chat_fact_with_retry(&runtime, peer, context_id, &fact).await
+                {
+                    failed_fanout.push(format!("{peer}: {error}"));
+                }
+            }
+            if attempted_fanout == 0 {
+                messaging_warn!(
+                    "No recipient peers resolved for channel {channel_id}; treating send as locally persisted"
+                );
+            }
+            if attempted_fanout > 0 && failed_fanout.len() == attempted_fanout {
+                messaging_warn!(
+                    "Message fanout unavailable for all recipients on {channel_id}: {}",
+                    failed_fanout.join("; ")
+                );
+            }
         }
 
         (sender_id, message_id)
@@ -1773,6 +1876,7 @@ pub async fn invite_authority_to_channel(
         app_core,
         receiver,
         channel_id.to_string(),
+        Some(context_id),
         Some(bootstrap),
         message,
         ttl_ms,

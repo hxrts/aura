@@ -43,6 +43,14 @@ pub mod signals {
         SYNC_STATUS_SIGNAL, TRANSPORT_PEERS_SIGNAL, UNREAD_COUNT_SIGNAL,
     };
     pub use crate::signal_defs::{ConnectionStatus, NetworkStatus, SyncStatus};
+    // Signal name constants for emit_signal calls
+    pub use crate::signal_defs::{
+        BUDGET_SIGNAL_NAME, CHAT_SIGNAL_NAME, CONNECTION_STATUS_SIGNAL_NAME, CONTACTS_SIGNAL_NAME,
+        DISCOVERED_PEERS_SIGNAL_NAME, ERROR_SIGNAL_NAME, HOMES_SIGNAL_NAME,
+        INVITATIONS_SIGNAL_NAME, NEIGHBORHOOD_SIGNAL_NAME, NETWORK_STATUS_SIGNAL_NAME,
+        RECOVERY_SIGNAL_NAME, SETTINGS_SIGNAL_NAME, SYNC_STATUS_SIGNAL_NAME,
+        TRANSPORT_PEERS_SIGNAL_NAME, UNREAD_COUNT_SIGNAL_NAME,
+    };
 }
 
 pub mod workflows {
@@ -180,6 +188,10 @@ pub mod types {
 
     // Recovery types for scenario simulation
     pub use aura_recovery::types::RecoveryRequest;
+
+    // Types for demo seeding (used by aura-terminal's development feature)
+    pub use aura_journal::DomainFact;
+    pub use aura_relational::ContactFact;
 }
 
 pub mod authorization {

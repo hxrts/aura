@@ -17,6 +17,89 @@ use aura_journal::DomainFact;
 use aura_relational::ContactFact;
 use std::sync::Arc;
 
+/// Add a contact to the local contact list.
+///
+/// This creates a "contact added" fact that establishes the contact relationship.
+/// The nickname is the display name for the contact.
+pub async fn add_contact(
+    app_core: &Arc<RwLock<AppCore>>,
+    contact_id: &str,
+    nickname: &str,
+    timestamp_ms: u64,
+) -> Result<(), AuraError> {
+    let runtime = require_runtime(app_core).await?;
+
+    let target = parse_authority_id(contact_id)?;
+    let trimmed = nickname.trim();
+    if trimmed.len() > 100 {
+        return Err(AuraError::invalid("Nickname too long"));
+    }
+
+    let owner_id = runtime.authority_id();
+
+    let fact = ContactFact::added_with_timestamp_ms(
+        default_relational_context(),
+        owner_id,
+        target,
+        trimmed.to_string(),
+        timestamp_ms,
+    )
+    .to_generic();
+
+    runtime
+        .commit_relational_facts(&[fact])
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to add contact: {e}")))?;
+
+    Ok(())
+}
+
+/// Add multiple contacts to the local contact list in a single batch.
+///
+/// This is more efficient than calling `add_contact` multiple times as it
+/// commits all facts in a single operation.
+///
+/// Each contact is specified as (authority_id_string, nickname, timestamp_ms).
+pub async fn add_contacts_batch(
+    app_core: &Arc<RwLock<AppCore>>,
+    contacts: &[(&str, &str, u64)],
+) -> Result<(), AuraError> {
+    if contacts.is_empty() {
+        return Ok(());
+    }
+
+    let runtime = require_runtime(app_core).await?;
+    let owner_id = runtime.authority_id();
+
+    let mut facts = Vec::with_capacity(contacts.len());
+    for (contact_id, nickname, timestamp_ms) in contacts {
+        let target = parse_authority_id(contact_id)?;
+        let trimmed = nickname.trim();
+        if trimmed.len() > 100 {
+            return Err(AuraError::invalid(format!(
+                "Nickname too long for contact {contact_id}"
+            )));
+        }
+
+        let fact = ContactFact::added_with_timestamp_ms(
+            default_relational_context(),
+            owner_id,
+            target,
+            trimmed.to_string(),
+            *timestamp_ms,
+        )
+        .to_generic();
+        facts.push(fact);
+    }
+
+    runtime
+        .commit_relational_facts(&facts)
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to add contacts: {e}")))?;
+
+    Ok(())
+}
+
 /// Update (or clear) a contact's nickname.
 ///
 /// Nicknames are **user-assigned local labels**. Passing an empty nickname clears the label,
