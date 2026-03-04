@@ -14,10 +14,16 @@
 //! - test_get_invitation_via_agent: 250-251
 
 use aura_agent::{
-    AgentBuilder, AuthorityId, EffectContext, ExecutionMode, InvitationStatus, InvitationType,
+    AgentBuilder, AuraAgent, AuthorityId, EffectContext, ExecutionMode, InvitationStatus,
+    InvitationType,
 };
+use aura_core::effects::ThresholdSigningEffects;
 use aura_core::hash::hash;
 use aura_core::identifiers::{ChannelId, ContextId, InvitationId};
+use aura_core::threshold::ParticipantIdentity;
+use std::sync::Arc;
+
+type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 /// Create a test effect context for async tests
 fn test_context(authority_id: AuthorityId) -> EffectContext {
@@ -29,15 +35,31 @@ fn test_context(authority_id: AuthorityId) -> EffectContext {
     )
 }
 
-#[tokio::test]
-async fn test_invitation_service_via_agent() -> Result<(), Box<dyn std::error::Error>> {
-    // Entropy range: 200-209
-    let authority_id = AuthorityId::new_from_entropy([200u8; 32]);
+/// Helper to create a properly initialized test agent.
+///
+/// This sets up Biscuit tokens and key rotation which are required for
+/// authorization guards to function correctly.
+async fn create_test_agent(seed: u8) -> TestResult<Arc<AuraAgent>> {
+    let authority_id = AuthorityId::new_from_entropy([seed; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
         .await?;
+    let effects = agent.runtime().effects();
+    effects.bootstrap_authority(&authority_id).await?;
+    let participants = vec![ParticipantIdentity::guardian(authority_id)];
+    let (epoch, _, _) = effects
+        .rotate_keys(&authority_id, 1, 1, &participants)
+        .await?;
+    effects.commit_key_rotation(&authority_id, epoch).await?;
+    Ok(Arc::new(agent))
+}
+
+#[tokio::test]
+async fn test_invitation_service_via_agent() -> TestResult {
+    // Entropy range: 200-209
+    let agent = create_test_agent(200).await?;
 
     let invitations = agent.invitations()?;
 
@@ -48,14 +70,10 @@ async fn test_invitation_service_via_agent() -> Result<(), Box<dyn std::error::E
 }
 
 #[tokio::test]
-async fn test_invite_as_contact_via_agent() -> Result<(), Box<dyn std::error::Error>> {
+async fn test_invite_as_contact_via_agent() -> TestResult {
     // Entropy range: 210-219
-    let authority_id = AuthorityId::new_from_entropy([210u8; 32]);
-    let ctx = test_context(authority_id);
-    let agent = AgentBuilder::new()
-        .with_authority(authority_id)
-        .build_testing_async(&ctx)
-        .await?;
+    let agent = create_test_agent(210).await?;
+    let authority_id = agent.authority_id();
 
     let invitations = agent.invitations()?;
 
@@ -78,14 +96,10 @@ async fn test_invite_as_contact_via_agent() -> Result<(), Box<dyn std::error::Er
 }
 
 #[tokio::test]
-async fn test_invite_as_guardian_via_agent() -> Result<(), Box<dyn std::error::Error>> {
+async fn test_invite_as_guardian_via_agent() -> TestResult {
     // Entropy range: 220-229
-    let authority_id = AuthorityId::new_from_entropy([220u8; 32]);
-    let ctx = test_context(authority_id);
-    let agent = AgentBuilder::new()
-        .with_authority(authority_id)
-        .build_testing_async(&ctx)
-        .await?;
+    let agent = create_test_agent(220).await?;
+    let authority_id = agent.authority_id();
 
     let invitations = agent.invitations()?;
 
@@ -111,14 +125,9 @@ async fn test_invite_as_guardian_via_agent() -> Result<(), Box<dyn std::error::E
 }
 
 #[tokio::test]
-async fn test_invite_to_channel_via_agent() -> Result<(), Box<dyn std::error::Error>> {
+async fn test_invite_to_channel_via_agent() -> TestResult {
     // Entropy range: 230-239
-    let authority_id = AuthorityId::new_from_entropy([230u8; 32]);
-    let ctx = test_context(authority_id);
-    let agent = AgentBuilder::new()
-        .with_authority(authority_id)
-        .build_testing_async(&ctx)
-        .await?;
+    let agent = create_test_agent(230).await?;
 
     let invitations = agent.invitations()?;
 
@@ -139,14 +148,8 @@ async fn test_invite_to_channel_via_agent() -> Result<(), Box<dyn std::error::Er
 }
 
 #[tokio::test]
-async fn test_invite_to_channel_rejects_invalid_home_id() -> Result<(), Box<dyn std::error::Error>>
-{
-    let authority_id = AuthorityId::new_from_entropy([239u8; 32]);
-    let ctx = test_context(authority_id);
-    let agent = AgentBuilder::new()
-        .with_authority(authority_id)
-        .build_testing_async(&ctx)
-        .await?;
+async fn test_invite_to_channel_rejects_invalid_home_id() -> TestResult {
+    let agent = create_test_agent(239).await?;
     let invitations = agent.invitations()?;
 
     let receiver_id = AuthorityId::new_from_entropy([238u8; 32]);
@@ -162,14 +165,9 @@ async fn test_invite_to_channel_rejects_invalid_home_id() -> Result<(), Box<dyn 
 }
 
 #[tokio::test]
-async fn test_accept_invitation_via_agent() -> Result<(), Box<dyn std::error::Error>> {
+async fn test_accept_invitation_via_agent() -> TestResult {
     // Entropy range: 240-241
-    let authority_id = AuthorityId::new_from_entropy([240u8; 32]);
-    let ctx = test_context(authority_id);
-    let agent = AgentBuilder::new()
-        .with_authority(authority_id)
-        .build_testing_async(&ctx)
-        .await?;
+    let agent = create_test_agent(240).await?;
 
     let invitations = agent.invitations()?;
 
@@ -186,14 +184,9 @@ async fn test_accept_invitation_via_agent() -> Result<(), Box<dyn std::error::Er
 }
 
 #[tokio::test]
-async fn test_decline_invitation_via_agent() -> Result<(), Box<dyn std::error::Error>> {
+async fn test_decline_invitation_via_agent() -> TestResult {
     // Entropy range: 242-243
-    let authority_id = AuthorityId::new_from_entropy([242u8; 32]);
-    let ctx = test_context(authority_id);
-    let agent = AgentBuilder::new()
-        .with_authority(authority_id)
-        .build_testing_async(&ctx)
-        .await?;
+    let agent = create_test_agent(242).await?;
 
     let invitations = agent.invitations()?;
 
@@ -210,14 +203,9 @@ async fn test_decline_invitation_via_agent() -> Result<(), Box<dyn std::error::E
 }
 
 #[tokio::test]
-async fn test_cancel_invitation_via_agent() -> Result<(), Box<dyn std::error::Error>> {
+async fn test_cancel_invitation_via_agent() -> TestResult {
     // Entropy range: 244-245
-    let authority_id = AuthorityId::new_from_entropy([244u8; 32]);
-    let ctx = test_context(authority_id);
-    let agent = AgentBuilder::new()
-        .with_authority(authority_id)
-        .build_testing_async(&ctx)
-        .await?;
+    let agent = create_test_agent(244).await?;
 
     let invitations = agent.invitations()?;
 
@@ -240,14 +228,9 @@ async fn test_cancel_invitation_via_agent() -> Result<(), Box<dyn std::error::Er
 }
 
 #[tokio::test]
-async fn test_list_pending_via_agent() -> Result<(), Box<dyn std::error::Error>> {
+async fn test_list_pending_via_agent() -> TestResult {
     // Entropy range: 246-249
-    let authority_id = AuthorityId::new_from_entropy([246u8; 32]);
-    let ctx = test_context(authority_id);
-    let agent = AgentBuilder::new()
-        .with_authority(authority_id)
-        .build_testing_async(&ctx)
-        .await?;
+    let agent = create_test_agent(246).await?;
 
     let invitations = agent.invitations()?;
 
@@ -281,14 +264,9 @@ async fn test_list_pending_via_agent() -> Result<(), Box<dyn std::error::Error>>
 }
 
 #[tokio::test]
-async fn test_get_invitation_via_agent() -> Result<(), Box<dyn std::error::Error>> {
+async fn test_get_invitation_via_agent() -> TestResult {
     // Entropy range: 250-251
-    let authority_id = AuthorityId::new_from_entropy([250u8; 32]);
-    let ctx = test_context(authority_id);
-    let agent = AgentBuilder::new()
-        .with_authority(authority_id)
-        .build_testing_async(&ctx)
-        .await?;
+    let agent = create_test_agent(250).await?;
 
     let invitations = agent.invitations()?;
 
