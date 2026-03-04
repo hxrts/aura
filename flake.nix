@@ -339,17 +339,6 @@
             wasm-pack
             wasm-bindgen-cli
             trunk
-          ]
-          # Linux-only: patchbay network simulation dependencies
-          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-            iproute2
-            nftables
-            iptables
-            qemu  # For patchbay-vm
-          ]
-          # patchbay-vm binary (Linux only)
-          ++ pkgs.lib.optionals (pkgs.stdenv.isLinux && patchbay-vm != {}) [
-            patchbay-vm
           ];
 
           shellHook = ''
