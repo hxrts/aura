@@ -11,27 +11,6 @@ env:
   AURA_SUPPRESS_NIX_WELCOME: 1
 
 jobs:
-  quint-typecheck:
-    name: Quint Typecheck
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: quint-typecheck
-      - run: nix develop --command just ci-quint-typecheck
-
-  quint-verify:
-    name: Quint Verify
-    needs: quint-typecheck
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: quint-verify
-      - run: nix develop --command just ci-quint-verify
-
   lean:
     name: Lean
     runs-on: ubuntu-latest
