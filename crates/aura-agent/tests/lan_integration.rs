@@ -1,5 +1,6 @@
 //! LAN integration tests (UDP discovery + TCP envelope + sync roundtrip).
 
+use anyhow::anyhow;
 use async_lock::RwLock;
 use aura_agent::{
     AgentBuilder, AgentConfig, AuraAgent, EffectContext, ExecutionMode, RendezvousManagerConfig,
@@ -157,7 +158,7 @@ async fn wait_for_lan_peer(agent: &AuraAgent, peer_id: AuthorityId) -> TestResul
     let rendezvous = agent
         .runtime()
         .rendezvous()
-        .ok_or("rendezvous service not enabled")?;
+        .ok_or_else(|| anyhow!("rendezvous service not enabled"))?;
 
     timeout(Duration::from_secs(15), async {
         loop {
@@ -169,7 +170,7 @@ async fn wait_for_lan_peer(agent: &AuraAgent, peer_id: AuthorityId) -> TestResul
         }
     })
     .await
-    .map_err(|_| "timed out waiting for LAN peer discovery".into())
+    .map_err(|_| anyhow!("timed out waiting for LAN peer discovery"))
 }
 
 async fn wait_for_envelope(
@@ -224,7 +225,7 @@ async fn wait_for_chat_fact(
         }
     })
     .await
-    .map_err(|_| "timed out waiting for committed chat fact".into())
+    .map_err(|_| anyhow!("timed out waiting for committed chat fact"))
 }
 
 async fn wait_for_matching_chat_fact(
@@ -259,7 +260,7 @@ async fn wait_for_matching_chat_fact(
         }
     })
     .await
-    .map_err(|_| "timed out waiting for matching chat fact".into())
+    .map_err(|_| anyhow!("timed out waiting for matching chat fact"))
 }
 
 async fn wait_for_chat_signal_message(
@@ -297,11 +298,10 @@ async fn wait_for_chat_signal_message(
         }
 
         if tokio::time::Instant::now() >= deadline {
-            return Err(format!(
+            return Err(anyhow!(
                 "timed out waiting for chat signal message; expected sender={sender_id} content={expected_content}; observed=[{}]",
                 observed.join(" | ")
-            )
-            .into());
+            ));
         }
 
         sleep(Duration::from_millis(100)).await;
@@ -325,10 +325,9 @@ async fn ensure_chat_signal_message_absent(
             .into_iter()
             .any(|message| message.sender_id == sender_id && message.content == forbidden_content)
         {
-            return Err(format!(
+            return Err(anyhow!(
                 "unexpected message delivery for muted sender: '{forbidden_content}'"
-            )
-            .into());
+            ));
         }
 
         if tokio::time::Instant::now() >= deadline {
@@ -355,7 +354,7 @@ async fn wait_for_contact_signal(app: &Arc<RwLock<AppCore>>, target: AuthorityId
         }
     })
     .await
-    .map_err(|_| "timed out waiting for contact signal".into())
+    .map_err(|_| anyhow!("timed out waiting for contact signal"))
 }
 
 async fn wait_for_channel_signal(app: &Arc<RwLock<AppCore>>, channel_id: ChannelId) -> TestResult {
@@ -374,7 +373,7 @@ async fn wait_for_channel_signal(app: &Arc<RwLock<AppCore>>, channel_id: Channel
         }
     })
     .await
-    .map_err(|_| "timed out waiting for channel in chat signal".into())
+    .map_err(|_| anyhow!("timed out waiting for channel in chat signal"))
 }
 
 async fn accept_pending_channel_invitation(
@@ -471,7 +470,7 @@ async fn setup_lan_group_channel_pair(
         }
     })
     .await
-    .map_err(|_| "timed out waiting for descriptor cache")?;
+    .map_err(|_| anyhow!("timed out waiting for descriptor cache"))?;
 
     wait_for_contact_signal(&app_a, agent_b.authority_id()).await?;
     wait_for_contact_signal(&app_b, agent_a.authority_id()).await?;
@@ -520,7 +519,7 @@ async fn execute_strong_command(
     let snapshot = resolver.capture_snapshot(app).await;
     let resolved = resolver
         .resolve(parsed, &snapshot)
-        .map_err(|error| format!("resolve failed: {error}"))?;
+        .map_err(|error| anyhow!("resolve failed: {error}"))?;
     let channel_hint = channel_id.to_string();
     let plan = resolver
         .plan(
@@ -529,10 +528,10 @@ async fn execute_strong_command(
             Some(channel_hint.as_str()),
             Some(actor),
         )
-        .map_err(|error| format!("plan failed: {error}"))?;
+        .map_err(|error| anyhow!("plan failed: {error}"))?;
     strong_command_workflow::execute_planned(app, plan)
         .await
-        .map_err(|error| format!("execute failed: {error}").into())
+        .map_err(|error| anyhow!("execute failed: {error}"))
 }
 
 #[tokio::test]
@@ -665,7 +664,7 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
         }
     })
     .await
-    .map_err(|_| "timed out waiting for sender-side descriptor cache")?;
+    .map_err(|_| anyhow!("timed out waiting for sender-side descriptor cache"))?;
 
     // Both sides start the same deterministic DM channel.
     let dm_a = messaging_workflow::start_direct_chat(
@@ -676,7 +675,7 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
     .await?;
     let dm_channel_id: aura_core::identifiers::ChannelId = dm_a
         .parse()
-        .map_err(|_| "failed to parse dm channel id from start_direct_chat")?;
+        .map_err(|_| anyhow!("failed to parse dm channel id from start_direct_chat"))?;
 
     // Ensure Bob has received the direct-channel creation fact before messaging.
     let effects_b = agent_b.runtime().effects();
@@ -696,10 +695,14 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
         FactContent::Relational(RelationalFact::Generic { envelope, .. }) => {
             match ChatFact::from_envelope(envelope) {
                 Some(ChatFact::ChannelCreated { context_id, .. }) => context_id,
-                _ => return Err("expected ChannelCreated chat fact".into()),
+                _ => return Err(anyhow!("expected ChannelCreated chat fact")),
             }
         }
-        _ => return Err("expected relational generic fact for channel create".into()),
+        _ => {
+            return Err(anyhow!(
+                "expected relational generic fact for channel create"
+            ))
+        }
     };
 
     // Ensure both sides are explicitly joined before message exchange so moderation
@@ -735,14 +738,14 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
         core.read(&*CHAT_SIGNAL).await.unwrap_or_default()
     };
     let Some(dm_channel_b) = state_b.channel(&dm_channel_id) else {
-        return Err("recipient missing DM channel in CHAT_SIGNAL".into());
+        return Err(anyhow!("recipient missing DM channel in CHAT_SIGNAL"));
     };
     if dm_channel_b.context_id != Some(dm_context_id) {
-        return Err("recipient DM channel context mismatch".into());
+        return Err(anyhow!("recipient DM channel context mismatch"));
     }
     aura_protocol::amp::get_channel_state(&*effects_b, dm_context_id, dm_channel_id)
         .await
-        .map_err(|e| format!("recipient AMP channel state missing before reply: {e}"))?;
+        .map_err(|e| anyhow!("recipient AMP channel state missing before reply: {e}"))?;
 
     // Bob replies on the same channel provisioned by Alice's create flow.
     let reply_text = "lan-e2e-reply";
@@ -752,12 +755,11 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
     if let Err(err) = reply_result {
         let post_send_state =
             aura_protocol::amp::get_channel_state(&*effects_b, dm_context_id, dm_channel_id).await;
-        return Err(format!(
+        return Err(anyhow!(
             "reply send failed; dm_context={dm_context_id} channel={dm_channel_id} \
              post_send_channel_state_present={} err={err}",
             post_send_state.is_ok()
-        )
-        .into());
+        ));
     }
 
     wait_for_matching_chat_fact(&effects_a, agent_a.authority_id(), |fact| {
@@ -817,7 +819,7 @@ async fn test_lan_invitation_dm_message_e2e_without_descriptor_wait() -> TestRes
     .await?;
     let dm_channel_id: aura_core::identifiers::ChannelId = dm_name
         .parse()
-        .map_err(|_| "failed to parse dm channel id from start_direct_chat")?;
+        .map_err(|_| anyhow!("failed to parse dm channel id from start_direct_chat"))?;
 
     let effects_b = agent_b.runtime().effects();
     wait_for_matching_chat_fact(&effects_b, agent_b.authority_id(), |fact| {
@@ -930,9 +932,9 @@ async fn test_lan_strong_command_mute_blocks_cross_instance_delivery_until_unmut
             core.read(&*CONTACTS_SIGNAL).await.unwrap_or_default()
         };
         let Some(contact) = contacts.all_contacts().next() else {
-            return Err(
-                "expected at least one contact for strong-command target resolution".into(),
-            );
+            return Err(anyhow!(
+                "expected at least one contact for strong-command target resolution"
+            ));
         };
         contact.id.to_string()
     };
@@ -1103,9 +1105,15 @@ async fn test_lan_sync_roundtrip() -> TestResult {
     effects_a.persist_journal(&journal).await?;
 
     let peer_device_id = DeviceId::from_uuid(agent_b.authority_id().uuid());
-    let sync_a = agent_a.runtime().sync().ok_or("sync service not enabled")?;
+    let sync_a = agent_a
+        .runtime()
+        .sync()
+        .ok_or_else(|| anyhow!("sync service not enabled"))?;
     let peer_device_id_b = DeviceId::from_uuid(agent_a.authority_id().uuid());
-    let sync_b = agent_b.runtime().sync().ok_or("sync service not enabled")?;
+    let sync_b = agent_b
+        .runtime()
+        .sync()
+        .ok_or_else(|| anyhow!("sync service not enabled"))?;
 
     sync_a.add_peer(peer_device_id).await;
     sync_b.add_peer(peer_device_id_b).await;
@@ -1114,11 +1122,17 @@ async fn test_lan_sync_roundtrip() -> TestResult {
         sync_a.sync_with_peers(&*effects_a, vec![peer_device_id]),
         sync_b.sync_with_peers(&*effects_b, vec![peer_device_id_b]),
     );
-    res_a?;
-    res_b?;
+    res_a.map_err(anyhow::Error::msg)?;
+    res_b.map_err(anyhow::Error::msg)?;
 
-    let health_a = sync_a.health().await.ok_or("missing sync health")?;
-    let health_b = sync_b.health().await.ok_or("missing sync health")?;
+    let health_a = sync_a
+        .health()
+        .await
+        .ok_or_else(|| anyhow!("missing sync health"))?;
+    let health_b = sync_b
+        .health()
+        .await
+        .ok_or_else(|| anyhow!("missing sync health"))?;
     assert!(health_a.last_sync.is_some());
     assert!(health_b.last_sync.is_some());
 

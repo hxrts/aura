@@ -143,7 +143,6 @@ pub struct IoAppProps {
 }
 
 /// Main application with screen navigation
-
 #[allow(clippy::field_reassign_with_default)] // Large struct with many conditional fields
 #[component]
 pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {

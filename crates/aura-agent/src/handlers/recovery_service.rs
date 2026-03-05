@@ -2098,7 +2098,7 @@ mod tests {
         service
             .apply_guardian_handoff_reconfiguration(&completion, &change)
             .await
-            .expect(&format!(
+            .unwrap_or_else(|_| panic!(
                 "guardian handoff reconfiguration failed: authority_id={account_authority}, reconfiguration_type=UpdateGuardian, change_id={}, previous_guardian={previous_guardian}, replacement_guardian={replacement_guardian}",
                 completion.change_id
             ));
@@ -2107,7 +2107,7 @@ mod tests {
         let facts = effects
             .load_committed_facts(account_authority)
             .await
-            .expect(&format!(
+            .unwrap_or_else(|_| panic!(
                 "load committed facts failed: context_id={context_id}, authority_id={account_authority}, expected_fact_types={expected_fact_types}, reason=verify guardian handoff audit facts persisted"
             ));
 
