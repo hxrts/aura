@@ -95,16 +95,14 @@ impl CliTestHarness {
     /// Create a new test harness with default configuration
     ///
     /// This is async because agent construction requires an async runtime context.
-    pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn new() -> anyhow::Result<Self> {
         Self::with_device_id(DeviceId::from_bytes([0u8; 32])).await
     }
 
     /// Create a test harness with a specific device ID
     ///
     /// This is async because agent construction requires an async runtime context.
-    pub async fn with_device_id(
-        device_id: DeviceId,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn with_device_id(device_id: DeviceId) -> anyhow::Result<Self> {
         let authority_id = ids::authority_id(&format!("cli:test-authority:{device_id}"));
         let context_id = ids::context_id(&format!("cli:test-context:{device_id}"));
         let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);

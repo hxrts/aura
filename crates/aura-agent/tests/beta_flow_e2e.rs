@@ -25,7 +25,7 @@ use aura_rendezvous::{
 };
 use std::sync::Arc;
 
-type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+type TestResult<T = ()> = anyhow::Result<T>;
 
 /// Create a test effect context for async tests
 fn test_context(authority_id: AuthorityId) -> EffectContext {

@@ -136,7 +136,7 @@ enum SmokeTestResult {
 ///
 /// # Returns
 /// The parsed scenario or an error
-fn load_scenario<P: AsRef<Path>>(path: P) -> Result<SmokeScenario, Box<dyn std::error::Error>> {
+fn load_scenario<P: AsRef<Path>>(path: P) -> anyhow::Result<SmokeScenario> {
     let content = fs::read_to_string(path.as_ref())?;
     let scenario: SmokeScenario = toml::from_str(&content)?;
     Ok(scenario)
@@ -185,7 +185,7 @@ fn discover_scenarios<P: AsRef<Path>>(dir: P) -> Vec<PathBuf> {
 fn execute_scenario(
     scenario: &SmokeScenario,
     _scenario_path: &Path,
-) -> Result<SmokeTestResult, Box<dyn std::error::Error>> {
+) -> anyhow::Result<SmokeTestResult> {
     // Validate scenario structure without actually running the simulator
     // This smoke test focuses on structural validation only
     if scenario.setup.participants < scenario.setup.threshold {

@@ -3,6 +3,7 @@
 //! This module provides standardized helpers for creating and managing test effect_apis
 //! (CRDT-based account effect_apis) across the Aura test suite.
 
+use anyhow::Result;
 use async_lock::RwLock;
 use aura_core::crypto::Ed25519VerifyingKey;
 use aura_core::hash::hash;
@@ -20,7 +21,7 @@ pub struct AccountEffectApi {
 
 impl AccountEffectApi {
     /// Create a new AccountEffectApi with the given initial state
-    pub fn new(state: AccountState) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(state: AccountState) -> Result<Self> {
         Ok(Self { state })
     }
 
@@ -79,7 +80,7 @@ impl LedgerTestFixture {
     }
 
     /// Get account state from the effect_api
-    pub async fn account_state(&self) -> Result<AccountState, Box<dyn std::error::Error>> {
+    pub async fn account_state(&self) -> Result<AccountState> {
         let effect_api = self.effect_api.read().await;
         Ok(effect_api.state().clone())
     }
@@ -114,7 +115,7 @@ impl LedgerBuilder {
     }
 
     /// Build the effect_api fixture
-    pub async fn build(self) -> Result<LedgerTestFixture, Box<dyn std::error::Error>> {
+    pub async fn build(self) -> Result<LedgerTestFixture> {
         let account_id = self.account_id.unwrap_or_else(|| {
             let hash_input = "effect_api-builder-account";
             let hash_bytes = hash(hash_input.as_bytes());
@@ -149,9 +150,7 @@ pub mod effect_api_helpers {
     }
 
     /// Create a test effect_api for a threshold scenario
-    pub async fn test_effect_api_threshold(
-        _threshold: u16,
-    ) -> Result<LedgerTestFixture, Box<dyn std::error::Error>> {
+    pub async fn test_effect_api_threshold(_threshold: u16) -> Result<LedgerTestFixture> {
         LedgerBuilder::new()
             .with_threshold(_threshold)
             .build()
@@ -170,8 +169,7 @@ pub mod effect_api_helpers {
     }
 
     /// Create a two-effect_api pair
-    pub async fn test_effect_api_pair(
-    ) -> Result<(LedgerTestFixture, LedgerTestFixture), Box<dyn std::error::Error>> {
+    pub async fn test_effect_api_pair() -> Result<(LedgerTestFixture, LedgerTestFixture)> {
         let hash_input = "effect_api-pair";
         let hash_bytes = hash(hash_input.as_bytes());
         let uuid = Uuid::from_bytes(hash_bytes[..16].try_into().unwrap());
@@ -188,8 +186,7 @@ pub mod effect_api_helpers {
 
     /// Create a three-effect_api trio
     pub async fn test_effect_api_trio(
-    ) -> Result<(LedgerTestFixture, LedgerTestFixture, LedgerTestFixture), Box<dyn std::error::Error>>
-    {
+    ) -> Result<(LedgerTestFixture, LedgerTestFixture, LedgerTestFixture)> {
         let hash_input = "effect_api-trio";
         let hash_bytes = hash(hash_input.as_bytes());
         let uuid = Uuid::from_bytes(hash_bytes[..16].try_into().unwrap());
@@ -203,9 +200,7 @@ pub mod effect_api_helpers {
     }
 
     /// Verify effect_api consistency across multiple instances
-    pub async fn verify_effect_api_consistency(
-        effect_apis: &[LedgerTestFixture],
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub async fn verify_effect_api_consistency(effect_apis: &[LedgerTestFixture]) -> Result<bool> {
         if effect_apis.is_empty() {
             return Ok(true);
         }

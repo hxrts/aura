@@ -28,7 +28,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
 
-type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+type TestResult<T = ()> = anyhow::Result<T>;
 
 static NEXT_LAN_PORT: AtomicU16 = AtomicU16::new(22000);
 static LAN_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());

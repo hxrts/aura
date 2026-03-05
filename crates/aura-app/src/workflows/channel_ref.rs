@@ -25,9 +25,6 @@ impl ChannelRef {
     }
 
     #[cfg_attr(not(feature = "signals"), allow(dead_code))]
-    #[allow(dead_code)]
-    #[allow(dead_code)]
-    #[allow(dead_code)]
     pub fn to_channel_id(&self) -> ChannelId {
         match self {
             ChannelRef::Id(id) => *id,
