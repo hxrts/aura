@@ -256,6 +256,7 @@
 
           shellHook = ''
             export AURA_SUPPRESS_NIX_WELCOME=1
+            export CARGO_TARGET_DIR="target"
             if [ -z "$AURA_SUPPRESS_NIX_WELCOME" ]; then
               echo "Aura Development Environment"
               echo "============================"
@@ -345,6 +346,7 @@
             export RUST_BACKTRACE=1
             export RUST_LOG=info
             export MACOSX_DEPLOYMENT_TARGET=11.0
+            export CARGO_TARGET_DIR="target"
             export AURA_PATH="$PWD"
           '';
         };
@@ -401,6 +403,7 @@
             export RUST_BACKTRACE=1
             export RUST_LOG=info
             export MACOSX_DEPLOYMENT_TARGET=11.0
+            export CARGO_TARGET_DIR="target"
 
             # Custom PS1 prompt (nightly variant)
             # Colors: darkgrey=user@host, purple=path, greenish-yellow=branch, orange=[nix-nightly] >
