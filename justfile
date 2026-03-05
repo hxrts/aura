@@ -259,12 +259,26 @@ ci-harness-browser:
       fi
     }
     trap cleanup EXIT
-    for _ in $(seq 1 90); do
+    web_ready=0
+    for _ in $(seq 1 300); do
+      if [ -f artifacts/harness/browser/web-serve.pid ]; then
+        if ! kill -0 "$(cat artifacts/harness/browser/web-serve.pid)" 2>/dev/null; then
+          echo "trunk serve exited before becoming reachable"
+          tail -n 200 artifacts/harness/browser/web-serve.log || true
+          exit 1
+        fi
+      fi
       if curl -fsS "http://127.0.0.1:4173/" >/dev/null 2>&1; then
+        web_ready=1
         break
       fi
       sleep 1
     done
+    if [ "$web_ready" -ne 1 ]; then
+      echo "timed out waiting for trunk serve at http://127.0.0.1:4173/"
+      tail -n 200 artifacts/harness/browser/web-serve.log || true
+      exit 1
+    fi
     cargo run -p aura-harness --bin aura-harness -- run \
       --config configs/harness/browser-loopback.toml \
       --scenario scenarios/harness/local-discovery-smoke.toml \
