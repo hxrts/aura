@@ -20,8 +20,7 @@ use aura_app::ui::workflows::context::default_relational_context;
 use aura_chat::ChatFact;
 use aura_core::effects::{
     AmpChannelEffects, ChannelCreateParams, ChannelJoinParams, ChannelSendParams, ExecutionMode,
-    PhysicalTimeEffects,
-    TimeEffects, TransportEffects,
+    PhysicalTimeEffects, TimeEffects, TransportEffects,
 };
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
@@ -33,8 +32,8 @@ use aura_journal::fact::{
 };
 use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
-use aura_relational::ContactFact;
 use aura_recovery::guardian_ceremony::{CeremonyProposal, CeremonyResponse, CeremonyResponseMsg};
+use aura_relational::ContactFact;
 use serde::Serialize;
 
 use crate::error::TerminalResult;
@@ -259,8 +258,7 @@ impl DemoSimulator {
 
         for peer_name in ALICE_CONTACT_EXCHANGE_NAMES {
             if let Some(peer) = self.social_peer_by_name(peer_name) {
-                match establish_contact_exchange("Alice", &self.alice, peer_name, &peer.agent)
-                    .await
+                match establish_contact_exchange("Alice", &self.alice, peer_name, &peer.agent).await
                 {
                     Ok(()) => {
                         exchange_count += 1;
@@ -276,8 +274,7 @@ impl DemoSimulator {
 
         for peer_name in CAROL_CONTACT_EXCHANGE_NAMES {
             if let Some(peer) = self.social_peer_by_name(peer_name) {
-                match establish_contact_exchange("Carol", &self.carol, peer_name, &peer.agent)
-                    .await
+                match establish_contact_exchange("Carol", &self.carol, peer_name, &peer.agent).await
                 {
                     Ok(()) => {
                         exchange_count += 1;
@@ -451,7 +448,8 @@ async fn establish_contact_exchange(
         .as_runtime_bridge()
         .commit_relational_facts(&[left_contact])
         .await?;
-    right.clone()
+    right
+        .clone()
         .as_runtime_bridge()
         .commit_relational_facts(&[right_contact])
         .await?;
@@ -805,11 +803,7 @@ async fn process_peer_transport_messages(
                     };
 
                     observed_messages.push(PeerObservedMessage {
-                        message_id: format!(
-                            "amp:{}:{}",
-                            context,
-                            message.header.channel
-                        ),
+                        message_id: format!("amp:{}:{}", context, message.header.channel),
                         context,
                         channel: message.header.channel,
                     });

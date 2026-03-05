@@ -8,8 +8,8 @@
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::ui::signals::{HOMES_SIGNAL, NEIGHBORHOOD_SIGNAL, NEIGHBORHOOD_SIGNAL_NAME};
 use aura_app::ui::prelude::*;
+use aura_app::ui::signals::{HOMES_SIGNAL, NEIGHBORHOOD_SIGNAL, NEIGHBORHOOD_SIGNAL_NAME};
 use aura_app::ui::types::{NeighborHome, OneHopLinkType};
 use aura_app::ui::workflows::demo_config::DEMO_SEED_2024;
 use aura_app::ui::workflows::signals::{emit_signal, read_signal_or_default};
