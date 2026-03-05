@@ -9,6 +9,7 @@ use aura_core::types::Epoch;
 use aura_core::{AuraError, AuraResult, AuthorityId, Hash32};
 use aura_sync::protocols::{EpochConfirmation, OTAConfig, UpgradeKind, UpgradeProposal};
 use aura_testkit::simulation::network::NetworkCondition;
+use aura_testkit::test_utils::wrap_test_error;
 use std::time::Duration;
 use tokio::time::timeout;
 use uuid::Uuid;
@@ -95,11 +96,11 @@ async fn test_basic_ota_coordination() -> AuraResult<()> {
     let ended = session
         .end()
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(120))
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
 
     Ok(())
 }
@@ -171,7 +172,7 @@ async fn test_ota_insufficient_approvals() -> AuraResult<()> {
     let ended = session
         .end()
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
     let session_completion = timeout(
         Duration::from_secs(30),
         ended.wait_for_completion(Duration::from_secs(90)),
@@ -262,11 +263,11 @@ async fn test_ota_epoch_fencing() -> AuraResult<()> {
     let ended = session
         .end()
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(90))
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
 
     Ok(())
 }
@@ -328,11 +329,11 @@ async fn test_ota_rollback() -> AuraResult<()> {
     let ended = session
         .end()
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(120))
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
 
     Ok(())
 }
@@ -396,11 +397,11 @@ async fn test_ota_network_partition() -> AuraResult<()> {
     let ended = session
         .end()
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(150))
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
 
     Ok(())
 }
@@ -469,11 +470,11 @@ async fn test_concurrent_ota_attempts() -> AuraResult<()> {
     let ended = session
         .end()
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(120))
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
 
     Ok(())
 }
@@ -591,11 +592,11 @@ async fn test_ota_device_failures() -> AuraResult<()> {
     let ended = session
         .end()
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(150))
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
 
     Ok(())
 }

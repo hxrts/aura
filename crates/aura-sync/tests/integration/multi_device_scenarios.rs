@@ -7,6 +7,7 @@ use super::test_utils::*;
 use aura_core::types::Epoch;
 use aura_core::{AuraError, AuraResult};
 use aura_testkit::simulation::network::NetworkCondition;
+use aura_testkit::test_utils::wrap_test_error;
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -88,11 +89,11 @@ async fn test_complete_partition_healing_recovery() -> AuraResult<()> {
     let ended = session
         .end()
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(360))
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
 
     // Verify final consistency across all devices
     let consistency = verify_journal_consistency(&fixture).await?;
@@ -185,11 +186,11 @@ async fn test_multi_protocol_coordination() -> AuraResult<()> {
     let ended = session
         .end()
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(300))
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
 
     // Verify system is in a good state after multi-protocol operations
     let consistency = verify_journal_consistency(&fixture).await?;
@@ -270,11 +271,11 @@ async fn test_large_scale_device_coordination() -> AuraResult<()> {
     let ended = session
         .end()
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(420))
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
 
     let consistency = verify_journal_consistency(&fixture).await?;
     assert!(
@@ -427,11 +428,11 @@ async fn test_concurrent_failure_recovery() -> AuraResult<()> {
     let ended = session
         .end()
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(360))
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
 
     let consistency = verify_journal_consistency(&fixture).await?;
     assert!(
@@ -577,11 +578,11 @@ async fn test_complete_end_to_end_workflow() -> AuraResult<()> {
     let ended = session
         .end()
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(480))
         .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+        .map_err(wrap_test_error)?;
 
     let consistency = verify_journal_consistency(&fixture).await?;
     assert!(

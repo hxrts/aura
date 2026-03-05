@@ -131,6 +131,7 @@ pub mod protocol_validation;
 pub mod replay; // Effect trace replay helpers for native parity/debug tooling
 pub mod simulation;
 pub mod stateful_effects;
+pub mod test_utils;
 pub mod time;
 pub mod verification;
 
