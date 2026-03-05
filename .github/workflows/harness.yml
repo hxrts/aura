@@ -52,7 +52,10 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: harness-browser
+      # Nix-provided ldd can mis-detect Ubuntu host libs for Playwright browsers in CI.
       - run: nix develop --command just ci-harness-browser
+        env:
+          PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS: "1"
       - name: Upload browser harness artifacts
         if: always()
         uses: actions/upload-artifact@v4
