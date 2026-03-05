@@ -25,9 +25,9 @@
 //! ```
 
 use super::lean_types::{
-    LeanComparePolicy, LeanCompareTimeStamp, LeanFlowChargeInput, LeanFlowChargeResult,
-    LeanJournal, LeanJournalMergeResult, LeanJournalReduceResult, LeanNamespace,
-    LeanTimestampCompareInput, LeanTimestampCompareResult, LeanTimestampOrdering,
+    LeanFlowChargeInput, LeanFlowChargeResult, LeanJournal, LeanJournalMergeResult,
+    LeanJournalReduceResult, LeanNamespace, LeanTimestampCompareInput,
+    LeanTimestampCompareResult, LeanTimestampOrdering,
 };
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -61,137 +61,6 @@ pub enum LeanOracleError {
 pub struct OracleVersion {
     pub version: String,
     pub modules: Vec<String>,
-}
-
-/// Deprecated legacy input shape.
-///
-/// Prefer `LeanJournal` + `verify_journal_merge`.
-/// Journal merge input
-#[derive(Debug, Clone, Serialize)]
-pub struct JournalMergeInput {
-    pub journal1: Vec<Fact>,
-    pub journal2: Vec<Fact>,
-}
-
-/// Deprecated legacy result shape.
-///
-/// Prefer `LeanJournalMergeResult`.
-/// Journal merge result
-#[derive(Debug, Clone, Deserialize)]
-pub struct JournalMergeResult {
-    pub result: Vec<Fact>,
-    pub count: usize,
-}
-
-/// Deprecated legacy input shape.
-///
-/// Prefer `LeanJournal` + `verify_journal_reduce`.
-/// Journal reduce input
-#[derive(Debug, Clone, Serialize)]
-pub struct JournalReduceInput {
-    pub journal: Vec<Fact>,
-}
-
-/// Deprecated legacy result shape.
-///
-/// Prefer `LeanJournalReduceResult`.
-/// Journal reduce result
-#[derive(Debug, Clone, Deserialize)]
-pub struct JournalReduceResult {
-    pub result: Vec<Fact>,
-    pub count: usize,
-}
-
-/// Deprecated legacy fact shape.
-///
-/// Prefer `LeanFact`.
-/// A fact in the journal (matching Lean model)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Fact {
-    pub id: u64,
-}
-
-/// Deprecated legacy input shape.
-///
-/// Prefer `LeanFlowChargeInput`.
-/// Flow charge input
-#[derive(Debug, Clone, Serialize)]
-pub struct FlowChargeInput {
-    pub budget: u64,
-    pub cost: u64,
-}
-
-/// Deprecated legacy result shape.
-///
-/// Prefer `LeanFlowChargeResult`.
-/// Flow charge result
-#[derive(Debug, Clone, Deserialize)]
-pub struct FlowChargeResult {
-    pub success: bool,
-    pub remaining: Option<u64>,
-}
-
-/// Deprecated legacy input shape.
-///
-/// Prefer `LeanTimestampCompareInput`.
-/// Timestamp comparison input
-#[derive(Debug, Clone, Serialize)]
-pub struct TimestampCompareInput {
-    pub policy: ComparePolicy,
-    pub a: TimeStamp,
-    pub b: TimeStamp,
-}
-
-/// Deprecated legacy policy shape.
-///
-/// Prefer `LeanComparePolicy`.
-/// Comparison policy
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ComparePolicy {
-    pub ignore_physical: bool,
-}
-
-/// Deprecated legacy timestamp shape.
-///
-/// Prefer `LeanCompareTimeStamp`.
-/// Timestamp structure matching Lean model
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TimeStamp {
-    pub logical: u64,
-    pub order_clock: u64,
-}
-
-/// Deprecated legacy result shape.
-///
-/// Prefer `LeanTimestampCompareResult`.
-/// Timestamp comparison result
-#[derive(Debug, Clone, Deserialize)]
-pub struct TimestampCompareResult {
-    pub ordering: String,
-}
-
-/// Deprecated legacy ordering enum.
-///
-/// Prefer `LeanTimestampOrdering`.
-/// Ordering result enum
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Ordering {
-    Lt,
-    Eq,
-    Gt,
-}
-
-impl From<&str> for Ordering {
-    fn from(s: &str) -> Self {
-        match s {
-            "lt" => Ordering::Lt,
-            "eq" => Ordering::Eq,
-            "gt" => Ordering::Gt,
-            _ => panic!("Unknown ordering: {}", s),
-        }
-    }
 }
 
 // ============================================================================
@@ -290,66 +159,6 @@ impl LeanOracle {
             });
         }
         Ok(())
-    }
-
-    /// Verify journal merge operation
-    ///
-    /// Runs the Lean model's merge function and returns the result.
-    pub fn verify_merge(
-        &self,
-        journal1: Vec<Fact>,
-        journal2: Vec<Fact>,
-    ) -> LeanOracleResult<JournalMergeResult> {
-        let input = JournalMergeInput { journal1, journal2 };
-        let input_json = serde_json::to_string(&input)?;
-        let output = self.run_command("journal-merge", &input_json)?;
-        self.parse_output(&output)
-    }
-
-    /// Verify journal reduce operation
-    ///
-    /// Runs the Lean model's reduce function and returns the result.
-    pub fn verify_reduce(&self, journal: Vec<Fact>) -> LeanOracleResult<JournalReduceResult> {
-        let input = JournalReduceInput { journal };
-        let input_json = serde_json::to_string(&input)?;
-        let output = self.run_command("journal-reduce", &input_json)?;
-        self.parse_output(&output)
-    }
-
-    /// Verify flow budget charge operation
-    ///
-    /// Runs the Lean model's charge function and returns the result.
-    pub fn verify_charge(&self, budget: u64, cost: u64) -> LeanOracleResult<FlowChargeResult> {
-        let input = LeanFlowChargeInput { budget, cost };
-        let result = self.verify_flow_charge(&input)?;
-        Ok(FlowChargeResult {
-            success: result.success,
-            remaining: result.remaining,
-        })
-    }
-
-    /// Verify timestamp comparison
-    ///
-    /// Runs the Lean model's compare function and returns the ordering.
-    pub fn verify_compare(
-        &self,
-        policy: ComparePolicy,
-        a: TimeStamp,
-        b: TimeStamp,
-    ) -> LeanOracleResult<Ordering> {
-        let input = LeanTimestampCompareInput {
-            policy: LeanComparePolicy {
-                ignore_physical: policy.ignore_physical,
-            },
-            a: LeanCompareTimeStamp::new(a.logical, a.order_clock),
-            b: LeanCompareTimeStamp::new(b.logical, b.order_clock),
-        };
-        let result = self.verify_timestamp_compare(&input)?;
-        Ok(match result {
-            LeanTimestampOrdering::Lt => Ordering::Lt,
-            LeanTimestampOrdering::Eq => Ordering::Eq,
-            LeanTimestampOrdering::Gt => Ordering::Gt,
-        })
     }
 
     /// Verify flow budget charge operation using canonical typed payloads.
@@ -481,6 +290,7 @@ impl Default for LeanOracle {
 mod tests {
     use super::*;
     use crate::verification::lean_types::ByteArray32;
+    use crate::verification::lean_types::{LeanComparePolicy, LeanCompareTimeStamp};
 
     // These tests require the Lean verifier to be built
     // Run `just lean-oracle-build` first

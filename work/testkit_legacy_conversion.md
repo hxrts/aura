@@ -205,25 +205,37 @@ Refactor all `aura-testkit` verification call sites to use the new full-fidelity
 
 ### Tasks
 
-- [ ] Delete legacy type definitions and legacy-only methods from `lean_oracle.rs`.
-- [ ] Remove legacy re-exports from `verification/mod.rs`.
-- [ ] Remove compatibility comments referring to retained legacy support.
-- [ ] Simplify module/docs to a single canonical type surface.
+- [x] Delete legacy type definitions and legacy-only methods from `lean_oracle.rs`.
+- [x] Remove legacy re-exports from `verification/mod.rs`.
+- [x] Remove compatibility comments referring to retained legacy support.
+- [x] Simplify module/docs to a single canonical type surface.
 
 ### Success Criteria
 
-- [ ] Legacy verification symbols no longer exist in code.
-- [ ] Public API exports only full-fidelity types.
-- [ ] `cargo doc`/rustdoc comments no longer claim legacy compatibility.
+- [x] Legacy verification symbols no longer exist in code.
+- [x] Public API exports only full-fidelity types.
+- [x] `cargo doc`/rustdoc comments no longer claim legacy compatibility.
 
 ### Verify + Commit Gate
 
-- [ ] Run:
+- [x] Run:
   - `nix develop --command cargo check -p aura-testkit --all-features`
   - `nix develop --command cargo test -p aura-testkit --all-features`
   - `nix develop --command just check-arch`
 - [ ] Commit:
   - Suggested commit: `testkit: remove legacy verification types and re-exports`
+
+### Phase 4 Notes
+
+- Removed legacy Lean oracle API surface:
+  - deleted legacy types (`Fact`, `ComparePolicy`, `TimeStamp`, `Ordering`, and legacy input/result payloads)
+  - deleted legacy adapter methods (`verify_merge`, `verify_reduce`, `verify_charge`, `verify_compare`)
+- `verification/mod.rs` now re-exports only canonical Lean oracle and full-fidelity Lean types.
+- `cargo check/test -p aura-testkit --all-features` passed.
+- `just check-arch` reports existing unrelated workspace violations in:
+  - `crates/aura-ui/src/clipboard.rs`
+  - `crates/aura-ui/src/model.rs`
+  - `crates/aura-harness/src/backend/playwright_browser.rs` (2 findings)
 
 ---
 

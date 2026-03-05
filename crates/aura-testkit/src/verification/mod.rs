@@ -33,12 +33,7 @@ pub use capability_soundness::{
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "lean")] {
-        // Legacy types (backward compatibility)
-        pub use lean_oracle::{
-            ComparePolicy, Fact, FlowChargeInput, FlowChargeResult, JournalMergeInput, JournalMergeResult,
-            JournalReduceInput, JournalReduceResult, LeanOracle, LeanOracleError, LeanOracleResult,
-            OracleVersion, Ordering, TimeStamp, TimestampCompareInput, TimestampCompareResult,
-        };
+        pub use lean_oracle::{LeanOracle, LeanOracleError, LeanOracleResult, OracleVersion};
 
         // Full-fidelity types (v0.4.0+)
         pub use lean_types::{
