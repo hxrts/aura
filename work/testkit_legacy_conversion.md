@@ -114,7 +114,7 @@ Refactor all `aura-testkit` verification call sites to use the new full-fidelity
   - `nix develop --command cargo test -p aura-testkit --lib`
   - `nix develop --command cargo test -p aura-testkit --features lean --lib`
   - `nix develop --command cargo test -p aura-testkit --test lean_differential --features lean -- --ignored`
-- [ ] Commit:
+- [x] Commit:
   - Suggested commit: `testkit: add new typed verification APIs and deprecate legacy surface`
 
 ### Phase 1 Notes
@@ -136,23 +136,35 @@ Refactor all `aura-testkit` verification call sites to use the new full-fidelity
 
 ### Tasks
 
-- [ ] Update `crates/aura-testkit/tests/lean_differential.rs` to remove legacy type usage.
-- [ ] Rewrite helper strategies using `LeanFact`, `LeanTimeStamp`, `LeanJournal`, etc.
-- [ ] Update any remaining internal references to legacy compare/merge/reduce structures.
-- [ ] Remove dead helper code that exists only for legacy paths.
+- [x] Update `crates/aura-testkit/tests/lean_differential.rs` to remove legacy type usage.
+- [x] Rewrite helper strategies using `LeanFact`, `LeanTimeStamp`, `LeanJournal`, etc.
+- [x] Update any remaining internal references to legacy compare/merge/reduce structures.
+- [x] Remove dead helper code that exists only for legacy paths.
 
 ### Success Criteria
 
-- [ ] `aura-testkit` internal code and tests compile without importing legacy verification symbols.
-- [ ] Differential tests validate the same semantics via new types.
+- [x] `aura-testkit` internal code and tests compile without importing legacy verification symbols.
+- [x] Differential tests validate the same semantics via new types.
 
 ### Verify + Commit Gate
 
-- [ ] Run:
+- [x] Run:
   - `nix develop --command cargo test -p aura-testkit --features lean --test lean_differential`
   - `nix develop --command cargo test -p aura-testkit --features lean`
 - [ ] Commit:
   - Suggested commit: `testkit: migrate internal verification tests to full-fidelity Lean types`
+
+### Phase 2 Notes
+
+- `lean_differential` imports now use only canonical typed verification symbols:
+  `LeanComparePolicy`, `LeanCompareTimeStamp`, `LeanFlowChargeInput`,
+  `LeanTimestampCompareInput`, and `LeanTimestampOrdering`.
+- Differential compare/flow tests and proptests were migrated from
+  `verify_compare`/`verify_charge` to `verify_timestamp_compare`/`verify_flow_charge`.
+- Legacy helper strategy/code paths (`legacy_*`, `rust_journal_merge`,
+  `normalize_legacy_journal`) were removed.
+- `lean_oracle` test `test_journal_merge` now exercises structured merge
+  (`verify_journal_merge`) and uses `LeanJournal::empty` with explicit namespace.
 
 ---
 

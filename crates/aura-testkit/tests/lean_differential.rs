@@ -21,12 +21,11 @@
 
 #![cfg(feature = "lean")]
 
-use aura_testkit::verification::lean_oracle::{
-    ComparePolicy, Fact, LeanOracle, LeanOracleError, LeanOracleResult, Ordering, TimeStamp,
-};
+use aura_testkit::verification::lean_oracle::{LeanOracle, LeanOracleError, LeanOracleResult};
 use aura_testkit::verification::lean_types::{
-    ByteArray32, LeanFact, LeanFactContent, LeanJournal, LeanNamespace, LeanTimeStamp, OrderTime,
-    SnapshotFact,
+    ByteArray32, LeanComparePolicy, LeanCompareTimeStamp, LeanFact, LeanFactContent,
+    LeanFlowChargeInput, LeanJournal, LeanNamespace, LeanTimeStamp, LeanTimestampCompareInput,
+    LeanTimestampOrdering, OrderTime, SnapshotFact,
 };
 use aura_testkit::verification::proptest_journal::{
     fixed_namespace, minimal_journal, order_time_strategy, same_namespace_journals_strategy,
@@ -34,34 +33,10 @@ use aura_testkit::verification::proptest_journal::{
 };
 use proptest::prelude::*;
 
-// ============================================================================
-// Legacy Types (backward compatibility)
-// ============================================================================
-
-/// Strategy for generating random facts (legacy format)
-#[allow(dead_code)]
-fn legacy_fact_strategy() -> impl Strategy<Value = Fact> {
-    (0u64..1000).prop_map(|id| Fact { id })
-}
-
-/// Strategy for generating random journals (Vec<Fact>) (legacy format)
-#[allow(dead_code)]
-fn legacy_journal_strategy() -> impl Strategy<Value = Vec<Fact>> {
-    prop::collection::vec(legacy_fact_strategy(), 0..20)
-}
-
-/// Strategy for generating random timestamps (legacy format)
-fn legacy_timestamp_strategy() -> impl Strategy<Value = TimeStamp> {
-    (0u64..1000, 0u64..1000).prop_map(|(logical, order_clock)| TimeStamp {
-        logical,
-        order_clock,
-    })
-}
-
-/// Strategy for generating comparison policies
-#[allow(dead_code)]
-fn policy_strategy() -> impl Strategy<Value = ComparePolicy> {
-    prop::bool::ANY.prop_map(|ignore_physical| ComparePolicy { ignore_physical })
+/// Strategy for generating compare timestamps for the Lean oracle compare command.
+fn compare_timestamp_strategy() -> impl Strategy<Value = LeanCompareTimeStamp> {
+    (0u64..1000, 0u64..1000)
+        .prop_map(|(logical, order_clock)| LeanCompareTimeStamp::new(logical, order_clock))
 }
 
 // ============================================================================
@@ -326,31 +301,6 @@ fn test_all_timestamp_variants() -> LeanOracleResult<()> {
 }
 
 // ============================================================================
-// Legacy Journal Merge Tests
-// ============================================================================
-
-/// Rust implementation of journal merge (set union with dedup)
-#[allow(dead_code)]
-fn rust_journal_merge(j1: &[Fact], j2: &[Fact]) -> Vec<Fact> {
-    let mut result: Vec<Fact> = j1.iter().chain(j2.iter()).cloned().collect();
-    result.sort_by_key(|f| f.id);
-    result.dedup_by_key(|f| f.id);
-    result
-}
-
-/// Normalize a journal to set semantics (sort and dedup) for comparison
-#[allow(dead_code)]
-fn normalize_legacy_journal(facts: &[Fact]) -> Vec<u64> {
-    let mut ids: Vec<u64> = facts.iter().map(|f| f.id).collect();
-    ids.sort();
-    ids.dedup();
-    ids
-}
-
-// test_legacy_merge_commutative removed: Uses old Fact type no longer supported by Lean.
-// Commutativity is now tested by prop_full_journal_merge_commutative and test_full_journal_merge_same_namespace.
-
-// ============================================================================
 // Flow Budget Tests
 // ============================================================================
 
@@ -379,7 +329,7 @@ fn test_flow_charge_matches_rust() -> LeanOracleResult<()> {
     ];
 
     for (budget, cost) in test_cases {
-        let lean_result = oracle.verify_charge(budget, cost)?;
+        let lean_result = oracle.verify_flow_charge(&LeanFlowChargeInput { budget, cost })?;
         let rust_result = rust_flow_charge(budget, cost);
 
         match (lean_result.success, rust_result) {
@@ -416,21 +366,25 @@ fn test_flow_charge_matches_rust() -> LeanOracleResult<()> {
 // ============================================================================
 
 /// Rust implementation of timestamp comparison
-fn rust_timestamp_compare(policy: &ComparePolicy, a: &TimeStamp, b: &TimeStamp) -> Ordering {
+fn rust_timestamp_compare(
+    policy: &LeanComparePolicy,
+    a: &LeanCompareTimeStamp,
+    b: &LeanCompareTimeStamp,
+) -> LeanTimestampOrdering {
     if policy.ignore_physical {
         match a.logical.cmp(&b.logical) {
-            std::cmp::Ordering::Less => Ordering::Lt,
-            std::cmp::Ordering::Equal => Ordering::Eq,
-            std::cmp::Ordering::Greater => Ordering::Gt,
+            std::cmp::Ordering::Less => LeanTimestampOrdering::Lt,
+            std::cmp::Ordering::Equal => LeanTimestampOrdering::Eq,
+            std::cmp::Ordering::Greater => LeanTimestampOrdering::Gt,
         }
     } else {
         match a.logical.cmp(&b.logical) {
-            std::cmp::Ordering::Less => Ordering::Lt,
-            std::cmp::Ordering::Greater => Ordering::Gt,
+            std::cmp::Ordering::Less => LeanTimestampOrdering::Lt,
+            std::cmp::Ordering::Greater => LeanTimestampOrdering::Gt,
             std::cmp::Ordering::Equal => match a.order_clock.cmp(&b.order_clock) {
-                std::cmp::Ordering::Less => Ordering::Lt,
-                std::cmp::Ordering::Equal => Ordering::Eq,
-                std::cmp::Ordering::Greater => Ordering::Gt,
+                std::cmp::Ordering::Less => LeanTimestampOrdering::Lt,
+                std::cmp::Ordering::Equal => LeanTimestampOrdering::Eq,
+                std::cmp::Ordering::Greater => LeanTimestampOrdering::Gt,
             },
         }
     }
@@ -443,30 +397,25 @@ fn test_compare_reflexive() -> LeanOracleResult<()> {
     let oracle = LeanOracle::new()?;
 
     let timestamps = vec![
-        TimeStamp {
-            logical: 0,
-            order_clock: 0,
-        },
-        TimeStamp {
-            logical: 10,
-            order_clock: 5,
-        },
-        TimeStamp {
-            logical: 100,
-            order_clock: 200,
-        },
+        LeanCompareTimeStamp::new(0, 0),
+        LeanCompareTimeStamp::new(10, 5),
+        LeanCompareTimeStamp::new(100, 200),
     ];
 
     for policy_ignore in [true, false] {
-        let policy = ComparePolicy {
+        let policy = LeanComparePolicy {
             ignore_physical: policy_ignore,
         };
 
         for t in &timestamps {
-            let result = oracle.verify_compare(policy.clone(), t.clone(), t.clone())?;
+            let result = oracle.verify_timestamp_compare(&LeanTimestampCompareInput {
+                policy: policy.clone(),
+                a: t.clone(),
+                b: t.clone(),
+            })?;
             assert_eq!(
                 result,
-                Ordering::Eq,
+                LeanTimestampOrdering::Eq,
                 "Compare should be reflexive for {:?} with policy ignore_physical={}",
                 t,
                 policy_ignore
@@ -486,43 +435,29 @@ fn test_compare_matches_rust() -> LeanOracleResult<()> {
     let test_cases = vec![
         (
             true,
-            TimeStamp {
-                logical: 5,
-                order_clock: 100,
-            },
-            TimeStamp {
-                logical: 10,
-                order_clock: 50,
-            },
+            LeanCompareTimeStamp::new(5, 100),
+            LeanCompareTimeStamp::new(10, 50),
         ),
         (
             true,
-            TimeStamp {
-                logical: 10,
-                order_clock: 100,
-            },
-            TimeStamp {
-                logical: 10,
-                order_clock: 50,
-            },
+            LeanCompareTimeStamp::new(10, 100),
+            LeanCompareTimeStamp::new(10, 50),
         ),
         (
             false,
-            TimeStamp {
-                logical: 10,
-                order_clock: 100,
-            },
-            TimeStamp {
-                logical: 10,
-                order_clock: 50,
-            },
+            LeanCompareTimeStamp::new(10, 100),
+            LeanCompareTimeStamp::new(10, 50),
         ),
     ];
 
     for (ignore_physical, a, b) in test_cases {
-        let policy = ComparePolicy { ignore_physical };
+        let policy = LeanComparePolicy { ignore_physical };
 
-        let lean_result = oracle.verify_compare(policy.clone(), a.clone(), b.clone())?;
+        let lean_result = oracle.verify_timestamp_compare(&LeanTimestampCompareInput {
+            policy: policy.clone(),
+            a: a.clone(),
+            b: b.clone(),
+        })?;
         let rust_result = rust_timestamp_compare(&policy, &a, &b);
 
         assert_eq!(
@@ -545,7 +480,7 @@ proptest! {
     #[ignore = "requires Lean oracle - run with just test-differential"]
     fn prop_flow_charge_agreement(budget in 0u64..1000, cost in 0u64..1000) {
         if let Ok(oracle) = LeanOracle::new() {
-            if let Ok(lean_result) = oracle.verify_charge(budget, cost) {
+            if let Ok(lean_result) = oracle.verify_flow_charge(&LeanFlowChargeInput { budget, cost }) {
                 let rust_result = rust_flow_charge(budget, cost);
 
                 match (lean_result.success, rust_result) {
@@ -566,11 +501,15 @@ proptest! {
     /// Property test: Timestamp comparison is reflexive
     #[test]
     #[ignore = "requires Lean oracle - run with just test-differential"]
-    fn prop_compare_reflexive(ts in legacy_timestamp_strategy(), ignore_physical in prop::bool::ANY) {
+    fn prop_compare_reflexive(ts in compare_timestamp_strategy(), ignore_physical in prop::bool::ANY) {
         if let Ok(oracle) = LeanOracle::new() {
-            let policy = ComparePolicy { ignore_physical };
-            if let Ok(result) = oracle.verify_compare(policy, ts.clone(), ts) {
-                prop_assert_eq!(result, Ordering::Eq);
+            let policy = LeanComparePolicy { ignore_physical };
+            if let Ok(result) = oracle.verify_timestamp_compare(&LeanTimestampCompareInput {
+                policy,
+                a: ts.clone(),
+                b: ts,
+            }) {
+                prop_assert_eq!(result, LeanTimestampOrdering::Eq);
             }
         }
     }

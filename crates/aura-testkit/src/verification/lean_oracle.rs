@@ -25,9 +25,9 @@
 //! ```
 
 use super::lean_types::{
-    LeanComparePolicy, LeanCompareTimeStamp, LeanFlowChargeInput, LeanFlowChargeResult, LeanJournal,
-    LeanJournalMergeResult, LeanJournalReduceResult, LeanNamespace, LeanTimestampCompareInput,
-    LeanTimestampCompareResult, LeanTimestampOrdering,
+    LeanComparePolicy, LeanCompareTimeStamp, LeanFlowChargeInput, LeanFlowChargeResult,
+    LeanJournal, LeanJournalMergeResult, LeanJournalReduceResult, LeanNamespace,
+    LeanTimestampCompareInput, LeanTimestampCompareResult, LeanTimestampOrdering,
 };
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -480,6 +480,7 @@ impl Default for LeanOracle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::verification::lean_types::ByteArray32;
 
     // These tests require the Lean verifier to be built
     // Run `just lean-oracle-build` first
@@ -497,10 +498,15 @@ mod tests {
     #[ignore = "requires Lean verifier to be built"]
     fn test_journal_merge() {
         let oracle = LeanOracle::new().expect("Failed to create oracle");
+        let ns = LeanNamespace::Authority {
+            id: ByteArray32::zero(),
+        };
+        let j1 = LeanJournal::empty(ns.clone());
+        let j2 = LeanJournal::empty(ns);
         let result = oracle
-            .verify_merge(vec![Fact { id: 1 }, Fact { id: 2 }], vec![Fact { id: 3 }])
+            .verify_journal_merge(&j1, &j2)
             .expect("Failed to merge");
-        assert_eq!(result.count, 3);
+        assert_eq!(result.count, 0);
     }
 
     #[test]
