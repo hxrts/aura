@@ -27,7 +27,12 @@ fn context(seed: u8) -> ContextId {
 }
 
 /// Example guard function that evaluates a request
-fn evaluate_request_guard(snapshot: &GuardSnapshot, request_type: &str) -> GuardOutcome {
+fn evaluate_request_guard(
+    snapshot: &GuardSnapshot,
+    request_type: &str,
+    ctx: ContextId,
+    auth: AuthorityId,
+) -> GuardOutcome {
     // Check if user is authorized based on metadata
     let is_authorized = snapshot
         .metadata
@@ -40,8 +45,6 @@ fn evaluate_request_guard(snapshot: &GuardSnapshot, request_type: &str) -> Guard
     }
 
     // Check flow budget
-    let context = context(0); // Would come from request context
-    let authority = authority(0); // Would come from request
     let required_budget = match request_type {
         "read" => FlowCost::new(10),
         "write" => FlowCost::new(50),
@@ -49,10 +52,7 @@ fn evaluate_request_guard(snapshot: &GuardSnapshot, request_type: &str) -> Guard
         _ => FlowCost::new(25),
     };
 
-    if !snapshot
-        .budgets
-        .has_budget(&context, &authority, required_budget)
-    {
+    if !snapshot.budgets.has_budget(&ctx, &auth, required_budget) {
         return GuardOutcome::denied("Insufficient flow budget");
     }
 
@@ -60,9 +60,9 @@ fn evaluate_request_guard(snapshot: &GuardSnapshot, request_type: &str) -> Guard
     let mut effects = vec![
         // Charge flow budget
         EffectCommand::ChargeBudget {
-            context,
-            authority,
-            peer: authority, // Peer would be the requesting authority
+            context: ctx,
+            authority: auth,
+            peer: auth, // Peer would be the requesting authority
             amount: required_budget,
         },
         // Record metadata leakage (request type)
@@ -75,7 +75,7 @@ fn evaluate_request_guard(snapshot: &GuardSnapshot, request_type: &str) -> Guard
             effects.push(EffectCommand::AppendJournal {
                 entry: JournalEntry {
                     fact: Fact::default(), // Would contain actual write data
-                    authority,
+                    authority: auth,
                     timestamp: snapshot.now.clone(),
                 },
             });
@@ -140,18 +140,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("write", "Final write"),
     ];
 
+    // Use consistent context for all operations
+    let ctx = context(1);
+
     for (request_type, description) in &requests {
         println!("Processing: {request_type} - {description}");
 
         // Create guard snapshot from current state
         let state = interpreter.snapshot_state();
         // Convert flow_budgets to include context
-        let context = context(2);
         let budgets_with_context: std::collections::HashMap<(ContextId, AuthorityId), FlowCost> =
             state
                 .flow_budgets
                 .iter()
-                .map(|(auth, amount)| ((context, *auth), *amount))
+                .map(|(auth, amount)| ((ctx, *auth), *amount))
                 .collect();
         let snapshot = GuardSnapshot {
             now: state.current_time,
@@ -162,7 +164,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         // Evaluate guard
-        let outcome = evaluate_request_guard(&snapshot, request_type);
+        let outcome = evaluate_request_guard(&snapshot, request_type, ctx, authority);
 
         if outcome.is_authorized() {
             println!("  ✓ Authorized");
