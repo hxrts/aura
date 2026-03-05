@@ -1943,42 +1943,34 @@ impl PerformanceMonitor {
         }
     }
 
-    #[cfg(target_os = "macos")]
-    fn get_memory_usage() -> Option<u64> {
-        use std::process::Command;
+    cfg_if::cfg_if! {
+        if #[cfg(target_os = "macos")] {
+            fn get_memory_usage() -> Option<u64> {
+                use std::process::Command;
 
-        let output = Command::new("ps")
-            .args(["-o", "rss=", "-p"])
-            .arg(std::process::id().to_string())
-            .output()
-            .ok()?;
+                let output = Command::new("ps")
+                    .args(["-o", "rss=", "-p"])
+                    .arg(std::process::id().to_string())
+                    .output()
+                    .ok()?;
 
-        let rss_str = String::from_utf8(output.stdout).ok()?;
-        let rss_kb: u64 = rss_str.trim().parse().ok()?;
-        Some(rss_kb * 1024) // Convert KB to bytes
-    }
-
-    #[cfg(target_os = "linux")]
-    fn get_memory_usage() -> Option<u64> {
-        use sysinfo::ProcessesToUpdate;
-        let mut system = System::new();
-        let pid = sysinfo::get_current_pid().ok()?;
-        system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
-        system.process(pid).map(|p| p.memory() * 1024) // memory() returns KiB
-    }
-
-    #[cfg(target_os = "windows")]
-    fn get_memory_usage() -> Option<u64> {
-        use sysinfo::ProcessesToUpdate;
-        let mut system = System::new();
-        let pid = sysinfo::get_current_pid().ok()?;
-        system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
-        system.process(pid).map(|p| p.memory() * 1024)
-    }
-
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-    fn get_memory_usage() -> Option<u64> {
-        None
+                let rss_str = String::from_utf8(output.stdout).ok()?;
+                let rss_kb: u64 = rss_str.trim().parse().ok()?;
+                Some(rss_kb * 1024) // Convert KB to bytes
+            }
+        } else if #[cfg(any(target_os = "linux", target_os = "windows"))] {
+            fn get_memory_usage() -> Option<u64> {
+                use sysinfo::ProcessesToUpdate;
+                let mut system = System::new();
+                let pid = sysinfo::get_current_pid().ok()?;
+                system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+                system.process(pid).map(|p| p.memory() * 1024) // memory() returns KiB
+            }
+        } else {
+            fn get_memory_usage() -> Option<u64> {
+                None
+            }
+        }
     }
 }
 

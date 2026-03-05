@@ -58,6 +58,9 @@ time = { workspace = true }
 subtle = { workspace = true }
 zeroize = { workspace = true }
 
+# Conditional compilation
+cfg-if = "1"
+
 # Authorization tokens
 biscuit-auth = { workspace = true }
 

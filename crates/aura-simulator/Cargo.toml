@@ -50,6 +50,9 @@ rand_chacha = { workspace = true }
 # Collections
 indexmap = { workspace = true }
 
+# Conditional compilation
+cfg-if = "1"
+
 # Additional dependencies for choreographic framework
 futures = { workspace = true }
 bincode = { workspace = true }

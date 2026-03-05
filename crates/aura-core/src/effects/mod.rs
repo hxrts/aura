@@ -85,14 +85,14 @@ pub mod transport;
 pub mod tree; // Commitment tree operations
 
 // Simulation/testing effect traits (feature-gated)
-#[cfg(feature = "simulation")]
-pub mod chaos;
-#[cfg(feature = "simulation")]
-pub mod quint;
-#[cfg(feature = "simulation")]
-pub mod simulation;
-#[cfg(feature = "simulation")]
-pub mod testing;
+cfg_if::cfg_if! {
+    if #[cfg(feature = "simulation")] {
+        pub mod chaos;
+        pub mod quint;
+        pub mod simulation;
+        pub mod testing;
+    }
+}
 
 // Re-export core effect traits
 pub use agent::{

@@ -18,34 +18,35 @@ pub mod capability_soundness;
 // Note: assertions, capabilities, strategies are also in this directory
 // but they're re-exported from lib.rs directly
 
-#[cfg(feature = "lean")]
-pub mod lean_types;
-
-#[cfg(feature = "lean")]
-pub mod lean_oracle;
-
-#[cfg(feature = "lean")]
-pub mod proptest_journal;
+cfg_if::cfg_if! {
+    if #[cfg(feature = "lean")] {
+        pub mod lean_types;
+        pub mod lean_oracle;
+        pub mod proptest_journal;
+    }
+}
 
 pub use capability_soundness::{
     CapabilitySoundnessVerifier, CapabilityState, SoundnessProperty, SoundnessReport,
     SoundnessVerificationResult, VerificationConfig,
 };
 
-// Legacy types (backward compatibility)
-#[cfg(feature = "lean")]
-pub use lean_oracle::{
-    ComparePolicy, Fact, FlowChargeInput, FlowChargeResult, JournalMergeInput, JournalMergeResult,
-    JournalReduceInput, JournalReduceResult, LeanOracle, LeanOracleError, LeanOracleResult,
-    OracleVersion, Ordering, TimeStamp, TimestampCompareInput, TimestampCompareResult,
-};
+cfg_if::cfg_if! {
+    if #[cfg(feature = "lean")] {
+        // Legacy types (backward compatibility)
+        pub use lean_oracle::{
+            ComparePolicy, Fact, FlowChargeInput, FlowChargeResult, JournalMergeInput, JournalMergeResult,
+            JournalReduceInput, JournalReduceResult, LeanOracle, LeanOracleError, LeanOracleResult,
+            OracleVersion, Ordering, TimeStamp, TimestampCompareInput, TimestampCompareResult,
+        };
 
-// Full-fidelity types (v0.4.0+)
-#[cfg(feature = "lean")]
-pub use lean_types::{
-    AttestedOp, AuthorityId, ByteArray32, ChannelCheckpoint, ChannelId, ChannelPolicy,
-    CommittedChannelEpochBump, ContextId, ConvergenceCert, DkgTranscriptCommit, Hash32, LeafRole,
-    LeakageFact, LeanFact, LeanFactContent, LeanJournal, LeanJournalMergeResult,
-    LeanJournalReduceResult, LeanNamespace, LeanTimeStamp, OrderTime, ProposedChannelEpochBump,
-    ProtocolRelationalFact, RelationalFact, ReversionFact, RotateFact, SnapshotFact, TreeOpKind,
-};
+        // Full-fidelity types (v0.4.0+)
+        pub use lean_types::{
+            AttestedOp, AuthorityId, ByteArray32, ChannelCheckpoint, ChannelId, ChannelPolicy,
+            CommittedChannelEpochBump, ContextId, ConvergenceCert, DkgTranscriptCommit, Hash32, LeafRole,
+            LeakageFact, LeanFact, LeanFactContent, LeanJournal, LeanJournalMergeResult,
+            LeanJournalReduceResult, LeanNamespace, LeanTimeStamp, OrderTime, ProposedChannelEpochBump,
+            ProtocolRelationalFact, RelationalFact, ReversionFact, RotateFact, SnapshotFact, TreeOpKind,
+        };
+    }
+}
