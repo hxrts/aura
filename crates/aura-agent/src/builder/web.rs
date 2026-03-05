@@ -30,9 +30,13 @@ use aura_core::effects::ExecutionMode;
 #[cfg(feature = "web")]
 use aura_core::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
+#[cfg(feature = "web")]
+use std::path::PathBuf;
 
 use crate::builder::BuildError;
 use crate::core::AgentConfig;
+#[cfg(feature = "web")]
+use crate::runtime::{EffectContext, EffectSystemBuilder};
 use crate::{AgentResult, AuraAgent};
 
 /// Web/WASM-specific builder with sensible defaults for browser applications.
@@ -173,7 +177,6 @@ impl WebPresetBuilder {
         #[cfg(feature = "web")]
         {
             // Get or generate authority ID
-            // In a real implementation, this might derive from window.location.origin
             let authority_id = self.authority_id.unwrap_or_else(|| {
                 let id_str = format!("web:{}", self.storage_prefix);
                 AuthorityId::new_from_entropy(hash::hash(id_str.as_bytes()))
@@ -185,28 +188,45 @@ impl WebPresetBuilder {
                 ContextId::new_from_entropy(context_entropy)
             });
 
-            // TODO: Wire up Web-specific handlers when web feature is implemented
-            // - WebCryptoCryptoHandler using SubtleCrypto
-            // - IndexedDBStorageHandler
-            // - PerformanceTimeHandler
-            // - WebCryptoRandomHandler
-            // - ConsoleLogHandler
-            // - FetchTransportHandler / WebSocketTransportHandler
+            let mut config = self.config;
 
-            let _ = (
-                authority_id,
-                context_id,
-                self.storage_prefix,
-                self.use_session_storage,
-                self.enable_persistence,
-                self.execution_mode,
-                self.config,
-            );
+            // On web targets we map logical storage settings into the storage namespace.
+            // The wasm storage handler turns this base_path into an IndexedDB database key.
+            let namespace = if self.use_session_storage || !self.enable_persistence {
+                format!("session/{}", self.storage_prefix)
+            } else {
+                format!("persistent/{}", self.storage_prefix)
+            };
+            config.storage.base_path = PathBuf::from(namespace);
 
-            Err(BuildError::EffectInit {
-                effect: "web",
-                message: "Web handlers not yet implemented. This is a placeholder for future development.".to_string(),
-            }.into())
+            // UDP LAN discovery is native-only and should be disabled for browser runtimes.
+            config.lan_discovery.enabled = false;
+
+            let effect_context = EffectContext::new(authority_id, context_id, self.execution_mode);
+            let runtime = match self.execution_mode {
+                ExecutionMode::Testing => EffectSystemBuilder::testing()
+                    .with_config(config)
+                    .with_authority(authority_id)
+                    .build(&effect_context)
+                    .await
+                    .map_err(BuildError::RuntimeConstruction)?,
+                ExecutionMode::Production => EffectSystemBuilder::production()
+                    .with_config(config)
+                    .with_authority(authority_id)
+                    .with_sync()
+                    .with_rendezvous()
+                    .build(&effect_context)
+                    .await
+                    .map_err(BuildError::RuntimeConstruction)?,
+                ExecutionMode::Simulation { seed } => EffectSystemBuilder::simulation(seed)
+                    .with_config(config)
+                    .with_authority(authority_id)
+                    .build(&effect_context)
+                    .await
+                    .map_err(BuildError::RuntimeConstruction)?,
+            };
+
+            Ok(AuraAgent::new(runtime, authority_id))
         }
     }
 }

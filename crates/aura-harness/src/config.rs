@@ -38,6 +38,7 @@ pub struct RunSection {
 #[serde(rename_all = "snake_case")]
 pub enum InstanceMode {
     Local,
+    Browser,
     Ssh,
 }
 
@@ -304,6 +305,27 @@ impl RunConfig {
                         .is_some_and(str::is_empty)
                     {
                         bail!("local instance {} has empty command", instance.id);
+                    }
+                }
+                InstanceMode::Browser => {
+                    if instance
+                        .command
+                        .as_deref()
+                        .map(str::trim)
+                        .is_some_and(str::is_empty)
+                    {
+                        bail!("browser instance {} has empty command", instance.id);
+                    }
+                    if instance.ssh_host.is_some()
+                        || instance.ssh_user.is_some()
+                        || instance.ssh_port.is_some()
+                        || instance.remote_workdir.is_some()
+                        || instance.tunnel.is_some()
+                    {
+                        bail!(
+                            "browser instance {} must not set ssh_host/ssh_user/ssh_port/remote_workdir/tunnel",
+                            instance.id
+                        );
                     }
                 }
                 InstanceMode::Ssh => {
@@ -596,5 +618,54 @@ mod tests {
 
         let parsed: Result<ScenarioConfig, _> = toml::from_str(body);
         assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn browser_instance_rejects_ssh_fields() {
+        let config = RunConfig {
+            schema_version: RUN_SCHEMA_VERSION,
+            run: RunSection {
+                name: "browser-invalid".to_string(),
+                pty_rows: Some(40),
+                pty_cols: Some(120),
+                artifact_dir: None,
+                global_budget_ms: None,
+                step_budget_ms: None,
+                seed: None,
+                max_cpu_percent: None,
+                max_memory_bytes: None,
+                max_open_files: None,
+                require_remote_artifact_sync: false,
+            },
+            instances: vec![InstanceConfig {
+                id: "alice".to_string(),
+                mode: InstanceMode::Browser,
+                data_dir: PathBuf::from(".tmp/browser/alice"),
+                device_id: None,
+                bind_address: "127.0.0.1:41001".to_string(),
+                demo_mode: false,
+                command: None,
+                args: vec![],
+                env: vec![],
+                log_path: None,
+                ssh_host: Some("example.org".to_string()),
+                ssh_user: None,
+                ssh_port: None,
+                ssh_strict_host_key_checking: true,
+                ssh_known_hosts_file: None,
+                ssh_fingerprint: None,
+                ssh_require_fingerprint: false,
+                ssh_dry_run: true,
+                remote_workdir: None,
+                lan_discovery: None,
+                tunnel: None,
+            }],
+        };
+
+        let error = match config.validate() {
+            Ok(()) => panic!("browser instance must reject ssh fields"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("must not set ssh_host"));
     }
 }

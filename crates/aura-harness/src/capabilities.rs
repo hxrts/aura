@@ -19,18 +19,25 @@ pub fn available_capabilities(run_config: &RunConfig) -> BTreeSet<String> {
         .instances
         .iter()
         .any(|instance| matches!(instance.mode, InstanceMode::Local));
+    let has_browser = run_config
+        .instances
+        .iter()
+        .any(|instance| matches!(instance.mode, InstanceMode::Browser));
     let has_ssh = run_config
         .instances
         .iter()
         .any(|instance| matches!(instance.mode, InstanceMode::Ssh));
 
-    if has_local {
+    if has_local || has_browser {
         capabilities.insert("local".to_string());
+    }
+    if has_browser {
+        capabilities.insert("browser".to_string());
     }
     if has_ssh {
         capabilities.insert("ssh".to_string());
     }
-    if has_ssh && !has_local {
+    if has_ssh && !has_local && !has_browser {
         capabilities.insert("remote-only".to_string());
     }
 
@@ -91,6 +98,31 @@ mod tests {
         let available = available_capabilities(&run_config);
         assert!(available.contains("local"));
         assert!(available.contains("ssh"));
+    }
+
+    #[test]
+    fn capability_matrix_reports_browser_as_local_compatible() {
+        let run_config = RunConfig {
+            schema_version: 1,
+            run: RunSection {
+                name: "capability-browser-test".to_string(),
+                pty_rows: Some(40),
+                pty_cols: Some(120),
+                artifact_dir: None,
+                global_budget_ms: None,
+                step_budget_ms: None,
+                seed: Some(3),
+                max_cpu_percent: None,
+                max_memory_bytes: None,
+                max_open_files: None,
+                require_remote_artifact_sync: false,
+            },
+            instances: vec![base_instance("alice", InstanceMode::Browser)],
+        };
+
+        let available = available_capabilities(&run_config);
+        assert!(available.contains("browser"));
+        assert!(available.contains("local"));
     }
 
     fn base_instance(id: &str, mode: InstanceMode) -> InstanceConfig {

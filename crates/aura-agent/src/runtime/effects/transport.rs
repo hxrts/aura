@@ -8,6 +8,14 @@ use aura_core::{AuthorityId, ContextId};
 use aura_effects::transport::TransportConfig;
 use aura_rendezvous::TransportHint;
 use cfg_if::cfg_if;
+#[cfg(target_arch = "wasm32")]
+use futures::channel::oneshot;
+#[cfg(target_arch = "wasm32")]
+use futures::SinkExt;
+#[cfg(target_arch = "wasm32")]
+use gloo_net::websocket::{futures::WebSocket, Message};
+#[cfg(target_arch = "wasm32")]
+use std::future::Future;
 #[cfg(not(target_arch = "wasm32"))]
 use std::net::SocketAddr;
 #[cfg(not(target_arch = "wasm32"))]
@@ -16,6 +24,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::time::timeout;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local;
 
 // Implementation of TransportEffects
 #[async_trait]
@@ -195,10 +205,26 @@ fn descriptor_tcp_addr(descriptor: aura_rendezvous::RendezvousDescriptor) -> Opt
 async fn send_envelope_tcp(addr: &str, envelope: &TransportEnvelope) -> Result<(), TransportError> {
     cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
-            let _ = addr;
-            Err(TransportError::SendFailed {
+            let payload = aura_core::util::serialization::to_vec(envelope).map_err(|e| {
+                TransportError::SendFailed {
+                    destination: envelope.destination,
+                    reason: format!("Envelope serialization failed: {e}"),
+                }
+            })?;
+            let url = normalize_ws_url(addr);
+
+            run_local_ws(move || async move {
+                let mut ws = WebSocket::open(&url)
+                    .map_err(|e| format!("WebSocket open failed ({url}): {e}"))?;
+                ws.send(Message::Bytes(payload))
+                    .await
+                    .map_err(|e| format!("WebSocket send failed ({url}): {e}"))?;
+                Ok(())
+            })
+            .await
+            .map_err(|reason| TransportError::SendFailed {
                 destination: envelope.destination,
-                reason: "TCP transport is not available on wasm".to_string(),
+                reason,
             })
         } else {
             let socket_addr: SocketAddr = addr.parse().map_err(|e| TransportError::SendFailed {
@@ -263,6 +289,30 @@ async fn send_envelope_tcp(addr: &str, envelope: &TransportEnvelope) -> Result<(
             Ok(())
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn normalize_ws_url(addr: &str) -> String {
+    if addr.starts_with("ws://") || addr.starts_with("wss://") {
+        addr.to_string()
+    } else {
+        format!("ws://{addr}")
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn run_local_ws<Mk, Fut>(make_fut: Mk) -> Result<(), String>
+where
+    Mk: FnOnce() -> Fut + 'static,
+    Fut: Future<Output = Result<(), String>> + 'static,
+{
+    let (tx, rx) = oneshot::channel();
+    spawn_local(async move {
+        let _ = tx.send(make_fut().await);
+    });
+
+    rx.await
+        .map_err(|_| "WebSocket task dropped before completion".to_string())?
 }
 
 #[cfg(test)]

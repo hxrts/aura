@@ -1,0 +1,29 @@
+schema_version = 1
+
+[run]
+name = "browser-loopback-smoke"
+pty_rows = 40
+pty_cols = 120
+artifact_dir = "artifacts/harness/browser-loopback-smoke"
+
+[[instances]]
+id = "alice"
+mode = "browser"
+data_dir = ".tmp/harness-browser/alice"
+device_id = "alice-browser-01"
+bind_address = "127.0.0.1:51001"
+demo_mode = false
+env = [
+  "AURA_HARNESS_BROWSER_HEADLESS=true",
+]
+
+[[instances]]
+id = "bob"
+mode = "browser"
+data_dir = ".tmp/harness-browser/bob"
+device_id = "bob-browser-01"
+bind_address = "127.0.0.1:51002"
+demo_mode = false
+env = [
+  "AURA_HARNESS_BROWSER_HEADLESS=true",
+]

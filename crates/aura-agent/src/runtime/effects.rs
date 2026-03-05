@@ -46,13 +46,14 @@ use biscuit_auth::{macros::*, Biscuit, KeyPair, PublicKey};
 use parking_lot::RwLock;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use std::sync::Arc;
-#[cfg(debug_assertions)]
-use std::sync::Once;
-#[cfg(debug_assertions)]
-use std::time::Duration;
+use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
-use std::{collections::HashMap, net::SocketAddr};
+use std::net::SocketAddr;
+use std::sync::Arc;
+#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
+use std::sync::Once;
+#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 use super::shared_transport::SharedTransport;
@@ -164,6 +165,9 @@ pub struct AuraEffectSystem {
     /// Addresses are parsed and validated once during `open`.
     #[cfg(not(target_arch = "wasm32"))]
     network_connections: parking_lot::RwLock<HashMap<uuid::Uuid, SocketAddr>>,
+    /// Browser websocket endpoints keyed by opaque connection handle UUID.
+    #[cfg(target_arch = "wasm32")]
+    network_connections: parking_lot::RwLock<HashMap<uuid::Uuid, String>>,
 }
 
 #[derive(Clone, Default)]
@@ -194,7 +198,7 @@ impl BiscuitAuthorizationEffects for NoopBiscuitAuthorizationHandler {
 }
 
 impl AuraEffectSystem {
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     fn maybe_start_deadlock_detector() {
         static START: Once = Once::new();
         START.call_once(|| {
@@ -215,7 +219,7 @@ impl AuraEffectSystem {
         });
     }
 
-    #[cfg(not(debug_assertions))]
+    #[cfg(any(not(debug_assertions), target_arch = "wasm32"))]
     fn maybe_start_deadlock_detector() {}
 
     fn normalize_test_config(mut config: AgentConfig) -> AgentConfig {
@@ -404,6 +408,8 @@ impl AuraEffectSystem {
             rendezvous_manager: parking_lot::RwLock::new(None),
             biscuit_cache: parking_lot::RwLock::new(initial_biscuit_cache),
             #[cfg(not(target_arch = "wasm32"))]
+            network_connections: parking_lot::RwLock::new(HashMap::new()),
+            #[cfg(target_arch = "wasm32")]
             network_connections: parking_lot::RwLock::new(HashMap::new()),
         }
     }

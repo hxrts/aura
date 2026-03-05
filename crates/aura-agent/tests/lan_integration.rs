@@ -441,6 +441,7 @@ async fn setup_lan_group_channel_pair(
     let app_b = create_runtime_app(agent_b.clone()).await?;
     ensure_current_home(&app_a).await?;
     context_workflow::move_position(&app_a, "home", "partial").await?;
+    context_workflow::move_position(&app_a, "home", "partial").await?;
 
     let invite = invitation_workflow::create_contact_invitation(
         &app_a,

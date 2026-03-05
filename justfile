@@ -43,6 +43,48 @@ build-terminal-release:
 build-app-host:
     cargo build -p aura-app --bin app-host --features host --release
 
+# Check Aura web shell + shared UI core for wasm target
+web-check:
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0" cargo check -p aura-ui
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0" cargo check -p aura-web --target wasm32-unknown-unknown
+
+# Rebuild local Tailwind bundle used by aura-web (no CDN)
+web-tailwind-build:
+    cd crates/aura-web && npm ci && npm run tailwind:build
+
+# Watch and rebuild local Tailwind bundle for aura-web
+web-tailwind-watch:
+    cd crates/aura-web && npm run tailwind:watch
+
+# Serve Aura web shell locally for harness/browser runs
+web-serve port="4173":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    selected_port="{{port}}"
+    if command -v lsof >/dev/null 2>&1; then
+        while lsof -PiTCP:"$selected_port" -sTCP:LISTEN -t >/dev/null 2>&1; do
+            selected_port="$((selected_port + 1))"
+        done
+    fi
+    echo "Serving aura-web on port $selected_port"
+    cd crates/aura-web && NO_COLOR=true trunk serve --address 0.0.0.0 --port "$selected_port"
+
+# Browser harness driver smoke test
+browser-driver-smoke:
+    cd crates/aura-harness/playwright-driver && npm test
+
+# Run harness scenario against browser backend config
+harness-run-browser scenario config="configs/harness/browser-loopback.toml" artifacts_dir="artifacts/harness/browser":
+    cargo run -p aura-harness --bin aura-harness -- run --config {{config}} --scenario {{scenario}} --artifacts-dir {{artifacts_dir}}
+
+# Lint harness run/scenario files for browser backend workflows
+harness-lint-browser scenario config="configs/harness/browser-loopback.toml":
+    cargo run -p aura-harness --bin aura-harness -- lint --config {{config}} --scenario {{scenario}}
+
+# Replay latest browser harness bundle
+harness-replay-browser bundle="artifacts/harness/browser/harness/browser-loopback-smoke/replay_bundle.json":
+    cargo run -p aura-harness --bin aura-harness -- replay --bundle {{bundle}}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Test
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -192,6 +234,45 @@ ci-harness-replay:
     cargo build -p aura-terminal --bin aura -q
     AURA_HARNESS_AURA_BIN="$PWD/target/debug/aura" cargo run -p aura-harness --bin aura-harness -- run --config configs/harness/local-loopback.toml --scenario scenarios/harness/local-discovery-smoke.toml
     AURA_HARNESS_AURA_BIN="$PWD/target/debug/aura" cargo run -p aura-harness --bin aura-harness -- replay --bundle artifacts/harness/local-loopback-smoke/replay_bundle.json
+
+# Browser harness lane (wasm build + playwright smoke + browser scenarios)
+ci-harness-browser:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p artifacts/harness/browser
+    just web-check
+    (
+      cd crates/aura-harness/playwright-driver
+      npm ci
+      npm run install-browsers
+      npm test
+    )
+    (
+      cd crates/aura-web
+      NO_COLOR=true trunk serve --address 0.0.0.0 --port 4173 \
+        > ../../artifacts/harness/browser/web-serve.log 2>&1 &
+      echo $! > ../../artifacts/harness/browser/web-serve.pid
+    )
+    cleanup() {
+      if [ -f artifacts/harness/browser/web-serve.pid ]; then
+        kill "$(cat artifacts/harness/browser/web-serve.pid)" 2>/dev/null || true
+      fi
+    }
+    trap cleanup EXIT
+    for _ in $(seq 1 90); do
+      if curl -fsS "http://127.0.0.1:4173/" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 1
+    done
+    cargo run -p aura-harness --bin aura-harness -- run \
+      --config configs/harness/browser-loopback.toml \
+      --scenario scenarios/harness/local-discovery-smoke.toml \
+      --artifacts-dir artifacts/harness/browser
+    cargo run -p aura-harness --bin aura-harness -- run \
+      --config configs/harness/browser-loopback.toml \
+      --scenario scenarios/harness/scenario1-invitation-chat-e2e.toml \
+      --artifacts-dir artifacts/harness/browser
 
 # Test suite (excludes patchbay tests which run in ci-holepunch-tier2)
 ci-test:
