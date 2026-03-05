@@ -172,23 +172,32 @@ Refactor all `aura-testkit` verification call sites to use the new full-fidelity
 
 ### Tasks
 
-- [ ] Search workspace for imports from `aura_testkit::verification` legacy symbols.
-- [ ] Update all consuming crates/tests/examples to new symbols.
-- [ ] Ensure no public docs/snippets reference legacy verification types.
+- [x] Search workspace for imports from `aura_testkit::verification` legacy symbols.
+- [x] Update all consuming crates/tests/examples to new symbols.
+- [x] Ensure no public docs/snippets reference legacy verification types.
 
 ### Success Criteria
 
-- [ ] Workspace-wide search returns zero usage of targeted legacy symbols.
-- [ ] All downstream tests compile with new imports and APIs.
+- [x] Workspace-wide search returns zero usage of targeted legacy symbols.
+- [x] All downstream tests compile with new imports and APIs.
 
 ### Verify + Commit Gate
 
-- [ ] Run:
+- [x] Run:
   - `nix develop --command rg -n "\\b(ComparePolicy|Fact|TimeStamp|Ordering|JournalMergeInput|JournalReduceInput|FlowChargeInput|TimestampCompareInput)\\b" crates tests examples verification`
   - `nix develop --command just test-crate aura-testkit`
   - `nix develop --command just test`
 - [ ] Commit:
   - Suggested commit: `testkit: migrate workspace verification call sites to new types`
+
+### Phase 3 Notes
+
+- No non-`aura-testkit` call sites import legacy verification symbols from
+  `aura_testkit::verification` or `aura_testkit::verification::lean_oracle`.
+- Broad regex scan (`Fact`, `TimeStamp`, etc.) remains noisy due legitimate
+  core-domain symbols, but targeted legacy import scans returned no matches.
+- `just test` initially hit a flaky `aura-agent` LAN integration failure;
+  targeted rerun and a full rerun of `just test` passed.
 
 ---
 
