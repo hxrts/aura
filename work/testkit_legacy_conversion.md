@@ -259,7 +259,7 @@ Refactor all `aura-testkit` verification call sites to use the new full-fidelity
   - `nix develop --command just ci-lean-quint-bridge`
   - `nix develop --command just ci-simulator-telltale-parity`
   - `nix develop --command just ci-dry-run`
-- [ ] Commit:
+- [x] Commit:
   - Suggested commit: `docs: finalize legacy verification type migration notes`
 
 ### Phase 5 Notes
