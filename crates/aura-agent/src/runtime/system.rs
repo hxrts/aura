@@ -14,16 +14,22 @@ use super::{
 use crate::core::{AgentConfig, AuthorityContext};
 use crate::handlers::{InvitationHandler, RendezvousHandler};
 use crate::reactive::{FactSource, ReactivePipeline, SchedulerConfig};
+#[cfg(not(target_arch = "wasm32"))]
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
 use aura_core::effects::task::TaskSpawner;
 use aura_core::effects::time::PhysicalTimeEffects;
+#[cfg(not(target_arch = "wasm32"))]
 use aura_core::effects::{AmpChannelEffects, ChannelCreateParams, ChannelJoinParams};
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
+#[cfg(not(target_arch = "wasm32"))]
 use aura_core::util::serialization::from_slice;
 use aura_core::DeviceId;
+#[cfg(not(target_arch = "wasm32"))]
 use aura_journal::fact::RelationalFact;
+#[cfg(not(target_arch = "wasm32"))]
 use aura_journal::DomainFact;
+#[cfg(not(target_arch = "wasm32"))]
 use aura_protocol::amp::get_channel_state;
 use aura_rendezvous::TransportHint;
 use std::sync::Arc;
@@ -33,6 +39,7 @@ use tokio::io::AsyncReadExt;
 
 const MIN_SYNC_PEER_RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_SYNC_PEER_RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
+#[cfg(not(target_arch = "wasm32"))]
 const CHAT_FACT_CONTENT_TYPE: &str = "application/aura-chat-fact";
 
 fn sync_peer_reconcile_interval(sync_manager: &SyncServiceManager) -> Duration {

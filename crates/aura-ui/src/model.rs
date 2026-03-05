@@ -15,10 +15,53 @@ pub enum UiScreen {
     Settings,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NeighborhoodMode {
+    Map,
+    Detail,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessDepth {
+    Full,
+    Partial,
+    Limited,
+}
+
+impl AccessDepth {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Full => "Full",
+            Self::Partial => "Partial",
+            Self::Limited => "Limited",
+        }
+    }
+
+    #[must_use]
+    pub const fn compact(self) -> &'static str {
+        match self {
+            Self::Full => "D:Full",
+            Self::Partial => "D:Par",
+            Self::Limited => "D:Lim",
+        }
+    }
+
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Limited => Self::Partial,
+            Self::Partial => Self::Full,
+            Self::Full => Self::Limited,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ChannelRow {
     pub name: String,
     pub selected: bool,
+    pub topic: String,
 }
 
 #[derive(Debug, Clone)]
@@ -33,11 +76,23 @@ pub struct ToastState {
     pub message: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum ModalState {
+    Help,
     CreateInvitation,
     AcceptInvitation,
     CreateHome,
+    CreateChannel,
+    SetChannelTopic,
+    ChannelInfo,
+    EditNickname,
+    RemoveContact,
+    GuardianSetup,
+    AddDeviceStep1,
+    ImportDeviceEnrollmentCode,
+    AssignModerator,
+    AccessOverride,
+    CapabilityConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -47,17 +102,26 @@ pub struct UiModel {
     pub channels: Vec<ChannelRow>,
     pub contacts: Vec<ContactRow>,
     pub messages: Vec<String>,
+    pub notifications: Vec<String>,
     pub logs: Vec<String>,
     pub toast: Option<ToastState>,
     pub input_mode: bool,
     pub input_buffer: String,
     pub modal: Option<ModalState>,
     pub modal_buffer: String,
+    pub modal_hint: String,
     pub selected_home: Option<String>,
+    pub neighborhood_mode: NeighborhoodMode,
+    pub access_depth: AccessDepth,
     pub authority_id: String,
+    pub profile_nickname: String,
     pub invite_counter: u64,
     pub last_invite_code: Option<String>,
+    pub last_scan: String,
     pub selected_contact_index: usize,
+    pub selected_channel_index: usize,
+    pub selected_notification_index: usize,
+    pub contact_details: bool,
 }
 
 impl UiModel {
@@ -68,20 +132,30 @@ impl UiModel {
             channels: vec![ChannelRow {
                 name: "general".to_string(),
                 selected: true,
+                topic: "bootstrap-topic".to_string(),
             }],
             contacts: Vec::new(),
             messages: Vec::new(),
+            notifications: Vec::new(),
             logs: vec!["Aura web shell initialized".to_string()],
             toast: None,
             input_mode: false,
             input_buffer: String::new(),
             modal: None,
             modal_buffer: String::new(),
+            modal_hint: String::new(),
             selected_home: None,
+            neighborhood_mode: NeighborhoodMode::Map,
+            access_depth: AccessDepth::Limited,
             authority_id,
+            profile_nickname: "Ops".to_string(),
             invite_counter: 0,
             last_invite_code: None,
+            last_scan: "never".to_string(),
             selected_contact_index: 0,
+            selected_channel_index: 0,
+            selected_notification_index: 0,
+            contact_details: false,
         }
     }
 
@@ -94,11 +168,12 @@ impl UiModel {
 
     pub fn select_channel_by_name(&mut self, name: &str) {
         let mut found = false;
-        for row in &mut self.channels {
+        for (idx, row) in self.channels.iter_mut().enumerate() {
             let matches = row.name.eq_ignore_ascii_case(name);
             row.selected = matches;
             if matches {
                 found = true;
+                self.selected_channel_index = idx;
             }
         }
         if !found {
@@ -108,7 +183,9 @@ impl UiModel {
             self.channels.push(ChannelRow {
                 name: name.to_string(),
                 selected: true,
+                topic: String::new(),
             });
+            self.selected_channel_index = self.channels.len().saturating_sub(1);
         }
     }
 
@@ -124,6 +201,52 @@ impl UiModel {
             name: name.to_string(),
             selected: self.contacts.is_empty(),
         });
+        if self.contacts.len() == 1 {
+            self.selected_contact_index = 0;
+        }
+    }
+
+    pub fn selected_contact_name(&self) -> Option<&str> {
+        self.contacts
+            .get(self.selected_contact_index)
+            .map(|row| row.name.as_str())
+    }
+
+    pub fn set_selected_contact_name(&mut self, value: String) {
+        if let Some(contact) = self.contacts.get_mut(self.selected_contact_index) {
+            contact.name = value;
+        }
+    }
+
+    pub fn selected_channel_topic(&self) -> &str {
+        self.channels
+            .get(self.selected_channel_index)
+            .map(|row| row.topic.as_str())
+            .unwrap_or("")
+    }
+
+    pub fn set_selected_channel_topic(&mut self, value: String) {
+        if let Some(channel) = self.channels.get_mut(self.selected_channel_index) {
+            channel.topic = value;
+        }
+    }
+
+    pub fn move_channel_selection(&mut self, delta: i32) {
+        if self.channels.is_empty() {
+            return;
+        }
+        let max = self.channels.len() as i32 - 1;
+        let mut next = self.selected_channel_index as i32 + delta;
+        if next < 0 {
+            next = max;
+        }
+        if next > max {
+            next = 0;
+        }
+        self.selected_channel_index = next as usize;
+        for (idx, row) in self.channels.iter_mut().enumerate() {
+            row.selected = idx == self.selected_channel_index;
+        }
     }
 }
 
@@ -171,11 +294,8 @@ impl UiController {
     }
 
     pub fn send_key_named(&self, key: &str, repeat: u16) {
-        let repeat = repeat.max(1);
         if let Ok(mut model) = self.model.write() {
-            for _ in 0..repeat {
-                apply_named_key(&mut model, key, self.clipboard.as_ref());
-            }
+            apply_named_key(&mut model, key, repeat, self.clipboard.as_ref());
         }
     }
 
@@ -235,6 +355,13 @@ impl UiController {
         if let Ok(mut model) = self.model.write() {
             model.authority_id = authority_id.to_string();
         }
+    }
+
+    pub fn authority_id(&self) -> String {
+        if let Ok(model) = self.model.read() {
+            return model.authority_id.clone();
+        }
+        String::new()
     }
 
     pub fn app_core(&self) -> &Arc<RwLock<AppCore>> {

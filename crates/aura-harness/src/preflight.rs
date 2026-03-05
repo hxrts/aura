@@ -292,7 +292,9 @@ fn env_value(key: &str, env_entries: &[String]) -> Option<String> {
 fn default_playwright_driver_path() -> Option<std::path::PathBuf> {
     std::env::current_dir()
         .ok()
-        .map(|cwd| cwd.join("tooling/playwright-driver/playwright_driver.mjs"))
+        .map(|cwd| {
+            cwd.join("crates/aura-harness/playwright-driver/playwright_driver.mjs")
+        })
 }
 
 fn ensure_app_url_reachable(app_url: &str) -> Result<()> {
@@ -345,7 +347,7 @@ fn validate_playwright_chromium_available() -> Result<()> {
     let mut command = Command::new("node");
     command.args(["-e", script]);
     if let Ok(cwd) = std::env::current_dir() {
-        command.current_dir(cwd.join("tooling/playwright-driver"));
+        command.current_dir(cwd.join("crates/aura-harness/playwright-driver"));
     }
     let output = command
         .output()
@@ -355,7 +357,7 @@ fn validate_playwright_chromium_available() -> Result<()> {
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
     bail!(
-        "Playwright chromium is unavailable (run npm ci and npm run install-browsers in tooling/playwright-driver): {}",
+        "Playwright chromium is unavailable (run npm ci and npm run install-browsers in crates/aura-harness/playwright-driver): {}",
         stderr.trim()
     )
 }

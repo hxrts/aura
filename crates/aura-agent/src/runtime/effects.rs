@@ -47,9 +47,9 @@ use parking_lot::RwLock;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use std::sync::Arc;
-#[cfg(debug_assertions)]
+#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
 use std::sync::Once;
-#[cfg(debug_assertions)]
+#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
 use std::time::Duration;
 use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
@@ -198,7 +198,7 @@ impl BiscuitAuthorizationEffects for NoopBiscuitAuthorizationHandler {
 }
 
 impl AuraEffectSystem {
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     fn maybe_start_deadlock_detector() {
         static START: Once = Once::new();
         START.call_once(|| {
@@ -219,7 +219,7 @@ impl AuraEffectSystem {
         });
     }
 
-    #[cfg(not(debug_assertions))]
+    #[cfg(any(not(debug_assertions), target_arch = "wasm32"))]
     fn maybe_start_deadlock_detector() {}
 
     fn normalize_test_config(mut config: AgentConfig) -> AgentConfig {

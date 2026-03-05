@@ -237,6 +237,23 @@ impl HarnessCoordinator {
         Ok(text)
     }
 
+    pub fn get_authority_id(&mut self, instance_id: &str) -> Result<Option<String>> {
+        let backend = self
+            .backends
+            .get_mut(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        let authority_id = backend.as_trait_mut().authority_id()?;
+        self.events.push(
+            "observation",
+            "get_authority_id",
+            Some(instance_id.to_string()),
+            serde_json::json!({
+                "source": if authority_id.is_some() { "backend" } else { "unavailable" }
+            }),
+        );
+        Ok(authority_id)
+    }
+
     pub fn restart(&mut self, instance_id: &str) -> Result<()> {
         let backend = self
             .backends

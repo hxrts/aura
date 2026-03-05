@@ -378,6 +378,24 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         })
     }
 
+    fn authority_id(&mut self) -> Result<Option<String>> {
+        self.with_session(|session| {
+            let payload = session.rpc_call(
+                "get_authority_id",
+                json!({
+                    "instance_id": self.config.id,
+                }),
+            )?;
+            let authority_id = payload
+                .get("authority_id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            Ok(authority_id)
+        })
+    }
+
     fn health_check(&self) -> Result<bool> {
         if self.state != BackendState::Running {
             return Ok(false);
@@ -472,7 +490,8 @@ fn absolutize_path(path: PathBuf) -> PathBuf {
 fn default_driver_script_path() -> Result<PathBuf> {
     let root = std::env::current_dir().context("failed to resolve current_dir for harness")?;
     let candidate = root
-        .join("tooling")
+        .join("crates")
+        .join("aura-harness")
         .join("playwright-driver")
         .join("playwright_driver.mjs");
     require_existing_path(&candidate, "playwright driver script")?;

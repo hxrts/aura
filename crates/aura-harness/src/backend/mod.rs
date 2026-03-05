@@ -32,6 +32,9 @@ pub trait InstanceBackend {
             self.backend_kind()
         )
     }
+    fn authority_id(&mut self) -> Result<Option<String>> {
+        Ok(None)
+    }
     fn health_check(&self) -> Result<bool> {
         Ok(self.is_healthy())
     }

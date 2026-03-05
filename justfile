@@ -50,11 +50,11 @@ web-check:
 
 # Serve Aura web shell locally for harness/browser runs
 web-serve:
-    cd crates/aura-web && NO_COLOR=true trunk serve --address 127.0.0.1 --port 4173
+    cd crates/aura-web && NO_COLOR=true trunk serve --address 0.0.0.0 --port 4173
 
 # Browser harness driver smoke test
 browser-driver-smoke:
-    cd tooling/playwright-driver && npm test
+    cd crates/aura-harness/playwright-driver && npm test
 
 # Run harness scenario against browser backend config
 harness-run-browser scenario config="configs/harness/browser-loopback.toml" artifacts_dir="artifacts/harness/browser":
@@ -225,14 +225,14 @@ ci-harness-browser:
     mkdir -p artifacts/harness/browser
     just web-check
     (
-      cd tooling/playwright-driver
+      cd crates/aura-harness/playwright-driver
       npm ci
       npm run install-browsers
       npm test
     )
     (
       cd crates/aura-web
-      NO_COLOR=true trunk serve --address 127.0.0.1 --port 4173 \
+      NO_COLOR=true trunk serve --address 0.0.0.0 --port 4173 \
         > ../../artifacts/harness/browser/web-serve.log 2>&1 &
       echo $! > ../../artifacts/harness/browser/web-serve.pid
     )

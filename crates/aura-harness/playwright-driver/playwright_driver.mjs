@@ -224,6 +224,21 @@ async function readClipboard(params) {
   return { text: String(text ?? '') };
 }
 
+async function getAuthorityId(params) {
+  const instanceId = normalizeInstanceId(params);
+  const session = getSession(instanceId);
+  const authorityId = await session.page.evaluate(() => {
+    if (typeof window.__AURA_HARNESS__?.get_authority_id === 'function') {
+      return window.__AURA_HARNESS__.get_authority_id();
+    }
+    return null;
+  });
+  if (authorityId == null) {
+    return {};
+  }
+  return { authority_id: String(authorityId) };
+}
+
 async function tailLog(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
@@ -306,6 +321,8 @@ async function dispatch(method, params) {
       return snapshot(params);
     case 'read_clipboard':
       return readClipboard(params);
+    case 'get_authority_id':
+      return getAuthorityId(params);
     case 'tail_log':
       return tailLog(params);
     case 'inject_message':

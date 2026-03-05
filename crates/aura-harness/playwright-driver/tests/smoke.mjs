@@ -52,6 +52,9 @@ const fixtureHtml = `<!doctype html>
           read_clipboard() {
             return state.clipboard;
           },
+          get_authority_id() {
+            return 'authority-00000000-0000-0000-0000-000000000000';
+          },
           tail_log(lines) {
             return state.logs.slice(-lines);
           }
@@ -149,6 +152,9 @@ async function main() {
     await driver.call('send_keys', { instance_id: 'smoke-a', keys: 'c' });
     const clipboard = await driver.call('read_clipboard', { instance_id: 'smoke-a' });
     assert.equal(clipboard.text, 'fixture-clipboard');
+
+    const authority = await driver.call('get_authority_id', { instance_id: 'smoke-a' });
+    assert.equal(authority.authority_id, 'authority-00000000-0000-0000-0000-000000000000');
 
     const logs = await driver.call('tail_log', { instance_id: 'smoke-a', lines: 5 });
     assert.ok(Array.isArray(logs.lines));

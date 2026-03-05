@@ -484,7 +484,7 @@ Use this flow to run harness scenarios in browser mode:
 just web-check
 
 # 2) Install/update Playwright driver deps
-cd tooling/playwright-driver
+cd crates/aura-harness/playwright-driver
 npm ci
 npm run install-browsers
 npm test

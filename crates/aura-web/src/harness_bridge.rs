@@ -87,6 +87,17 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
     )?;
     read_clipboard.forget();
 
+    let authority_id_controller = controller.clone();
+    let get_authority_id = Closure::wrap(Box::new(move || -> JsValue {
+        JsValue::from_str(&authority_id_controller.authority_id())
+    }) as Box<dyn FnMut() -> JsValue>);
+    Reflect::set(
+        &harness,
+        &JsValue::from_str("get_authority_id"),
+        get_authority_id.as_ref().unchecked_ref(),
+    )?;
+    get_authority_id.forget();
+
     let tail_log_controller = controller.clone();
     let tail_log = Closure::wrap(Box::new(move |lines: JsValue| -> JsValue {
         let lines = lines.as_f64().map(|value| value.max(1.0) as usize).unwrap_or(20);
