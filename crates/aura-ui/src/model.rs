@@ -364,6 +364,10 @@ impl UiController {
         String::new()
     }
 
+    pub fn ui_model(&self) -> Option<UiModel> {
+        self.model.read().ok().map(|model| model.clone())
+    }
+
     pub fn app_core(&self) -> &Arc<RwLock<AppCore>> {
         &self.app_core
     }

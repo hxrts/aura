@@ -48,6 +48,14 @@ web-check:
     CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0" cargo check -p aura-ui
     CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0" cargo check -p aura-web --target wasm32-unknown-unknown
 
+# Rebuild local Tailwind bundle used by aura-web (no CDN)
+web-tailwind-build:
+    cd crates/aura-web && npm ci && npm run tailwind:build
+
+# Watch and rebuild local Tailwind bundle for aura-web
+web-tailwind-watch:
+    cd crates/aura-web && npm run tailwind:watch
+
 # Serve Aura web shell locally for harness/browser runs
 web-serve:
     cd crates/aura-web && NO_COLOR=true trunk serve --address 0.0.0.0 --port 4173
