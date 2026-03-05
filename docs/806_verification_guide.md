@@ -330,6 +330,32 @@ Operational notes:
 - `aura_quint::upstream_telltale_lean_bridge_schema_version()` returns the upstream schema version
 - CI lanes remain: `just ci-lean-quint-bridge` and `just ci-simulator-telltale-parity`
 
+### 5) `aura-testkit` Lean verification API migration (March 5, 2026)
+
+As of March 5, 2026, legacy Lean verification compatibility types were removed from
+`aura_testkit::verification` and `aura_testkit::verification::lean_oracle`.
+
+Use the canonical full-fidelity types and methods:
+
+- types:
+  - `Fact` -> `LeanFact`
+  - `ComparePolicy` -> `LeanComparePolicy`
+  - `TimeStamp` -> `LeanCompareTimeStamp` (compare payloads) or `LeanTimeStamp` (journal facts)
+  - `Ordering` -> `LeanTimestampOrdering`
+  - `FlowChargeInput`/`FlowChargeResult` -> `LeanFlowChargeInput`/`LeanFlowChargeResult`
+  - `TimestampCompareInput`/`TimestampCompareResult` -> `LeanTimestampCompareInput`/`LeanTimestampCompareResult`
+- methods:
+  - `verify_merge` -> `verify_journal_merge`
+  - `verify_reduce` -> `verify_journal_reduce`
+  - `verify_charge` -> `verify_flow_charge`
+  - `verify_compare` -> `verify_timestamp_compare`
+
+Downstream guidance:
+
+- import Lean verification payload types from `aura_testkit::verification` (re-exported from `lean_types`)
+- construct structured journals with `LeanJournal` + `LeanNamespace`
+- update tests to compare `LeanTimestampOrdering` values directly
+
 ## Lean-Quint Bridge
 
 The bridge connects Quint model checking with Telltale and Lean proof artifacts. It enables exporting Quint session models to a stable interchange format, importing Telltale and Lean properties back into Quint harnesses, and running cross-validation to detect divergence early in CI.

@@ -124,6 +124,22 @@ just lean-oracle-build    # Build Lean oracle
 just test-differential    # Rust vs Lean tests
 ```
 
+### Migration Note (March 5, 2026)
+
+Legacy `aura-testkit` Lean verification compatibility types were removed.
+Downstream users should use canonical full-fidelity symbols from
+`aura_testkit::verification`:
+
+- `LeanFact`, `LeanJournal`, `LeanNamespace`
+- `LeanFlowChargeInput`/`LeanFlowChargeResult`
+- `LeanTimestampCompareInput`/`LeanTimestampCompareResult`/`LeanTimestampOrdering`
+- `LeanComparePolicy` and `LeanCompareTimeStamp`
+
+And oracle methods:
+
+- `verify_journal_merge`, `verify_journal_reduce`
+- `verify_flow_charge`, `verify_timestamp_compare`
+
 ### Telltale Lean Bridge
 
 `aura-quint` now depends on and re-exports upstream `telltale-lean-bridge` to align Aura's bridge workflows with Telltale's Lean integration surface.

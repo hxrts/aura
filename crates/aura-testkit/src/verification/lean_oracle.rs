@@ -26,8 +26,8 @@
 
 use super::lean_types::{
     LeanFlowChargeInput, LeanFlowChargeResult, LeanJournal, LeanJournalMergeResult,
-    LeanJournalReduceResult, LeanNamespace, LeanTimestampCompareInput,
-    LeanTimestampCompareResult, LeanTimestampOrdering,
+    LeanJournalReduceResult, LeanNamespace, LeanTimestampCompareInput, LeanTimestampCompareResult,
+    LeanTimestampOrdering,
 };
 use serde::{Deserialize, Serialize};
 use std::io::Write;

@@ -151,7 +151,7 @@ Refactor all `aura-testkit` verification call sites to use the new full-fidelity
 - [x] Run:
   - `nix develop --command cargo test -p aura-testkit --features lean --test lean_differential`
   - `nix develop --command cargo test -p aura-testkit --features lean`
-- [ ] Commit:
+- [x] Commit:
   - Suggested commit: `testkit: migrate internal verification tests to full-fidelity Lean types`
 
 ### Phase 2 Notes
@@ -187,7 +187,7 @@ Refactor all `aura-testkit` verification call sites to use the new full-fidelity
   - `nix develop --command rg -n "\\b(ComparePolicy|Fact|TimeStamp|Ordering|JournalMergeInput|JournalReduceInput|FlowChargeInput|TimestampCompareInput)\\b" crates tests examples verification`
   - `nix develop --command just test-crate aura-testkit`
   - `nix develop --command just test`
-- [ ] Commit:
+- [x] Commit:
   - Suggested commit: `testkit: migrate workspace verification call sites to new types`
 
 ### Phase 3 Notes
@@ -222,7 +222,7 @@ Refactor all `aura-testkit` verification call sites to use the new full-fidelity
   - `nix develop --command cargo check -p aura-testkit --all-features`
   - `nix develop --command cargo test -p aura-testkit --all-features`
   - `nix develop --command just check-arch`
-- [ ] Commit:
+- [x] Commit:
   - Suggested commit: `testkit: remove legacy verification types and re-exports`
 
 ### Phase 4 Notes
@@ -243,33 +243,44 @@ Refactor all `aura-testkit` verification call sites to use the new full-fidelity
 
 ### Tasks
 
-- [ ] Update docs that mention legacy verification types (`docs/806_verification_guide.md`, `verification/README.md`, inline rustdoc).
-- [ ] Add a short migration note/changelog entry for downstream users.
-- [ ] Run full verification-related CI lanes locally where feasible.
+- [x] Update docs that mention legacy verification types (`docs/806_verification_guide.md`, `verification/README.md`, inline rustdoc).
+- [x] Add a short migration note/changelog entry for downstream users.
+- [x] Run full verification-related CI lanes locally where feasible.
 
 ### Success Criteria
 
-- [ ] Documentation consistently describes only the new type model.
+- [x] Documentation consistently describes only the new type model.
 - [ ] Verification lanes are green.
-- [ ] Migration note includes breaking-change guidance.
+- [x] Migration note includes breaking-change guidance.
 
 ### Verify + Commit Gate
 
-- [ ] Run:
+- [x] Run:
   - `nix develop --command just ci-lean-quint-bridge`
   - `nix develop --command just ci-simulator-telltale-parity`
   - `nix develop --command just ci-dry-run`
 - [ ] Commit:
   - Suggested commit: `docs: finalize legacy verification type migration notes`
 
+### Phase 5 Notes
+
+- Added explicit migration guidance and replacement mappings to:
+  - `docs/806_verification_guide.md`
+  - `verification/README.md`
+- `just ci-lean-quint-bridge`: passed.
+- `just ci-simulator-telltale-parity`: passed.
+- `just ci-dry-run`: failed in existing workspace lanes (`Test`, `Choreo Parity`,
+  `Effects`, `Harness Replay`, `Quint`) and reported `Architecture` warnings.
+- `cargo fmt --all -- --check` is now clean after formatting `lean_oracle.rs`.
+
 ---
 
 ## Final Validation Checklist
 
-- [ ] `rg` confirms zero legacy symbol usage and definitions.
-- [ ] `aura-testkit` lean differential tests pass on new types.
+- [x] `rg` confirms zero legacy symbol usage and definitions.
+- [x] `aura-testkit` lean differential tests pass on new types.
 - [ ] Workspace tests and architecture checks pass.
-- [ ] Commits are phase-separated and reversible.
+- [x] Commits are phase-separated and reversible.
 - [ ] PR description includes:
   - migration mapping table
   - breaking changes
