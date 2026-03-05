@@ -1,3 +1,8 @@
+//! Deterministic seed generation for reproducible test runs.
+//!
+//! Derives per-instance and per-component seeds from a root seed, enabling
+//! exact replay of randomized test scenarios across different environments.
+
 use std::collections::BTreeMap;
 
 use aura_core::hash::hasher;

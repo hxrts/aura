@@ -1,3 +1,8 @@
+//! UI state model and controller for the Aura web interface.
+//!
+//! Defines the core UI model (screens, selections, modals, toasts) and the
+//! controller that bridges the model to the application core and input handlers.
+
 use crate::clipboard::ClipboardPort;
 use crate::keyboard::{apply_named_key, apply_text_keys};
 use crate::snapshot::render_canonical_snapshot;

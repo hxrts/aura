@@ -1,3 +1,8 @@
+//! Aura test harness CLI entry point.
+//!
+//! Provides commands for running integration test scenarios, replaying recorded
+//! sessions, and validating harness configurations across local and remote instances.
+
 #![allow(missing_docs)]
 
 use std::collections::BTreeMap;

@@ -1,3 +1,8 @@
+//! Configuration types for harness runs and test scenarios.
+//!
+//! Defines the schema for run configurations (instances, budgets, resource limits)
+//! and scenario definitions (steps, assertions, timeouts) loaded from TOML files.
+
 use std::collections::HashSet;
 use std::fmt;
 use std::fs;

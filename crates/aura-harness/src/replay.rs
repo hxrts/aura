@@ -1,3 +1,8 @@
+//! Session replay for deterministic test reproduction.
+//!
+//! Records and replays tool API interactions with exact timing and seed state,
+//! enabling reproduction of test failures and regression verification.
+
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 

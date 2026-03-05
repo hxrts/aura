@@ -1,3 +1,8 @@
+//! Capability detection and requirement checking for test scenarios.
+//!
+//! Determines available test capabilities (local, browser, SSH, remote-only) based
+//! on instance configuration and validates that scenarios have required capabilities.
+
 use std::collections::BTreeSet;
 
 use anyhow::{bail, Result};

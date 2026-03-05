@@ -1,3 +1,8 @@
+//! Keyboard input handling and navigation logic.
+//!
+//! Processes keyboard events to navigate screens, update selections, handle text
+//! input, and dispatch commands across the UI model state machine.
+
 use crate::clipboard::ClipboardPort;
 use crate::model::{AccessDepth, ModalState, ToastState, UiModel, UiScreen};
 use aura_app::ui::types::parse_chat_command;

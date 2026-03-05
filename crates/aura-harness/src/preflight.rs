@@ -1,3 +1,8 @@
+//! Pre-flight checks for test environment validation.
+//!
+//! Validates system prerequisites (binaries, connectivity, permissions) before
+//! scenario execution to fail fast with actionable diagnostics.
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};

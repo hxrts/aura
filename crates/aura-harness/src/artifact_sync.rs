@@ -1,3 +1,8 @@
+//! Remote artifact synchronization for distributed test execution.
+//!
+//! Handles copying test artifacts (binaries, configs, data) to remote SSH hosts
+//! before scenario execution, with checksum verification to ensure consistency.
+
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};

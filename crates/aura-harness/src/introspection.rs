@@ -1,3 +1,8 @@
+//! Screen state introspection and pattern extraction.
+//!
+//! Parses terminal screen output to extract UI state snapshots including toasts,
+//! channels, contacts, command status, and modal states for assertion matching.
+
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 

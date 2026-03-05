@@ -1,3 +1,8 @@
+//! Scenario step executor for scripted and agent-driven test flows.
+//!
+//! Interprets scenario steps (input, wait, assert, screenshot) and executes them
+//! against backend instances, tracking state transitions and generating reports.
+
 use std::collections::BTreeMap;
 use std::time::Duration;
 

@@ -1,3 +1,8 @@
+//! Central coordinator for multi-instance test harness execution.
+//!
+//! Manages the lifecycle of multiple backend instances (local, browser, SSH),
+//! dispatches commands, captures screen states, and enforces timeouts.
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;

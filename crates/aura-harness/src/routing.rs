@@ -1,3 +1,8 @@
+//! Network address resolution and SSH tunnel mapping.
+//!
+//! Resolves advertised peer addresses to reachable endpoints, handling SSH tunnels
+//! and network topology differences between local and remote instances.
+
 use serde::{Deserialize, Serialize};
 
 use crate::config::InstanceConfig;

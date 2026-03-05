@@ -1,3 +1,8 @@
+//! Aura web application entry point for WASM targets.
+//!
+//! Initializes the Dioxus-based web UI with the AppCore, clipboard adapter,
+//! and harness bridge for browser-based deployment and testing.
+
 #![allow(missing_docs)]
 
 use cfg_if::cfg_if;

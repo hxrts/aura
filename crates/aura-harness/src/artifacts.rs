@@ -1,3 +1,8 @@
+//! Test artifact bundle management for harness runs.
+//!
+//! Provides directory structure creation and JSON serialization for test artifacts
+//! including logs, screenshots, traces, and scenario results.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

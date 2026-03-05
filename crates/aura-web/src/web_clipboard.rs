@@ -1,3 +1,8 @@
+//! Web Clipboard API adapter for browser environments.
+//!
+//! Implements the ClipboardPort trait using the browser's Clipboard API,
+//! with a synchronous mirror for read operations that can't await async results.
+
 use aura_ui::ClipboardPort;
 use std::sync::RwLock;
 use wasm_bindgen_futures::{spawn_local, JsFuture};

@@ -1,3 +1,8 @@
+//! Event stream for harness execution tracing.
+//!
+//! Collects structured events during test execution including instance operations,
+//! state transitions, and assertion results for post-run analysis and debugging.
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 

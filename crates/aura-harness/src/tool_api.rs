@@ -1,3 +1,8 @@
+//! Tool API for harness-client RPC communication.
+//!
+//! Defines request/response types and dispatch logic for the harness tool API,
+//! enabling test clients to send input, capture screens, and query instance state.
+
 use serde::{Deserialize, Serialize};
 
 use crate::api_version::{negotiate, TOOL_API_DEFAULT_VERSION, TOOL_API_VERSIONS};

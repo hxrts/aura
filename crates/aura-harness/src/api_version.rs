@@ -1,3 +1,8 @@
+//! Tool API version negotiation for harness-client communication.
+//!
+//! Provides version negotiation between the harness server and test clients,
+//! ensuring compatibility by selecting the highest mutually supported API version.
+
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 

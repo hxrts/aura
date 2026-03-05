@@ -1,3 +1,8 @@
+//! Dioxus-based web UI application root and screen components.
+//!
+//! Provides the main application shell, screen routing, keyboard handling,
+//! and toast notifications for the Aura web interface.
+
 use crate::components::{
     ButtonVariant, ModalView, PillTone, UiButton, UiCard, UiFooter, UiListItem, UiModal, UiPill,
     UiTabButton,

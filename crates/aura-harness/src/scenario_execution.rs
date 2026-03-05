@@ -1,3 +1,8 @@
+//! High-level scenario execution with budget enforcement.
+//!
+//! Orchestrates scenario execution with deterministic seeds and time budgets,
+//! integrating linting, seed derivation, and executor invocation.
+
 use anyhow::{anyhow, bail, Result};
 
 use crate::config::{RunConfig, ScenarioConfig};

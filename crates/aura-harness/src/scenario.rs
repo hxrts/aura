@@ -1,3 +1,8 @@
+//! Scenario loading, validation, and linting.
+//!
+//! Loads scenario configurations from TOML, validates step references against
+//! instance definitions, and reports configuration warnings and errors.
+
 use std::path::Path;
 
 use anyhow::Result;

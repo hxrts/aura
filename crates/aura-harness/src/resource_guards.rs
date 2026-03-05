@@ -1,3 +1,8 @@
+//! Resource monitoring and limit enforcement during test execution.
+//!
+//! Samples CPU, memory, and file descriptor usage at configurable intervals,
+//! reporting violations against configured limits for CI resource control.
+
 use serde::{Deserialize, Serialize};
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 

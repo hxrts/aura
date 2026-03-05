@@ -1,3 +1,8 @@
+//! JavaScript harness API bridge for browser-based testing.
+//!
+//! Exposes the UiController to JavaScript via window.harness, enabling the test
+//! harness to send keys, capture screenshots, and query UI state from Playwright.
+
 use aura_ui::UiController;
 use js_sys::{Array, Object, Reflect};
 use std::cell::RefCell;

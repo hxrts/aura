@@ -1,3 +1,8 @@
+//! Canonical text snapshot rendering for UI state comparison.
+//!
+//! Renders the UI model as a deterministic text representation suitable for
+//! snapshot testing and harness assertions across different rendering backends.
+
 use crate::model::{ModalState, NeighborhoodMode, UiModel, UiScreen};
 
 const PANEL_WIDTH: usize = 38;

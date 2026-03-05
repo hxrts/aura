@@ -1,3 +1,8 @@
+//! Reusable UI components built on Lumen Blocks primitives.
+//!
+//! Provides styled buttons, cards, pills, modals, and list items that compose
+//! into the Aura application screens with consistent visual appearance.
+
 #![allow(clippy::incompatible_msrv)]
 
 use dioxus::prelude::*;

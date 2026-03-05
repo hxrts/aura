@@ -1,3 +1,8 @@
+//! Terminal screen normalization for deterministic assertions.
+//!
+//! Strips ANSI codes, normalizes whitespace, and extracts authoritative screen
+//! regions for consistent snapshot comparison across terminal emulators.
+
 use regex::Regex;
 use std::sync::OnceLock;
 
