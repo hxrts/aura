@@ -42,18 +42,20 @@ impl RunningSession {
             .flush()
             .with_context(|| format!("failed flushing Playwright request {method}"))?;
 
-        let mut line = String::new();
+        let mut line = Vec::new();
         loop {
             line.clear();
             let read = self
                 .stdout
-                .read_line(&mut line)
+                .read_until(b'\n', &mut line)
                 .with_context(|| format!("failed reading Playwright response for {method}"))?;
             if read == 0 {
                 bail!("Playwright driver closed stdout while awaiting {method}");
             }
 
-            let response: Value = serde_json::from_str(line.trim_end())
+            let line_text =
+                std::str::from_utf8(&line).with_context(|| "Playwright response was not UTF-8")?;
+            let response: Value = serde_json::from_str(line_text.trim_end())
                 .with_context(|| "invalid driver JSON line")?;
             if response
                 .get("id")
@@ -418,17 +420,17 @@ impl Drop for PlaywrightBrowserBackend {
 
 fn collect_stderr(stderr: ChildStderr, buffer: &Arc<Mutex<Vec<String>>>) {
     let mut reader = BufReader::new(stderr);
-    let mut line = String::new();
+    let mut line = Vec::new();
     loop {
         line.clear();
-        let read = match reader.read_line(&mut line) {
+        let read = match reader.read_until(b'\n', &mut line) {
             Ok(read) => read,
             Err(_) => break,
         };
         if read == 0 {
             break;
         }
-        let entry = line.trim_end().to_string();
+        let entry = String::from_utf8_lossy(&line).trim_end().to_string();
         if entry.is_empty() {
             continue;
         }

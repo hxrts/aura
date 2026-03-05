@@ -1,4 +1,4 @@
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 pub trait ClipboardPort: Send + Sync {
     fn write(&self, text: &str);
@@ -12,10 +12,10 @@ pub struct MemoryClipboard {
 
 impl ClipboardPort for MemoryClipboard {
     fn write(&self, text: &str) {
-        *self.text.blocking_write() = text.to_string();
+        *self.text.write_blocking() = text.to_string();
     }
 
     fn read(&self) -> String {
-        self.text.blocking_read().clone()
+        self.text.read_blocking().clone()
     }
 }

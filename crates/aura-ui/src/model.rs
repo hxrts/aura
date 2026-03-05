@@ -4,7 +4,6 @@ use crate::snapshot::render_canonical_snapshot;
 use async_lock::RwLock as AsyncRwLock;
 use aura_app::AppCore;
 use std::sync::Arc;
-use tokio::sync::RwLock as TokioRwLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiScreen {
@@ -260,7 +259,7 @@ pub struct RenderedHarnessSnapshot {
 
 pub struct UiController {
     app_core: Arc<AsyncRwLock<AppCore>>,
-    model: TokioRwLock<UiModel>,
+    model: AsyncRwLock<UiModel>,
     clipboard: Arc<dyn ClipboardPort>,
 }
 
@@ -282,31 +281,31 @@ impl UiController {
 
         Self {
             app_core,
-            model: TokioRwLock::new(UiModel::new(authority_id)),
+            model: AsyncRwLock::new(UiModel::new(authority_id)),
             clipboard,
         }
     }
 
     pub fn send_keys(&self, keys: &str) {
-        let mut model = self.model.blocking_write();
+        let mut model = self.model.write_blocking();
         apply_text_keys(&mut model, keys, self.clipboard.as_ref());
     }
 
     pub fn send_key_named(&self, key: &str, repeat: u16) {
-        let mut model = self.model.blocking_write();
+        let mut model = self.model.write_blocking();
         apply_named_key(&mut model, key, repeat, self.clipboard.as_ref());
     }
 
     pub fn set_screen(&self, screen: UiScreen) {
-        self.model.blocking_write().screen = screen;
+        self.model.write_blocking().screen = screen;
     }
 
     pub fn set_modal_buffer(&self, value: &str) {
-        self.model.blocking_write().modal_buffer = value.to_string();
+        self.model.write_blocking().modal_buffer = value.to_string();
     }
 
     pub fn snapshot(&self) -> RenderedHarnessSnapshot {
-        let screen = render_canonical_snapshot(&self.model.blocking_read());
+        let screen = render_canonical_snapshot(&self.model.read_blocking());
         let normalized_screen = screen
             .replace('\r', "")
             .lines()
@@ -331,7 +330,7 @@ impl UiController {
     }
 
     pub fn tail_log(&self, lines: usize) -> Vec<String> {
-        let model = self.model.blocking_read();
+        let model = self.model.read_blocking();
         let mut output = model.logs.clone();
         if output.len() > lines {
             output = output.split_off(output.len() - lines);
@@ -341,25 +340,25 @@ impl UiController {
 
     pub fn inject_message(&self, message: &str) {
         self.model
-            .blocking_write()
+            .write_blocking()
             .messages
             .push(message.to_string());
     }
 
     pub fn push_log(&self, line: &str) {
-        self.model.blocking_write().logs.push(line.to_string());
+        self.model.write_blocking().logs.push(line.to_string());
     }
 
     pub fn set_authority_id(&self, authority_id: &str) {
-        self.model.blocking_write().authority_id = authority_id.to_string();
+        self.model.write_blocking().authority_id = authority_id.to_string();
     }
 
     pub fn authority_id(&self) -> String {
-        self.model.blocking_read().authority_id.clone()
+        self.model.read_blocking().authority_id.clone()
     }
 
     pub fn ui_model(&self) -> Option<UiModel> {
-        Some(self.model.blocking_read().clone())
+        Some(self.model.read_blocking().clone())
     }
 
     pub fn app_core(&self) -> &Arc<AsyncRwLock<AppCore>> {
