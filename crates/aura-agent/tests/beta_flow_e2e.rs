@@ -406,9 +406,10 @@ async fn test_channel_invitation() -> TestResult {
         .invite_to_channel(
             invitee,
             home_id.clone(),
-            None,
+            None, // context_id
+            None, // bootstrap
             Some("Join our discussion channel".to_string()),
-            None,
+            None, // expires_in_ms
         )
         .await?;
 

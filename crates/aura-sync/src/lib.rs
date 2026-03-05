@@ -193,21 +193,21 @@ pub use verification::{MerkleComparison, MerkleVerifier, VerificationResult, Ver
 ///
 /// This module is intentionally inline so `aura-sync` does not depend on an
 /// external markdown file being present at compile time.
-pub mod integration_docs {
-    //! `aura-sync` integration summary.
-    //!
-    //! - Layer: L5 feature crate.
-    //! - Runtime wiring is owned by L6 (`aura-agent`), not by this crate.
-    //! - TUI/CLI surfaces operations through `aura-app` workflows.
-    //!
-    //! Primary operation categories:
-    //!
-    //! - `sync:anti-entropy` (`A`)
-    //! - `sync:journal-sync` (`A`)
-    //! - `sync:snapshot` (`A`)
-    //! - `sync:ota-ceremony` (`C`)
-    //! - `sync:receipt-verify` (`A`)
-}
+///
+/// `aura-sync` integration summary:
+///
+/// - Layer: L5 feature crate.
+/// - Runtime wiring is owned by L6 (`aura-agent`), not by this crate.
+/// - TUI/CLI surfaces operations through `aura-app` workflows.
+///
+/// Primary operation categories:
+///
+/// - `sync:anti-entropy` (`A`)
+/// - `sync:journal-sync` (`A`)
+/// - `sync:snapshot` (`A`)
+/// - `sync:ota-ceremony` (`C`)
+/// - `sync:receipt-verify` (`A`)
+pub mod integration_docs {}
 
 // =============================================================================
 // Layer Dependencies Re-exports
