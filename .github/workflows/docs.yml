@@ -8,12 +8,10 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  group: "docs-${{ github.ref }}"
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   AURA_SUPPRESS_NIX_WELCOME: 1
@@ -51,7 +49,7 @@ jobs:
 
   build:
     name: Build
-    needs: [links, crate-links]
+    needs: [links, crate-links, text-formatting]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,28 +57,30 @@ jobs:
         with:
           cache-name: docs-build
       - run: nix develop --command just ci-book
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/book
 
   deploy:
     name: Deploy
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: [build]
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: "pages"
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: docs-deploy
-      - name: Build documentation
-        run: nix develop --command just ci-book
       - name: Setup Pages
         uses: actions/configure-pages@v4
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: docs/book
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
