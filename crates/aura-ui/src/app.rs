@@ -226,12 +226,9 @@ fn neighborhood_screen(
                     UiButton {
                         label: "New Home".to_string(),
                         variant: ButtonVariant::Primary,
-                        on_click: {
-                            let controller = controller.clone();
-                            move |_| {
-                                controller.send_keys("n");
-                                render_tick.set(render_tick() + 1);
-                            }
+                        on_click: move |_| {
+                            controller.send_keys("n");
+                            render_tick.set(render_tick() + 1);
                         }
                     }
                 }
@@ -294,12 +291,9 @@ fn chat_screen(
                     UiButton {
                         label: "New Group".to_string(),
                         variant: ButtonVariant::Primary,
-                        on_click: {
-                            let controller = controller.clone();
-                            move |_| {
-                                controller.send_keys("n");
-                                render_tick.set(render_tick() + 1);
-                            }
+                        on_click: move |_| {
+                            controller.send_keys("n");
+                            render_tick.set(render_tick() + 1);
                         }
                     }
                 }
@@ -376,12 +370,9 @@ fn contacts_screen(
                     UiButton {
                         label: "Invite".to_string(),
                         variant: ButtonVariant::Primary,
-                        on_click: {
-                            let controller = controller.clone();
-                            move |_| {
-                                controller.send_keys("i");
-                                render_tick.set(render_tick() + 1);
-                            }
+                        on_click: move |_| {
+                            controller.send_keys("i");
+                            render_tick.set(render_tick() + 1);
                         }
                     }
                 }

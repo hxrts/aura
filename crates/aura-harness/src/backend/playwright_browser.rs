@@ -2,11 +2,12 @@ use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
+use tokio::sync::Mutex;
 
 use crate::backend::InstanceBackend;
 use crate::config::InstanceConfig;
@@ -124,9 +125,7 @@ impl PlaywrightBrowserBackend {
             .session
             .as_ref()
             .ok_or_else(|| anyhow!("instance {} is not running", self.config.id))?;
-        let mut session = session
-            .lock()
-            .map_err(|_| anyhow!("Playwright session lock poisoned for {}", self.config.id))?;
+        let mut session = session.blocking_lock();
         operation(&mut session)
     }
 
@@ -155,9 +154,7 @@ impl PlaywrightBrowserBackend {
             return Ok(());
         };
 
-        let mut session = session_mutex
-            .into_inner()
-            .map_err(|_| anyhow!("Playwright session lock poisoned for {}", self.config.id))?;
+        let mut session = session_mutex.into_inner();
         let _ = session.rpc_call("stop", json!({ "instance_id": self.config.id }));
         let _ = session.child.kill();
         let _ = session.child.wait();
@@ -327,8 +324,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
 
         let stderr_tail = self
             .stderr_log
-            .lock()
-            .map_err(|_| anyhow!("Playwright stderr buffer lock poisoned"))?
+            .blocking_lock()
             .iter()
             .rev()
             .take(lines)
@@ -436,12 +432,11 @@ fn collect_stderr(stderr: ChildStderr, buffer: &Arc<Mutex<Vec<String>>>) {
         if entry.is_empty() {
             continue;
         }
-        if let Ok(mut logs) = buffer.lock() {
-            logs.push(entry);
-            if logs.len() > 2048 {
-                let drain_to = logs.len().saturating_sub(1024);
-                logs.drain(0..drain_to);
-            }
+        let mut logs = buffer.blocking_lock();
+        logs.push(entry);
+        if logs.len() > 2048 {
+            let drain_to = logs.len().saturating_sub(1024);
+            logs.drain(0..drain_to);
         }
     }
 }

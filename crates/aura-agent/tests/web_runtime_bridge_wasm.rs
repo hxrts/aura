@@ -1,4 +1,6 @@
+//! Web runtime bridge tests for wasm builds.
 #![cfg(all(target_arch = "wasm32", feature = "web"))]
+#![allow(missing_docs)]
 
 use std::sync::Arc;
 

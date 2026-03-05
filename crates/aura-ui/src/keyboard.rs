@@ -635,7 +635,7 @@ fn submit_chat_input(model: &mut UiModel, text: &str) {
                     }
                     aura_app::ui::types::ChatCommand::Msg { text, .. }
                     | aura_app::ui::types::ChatCommand::Me { action: text } => {
-                        model.messages.push(text.clone());
+                        model.messages.push(text);
                         model.toast = Some(command_toast(
                             '✓',
                             "ok",
@@ -645,7 +645,7 @@ fn submit_chat_input(model: &mut UiModel, text: &str) {
                         ));
                     }
                     aura_app::ui::types::ChatCommand::Topic { text } => {
-                        model.set_selected_channel_topic(text.clone());
+                        model.set_selected_channel_topic(text);
                         model.toast = Some(command_toast(
                             '✓',
                             "ok",

@@ -1,3 +1,5 @@
+#![allow(clippy::incompatible_msrv)]
+
 use dioxus::prelude::*;
 use lumen_blocks::components::button::{
     Button as LbButton, ButtonSize as LbButtonSize, ButtonVariant as LbButtonVariant,
@@ -199,7 +201,7 @@ pub fn UiModal(
                                 full_width: true,
                                 class: Some("font-mono".to_string()),
                                 on_input: move |evt: FormEvent| {
-                                    on_input_change.call(evt.value().to_string());
+                                    on_input_change.call(evt.value());
                                 },
                             }
                         }

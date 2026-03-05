@@ -29,7 +29,7 @@ pub fn render_canonical_snapshot(model: &UiModel) -> String {
     }
 
     if !authority_written {
-        lines.push(format!("│ {:<114} │", authority_label));
+        lines.push(format!("│ {authority_label:<114} │"));
     }
 
     if let Some(toast) = &model.toast {
@@ -416,13 +416,5 @@ fn apply_modal_overlay(
 }
 
 fn format_panel_row(left: &str, center: &str, right: &str) -> String {
-    format!(
-        "│ {:<left_width$} │ {:<center_width$} │ {:<right_width$} │",
-        left,
-        center,
-        right,
-        left_width = PANEL_WIDTH,
-        center_width = PANEL_WIDTH,
-        right_width = PANEL_WIDTH,
-    )
+    format!("│ {left:<PANEL_WIDTH$} │ {center:<PANEL_WIDTH$} │ {right:<PANEL_WIDTH$} │")
 }
