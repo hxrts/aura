@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod clipboard;
+pub mod components;
 pub mod keyboard;
 pub mod model;
 pub mod snapshot;

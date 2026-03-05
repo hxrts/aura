@@ -216,9 +216,7 @@ fn contacts_row(model: &UiModel, row_idx: usize) -> (String, String, String) {
         return (
             format!("{prefix}○ {}", contact.name),
             String::new(),
-            if model.contact_details
-                && model.selected_contact_index == row_idx.saturating_sub(1)
-            {
+            if model.contact_details && model.selected_contact_index == row_idx.saturating_sub(1) {
                 format!("Nickname: {}", contact.name)
             } else {
                 String::new()
@@ -269,7 +267,11 @@ fn settings_row(model: &UiModel, row_idx: usize) -> (String, String, String) {
 
     if row_idx > 0 && row_idx <= SETTINGS_ROWS.len() {
         let idx = row_idx - 1;
-        let prefix = if idx == model.settings_index { "➤ " } else { "" };
+        let prefix = if idx == model.settings_index {
+            "➤ "
+        } else {
+            ""
+        };
         let right = if idx == 0 {
             format!("Nickname: {}", model.profile_nickname)
         } else if SETTINGS_ROWS[idx] == "Authority" {
@@ -277,7 +279,11 @@ fn settings_row(model: &UiModel, row_idx: usize) -> (String, String, String) {
         } else {
             String::new()
         };
-        return (format!("{prefix}{}", SETTINGS_ROWS[idx]), String::new(), right);
+        return (
+            format!("{prefix}{}", SETTINGS_ROWS[idx]),
+            String::new(),
+            right,
+        );
     }
 
     (String::new(), String::new(), String::new())

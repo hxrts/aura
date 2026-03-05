@@ -57,8 +57,17 @@ web-tailwind-watch:
     cd crates/aura-web && npm run tailwind:watch
 
 # Serve Aura web shell locally for harness/browser runs
-web-serve:
-    cd crates/aura-web && NO_COLOR=true trunk serve --address 0.0.0.0 --port 4173
+web-serve port="4173":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    selected_port="{{port}}"
+    if command -v lsof >/dev/null 2>&1; then
+        while lsof -PiTCP:"$selected_port" -sTCP:LISTEN -t >/dev/null 2>&1; do
+            selected_port="$((selected_port + 1))"
+        done
+    fi
+    echo "Serving aura-web on port $selected_port"
+    cd crates/aura-web && NO_COLOR=true trunk serve --address 0.0.0.0 --port "$selected_port"
 
 # Browser harness driver smoke test
 browser-driver-smoke:

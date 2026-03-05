@@ -232,36 +232,35 @@ impl ToolApi {
                 .coordinator
                 .read_clipboard(&instance_id)
                 .map(|text| serde_json::json!({ "text": text })),
-            ToolRequest::GetAuthorityId { instance_id } => {
-                self.coordinator
-                    .get_authority_id(&instance_id)
-                    .and_then(|authority_id| {
-                        if let Some(authority_id) = authority_id {
+            ToolRequest::GetAuthorityId { instance_id } => self
+                .coordinator
+                .get_authority_id(&instance_id)
+                .and_then(|authority_id| {
+                    if let Some(authority_id) = authority_id {
+                        return Ok(serde_json::json!({
+                            "authority_id": authority_id,
+                            "source": "backend"
+                        }));
+                    }
+
+                    self.coordinator.screen(&instance_id).and_then(|screen| {
+                        if let Some(authority_id) = extract_authority_id(&screen) {
                             return Ok(serde_json::json!({
                                 "authority_id": authority_id,
-                                "source": "backend"
+                                "source": "screen"
                             }));
                         }
 
-                        self.coordinator.screen(&instance_id).and_then(|screen| {
-                            if let Some(authority_id) = extract_authority_id(&screen) {
-                                return Ok(serde_json::json!({
+                        self.coordinator
+                            .resolve_authority_id_from_local_state(&instance_id)
+                            .map(|authority_id| {
+                                serde_json::json!({
                                     "authority_id": authority_id,
-                                    "source": "screen"
-                                }));
-                            }
-
-                            self.coordinator
-                                .resolve_authority_id_from_local_state(&instance_id)
-                                .map(|authority_id| {
-                                    serde_json::json!({
-                                        "authority_id": authority_id,
-                                        "source": "local_state"
-                                    })
+                                    "source": "local_state"
                                 })
-                        })
+                            })
                     })
-            }
+                }),
             ToolRequest::ListChannels { instance_id } => {
                 self.coordinator.screen(&instance_id).map(|screen| {
                     let channels = extract_channels(&screen);

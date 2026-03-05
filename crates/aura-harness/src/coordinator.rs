@@ -114,7 +114,10 @@ impl HarnessCoordinator {
                 if peer_id == instance_id {
                     continue;
                 }
-                if !matches!(self.instance_modes.get(peer_id), Some(InstanceMode::Browser)) {
+                if !matches!(
+                    self.instance_modes.get(peer_id),
+                    Some(InstanceMode::Browser)
+                ) {
                     continue;
                 }
                 let _ = backend.as_trait_mut().inject_message(&message);

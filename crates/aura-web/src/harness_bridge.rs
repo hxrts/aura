@@ -29,17 +29,28 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
         }
         JsValue::TRUE
     }) as Box<dyn FnMut(JsValue) -> JsValue>);
-    Reflect::set(&harness, &JsValue::from_str("send_keys"), send_keys.as_ref().unchecked_ref())?;
+    Reflect::set(
+        &harness,
+        &JsValue::from_str("send_keys"),
+        send_keys.as_ref().unchecked_ref(),
+    )?;
     send_keys.forget();
 
     let send_key_controller = controller.clone();
     let send_key = Closure::wrap(Box::new(move |key: JsValue, repeat: JsValue| -> JsValue {
         let key_name = key.as_string().unwrap_or_default();
-        let repeat = repeat.as_f64().map(|value| value.max(1.0) as u16).unwrap_or(1);
+        let repeat = repeat
+            .as_f64()
+            .map(|value| value.max(1.0) as u16)
+            .unwrap_or(1);
         send_key_controller.send_key_named(&key_name, repeat);
         JsValue::TRUE
     }) as Box<dyn FnMut(JsValue, JsValue) -> JsValue>);
-    Reflect::set(&harness, &JsValue::from_str("send_key"), send_key.as_ref().unchecked_ref())?;
+    Reflect::set(
+        &harness,
+        &JsValue::from_str("send_key"),
+        send_key.as_ref().unchecked_ref(),
+    )?;
     send_key.forget();
 
     let snapshot_controller = controller.clone();
@@ -73,7 +84,11 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
         );
         payload.into()
     }) as Box<dyn FnMut() -> JsValue>);
-    Reflect::set(&harness, &JsValue::from_str("snapshot"), snapshot.as_ref().unchecked_ref())?;
+    Reflect::set(
+        &harness,
+        &JsValue::from_str("snapshot"),
+        snapshot.as_ref().unchecked_ref(),
+    )?;
     snapshot.forget();
 
     let read_clipboard_controller = controller.clone();
@@ -100,14 +115,21 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
 
     let tail_log_controller = controller.clone();
     let tail_log = Closure::wrap(Box::new(move |lines: JsValue| -> JsValue {
-        let lines = lines.as_f64().map(|value| value.max(1.0) as usize).unwrap_or(20);
+        let lines = lines
+            .as_f64()
+            .map(|value| value.max(1.0) as usize)
+            .unwrap_or(20);
         let array = Array::new();
         for line in tail_log_controller.tail_log(lines) {
             array.push(&JsValue::from_str(&line));
         }
         array.into()
     }) as Box<dyn FnMut(JsValue) -> JsValue>);
-    Reflect::set(&harness, &JsValue::from_str("tail_log"), tail_log.as_ref().unchecked_ref())?;
+    Reflect::set(
+        &harness,
+        &JsValue::from_str("tail_log"),
+        tail_log.as_ref().unchecked_ref(),
+    )?;
     tail_log.forget();
 
     let inject_controller = controller.clone();

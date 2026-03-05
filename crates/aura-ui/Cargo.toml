@@ -18,6 +18,7 @@ aura-app = { path = "../aura-app" }
 async-lock = { workspace = true }
 cfg-if = "1"
 dioxus = { version = "0.7", default-features = false, features = ["macro", "hooks", "signals", "html"] }
+lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.3.0" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

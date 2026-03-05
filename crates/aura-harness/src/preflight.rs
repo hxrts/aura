@@ -292,9 +292,7 @@ fn env_value(key: &str, env_entries: &[String]) -> Option<String> {
 fn default_playwright_driver_path() -> Option<std::path::PathBuf> {
     std::env::current_dir()
         .ok()
-        .map(|cwd| {
-            cwd.join("crates/aura-harness/playwright-driver/playwright_driver.mjs")
-        })
+        .map(|cwd| cwd.join("crates/aura-harness/playwright-driver/playwright_driver.mjs"))
 }
 
 fn ensure_app_url_reachable(app_url: &str) -> Result<()> {

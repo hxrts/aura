@@ -4,7 +4,6 @@ use crate::snapshot::render_canonical_snapshot;
 use async_lock::RwLock;
 use aura_app::AppCore;
 use std::sync::{Arc, RwLock as StdRwLock};
-use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiScreen {
@@ -278,7 +277,7 @@ impl UiController {
             .try_read()
             .and_then(|core| core.authority().cloned())
             .map(|id| id.to_string())
-            .unwrap_or_else(|| format!("authority-{}", Uuid::new_v4()));
+            .unwrap_or_else(|| "authority-local".to_string());
 
         Self {
             app_core,
@@ -296,6 +295,18 @@ impl UiController {
     pub fn send_key_named(&self, key: &str, repeat: u16) {
         if let Ok(mut model) = self.model.write() {
             apply_named_key(&mut model, key, repeat, self.clipboard.as_ref());
+        }
+    }
+
+    pub fn set_screen(&self, screen: UiScreen) {
+        if let Ok(mut model) = self.model.write() {
+            model.screen = screen;
+        }
+    }
+
+    pub fn set_modal_buffer(&self, value: &str) {
+        if let Ok(mut model) = self.model.write() {
+            model.modal_buffer = value.to_string();
         }
     }
 

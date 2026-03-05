@@ -86,7 +86,9 @@ impl FilesystemStorageHandler {
         Database::open(db_name)
             .with_version(STORAGE_VERSION)
             .with_on_upgrade_needed(|_event, db| {
-                let has_store = db.object_store_names().any(|name| name == OBJECT_STORE_NAME);
+                let has_store = db
+                    .object_store_names()
+                    .any(|name| name == OBJECT_STORE_NAME);
                 if !has_store {
                     let _ = db.create_object_store(OBJECT_STORE_NAME).build()?;
                 }
@@ -126,7 +128,9 @@ impl FilesystemStorageHandler {
             .await
             .map_err(|e| Self::map_write("put await", e))?;
 
-        tx.commit().await.map_err(|e| Self::map_write("commit", e))?;
+        tx.commit()
+            .await
+            .map_err(|e| Self::map_write("commit", e))?;
         Ok(())
     }
 
@@ -209,7 +213,9 @@ impl FilesystemStorageHandler {
                 .map_err(|e| Self::map_write("batch put await", e))?;
         }
 
-        tx.commit().await.map_err(|e| Self::map_write("commit", e))?;
+        tx.commit()
+            .await
+            .map_err(|e| Self::map_write("commit", e))?;
         Ok(())
     }
 
@@ -283,10 +289,16 @@ impl StorageExtendedEffects for FilesystemStorageHandler {
         }
 
         let db_name = self.db_name.clone();
-        Self::run_local("store_batch", move || Self::store_batch_inner(db_name, pairs)).await
+        Self::run_local("store_batch", move || {
+            Self::store_batch_inner(db_name, pairs)
+        })
+        .await
     }
 
-    async fn retrieve_batch(&self, keys: &[String]) -> Result<HashMap<String, Vec<u8>>, StorageError> {
+    async fn retrieve_batch(
+        &self,
+        keys: &[String],
+    ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
         let mut out = HashMap::new();
         for key in keys {
             if let Some(value) = self.retrieve(key).await? {

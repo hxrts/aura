@@ -46,14 +46,14 @@ use biscuit_auth::{macros::*, Biscuit, KeyPair, PublicKey};
 use parking_lot::RwLock;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
+use std::net::SocketAddr;
 use std::sync::Arc;
 #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
 use std::sync::Once;
 #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
 use std::time::Duration;
-use std::collections::HashMap;
-#[cfg(not(target_arch = "wasm32"))]
-use std::net::SocketAddr;
 use tokio::sync::mpsc;
 
 use super::shared_transport::SharedTransport;

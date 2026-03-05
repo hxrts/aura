@@ -176,7 +176,10 @@ fn handle_contacts_char(model: &mut UiModel, ch: char) {
         }
         'e' => {
             model.modal = Some(ModalState::EditNickname);
-            model.modal_buffer = model.selected_contact_name().unwrap_or_default().to_string();
+            model.modal_buffer = model
+                .selected_contact_name()
+                .unwrap_or_default()
+                .to_string();
             model.modal_hint = "Edit Nickname".to_string();
         }
         'g' => {
@@ -268,19 +271,35 @@ fn handle_neighborhood_char(model: &mut UiModel, ch: char) {
                 message: "Neighborhood".to_string(),
             });
         }
-        'o' if matches!(model.neighborhood_mode, crate::model::NeighborhoodMode::Detail) => {
+        'o' if matches!(
+            model.neighborhood_mode,
+            crate::model::NeighborhoodMode::Detail
+        ) =>
+        {
             model.modal = Some(ModalState::AssignModerator);
             model.modal_hint = "Assign Moderator".to_string();
         }
-        'x' if matches!(model.neighborhood_mode, crate::model::NeighborhoodMode::Detail) => {
+        'x' if matches!(
+            model.neighborhood_mode,
+            crate::model::NeighborhoodMode::Detail
+        ) =>
+        {
             model.modal = Some(ModalState::AccessOverride);
             model.modal_hint = "Access Override".to_string();
         }
-        'p' if matches!(model.neighborhood_mode, crate::model::NeighborhoodMode::Detail) => {
+        'p' if matches!(
+            model.neighborhood_mode,
+            crate::model::NeighborhoodMode::Detail
+        ) =>
+        {
             model.modal = Some(ModalState::CapabilityConfig);
             model.modal_hint = "Home Capability Configuration".to_string();
         }
-        'i' if matches!(model.neighborhood_mode, crate::model::NeighborhoodMode::Detail) => {
+        'i' if matches!(
+            model.neighborhood_mode,
+            crate::model::NeighborhoodMode::Detail
+        ) =>
+        {
             model.input_mode = true;
             model.input_buffer.clear();
         }
@@ -362,36 +381,34 @@ fn handle_enter(model: &mut UiModel, clipboard: &dyn ClipboardPort) {
         UiScreen::Contacts => {
             model.contact_details = true;
         }
-        UiScreen::Settings => {
-            match model.settings_index {
-                0 => {
-                    model.modal = Some(ModalState::EditNickname);
-                    model.modal_buffer = model.profile_nickname.clone();
-                    model.modal_hint = "Edit Nickname".to_string();
-                }
-                1 => {
-                    model.modal = Some(ModalState::GuardianSetup);
-                    model.modal_hint = "Guardian Setup".to_string();
-                }
-                2 => {
-                    model.toast = Some(ToastState {
-                        icon: 'ℹ',
-                        message: "guardians for recovery".to_string(),
-                    });
-                }
-                3 => {
-                    model.modal = Some(ModalState::AddDeviceStep1);
-                    model.modal_hint = "Add Device — Step 1 of 3".to_string();
-                }
-                4 => {
-                    model.toast = Some(ToastState {
-                        icon: '✗',
-                        message: "MFA requires at least 2 devices".to_string(),
-                    });
-                }
-                _ => {}
+        UiScreen::Settings => match model.settings_index {
+            0 => {
+                model.modal = Some(ModalState::EditNickname);
+                model.modal_buffer = model.profile_nickname.clone();
+                model.modal_hint = "Edit Nickname".to_string();
             }
-        }
+            1 => {
+                model.modal = Some(ModalState::GuardianSetup);
+                model.modal_hint = "Guardian Setup".to_string();
+            }
+            2 => {
+                model.toast = Some(ToastState {
+                    icon: 'ℹ',
+                    message: "guardians for recovery".to_string(),
+                });
+            }
+            3 => {
+                model.modal = Some(ModalState::AddDeviceStep1);
+                model.modal_hint = "Add Device — Step 1 of 3".to_string();
+            }
+            4 => {
+                model.toast = Some(ToastState {
+                    icon: '✗',
+                    message: "MFA requires at least 2 devices".to_string(),
+                });
+            }
+            _ => {}
+        },
         UiScreen::Chat | UiScreen::Notifications => {}
     }
 }
@@ -436,7 +453,11 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             dismiss_modal(model);
         }
         ModalState::CreateChannel => {
-            let channel = model.modal_buffer.trim().trim_start_matches('#').to_string();
+            let channel = model
+                .modal_buffer
+                .trim()
+                .trim_start_matches('#')
+                .to_string();
             if !channel.is_empty() {
                 model.select_channel_by_name(&channel);
                 model.toast = Some(ToastState {
@@ -566,7 +587,13 @@ fn submit_chat_input(model: &mut UiModel, text: &str) {
                                 }
                             }
                         }
-                        model.toast = Some(command_toast('✓', "ok", "none", "replicated", "left channel"));
+                        model.toast = Some(command_toast(
+                            '✓',
+                            "ok",
+                            "none",
+                            "replicated",
+                            "left channel",
+                        ));
                     }
                     aura_app::ui::types::ChatCommand::Help { command } => {
                         let detail = if let Some(command) = command {
@@ -688,7 +715,10 @@ fn handle_escape(model: &mut UiModel) {
         return;
     }
     if model.screen == UiScreen::Neighborhood
-        && matches!(model.neighborhood_mode, crate::model::NeighborhoodMode::Detail)
+        && matches!(
+            model.neighborhood_mode,
+            crate::model::NeighborhoodMode::Detail
+        )
     {
         model.neighborhood_mode = crate::model::NeighborhoodMode::Map;
         return;
@@ -820,8 +850,6 @@ fn command_toast(
 ) -> ToastState {
     ToastState {
         icon,
-        message: format!(
-            "{detail} status={status} reason={reason} consistency={consistency}"
-        ),
+        message: format!("{detail} status={status} reason={reason} consistency={consistency}"),
     }
 }

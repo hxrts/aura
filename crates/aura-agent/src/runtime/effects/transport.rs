@@ -4,16 +4,16 @@ use async_trait::async_trait;
 use aura_core::effects::transport::{TransportEnvelope, TransportStats};
 use aura_core::effects::{TransportEffects, TransportError};
 use aura_core::{AuthorityId, ContextId};
+#[cfg(not(target_arch = "wasm32"))]
+use aura_effects::transport::TransportConfig;
+use aura_rendezvous::TransportHint;
+use cfg_if::cfg_if;
 #[cfg(target_arch = "wasm32")]
 use futures::channel::oneshot;
 #[cfg(target_arch = "wasm32")]
 use futures::SinkExt;
 #[cfg(target_arch = "wasm32")]
 use gloo_net::websocket::{futures::WebSocket, Message};
-#[cfg(not(target_arch = "wasm32"))]
-use aura_effects::transport::TransportConfig;
-use aura_rendezvous::TransportHint;
-use cfg_if::cfg_if;
 #[cfg(target_arch = "wasm32")]
 use std::future::Future;
 #[cfg(not(target_arch = "wasm32"))]
