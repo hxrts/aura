@@ -17,8 +17,6 @@
 
 // Runtime builder and container
 pub mod builder;
-#[cfg(feature = "effect-container")]
-pub mod container;
 
 // Effect system registry
 pub mod registry;
@@ -33,8 +31,6 @@ pub mod subsystems;
 // Context management
 pub mod context;
 pub mod contextual;
-#[cfg(feature = "context-propagation")]
-pub mod propagation;
 
 // Runtime services
 pub mod consensus;

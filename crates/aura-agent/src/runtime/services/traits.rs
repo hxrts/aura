@@ -72,7 +72,6 @@ impl fmt::Display for ServiceHealth {
 }
 
 /// Error kinds for service operations
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServiceErrorKind {
     /// Service failed to start
@@ -92,7 +91,6 @@ pub enum ServiceErrorKind {
 }
 
 /// Error from a service operation
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct ServiceError {
     /// Name of the service that encountered the error
@@ -105,7 +103,6 @@ pub struct ServiceError {
     pub cause: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
 
-#[allow(dead_code)]
 impl ServiceError {
     /// Create a new service error
     pub fn new(service: &'static str, kind: ServiceErrorKind, message: impl Into<String>) -> Self {
@@ -204,7 +201,7 @@ impl std::error::Error for ServiceError {
 ///     }
 /// }
 /// ```
-#[allow(dead_code)]
+#[allow(dead_code)] // Lifecycle API surface; methods are consumed incrementally by runtime wiring.
 #[async_trait]
 pub trait RuntimeService: Send + Sync {
     /// Returns the unique name of this service
@@ -255,7 +252,7 @@ pub trait RuntimeService: Send + Sync {
 }
 
 /// Extension trait for collections of runtime services
-#[allow(dead_code)]
+#[allow(dead_code)] // Reserved for future dependency-ordered service collections.
 pub trait RuntimeServiceCollection {
     /// Get a service by name
     fn get_service(&self, name: &str) -> Option<&dyn RuntimeService>;

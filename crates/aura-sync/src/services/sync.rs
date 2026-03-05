@@ -129,7 +129,6 @@ pub struct SyncMaintenanceStats {
 /// unified protocols and infrastructure from Phases 2 and 3.
 pub struct SyncService {
     /// Configuration
-    #[allow(dead_code)]
     config: SyncServiceConfig,
 
     /// Service state

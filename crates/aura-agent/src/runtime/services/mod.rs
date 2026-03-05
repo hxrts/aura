@@ -11,7 +11,6 @@ pub mod authority_state;
 pub mod ceremony_runner;
 pub mod ceremony_tracker;
 pub mod context_manager;
-pub mod device_nickname_manager;
 pub mod flow_budget_manager;
 pub mod invitation_manager;
 pub mod lan_discovery;
@@ -36,9 +35,6 @@ pub use authority_manager::AuthorityManager;
 pub use authority_state::AuthorityStatus;
 pub use ceremony_tracker::CeremonyTracker;
 pub use context_manager::ContextManager;
-// DeviceNicknameManager is prepared but not yet wired into runtime
-#[allow(unused_imports)]
-pub use device_nickname_manager::{DeviceNicknameManager, DeviceNicknameStore};
 pub use flow_budget_manager::FlowBudgetManager;
 pub(crate) use invitation_manager::InvitationManager;
 pub use lan_transport::LanTransportService;

@@ -76,7 +76,6 @@ dirs = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["net", "rt-multi-thread"] }
 get_if_addrs = "0.5"
-tokio-tungstenite = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-net = { version = "0.6", features = ["websocket"] }
@@ -97,21 +96,11 @@ wasm-bindgen-futures = "0.4"
 [features]
 default = []
 # qrcode = ["dep:qrcode"]  # commented out - qrcode not in workspace
-dev-console = [
-    "dep:tokio-tungstenite",
-    # "dep:axum",     # commented out - not in workspace
-    # "dep:tower",    # commented out - not in workspace
-    # "dep:tower-http", # commented out - not in workspace
-]
 real-android-keystore = []  # Enable real Android Keystore implementation
 
 # Simulation feature: enables SimulationEnvironmentFactory and related abstractions
 # for decoupling the simulator from agent internals
 simulation = ["aura-core/simulation"]
-
-# Experimental runtime modules (not enabled by default)
-effect-container = []
-context-propagation = []
 
 # Choreography backend switch flags.
 # If none is set, runtime defaults to telltale adapter behavior.

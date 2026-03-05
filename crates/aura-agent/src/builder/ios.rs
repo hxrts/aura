@@ -24,8 +24,6 @@
 //!     .await?;
 //! ```
 
-use std::path::PathBuf;
-
 use aura_core::effects::ExecutionMode;
 #[cfg(feature = "ios")]
 use aura_core::hash;
@@ -232,12 +230,4 @@ impl Default for IosPresetBuilder {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Get the default iOS data directory (app container).
-#[allow(dead_code)]
-fn default_ios_data_dir() -> PathBuf {
-    // On iOS, this would be obtained from:
-    // FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)
-    PathBuf::from("~/Library/Application Support/aura")
 }

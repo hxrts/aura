@@ -25,8 +25,6 @@
 //!     .await?;
 //! ```
 
-use std::path::PathBuf;
-
 use aura_core::effects::ExecutionMode;
 #[cfg(feature = "android")]
 use aura_core::hash;
@@ -229,12 +227,4 @@ impl Default for AndroidPresetBuilder {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Get the default Android data directory.
-#[allow(dead_code)]
-fn default_android_data_dir() -> PathBuf {
-    // On Android, this would be obtained from:
-    // context.getFilesDir() or context.getNoBackupFilesDir()
-    PathBuf::from("/data/data/com.example.aura/files")
 }

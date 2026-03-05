@@ -535,7 +535,6 @@ impl PeerManager {
     }
 
     /// Validate a Biscuit token using proper root public key verification
-    #[allow(dead_code)]
     async fn validate_biscuit_token(
         &self,
         token_bytes: &[u8],
@@ -577,7 +576,6 @@ impl PeerManager {
     }
 
     /// Get the root public key for Biscuit token validation
-    #[allow(dead_code)]
     async fn get_root_public_key(&self) -> SyncResult<biscuit_auth::PublicKey> {
         // In a real implementation, this would:
         // 1. Load from configuration file or environment
