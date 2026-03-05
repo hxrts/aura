@@ -1101,6 +1101,49 @@ mod tests {
     }
 
     #[test]
+    fn test_reduce_authority_multiple_add_leafs_with_same_order() {
+        let auth_id = AuthorityId::new_from_entropy([21u8; 32]);
+        let mut journal = Journal::new(JournalNamespace::Authority(auth_id));
+
+        let shared_order = OrderTime([42u8; 32]);
+        let add_leaf_1 = Fact::new(
+            shared_order.clone(),
+            TimeStamp::OrderClock(OrderTime([1u8; 32])),
+            FactContent::AttestedOp(AttestedOp {
+                tree_op: crate::fact::TreeOpKind::AddLeaf {
+                    public_key: vec![1u8; 32],
+                    role: aura_core::tree::LeafRole::Device,
+                },
+                parent_commitment: Hash32::default(),
+                new_commitment: Hash32::new([3u8; 32]),
+                witness_threshold: 1,
+                signature: vec![0xAA],
+            }),
+        );
+        let add_leaf_2 = Fact::new(
+            shared_order,
+            TimeStamp::OrderClock(OrderTime([2u8; 32])),
+            FactContent::AttestedOp(AttestedOp {
+                tree_op: crate::fact::TreeOpKind::AddLeaf {
+                    public_key: vec![2u8; 32],
+                    role: aura_core::tree::LeafRole::Device,
+                },
+                parent_commitment: Hash32::new([3u8; 32]),
+                new_commitment: Hash32::new([4u8; 32]),
+                witness_threshold: 1,
+                signature: vec![0xBB],
+            }),
+        );
+
+        journal.add_fact(add_leaf_1).unwrap();
+        journal.add_fact(add_leaf_2).unwrap();
+
+        assert_eq!(journal.facts.len(), 2);
+        let state = reduce_authority(&journal).unwrap();
+        assert_eq!(state.tree_state.device_count(), 2);
+    }
+
+    #[test]
     fn amp_reduction_order_independent() {
         let ctx = ContextId::new_from_entropy([20u8; 32]);
         let channel = ChannelId::from_bytes([7u8; 32]);

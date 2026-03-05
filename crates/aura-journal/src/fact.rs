@@ -577,8 +577,19 @@ impl PartialOrd for Fact {
 
 impl Ord for Fact {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.order.cmp(&other.order)
+        // OrderTime is primary sort key. When it collides, use timestamp/content
+        // tie-breakers so distinct facts are not dropped by BTreeSet.
+        self.order
+            .cmp(&other.order)
+            .then_with(|| cmp_serialized(&self.timestamp, &other.timestamp))
+            .then_with(|| cmp_serialized(&self.content, &other.content))
     }
+}
+
+fn cmp_serialized<T: Serialize>(left: &T, right: &T) -> std::cmp::Ordering {
+    let left_bytes = aura_core::util::serialization::to_vec(left).unwrap_or_default();
+    let right_bytes = aura_core::util::serialization::to_vec(right).unwrap_or_default();
+    left_bytes.cmp(&right_bytes)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1594,6 +1605,38 @@ mod tests {
 
         // Ordering should be based on order field only
         assert!(fact1 < fact2);
+    }
+
+    #[test]
+    fn test_same_order_different_content_are_distinct() {
+        let namespace = JournalNamespace::Authority(AuthorityId::new_from_entropy([24u8; 32]));
+        let mut journal = Journal::new(namespace);
+        let shared_order = OrderTime([9u8; 32]);
+
+        let fact1 = Fact::new(
+            shared_order.clone(),
+            TimeStamp::OrderClock(OrderTime([10u8; 32])),
+            FactContent::Snapshot(SnapshotFact {
+                state_hash: Hash32::new([1u8; 32]),
+                superseded_facts: vec![],
+                sequence: 1,
+            }),
+        );
+
+        let fact2 = Fact::new(
+            shared_order,
+            TimeStamp::OrderClock(OrderTime([11u8; 32])),
+            FactContent::Snapshot(SnapshotFact {
+                state_hash: Hash32::new([2u8; 32]),
+                superseded_facts: vec![],
+                sequence: 2,
+            }),
+        );
+
+        journal.add_fact(fact1).unwrap();
+        journal.add_fact(fact2).unwrap();
+
+        assert_eq!(journal.size(), 2);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

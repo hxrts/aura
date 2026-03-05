@@ -2220,6 +2220,7 @@ mod tests {
     async fn test_guardian_handoff_reconfiguration_emits_audit_facts() {
         let authority_context = create_test_authority(179);
         let account_authority = authority_context.authority_id();
+        let context_id = crate::core::default_context_id_for_authority(account_authority);
         let config = AgentConfig::default();
         let effects = Arc::new(
             AuraEffectSystem::simulation_for_authority(&config, 1107, account_authority).unwrap(),
@@ -2243,12 +2244,18 @@ mod tests {
         service
             .apply_guardian_handoff_reconfiguration(&completion, &change)
             .await
-            .expect("guardian handoff reconfiguration");
+            .expect(&format!(
+                "guardian handoff reconfiguration failed: authority_id={account_authority}, reconfiguration_type=UpdateGuardian, change_id={}, previous_guardian={previous_guardian}, replacement_guardian={replacement_guardian}",
+                completion.change_id
+            ));
 
+        let expected_fact_types = "SessionDelegation(guardian_handoff), GuardianBinding";
         let facts = effects
             .load_committed_facts(account_authority)
             .await
-            .expect("load committed facts");
+            .expect(&format!(
+                "load committed facts failed: context_id={context_id}, authority_id={account_authority}, expected_fact_types={expected_fact_types}, reason=verify guardian handoff audit facts persisted"
+            ));
 
         assert!(facts.iter().any(|fact| {
             matches!(

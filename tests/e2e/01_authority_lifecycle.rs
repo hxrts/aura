@@ -50,9 +50,7 @@ async fn test_authority_lifecycle_end_to_end() -> Result<()> {
     manager.rotate_authority_epoch(&random, authority_id).await?;
 
     // Phase 5: Update Authority Threshold (we now have 2 devices after rotation)
-    // TODO: There's a reduction pipeline issue where only 1 leaf is visible
-    // Skip threshold update for now until journal reduction is fixed
-    // manager.update_authority_threshold(&random, authority_id, 2).await?;
+    manager.update_authority_threshold(&random, authority_id, 2).await?;
 
     // Phase 6: Get Authority Tree Info
     let (threshold, device_count, _root_commitment) =
