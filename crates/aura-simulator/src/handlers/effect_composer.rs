@@ -202,14 +202,6 @@ impl SimulationEffectComposer {
             .build()
     }
 
-    /// Deprecated: Use `for_testing` instead
-    #[deprecated(since = "0.1.0", note = "Use for_testing instead")]
-    pub async fn for_testing_async(
-        device_id: DeviceId,
-    ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        Self::for_testing(device_id).await
-    }
-
     /// Create a simulation environment with specific seed
     pub async fn for_simulation(
         device_id: DeviceId,

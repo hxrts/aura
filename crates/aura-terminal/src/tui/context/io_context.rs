@@ -314,24 +314,6 @@ impl IoContext {
         self.tasks.clone()
     }
 
-    /// Create a new IoContext with the given parameters.
-    ///
-    /// # Deprecated
-    ///
-    /// Use `IoContext::builder()` instead for more flexible construction.
-    #[doc(hidden)]
-    #[deprecated(since = "0.1.0", note = "Use IoContext::builder() instead")]
-    #[must_use]
-    pub fn new(
-        app_core: InitializedAppCore,
-        base_path: PathBuf,
-        device_id_str: String,
-        mode: TuiMode,
-    ) -> Self {
-        #[allow(deprecated)]
-        Self::with_account_status(app_core, true, base_path, device_id_str, mode)
-    }
-
     /// Create a new IoContext with explicit account status.
     ///
     /// # Deprecated

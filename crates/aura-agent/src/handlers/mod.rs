@@ -47,18 +47,6 @@ pub use recovery::{
 };
 pub use recovery_service::RecoveryServiceApi;
 
-// Backwards-compatible aliases (prefer *ServiceApi names for clarity)
-#[deprecated(note = "Use AuthServiceApi instead.")]
-pub type AuthService = AuthServiceApi;
-#[deprecated(note = "Use ChatServiceApi instead.")]
-pub type ChatService = ChatServiceApi;
-#[deprecated(note = "Use InvitationServiceApi instead.")]
-pub type InvitationService = InvitationServiceApi;
-#[deprecated(note = "Use RecoveryServiceApi instead.")]
-pub type RecoveryService = RecoveryServiceApi;
-#[deprecated(note = "Use SessionServiceApi instead.")]
-pub type SessionService = SessionServiceApi;
-
 // Re-export rendezvous types for public API
 pub use rendezvous::{ChannelResult, RendezvousHandler, RendezvousResult};
 pub use rendezvous_service::RendezvousServiceApi;

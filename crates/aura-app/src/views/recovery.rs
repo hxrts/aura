@@ -732,39 +732,6 @@ impl RecoveryState {
         self.update_guardian(id, |g| g.status = GuardianStatus::Active)
     }
 
-    /// Toggle guardian status for a contact (legacy compatibility).
-    ///
-    /// If is_guardian is true, adds/activates the guardian.
-    /// If is_guardian is false, removes/revokes the guardian.
-    #[deprecated(since = "0.2.0", note = "Use apply_guardian/revoke_guardian instead")]
-    pub fn toggle_guardian(&mut self, contact_id: AuthorityId, is_guardian: bool) {
-        if is_guardian {
-            // Check if guardian already exists
-            if let Some(guardian) = self.guardians.get_mut(&contact_id) {
-                // Reactivate existing guardian
-                guardian.status = GuardianStatus::Active;
-            } else {
-                // Add new guardian
-                self.guardians.insert(
-                    contact_id,
-                    Guardian {
-                        id: contact_id,
-                        name: String::new(), // Will be resolved from contacts
-                        status: GuardianStatus::Active,
-                        added_at: 0, // Timestamp would come from fact
-                        last_seen: None,
-                    },
-                );
-            }
-        } else {
-            // Revoke guardian status
-            if let Some(guardian) = self.guardians.get_mut(&contact_id) {
-                guardian.status = GuardianStatus::Revoked;
-                // Note: We don't remove from list to preserve history
-            }
-        }
-    }
-
     /// Set the recovery threshold.
     pub fn set_threshold(&mut self, threshold: u32) {
         self.threshold = threshold;

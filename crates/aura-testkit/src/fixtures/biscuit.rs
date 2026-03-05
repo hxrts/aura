@@ -408,12 +408,6 @@ pub fn create_security_test_scenario() -> Result<BiscuitTestFixture, BiscuitErro
     Ok(fixture)
 }
 
-// Legacy compatibility aliases
-#[deprecated(since = "0.2.0", note = "Use create_multi_authority_scenario instead")]
-pub fn create_multi_device_scenario() -> Result<BiscuitTestFixture, BiscuitError> {
-    create_multi_authority_scenario()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
