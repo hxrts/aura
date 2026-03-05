@@ -74,6 +74,15 @@ use crate::tui::state_machine::{transition, DispatchCommand, QueuedModal, TuiCom
 use crate::tui::updates::{ui_update_channel, UiUpdate, UiUpdateReceiver, UiUpdateSender};
 use std::sync::Mutex;
 
+mod events;
+mod input;
+mod render;
+mod state;
+use events::handle_channel_selection_change;
+use input::transition_from_terminal_event;
+use render::{build_global_modals, state_indicator_label};
+use state::{sync_neighborhood_navigation_state, TuiStateHandle};
+
 /// Props for IoApp
 ///
 /// These values are initial seeds only. Screens subscribe to `aura_app` signals
@@ -134,189 +143,6 @@ pub struct IoAppProps {
 }
 
 /// Main application with screen navigation
-
-/// Type-safe handle for TuiState that enforces proper reactivity patterns.
-///
-/// # Reactivity Model
-///
-/// iocraft's `Ref<T>` (from `use_ref`) does NOT trigger re-renders when modified.
-/// iocraft's `State<T>` (from `use_state`) DOES trigger re-renders when `.set()` is called,
-/// but ONLY if the component read the State during render via `.get()`.
-///
-/// This handle enforces the correct pattern:
-/// - **During render**: Use `read_for_render()` which reads the version (establishing reactivity)
-///   and returns a snapshot of the state. This is the ONLY way to read state during render.
-/// - **During callbacks**: Use `replace()` or `with_mut()` which update the Ref and bump the
-///   version, triggering a re-render.
-///
-/// # Compile-Time Safety
-///
-/// By making `read_for_render()` the only way to access state during render, we ensure
-/// the version is always read. If you try to bypass this (e.g., holding onto the raw Ref),
-/// you won't have a `TuiStateSnapshot` to pass to prop extraction functions.
-#[derive(Clone)]
-struct TuiStateHandle {
-    state: Ref<TuiState>,
-    version: State<usize>,
-}
-
-impl TuiStateHandle {
-    fn new(state: Ref<TuiState>, version: State<usize>) -> Self {
-        Self { state, version }
-    }
-
-    fn bump(&mut self) {
-        self.version.set(self.version.get().wrapping_add(1));
-    }
-
-    /// Read state for rendering. This MUST be used during the render phase.
-    ///
-    /// This method:
-    /// 1. Reads `version.get()` to establish reactivity (so the component re-renders when
-    ///    `replace()` or `with_mut()` are called)
-    /// 2. Returns a `TuiRenderState` that provides access to the TuiState
-    ///
-    /// # Why This Exists
-    ///
-    /// iocraft only re-renders a component when a `State<T>` it read during render changes.
-    /// The TuiState lives in a `Ref<T>` which doesn't trigger re-renders. We use a separate
-    /// `State<usize>` version counter that gets bumped on every state change.
-    ///
-    /// By reading the version here, we subscribe to changes. By returning a TuiRenderState,
-    /// we ensure all render-time state access goes through this method.
-    ///
-    /// # Type Safety
-    ///
-    /// The returned `TuiRenderState` can only be created via this method, ensuring the
-    /// version is always read during render. This makes the "forgot to read version" bug
-    /// impossible - you can't access TuiState for rendering without going through here.
-    fn read_for_render(&self) -> TuiRenderState {
-        // Read version to establish reactivity - this is the key to making re-renders work!
-        let _version = self.version.get();
-        TuiRenderState {
-            state: self.state.read().clone(),
-        }
-    }
-
-    /// Clone the current state (for use in event handlers where you need ownership).
-    ///
-    /// Note: This does NOT read the version, so it should only be used in callbacks,
-    /// not during render. For render-time access, use `read_for_render()`.
-    fn read_clone(&self) -> TuiState {
-        self.state.read().clone()
-    }
-
-    fn with_mut<R>(&mut self, f: impl FnOnce(&mut TuiState) -> R) -> R {
-        let mut guard = self.state.write();
-        let out = f(&mut guard);
-        drop(guard);
-        self.bump();
-        out
-    }
-
-    fn replace(&mut self, new_state: TuiState) {
-        self.with_mut(|state| *state = new_state);
-    }
-
-    /// Advance the active toast timer without forcing a full re-render on every tick.
-    ///
-    /// We only bump the render version when a toast is actually dismissed.
-    fn tick_active_toast_timer(&mut self) {
-        let dismissed = {
-            let mut guard = self.state.write();
-            guard.toast_queue.tick()
-        };
-        if dismissed {
-            self.bump();
-        }
-    }
-}
-
-/// A render-time state snapshot that can only be created via `TuiStateHandle::read_for_render()`.
-///
-/// This type enforces that the version State is read during render (establishing reactivity).
-/// All render-time access to TuiState must go through this type.
-///
-/// The state is cloned once per render, which is acceptable since:
-/// - Render happens at most once per frame (~60Hz)
-/// - The state is read-only during render anyway
-/// - This avoids unsafe code and keeps the API clean
-///
-/// Implements `Deref<Target = TuiState>` for convenient access to state fields.
-struct TuiRenderState {
-    state: TuiState,
-}
-
-impl std::ops::Deref for TuiRenderState {
-    type Target = TuiState;
-    fn deref(&self) -> &TuiState {
-        &self.state
-    }
-}
-
-fn sync_neighborhood_navigation_state(
-    state: &mut TuiState,
-    shared_homes: &Arc<std::sync::RwLock<Vec<String>>>,
-    shared_channels: &Arc<std::sync::RwLock<Vec<Channel>>>,
-    shared_home_meta: &SharedNeighborhoodHomeMeta,
-) {
-    let (home_count, selected_home_id, local_home_id) = shared_homes
-        .read()
-        .map(|guard| {
-            let count = guard.len();
-            let selected = guard.get(state.neighborhood.grid.current()).cloned();
-            let local = guard.first().cloned();
-            (count, selected, local)
-        })
-        .unwrap_or((0, None, None));
-    state.neighborhood.home_count = home_count;
-    // Neighborhood map is currently rendered as a single-column list.
-    // Keep GridNav columns non-zero so map navigation works.
-    state.neighborhood.grid.set_cols(1);
-    state.neighborhood.grid.set_count(home_count);
-    state.neighborhood.selected_home = state.neighborhood.grid.current();
-
-    let is_local_home_selected = selected_home_id == local_home_id;
-    let is_selected_home_entered = selected_home_id
-        .as_ref()
-        .map(|selected| state.neighborhood.entered_home_id.as_ref() == Some(selected))
-        .unwrap_or(false);
-    let is_detail_mode = matches!(
-        state.neighborhood.mode,
-        crate::tui::state_machine::NeighborhoodMode::Detail
-    );
-    let expose_remote_home_details = is_selected_home_entered
-        && is_detail_mode
-        && matches!(state.neighborhood.enter_depth, AccessLevel::Full);
-    let expose_home_details = is_local_home_selected || expose_remote_home_details;
-
-    let channel_count = if expose_home_details {
-        shared_channels.read().map(|guard| guard.len()).unwrap_or(0)
-    } else {
-        0
-    };
-    state.neighborhood.channel_count = channel_count;
-    state.neighborhood.selected_channel =
-        clamp_list_index(state.neighborhood.selected_channel, channel_count);
-
-    let home_meta = shared_home_meta
-        .read()
-        .map(|guard| *guard)
-        .unwrap_or_default();
-    let member_count = if expose_home_details {
-        home_meta.member_count
-    } else {
-        0
-    };
-    state.neighborhood.member_count = member_count;
-    state.neighborhood.moderator_actions_enabled = if expose_home_details {
-        home_meta.moderator_actions_enabled
-    } else {
-        false
-    };
-    state.neighborhood.selected_member =
-        clamp_list_index(state.neighborhood.selected_member, member_count);
-}
 
 #[allow(clippy::field_reassign_with_default)] // Large struct with many conditional fields
 #[component]
@@ -585,8 +411,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 // Only tick auto-dismissing toasts. Keep error toasts static and avoid
                 // forcing a full re-render unless dismissal actually occurred.
                 let should_tick = tui
-                    .state
-                    .read()
+                    .read_clone()
                     .toast_queue
                     .current()
                     .is_some_and(|toast| toast.auto_dismisses());
@@ -1291,7 +1116,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // =========================================================================
                         UiUpdate::ContactCountChanged(count) => {
                             let needs_update = {
-                                let state = tui.state.read();
+                                let state = tui.read_clone();
                                 state.contacts.contact_count != count
                                     || state.contacts.selected_index
                                         != clamp_list_index(state.contacts.selected_index, count)
@@ -1306,7 +1131,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
                         UiUpdate::NotificationsCountChanged(count) => {
                             let needs_update = {
-                                let state = tui.state.read();
+                                let state = tui.read_clone();
                                 state.notifications.item_count != count
                                     || state.notifications.selected_index
                                         != clamp_list_index(state.notifications.selected_index, count)
@@ -1340,7 +1165,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
                         UiUpdate::LanPeersCountChanged(count) => {
                             let needs_update = {
-                                let state = tui.state.read();
+                                let state = tui.read_clone();
                                 state.contacts.lan_peer_count != count
                                     || state.contacts.lan_selected_index
                                         != clamp_list_index(state.contacts.lan_selected_index, count)
@@ -1520,74 +1345,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Global modal overlays
     // =========================================================================
-    let mut global_modals = GlobalModalProps::default();
-    global_modals.current_screen_name = current_screen.name().to_string();
-
-    if let Some(modal) = tui_snapshot.modal_queue.current() {
-        match modal {
-            QueuedModal::AccountSetup(state) => {
-                global_modals.account_setup_visible = true;
-                global_modals.account_setup_nickname_suggestion = state.nickname_suggestion.clone();
-                global_modals.account_setup_creating = state.creating;
-                global_modals.account_setup_show_spinner = state.should_show_spinner();
-                global_modals.account_setup_success = state.success;
-                global_modals.account_setup_error = state.error.clone();
-            }
-            QueuedModal::GuardianSelect(state) => {
-                global_modals.guardian_modal_visible = true;
-                global_modals.guardian_modal_title = state.title.clone();
-                global_modals.guardian_modal_contacts = state
-                    .contacts
-                    .iter()
-                    .map(|(id, name)| Contact::new(id.clone(), name.clone()))
-                    .collect();
-                global_modals.guardian_modal_selected = state.selected_index;
-                global_modals.guardian_modal_selected_ids = state.selected_ids.clone();
-                global_modals.guardian_modal_multi_select = state.multi_select;
-            }
-            QueuedModal::ContactSelect(state) => {
-                global_modals.contact_modal_visible = true;
-                global_modals.contact_modal_title = state.title.clone();
-                global_modals.contact_modal_contacts = state
-                    .contacts
-                    .iter()
-                    .map(|(id, name)| Contact::new(id.clone(), name.clone()))
-                    .collect();
-                global_modals.contact_modal_selected = state.selected_index;
-                global_modals.contact_modal_selected_ids = state.selected_ids.clone();
-                global_modals.contact_modal_multi_select = state.multi_select;
-            }
-            QueuedModal::ChatMemberSelect(state) => {
-                global_modals.contact_modal_visible = true;
-                global_modals.contact_modal_title = state.picker.title.clone();
-                global_modals.contact_modal_contacts = state
-                    .picker
-                    .contacts
-                    .iter()
-                    .map(|(id, name)| Contact::new(id.clone(), name.clone()))
-                    .collect();
-                global_modals.contact_modal_selected = state.picker.selected_index;
-                global_modals.contact_modal_selected_ids = state.picker.selected_ids.clone();
-                global_modals.contact_modal_multi_select = state.picker.multi_select;
-            }
-            QueuedModal::Confirm {
-                title,
-                message,
-                on_confirm: _,
-            } => {
-                global_modals.confirm_visible = true;
-                global_modals.confirm_title = title.clone();
-                global_modals.confirm_message = message.clone();
-            }
-            QueuedModal::Help { current_screen } => {
-                global_modals.help_modal_visible = true;
-                if let Some(help_screen) = current_screen {
-                    global_modals.current_screen_name = help_screen.name().to_string();
-                }
-            }
-            _ => {}
-        }
-    }
+    let global_modals = build_global_modals(current_screen, &tui_snapshot);
 
     // Extract toast state from queue (type-enforced single toast at a time)
     let queued_toast = tui_snapshot.toast_queue.current().cloned();
@@ -1596,21 +1354,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let global_hints = global_footer_hints();
     let screen_hints = screen_footer_hints(current_screen);
 
-    let pending_actions = usize::from(tui_snapshot.modal_queue.is_active())
-        + tui_snapshot.modal_queue.pending_count()
-        + usize::from(tui_snapshot.toast_queue.is_active())
-        + tui_snapshot.toast_queue.pending_count();
-    let depth_label = match tui_snapshot.neighborhood.enter_depth {
-        AccessLevel::Limited => "Lim",
-        AccessLevel::Partial => "Par",
-        AccessLevel::Full => "Full",
-    };
-    let moderator_label = if tui_snapshot.neighborhood.moderator_actions_enabled {
-        "On"
-    } else {
-        "Off"
-    };
-    let state_indicator = format!("D:{depth_label} M:{moderator_label} P:{pending_actions}");
+    let state_indicator = state_indicator_label(&tui_snapshot);
 
     let tasks_for_events = tasks.clone();
     hooks.use_terminal_events({
@@ -1644,53 +1388,28 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let selected_channel_id_for_dispatch = selected_channel_id.clone();
         // Used for recovery eligibility checks (from threshold subscription)
         move |event| {
-            // Convert iocraft event to aura-core event and run through state machine
-            if let Some(core_event) = convert_iocraft_event(event) {
-                // Get current state, apply transition, update state
-                let mut current = tui.read_clone();
-                let current_channels = match shared_channels_for_dispatch.read() {
-                    Ok(guard) => guard.clone(),
-                    Err(poisoned) => poisoned.into_inner().clone(),
-                };
-                if let Some(channel) = current_channels.get(current.chat.selected_channel) {
-                    if let Ok(mut selected_id) = selected_channel_id_for_dispatch.write() {
-                        *selected_id = Some(channel.id.clone());
-                    }
-                }
-                sync_neighborhood_navigation_state(
-                    &mut current,
-                    &shared_neighborhood_homes_for_dispatch,
-                    &shared_channels_for_dispatch,
-                    &shared_neighborhood_home_meta_for_dispatch,
-                );
-                let (mut new_state, commands) = transition(&current, core_event);
-                sync_neighborhood_navigation_state(
-                    &mut new_state,
-                    &shared_neighborhood_homes_for_dispatch,
-                    &shared_channels_for_dispatch,
-                    &shared_neighborhood_home_meta_for_dispatch,
-                );
+            if let Some(input_transition) = transition_from_terminal_event(
+                event,
+                &tui,
+                &shared_channels_for_dispatch,
+                &shared_neighborhood_homes_for_dispatch,
+                &shared_neighborhood_home_meta_for_dispatch,
+                &selected_channel_id_for_dispatch,
+            ) {
+                let current = input_transition.current;
+                let mut new_state = input_transition.new_state;
+                let commands = input_transition.commands;
 
                 // Execute commands using callbacks registry
                 if let Some(ref cb) = callbacks {
-                    if new_state.chat.selected_channel != current.chat.selected_channel {
-                        let idx = new_state.chat.selected_channel;
-                        // Sync shared selection state IMMEDIATELY so ChatScreen's signal
-                        // callback reads the correct channel for message count computation
-                        if let Ok(mut guard) = tui_selected_for_events.write() {
-                            *guard = idx;
-                        }
-                        let channels = match shared_channels_for_dispatch.read() {
-                            Ok(guard) => guard.clone(),
-                            Err(poisoned) => poisoned.into_inner().clone(),
-                        };
-                        if let Some(channel) = channels.get(idx) {
-                            if let Ok(mut selected_id) = selected_channel_id_for_dispatch.write() {
-                                *selected_id = Some(channel.id.clone());
-                            }
-                            (cb.chat.on_channel_select)(channel.id.clone());
-                        }
-                    }
+                    handle_channel_selection_change(
+                        &current,
+                        &new_state,
+                        &shared_channels_for_dispatch,
+                        &tui_selected_for_events,
+                        &selected_channel_id_for_dispatch,
+                        cb,
+                    );
                     for cmd in commands {
                         match cmd {
                             TuiCommand::Exit => {
