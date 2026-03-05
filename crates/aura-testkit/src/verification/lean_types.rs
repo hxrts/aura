@@ -516,6 +516,73 @@ pub struct LeanJournalReduceResult {
     pub count: usize,
 }
 
+// ============================================================================
+// Typed flow budget + timestamp compare payloads
+// ============================================================================
+
+/// Canonical compare policy payload for the Lean oracle time compare command.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeanComparePolicy {
+    pub ignore_physical: bool,
+}
+
+/// Canonical compare timestamp payload for the Lean oracle time compare command.
+///
+/// Note: this is the current wire format accepted by `aura_verifier timestamp-compare`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeanCompareTimeStamp {
+    pub logical: u64,
+    pub order_clock: u64,
+}
+
+impl LeanCompareTimeStamp {
+    pub fn new(logical: u64, order_clock: u64) -> Self {
+        Self {
+            logical,
+            order_clock,
+        }
+    }
+}
+
+/// Canonical input payload for flow charge verification.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeanFlowChargeInput {
+    pub budget: u64,
+    pub cost: u64,
+}
+
+/// Canonical result payload for flow charge verification.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeanFlowChargeResult {
+    pub success: bool,
+    pub remaining: Option<u64>,
+}
+
+/// Canonical input payload for timestamp comparison verification.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeanTimestampCompareInput {
+    pub policy: LeanComparePolicy,
+    pub a: LeanCompareTimeStamp,
+    pub b: LeanCompareTimeStamp,
+}
+
+/// Canonical ordering enum returned by timestamp comparison verification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LeanTimestampOrdering {
+    Lt,
+    Eq,
+    Gt,
+}
+
+/// Canonical result payload for timestamp comparison verification.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeanTimestampCompareResult {
+    pub ordering: LeanTimestampOrdering,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -602,6 +669,39 @@ mod tests {
 
         let parsed: LeanJournal = serde_json::from_str(&json).unwrap();
         assert_eq!(journal, parsed);
+    }
+
+    #[test]
+    fn test_compare_payload_json() {
+        let input = LeanTimestampCompareInput {
+            policy: LeanComparePolicy {
+                ignore_physical: true,
+            },
+            a: LeanCompareTimeStamp::new(10, 1),
+            b: LeanCompareTimeStamp::new(10, 2),
+        };
+        let json = serde_json::to_string(&input).unwrap();
+        assert!(json.contains("ignorePhysical"));
+        assert!(json.contains("orderClock"));
+    }
+
+    #[test]
+    fn test_flow_charge_payload_json() {
+        let input = LeanFlowChargeInput {
+            budget: 100,
+            cost: 40,
+        };
+        let json = serde_json::to_string(&input).unwrap();
+        assert!(json.contains("budget"));
+        assert!(json.contains("cost"));
+
+        let result = LeanFlowChargeResult {
+            success: true,
+            remaining: Some(60),
+        };
+        let roundtrip: LeanFlowChargeResult =
+            serde_json::from_str(&serde_json::to_string(&result).unwrap()).unwrap();
+        assert_eq!(roundtrip, result);
     }
 }
 

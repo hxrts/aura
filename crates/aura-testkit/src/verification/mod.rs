@@ -44,9 +44,12 @@ cfg_if::cfg_if! {
         pub use lean_types::{
             AttestedOp, AuthorityId, ByteArray32, ChannelCheckpoint, ChannelId, ChannelPolicy,
             CommittedChannelEpochBump, ContextId, ConvergenceCert, DkgTranscriptCommit, Hash32, LeafRole,
-            LeakageFact, LeanFact, LeanFactContent, LeanJournal, LeanJournalMergeResult,
-            LeanJournalReduceResult, LeanNamespace, LeanTimeStamp, OrderTime, ProposedChannelEpochBump,
-            ProtocolRelationalFact, RelationalFact, ReversionFact, RotateFact, SnapshotFact, TreeOpKind,
+            LeakageFact, LeanComparePolicy, LeanCompareTimeStamp, LeanFact, LeanFactContent,
+            LeanFlowChargeInput, LeanFlowChargeResult, LeanJournal, LeanJournalMergeResult,
+            LeanJournalReduceResult, LeanNamespace, LeanTimeStamp, LeanTimestampCompareInput,
+            LeanTimestampCompareResult, LeanTimestampOrdering, OrderTime, ProposedChannelEpochBump,
+            ProtocolRelationalFact, RelationalFact, ReversionFact, RotateFact, SnapshotFact,
+            TreeOpKind,
         };
     }
 }

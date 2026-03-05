@@ -777,15 +777,15 @@ fn create_rust_journal(seed: u8, num_facts: usize) -> RustJournal {
         order_bytes[0] = seed;
         order_bytes[1] = i as u8;
 
-        let fact = RustFact {
-            order: RustOrderTime(order_bytes),
-            timestamp: aura_core::time::TimeStamp::OrderClock(RustOrderTime(order_bytes)),
-            content: RustFactContent::Snapshot(RustSnapshotFact {
+        let fact = RustFact::new(
+            RustOrderTime(order_bytes),
+            aura_core::time::TimeStamp::OrderClock(RustOrderTime(order_bytes)),
+            RustFactContent::Snapshot(RustSnapshotFact {
                 state_hash: Hash32::new([i as u8; 32]),
                 superseded_facts: vec![],
                 sequence: i as u64,
             }),
-        };
+        );
         journal.facts.insert(fact);
     }
 

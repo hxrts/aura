@@ -25,7 +25,9 @@
 //! ```
 
 use super::lean_types::{
-    LeanJournal, LeanJournalMergeResult, LeanJournalReduceResult, LeanNamespace,
+    LeanComparePolicy, LeanCompareTimeStamp, LeanFlowChargeInput, LeanFlowChargeResult, LeanJournal,
+    LeanJournalMergeResult, LeanJournalReduceResult, LeanNamespace, LeanTimestampCompareInput,
+    LeanTimestampCompareResult, LeanTimestampOrdering,
 };
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -61,6 +63,9 @@ pub struct OracleVersion {
     pub modules: Vec<String>,
 }
 
+/// Deprecated legacy input shape.
+///
+/// Prefer `LeanJournal` + `verify_journal_merge`.
 /// Journal merge input
 #[derive(Debug, Clone, Serialize)]
 pub struct JournalMergeInput {
@@ -68,6 +73,9 @@ pub struct JournalMergeInput {
     pub journal2: Vec<Fact>,
 }
 
+/// Deprecated legacy result shape.
+///
+/// Prefer `LeanJournalMergeResult`.
 /// Journal merge result
 #[derive(Debug, Clone, Deserialize)]
 pub struct JournalMergeResult {
@@ -75,12 +83,18 @@ pub struct JournalMergeResult {
     pub count: usize,
 }
 
+/// Deprecated legacy input shape.
+///
+/// Prefer `LeanJournal` + `verify_journal_reduce`.
 /// Journal reduce input
 #[derive(Debug, Clone, Serialize)]
 pub struct JournalReduceInput {
     pub journal: Vec<Fact>,
 }
 
+/// Deprecated legacy result shape.
+///
+/// Prefer `LeanJournalReduceResult`.
 /// Journal reduce result
 #[derive(Debug, Clone, Deserialize)]
 pub struct JournalReduceResult {
@@ -88,12 +102,18 @@ pub struct JournalReduceResult {
     pub count: usize,
 }
 
+/// Deprecated legacy fact shape.
+///
+/// Prefer `LeanFact`.
 /// A fact in the journal (matching Lean model)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Fact {
     pub id: u64,
 }
 
+/// Deprecated legacy input shape.
+///
+/// Prefer `LeanFlowChargeInput`.
 /// Flow charge input
 #[derive(Debug, Clone, Serialize)]
 pub struct FlowChargeInput {
@@ -101,6 +121,9 @@ pub struct FlowChargeInput {
     pub cost: u64,
 }
 
+/// Deprecated legacy result shape.
+///
+/// Prefer `LeanFlowChargeResult`.
 /// Flow charge result
 #[derive(Debug, Clone, Deserialize)]
 pub struct FlowChargeResult {
@@ -108,6 +131,9 @@ pub struct FlowChargeResult {
     pub remaining: Option<u64>,
 }
 
+/// Deprecated legacy input shape.
+///
+/// Prefer `LeanTimestampCompareInput`.
 /// Timestamp comparison input
 #[derive(Debug, Clone, Serialize)]
 pub struct TimestampCompareInput {
@@ -116,6 +142,9 @@ pub struct TimestampCompareInput {
     pub b: TimeStamp,
 }
 
+/// Deprecated legacy policy shape.
+///
+/// Prefer `LeanComparePolicy`.
 /// Comparison policy
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -123,6 +152,9 @@ pub struct ComparePolicy {
     pub ignore_physical: bool,
 }
 
+/// Deprecated legacy timestamp shape.
+///
+/// Prefer `LeanCompareTimeStamp`.
 /// Timestamp structure matching Lean model
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -131,12 +163,18 @@ pub struct TimeStamp {
     pub order_clock: u64,
 }
 
+/// Deprecated legacy result shape.
+///
+/// Prefer `LeanTimestampCompareResult`.
 /// Timestamp comparison result
 #[derive(Debug, Clone, Deserialize)]
 pub struct TimestampCompareResult {
     pub ordering: String,
 }
 
+/// Deprecated legacy ordering enum.
+///
+/// Prefer `LeanTimestampOrdering`.
 /// Ordering result enum
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ordering {
@@ -282,10 +320,12 @@ impl LeanOracle {
     ///
     /// Runs the Lean model's charge function and returns the result.
     pub fn verify_charge(&self, budget: u64, cost: u64) -> LeanOracleResult<FlowChargeResult> {
-        let input = FlowChargeInput { budget, cost };
-        let input_json = serde_json::to_string(&input)?;
-        let output = self.run_command("flow-charge", &input_json)?;
-        self.parse_output(&output)
+        let input = LeanFlowChargeInput { budget, cost };
+        let result = self.verify_flow_charge(&input)?;
+        Ok(FlowChargeResult {
+            success: result.success,
+            remaining: result.remaining,
+        })
     }
 
     /// Verify timestamp comparison
@@ -297,11 +337,40 @@ impl LeanOracle {
         a: TimeStamp,
         b: TimeStamp,
     ) -> LeanOracleResult<Ordering> {
-        let input = TimestampCompareInput { policy, a, b };
-        let input_json = serde_json::to_string(&input)?;
+        let input = LeanTimestampCompareInput {
+            policy: LeanComparePolicy {
+                ignore_physical: policy.ignore_physical,
+            },
+            a: LeanCompareTimeStamp::new(a.logical, a.order_clock),
+            b: LeanCompareTimeStamp::new(b.logical, b.order_clock),
+        };
+        let result = self.verify_timestamp_compare(&input)?;
+        Ok(match result {
+            LeanTimestampOrdering::Lt => Ordering::Lt,
+            LeanTimestampOrdering::Eq => Ordering::Eq,
+            LeanTimestampOrdering::Gt => Ordering::Gt,
+        })
+    }
+
+    /// Verify flow budget charge operation using canonical typed payloads.
+    pub fn verify_flow_charge(
+        &self,
+        input: &LeanFlowChargeInput,
+    ) -> LeanOracleResult<LeanFlowChargeResult> {
+        let input_json = serde_json::to_string(input)?;
+        let output = self.run_command("flow-charge", &input_json)?;
+        self.parse_output(&output)
+    }
+
+    /// Verify timestamp comparison using canonical typed payloads.
+    pub fn verify_timestamp_compare(
+        &self,
+        input: &LeanTimestampCompareInput,
+    ) -> LeanOracleResult<LeanTimestampOrdering> {
+        let input_json = serde_json::to_string(input)?;
         let output = self.run_command("timestamp-compare", &input_json)?;
-        let result: TimestampCompareResult = self.parse_output(&output)?;
-        Ok(Ordering::from(result.ordering.as_str()))
+        let result: LeanTimestampCompareResult = self.parse_output(&output)?;
+        Ok(result.ordering)
     }
 
     // ========================================================================
@@ -440,12 +509,22 @@ mod tests {
         let oracle = LeanOracle::new().expect("Failed to create oracle");
 
         // Successful charge
-        let result = oracle.verify_charge(100, 30).expect("Failed to charge");
+        let result = oracle
+            .verify_flow_charge(&LeanFlowChargeInput {
+                budget: 100,
+                cost: 30,
+            })
+            .expect("Failed to charge");
         assert!(result.success);
         assert_eq!(result.remaining, Some(70));
 
         // Failed charge (insufficient budget)
-        let result = oracle.verify_charge(10, 30).expect("Failed to charge");
+        let result = oracle
+            .verify_flow_charge(&LeanFlowChargeInput {
+                budget: 10,
+                cost: 30,
+            })
+            .expect("Failed to charge");
         assert!(!result.success);
         assert_eq!(result.remaining, None);
     }
@@ -457,38 +536,38 @@ mod tests {
 
         // With ignorePhysical = true, only logical time matters
         let result = oracle
-            .verify_compare(
-                ComparePolicy {
+            .verify_timestamp_compare(&LeanTimestampCompareInput {
+                policy: LeanComparePolicy {
                     ignore_physical: true,
                 },
-                TimeStamp {
+                a: LeanCompareTimeStamp {
                     logical: 5,
                     order_clock: 100,
                 },
-                TimeStamp {
+                b: LeanCompareTimeStamp {
                     logical: 10,
                     order_clock: 50,
                 },
-            )
+            })
             .expect("Failed to compare");
-        assert_eq!(result, Ordering::Lt);
+        assert_eq!(result, LeanTimestampOrdering::Lt);
 
         // Equal logical times
         let result = oracle
-            .verify_compare(
-                ComparePolicy {
+            .verify_timestamp_compare(&LeanTimestampCompareInput {
+                policy: LeanComparePolicy {
                     ignore_physical: true,
                 },
-                TimeStamp {
+                a: LeanCompareTimeStamp {
                     logical: 10,
                     order_clock: 100,
                 },
-                TimeStamp {
+                b: LeanCompareTimeStamp {
                     logical: 10,
                     order_clock: 50,
                 },
-            )
+            })
             .expect("Failed to compare");
-        assert_eq!(result, Ordering::Eq);
+        assert_eq!(result, LeanTimestampOrdering::Eq);
     }
 }

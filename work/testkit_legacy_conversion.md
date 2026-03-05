@@ -47,7 +47,7 @@ Refactor all `aura-testkit` verification call sites to use the new full-fidelity
 - [x] Run:
   - `nix develop --command cargo test -p aura-testkit --lib`
   - `nix develop --command cargo test -p aura-testkit --tests`
-- [ ] Commit baseline inventory artifacts and plan updates:
+- [x] Commit baseline inventory artifacts and plan updates:
   - Suggested commit: `testkit: inventory legacy verification type usage`
 
 ### Phase 0 Inventory Results
@@ -97,25 +97,38 @@ Refactor all `aura-testkit` verification call sites to use the new full-fidelity
 
 ### Tasks
 
-- [ ] Add/normalize new typed request/response structs for operations still using legacy payloads (merge/reduce/charge/compare).
-- [ ] Add conversion helpers where needed (`legacy -> new`, temporary internal only).
-- [ ] Mark legacy types and methods as deprecated in rustdoc/comments.
-- [ ] Keep behavior unchanged while dual-surface exists.
+- [x] Add/normalize new typed request/response structs for operations still using legacy payloads (merge/reduce/charge/compare).
+- [x] Add conversion helpers where needed (`legacy -> new`, temporary internal only).
+- [x] Mark legacy types and methods as deprecated in rustdoc/comments.
+- [x] Keep behavior unchanged while dual-surface exists.
 
 ### Success Criteria
 
-- [ ] All operational paths can be exercised via new typed APIs.
-- [ ] Legacy symbols are still present but clearly deprecated.
-- [ ] No behavior regressions in existing tests.
+- [x] All operational paths can be exercised via new typed APIs.
+- [x] Legacy symbols are still present but clearly deprecated.
+- [x] No behavior regressions in existing tests.
 
 ### Verify + Commit Gate
 
-- [ ] Run:
+- [x] Run:
   - `nix develop --command cargo test -p aura-testkit --lib`
   - `nix develop --command cargo test -p aura-testkit --features lean --lib`
   - `nix develop --command cargo test -p aura-testkit --test lean_differential --features lean -- --ignored`
 - [ ] Commit:
   - Suggested commit: `testkit: add new typed verification APIs and deprecate legacy surface`
+
+### Phase 1 Notes
+
+- Added canonical typed payloads in `lean_types`:
+  - `LeanFlowChargeInput` / `LeanFlowChargeResult`
+  - `LeanComparePolicy` / `LeanCompareTimeStamp`
+  - `LeanTimestampCompareInput` / `LeanTimestampCompareResult` / `LeanTimestampOrdering`
+- Added typed oracle APIs in `lean_oracle`:
+  - `verify_flow_charge(...)`
+  - `verify_timestamp_compare(...)`
+- Legacy `verify_charge(...)` and `verify_compare(...)` now delegate through typed APIs.
+- Legacy surface remains exported for compatibility, with deprecation notes in doc comments.
+- Built Lean oracle binary (`just lean-oracle-build`) to run ignored differential tests during gate.
 
 ---
 
