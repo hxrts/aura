@@ -17,11 +17,29 @@ pub struct MemoryClipboard {
 
 impl ClipboardPort for MemoryClipboard {
     fn write(&self, text: &str) {
-        *self.text.write_blocking() = text.to_string();
+        *write_guard(&self.text) = text.to_string();
     }
 
     fn read(&self) -> String {
-        self.text.read_blocking().clone()
+        read_guard(&self.text).clone()
+    }
+}
+
+fn read_guard<T>(lock: &RwLock<T>) -> async_lock::RwLockReadGuard<'_, T> {
+    loop {
+        if let Some(guard) = lock.try_read() {
+            return guard;
+        }
+        std::hint::spin_loop();
+    }
+}
+
+fn write_guard<T>(lock: &RwLock<T>) -> async_lock::RwLockWriteGuard<'_, T> {
+    loop {
+        if let Some(guard) = lock.try_write() {
+            return guard;
+        }
+        std::hint::spin_loop();
     }
 }
 

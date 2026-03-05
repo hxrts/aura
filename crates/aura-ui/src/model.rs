@@ -292,25 +292,25 @@ impl UiController {
     }
 
     pub fn send_keys(&self, keys: &str) {
-        let mut model = self.model.write_blocking();
+        let mut model = write_model(&self.model);
         apply_text_keys(&mut model, keys, self.clipboard.as_ref());
     }
 
     pub fn send_key_named(&self, key: &str, repeat: u16) {
-        let mut model = self.model.write_blocking();
+        let mut model = write_model(&self.model);
         apply_named_key(&mut model, key, repeat, self.clipboard.as_ref());
     }
 
     pub fn set_screen(&self, screen: UiScreen) {
-        self.model.write_blocking().screen = screen;
+        write_model(&self.model).screen = screen;
     }
 
     pub fn set_modal_buffer(&self, value: &str) {
-        self.model.write_blocking().modal_buffer = value.to_string();
+        write_model(&self.model).modal_buffer = value.to_string();
     }
 
     pub fn snapshot(&self) -> RenderedHarnessSnapshot {
-        let screen = render_canonical_snapshot(&self.model.read_blocking());
+        let screen = render_canonical_snapshot(&read_model(&self.model));
         let normalized_screen = screen
             .replace('\r', "")
             .lines()
@@ -335,7 +335,7 @@ impl UiController {
     }
 
     pub fn tail_log(&self, lines: usize) -> Vec<String> {
-        let model = self.model.read_blocking();
+        let model = read_model(&self.model);
         let mut output = model.logs.clone();
         if output.len() > lines {
             output = output.split_off(output.len() - lines);
@@ -344,29 +344,44 @@ impl UiController {
     }
 
     pub fn inject_message(&self, message: &str) {
-        self.model
-            .write_blocking()
-            .messages
-            .push(message.to_string());
+        write_model(&self.model).messages.push(message.to_string());
     }
 
     pub fn push_log(&self, line: &str) {
-        self.model.write_blocking().logs.push(line.to_string());
+        write_model(&self.model).logs.push(line.to_string());
     }
 
     pub fn set_authority_id(&self, authority_id: &str) {
-        self.model.write_blocking().authority_id = authority_id.to_string();
+        write_model(&self.model).authority_id = authority_id.to_string();
     }
 
     pub fn authority_id(&self) -> String {
-        self.model.read_blocking().authority_id.clone()
+        read_model(&self.model).authority_id.clone()
     }
 
     pub fn ui_model(&self) -> Option<UiModel> {
-        Some(self.model.read_blocking().clone())
+        Some(read_model(&self.model).clone())
     }
 
     pub fn app_core(&self) -> &Arc<AsyncRwLock<AppCore>> {
         &self.app_core
+    }
+}
+
+fn read_model(model: &AsyncRwLock<UiModel>) -> async_lock::RwLockReadGuard<'_, UiModel> {
+    loop {
+        if let Some(guard) = model.try_read() {
+            return guard;
+        }
+        std::hint::spin_loop();
+    }
+}
+
+fn write_model(model: &AsyncRwLock<UiModel>) -> async_lock::RwLockWriteGuard<'_, UiModel> {
+    loop {
+        if let Some(guard) = model.try_write() {
+            return guard;
+        }
+        std::hint::spin_loop();
     }
 }
