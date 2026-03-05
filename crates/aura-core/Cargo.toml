@@ -50,6 +50,7 @@ hkdf = { workspace = true }
 
 # Additional serialization for crypto types
 serde_bytes = { workspace = true }
+paste = "1.0"
 
 # Time utilities
 time = { workspace = true }

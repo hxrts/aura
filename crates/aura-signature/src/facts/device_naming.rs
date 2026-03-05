@@ -30,24 +30,20 @@
 
 use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::time::PhysicalTime;
-use aura_core::types::facts::{FactError, FactTypeId};
+use aura_core::types::facts::FactError;
 use serde::{Deserialize, Serialize};
 
-/// Type identifier for device naming facts.
-pub static DEVICE_NAMING_FACT_TYPE_ID: FactTypeId = FactTypeId::new("device_naming/v1");
-
-/// Schema version for device naming facts.
-pub const DEVICE_NAMING_SCHEMA_VERSION: u16 = 1;
+aura_core::define_fact_type_id!(
+    device_naming,
+    "device_naming/v1",
+    1,
+    schema_const = DEVICE_NAMING_SCHEMA_VERSION
+);
 
 /// Maximum bytes for nickname suggestion in facts.
 ///
 /// Matches `NICKNAME_SUGGESTION_BYTES_MAX` in `DeviceLeafMetadata` for consistency.
 pub const NICKNAME_SUGGESTION_BYTES_MAX: usize = 64;
-
-/// Get the typed fact ID for device naming facts
-pub fn device_naming_fact_type_id() -> &'static FactTypeId {
-    &DEVICE_NAMING_FACT_TYPE_ID
-}
 
 /// Derive a context ID from an authority ID for device naming facts.
 ///

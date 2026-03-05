@@ -57,6 +57,75 @@ impl AsRef<str> for FactTypeId {
     }
 }
 
+/// Define fact type identifiers, schema version constants, and helper accessors.
+///
+/// Typed `FactTypeId` usage:
+/// ```ignore
+/// aura_core::define_fact_type_id!(wot, "wot/v1", 1);
+/// // Expands to:
+/// // pub static WOT_FACT_TYPE_ID: FactTypeId = FactTypeId::new("wot/v1");
+/// // pub const WOT_FACT_SCHEMA_VERSION: u16 = 1;
+/// // pub fn wot_fact_type_id() -> &'static FactTypeId { &WOT_FACT_TYPE_ID }
+/// ```
+///
+/// String `&str` usage (for `DomainFact`-style crates):
+/// ```ignore
+/// aura_core::define_fact_type_id!(str invitation, "invitation", 1);
+/// // Expands to INVITATION_FACT_TYPE_ID: &str, INVITATION_FACT_SCHEMA_VERSION, invitation_fact_type_id()
+/// ```
+#[macro_export]
+macro_rules! define_fact_type_id {
+    (str $prefix:ident, $type_id:literal, $schema_version:expr $(,)?) => {
+        $crate::__private::paste::paste! {
+            #[doc = "String fact type identifier for this domain fact family."]
+            pub const [<$prefix:upper _FACT_TYPE_ID>]: &str = $type_id;
+            #[doc = "Schema version for this domain fact family."]
+            pub const [<$prefix:upper _FACT_SCHEMA_VERSION>]: u16 = $schema_version;
+            #[doc = "Returns the string fact type identifier."]
+            pub fn [<$prefix _fact_type_id>]() -> &'static str {
+                [<$prefix:upper _FACT_TYPE_ID>]
+            }
+        }
+    };
+    ($prefix:ident, $type_id:literal, $schema_version:expr, schema_const = $schema_const:ident $(,)?) => {
+        $crate::__private::paste::paste! {
+            #[doc = "Typed fact type identifier for this domain fact family."]
+            pub static [<$prefix:upper _FACT_TYPE_ID>]: $crate::types::facts::FactTypeId =
+                $crate::types::facts::FactTypeId::new($type_id);
+            #[doc = "Schema version for this domain fact family."]
+            pub const $schema_const: u16 = $schema_version;
+            #[doc = "Returns the typed fact type identifier."]
+            pub fn [<$prefix _fact_type_id>]() -> &'static $crate::types::facts::FactTypeId {
+                &[<$prefix:upper _FACT_TYPE_ID>]
+            }
+        }
+    };
+    ($prefix:ident, $type_id:literal, $schema_version:expr $(,)?) => {
+        $crate::__private::paste::paste! {
+            #[doc = "Typed fact type identifier for this domain fact family."]
+            pub static [<$prefix:upper _FACT_TYPE_ID>]: $crate::types::facts::FactTypeId =
+                $crate::types::facts::FactTypeId::new($type_id);
+            #[doc = "Schema version for this domain fact family."]
+            pub const [<$prefix:upper _FACT_SCHEMA_VERSION>]: u16 = $schema_version;
+            #[doc = "Returns the typed fact type identifier."]
+            pub fn [<$prefix _fact_type_id>]() -> &'static $crate::types::facts::FactTypeId {
+                &[<$prefix:upper _FACT_TYPE_ID>]
+            }
+        }
+    };
+    ($prefix:ident, $type_id:literal $(,)?) => {
+        $crate::__private::paste::paste! {
+            #[doc = "Typed fact type identifier for this domain fact family."]
+            pub static [<$prefix:upper _FACT_TYPE_ID>]: $crate::types::facts::FactTypeId =
+                $crate::types::facts::FactTypeId::new($type_id);
+            #[doc = "Returns the typed fact type identifier."]
+            pub fn [<$prefix _fact_type_id>]() -> &'static $crate::types::facts::FactTypeId {
+                &[<$prefix:upper _FACT_TYPE_ID>]
+            }
+        }
+    };
+}
+
 /// Error type for fact encoding/decoding operations.
 #[derive(Debug, thiserror::Error)]
 pub enum FactError {

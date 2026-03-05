@@ -52,17 +52,10 @@
 use crate::effect_policy::{ApprovalThreshold, OperationType};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
-use aura_core::types::facts::FactTypeId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Type identifier for proposal facts
-pub static PROPOSAL_FACT_TYPE_ID: FactTypeId = FactTypeId::new("proposal/v1");
-
-/// Get the typed fact ID for proposal facts.
-pub fn proposal_fact_type_id() -> &'static FactTypeId {
-    &PROPOSAL_FACT_TYPE_ID
-}
+aura_core::define_fact_type_id!(proposal, "proposal/v1");
 
 /// Proposal domain fact types
 ///

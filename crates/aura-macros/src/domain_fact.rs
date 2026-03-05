@@ -1,13 +1,13 @@
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::{
-    parse::Parse, parse::ParseStream, parse_macro_input, Attribute, Data, DeriveInput, Fields,
-    Ident, LitInt, LitStr, Result, Token,
+    parse::Parse, parse::ParseStream, parse_macro_input, Attribute, Data, DeriveInput, Expr,
+    Fields, Ident, LitStr, Result, Token,
 };
 
 struct DomainFactArgs {
-    type_id: Option<LitStr>,
-    schema_version: Option<LitInt>,
+    type_id: Option<Expr>,
+    schema_version: Option<Expr>,
     context_field: Option<LitStr>,
     context_fn: Option<LitStr>,
 }
@@ -29,17 +29,15 @@ impl DomainFactArgs {
             for item in meta.items {
                 match item.key.to_string().as_str() {
                     "type_id" => args.type_id = Some(item.value.clone()),
-                    "schema_version" => {
-                        if !item.is_int {
-                            return Err(syn::Error::new(
-                                item.key.span(),
-                                "schema_version must be an integer literal",
-                            ));
-                        }
-                        args.schema_version = item.int_value.clone();
+                    "schema_version" => args.schema_version = Some(item.value.clone()),
+                    "context" => {
+                        let lit = expr_to_string_literal(&item.value, item.key.span())?;
+                        args.context_field = Some(lit);
                     }
-                    "context" => args.context_field = Some(item.value.clone()),
-                    "context_fn" => args.context_fn = Some(item.value.clone()),
+                    "context_fn" => {
+                        let lit = expr_to_string_literal(&item.value, item.key.span())?;
+                        args.context_fn = Some(lit);
+                    }
                     other => {
                         return Err(syn::Error::new(
                             item.key.span(),
@@ -60,9 +58,7 @@ struct DomainFactMeta {
 
 struct DomainFactMetaItem {
     key: Ident,
-    value: LitStr,
-    int_value: Option<LitInt>,
-    is_int: bool,
+    value: Expr,
 }
 
 impl Parse for DomainFactMeta {
@@ -71,26 +67,8 @@ impl Parse for DomainFactMeta {
         while !input.is_empty() {
             let key: Ident = input.parse()?;
             input.parse::<Token![=]>()?;
-            let value: syn::Lit = input.parse()?;
-            let (lit_str, lit_int, is_int) = match value {
-                syn::Lit::Str(s) => (s, None, false),
-                syn::Lit::Int(i) => {
-                    let lit_str = LitStr::new(&i.to_string(), i.span());
-                    (lit_str, Some(i), true)
-                }
-                _ => {
-                    return Err(syn::Error::new(
-                        value.span(),
-                        "expected string literal or integer literal",
-                    ))
-                }
-            };
-            items.push(DomainFactMetaItem {
-                key,
-                value: lit_str,
-                int_value: lit_int,
-                is_int,
-            });
+            let value: Expr = input.parse()?;
+            items.push(DomainFactMetaItem { key, value });
             if input.peek(Token![,]) {
                 input.parse::<Token![,]>()?;
             }
@@ -185,6 +163,16 @@ pub fn derive_domain_fact_impl(input: proc_macro::TokenStream) -> proc_macro::To
     };
 
     expanded.into()
+}
+
+fn expr_to_string_literal(expr: &Expr, span: Span) -> Result<LitStr> {
+    match expr {
+        Expr::Lit(expr_lit) => match &expr_lit.lit {
+            syn::Lit::Str(s) => Ok(s.clone()),
+            _ => Err(syn::Error::new(span, "expected string literal")),
+        },
+        _ => Err(syn::Error::new(span, "expected string literal")),
+    }
 }
 
 fn context_expr(data: &Data, args: &DomainFactArgs) -> Result<TokenStream> {

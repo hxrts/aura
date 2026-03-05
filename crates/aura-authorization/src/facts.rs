@@ -10,23 +10,14 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::scope::{AuthorizationOp, ResourceScope};
 use aura_core::time::PhysicalTime;
 use aura_core::types::facts::{
-    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, FactTypeId,
-    MAX_FACT_PAYLOAD_BYTES,
+    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, MAX_FACT_PAYLOAD_BYTES,
 };
 use aura_core::types::Epoch;
 use aura_core::util::serialization::{from_slice, to_vec, SerializationError};
 use aura_core::Cap;
 use serde::{Deserialize, Serialize};
 
-/// Unique type identifier for WoT facts
-pub static WOT_FACT_TYPE_ID: FactTypeId = FactTypeId::new("wot/v1");
-/// Schema version for WoT facts
-pub const WOT_FACT_SCHEMA_VERSION: u16 = 1;
-
-/// Get the typed fact ID for WoT facts
-pub fn wot_fact_type_id() -> &'static FactTypeId {
-    &WOT_FACT_TYPE_ID
-}
+aura_core::define_fact_type_id!(wot, "wot/v1", 1);
 
 /// Web of Trust domain facts for authorization state changes.
 ///

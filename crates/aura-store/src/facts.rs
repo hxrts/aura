@@ -13,22 +13,13 @@ use crate::types::{ByteSize, ChunkCount, ChunkIndex, NodeId};
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::PhysicalTime;
 use aura_core::types::facts::{
-    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, FactTypeId,
-    MAX_FACT_PAYLOAD_BYTES,
+    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, MAX_FACT_PAYLOAD_BYTES,
 };
 use aura_core::util::serialization::{from_slice, to_vec, SerializationError};
 use aura_core::{ChunkId, ContentId, ContextId};
 use serde::{Deserialize, Serialize};
 
-/// Unique type ID for storage facts in the journal system
-pub static STORAGE_FACT_TYPE_ID: FactTypeId = FactTypeId::new("aura.store.v1");
-/// Schema version for storage fact encoding
-pub const STORAGE_FACT_SCHEMA_VERSION: u16 = 1;
-
-/// Get the typed fact ID for storage facts
-pub fn storage_fact_type_id() -> &'static FactTypeId {
-    &STORAGE_FACT_TYPE_ID
-}
+aura_core::define_fact_type_id!(storage, "aura.store.v1", 1);
 
 /// Storage domain facts for journal integration
 ///

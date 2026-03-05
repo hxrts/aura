@@ -7,22 +7,14 @@
 
 use aura_core::hash::hash;
 use aura_core::time::ProvenancedTime;
-use aura_core::types::facts::{FactDelta, FactDeltaReducer, FactError, FactTypeId};
+use aura_core::types::facts::{FactDelta, FactDeltaReducer, FactError};
 use aura_core::types::Epoch;
 use aura_core::{AccountId, AuthorityId, ContextId, Hash32, SemanticVersion};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
-/// Type identifier for maintenance facts.
-pub static MAINTENANCE_FACT_TYPE_ID: FactTypeId = FactTypeId::new("maintenance");
-/// Schema version for maintenance fact encoding.
-pub const MAINTENANCE_FACT_SCHEMA_VERSION: u16 = 1;
-
-/// Get the typed fact ID for maintenance facts.
-pub fn maintenance_fact_type_id() -> &'static FactTypeId {
-    &MAINTENANCE_FACT_TYPE_ID
-}
+aura_core::define_fact_type_id!(maintenance, "maintenance", 1);
 
 /// Cache key used for invalidation facts.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

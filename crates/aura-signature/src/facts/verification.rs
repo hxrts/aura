@@ -7,22 +7,14 @@
 //! authority-centric model where authorities hide internal device structure.
 
 use aura_core::time::PhysicalTime;
-use aura_core::types::facts::{FactDelta, FactDeltaReducer, FactError, FactTypeId};
+use aura_core::types::facts::{FactDelta, FactDeltaReducer, FactError};
 use aura_core::types::Epoch;
 use aura_core::AuthorityId;
 use aura_core::{AccountId, Cap};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Unique type identifier for verification facts
-pub static VERIFY_FACT_TYPE_ID: FactTypeId = FactTypeId::new("verify/v1");
-/// Schema version for verification fact encoding
-pub const VERIFY_FACT_SCHEMA_VERSION: u16 = 2;
-
-/// Get the typed fact ID for verification facts
-pub fn verify_fact_type_id() -> &'static FactTypeId {
-    &VERIFY_FACT_TYPE_ID
-}
+aura_core::define_fact_type_id!(verify, "verify/v1", 2);
 
 /// Validated Ed25519 public key bytes (32 bytes).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -58,6 +58,11 @@
 #![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
+#[doc(hidden)]
+pub mod __private {
+    pub use paste;
+}
+
 // === Core Modules ===
 
 /// Domain-specific logic types (consensus, journal, content addressing)

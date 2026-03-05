@@ -50,8 +50,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-/// Type identifier for invitation facts
-pub const INVITATION_FACT_TYPE_ID: &str = "invitation";
+aura_core::define_fact_type_id!(str invitation, "invitation", 1);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CeremonyRelationshipId(String);
@@ -123,8 +122,8 @@ pub struct InvitationFactKey {
 /// They are stored as `RelationalFact::Generic` and reduced by `InvitationFactReducer`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
 #[domain_fact(
-    type_id = "invitation",
-    schema_version = 1,
+    type_id = INVITATION_FACT_TYPE_ID,
+    schema_version = INVITATION_FACT_SCHEMA_VERSION,
     context_fn = "context_id_for_fact"
 )]
 #[allow(clippy::large_enum_variant)] // Sent variant contains rich invitation data

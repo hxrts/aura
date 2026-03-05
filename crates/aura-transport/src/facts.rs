@@ -6,23 +6,14 @@
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
 use aura_core::types::facts::{
-    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, FactTypeId,
-    MAX_FACT_PAYLOAD_BYTES,
+    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, MAX_FACT_PAYLOAD_BYTES,
 };
 use aura_core::util::serialization::{from_slice, to_vec, SerializationError};
 use serde::{Deserialize, Serialize};
 
 use crate::context_transport::TransportProtocol;
 
-/// Unique type identifier for transport facts
-pub static TRANSPORT_FACT_TYPE_ID: FactTypeId = FactTypeId::new("transport/v1");
-/// Schema version for transport fact encoding
-pub const TRANSPORT_FACT_SCHEMA_VERSION: u16 = 1;
-
-/// Get the typed fact ID for transport facts
-pub fn transport_fact_type_id() -> &'static FactTypeId {
-    &TRANSPORT_FACT_TYPE_ID
-}
+aura_core::define_fact_type_id!(transport, "transport/v1", 1);
 
 /// Transport domain facts for state changes.
 ///
