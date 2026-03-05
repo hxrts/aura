@@ -316,13 +316,19 @@ nix develop --command cargo test -p aura-simulator --test fault_invariant_monito
 
 This verifies that injected faults produce monitor-visible invariant violations (for example, `NoFaults` violations), and that a gate configured to require zero violations fails accordingly.
 
-### 4) Current `telltale-lean-bridge` decision
+### 4) `telltale-lean-bridge` integration status
 
-As of March 3, 2026, Aura **defers** adding `telltale-lean-bridge` as a new dependency.
+As of March 5, 2026, Aura includes `telltale-lean-bridge` as a workspace dependency and exposes it through `aura-quint`.
 
-Reason:
-- existing `just ci-lean-quint-bridge` and `just ci-simulator-telltale-parity` lanes already provide overlap for current assurance goals
-- additional bridge dependency cost is not justified until a specific verification blind spot is identified
+What this adds:
+- direct access to upstream Lean runner and equivalence utilities from the Telltale project
+- explicit schema/version linkage with upstream bridge contracts for cross-tool consistency
+- a cleaner path for future migration of local bridge helpers to upstream bridge APIs
+
+Operational notes:
+- `aura-quint` re-exports the upstream crate as `upstream_telltale_lean_bridge`
+- `aura_quint::upstream_telltale_lean_bridge_schema_version()` returns the upstream schema version
+- CI lanes remain: `just ci-lean-quint-bridge` and `just ci-simulator-telltale-parity`
 
 ## Lean-Quint Bridge
 

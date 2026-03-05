@@ -23,6 +23,7 @@ tracing = { workspace = true }
 async-trait = { workspace = true }
 async-process = "1"
 tempfile = "3.0"
+telltale-lean-bridge = { workspace = true }
 
 # Session types integration - temporarily removed during refactor
 

@@ -43,6 +43,9 @@ pub mod properties;
 pub mod runner;
 pub mod types;
 
+/// Re-export of the upstream Telltale Lean bridge crate for direct integration.
+pub use telltale_lean_bridge as upstream_telltale_lean_bridge;
+
 pub use bridge_export::{
     export_quint_to_telltale_bundle, parse_quint_modules, validate_export_bundle,
     BridgeExportError, QuintModuleSummary,
@@ -80,6 +83,12 @@ pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+/// Schema version reported by the upstream `telltale-lean-bridge` crate.
+#[must_use]
+pub fn upstream_telltale_lean_bridge_schema_version() -> &'static str {
+    telltale_lean_bridge::LEAN_BRIDGE_SCHEMA_VERSION
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,5 +96,10 @@ mod tests {
     #[test]
     fn test_version() {
         assert!(!version().is_empty());
+    }
+
+    #[test]
+    fn test_upstream_telltale_lean_bridge_schema_version() {
+        assert!(!upstream_telltale_lean_bridge_schema_version().is_empty());
     }
 }

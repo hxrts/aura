@@ -118,6 +118,7 @@ telltale-choreography = "2.1"
 telltale-vm = "2.1"
 telltale-types = "2.0"
 telltale-theory = "2.1"
+telltale-lean-bridge = "2.1.0"
 signature = "2.2"
 
 # KeyJournal dependencies for threshold operations and graph algorithms

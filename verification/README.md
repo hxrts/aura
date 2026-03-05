@@ -124,6 +124,17 @@ just lean-oracle-build    # Build Lean oracle
 just test-differential    # Rust vs Lean tests
 ```
 
+### Telltale Lean Bridge
+
+`aura-quint` now depends on and re-exports upstream `telltale-lean-bridge` to align Aura's bridge workflows with Telltale's Lean integration surface.
+
+Use:
+
+```bash
+just ci-lean-quint-bridge
+just ci-simulator-telltale-parity
+```
+
 ## Resources
 
 - [Verification Guide](../docs/806_verification_guide.md) — Detailed workflows and Quint-Lean correspondence
