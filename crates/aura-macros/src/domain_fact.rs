@@ -1,3 +1,8 @@
+//! Derive macro for DomainFact trait implementation.
+//!
+//! Generates DomainFact trait implementations with type_id, schema versioning,
+//! context extraction, and envelope serialization/deserialization.
+
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::{

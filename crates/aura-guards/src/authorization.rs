@@ -1,3 +1,8 @@
+//! Biscuit authorization bridge for guard chain integration.
+//!
+//! Bridges Biscuit token verification with Datalog policy evaluation,
+//! providing authorization checks with explicit time for determinism.
+
 #![allow(
     missing_docs,
     unused_variables,

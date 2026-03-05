@@ -1,3 +1,8 @@
+//! Anti-entropy synchronization protocol for eventual consistency.
+//!
+//! Provides digest-based comparison and reconciliation of OpLog state between
+//! peers, with guard chain enforcement for authorization and flow budgets.
+
 use super::config::AntiEntropyRuntimeConfig;
 use super::effects::{AntiEntropyConfig, BloomDigest, SyncError};
 use super::pure;

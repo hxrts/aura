@@ -1,3 +1,8 @@
+//! Eager-push/lazy-pull broadcast protocol for operation dissemination.
+//!
+//! Implements operation broadcast with rate limiting, back pressure handling,
+//! and configurable eager push to neighbors and lazy pull on request.
+
 use super::effects::{BloomDigest, SyncEffects, SyncError, SyncMetrics};
 use async_lock::RwLock;
 use async_trait::async_trait;

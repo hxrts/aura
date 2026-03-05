@@ -1,3 +1,8 @@
+//! Biscuit guard evaluator for capability and flow budget enforcement.
+//!
+//! Combines Biscuit authorization with flow budget checking to provide
+//! atomic capability verification and budget charging for guard chains.
+
 use crate::authorization::BiscuitAuthorizationBridge;
 use crate::guards::types::CapabilityId;
 use aura_authorization::{BiscuitError, ResourceScope};

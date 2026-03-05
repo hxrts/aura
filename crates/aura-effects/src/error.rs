@@ -1,3 +1,8 @@
+//! Error types for Layer 3 effect handlers.
+//!
+//! Provides structured errors for handler failures, unsupported operations,
+//! and invalid inputs with conversion to the unified AuraError type.
+
 use aura_core::AuraError;
 
 /// Structured error type for Layer 3 handlers.

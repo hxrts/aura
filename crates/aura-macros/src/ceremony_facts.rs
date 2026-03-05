@@ -1,3 +1,8 @@
+//! Procedural macro for ceremony fact enum generation.
+//!
+//! Adds convenience methods to ceremony fact enums for extracting ceremony_id
+//! and timestamp fields from ceremony-scoped variants.
+
 use proc_macro2::Span;
 use quote::quote;
 use syn::{parse_macro_input, ItemEnum};
