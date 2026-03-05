@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -48,6 +49,7 @@ impl HarnessCoordinator {
     }
 
     pub fn start_all(&mut self) -> Result<()> {
+        self.clear_stale_local_state()?;
         for (id, backend) in &mut self.backends {
             self.events.push(
                 "lifecycle",
@@ -56,6 +58,26 @@ impl HarnessCoordinator {
                 serde_json::json!({ "backend": backend.as_trait().backend_kind() }),
             );
             backend.as_trait_mut().start()?;
+        }
+        Ok(())
+    }
+
+    fn clear_stale_local_state(&mut self) -> Result<()> {
+        for (instance_id, mode) in &self.instance_modes {
+            if !matches!(mode, InstanceMode::Local) {
+                continue;
+            }
+            let data_dir = self
+                .instance_data_dirs
+                .get(instance_id)
+                .ok_or_else(|| anyhow!("missing data_dir for instance_id: {instance_id}"))?;
+            clear_directory_contents(data_dir)?;
+            self.events.push(
+                "lifecycle",
+                "clear_stale_state",
+                Some(instance_id.clone()),
+                serde_json::json!({ "data_dir": data_dir.display().to_string() }),
+            );
         }
         Ok(())
     }
@@ -369,6 +391,51 @@ fn clipboard_file_for_instance(instance: &InstanceConfig) -> PathBuf {
     absolutize_path(instance.data_dir.join(".harness-clipboard.txt"))
 }
 
+fn clear_directory_contents(dir: &Path) -> Result<()> {
+    fs::create_dir_all(dir)
+        .map_err(|error| anyhow!("failed to create data_dir {}: {error}", dir.display()))?;
+
+    for entry in fs::read_dir(dir)
+        .map_err(|error| anyhow!("failed to read data_dir {}: {error}", dir.display()))?
+    {
+        let entry = entry.map_err(|error| {
+            anyhow!(
+                "failed to read entry in data_dir {}: {error}",
+                dir.display()
+            )
+        })?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|error| {
+            anyhow!(
+                "failed to inspect entry {} in data_dir {}: {error}",
+                path.display(),
+                dir.display()
+            )
+        })?;
+
+        if file_type.is_dir() {
+            fs::remove_dir_all(&path).map_err(|error| {
+                anyhow!(
+                    "failed to remove stale directory {} in data_dir {}: {error}",
+                    path.display(),
+                    dir.display()
+                )
+            })?;
+        } else {
+            // Remove regular files and symlinks uniformly.
+            fs::remove_file(&path).map_err(|error| {
+                anyhow!(
+                    "failed to remove stale file {} in data_dir {}: {error}",
+                    path.display(),
+                    dir.display()
+                )
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
 impl Drop for HarnessCoordinator {
     fn drop(&mut self) {
         let _ = self.stop_all();
@@ -378,7 +445,8 @@ impl Drop for HarnessCoordinator {
 #[cfg(test)]
 mod tests {
     use super::{
-        clipboard_file_for_instance, normalize_key_stream, wait_pattern_matches, HarnessCoordinator,
+        clear_directory_contents, clipboard_file_for_instance, normalize_key_stream,
+        wait_pattern_matches, HarnessCoordinator,
     };
     use crate::config::InstanceConfig;
     use crate::config::InstanceMode;
@@ -391,7 +459,7 @@ mod tests {
         InstanceConfig {
             id: "alice".to_string(),
             mode: InstanceMode::Local,
-            data_dir: PathBuf::from(".tmp/test/alice"),
+            data_dir: PathBuf::from("artifacts/harness/state/test/alice"),
             device_id: None,
             bind_address: "127.0.0.1:45001".to_string(),
             demo_mode: false,
@@ -445,7 +513,7 @@ mod tests {
         let instance = test_instance(vec![]);
         let expected = std::env::current_dir()
             .unwrap_or_else(|error| panic!("current_dir failed: {error}"))
-            .join(".tmp/test/alice/.harness-clipboard.txt");
+            .join("artifacts/harness/state/test/alice/.harness-clipboard.txt");
         assert_eq!(clipboard_file_for_instance(&instance), expected);
     }
 
@@ -516,5 +584,22 @@ mod tests {
             .resolve_authority_id_from_local_state("alice")
             .unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(resolved, authority_id);
+    }
+
+    #[test]
+    fn clear_directory_contents_removes_files_and_subdirectories() {
+        let temp = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
+        let root = temp.path().join("instance");
+        std::fs::create_dir_all(root.join("nested"))
+            .unwrap_or_else(|error| panic!("failed to create nested dir: {error}"));
+        std::fs::write(root.join("stale.txt"), "stale")
+            .unwrap_or_else(|error| panic!("failed to create stale file: {error}"));
+        std::fs::write(root.join("nested").join("child.txt"), "child")
+            .unwrap_or_else(|error| panic!("failed to create nested stale file: {error}"));
+
+        clear_directory_contents(&root).unwrap_or_else(|error| panic!("{error}"));
+
+        let entries = std::fs::read_dir(&root).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(entries.count(), 0, "stale entries were not cleared");
     }
 }

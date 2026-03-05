@@ -195,7 +195,7 @@ The `itf_loader` module loads ITF traces for replay testing.
 ```rust
 use aura_testkit::consensus::itf_loader::ITFLoader;
 
-let trace = ITFLoader::load("traces/consensus_happy_path.itf.json")?;
+let trace = ITFLoader::load("artifacts/traces/consensus_happy_path.itf.json")?;
 for state in trace.states {
     // Verify state against implementation
 }

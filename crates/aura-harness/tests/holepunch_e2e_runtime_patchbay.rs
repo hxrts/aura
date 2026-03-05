@@ -288,7 +288,9 @@ async fn runtime_harness_patchbay_holepunch_works_e2e() -> Result<()> {
     // This test requires native patchbay capabilities (Linux network namespaces, tc, nft).
     // Skip gracefully if not available - use holepunch_tier2_patchbay tests for patchbay-vm coverage.
     if check_caps().is_err() {
-        eprintln!("SKIPPED: native patchbay capabilities not available (use patchbay-vm backend for CI)");
+        eprintln!(
+            "SKIPPED: native patchbay capabilities not available (use patchbay-vm backend for CI)"
+        );
         return Ok(());
     }
 

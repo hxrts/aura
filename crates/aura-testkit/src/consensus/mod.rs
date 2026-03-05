@@ -11,7 +11,7 @@
 //! use aura_testkit::consensus::{itf_loader, divergence, reference};
 //!
 //! // Load an ITF trace
-//! let trace = itf_loader::load_itf_trace(Path::new("traces/consensus.itf.json"))?;
+//! let trace = itf_loader::load_itf_trace(Path::new("artifacts/traces/consensus.itf.json"))?;
 //!
 //! // Compare states using reference implementations
 //! let ref_result = reference::apply_share_ref(&state, proposal);

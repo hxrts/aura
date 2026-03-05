@@ -5,7 +5,7 @@
 #![allow(clippy::expect_used)]
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use aura_simulator::quint::{
     capability_properties_registry, ActionRegistry, GenerativeSimulator, GenerativeSimulatorConfig,
@@ -41,17 +41,29 @@ fn create_test_state() -> QuintSimulationState {
     state
 }
 
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("missing manifest ancestors")
+        .to_path_buf()
+}
+
+fn traces_root() -> PathBuf {
+    let preferred = workspace_root().join("artifacts/traces");
+    if preferred.exists() {
+        return preferred;
+    }
+    workspace_root().join("traces")
+}
+
 // =============================================================================
 // ITF Loading Tests
 // =============================================================================
 
 #[test]
 fn test_load_consensus_trace_from_file() {
-    let trace_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|path| path.parent())
-        .expect("missing manifest ancestors")
-        .join("traces/consensus.itf.json");
+    let trace_path = traces_root().join("consensus.itf.json");
 
     if !trace_path.exists() {
         println!("Skipping test: consensus trace not found at {trace_path:?}");
@@ -75,11 +87,7 @@ fn test_load_consensus_trace_from_file() {
 
 #[test]
 fn test_load_anti_entropy_trace_from_file() {
-    let trace_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|path| path.parent())
-        .expect("missing manifest ancestors")
-        .join("traces/anti_entropy.itf.json");
+    let trace_path = traces_root().join("anti_entropy.itf.json");
 
     if !trace_path.exists() {
         println!("Skipping test: anti_entropy trace not found at {trace_path:?}");
@@ -100,11 +108,7 @@ fn test_load_anti_entropy_trace_from_file() {
 
 #[test]
 fn test_load_epochs_trace_from_file() {
-    let trace_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|path| path.parent())
-        .expect("missing manifest ancestors")
-        .join("traces/epochs.itf.json");
+    let trace_path = traces_root().join("epochs.itf.json");
 
     if !trace_path.exists() {
         println!("Skipping test: epochs trace not found at {trace_path:?}");
@@ -283,11 +287,7 @@ async fn test_explore_with_registry() {
 
 #[tokio::test]
 async fn test_load_and_analyze_consensus_trace() {
-    let trace_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|path| path.parent())
-        .expect("missing manifest ancestors")
-        .join("traces/consensus.itf.json");
+    let trace_path = traces_root().join("consensus.itf.json");
 
     if !trace_path.exists() {
         println!("Skipping: consensus trace not found");
@@ -324,11 +324,7 @@ async fn test_load_and_analyze_consensus_trace() {
 
 #[tokio::test]
 async fn test_load_and_analyze_all_traces() {
-    let traces_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|path| path.parent())
-        .expect("missing manifest ancestors")
-        .join("traces");
+    let traces_dir = traces_root();
 
     if !traces_dir.exists() {
         println!("Skipping: traces directory not found");

@@ -9,7 +9,7 @@ artifact_dir = "artifacts/harness/demo-loopback"
 [[instances]]
 id = "bob"
 mode = "local"
-data_dir = ".tmp/harness/demo-bob-s11"
+data_dir = "artifacts/harness/state/demo-loopback/bob"
 device_id = "demo-bob-dev-01"
 bind_address = "127.0.0.1:42001"
 demo_mode = true

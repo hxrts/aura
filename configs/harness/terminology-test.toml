@@ -10,7 +10,7 @@ artifact_dir = "artifacts/harness/terminology-test"
 [[instances]]
 id = "alice"
 mode = "local"
-data_dir = ".tmp/harness/terminology/alice"
+data_dir = "artifacts/harness/state/terminology/alice"
 device_id = "alice-dev-terminology"
 bind_address = "127.0.0.1:42001"
 demo_mode = false
@@ -24,7 +24,7 @@ port = 19541
 [[instances]]
 id = "bob"
 mode = "local"
-data_dir = ".tmp/harness/terminology/bob"
+data_dir = "artifacts/harness/state/terminology/bob"
 device_id = "bob-dev-terminology"
 bind_address = "127.0.0.1:42002"
 demo_mode = false
@@ -38,7 +38,7 @@ port = 19542
 [[instances]]
 id = "carol"
 mode = "local"
-data_dir = ".tmp/harness/terminology/carol"
+data_dir = "artifacts/harness/state/terminology/carol"
 device_id = "carol-dev-terminology"
 bind_address = "127.0.0.1:42003"
 demo_mode = false

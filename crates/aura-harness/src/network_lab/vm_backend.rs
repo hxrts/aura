@@ -64,6 +64,9 @@ impl VmPatchbayBackend {
     }
 
     fn run_patchbay_vm(&self) -> Result<()> {
+        self.ensure_qemu_state_redirect()?;
+        let vm_target_dir = self.vm_target_dir()?;
+
         let topology = self.topology_path()?;
         let output = Command::new("patchbay-vm")
             .arg("run")
@@ -72,12 +75,96 @@ impl VmPatchbayBackend {
             .arg(&self.work_dir)
             .arg("--patchbay-version")
             .arg("git:hxrts/aura")
+            .env("QEMU_VM_WORK_DIR", &self.work_dir)
+            .env("CARGO_TARGET_DIR", &vm_target_dir)
+            .env("NETSIM_TARGET_DIR", &vm_target_dir)
             .output()
             .context("failed to run patchbay-vm")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             bail!("patchbay-vm run failed: {stderr}");
+        }
+
+        Ok(())
+    }
+
+    fn vm_target_dir(&self) -> Result<PathBuf> {
+        let cwd = std::env::current_dir().context("resolve current directory")?;
+        let target_dir = cwd.join("target").join("patchbay-vm");
+        std::fs::create_dir_all(&target_dir)
+            .with_context(|| format!("create VM target directory {}", target_dir.display()))?;
+        Ok(target_dir)
+    }
+
+    fn qemu_state_dir(&self) -> PathBuf {
+        self.artifact_root.join("patchbay-vm-state")
+    }
+
+    fn ensure_qemu_state_redirect(&self) -> Result<()> {
+        let cwd = std::env::current_dir().context("resolve current directory")?;
+        let legacy_state_root = cwd.join(".qemu-vm");
+        let redirected_state_root = self.qemu_state_dir();
+
+        std::fs::create_dir_all(&redirected_state_root).with_context(|| {
+            format!(
+                "create redirected qemu state root {}",
+                redirected_state_root.display()
+            )
+        })?;
+
+        if legacy_state_root.exists() {
+            let metadata = std::fs::symlink_metadata(&legacy_state_root).with_context(|| {
+                format!(
+                    "read qemu state metadata for {}",
+                    legacy_state_root.display()
+                )
+            })?;
+            let file_type = metadata.file_type();
+
+            if file_type.is_symlink() {
+                return Ok(());
+            }
+
+            if file_type.is_dir() {
+                let legacy_empty = is_dir_empty(&legacy_state_root)?;
+                let redirected_empty = is_dir_empty(&redirected_state_root)?;
+
+                if !legacy_empty && redirected_empty {
+                    std::fs::remove_dir_all(&redirected_state_root).with_context(|| {
+                        format!(
+                            "remove redirected qemu state root {} before migration",
+                            redirected_state_root.display()
+                        )
+                    })?;
+                    std::fs::rename(&legacy_state_root, &redirected_state_root).with_context(
+                        || {
+                            format!(
+                                "migrate qemu state root {} -> {}",
+                                legacy_state_root.display(),
+                                redirected_state_root.display()
+                            )
+                        },
+                    )?;
+                } else if legacy_empty {
+                    std::fs::remove_dir(&legacy_state_root).with_context(|| {
+                        format!(
+                            "remove empty legacy qemu state root {}",
+                            legacy_state_root.display()
+                        )
+                    })?;
+                } else {
+                    // Keep a non-empty legacy root in place to avoid destructive merges.
+                    return Ok(());
+                }
+            } else {
+                // Unexpected file at .qemu-vm; do not overwrite it.
+                return Ok(());
+            }
+        }
+
+        if !legacy_state_root.exists() {
+            create_dir_symlink(&redirected_state_root, &legacy_state_root)?;
         }
 
         Ok(())
@@ -254,3 +341,21 @@ impl CanNat for VmPatchbayBackend {}
 impl CanFirewall for VmPatchbayBackend {}
 impl CanHandoff for VmPatchbayBackend {}
 impl CanArtifacts for VmPatchbayBackend {}
+
+fn is_dir_empty(dir: &Path) -> Result<bool> {
+    let mut entries =
+        std::fs::read_dir(dir).with_context(|| format!("read directory {}", dir.display()))?;
+    Ok(entries.next().is_none())
+}
+
+#[cfg(unix)]
+fn create_dir_symlink(target: &Path, link: &Path) -> Result<()> {
+    std::os::unix::fs::symlink(target, link)
+        .with_context(|| format!("create symlink {} -> {}", link.display(), target.display()))
+}
+
+#[cfg(windows)]
+fn create_dir_symlink(target: &Path, link: &Path) -> Result<()> {
+    std::os::windows::fs::symlink_dir(target, link)
+        .with_context(|| format!("create symlink {} -> {}", link.display(), target.display()))
+}

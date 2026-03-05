@@ -269,7 +269,7 @@ ITF traces become inputs for native/WASM conformance lanes.
 When Quint models change, regenerate traces and update the conformance corpus. This couples model evolution to test coverage.
 
 ```bash
-quint run --out-itf=traces/new_trace.itf.json verification/quint/updated_spec.qnt
+quint run --out-itf=artifacts/traces/new_trace.itf.json verification/quint/updated_spec.qnt
 just ci-conformance
 ```
 

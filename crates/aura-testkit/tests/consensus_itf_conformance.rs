@@ -20,7 +20,7 @@
 //! Generate traces first using quint:
 //! ```bash
 //! quint run verification/quint/consensus/core.qnt \
-//!   --out-itf traces/consensus/trace.itf.json --max-steps 20
+//!   --out-itf artifacts/traces/consensus/trace.itf.json --max-steps 20
 //! ```
 //!
 //! Then run tests:
@@ -47,20 +47,46 @@ fn threshold(value: u16) -> ConsensusThreshold {
     ConsensusThreshold::new(value).expect("threshold")
 }
 
+fn default_consensus_trace_path() -> PathBuf {
+    if let Ok(path) = std::env::var("AURA_CONSENSUS_ITF_TRACE") {
+        return PathBuf::from(path);
+    }
+
+    let preferred = PathBuf::from("../../artifacts/traces/consensus.itf.json");
+    if preferred.exists() {
+        return preferred;
+    }
+
+    PathBuf::from("../../traces/consensus.itf.json")
+}
+
+fn default_consensus_trace_dir() -> PathBuf {
+    if let Ok(path) = std::env::var("AURA_CONSENSUS_ITF_TRACE_DIR") {
+        return PathBuf::from(path);
+    }
+
+    let preferred = PathBuf::from("../../artifacts/traces/consensus");
+    if preferred.exists() {
+        return preferred;
+    }
+
+    PathBuf::from("../../traces/consensus")
+}
+
 /// Test that all states in an ITF trace satisfy invariants
 #[test]
 fn test_itf_trace_invariants() {
     // Load trace from the dedicated traces directory
-    let trace_path = Path::new("../../traces/consensus.itf.json");
+    let trace_path = default_consensus_trace_path();
 
     if !trace_path.exists() {
         eprintln!("Skipping ITF conformance test: trace file not found at {trace_path:?}");
-        eprintln!("Generate traces with: quint run --out-itf=traces/consensus.itf.json verification/quint/protocol_consensus.qnt");
+        eprintln!("Generate traces with: quint run --out-itf=artifacts/traces/consensus.itf.json verification/quint/protocol_consensus.qnt");
         return;
     }
 
-    let trace =
-        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace = load_itf_trace(trace_path.as_path())
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     println!(
         "Loaded ITF trace: {} states from {}",
@@ -88,14 +114,14 @@ fn test_itf_trace_invariants() {
 /// Test phase transitions are valid
 #[test]
 fn test_itf_phase_transitions() {
-    let trace_path = Path::new("../../traces/consensus.itf.json");
+    let trace_path = default_consensus_trace_path();
 
     if !trace_path.exists() {
         return;
     }
 
-    let trace =
-        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace = load_itf_trace(trace_path.as_path())
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     // Track phase transitions per instance
     for i in 1..trace.states.len() {
@@ -149,14 +175,14 @@ fn is_valid_phase_transition(from: ConsensusPhase, to: ConsensusPhase) -> bool {
 /// Test that committed instances have valid commit facts
 #[test]
 fn test_itf_committed_has_commit_fact() {
-    let trace_path = Path::new("../../traces/consensus.itf.json");
+    let trace_path = default_consensus_trace_path();
 
     if !trace_path.exists() {
         return;
     }
 
-    let trace =
-        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace = load_itf_trace(trace_path.as_path())
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     for state in &trace.states {
         for (cid, inst) in &state.instances {
@@ -250,14 +276,14 @@ fn test_parse_itf_with_instance() {
 /// Test monotonicity: proposal counts never decrease
 #[test]
 fn test_itf_proposal_monotonicity() {
-    let trace_path = Path::new("../../traces/consensus.itf.json");
+    let trace_path = default_consensus_trace_path();
 
     if !trace_path.exists() {
         return;
     }
 
-    let trace =
-        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace = load_itf_trace(trace_path.as_path())
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     for i in 1..trace.states.len() {
         let prev_state = &trace.states[i - 1];
@@ -395,14 +421,14 @@ fn infer_action(prev: &ITFState, curr: &ITFState) -> Vec<InferredAction> {
 /// Test action inference from state changes
 #[test]
 fn test_itf_action_inference() {
-    let trace_path = Path::new("../../traces/consensus.itf.json");
+    let trace_path = default_consensus_trace_path();
 
     if !trace_path.exists() {
         return;
     }
 
-    let trace =
-        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace = load_itf_trace(trace_path.as_path())
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     let mut action_counts: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
@@ -448,14 +474,14 @@ fn test_itf_action_inference() {
 /// Test equivocator detection matches between states
 #[test]
 fn test_itf_equivocator_monotonicity() {
-    let trace_path = Path::new("../../traces/consensus.itf.json");
+    let trace_path = default_consensus_trace_path();
 
     if !trace_path.exists() {
         return;
     }
 
-    let trace =
-        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace = load_itf_trace(trace_path.as_path())
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     for i in 1..trace.states.len() {
         let prev_state = &trace.states[i - 1];
@@ -480,14 +506,14 @@ fn test_itf_equivocator_monotonicity() {
 /// Test that terminal states (Committed/Failed) remain terminal
 #[test]
 fn test_itf_terminal_states_permanent() {
-    let trace_path = Path::new("../../traces/consensus.itf.json");
+    let trace_path = default_consensus_trace_path();
 
     if !trace_path.exists() {
         return;
     }
 
-    let trace =
-        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace = load_itf_trace(trace_path.as_path())
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     for i in 1..trace.states.len() {
         let prev_state = &trace.states[i - 1];
@@ -577,15 +603,15 @@ fn is_expected_divergence(actions: &[InferredAction], diff: &InstanceDiff) -> bo
 /// Test comprehensive state comparison with divergence reporting
 #[test]
 fn test_itf_state_comparison_with_divergence() {
-    let trace_path = Path::new("../../traces/consensus.itf.json");
+    let trace_path = default_consensus_trace_path();
 
     if !trace_path.exists() {
         eprintln!("Skipping divergence test: trace file not found");
         return;
     }
 
-    let trace =
-        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace = load_itf_trace(trace_path.as_path())
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     let mut total_divergences = 0;
     let mut unexpected_divergences = Vec::new();
@@ -768,14 +794,14 @@ fn test_invariant_violation_with_divergence() {
 /// Test action inference accuracy with divergence correlation
 #[test]
 fn test_action_inference_with_divergence() {
-    let trace_path = Path::new("../../traces/consensus.itf.json");
+    let trace_path = default_consensus_trace_path();
 
     if !trace_path.exists() {
         return;
     }
 
-    let trace =
-        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace = load_itf_trace(trace_path.as_path())
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     let mut action_divergence_correlation: HashMap<String, usize> = HashMap::new();
 
@@ -963,19 +989,23 @@ fn validate_trace(path: &Path) -> Result<TraceValidationResult, String> {
 /// Run exhaustive conformance tests on all traces in the consensus directory
 #[test]
 fn test_exhaustive_trace_conformance() {
-    let trace_dir = Path::new("../../traces/consensus");
-    let traces = discover_traces(trace_dir);
+    let trace_dir = default_consensus_trace_dir();
+    let traces = discover_traces(trace_dir.as_path());
 
     if traces.is_empty() {
-        eprintln!("No traces found in {trace_dir:?}");
-        eprintln!("Generate traces with: quint run verification/quint/consensus/core.qnt --out-itf traces/consensus/trace.itf.json --max-steps 20");
+        eprintln!("No traces found in {}", trace_dir.display());
+        eprintln!("Generate traces with: quint run verification/quint/consensus/core.qnt --out-itf artifacts/traces/consensus/trace.itf.json --max-steps 20");
         return;
     }
 
     println!("========================================");
     println!("Exhaustive ITF Trace Conformance Test");
     println!("========================================");
-    println!("Discovered {} traces in {trace_dir:?}", traces.len());
+    println!(
+        "Discovered {} traces in {}",
+        traces.len(),
+        trace_dir.display()
+    );
     println!();
 
     let mut total_states = 0;
@@ -1046,8 +1076,8 @@ fn test_exhaustive_trace_conformance() {
 /// Test for minimum trace coverage
 #[test]
 fn test_trace_coverage_minimum() {
-    let trace_dir = Path::new("../../traces/consensus");
-    let traces = discover_traces(trace_dir);
+    let trace_dir = default_consensus_trace_dir();
+    let traces = discover_traces(trace_dir.as_path());
 
     // We need at least 50 traces for reasonable coverage
     // Target is 200+ but we'll warn at 50
@@ -1061,7 +1091,7 @@ fn test_trace_coverage_minimum() {
             MIN_TRACES,
             TARGET_TRACES
         );
-        eprintln!("Generate more traces with: quint run verification/quint/consensus/core.qnt --out-itf traces/consensus/trace.itf.json --max-steps 20");
+        eprintln!("Generate more traces with: quint run verification/quint/consensus/core.qnt --out-itf artifacts/traces/consensus/trace.itf.json --max-steps 20");
         // Don't fail, just warn
     } else if traces.len() < TARGET_TRACES {
         println!(

@@ -211,7 +211,11 @@ ci-holepunch-tier1:
 # CI enables userns via: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 ci-holepunch-tier2:
     mkdir -p artifacts/holepunch/tier2
+    mkdir -p artifacts/patchbay/work target/patchbay-vm
     AURA_HOLEPUNCH_ARTIFACT_DIR="${PWD}/artifacts/holepunch/tier2" \
+      QEMU_VM_WORK_DIR="${PWD}/artifacts/patchbay/work" \
+      CARGO_TARGET_DIR="${PWD}/target/patchbay-vm" \
+      NETSIM_TARGET_DIR="${PWD}/target/patchbay-vm" \
       cargo test -p aura-harness --test holepunch_tier2_patchbay --test holepunch_e2e_runtime_patchbay -q
 
 # Daily smoke for hole-punch paths with flake tracking output
@@ -219,11 +223,15 @@ ci-holepunch-daily-smoke:
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p artifacts/holepunch/daily
+    mkdir -p artifacts/patchbay/work target/patchbay-vm
     RUNS=5
     FAILURES=0
     for run in $(seq 1 "$RUNS"); do
       echo "daily-smoke run $run/$RUNS"
       if ! AURA_HOLEPUNCH_ARTIFACT_DIR="${PWD}/artifacts/holepunch/daily/run-${run}" \
+        QEMU_VM_WORK_DIR="${PWD}/artifacts/patchbay/work" \
+        CARGO_TARGET_DIR="${PWD}/target/patchbay-vm" \
+        NETSIM_TARGET_DIR="${PWD}/target/patchbay-vm" \
         cargo test -p aura-harness --test holepunch_tier2_patchbay -q; then
         FAILURES=$((FAILURES + 1))
       fi
@@ -240,7 +248,11 @@ ci-holepunch-daily-smoke:
 # Tier 3 nightly stress suite
 ci-holepunch-nightly-stress:
     mkdir -p artifacts/holepunch/nightly
+    mkdir -p artifacts/patchbay/work target/patchbay-vm
     AURA_HOLEPUNCH_ARTIFACT_DIR="${PWD}/artifacts/holepunch/nightly" \
+      QEMU_VM_WORK_DIR="${PWD}/artifacts/patchbay/work" \
+      CARGO_TARGET_DIR="${PWD}/target/patchbay-vm" \
+      NETSIM_TARGET_DIR="${PWD}/target/patchbay-vm" \
       cargo test -p aura-harness --test holepunch_tier3_stress -q
 
 # Verify artifact capture and retention outputs exist
@@ -255,10 +267,14 @@ ci-holepunch-flaky-triage:
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p artifacts/holepunch/weekly
+    mkdir -p artifacts/patchbay/work target/patchbay-vm
     RUNS=10
     FAILURES=0
     for run in $(seq 1 "$RUNS"); do
       if ! AURA_HOLEPUNCH_ARTIFACT_DIR="${PWD}/artifacts/holepunch/weekly/triage-run-${run}" \
+        QEMU_VM_WORK_DIR="${PWD}/artifacts/patchbay/work" \
+        CARGO_TARGET_DIR="${PWD}/target/patchbay-vm" \
+        NETSIM_TARGET_DIR="${PWD}/target/patchbay-vm" \
         cargo test -p aura-harness --test holepunch_tier2_patchbay -q; then
         FAILURES=$((FAILURES + 1))
       fi
@@ -411,11 +427,17 @@ ci-kani:
 ci-conformance-itf:
     #!/usr/bin/env bash
     set -euo pipefail
-    mkdir -p traces
+    trace_file="${PWD}/artifacts/traces/consensus.itf.json"
+    trace_dir="${PWD}/artifacts/traces/consensus"
+    mkdir -p "$trace_dir"
     echo "Generating ITF traces..."
-    quint run --out-itf=traces/consensus.itf.json verification/quint/consensus/core.qnt --max-steps=30 --max-samples=5
+    quint run --out-itf="$trace_file" verification/quint/consensus/core.qnt --max-steps=30 --max-samples=5
+    cp "$trace_file" "$trace_dir/trace.itf.json"
     echo "Running ITF conformance tests..."
-    cargo test -p aura-testkit --test consensus_itf_conformance -- --nocapture
+    AURA_CONSENSUS_ITF_TRACE="$trace_file" \
+      AURA_CONSENSUS_ITF_TRACE_DIR="$trace_dir" \
+      AURA_CONFORMANCE_ITF_TRACE="$trace_file" \
+      cargo test -p aura-testkit --test consensus_itf_conformance -- --nocapture
 
 # Differential tests
 ci-conformance-diff:
@@ -579,6 +601,7 @@ clean:
     rm -rf logs/ *.log
     echo "Cleaning demo/test data..."
     rm -rf .aura-demo/ .aura-test/ outcomes/ *.sealed *.dat *.tmp *.temp
+    rm -rf traces/ .qemu-vm/ .patchbay-work/ .patchbay-target/ target-codex/
     echo "Cleaning verification artifacts..."
     rm -rf verification/lean/.lake/ verification/lean/build/ verification/lean/Generated/
     rm -rf verification/lean/.lean_build/ verification/traces/ _apalache-out/
@@ -1011,13 +1034,19 @@ verify-conformance:
     echo "==========================="
 
     echo "[1/3] Generating ITF traces..."
-    mkdir -p traces
-    quint run --out-itf=traces/consensus.itf.json verification/quint/consensus/core.qnt \
+    trace_file="${PWD}/artifacts/traces/consensus.itf.json"
+    trace_dir="${PWD}/artifacts/traces/consensus"
+    mkdir -p "$trace_dir"
+    quint run --out-itf="$trace_file" verification/quint/consensus/core.qnt \
         --max-steps=30 --max-samples=5 || { echo -e "${RED}[FAIL]${NC}"; exit 1; }
+    cp "$trace_file" "$trace_dir/trace.itf.json"
     echo -e "${GREEN}[OK]${NC} Generated traces"
 
     echo "[2/3] Running ITF conformance tests..."
-    cargo test -p aura-protocol --test consensus_itf_conformance -- --nocapture || \
+    AURA_CONSENSUS_ITF_TRACE="$trace_file" \
+      AURA_CONSENSUS_ITF_TRACE_DIR="$trace_dir" \
+      AURA_CONFORMANCE_ITF_TRACE="$trace_file" \
+      cargo test -p aura-protocol --test consensus_itf_conformance -- --nocapture || \
         { echo -e "${RED}[FAIL]${NC}"; exit 1; }
     echo -e "${GREEN}[OK]${NC} Conformance passed"
 
@@ -1109,7 +1138,7 @@ scenario3-e2e:
     [[instances]]
     id = "alice"
     mode = "local"
-    data_dir = ".tmp/harness/scenario3-e2e-${runstamp}-alice"
+    data_dir = "artifacts/harness/state/scenario3-e2e-${runstamp}-alice"
     device_id = "alice-dev-01"
     bind_address = "127.0.0.1:${baseport}"
     demo_mode = false
@@ -1123,7 +1152,7 @@ scenario3-e2e:
     [[instances]]
     id = "bob"
     mode = "local"
-    data_dir = ".tmp/harness/scenario3-e2e-${runstamp}-bob"
+    data_dir = "artifacts/harness/state/scenario3-e2e-${runstamp}-bob"
     device_id = "bob-dev-01"
     bind_address = "127.0.0.1:$((baseport + 1))"
     demo_mode = false

@@ -428,7 +428,7 @@ mod tests {
             [[instances]]
             id = "alice"
             mode = "local"
-            data_dir = ".tmp/alice"
+            data_dir = "artifacts/harness/state/test/alice"
             bind_address = "127.0.0.1:41001"
         "#;
 
@@ -457,7 +457,7 @@ mod tests {
                 InstanceConfig {
                     id: "alice".to_string(),
                     mode: InstanceMode::Local,
-                    data_dir: PathBuf::from(".tmp/shared"),
+                    data_dir: PathBuf::from("artifacts/harness/state/test/shared"),
                     device_id: None,
                     bind_address: "127.0.0.1:41001".to_string(),
                     demo_mode: false,
@@ -480,7 +480,7 @@ mod tests {
                 InstanceConfig {
                     id: "bob".to_string(),
                     mode: InstanceMode::Local,
-                    data_dir: PathBuf::from(".tmp/shared"),
+                    data_dir: PathBuf::from("artifacts/harness/state/test/shared"),
                     device_id: None,
                     bind_address: "127.0.0.1:41002".to_string(),
                     demo_mode: false,

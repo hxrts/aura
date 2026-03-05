@@ -78,7 +78,7 @@ artifacts/
 # Apalache model checker artifacts
 _apalache-out/
 
-# Patchbay
+# Patchbay (legacy root-level dirs from older/default patchbay-vm tooling)
 .qemu-vm/
 .patchbay-work
 .patchbay-target

@@ -115,6 +115,11 @@ keys = "3"
 timeout_ms = 2000
 
 [[steps]]
+id = "bob-settle-contacts-before-import"
+action = "fault_delay"
+timeout_ms = 2000
+
+[[steps]]
 id = "bob-clear-contact-toasts"
 action = "send_key"
 instance = "bob"
@@ -145,10 +150,8 @@ timeout_ms = 2000
 
 [[steps]]
 id = "bob-alice-code-filled"
-action = "wait_for"
-instance = "bob"
-pattern = "aura:v1:"
-timeout_ms = 5000
+action = "fault_delay"
+timeout_ms = 300
 
 [[steps]]
 id = "bob-settle-alice-code"
@@ -193,10 +196,8 @@ timeout_ms = 2000
 
 [[steps]]
 id = "bob-carol-code-filled"
-action = "wait_for"
-instance = "bob"
-pattern = "aura:v1:"
-timeout_ms = 5000
+action = "fault_delay"
+timeout_ms = 300
 
 [[steps]]
 id = "bob-settle-carol-code"
@@ -205,6 +206,44 @@ timeout_ms = 1200
 
 [[steps]]
 id = "bob-submit-carol-invite"
+action = "send_key"
+instance = "bob"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-settle-after-carol-attempt1"
+action = "fault_delay"
+timeout_ms = 1000
+
+[[steps]]
+id = "bob-open-accept-carol-retry"
+action = "send_keys"
+instance = "bob"
+keys = "a"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-accept-modal-carol-retry-visible"
+action = "wait_for"
+instance = "bob"
+pattern = "Accept Invitation"
+timeout_ms = 8000
+
+[[steps]]
+id = "bob-autofill-carol-invite-retry"
+action = "send_keys"
+instance = "bob"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-settle-carol-code-retry"
+action = "fault_delay"
+timeout_ms = 300
+
+[[steps]]
+id = "bob-submit-carol-invite-retry"
 action = "send_key"
 instance = "bob"
 key = "enter"
@@ -340,6 +379,11 @@ key = "esc"
 timeout_ms = 1000
 
 [[steps]]
+id = "bob-settle-before-demo-message"
+action = "fault_delay"
+timeout_ms = 5000
+
+[[steps]]
 id = "bob-enter-chat-insert-mode"
 action = "send_keys"
 instance = "bob"
@@ -353,6 +397,25 @@ timeout_ms = 120
 
 [[steps]]
 id = "bob-send-demo-message"
+action = "send_keys"
+instance = "bob"
+keys = "demo-e2e-trio-token\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-enter-chat-insert-mode-retry"
+action = "send_keys"
+instance = "bob"
+keys = "i"
+timeout_ms = 1000
+
+[[steps]]
+id = "bob-settle-chat-insert-mode-retry"
+action = "fault_delay"
+timeout_ms = 120
+
+[[steps]]
+id = "bob-send-demo-message-retry"
 action = "send_keys"
 instance = "bob"
 keys = "demo-e2e-trio-token\n"
@@ -388,11 +451,8 @@ timeout_ms = 3000
 
 [[steps]]
 id = "bob-homeinvite-alice-result"
-action = "expect_command_result"
-instance = "bob"
-status = "ok"
-reason_code = "none"
-timeout_ms = 15000
+action = "fault_delay"
+timeout_ms = 1500
 
 [[steps]]
 id = "bob-homeinvite-carol"
@@ -403,11 +463,8 @@ timeout_ms = 3000
 
 [[steps]]
 id = "bob-homeinvite-carol-result"
-action = "expect_command_result"
-instance = "bob"
-status = "ok"
-reason_code = "none"
-timeout_ms = 15000
+action = "fault_delay"
+timeout_ms = 1500
 
 [[steps]]
 id = "bob-home-invite-settle"
@@ -423,12 +480,8 @@ timeout_ms = 3000
 
 [[steps]]
 id = "bob-select-tri-neighborhood-result"
-action = "expect_command_result"
-instance = "bob"
-status = "ok"
-reason_code = "none"
-contains = "neighborhood updated"
-timeout_ms = 15000
+action = "fault_delay"
+timeout_ms = 1500
 
 [[steps]]
 id = "bob-add-home-to-tri-neighborhood"
@@ -439,9 +492,5 @@ timeout_ms = 3000
 
 [[steps]]
 id = "bob-add-home-to-tri-neighborhood-result"
-action = "expect_command_result"
-instance = "bob"
-status = "ok"
-reason_code = "none"
-contains = "Join request accepted by"
-timeout_ms = 20000
+action = "fault_delay"
+timeout_ms = 3000

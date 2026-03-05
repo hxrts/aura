@@ -1619,7 +1619,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let mut tui = tui;
         // Clone AppCore for key rotation operations
         let app_core_for_ceremony = app_ctx.app_core.clone();
-        let tasks_for_dispatch = tasks.clone();
+        let tasks_for_dispatch = tasks;
         // Clone update channel sender for ceremony UI updates
         let update_tx_for_ceremony = props.update_tx.clone();
         // Clone callbacks registry for command dispatch
@@ -1910,49 +1910,32 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     },
                                                 })
                                                 .collect();
-                                        let is_demo_mode = std::env::var("AURA_DEMO_DEVICE_ID")
-                                            .ok()
-                                            .is_some_and(|value| !value.trim().is_empty())
-                                            || !new_state.contacts.demo_alice_code.is_empty()
-                                            || !new_state.contacts.demo_carol_code.is_empty();
-                                        let demo_alice_id = if is_demo_mode {
-                                            Some(
-                                                crate::ids::authority_id(&format!(
-                                                    "demo:{}:{}:authority",
-                                                    aura_app::ui::workflows::demo_config::DEMO_SEED_2024,
-                                                    "Alice"
-                                                ))
-                                                .to_string(),
-                                            )
-                                        } else {
-                                            None
-                                        };
-                                        let demo_carol_id = if is_demo_mode {
-                                            Some(
-                                                crate::ids::authority_id(&format!(
-                                                    "demo:{}:{}:authority",
-                                                    aura_app::ui::workflows::demo_config::DEMO_SEED_2024 + 1,
-                                                    "Carol"
-                                                ))
-                                                .to_string(),
-                                            )
-                                        } else {
-                                            None
-                                        };
+                                        let demo_alice_id = crate::ids::authority_id(&format!(
+                                            "demo:{}:{}:authority",
+                                            aura_app::ui::workflows::demo_config::DEMO_SEED_2024,
+                                            "Alice"
+                                        ))
+                                        .to_string();
+                                        let demo_carol_id = crate::ids::authority_id(&format!(
+                                            "demo:{}:{}:authority",
+                                            aura_app::ui::workflows::demo_config::DEMO_SEED_2024 + 1,
+                                            "Carol"
+                                        ))
+                                        .to_string();
+                                        let is_demo_mode = candidates.iter().any(|candidate| {
+                                            candidate.id == demo_alice_id
+                                                || candidate.id == demo_carol_id
+                                        });
                                         let demo_name_rank = |contact_id: &str, name: &str| -> u8 {
                                             if !is_demo_mode {
                                                 return 2;
                                             }
                                             if name.eq_ignore_ascii_case("Alice")
-                                                || demo_alice_id
-                                                    .as_deref()
-                                                    .is_some_and(|id| id == contact_id)
+                                                || demo_alice_id == contact_id
                                             {
                                                 0
                                             } else if name.eq_ignore_ascii_case("Carol")
-                                                || demo_carol_id
-                                                    .as_deref()
-                                                    .is_some_and(|id| id == contact_id)
+                                                || demo_carol_id == contact_id
                                             {
                                                 1
                                             } else {
@@ -1989,13 +1972,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     } => {
                                         // Demo safeguard: keep the canonical trio room aligned with
                                         // Alice+Carol participation even if picker timing drifts.
-                                        let is_demo_mode = std::env::var("AURA_DEMO_DEVICE_ID")
-                                            .ok()
-                                            .is_some_and(|value| !value.trim().is_empty())
-                                            || !new_state.contacts.demo_alice_code.is_empty()
-                                            || !new_state.contacts.demo_carol_code.is_empty();
-                                        if name.eq_ignore_ascii_case("demo-trio-room") && is_demo_mode
-                                        {
+                                        if name.eq_ignore_ascii_case("demo-trio-room") {
                                             let contacts = match shared_contacts_for_dispatch.read() {
                                                 Ok(guard) => guard.clone(),
                                                 Err(poisoned) => poisoned.into_inner().clone(),
@@ -3067,8 +3044,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             ChatScreen(
                                 view: chat_props.clone(),
                                 selected_channel: Some(tui_selected_for_chat_screen),
-                                selected_channel_id: Some(selected_channel_id.clone()),
-                                shared_channels: Some(shared_channels.clone()),
+                                selected_channel_id: Some(selected_channel_id),
+                                shared_channels: Some(shared_channels),
                                 on_send: on_send.clone(),
                                 on_retry_message: on_retry_message.clone(),
                                 on_channel_select: on_channel_select.clone(),

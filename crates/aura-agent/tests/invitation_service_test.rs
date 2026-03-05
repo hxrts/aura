@@ -154,7 +154,14 @@ async fn test_invite_to_channel_rejects_invalid_home_id() -> TestResult {
 
     let receiver_id = AuthorityId::new_from_entropy([238u8; 32]);
     let err = match invitations
-        .invite_to_channel(receiver_id, "channel-123".to_string(), None, None, None, None)
+        .invite_to_channel(
+            receiver_id,
+            "channel-123".to_string(),
+            None,
+            None,
+            None,
+            None,
+        )
         .await
     {
         Ok(value) => panic!("invalid home id should be rejected: {value:?}"),

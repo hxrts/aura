@@ -301,7 +301,7 @@ seed = 4242
 [[instances]]
 id = "alice"
 mode = "local"
-data_dir = ".tmp/harness/alice"
+data_dir = "artifacts/harness/state/local-loopback/alice"
 device_id = "alice-dev-01"
 bind_address = "127.0.0.1:41001"
 ```

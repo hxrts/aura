@@ -301,7 +301,13 @@ mod tests {
     #[test]
     fn test_load_consensus_trace() {
         // Test loading the consensus trace we generated
-        let trace_path = std::path::Path::new("../../traces/consensus.itf.json");
+        let preferred = std::path::Path::new("../../artifacts/traces/consensus.itf.json");
+        let legacy = std::path::Path::new("../../traces/consensus.itf.json");
+        let trace_path = if preferred.exists() {
+            preferred
+        } else {
+            legacy
+        };
         if trace_path.exists() {
             let trace = ITFLoader::load_from_file(trace_path).expect("Failed to load trace");
             assert!(!trace.states.is_empty());

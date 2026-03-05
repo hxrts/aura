@@ -81,7 +81,7 @@ cfg_if! {
 
             let path = std::env::var("AURA_CONFORMANCE_ITF_TRACE")
                 .ok()
-                .unwrap_or_else(|| "traces/consensus.itf.json".to_string());
+                .unwrap_or_else(|| "artifacts/traces/consensus.itf.json".to_string());
             let trace_path = Path::new(&path);
             if !trace_path.exists() {
                 return Vec::new();

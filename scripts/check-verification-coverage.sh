@@ -39,6 +39,17 @@ fi
 mismatches=0
 checks_run=0
 
+# Count `find` matches safely under `set -euo pipefail` (missing paths => 0).
+count_find() {
+  local path="$1"
+  shift
+  if [[ -e "$path" ]]; then
+    find "$path" "$@" 2>/dev/null | wc -l | tr -d ' '
+  else
+    echo "0"
+  fi
+}
+
 # Helper to compare documented vs actual count
 check_metric() {
   local name="$1"
@@ -96,7 +107,7 @@ echo "---------------"
 # Summary table metrics
 # ─────────────────────────────────────────────────────────────────────────────
 
-quint_specs=$(find verification/quint -name "*.qnt" -type f 2>/dev/null | wc -l | tr -d ' ')
+quint_specs=$(count_find verification/quint -name "*.qnt" -type f)
 check_metric "Quint Specifications" "$(get_documented "Quint Specifications")" "$quint_specs"
 
 quint_invariants=$(grep -rhE "^\s*val [A-Za-z]*[Ii]nvariant" verification/quint/ 2>/dev/null | wc -l | tr -d ' ')
@@ -108,28 +119,28 @@ check_metric "Quint Temporal Properties" "$(get_documented "Quint Temporal Prope
 quint_types=$(grep -rhE "^\s*type " verification/quint/ 2>/dev/null | wc -l | tr -d ' ')
 check_metric "Quint Type Definitions" "$(get_documented "Quint Type Definitions")" "$quint_types"
 
-lean_files=$(find verification/lean -name "*.lean" -type f 2>/dev/null | wc -l | tr -d ' ')
+lean_files=$(count_find verification/lean -name "*.lean" -type f)
 check_metric "Lean Source Files" "$(get_documented "Lean Source Files")" "$lean_files"
 
 lean_theorems=$(grep -rhE "^(theorem|lemma) " verification/lean/ 2>/dev/null | wc -l | tr -d ' ')
 check_metric "Lean Theorems" "$(get_documented "Lean Theorems")" "$lean_theorems"
 
-conformance_fixtures=$(find crates/aura-testkit/tests/fixtures/conformance -name "*.json" -type f 2>/dev/null | wc -l | tr -d ' ')
+conformance_fixtures=$(count_find crates/aura-testkit/fixtures/conformance -name "*.json" -type f)
 check_metric "Conformance Fixtures" "$(get_documented "Conformance Fixtures")" "$conformance_fixtures"
 
-itf_harnesses=$(find verification/quint/harness -name "*.qnt" -type f 2>/dev/null | wc -l | tr -d ' ')
+itf_harnesses=$(count_find verification/quint/harness -name "*.qnt" -type f)
 check_metric "ITF Trace Harnesses" "$(get_documented "ITF Trace Harnesses")" "$itf_harnesses"
 
 testkit_tests=$(grep -rh "^#\[test\]" crates/aura-testkit/src/ crates/aura-testkit/tests/ 2>/dev/null | wc -l | tr -d ' ')
 check_metric "Testkit Tests" "$(get_documented "Testkit Tests")" "$testkit_tests"
 
-bridge_modules=$(find crates/aura-quint/src -name "bridge_*.rs" -type f 2>/dev/null | wc -l | tr -d ' ')
+bridge_modules=$(count_find crates/aura-quint/src -name "bridge_*.rs" -type f)
 check_metric "Bridge Modules" "$(get_documented "Bridge Modules")" "$bridge_modules"
 
-telltale_parity_modules=$(find crates/aura-simulator/src -name "telltale_parity.rs" -type f 2>/dev/null | wc -l | tr -d ' ')
+telltale_parity_modules=$(count_find crates/aura-simulator/src -name "telltale_parity.rs" -type f)
 check_metric "Telltale Parity Modules" "$(get_documented "Telltale Parity Modules")" "$telltale_parity_modules"
 
-bridge_pipeline_fixtures=$(find crates/aura-quint/tests/fixtures/bridge -name "*.json" -type f 2>/dev/null | wc -l | tr -d ' ')
+bridge_pipeline_fixtures=$(count_find crates/aura-quint/tests/fixtures/bridge -name "*.json" -type f)
 check_metric "Bridge Pipeline Fixtures" "$(get_documented "Bridge Pipeline Fixtures")" "$bridge_pipeline_fixtures"
 
 # Count CI verification gates from justfile
@@ -150,7 +161,7 @@ check_subsystem() {
   local name="$1"
   local path="$2"
   local actual
-  actual=$(find "$path" -maxdepth 1 -name "*.qnt" -type f 2>/dev/null | wc -l | tr -d ' ')
+  actual=$(count_find "$path" -maxdepth 1 -name "*.qnt" -type f)
   local documented
   documented=$(grep -E "^\| ${name} \|" "$DOC" 2>/dev/null | sed -E 's/.*\| ([0-9]+) \|.*/\1/' | head -1)
   check_metric "$name" "$documented" "$actual"
@@ -174,16 +185,16 @@ echo "---------------------"
 # Lean module counts - extract from prose like "(10 files)" or "(14 files,"
 # ─────────────────────────────────────────────────────────────────────────────
 
-lean_type_modules=$(find verification/lean/Aura/Types -name "*.lean" -type f 2>/dev/null | wc -l | tr -d ' ')
+lean_type_modules=$(count_find verification/lean/Aura/Types -name "*.lean" -type f)
 lean_type_modules=$((lean_type_modules + 1))  # Add Types.lean itself
 doc_type_modules=$(get_prose_count "Type Modules \([0-9]+ files\)")
 check_metric "Lean Type Modules" "$doc_type_modules" "$lean_type_modules"
 
-lean_domain_modules=$(find verification/lean/Aura/Domain -name "*.lean" -type f 2>/dev/null | wc -l | tr -d ' ')
+lean_domain_modules=$(count_find verification/lean/Aura/Domain -name "*.lean" -type f)
 doc_domain_modules=$(get_prose_count "Domain Modules \([0-9]+ files\)")
 check_metric "Lean Domain Modules" "$doc_domain_modules" "$lean_domain_modules"
 
-lean_proof_modules=$(find verification/lean/Aura/Proofs -name "*.lean" -type f 2>/dev/null | wc -l | tr -d ' ')
+lean_proof_modules=$(count_find verification/lean/Aura/Proofs -name "*.lean" -type f)
 doc_proof_modules=$(get_prose_count "Proof Modules \([0-9]+ files")
 check_metric "Lean Proof Modules" "$doc_proof_modules" "$lean_proof_modules"
 
@@ -202,7 +213,7 @@ echo "---------------------"
 # Simulator quint module count - extract from "17 modules implementing"
 # ─────────────────────────────────────────────────────────────────────────────
 
-sim_modules=$(find crates/aura-simulator/src/quint -name "*.rs" -type f 2>/dev/null | wc -l | tr -d ' ')
+sim_modules=$(count_find crates/aura-simulator/src/quint -name "*.rs" -type f)
 doc_sim_modules=$(get_prose_count "[0-9]+ modules implementing generative simulation")
 check_metric "Simulator Quint Modules" "$doc_sim_modules" "$sim_modules"
 

@@ -11,11 +11,17 @@ use aura_simulator::quint::{
 #[tokio::test]
 #[ignore]
 async fn replay_amp_channel_lifecycle_trace() {
-    let trace_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(|path| path.parent())
-        .expect("missing manifest ancestors")
-        .join("traces/amp_channel.itf.json");
+        .expect("missing manifest ancestors");
+    let preferred = workspace_root.join("artifacts/traces/amp_channel.itf.json");
+    let legacy = workspace_root.join("traces/amp_channel.itf.json");
+    let trace_path = if preferred.exists() {
+        preferred
+    } else {
+        legacy
+    };
 
     if !trace_path.exists() {
         println!("Skipping: AMP channel trace not found at {trace_path:?}");

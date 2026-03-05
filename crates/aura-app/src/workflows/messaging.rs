@@ -1547,7 +1547,8 @@ pub async fn send_message_ref(
             let mut failed_fanout = Vec::new();
             for peer in recipients {
                 attempted_fanout = attempted_fanout.saturating_add(1);
-                if let Err(error) = send_chat_fact_with_retry(&runtime, peer, context_id, &fact).await
+                if let Err(error) =
+                    send_chat_fact_with_retry(&runtime, peer, context_id, &fact).await
                 {
                     failed_fanout.push(format!("{peer}: {error}"));
                 }

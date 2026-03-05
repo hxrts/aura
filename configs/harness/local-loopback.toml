@@ -9,7 +9,7 @@ artifact_dir = "artifacts/harness/local-loopback-smoke"
 [[instances]]
 id = "alice"
 mode = "local"
-data_dir = ".tmp/harness/alice"
+data_dir = "artifacts/harness/state/local-loopback/alice"
 device_id = "alice-dev-01"
 bind_address = "127.0.0.1:41001"
 demo_mode = false
@@ -23,7 +23,7 @@ port = 19433
 [[instances]]
 id = "bob"
 mode = "local"
-data_dir = ".tmp/harness/bob"
+data_dir = "artifacts/harness/state/local-loopback/bob"
 device_id = "bob-dev-01"
 bind_address = "127.0.0.1:41002"
 demo_mode = false

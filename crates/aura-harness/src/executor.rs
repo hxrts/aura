@@ -375,6 +375,7 @@ fn execute_step(
             } else {
                 format!("/{command}")
             };
+            let command_body = command.trim_start_matches('/');
 
             // Clear any active toast/modal so command-result waits do not match stale UI.
             dispatch(
@@ -412,8 +413,16 @@ fn execute_step(
             dispatch(
                 tool_api,
                 ToolRequest::SendKeys {
+                    instance_id: instance_id.clone(),
+                    keys: "/".to_string(),
+                },
+            )?;
+            std::thread::sleep(Duration::from_millis(40));
+            dispatch(
+                tool_api,
+                ToolRequest::SendKeys {
                     instance_id,
-                    keys: format!("{command}\n"),
+                    keys: format!("{command_body}\n"),
                 },
             )?;
             Ok(())
@@ -1368,7 +1377,7 @@ mod tests {
         }
 
         let action_log = api.action_log();
-        assert!(action_log.len() >= 4, "expected at least four tool actions");
+        assert!(action_log.len() >= 6, "expected at least six tool actions");
 
         match &action_log[0].request {
             ToolRequest::SendKey {
@@ -1405,9 +1414,25 @@ mod tests {
         match &action_log[3].request {
             ToolRequest::SendKeys { instance_id, keys } => {
                 assert_eq!(instance_id, "alice");
-                assert_eq!(keys, "i/join slash-lab\n");
+                assert_eq!(keys, "i");
             }
-            other => panic!("expected SendKeys fourth, got {other:?}"),
+            other => panic!("expected SendKeys fourth (insert mode), got {other:?}"),
+        }
+
+        match &action_log[4].request {
+            ToolRequest::SendKeys { instance_id, keys } => {
+                assert_eq!(instance_id, "alice");
+                assert_eq!(keys, "/");
+            }
+            other => panic!("expected SendKeys fifth (slash), got {other:?}"),
+        }
+
+        match &action_log[5].request {
+            ToolRequest::SendKeys { instance_id, keys } => {
+                assert_eq!(instance_id, "alice");
+                assert_eq!(keys, "join slash-lab\n");
+            }
+            other => panic!("expected SendKeys sixth (command body), got {other:?}"),
         }
     }
 
