@@ -1,6 +1,7 @@
 //! Trace handler adapter
 
 use crate::adapters::collect_ops;
+use crate::adapters::utils::{deserialize_operation_params, serialize_operation_result};
 use crate::registry::{HandlerContext, HandlerError, RegistrableHandler};
 use async_trait::async_trait;
 use aura_core::effects::trace::{TraceEffects, TraceEvent, TraceSpanId};
@@ -40,38 +41,20 @@ impl RegistrableHandler for TraceHandlerAdapter {
 
         match operation {
             "trace_event" => {
-                let event: TraceEvent = aura_core::util::serialization::from_slice(parameters)
-                    .map_err(|e| HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    })?;
+                let event: TraceEvent =
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 self.handler.trace_event(event).await;
                 Ok(Vec::new())
             }
             "trace_span" => {
-                let event: TraceEvent = aura_core::util::serialization::from_slice(parameters)
-                    .map_err(|e| HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    })?;
+                let event: TraceEvent =
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 let span = self.handler.trace_span(event).await;
-                aura_core::util::serialization::to_vec(&span).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &span)
             }
             "trace_span_end" => {
-                let span: TraceSpanId = aura_core::util::serialization::from_slice(parameters)
-                    .map_err(|e| HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    })?;
+                let span: TraceSpanId =
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 self.handler.trace_span_end(span).await;
                 Ok(Vec::new())
             }

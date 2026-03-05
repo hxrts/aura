@@ -86,10 +86,7 @@ async fn test_complete_partition_healing_recovery() -> AuraResult<()> {
         "Complete partition healing should succeed"
     );
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(360))
         .await
@@ -183,10 +180,7 @@ async fn test_multi_protocol_coordination() -> AuraResult<()> {
         "Multi-protocol coordination should succeed"
     );
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(300))
         .await
@@ -268,10 +262,7 @@ async fn test_large_scale_device_coordination() -> AuraResult<()> {
         "Large-scale coordination should succeed"
     );
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(420))
         .await
@@ -425,10 +416,7 @@ async fn test_concurrent_failure_recovery() -> AuraResult<()> {
         "Should recover from concurrent failures"
     );
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(360))
         .await
@@ -575,10 +563,7 @@ async fn test_complete_end_to_end_workflow() -> AuraResult<()> {
         "Complete end-to-end workflow should succeed"
     );
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(480))
         .await

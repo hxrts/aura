@@ -1,5 +1,6 @@
 //! Logging system handler adapter
 
+use crate::adapters::utils::{deserialize_operation_params, serialize_operation_result};
 use crate::registry::{HandlerContext, HandlerError, RegistrableHandler};
 use async_trait::async_trait;
 use aura_core::effects::registry as effect_registry;
@@ -34,13 +35,7 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
         match operation {
             "log" => {
                 let (level, component, message): (String, String, String) =
-                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                        HandlerError::EffectDeserialization {
-                            effect_type,
-                            operation: operation.to_string(),
-                            source: Box::new(e),
-                        }
-                    })?;
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 self.handler
                     .log(&level, &component, &message)
                     .await
@@ -55,13 +50,7 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                     String,
                     String,
                     std::collections::HashMap<String, String>,
-                ) = aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                    HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })?;
+                ) = deserialize_operation_params(effect_type, operation, parameters)?;
                 self.handler
                     .log_with_context(&level, &component, &message, context)
                     .await
@@ -76,13 +65,7 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &result)
             }
             "get_system_info" => {
                 let result = self.handler.get_system_info().await.map_err(|e| {
@@ -90,23 +73,11 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &result)
             }
             "set_config" => {
                 let (key, value): (String, String) =
-                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                        HandlerError::EffectDeserialization {
-                            effect_type,
-                            operation: operation.to_string(),
-                            source: Box::new(e),
-                        }
-                    })?;
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 self.handler.set_config(&key, &value).await.map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
@@ -115,26 +86,13 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                 Ok(Vec::new())
             }
             "get_config" => {
-                let key: String =
-                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                        HandlerError::EffectDeserialization {
-                            effect_type,
-                            operation: operation.to_string(),
-                            source: Box::new(e),
-                        }
-                    })?;
+                let key: String = deserialize_operation_params(effect_type, operation, parameters)?;
                 let value = self.handler.get_config(&key).await.map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&value).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &value)
             }
             "get_metrics" => {
                 let result = self.handler.get_metrics().await.map_err(|e| {
@@ -142,21 +100,11 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &result)
             }
             "restart_component" => {
-                let component: String = aura_core::util::serialization::from_slice(parameters)
-                    .map_err(|e| HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    })?;
+                let component: String =
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 self.handler
                     .restart_component(&component)
                     .await

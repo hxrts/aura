@@ -12,6 +12,7 @@ mod storage;
 mod time;
 mod trace;
 mod transport;
+mod utils;
 
 pub use console::ConsoleHandlerAdapter;
 pub use crypto::CryptoHandlerAdapter;

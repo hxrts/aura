@@ -93,10 +93,7 @@ async fn test_basic_ota_coordination() -> AuraResult<()> {
 
     assert!(ota_result.is_ok(), "OTA coordination should succeed");
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(120))
         .await
@@ -169,10 +166,7 @@ async fn test_ota_insufficient_approvals() -> AuraResult<()> {
     }
 
     // Session might complete with failure status
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     let session_completion = timeout(
         Duration::from_secs(30),
         ended.wait_for_completion(Duration::from_secs(90)),
@@ -260,10 +254,7 @@ async fn test_ota_epoch_fencing() -> AuraResult<()> {
         "Epoch fencing should work correctly"
     );
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(90))
         .await
@@ -326,10 +317,7 @@ async fn test_ota_rollback() -> AuraResult<()> {
 
     assert!(rollback_result.is_ok(), "OTA rollback should succeed");
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(120))
         .await
@@ -394,10 +382,7 @@ async fn test_ota_network_partition() -> AuraResult<()> {
         "OTA should handle network partitions gracefully"
     );
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(150))
         .await
@@ -467,10 +452,7 @@ async fn test_concurrent_ota_attempts() -> AuraResult<()> {
         "Should handle concurrent OTA proposals correctly"
     );
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(120))
         .await
@@ -589,10 +571,7 @@ async fn test_ota_device_failures() -> AuraResult<()> {
         "OTA should handle device failures gracefully"
     );
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(150))
         .await

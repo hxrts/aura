@@ -1,6 +1,7 @@
 //! Console handler adapter
 
 use crate::adapters::collect_ops;
+use crate::adapters::utils::deserialize_operation_params;
 use crate::registry::{HandlerContext, HandlerError, RegistrableHandler};
 use async_trait::async_trait;
 use aura_core::effects::ConsoleEffects;
@@ -33,13 +34,7 @@ impl RegistrableHandler for ConsoleHandlerAdapter {
 
         match operation {
             "log_info" => {
-                let message = String::from_utf8(parameters.to_vec()).map_err(|e| {
-                    HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })?;
+                let message = decode_console_message(effect_type, operation, parameters)?;
                 self.handler.log_info(&message).await.map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
@@ -48,13 +43,7 @@ impl RegistrableHandler for ConsoleHandlerAdapter {
                 Ok(Vec::new()) // Console operations return void
             }
             "log_warn" => {
-                let message = String::from_utf8(parameters.to_vec()).map_err(|e| {
-                    HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })?;
+                let message = decode_console_message(effect_type, operation, parameters)?;
                 self.handler.log_warn(&message).await.map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
@@ -63,13 +52,7 @@ impl RegistrableHandler for ConsoleHandlerAdapter {
                 Ok(Vec::new())
             }
             "log_error" => {
-                let message = String::from_utf8(parameters.to_vec()).map_err(|e| {
-                    HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })?;
+                let message = decode_console_message(effect_type, operation, parameters)?;
                 self.handler.log_error(&message).await.map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
@@ -78,13 +61,7 @@ impl RegistrableHandler for ConsoleHandlerAdapter {
                 Ok(Vec::new())
             }
             "log_debug" => {
-                let message = String::from_utf8(parameters.to_vec()).map_err(|e| {
-                    HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })?;
+                let message = decode_console_message(effect_type, operation, parameters)?;
                 self.handler.log_debug(&message).await.map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
@@ -109,5 +86,22 @@ impl RegistrableHandler for ConsoleHandlerAdapter {
 
     fn execution_mode(&self) -> ExecutionMode {
         ExecutionMode::Production
+    }
+}
+
+fn decode_console_message(
+    effect_type: EffectType,
+    operation: &str,
+    parameters: &[u8],
+) -> Result<String, HandlerError> {
+    match deserialize_operation_params(effect_type, operation, parameters) {
+        Ok(message) => Ok(message),
+        Err(_) => String::from_utf8(parameters.to_vec()).map_err(|e| {
+            HandlerError::EffectDeserialization {
+                effect_type,
+                operation: operation.to_string(),
+                source: Box::new(e),
+            }
+        }),
     }
 }

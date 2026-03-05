@@ -40,10 +40,7 @@ async fn test_basic_journal_sync() -> AuraResult<()> {
     assert!(sync_result.is_ok(), "Basic journal sync should succeed");
 
     // End the session and wait for completion using type-state pattern
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(30))
         .await
@@ -92,10 +89,7 @@ async fn test_divergent_state_resolution() -> AuraResult<()> {
 
     assert!(resolution_result.is_ok(), "Should resolve divergent states");
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(60))
         .await
@@ -160,10 +154,7 @@ async fn test_batched_journal_sync() -> AuraResult<()> {
 
     assert!(sync_result.is_ok(), "Batched journal sync should succeed");
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(90))
         .await
@@ -232,10 +223,7 @@ async fn test_journal_sync_with_interruptions() -> AuraResult<()> {
         "Should recover from network interruptions"
     );
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(120))
         .await
@@ -287,10 +275,7 @@ async fn test_sync_state_transitions() -> AuraResult<()> {
         "State transitions should proceed correctly"
     );
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(45))
         .await
@@ -352,10 +337,7 @@ async fn test_concurrent_journal_writers() -> AuraResult<()> {
         "Concurrent writes should be handled correctly"
     );
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(90))
         .await
@@ -426,10 +408,7 @@ async fn test_sync_message_handling() -> AuraResult<()> {
         "All message types should be handled correctly"
     );
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(30))
         .await
@@ -504,10 +483,7 @@ async fn test_sync_retry_logic() -> AuraResult<()> {
         "Retry logic should eventually succeed"
     );
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(150))
         .await

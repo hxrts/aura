@@ -75,10 +75,7 @@ async fn test_partition_detection() -> AuraResult<()> {
     );
 
     // Allow session to handle partition state
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     let session_result = timeout(
         Duration::from_secs(30),
         ended.wait_for_completion(Duration::from_secs(120)),
@@ -148,10 +145,7 @@ async fn test_split_brain_prevention() -> AuraResult<()> {
     // In a real implementation with partition-aware quorum, the session would remain blocked.
     // With mock infrastructure, we verify the partition detection logic works correctly,
     // but session completion doesn't actually check quorum status.
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(30))
         .await
@@ -219,10 +213,7 @@ async fn test_majority_partition_operation() -> AuraResult<()> {
         "Majority partition should continue operations"
     );
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(120))
         .await
@@ -286,10 +277,7 @@ async fn test_partition_during_active_sync() -> AuraResult<()> {
     );
 
     // Session might complete with partial success
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     let session_result = timeout(
         Duration::from_secs(45),
         ended.wait_for_completion(Duration::from_secs(150)),
@@ -397,10 +385,7 @@ async fn test_cascading_partition_failures() -> AuraResult<()> {
     // In a real implementation with partition-aware quorum, the session would fail.
     // With mock infrastructure, we verify the cascading partition detection logic works,
     // but session completion doesn't actually check quorum status.
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(30))
         .await
@@ -475,10 +460,7 @@ async fn test_flapping_network_partition() -> AuraResult<()> {
         "Should handle flapping network conditions"
     );
 
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(200))
         .await
@@ -570,10 +552,7 @@ async fn test_partial_connectivity_partition() -> AuraResult<()> {
     );
 
     // Session might succeed with degraded performance
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     ended
         .wait_for_completion(Duration::from_secs(180))
         .await
@@ -657,10 +636,7 @@ async fn test_partition_detection_accuracy() -> AuraResult<()> {
     );
 
     // Session may fail due to final partition
-    let ended = session
-        .end()
-        .await
-        .map_err(wrap_test_error)?;
+    let ended = session.end().await.map_err(wrap_test_error)?;
     let session_result = timeout(
         Duration::from_secs(30),
         ended.wait_for_completion(Duration::from_secs(120)),

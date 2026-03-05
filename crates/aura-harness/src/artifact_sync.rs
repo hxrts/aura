@@ -148,18 +148,18 @@ mod tests {
     use crate::config::{InstanceConfig, InstanceMode, RunSection};
 
     #[test]
-    fn remote_sync_produces_checksum_and_metadata_records() {
-        let temp = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir failed: {error}"));
-        let artifacts = ArtifactBundle::create(temp.path(), "sync-test")
-            .unwrap_or_else(|error| panic!("artifact bundle failed: {error}"));
+    fn remote_sync_produces_checksum_and_metadata_records() -> Result<()> {
+        let temp = tempfile::tempdir().context("tempdir failed")?;
+        let artifacts =
+            ArtifactBundle::create(temp.path(), "sync-test").context("artifact bundle failed")?;
         let config = sample_run_config();
 
-        let report = sync_remote_artifacts(&config, &artifacts)
-            .unwrap_or_else(|error| panic!("remote sync failed: {error}"));
+        let report = sync_remote_artifacts(&config, &artifacts).context("remote sync failed")?;
 
         assert_eq!(report.records.len(), 1);
         assert_eq!(report.records[0].status, "simulated");
         assert!(!report.records[0].checksum_sha256.is_empty());
+        Ok(())
     }
 
     fn sample_run_config() -> RunConfig {

@@ -1,6 +1,7 @@
 //! Transport handler adapter
 
 use crate::adapters::collect_ops;
+use crate::adapters::utils::{deserialize_operation_params, serialize_operation_result};
 use crate::registry::{HandlerContext, HandlerError, RegistrableHandler};
 use async_trait::async_trait;
 use aura_core::effects::{NetworkCoreEffects, NetworkExtendedEffects};
@@ -66,13 +67,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
         match operation {
             "send_to_peer" => {
                 let params: (uuid::Uuid, Vec<u8>) =
-                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                        HandlerError::EffectDeserialization {
-                            effect_type,
-                            operation: operation.to_string(),
-                            source: Box::new(e),
-                        }
-                    })?;
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 self.core
                     .send_to_peer(params.0, params.1)
                     .await
@@ -82,12 +77,8 @@ impl RegistrableHandler for TransportHandlerAdapter {
                 Ok(Vec::new()) // send returns void
             }
             "broadcast" => {
-                let message: Vec<u8> = aura_core::util::serialization::from_slice(parameters)
-                    .map_err(|e| HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    })?;
+                let message: Vec<u8> =
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 self.core
                     .broadcast(message)
                     .await
@@ -102,13 +93,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&received).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &received)
             }
             "receive_from" => {
                 let handler =
@@ -118,24 +103,14 @@ impl RegistrableHandler for TransportHandlerAdapter {
                             effect_type,
                             operation: operation.to_string(),
                         })?;
-                let peer_id: uuid::Uuid = aura_core::util::serialization::from_slice(parameters)
-                    .map_err(|e| HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    })?;
+                let peer_id: uuid::Uuid =
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 let received = handler.receive_from(peer_id).await.map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&received).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &received)
             }
             "connected_peers" => {
                 let handler =
@@ -146,13 +121,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
                             operation: operation.to_string(),
                         })?;
                 let peers = handler.connected_peers().await;
-                aura_core::util::serialization::to_vec(&peers).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &peers)
             }
             "is_peer_connected" => {
                 let handler =
@@ -162,20 +131,10 @@ impl RegistrableHandler for TransportHandlerAdapter {
                             effect_type,
                             operation: operation.to_string(),
                         })?;
-                let peer_id: uuid::Uuid = aura_core::util::serialization::from_slice(parameters)
-                    .map_err(|e| HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    })?;
+                let peer_id: uuid::Uuid =
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 let result = handler.is_peer_connected(peer_id).await;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &result)
             }
             "subscribe_to_peer_events" => Err(HandlerError::ExecutionFailed {
                 source: "Peer event streams are not serializable in registry adapters".into(),
@@ -188,12 +147,8 @@ impl RegistrableHandler for TransportHandlerAdapter {
                             effect_type,
                             operation: operation.to_string(),
                         })?;
-                let address: String = aura_core::util::serialization::from_slice(parameters)
-                    .map_err(|e| HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    })?;
+                let address: String =
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 let connection_id =
                     handler
                         .open(&address)
@@ -201,13 +156,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
                         .map_err(|e| HandlerError::ExecutionFailed {
                             source: Box::new(e),
                         })?;
-                aura_core::util::serialization::to_vec(&connection_id).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &connection_id)
             }
             "send" => {
                 let handler =
@@ -218,13 +167,7 @@ impl RegistrableHandler for TransportHandlerAdapter {
                             operation: operation.to_string(),
                         })?;
                 let (connection_id, data): (String, Vec<u8>) =
-                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                        HandlerError::EffectDeserialization {
-                            effect_type,
-                            operation: operation.to_string(),
-                            source: Box::new(e),
-                        }
-                    })?;
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 handler.send(&connection_id, data).await.map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
@@ -240,12 +183,8 @@ impl RegistrableHandler for TransportHandlerAdapter {
                             effect_type,
                             operation: operation.to_string(),
                         })?;
-                let connection_id: String = aura_core::util::serialization::from_slice(parameters)
-                    .map_err(|e| HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    })?;
+                let connection_id: String =
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 handler
                     .close(&connection_id)
                     .await

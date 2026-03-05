@@ -1,6 +1,7 @@
 //! Random handler adapter
 
 use crate::adapters::collect_ops;
+use crate::adapters::utils::{deserialize_operation_params, serialize_operation_result};
 use crate::registry::{HandlerContext, HandlerError, RegistrableHandler};
 use async_trait::async_trait;
 use aura_core::effects::{RandomCoreEffects, RandomExtendedEffects};
@@ -40,68 +41,27 @@ impl RegistrableHandler for RandomHandlerAdapter {
 
         match operation {
             "random_bytes" => {
-                let len: usize =
-                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                        HandlerError::EffectDeserialization {
-                            effect_type,
-                            operation: operation.to_string(),
-                            source: Box::new(e),
-                        }
-                    })?;
+                let len: usize = deserialize_operation_params(effect_type, operation, parameters)?;
                 let result = self.handler.random_bytes(len).await;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &result)
             }
             "random_bytes_32" => {
                 let result = self.handler.random_bytes_32().await;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &result)
             }
             "random_u64" => {
                 let result = self.handler.random_u64().await;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &result)
             }
             "random_range" => {
-                let (min, max): (u64, u64) = aura_core::util::serialization::from_slice(parameters)
-                    .map_err(|e| HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    })?;
+                let (min, max): (u64, u64) =
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 let result = self.handler.random_range(min, max).await;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &result)
             }
             "random_uuid" => {
                 let result = self.handler.random_uuid().await;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &result)
             }
             _ => Err(HandlerError::UnknownOperation {
                 effect_type,

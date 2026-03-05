@@ -108,10 +108,11 @@ impl BackendHandle {
 mod tests {
     use super::BackendHandle;
     use crate::config::{InstanceConfig, InstanceMode};
+    use anyhow::Result;
     use std::path::PathBuf;
 
     #[test]
-    fn backend_handle_constructs_browser_variant() {
+    fn backend_handle_constructs_browser_variant() -> Result<()> {
         let config = InstanceConfig {
             id: "alice".to_string(),
             mode: InstanceMode::Browser,
@@ -136,11 +137,11 @@ mod tests {
             tunnel: None,
         };
 
-        let backend = BackendHandle::from_config(config, Some(40), Some(120))
-            .unwrap_or_else(|error| panic!("{error}"));
+        let backend = BackendHandle::from_config(config, Some(40), Some(120))?;
         match backend {
             BackendHandle::Browser(_) => {}
             _ => panic!("expected browser backend"),
         }
+        Ok(())
     }
 }

@@ -1,6 +1,7 @@
 //! Storage handler adapter
 
 use crate::adapters::collect_ops;
+use crate::adapters::utils::{deserialize_operation_params, serialize_operation_result};
 use crate::registry::{HandlerContext, HandlerError, RegistrableHandler};
 use async_trait::async_trait;
 use aura_core::effects::{StorageCoreEffects, StorageExtendedEffects};
@@ -59,13 +60,7 @@ impl RegistrableHandler for StorageHandlerAdapter {
         match operation {
             "store" => {
                 let params: (String, Vec<u8>) =
-                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                        HandlerError::EffectDeserialization {
-                            effect_type,
-                            operation: operation.to_string(),
-                            source: Box::new(e),
-                        }
-                    })?;
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 self.core.store(&params.0, params.1).await.map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
@@ -74,14 +69,7 @@ impl RegistrableHandler for StorageHandlerAdapter {
                 Ok(Vec::new()) // store returns void
             }
             "retrieve" => {
-                let key: String =
-                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                        HandlerError::EffectDeserialization {
-                            effect_type,
-                            operation: operation.to_string(),
-                            source: Box::new(e),
-                        }
-                    })?;
+                let key: String = deserialize_operation_params(effect_type, operation, parameters)?;
                 let result =
                     self.core
                         .retrieve(&key)
@@ -89,23 +77,10 @@ impl RegistrableHandler for StorageHandlerAdapter {
                         .map_err(|e| HandlerError::ExecutionFailed {
                             source: Box::new(e),
                         })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &result)
             }
             "remove" => {
-                let key: String =
-                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                        HandlerError::EffectDeserialization {
-                            effect_type,
-                            operation: operation.to_string(),
-                            source: Box::new(e),
-                        }
-                    })?;
+                let key: String = deserialize_operation_params(effect_type, operation, parameters)?;
                 let result =
                     self.core
                         .remove(&key)
@@ -113,33 +88,17 @@ impl RegistrableHandler for StorageHandlerAdapter {
                         .map_err(|e| HandlerError::ExecutionFailed {
                             source: Box::new(e),
                         })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &result)
             }
             "list_keys" => {
-                let prefix: Option<String> = aura_core::util::serialization::from_slice(parameters)
-                    .map_err(|e| HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    })?;
+                let prefix: Option<String> =
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 let result = self.core.list_keys(prefix.as_deref()).await.map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &result)
             }
             "exists" => {
                 let handler =
@@ -149,14 +108,7 @@ impl RegistrableHandler for StorageHandlerAdapter {
                             effect_type,
                             operation: operation.to_string(),
                         })?;
-                let key: String =
-                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                        HandlerError::EffectDeserialization {
-                            effect_type,
-                            operation: operation.to_string(),
-                            source: Box::new(e),
-                        }
-                    })?;
+                let key: String = deserialize_operation_params(effect_type, operation, parameters)?;
                 let result =
                     handler
                         .exists(&key)
@@ -164,13 +116,7 @@ impl RegistrableHandler for StorageHandlerAdapter {
                         .map_err(|e| HandlerError::ExecutionFailed {
                             source: Box::new(e),
                         })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &result)
             }
             "store_batch" => {
                 let handler =
@@ -181,13 +127,7 @@ impl RegistrableHandler for StorageHandlerAdapter {
                             operation: operation.to_string(),
                         })?;
                 let pairs: std::collections::HashMap<String, Vec<u8>> =
-                    aura_core::util::serialization::from_slice(parameters).map_err(|e| {
-                        HandlerError::EffectDeserialization {
-                            effect_type,
-                            operation: operation.to_string(),
-                            source: Box::new(e),
-                        }
-                    })?;
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 handler
                     .store_batch(pairs)
                     .await
@@ -204,24 +144,14 @@ impl RegistrableHandler for StorageHandlerAdapter {
                             effect_type,
                             operation: operation.to_string(),
                         })?;
-                let keys: Vec<String> = aura_core::util::serialization::from_slice(parameters)
-                    .map_err(|e| HandlerError::EffectDeserialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    })?;
+                let keys: Vec<String> =
+                    deserialize_operation_params(effect_type, operation, parameters)?;
                 let result = handler.retrieve_batch(&keys).await.map_err(|e| {
                     HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     }
                 })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &result)
             }
             "clear_all" => {
                 let handler =
@@ -253,13 +183,7 @@ impl RegistrableHandler for StorageHandlerAdapter {
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),
                     })?;
-                aura_core::util::serialization::to_vec(&result).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type,
-                        operation: operation.to_string(),
-                        source: Box::new(e),
-                    }
-                })
+                serialize_operation_result(effect_type, operation, &result)
             }
             _ => Err(HandlerError::UnknownOperation {
                 effect_type,

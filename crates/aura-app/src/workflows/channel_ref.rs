@@ -143,15 +143,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn channel_selector_accepts_name_and_canonical_id() {
-        let named = ChannelSelector::parse("#general")
-            .unwrap_or_else(|error| panic!("name selector should parse: {error}"));
+    fn channel_selector_accepts_name_and_canonical_id() -> Result<(), AuraError> {
+        let named = ChannelSelector::parse("#general")?;
         assert!(matches!(named, ChannelSelector::Name(name) if name == "general"));
 
         let canonical = ChannelId::from_bytes([7u8; 32]);
-        let parsed = ChannelSelector::parse(&canonical.to_string())
-            .unwrap_or_else(|error| panic!("canonical selector should parse: {error}"));
+        let parsed = ChannelSelector::parse(&canonical.to_string())?;
         assert_eq!(parsed, ChannelSelector::Id(canonical));
+        Ok(())
     }
 
     #[test]

@@ -696,52 +696,52 @@ mod tests {
     // === Invitation Role Parsing Tests ===
 
     #[test]
-    fn test_parse_invitation_role_guardian() {
-        let result = parse_invitation_role("guardian")
-            .unwrap_or_else(|error| panic!("guardian role should parse: {error}"));
+    fn test_parse_invitation_role_guardian() -> Result<(), InvitationRoleParseError> {
+        let result = parse_invitation_role("guardian")?;
         assert_eq!(result, InvitationRoleValue::Guardian);
+        Ok(())
     }
 
     #[test]
-    fn test_parse_invitation_role_guardian_case_insensitive() {
+    fn test_parse_invitation_role_guardian_case_insensitive() -> Result<(), InvitationRoleParseError>
+    {
         assert_eq!(
-            parse_invitation_role("GUARDIAN")
-                .unwrap_or_else(|error| panic!("guardian role should parse: {error}")),
+            parse_invitation_role("GUARDIAN")?,
             InvitationRoleValue::Guardian
         );
         assert_eq!(
-            parse_invitation_role("Guardian")
-                .unwrap_or_else(|error| panic!("guardian role should parse: {error}")),
+            parse_invitation_role("Guardian")?,
             InvitationRoleValue::Guardian
         );
+        Ok(())
     }
 
     #[test]
-    fn test_parse_invitation_role_channel() {
-        let result = parse_invitation_role("channel")
-            .unwrap_or_else(|error| panic!("channel role should parse: {error}"));
+    fn test_parse_invitation_role_channel() -> Result<(), InvitationRoleParseError> {
+        let result = parse_invitation_role("channel")?;
         assert_eq!(result, InvitationRoleValue::Channel);
+        Ok(())
     }
 
     #[test]
-    fn test_parse_invitation_role_channel_case_insensitive() {
+    fn test_parse_invitation_role_channel_case_insensitive() -> Result<(), InvitationRoleParseError>
+    {
         assert_eq!(
-            parse_invitation_role("CHANNEL")
-                .unwrap_or_else(|error| panic!("channel role should parse: {error}")),
+            parse_invitation_role("CHANNEL")?,
             InvitationRoleValue::Channel
         );
         assert_eq!(
-            parse_invitation_role("Channel")
-                .unwrap_or_else(|error| panic!("channel role should parse: {error}")),
+            parse_invitation_role("Channel")?,
             InvitationRoleValue::Channel
         );
+        Ok(())
     }
 
     #[test]
-    fn test_parse_invitation_role_contact() {
-        let result = parse_invitation_role("contact")
-            .unwrap_or_else(|error| panic!("contact role should parse: {error}"));
+    fn test_parse_invitation_role_contact() -> Result<(), InvitationRoleParseError> {
+        let result = parse_invitation_role("contact")?;
         assert_eq!(result, InvitationRoleValue::Contact);
+        Ok(())
     }
 
     #[test]
