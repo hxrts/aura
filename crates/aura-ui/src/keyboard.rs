@@ -9,6 +9,14 @@ use aura_app::ui::types::parse_chat_command;
 
 const SETTINGS_ROWS: usize = 5;
 
+fn set_toast(model: &mut UiModel, icon: char, message: impl Into<String>) {
+    model.toast_key = model.toast_key.saturating_add(1);
+    model.toast = Some(ToastState {
+        icon,
+        message: message.into(),
+    });
+}
+
 pub fn apply_text_keys(model: &mut UiModel, keys: &str, clipboard: &dyn ClipboardPort) {
     for ch in keys.chars() {
         match ch {
@@ -58,27 +66,27 @@ fn apply_char(model: &mut UiModel, ch: char, clipboard: &dyn ClipboardPort) {
     match ch {
         '?' => {
             model.modal = Some(ModalState::Help);
-            model.modal_hint = format!("Help - {}", screen_name(model.screen));
+            model.modal_hint = format!("Help - {}", model.screen.help_label());
             return;
         }
         '1' => {
-            model.screen = UiScreen::Neighborhood;
+            model.set_screen(UiScreen::Neighborhood);
             return;
         }
         '2' => {
-            model.screen = UiScreen::Chat;
+            model.set_screen(UiScreen::Chat);
             return;
         }
         '3' => {
-            model.screen = UiScreen::Contacts;
+            model.set_screen(UiScreen::Contacts);
             return;
         }
         '4' => {
-            model.screen = UiScreen::Notifications;
+            model.set_screen(UiScreen::Notifications);
             return;
         }
         '5' => {
-            model.screen = UiScreen::Settings;
+            model.set_screen(UiScreen::Settings);
             return;
         }
         'c' => {
@@ -193,7 +201,7 @@ fn handle_contacts_char(model: &mut UiModel, ch: char) {
         }
         'c' => {
             if let Some(contact) = model.selected_contact_name().map(str::to_string) {
-                model.screen = UiScreen::Chat;
+                model.set_screen(UiScreen::Chat);
                 model.select_channel_by_name(&format!("DM: {contact}"));
             }
         }
@@ -332,28 +340,25 @@ fn handle_settings_char(model: &mut UiModel, ch: char) {
             model.modal_hint = "Import Device Enrollment Code".to_string();
         }
         'r' if model.settings_index == 3 => {
-            model.toast = Some(ToastState {
-                icon: '✗',
-                message: "Cannot remove the current device".to_string(),
-            });
+            set_toast(model, '✗', "Cannot remove the current device");
         }
         's' if model.settings_index == 2 => {
-            model.toast = Some(ToastState {
-                icon: 'ℹ',
-                message: "guardians for recovery".to_string(),
-            });
+            model.modal = Some(ModalState::RequestRecovery);
+            model.modal_hint = "Request Recovery".to_string();
         }
         's' if model.settings_index == 4 => {
-            model.toast = Some(ToastState {
-                icon: 'ℹ',
-                message: "neighborhood updated".to_string(),
-            });
+            set_toast(
+                model,
+                'ℹ',
+                "Cannot switch authority: only one authority available",
+            );
         }
         'm' if model.settings_index == 4 => {
-            model.toast = Some(ToastState {
-                icon: '✗',
-                message: "MFA requires at least 2 devices".to_string(),
-            });
+            set_toast(
+                model,
+                '✗',
+                "Cannot configure multifactor: requires at least 2 devices",
+            );
         }
         _ => {}
     }
@@ -397,20 +402,19 @@ fn handle_enter(model: &mut UiModel, clipboard: &dyn ClipboardPort) {
                 model.modal_hint = "Guardian Setup".to_string();
             }
             2 => {
-                model.toast = Some(ToastState {
-                    icon: 'ℹ',
-                    message: "guardians for recovery".to_string(),
-                });
+                model.modal = Some(ModalState::RequestRecovery);
+                model.modal_hint = "Request Recovery".to_string();
             }
             3 => {
                 model.modal = Some(ModalState::AddDeviceStep1);
                 model.modal_hint = "Add Device — Step 1 of 3".to_string();
             }
             4 => {
-                model.toast = Some(ToastState {
-                    icon: '✗',
-                    message: "MFA requires at least 2 devices".to_string(),
-                });
+                set_toast(
+                    model,
+                    '✗',
+                    "Cannot configure multifactor: requires at least 2 devices",
+                );
             }
             _ => {}
         },
@@ -506,24 +510,19 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             dismiss_modal(model);
         }
         ModalState::GuardianSetup => {
-            model.toast = Some(ToastState {
-                icon: 'ℹ',
-                message: "guardians for recovery".to_string(),
-            });
+            set_toast(model, 'ℹ', "guardians for recovery");
+            dismiss_modal(model);
+        }
+        ModalState::RequestRecovery => {
+            set_toast(model, '✓', "Recovery request sent to guardians");
             dismiss_modal(model);
         }
         ModalState::AddDeviceStep1 => {
-            model.toast = Some(ToastState {
-                icon: '✓',
-                message: "invitation sent".to_string(),
-            });
+            set_toast(model, '✓', "invitation sent");
             dismiss_modal(model);
         }
         ModalState::ImportDeviceEnrollmentCode => {
-            model.toast = Some(ToastState {
-                icon: '✓',
-                message: "membership updated".to_string(),
-            });
+            set_toast(model, '✓', "membership updated");
             dismiss_modal(model);
         }
         ModalState::AssignModerator => {
@@ -759,23 +758,25 @@ fn backspace(model: &mut UiModel) {
 }
 
 fn cycle_screen(model: &mut UiModel) {
-    model.screen = match model.screen {
+    let next = match model.screen {
         UiScreen::Neighborhood => UiScreen::Chat,
         UiScreen::Chat => UiScreen::Contacts,
         UiScreen::Contacts => UiScreen::Notifications,
         UiScreen::Notifications => UiScreen::Settings,
         UiScreen::Settings => UiScreen::Neighborhood,
     };
+    model.set_screen(next);
 }
 
 fn cycle_screen_prev(model: &mut UiModel) {
-    model.screen = match model.screen {
+    let next = match model.screen {
         UiScreen::Neighborhood => UiScreen::Settings,
         UiScreen::Chat => UiScreen::Neighborhood,
         UiScreen::Contacts => UiScreen::Chat,
         UiScreen::Notifications => UiScreen::Contacts,
         UiScreen::Settings => UiScreen::Notifications,
     };
+    model.set_screen(next);
 }
 
 fn move_selection(model: &mut UiModel, delta: i32) {
@@ -836,16 +837,6 @@ fn handle_horizontal(model: &mut UiModel, _delta: i32) {
     }
 }
 
-fn screen_name(screen: UiScreen) -> &'static str {
-    match screen {
-        UiScreen::Neighborhood => "Neighborhood",
-        UiScreen::Chat => "Chat",
-        UiScreen::Contacts => "Contacts",
-        UiScreen::Notifications => "Notifications",
-        UiScreen::Settings => "Settings",
-    }
-}
-
 fn command_toast(
     icon: char,
     status: &str,
@@ -856,5 +847,130 @@ fn command_toast(
     ToastState {
         icon,
         message: format!("{detail} status={status} reason={reason} consistency={consistency}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_text_keys;
+    use crate::clipboard::MemoryClipboard;
+    use crate::model::{ModalState, UiModel, UiScreen};
+
+    #[test]
+    fn contacts_invite_shortcut_opens_invite_modal() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+
+        model.set_screen(UiScreen::Contacts);
+        apply_text_keys(&mut model, "n", &clipboard);
+
+        assert!(matches!(model.modal, Some(ModalState::CreateInvitation)));
+    }
+
+    #[test]
+    fn neighborhood_new_home_shortcut_opens_modal() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+
+        model.set_screen(UiScreen::Neighborhood);
+        apply_text_keys(&mut model, "n", &clipboard);
+
+        assert!(matches!(model.modal, Some(ModalState::CreateHome)));
+    }
+
+    #[test]
+    fn chat_shortcuts_open_expected_actions() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+
+        model.set_screen(UiScreen::Chat);
+
+        apply_text_keys(&mut model, "n", &clipboard);
+        assert!(matches!(model.modal, Some(ModalState::CreateChannel)));
+
+        // Close modal and ensure typing shortcut enters input mode.
+        model.modal = None;
+        apply_text_keys(&mut model, "i", &clipboard);
+        assert!(model.input_mode);
+    }
+
+    #[test]
+    fn settings_shortcuts_open_or_toast_expected_actions() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+
+        model.set_screen(UiScreen::Settings);
+
+        model.settings_index = 0;
+        apply_text_keys(&mut model, "e", &clipboard);
+        assert!(matches!(model.modal, Some(ModalState::EditNickname)));
+        model.modal = None;
+
+        model.settings_index = 1;
+        apply_text_keys(&mut model, "t", &clipboard);
+        assert!(matches!(model.modal, Some(ModalState::GuardianSetup)));
+        model.modal = None;
+
+        model.settings_index = 2;
+        apply_text_keys(&mut model, "s", &clipboard);
+        assert!(matches!(model.modal, Some(ModalState::RequestRecovery)));
+        model.modal = None;
+
+        model.settings_index = 3;
+        apply_text_keys(&mut model, "a", &clipboard);
+        assert!(matches!(model.modal, Some(ModalState::AddDeviceStep1)));
+        model.modal = None;
+        apply_text_keys(&mut model, "i", &clipboard);
+        assert!(matches!(
+            model.modal,
+            Some(ModalState::ImportDeviceEnrollmentCode)
+        ));
+        model.modal = None;
+        apply_text_keys(&mut model, "r", &clipboard);
+        assert_eq!(
+            model.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("Cannot remove the current device")
+        );
+
+        model.settings_index = 4;
+        apply_text_keys(&mut model, "s", &clipboard);
+        assert_eq!(
+            model.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("Cannot switch authority: only one authority available")
+        );
+        apply_text_keys(&mut model, "m", &clipboard);
+        assert_eq!(
+            model.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("Cannot configure multifactor: requires at least 2 devices")
+        );
+    }
+
+    #[test]
+    fn settings_remove_device_toast_repeats_with_new_event_key() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+
+        model.set_screen(UiScreen::Settings);
+        model.settings_index = 3;
+
+        apply_text_keys(&mut model, "r", &clipboard);
+        let first_key = model.toast_key;
+        let first_message = model
+            .toast
+            .as_ref()
+            .map(|toast| toast.message.clone())
+            .unwrap_or_default();
+
+        apply_text_keys(&mut model, "r", &clipboard);
+        let second_key = model.toast_key;
+        let second_message = model
+            .toast
+            .as_ref()
+            .map(|toast| toast.message.clone())
+            .unwrap_or_default();
+
+        assert_eq!(first_message, "Cannot remove the current device");
+        assert_eq!(second_message, "Cannot remove the current device");
+        assert!(second_key > first_key);
     }
 }

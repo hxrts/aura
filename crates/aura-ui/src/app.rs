@@ -67,7 +67,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
     use_effect(move || {
         let next_key = toast_snapshot
             .as_ref()
-            .map(|toast| format!("{}::{}", toast.icon, toast.message));
+            .map(|toast| format!("{}::{}::{}", model.toast_key, toast.icon, toast.message));
 
         if last_toast_key() == next_key {
             return;
@@ -96,7 +96,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
     rsx! {
         main {
-            class: "relative min-h-screen bg-background text-foreground font-mono p-3 sm:p-6 grid place-items-center outline-none",
+            class: "relative min-h-screen bg-background text-foreground font-mono outline-none flex flex-col",
             tabindex: 0,
             autofocus: true,
             onmounted: move |mounted| {
@@ -113,88 +113,81 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                     render_tick.set(render_tick() + 1);
                 }
             },
-            section {
-                class: "relative w-full max-w-[1300px] min-h-[86vh] sm:min-h-[82vh] rounded-2xl border border-border bg-card shadow-2xl overflow-hidden flex flex-col",
-                nav {
-                    class: "border-b border-border bg-card/95 backdrop-blur px-3 py-2.5 sm:px-4",
-                    div {
-                        class: "flex flex-wrap items-center justify-between gap-2",
-                        div {
-                            class: "flex flex-wrap items-center gap-2",
-                            span { class: "mr-2 text-xs uppercase tracking-[0.12em] text-muted-foreground", "Aura" }
-                            for (screen, label, is_active) in screen_tabs(model.screen) {
-                                button {
-                                    r#type: "button",
-                                    class: if is_active {
-                                        "rounded-md border border-primary/40 bg-primary/15 px-3 py-1.5 text-xs uppercase tracking-[0.08em] text-foreground"
-                                    } else {
-                                        "rounded-md border border-transparent bg-transparent px-3 py-1.5 text-xs uppercase tracking-[0.08em] text-muted-foreground hover:border-border hover:text-foreground"
-                                    },
-                                    onclick: {
-                                        let controller = controller.clone();
-                                        move |_| {
-                                            controller.set_screen(screen);
-                                            render_tick.set(render_tick() + 1);
-                                        }
-                                    },
-                                    "{label}"
-                                }
-                            }
-                        }
-                        ShadButton {
-                            variant: ShadButtonVariant::Ghost,
-                            size: ShadButtonSize::Icon,
-                            is_icon_button: true,
-                            aria_label: Some(match resolved_scheme {
-                                ColorScheme::Dark => "Switch to light mode".to_string(),
-                                _ => "Switch to dark mode".to_string(),
-                            }),
-                            on_click: move |_| theme_for_toggle.toggle_color_scheme(),
-                            span { class: "text-lg leading-none", "◑" }
-                        }
-                    }
-                }
+            nav {
+                class: "border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80",
                 div {
-                    class: "flex-1 min-h-0 overflow-y-auto p-3 sm:p-4",
-                    {render_screen_content(&model, controller.clone(), render_tick)}
-                }
-
-                if let Some(modal) = modal {
-                    UiModal {
-                        modal,
-                        on_cancel: {
-                            let controller = controller.clone();
-                            move |_| {
-                                controller.send_key_named("esc", 1);
-                                render_tick.set(render_tick() + 1);
-                            }
-                        },
-                        on_confirm: {
-                            let controller = controller.clone();
-                            move |_| {
-                                controller.send_key_named("enter", 1);
-                                render_tick.set(render_tick() + 1);
-                            }
-                        },
-                        on_input_change: {
-                            let controller = controller.clone();
-                            move |value: String| {
-                                controller.set_modal_buffer(&value);
-                                render_tick.set(render_tick() + 1);
+                    class: "flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6",
+                    div {
+                        class: "flex flex-wrap items-center gap-2",
+                        span { class: "mr-2 text-xs font-bold uppercase tracking-[0.12em] text-white", "AURA" }
+                        for (screen, label, is_active) in screen_tabs(model.screen) {
+                            button {
+                                r#type: "button",
+                                class: nav_tab_class(is_active),
+                                onclick: {
+                                    let controller = controller.clone();
+                                    move |_| {
+                                        controller.set_screen(screen);
+                                        render_tick.set(render_tick() + 1);
+                                    }
+                                },
+                                "{label}"
                             }
                         }
                     }
+                    ShadButton {
+                        variant: ShadButtonVariant::Ghost,
+                        size: ShadButtonSize::Icon,
+                        is_icon_button: true,
+                        aria_label: Some(match resolved_scheme {
+                            ColorScheme::Dark => "Switch to light mode".to_string(),
+                            _ => "Switch to dark mode".to_string(),
+                        }),
+                        on_click: move |_| theme_for_toggle.toggle_color_scheme(),
+                        span { class: "text-lg leading-none", "◑" }
+                    }
                 }
+            }
+            div {
+                class: "flex-1 min-h-0 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5",
+                {render_screen_content(&model, controller.clone(), render_tick)}
+            }
 
-                UiFooter {
-                    left: "Keys: 1-5 tab shift+tab arrows enter esc ? i n a c d r".to_string(),
-                    right: format!(
-                        "screen: {} | authority: {} | toast: {}",
-                        screen_label(model.screen),
-                        model.authority_id,
-                        model.toast.is_some()
-                    ),
+            if let Some(modal) = modal {
+                UiModal {
+                    modal,
+                    on_cancel: {
+                        let controller = controller.clone();
+                        move |_| {
+                            controller.send_key_named("esc", 1);
+                            render_tick.set(render_tick() + 1);
+                        }
+                    },
+                    on_confirm: {
+                        let controller = controller.clone();
+                        move |_| {
+                            controller.send_key_named("enter", 1);
+                            render_tick.set(render_tick() + 1);
+                        }
+                    },
+                    on_input_change: {
+                        let controller = controller.clone();
+                        move |value: String| {
+                            controller.set_modal_buffer(&value);
+                            render_tick.set(render_tick() + 1);
+                        }
+                    }
                 }
+            }
+
+            UiFooter {
+                left: String::new(),
+                right: format!(
+                    "screen: {} | authority: {} | toast: {}",
+                    screen_label(model.screen),
+                    model.authority_id,
+                    model.toast.is_some()
+                ),
             }
         }
     }
@@ -243,21 +236,10 @@ fn neighborhood_screen(
                 }
                 div { class: "flex gap-2 pt-1",
                     UiButton {
-                        label: "Help".to_string(),
-                        variant: ButtonVariant::Secondary,
-                        on_click: {
-                            let controller = controller.clone();
-                            move |_| {
-                                controller.send_keys("?");
-                                render_tick.set(render_tick() + 1);
-                            }
-                        }
-                    }
-                    UiButton {
                         label: "New Home".to_string(),
                         variant: ButtonVariant::Primary,
                         on_click: move |_| {
-                            controller.send_keys("n");
+                            controller.send_action_keys("n");
                             render_tick.set(render_tick() + 1);
                         }
                     }
@@ -324,7 +306,7 @@ fn chat_screen(
                         label: "New Group".to_string(),
                         variant: ButtonVariant::Primary,
                         on_click: move |_| {
-                            new_group_controller.send_keys("n");
+                            new_group_controller.send_action_keys("n");
                             render_tick.set(render_tick() + 1);
                         }
                     }
@@ -352,7 +334,7 @@ fn chat_screen(
                                         label: "Start Typing".to_string(),
                                         variant: ButtonVariant::Primary,
                                         on_click: move |_| {
-                                            start_typing_controller.send_keys("i");
+                                            start_typing_controller.send_action_keys("i");
                                             render_tick.set(render_tick() + 1);
                                         }
                                     }
@@ -410,7 +392,7 @@ fn contacts_screen(
                                 label: "Invite".to_string(),
                                 variant: ButtonVariant::Primary,
                                 on_click: move |_| {
-                                    empty_invite_controller.send_keys("i");
+                                    empty_invite_controller.send_action_keys("n");
                                     render_tick.set(render_tick() + 1);
                                 }
                             }
@@ -434,7 +416,7 @@ fn contacts_screen(
                         label: "Invite".to_string(),
                         variant: ButtonVariant::Primary,
                         on_click: move |_| {
-                            invite_controller.send_keys("i");
+                            invite_controller.send_action_keys("n");
                             render_tick.set(render_tick() + 1);
                         }
                     }
@@ -550,7 +532,8 @@ fn settings_screen(
                             on_click: {
                                 let controller = controller.clone();
                                 move |_| {
-                                    controller.send_keys("e");
+                                    controller.set_settings_index(0);
+                                    controller.send_action_keys("e");
                                     render_tick.set(render_tick() + 1);
                                 }
                             }
@@ -576,7 +559,8 @@ fn settings_screen(
                             on_click: {
                                 let controller = controller.clone();
                                 move |_| {
-                                    controller.send_keys("t");
+                                    controller.set_settings_index(1);
+                                    controller.send_action_keys("t");
                                     render_tick.set(render_tick() + 1);
                                 }
                             }
@@ -602,7 +586,8 @@ fn settings_screen(
                             on_click: {
                                 let controller = controller.clone();
                                 move |_| {
-                                    controller.send_keys("s");
+                                    controller.set_settings_index(2);
+                                    controller.send_action_keys("s");
                                     render_tick.set(render_tick() + 1);
                                 }
                             }
@@ -633,7 +618,8 @@ fn settings_screen(
                             on_click: {
                                 let controller = controller.clone();
                                 move |_| {
-                                    controller.send_keys("a");
+                                    controller.set_settings_index(3);
+                                    controller.send_action_keys("a");
                                     render_tick.set(render_tick() + 1);
                                 }
                             }
@@ -644,7 +630,8 @@ fn settings_screen(
                             on_click: {
                                 let controller = controller.clone();
                                 move |_| {
-                                    controller.send_keys("i");
+                                    controller.set_settings_index(3);
+                                    controller.send_action_keys("i");
                                     render_tick.set(render_tick() + 1);
                                 }
                             }
@@ -655,7 +642,8 @@ fn settings_screen(
                             on_click: {
                                 let controller = controller.clone();
                                 move |_| {
-                                    controller.send_keys("r");
+                                    controller.set_settings_index(3);
+                                    controller.send_action_keys("r");
                                     render_tick.set(render_tick() + 1);
                                 }
                             }
@@ -669,35 +657,37 @@ fn settings_screen(
                         active: false,
                     }
                     UiListItem {
-                        label: "Synchronization".to_string(),
-                        secondary: Some("Trigger neighborhood sync".to_string()),
+                        label: "Switch authority".to_string(),
+                        secondary: Some("Requires more than one available authority".to_string()),
                         active: false,
                     }
                     UiListItem {
-                        label: "MFA status".to_string(),
-                        secondary: Some("Run multi-factor guard check".to_string()),
+                        label: "Multifactor".to_string(),
+                        secondary: Some("Configure MFA ceremony for this authority".to_string()),
                         active: false,
                     }
                     div {
                         class: "flex flex-wrap gap-2 pt-1",
                         UiButton {
-                            label: "Sync".to_string(),
+                            label: "Switch Authority".to_string(),
                             variant: ButtonVariant::Secondary,
                             on_click: {
                                 let controller = controller.clone();
                                 move |_| {
-                                    controller.send_keys("s");
+                                    controller.set_settings_index(4);
+                                    controller.send_action_keys("s");
                                     render_tick.set(render_tick() + 1);
                                 }
                             }
                         }
                         UiButton {
-                            label: "MFA Check".to_string(),
+                            label: "Configure MFA".to_string(),
                             variant: ButtonVariant::Secondary,
                             on_click: {
                                 let controller = controller.clone();
                                 move |_| {
-                                    controller.send_keys("m");
+                                    controller.set_settings_index(4);
+                                    controller.send_action_keys("m");
                                     render_tick.set(render_tick() + 1);
                                 }
                             }
@@ -757,6 +747,14 @@ fn screen_label(screen: UiScreen) -> &'static str {
     }
 }
 
+fn nav_tab_class(is_active: bool) -> &'static str {
+    if is_active {
+        "rounded-md bg-accent px-3 py-1.5 text-xs uppercase tracking-[0.08em] text-foreground"
+    } else {
+        "rounded-md px-3 py-1.5 text-xs uppercase tracking-[0.08em] text-muted-foreground hover:bg-accent hover:text-foreground"
+    }
+}
+
 fn render_screen_content(
     model: &UiModel,
     controller: Arc<UiController>,
@@ -788,6 +786,7 @@ fn active_modal_title(model: &UiModel) -> Option<String> {
             ModalState::EditNickname => "Edit Nickname",
             ModalState::RemoveContact => "Remove Contact",
             ModalState::GuardianSetup => "Guardian Setup",
+            ModalState::RequestRecovery => "Request Recovery",
             ModalState::AddDeviceStep1 => "Add Device",
             ModalState::ImportDeviceEnrollmentCode => "Import Device Enrollment Code",
             ModalState::AssignModerator => "Assign Moderator",
@@ -807,16 +806,9 @@ fn modal_view(model: &UiModel) -> Option<ModalView> {
 
     match modal {
         ModalState::Help => {
-            details.push("Keyboard reference".to_string());
-            keybind_rows = vec![
-                ("1-5".to_string(), "Switch screens".to_string()),
-                ("tab / shift+tab".to_string(), "Move selection".to_string()),
-                ("arrow keys".to_string(), "Navigate lists".to_string()),
-                ("i".to_string(), "Create invitation".to_string()),
-                ("n".to_string(), "Create home/channel".to_string()),
-                ("enter".to_string(), "Confirm action".to_string()),
-                ("esc".to_string(), "Close modal / cancel".to_string()),
-            ];
+            let (help_details, help_keybind_rows) = help_modal_content(model.screen);
+            details = help_details;
+            keybind_rows = help_keybind_rows;
         }
         ModalState::CreateInvitation => {
             details.push("Create an invitation code for a contact.".to_string());
@@ -854,6 +846,10 @@ fn modal_view(model: &UiModel) -> Option<ModalView> {
             details.push("1. Select guardians".to_string());
             details.push("2. Configure threshold".to_string());
             details.push("3. Confirm ceremony".to_string());
+        }
+        ModalState::RequestRecovery => {
+            details.push("Request guardian-assisted recovery for this authority.".to_string());
+            details.push("Press Enter to notify your configured guardians.".to_string());
         }
         ModalState::AddDeviceStep1 => {
             details.push("Add Device Wizard".to_string());
@@ -897,6 +893,103 @@ fn modal_view(model: &UiModel) -> Option<ModalView> {
         input_value,
         enter_label,
     })
+}
+
+fn help_modal_content(screen: UiScreen) -> (Vec<String>, Vec<(String, String)>) {
+    let details = match screen {
+        UiScreen::Neighborhood => vec![
+            "Neighborhood reference".to_string(),
+            "Browse homes, access depth, and neighborhood detail views.".to_string(),
+        ],
+        UiScreen::Chat => vec![
+            "Chat reference".to_string(),
+            "Navigate channels, compose messages, and manage channel metadata.".to_string(),
+        ],
+        UiScreen::Contacts => vec![
+            "Contacts reference".to_string(),
+            "Manage invitations, nicknames, guardians, and direct-message handoff.".to_string(),
+        ],
+        UiScreen::Notifications => vec![
+            "Notifications reference".to_string(),
+            "Review pending notices and move through the notification feed.".to_string(),
+        ],
+        UiScreen::Settings => vec![
+            "Settings reference".to_string(),
+            "Adjust profile, recovery, devices, and authority-level configuration.".to_string(),
+        ],
+    };
+
+    let keybind_rows = match screen {
+        UiScreen::Neighborhood => vec![
+            ("1-5".to_string(), "Switch screens".to_string()),
+            ("tab / shift+tab".to_string(), "Cycle screens".to_string()),
+            ("enter".to_string(), "Toggle map/detail view".to_string()),
+            ("a".to_string(), "Accept home invitation".to_string()),
+            ("n".to_string(), "Create home".to_string()),
+            ("d".to_string(), "Cycle access depth".to_string()),
+            ("esc".to_string(), "Close modal / back out".to_string()),
+        ],
+        UiScreen::Chat => vec![
+            ("1-5".to_string(), "Switch screens".to_string()),
+            ("tab / shift+tab".to_string(), "Cycle screens".to_string()),
+            (
+                "up / down".to_string(),
+                "Move channel selection".to_string(),
+            ),
+            ("i".to_string(), "Enter message input".to_string()),
+            ("n".to_string(), "Create channel".to_string()),
+            ("t".to_string(), "Set channel topic".to_string()),
+            ("o".to_string(), "Open channel info".to_string()),
+            ("esc".to_string(), "Close modal / exit input".to_string()),
+        ],
+        UiScreen::Contacts => vec![
+            ("1-5".to_string(), "Switch screens".to_string()),
+            ("tab / shift+tab".to_string(), "Cycle screens".to_string()),
+            (
+                "up / down".to_string(),
+                "Move contact selection".to_string(),
+            ),
+            (
+                "left / right".to_string(),
+                "Toggle contact detail pane".to_string(),
+            ),
+            ("n".to_string(), "Create invitation".to_string()),
+            ("a".to_string(), "Accept invitation".to_string()),
+            ("e".to_string(), "Edit nickname".to_string()),
+            ("g".to_string(), "Configure guardians".to_string()),
+            ("c".to_string(), "Open DM for selected contact".to_string()),
+            ("r".to_string(), "Remove contact".to_string()),
+        ],
+        UiScreen::Notifications => vec![
+            ("1-5".to_string(), "Switch screens".to_string()),
+            ("tab / shift+tab".to_string(), "Cycle screens".to_string()),
+            (
+                "up / down".to_string(),
+                "Move notification selection".to_string(),
+            ),
+            ("enter".to_string(), "No-op placeholder".to_string()),
+            ("esc".to_string(), "Close modal".to_string()),
+        ],
+        UiScreen::Settings => vec![
+            ("1-5".to_string(), "Switch screens".to_string()),
+            ("tab / shift+tab".to_string(), "Cycle screens".to_string()),
+            (
+                "up / down".to_string(),
+                "Move settings selection".to_string(),
+            ),
+            (
+                "enter".to_string(),
+                "Open selected settings action".to_string(),
+            ),
+            ("e".to_string(), "Edit profile nickname".to_string()),
+            ("t".to_string(), "Guardian threshold setup".to_string()),
+            ("s".to_string(), "Request recovery".to_string()),
+            ("a".to_string(), "Add device".to_string()),
+            ("i".to_string(), "Import enrollment code".to_string()),
+        ],
+    };
+
+    (details, keybind_rows)
 }
 
 fn modal_accepts_text(modal: ModalState) -> bool {

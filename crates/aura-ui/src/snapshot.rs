@@ -380,6 +380,13 @@ fn apply_modal_overlay(
                 *center = "Guardian Threshold".to_string();
             }
         }
+        ModalState::RequestRecovery => {
+            if row_idx == 0 {
+                *center = "Request Recovery".to_string();
+            } else if row_idx == 1 {
+                *center = "Notify guardians to begin recovery".to_string();
+            }
+        }
         ModalState::AddDeviceStep1 => {
             if row_idx == 0 {
                 *center = "Add Device — Step 1 of 3".to_string();

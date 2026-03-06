@@ -19,6 +19,19 @@ pub enum UiScreen {
     Settings,
 }
 
+impl UiScreen {
+    #[must_use]
+    pub const fn help_label(self) -> &'static str {
+        match self {
+            Self::Neighborhood => "Neighborhood",
+            Self::Chat => "Chat",
+            Self::Contacts => "Contacts",
+            Self::Notifications => "Notifications",
+            Self::Settings => "Settings",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NeighborhoodMode {
     Map,
@@ -92,6 +105,7 @@ pub enum ModalState {
     EditNickname,
     RemoveContact,
     GuardianSetup,
+    RequestRecovery,
     AddDeviceStep1,
     ImportDeviceEnrollmentCode,
     AssignModerator,
@@ -109,6 +123,7 @@ pub struct UiModel {
     pub notifications: Vec<String>,
     pub logs: Vec<String>,
     pub toast: Option<ToastState>,
+    pub toast_key: u64,
     pub input_mode: bool,
     pub input_buffer: String,
     pub modal: Option<ModalState>,
@@ -143,6 +158,7 @@ impl UiModel {
             notifications: Vec::new(),
             logs: vec!["Aura web shell initialized".to_string()],
             toast: None,
+            toast_key: 0,
             input_mode: false,
             input_buffer: String::new(),
             modal: None,
@@ -168,6 +184,17 @@ impl UiModel {
             .iter()
             .find(|row| row.selected)
             .map(|row| row.name.as_str())
+    }
+
+    pub fn set_screen(&mut self, screen: UiScreen) {
+        self.screen = screen;
+        // Screen changes should always exit chat insert mode so global actions
+        // (including settings buttons) are not swallowed as hidden text input.
+        self.input_mode = false;
+        self.input_buffer.clear();
+        if matches!(self.modal, Some(ModalState::Help)) {
+            self.modal_hint = format!("Help - {}", screen.help_label());
+        }
     }
 
     pub fn select_channel_by_name(&mut self, name: &str) {
@@ -296,13 +323,20 @@ impl UiController {
         apply_text_keys(&mut model, keys, self.clipboard.as_ref());
     }
 
+    pub fn send_action_keys(&self, keys: &str) {
+        let mut model = write_model(&self.model);
+        model.input_mode = false;
+        model.input_buffer.clear();
+        apply_text_keys(&mut model, keys, self.clipboard.as_ref());
+    }
+
     pub fn send_key_named(&self, key: &str, repeat: u16) {
         let mut model = write_model(&self.model);
         apply_named_key(&mut model, key, repeat, self.clipboard.as_ref());
     }
 
     pub fn set_screen(&self, screen: UiScreen) {
-        write_model(&self.model).screen = screen;
+        write_model(&self.model).set_screen(screen);
     }
 
     pub fn set_modal_buffer(&self, value: &str) {
@@ -387,5 +421,23 @@ fn write_model(model: &AsyncRwLock<UiModel>) -> async_lock::RwLockWriteGuard<'_,
             return guard;
         }
         std::hint::spin_loop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{UiModel, UiScreen};
+
+    #[test]
+    fn set_screen_clears_input_mode_and_buffer() {
+        let mut model = UiModel::new("authority-local".to_string());
+        model.input_mode = true;
+        model.input_buffer = "pending text".to_string();
+
+        model.set_screen(UiScreen::Settings);
+
+        assert!(!model.input_mode);
+        assert!(model.input_buffer.is_empty());
+        assert!(matches!(model.screen, UiScreen::Settings));
     }
 }

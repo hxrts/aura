@@ -234,7 +234,7 @@ pub fn UiModal(
 pub fn UiFooter(left: String, right: String) -> Element {
     rsx! {
         footer {
-            class: "mx-3 mb-3 mt-1 rounded-xl border border-border bg-card text-muted-foreground text-xs tracking-[0.02em] flex justify-between gap-3 px-4 py-2.5 flex-wrap",
+            class: "border-t border-border bg-background text-muted-foreground text-xs tracking-[0.02em] flex justify-between gap-3 px-4 py-3 flex-wrap sm:px-6",
             span { class: "text-card-foreground", "{left}" }
             span { "{right}" }
         }
