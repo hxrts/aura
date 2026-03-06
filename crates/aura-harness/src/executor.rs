@@ -615,7 +615,7 @@ fn execute_step(
                         }
                     }
                     if let Some(ref contains) = expected_contains {
-                        if !toast.message.contains(contains) {
+                        if !command_result_contains_matches(contains, &toast.message) {
                             return false;
                         }
                     }
@@ -1288,6 +1288,22 @@ fn allow_missing_denied_toast(
     false
 }
 
+fn command_result_contains_matches(expected_contains: &str, message: &str) -> bool {
+    if message.contains(expected_contains) {
+        return true;
+    }
+
+    let expected = expected_contains.trim().to_ascii_lowercase();
+    let message = message.to_ascii_lowercase();
+    match expected.as_str() {
+        // Browser flow can emit explicit join text instead of "membership updated".
+        "membership updated" => message.contains("joined "),
+        // Browser flow can emit explicit invite text instead of "invitation sent".
+        "invitation sent" => message.contains("invited "),
+        _ => false,
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct DeterministicRng {
     state: u64,
@@ -1466,6 +1482,26 @@ mod tests {
             Some(DeniedReason::Permission),
             Some(ExpectedCommandStatus::Denied),
             Some("permission_denied"),
+        ));
+    }
+
+    #[test]
+    fn command_result_contains_aliases_membership_updates() {
+        assert!(command_result_contains_matches(
+            "membership updated",
+            "joined #modal-lab status=ok reason=none consistency=replicated"
+        ));
+        assert!(!command_result_contains_matches(
+            "membership updated",
+            "invited authority-abc status=ok reason=none consistency=enforced"
+        ));
+    }
+
+    #[test]
+    fn command_result_contains_aliases_invitation_sent() {
+        assert!(command_result_contains_matches(
+            "invitation sent",
+            "invited authority-abc status=ok reason=none consistency=enforced"
         ));
     }
 

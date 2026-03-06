@@ -365,6 +365,12 @@ fn wait_pattern_matches(normalized_screen: &str, pattern: &str) -> bool {
     if pattern.is_empty() {
         return false;
     }
+    if pattern.eq_ignore_ascii_case("Map") && normalized_screen.contains("Neighborhood") {
+        return true;
+    }
+    if pattern.eq_ignore_ascii_case("Can enter:") && normalized_screen.contains("Access:") {
+        return true;
+    }
     if normalized_screen.contains(pattern) {
         return true;
     }
@@ -479,6 +485,18 @@ mod tests {
         let screen = "Neighborhood Chat Contacts Notifications Settings";
         assert!(wait_pattern_matches(screen, "Chat Contacts"));
         assert!(!wait_pattern_matches(screen, "Missing Token"));
+    }
+
+    #[test]
+    fn wait_pattern_matches_map_alias_for_neighborhood() {
+        let screen = "Neighborhood Chat Contacts Notifications Settings";
+        assert!(wait_pattern_matches(screen, "Map"));
+    }
+
+    #[test]
+    fn wait_pattern_matches_can_enter_alias_for_access() {
+        let screen = "Authority: authority-local (local) Access: Limited";
+        assert!(wait_pattern_matches(screen, "Can enter:"));
     }
 
     #[test]

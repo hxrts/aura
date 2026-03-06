@@ -4,7 +4,9 @@
 //! input, and dispatch commands across the UI model state machine.
 
 use crate::clipboard::ClipboardPort;
-use crate::model::{AccessDepth, ChannelRow, ModalState, ToastState, UiModel, UiScreen};
+use crate::model::{
+    AccessDepth, ChannelRow, CreateChannelWizardStep, ModalState, ToastState, UiModel, UiScreen,
+};
 use aura_app::ui::types::parse_chat_command;
 
 const SETTINGS_ROWS: usize = 6;
@@ -34,8 +36,16 @@ pub fn apply_named_key(model: &mut UiModel, key: &str, repeat: u16, clipboard: &
         match key.trim().to_ascii_lowercase().as_str() {
             "enter" => handle_enter(model, clipboard),
             "esc" => handle_escape(model),
-            "tab" => cycle_screen(model),
-            "backtab" => cycle_screen_prev(model),
+            "tab" => {
+                if !handle_modal_tab(model, false) {
+                    cycle_screen(model);
+                }
+            }
+            "backtab" => {
+                if !handle_modal_tab(model, true) {
+                    cycle_screen_prev(model);
+                }
+            }
             "up" => move_selection(model, -1),
             "down" => move_selection(model, 1),
             "left" => handle_horizontal(model, -1),
@@ -152,6 +162,7 @@ fn handle_chat_char(model: &mut UiModel, ch: char) {
         }
         'n' => {
             model.modal = Some(ModalState::CreateChannel);
+            model.reset_create_channel_wizard();
             model.modal_buffer.clear();
             model.modal_hint = "New Chat Group".to_string();
         }
@@ -461,19 +472,47 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             dismiss_modal(model);
         }
         ModalState::CreateChannel => {
-            let channel = model
-                .modal_buffer
-                .trim()
-                .trim_start_matches('#')
-                .to_string();
-            if !channel.is_empty() {
-                model.select_channel_by_name(&channel);
-                model.toast = Some(ToastState {
-                    icon: '✓',
-                    message: format!("Created '{channel}'."),
-                });
+            match model.create_channel_step {
+                CreateChannelWizardStep::Name => {
+                    model.create_channel_name = model
+                        .modal_buffer
+                        .trim()
+                        .trim_start_matches('#')
+                        .to_string();
+                    model.create_channel_step = CreateChannelWizardStep::Topic;
+                    model.modal_buffer = model.create_channel_topic.clone();
+                    model.modal_hint = "New Chat Group".to_string();
+                }
+                CreateChannelWizardStep::Topic => {
+                    model.create_channel_topic = model.modal_buffer.trim().to_string();
+                    model.create_channel_step = CreateChannelWizardStep::InviteContacts;
+                    model.modal_buffer = model.create_channel_invitee.clone();
+                    model.modal_hint = "Invite Contacts".to_string();
+                }
+                CreateChannelWizardStep::InviteContacts => {
+                    model.create_channel_invitee = model.modal_buffer.trim().to_string();
+                    model.create_channel_step = CreateChannelWizardStep::Threshold;
+                    model.modal_buffer = model.create_channel_threshold.to_string();
+                    model.modal_hint = "Threshold".to_string();
+                }
+                CreateChannelWizardStep::Threshold => {
+                    if let Ok(value) = model.modal_buffer.trim().parse::<u8>() {
+                        model.create_channel_threshold = value.max(1);
+                    }
+                    let channel = model.create_channel_name.trim().to_string();
+                    if !channel.is_empty() {
+                        model.select_channel_by_name(&channel);
+                        if !model.create_channel_topic.trim().is_empty() {
+                            model.set_selected_channel_topic(model.create_channel_topic.clone());
+                        }
+                        model.toast = Some(ToastState {
+                            icon: '✓',
+                            message: format!("Created '{channel}'."),
+                        });
+                    }
+                    dismiss_modal(model);
+                }
             }
-            dismiss_modal(model);
         }
         ModalState::SetChannelTopic => {
             model.set_selected_channel_topic(model.modal_buffer.trim().to_string());
@@ -802,6 +841,67 @@ fn dismiss_modal(model: &mut UiModel) {
     model.modal = None;
     model.modal_buffer.clear();
     model.modal_hint.clear();
+    model.reset_create_channel_wizard();
+}
+
+fn handle_modal_tab(model: &mut UiModel, reverse: bool) -> bool {
+    if !matches!(model.modal, Some(ModalState::CreateChannel)) {
+        return false;
+    }
+
+    if reverse {
+        match model.create_channel_step {
+            CreateChannelWizardStep::Name => {}
+            CreateChannelWizardStep::Topic => {
+                model.create_channel_topic = model.modal_buffer.clone();
+                model.create_channel_step = CreateChannelWizardStep::Name;
+                model.modal_buffer = model.create_channel_name.clone();
+                model.modal_hint = "New Chat Group".to_string();
+            }
+            CreateChannelWizardStep::InviteContacts => {
+                model.create_channel_invitee = model.modal_buffer.clone();
+                model.create_channel_step = CreateChannelWizardStep::Topic;
+                model.modal_buffer = model.create_channel_topic.clone();
+                model.modal_hint = "New Chat Group".to_string();
+            }
+            CreateChannelWizardStep::Threshold => {
+                if let Ok(value) = model.modal_buffer.trim().parse::<u8>() {
+                    model.create_channel_threshold = value.max(1);
+                }
+                model.create_channel_step = CreateChannelWizardStep::InviteContacts;
+                model.modal_buffer = model.create_channel_invitee.clone();
+                model.modal_hint = "Invite Contacts".to_string();
+            }
+        }
+        return true;
+    }
+
+    match model.create_channel_step {
+        CreateChannelWizardStep::Name => {
+            model.create_channel_name = model
+                .modal_buffer
+                .trim()
+                .trim_start_matches('#')
+                .to_string();
+            model.create_channel_step = CreateChannelWizardStep::Topic;
+            model.modal_buffer = model.create_channel_topic.clone();
+            model.modal_hint = "New Chat Group".to_string();
+        }
+        CreateChannelWizardStep::Topic => {
+            model.create_channel_topic = model.modal_buffer.trim().to_string();
+            model.create_channel_step = CreateChannelWizardStep::InviteContacts;
+            model.modal_buffer = model.create_channel_invitee.clone();
+            model.modal_hint = "Invite Contacts".to_string();
+        }
+        CreateChannelWizardStep::InviteContacts => {
+            model.create_channel_invitee = model.modal_buffer.trim().to_string();
+            model.create_channel_step = CreateChannelWizardStep::Threshold;
+            model.modal_buffer = model.create_channel_threshold.to_string();
+            model.modal_hint = "Threshold".to_string();
+        }
+        CreateChannelWizardStep::Threshold => {}
+    }
+    true
 }
 
 fn modal_accepts_text(modal: ModalState) -> bool {
@@ -920,9 +1020,9 @@ fn command_toast(
 
 #[cfg(test)]
 mod tests {
-    use super::apply_text_keys;
+    use super::{apply_named_key, apply_text_keys};
     use crate::clipboard::MemoryClipboard;
-    use crate::model::{ModalState, UiModel, UiScreen};
+    use crate::model::{CreateChannelWizardStep, ModalState, UiModel, UiScreen};
 
     #[test]
     fn contacts_invite_shortcut_opens_invite_modal() {
@@ -960,6 +1060,38 @@ mod tests {
         model.modal = None;
         apply_text_keys(&mut model, "i", &clipboard);
         assert!(model.input_mode);
+    }
+
+    #[test]
+    fn create_channel_modal_uses_multistep_wizard_flow() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+        model.set_screen(UiScreen::Chat);
+
+        apply_text_keys(&mut model, "n", &clipboard);
+        assert!(matches!(model.modal, Some(ModalState::CreateChannel)));
+        assert_eq!(model.modal_hint, "New Chat Group");
+        assert_eq!(model.create_channel_step, CreateChannelWizardStep::Name);
+
+        apply_text_keys(&mut model, "team-room", &clipboard);
+        apply_named_key(&mut model, "tab", 1, &clipboard);
+        assert_eq!(model.create_channel_step, CreateChannelWizardStep::Topic);
+
+        apply_text_keys(&mut model, "bootstrap-topic", &clipboard);
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        assert_eq!(model.create_channel_step, CreateChannelWizardStep::InviteContacts);
+        assert_eq!(model.modal_hint, "Invite Contacts");
+
+        apply_text_keys(&mut model, "bob", &clipboard);
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        assert_eq!(model.create_channel_step, CreateChannelWizardStep::Threshold);
+        assert_eq!(model.modal_hint, "Threshold");
+
+        apply_text_keys(&mut model, "2", &clipboard);
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        assert!(model.modal.is_none());
+        assert!(model.channels.iter().any(|row| row.name == "team-room"));
+        assert_eq!(model.selected_channel_topic(), "bootstrap-topic");
     }
 
     #[test]

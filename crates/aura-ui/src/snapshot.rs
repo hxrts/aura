@@ -340,7 +340,11 @@ fn apply_modal_overlay(
         }
         ModalState::CreateChannel => {
             if row_idx == 0 {
-                *center = "New Chat Group".to_string();
+                *center = if model.modal_hint.is_empty() {
+                    "New Chat Group".to_string()
+                } else {
+                    model.modal_hint.clone()
+                };
             } else if row_idx == 1 {
                 *center = model.modal_buffer.clone();
             }

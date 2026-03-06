@@ -113,6 +113,14 @@ pub enum ModalState {
     CapabilityConfig,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateChannelWizardStep {
+    Name,
+    Topic,
+    InviteContacts,
+    Threshold,
+}
+
 #[derive(Debug, Clone)]
 pub struct UiModel {
     pub screen: UiScreen,
@@ -129,6 +137,11 @@ pub struct UiModel {
     pub modal: Option<ModalState>,
     pub modal_buffer: String,
     pub modal_hint: String,
+    pub create_channel_step: CreateChannelWizardStep,
+    pub create_channel_name: String,
+    pub create_channel_topic: String,
+    pub create_channel_invitee: String,
+    pub create_channel_threshold: u8,
     pub selected_home: Option<String>,
     pub neighborhood_mode: NeighborhoodMode,
     pub access_depth: AccessDepth,
@@ -171,6 +184,11 @@ impl UiModel {
             modal: None,
             modal_buffer: String::new(),
             modal_hint: String::new(),
+            create_channel_step: CreateChannelWizardStep::Name,
+            create_channel_name: String::new(),
+            create_channel_topic: String::new(),
+            create_channel_invitee: String::new(),
+            create_channel_threshold: 1,
             selected_home: None,
             neighborhood_mode: NeighborhoodMode::Map,
             access_depth: AccessDepth::Limited,
@@ -288,6 +306,14 @@ impl UiModel {
         for (idx, row) in self.channels.iter_mut().enumerate() {
             row.selected = idx == self.selected_channel_index;
         }
+    }
+
+    pub fn reset_create_channel_wizard(&mut self) {
+        self.create_channel_step = CreateChannelWizardStep::Name;
+        self.create_channel_name.clear();
+        self.create_channel_topic.clear();
+        self.create_channel_invitee.clear();
+        self.create_channel_threshold = 1;
     }
 }
 

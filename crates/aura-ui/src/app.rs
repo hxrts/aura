@@ -320,7 +320,11 @@ fn chat_screen(
                                 },
                                 UiListItem {
                                     label: format!("# {}", channel.name),
-                                    secondary: if channel.topic.is_empty() { None } else { Some(channel.topic.clone()) },
+                                    secondary: Some(if channel.topic.is_empty() {
+                                        "\u{00A0}".to_string()
+                                    } else {
+                                        channel.topic.clone()
+                                    }),
                                     active: channel.selected,
                                 }
                             }
