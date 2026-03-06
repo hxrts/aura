@@ -62,11 +62,8 @@ work/
 ext/
 outcomes/
 
-# Legacy & tooling
+# Tooling
 .claude
-.qemu-vm/
-.patchbay-work
-.patchbay-target
 target-codex
 node_modules/
 /bin/
