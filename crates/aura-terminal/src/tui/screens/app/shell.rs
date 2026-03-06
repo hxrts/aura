@@ -31,6 +31,7 @@ use aura_app::ceremonies::{
 };
 use aura_app::ui::prelude::*;
 use aura_app::ui::signals::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
+use aura_app::ui::workflows::access as access_workflows;
 use aura_app::ui::workflows::ceremonies::{
     cancel_key_rotation_ceremony, monitor_key_rotation_ceremony, start_device_threshold_ceremony,
     start_guardian_ceremony,
@@ -51,8 +52,8 @@ use crate::tui::layout::dim;
 use crate::tui::navigation::clamp_list_index;
 use crate::tui::screens::app::subscriptions::{
     use_authority_id_subscription, use_channels_subscription, use_contacts_subscription,
-    use_devices_subscription, use_discovered_peers_subscription, use_messages_subscription,
-    use_nav_status_signals, use_neighborhood_home_meta_subscription,
+    use_devices_subscription, use_discovered_peers_subscription, use_invitations_subscription,
+    use_messages_subscription, use_nav_status_signals, use_neighborhood_home_meta_subscription,
     use_neighborhood_homes_subscription, use_notifications_subscription,
     use_pending_requests_subscription, use_threshold_subscription, SharedNeighborhoodHomeMeta,
 };
@@ -82,6 +83,69 @@ use events::handle_channel_selection_change;
 use input::transition_from_terminal_event;
 use render::{build_global_modals, state_indicator_label};
 use state::{sync_neighborhood_navigation_state, TuiStateHandle};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum NotificationSelection {
+    ReceivedInvitation(String),
+    SentInvitation(String),
+    RecoveryRequest(String),
+}
+
+fn read_selected_notification(
+    selected_index: usize,
+    invitations: &std::sync::Arc<std::sync::RwLock<Vec<Invitation>>>,
+    pending_requests: &std::sync::Arc<std::sync::RwLock<Vec<crate::tui::types::PendingRequest>>>,
+) -> Option<NotificationSelection> {
+    let invitation_items = invitations
+        .read()
+        .ok()
+        .map(|guard| {
+            guard
+                .iter()
+                .filter_map(|invitation| {
+                    let selection = match (invitation.direction, invitation.status) {
+                        (
+                            crate::tui::types::InvitationDirection::Inbound,
+                            crate::tui::types::InvitationStatus::Pending,
+                        ) => Some(NotificationSelection::ReceivedInvitation(
+                            invitation.id.clone(),
+                        )),
+                        (
+                            crate::tui::types::InvitationDirection::Outbound,
+                            crate::tui::types::InvitationStatus::Pending,
+                        ) => Some(NotificationSelection::SentInvitation(invitation.id.clone())),
+                        _ => None,
+                    }?;
+                    Some((invitation.created_at, selection))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let recovery_items = pending_requests
+        .read()
+        .ok()
+        .map(|guard| {
+            guard
+                .iter()
+                .map(|request| {
+                    (
+                        request.initiated_at,
+                        NotificationSelection::RecoveryRequest(request.id.clone()),
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let mut notifications = invitation_items;
+    notifications.extend(recovery_items);
+    notifications.sort_by(|left, right| right.0.cmp(&left.0));
+
+    notifications
+        .get(selected_index)
+        .map(|(_, selection)| selection.clone())
+}
 
 /// Props for IoApp
 ///
@@ -276,6 +340,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Devices subscription: SharedDevices for dispatch handlers to read
     // =========================================================================
     let shared_devices = use_devices_subscription(&mut hooks, &app_ctx);
+
+    // =========================================================================
+    // Invitations subscription: SharedInvitations for notification action dispatch
+    // =========================================================================
+    let shared_invitations = use_invitations_subscription(&mut hooks, &app_ctx);
 
     // =========================================================================
     // Neighborhood homes subscription: SharedNeighborhoodHomes for dispatch handlers to read
@@ -1371,12 +1440,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let shared_channels_for_dispatch = shared_channels.clone();
         let shared_neighborhood_homes_for_dispatch = shared_neighborhood_homes;
         let shared_neighborhood_home_meta_for_dispatch = shared_neighborhood_home_meta;
+        let shared_invitations_for_dispatch = shared_invitations;
         let shared_pending_requests_for_dispatch = shared_pending_requests;
         // This Arc is updated by a reactive subscription, so reading from it
         // always gets current contacts (not stale props)
         let shared_contacts_for_dispatch = shared_contacts;
         let shared_discovered_peers_for_dispatch = shared_discovered_peers;
         let shared_authority_id_for_dispatch = shared_authority_id;
+        let app_ctx_for_dispatch = app_ctx.clone();
         // Clone shared messages Arc for message retry dispatch
         // Used to look up failed messages by ID to get channel and content for retry
         let shared_messages_for_dispatch = shared_messages;
@@ -1938,14 +2009,38 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                     // === Invitations Screen Commands ===
                                     DispatchCommand::AcceptInvitation => {
-                                        new_state.toast_error(
-                                            "Invitation list is not available; use Contacts to import codes",
+                                        let selected = read_selected_notification(
+                                            new_state.notifications.selected_index,
+                                            &shared_invitations_for_dispatch,
+                                            &shared_pending_requests_for_dispatch,
                                         );
+                                        if let Some(NotificationSelection::ReceivedInvitation(
+                                            invitation_id,
+                                        )) = selected
+                                        {
+                                            (cb.invitations.on_accept)(invitation_id);
+                                        } else {
+                                            new_state.toast_error(
+                                                "Select a received invitation to accept",
+                                            );
+                                        }
                                     }
                                     DispatchCommand::DeclineInvitation => {
-                                        new_state.toast_error(
-                                            "Invitation list is not available; use Contacts to import codes",
+                                        let selected = read_selected_notification(
+                                            new_state.notifications.selected_index,
+                                            &shared_invitations_for_dispatch,
+                                            &shared_pending_requests_for_dispatch,
                                         );
+                                        if let Some(NotificationSelection::ReceivedInvitation(
+                                            invitation_id,
+                                        )) = selected
+                                        {
+                                            (cb.invitations.on_decline)(invitation_id);
+                                        } else {
+                                            new_state.toast_error(
+                                                "Select a received invitation to decline",
+                                            );
+                                        }
                                     }
                                     DispatchCommand::CreateInvitation {
                                         receiver_id,
@@ -1964,9 +2059,21 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         (cb.invitations.on_import)(code);
                                     }
                                     DispatchCommand::ExportInvitation => {
-                                        new_state.toast_error(
-                                            "Invitation list is not available; use Contacts to create codes",
+                                        let selected = read_selected_notification(
+                                            new_state.notifications.selected_index,
+                                            &shared_invitations_for_dispatch,
+                                            &shared_pending_requests_for_dispatch,
                                         );
+                                        if let Some(NotificationSelection::SentInvitation(
+                                            invitation_id,
+                                        )) = selected
+                                        {
+                                            (cb.invitations.on_export)(invitation_id);
+                                        } else {
+                                            new_state.toast_error(
+                                                "Select a sent invitation to export",
+                                            );
+                                        }
                                     }
                                     DispatchCommand::RevokeInvitation { invitation_id } => {
                                         (cb.invitations.on_revoke)(invitation_id);
@@ -2008,7 +2115,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         (cb.recovery.on_start_recovery)();
                                     }
                                     DispatchCommand::ApproveRecovery => {
-                                        if let Ok(guard) = shared_pending_requests_for_dispatch.read() {
+                                        if let Some(NotificationSelection::RecoveryRequest(req_id)) =
+                                            read_selected_notification(
+                                                new_state.notifications.selected_index,
+                                                &shared_invitations_for_dispatch,
+                                                &shared_pending_requests_for_dispatch,
+                                            )
+                                        {
+                                            (cb.recovery.on_submit_approval)(req_id);
+                                        } else if let Ok(guard) =
+                                            shared_pending_requests_for_dispatch.read()
+                                        {
                                             if let Some(req) = guard.first() {
                                                 (cb.recovery.on_submit_approval)(req.id.clone());
                                             } else {
@@ -2516,22 +2633,38 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         }
                                     }
                                     DispatchCommand::SwitchAuthority { authority_id } => {
-                                        // Find the authority index and update app-global state
                                         if let Some(idx) = new_state.authorities
                                             .iter()
                                             .position(|a| a.id == authority_id)
                                         {
+                                            let nickname = new_state
+                                                .authorities
+                                                .get(idx)
+                                                .and_then(|auth| {
+                                                    if auth.nickname_suggestion.trim().is_empty() {
+                                                        None
+                                                    } else {
+                                                        Some(auth.nickname_suggestion.clone())
+                                                    }
+                                                });
                                             new_state.current_authority_index = idx;
-                                            if let Some(auth) = new_state.authorities.get(idx) {
-                                                new_state.toast_success(format!(
-                                                    "Switched to authority: {}",
-                                                    auth.nickname_suggestion
-                                                ));
+                                            match authority_id.parse::<AuthorityId>() {
+                                                Ok(parsed_authority) => {
+                                                    app_ctx_for_dispatch.request_authority_switch(
+                                                        parsed_authority,
+                                                        nickname.clone(),
+                                                    );
+                                                    new_state.modal_queue.dismiss();
+                                                    new_state.toast_info("Reloading selected authority");
+                                                    new_state.should_exit = true;
+                                                }
+                                                Err(_) => {
+                                                    new_state.toast_error("Invalid authority ID");
+                                                }
                                             }
                                         } else {
                                             new_state.toast_error("Authority not found");
                                         }
-                                        // UI-only for now; runtime authority changes are managed elsewhere.
                                     }
                                     // Note: Threshold/guardian changes now use OpenGuardianSetup
                                     // which is handled above with the guardian ceremony commands.
@@ -2608,12 +2741,65 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         target_id,
                                         access_level,
                                     } => {
-                                        new_state.toast_info(format!(
-                                            "Access override preview: {} -> {}",
-                                            target_id,
-                                            access_level.label()
-                                        ));
                                         new_state.modal_queue.dismiss();
+                                        let app_core = app_core_for_ceremony.clone();
+                                        let update_tx = update_tx_for_ceremony.clone();
+                                        let home_id = new_state.neighborhood.entered_home_id.clone();
+                                        let target_for_toast = target_id.clone();
+                                        let tasks = tasks_for_events.clone();
+                                        tasks.spawn(async move {
+                                            let parsed_target = match target_id.parse::<AuthorityId>() {
+                                                Ok(target) => target,
+                                                Err(_) => {
+                                                    if let Some(tx) = update_tx {
+                                                        let _ = tx.try_send(UiUpdate::ToastAdded(
+                                                            ToastMessage::error(
+                                                                "access-override",
+                                                                "Invalid authority selected",
+                                                            ),
+                                                        ));
+                                                    }
+                                                    return;
+                                                }
+                                            };
+
+                                            match access_workflows::set_access_override(
+                                                app_core.raw(),
+                                                home_id.as_deref(),
+                                                parsed_target,
+                                                access_level,
+                                            )
+                                            .await
+                                            {
+                                                Ok(()) => {
+                                                    if let Some(tx) = update_tx {
+                                                        let _ = tx.try_send(UiUpdate::ToastAdded(
+                                                            ToastMessage::success(
+                                                                "access-override",
+                                                                format!(
+                                                                    "Access override set for {}: {}",
+                                                                    target_for_toast,
+                                                                    access_level.label()
+                                                                ),
+                                                            ),
+                                                        ));
+                                                    }
+                                                }
+                                                Err(error) => {
+                                                    if let Some(tx) = update_tx {
+                                                        let _ = tx.try_send(UiUpdate::ToastAdded(
+                                                            ToastMessage::error(
+                                                                "access-override",
+                                                                format!(
+                                                                    "Failed to set access override: {}",
+                                                                    error
+                                                                ),
+                                                            ),
+                                                        ));
+                                                    }
+                                                }
+                                            }
+                                        });
                                     }
                                     DispatchCommand::OpenHomeCapabilityConfigModal => {
                                         new_state.modal_queue.enqueue(
@@ -2627,10 +2813,46 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         partial_caps,
                                         limited_caps,
                                     } => {
-                                        new_state.toast_success(format!(
-                                            "Capability config saved (Full: {full_caps}; Partial: {partial_caps}; Limited: {limited_caps})"
-                                        ));
                                         new_state.modal_queue.dismiss();
+                                        let app_core = app_core_for_ceremony.clone();
+                                        let update_tx = update_tx_for_ceremony.clone();
+                                        let home_id = new_state.neighborhood.entered_home_id.clone();
+                                        let tasks = tasks_for_events.clone();
+                                        tasks.spawn(async move {
+                                            match access_workflows::configure_home_capabilities(
+                                                app_core.raw(),
+                                                home_id.as_deref(),
+                                                &full_caps,
+                                                &partial_caps,
+                                                &limited_caps,
+                                            )
+                                            .await
+                                            {
+                                                Ok(()) => {
+                                                    if let Some(tx) = update_tx {
+                                                        let _ = tx.try_send(UiUpdate::ToastAdded(
+                                                            ToastMessage::success(
+                                                                "capability-config",
+                                                                "Capability config saved",
+                                                            ),
+                                                        ));
+                                                    }
+                                                }
+                                                Err(error) => {
+                                                    if let Some(tx) = update_tx {
+                                                        let _ = tx.try_send(UiUpdate::ToastAdded(
+                                                            ToastMessage::error(
+                                                                "capability-config",
+                                                                format!(
+                                                                    "Failed to save capability config: {}",
+                                                                    error
+                                                                ),
+                                                            ),
+                                                        ));
+                                                    }
+                                                }
+                                            }
+                                        });
                                     }
                                     DispatchCommand::CreateHome { name, description } => {
                                         (cb.neighborhood.on_create_home)(name, description);

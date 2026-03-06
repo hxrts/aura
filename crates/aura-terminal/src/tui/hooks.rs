@@ -169,6 +169,15 @@ impl AppCoreContext {
         self.io_context.add_info_toast(id, message).await;
     }
 
+    pub fn request_authority_switch(
+        &self,
+        authority_id: aura_core::identifiers::AuthorityId,
+        nickname_suggestion: Option<String>,
+    ) {
+        self.io_context
+            .request_authority_switch(authority_id, nickname_suggestion);
+    }
+
     #[must_use]
     pub fn tasks(&self) -> Arc<UiTaskRegistry> {
         self.io_context.tasks()

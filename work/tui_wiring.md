@@ -1,0 +1,4 @@
+- [x] Wire notifications/invitations actions to the runtime so `Accept`, `Decline`, and `Export` act on the selected invitation instead of showing placeholder toasts.
+- [x] Wire neighborhood `Access Override` submission to the shared runtime workflow and surface success/error through normal TUI toasts.
+- [x] Wire neighborhood `Capability Config` submission to the shared runtime workflow and surface success/error through normal TUI toasts.
+- [x] Replace the TUI's UI-only authority switch with a real runtime reload path that persists the selected authority, rebuilds the TUI runtime, and re-enters the app under that authority.

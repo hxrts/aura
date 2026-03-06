@@ -51,6 +51,12 @@ use crate::tui::hooks::{
     InvitationsSnapshot, NeighborhoodSnapshot, RecoverySnapshot,
 };
 
+#[derive(Clone, Debug)]
+pub struct AuthoritySwitchRequest {
+    pub authority_id: aura_core::identifiers::AuthorityId,
+    pub nickname_suggestion: Option<String>,
+}
+
 // ============================================================================
 // Builder
 // ============================================================================
@@ -210,6 +216,7 @@ impl IoContextBuilder {
         let current_context = Arc::new(RwLock::new(None));
         let channel_modes = Arc::new(RwLock::new(HashMap::new()));
         let tasks = Arc::new(UiTaskRegistry::new());
+        let requested_authority_switch = Arc::new(std::sync::Mutex::new(None));
 
         let dispatch = DispatchHelper::new(
             operational.clone(),
@@ -242,6 +249,7 @@ impl IoContextBuilder {
             current_context,
             channel_modes,
             tasks,
+            requested_authority_switch,
         })
     }
 }
@@ -277,6 +285,7 @@ pub struct IoContext {
     current_context: Arc<RwLock<Option<String>>>,
     channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
     tasks: Arc<UiTaskRegistry>,
+    requested_authority_switch: Arc<std::sync::Mutex<Option<AuthoritySwitchRequest>>>,
 }
 
 /// Lightweight TUI-facing result of starting device enrollment.
@@ -312,6 +321,25 @@ impl IoContext {
     #[must_use]
     pub fn tasks(&self) -> Arc<UiTaskRegistry> {
         self.tasks.clone()
+    }
+
+    pub fn authority_switch_request_handle(
+        &self,
+    ) -> Arc<std::sync::Mutex<Option<AuthoritySwitchRequest>>> {
+        self.requested_authority_switch.clone()
+    }
+
+    pub fn request_authority_switch(
+        &self,
+        authority_id: aura_core::identifiers::AuthorityId,
+        nickname_suggestion: Option<String>,
+    ) {
+        if let Ok(mut guard) = self.requested_authority_switch.lock() {
+            *guard = Some(AuthoritySwitchRequest {
+                authority_id,
+                nickname_suggestion,
+            });
+        }
     }
 
     /// Create a new IoContext with explicit account status.
