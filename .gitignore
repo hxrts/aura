@@ -1,90 +1,72 @@
-# Rust
-/target/
+# Build artifacts
 target/
 /traces
 **/*.rs.bk
 *.pdb
 Cargo.lock
+result
+result-*
 
-# Local binary symlinks
-/bin/
-
-# Documentation builds
-docs/book/
-
-# WASM artifacts
+# WASM
 pkg/
 dist/
 crates/aura-web/public/
 *.wasm
 *_bg.wasm.d.ts
 
-# IDE
+# IDE & editors
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-.DS_Store
-.claude
-GEMINI.md
 
-# Aura
+# OS
+.DS_Store
+
+# Aura data
 .aura/
-aura-data/
 .aura-demo/
 .aura-test/
+aura-data/
+secure_store/
 *.sealed
 *.dat
-outcomes/
-*.txt
-secure_store/
 
-# Nix
-result
-result-*
+# Documentation
+docs/book/
+
+# Verification
+verification/lean/.lake/
+verification/lean/.lean_build/
+verification/lean/build/
+verification/lean/Generated/
+verification/quint/traces/*.json
+_apalache-out/
+artifacts/
+
+# Nix & direnv
 .direnv/
 
-# Logs
+# Environment & logs
+.env
+.env.local
 *.log
 logs/
 
-# Environment
-.env
-.env.local
-
-# Temporary files
+# Temporary & working
 *.tmp
 *.temp
-
-# Working
-work
+*.txt
+work/
 ext/
-mermaid.min.js
-mermaid-init.js
+outcomes/
 
-# Lean build artifacts
-verification/lean/.lake/
-verification/lean/build/
-verification/lean/Generated/
-verification/lean/.lean_build/
-
-# Quint ITF trace outputs
-verification/quint/traces/*.itf.json
-verification/quint/traces/*.json
-
-# Conformance
-artifacts/
-
-# Apalache model checker artifacts
-_apalache-out/
-
-# Patchbay (legacy root-level dirs from older/default patchbay-vm tooling)
+# Legacy & tooling
+.claude
 .qemu-vm/
 .patchbay-work
 .patchbay-target
-
-<<<<<<< HEAD
 target-codex
-# Node
 node_modules/
+/bin/
