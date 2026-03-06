@@ -22,6 +22,14 @@ use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::time::Duration;
 
+cfg_if::cfg_if! {
+    if #[cfg(target_arch = "wasm32")] {
+        type MonotonicInstant = web_time::Instant;
+    } else {
+        type MonotonicInstant = std::time::Instant;
+    }
+}
+
 /// Reliability operations for fault tolerance and graceful degradation
 ///
 /// This trait provides pure reliability primitives that can be composed
@@ -383,7 +391,7 @@ impl RetryPolicy {
     /// Execute with caller-provided sleep and timing context for deterministic metrics.
     pub async fn execute_with_sleep_and_context<F, Fut, T, E, S, SFut>(
         &self,
-        now: std::time::Instant,
+        now: MonotonicInstant,
         mut operation: F,
         mut sleep: S,
     ) -> RetryResult<T, E>
@@ -479,7 +487,7 @@ pub struct RetryContext {
     /// Current attempt number (0-based)
     pub attempt: u32,
     /// Time of first attempt
-    pub started_at: std::time::Instant,
+    pub started_at: MonotonicInstant,
     /// Total delay accumulated
     pub accumulated_delay: Duration,
     /// Whether this is the last attempt
@@ -492,7 +500,7 @@ impl RetryContext {
     /// # Arguments
     /// - `now`: Current time instant (obtain from TimeEffects in production)
     /// - `max_attempts`: Maximum number of retry attempts
-    pub fn new(now: std::time::Instant, max_attempts: u32) -> Self {
+    pub fn new(now: MonotonicInstant, max_attempts: u32) -> Self {
         Self {
             attempt: 0,
             started_at: now,
@@ -589,7 +597,7 @@ pub struct RateLimit {
 
     /// Last refill time (skipped during serialization, must be set after deserialization)
     #[serde(skip)]
-    pub last_refill: Option<std::time::Instant>,
+    pub last_refill: Option<MonotonicInstant>,
 }
 
 impl RateLimit {
@@ -599,7 +607,7 @@ impl RateLimit {
     /// - `max_operations`: Maximum operations per window
     /// - `window`: Window duration
     /// - `now`: Current time instant (obtain from TimeEffects in production)
-    pub fn new(max_operations: u32, window: Duration, now: std::time::Instant) -> Self {
+    pub fn new(max_operations: u32, window: Duration, now: MonotonicInstant) -> Self {
         Self {
             max_operations,
             window,
@@ -618,7 +626,7 @@ impl RateLimit {
         &mut self,
         cost: u32,
         refill_rate: u32,
-        now: std::time::Instant,
+        now: MonotonicInstant,
     ) -> bool {
         // Initialize last_refill if not set (after deserialization)
         let last_refill = self.last_refill.get_or_insert(now);
@@ -722,7 +730,7 @@ impl RateLimiter {
     /// # Arguments
     /// - `config`: Rate limiter configuration
     /// - `now`: Current time instant (obtain from TimeEffects in production)
-    pub fn new(config: RateLimitConfig, now: std::time::Instant) -> Self {
+    pub fn new(config: RateLimitConfig, now: MonotonicInstant) -> Self {
         let global_limit =
             RateLimit::new(config.global_ops_per_second, Duration::from_secs(1), now);
 
@@ -748,7 +756,7 @@ impl RateLimiter {
         &mut self,
         peer_id: crate::types::identifiers::DeviceId,
         cost: u32,
-        now: std::time::Instant,
+        now: MonotonicInstant,
     ) -> RateLimitResult {
         // Check global limit first
         if !self
@@ -837,7 +845,7 @@ impl RateLimiter {
     ///
     /// # Arguments
     /// - `now`: Current time instant (obtain from TimeEffects in production)
-    pub fn reset(&mut self, now: std::time::Instant) {
+    pub fn reset(&mut self, now: MonotonicInstant) {
         self.global_limit = RateLimit::new(
             self.config.global_ops_per_second,
             Duration::from_secs(1),
