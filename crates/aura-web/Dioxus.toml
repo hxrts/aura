@@ -13,7 +13,7 @@ index_on_404 = true
 watch_path = ["src", "../aura-ui/src", "styles", "public"]
 
 [web.resource]
-style = ["./styles/tailwind.css"]
+style = ["./assets/tailwind.css"]
 script = []
 
 [web.resource.dev]

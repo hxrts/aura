@@ -37,8 +37,8 @@ wasm_root="$cache_root/wasm-bindgen-cli/$wasm_bindgen_version"
 dx_bin="$dx_root/bin/dx"
 wasm_bin="$wasm_root/bin/wasm-bindgen"
 
-if [[ -f Dioxus.toml && ! -d public ]]; then
-  mkdir -p public
+if [[ -f Dioxus.toml ]]; then
+  mkdir -p public/assets
 fi
 
 if [[ ! -x "$dx_bin" ]]; then

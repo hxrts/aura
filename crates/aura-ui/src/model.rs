@@ -355,6 +355,10 @@ impl UiController {
         write_model(&self.model).authority_id = authority_id.to_string();
     }
 
+    pub fn set_settings_index(&self, index: usize) {
+        write_model(&self.model).settings_index = index;
+    }
+
     pub fn authority_id(&self) -> String {
         read_model(&self.model).authority_id.clone()
     }

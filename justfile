@@ -81,6 +81,10 @@ web-serve port="4173":
     trap cleanup EXIT
     NO_COLOR=true ../../scripts/run-dx.sh serve --web --package aura-web --bin aura-web --features web --addr 0.0.0.0 --port "$selected_port" --open false
 
+# Alias for the main web development workflow
+web-dev port="4173":
+    just web-serve {{port}}
+
 # Browser harness driver smoke test
 browser-driver-smoke:
     cd crates/aura-harness/playwright-driver && npm test

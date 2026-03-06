@@ -3,8 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "tailwind:build": "BROWSERSLIST_IGNORE_OLD_DATA=1 tailwindcss -c tailwind.config.cjs -i ./styles/input.css -o ./styles/tailwind.css --minify",
-    "tailwind:watch": "BROWSERSLIST_IGNORE_OLD_DATA=1 tailwindcss -c tailwind.config.cjs -i ./styles/input.css -o ./styles/tailwind.css --watch"
+    "tailwind:build": "mkdir -p ./public/assets && BROWSERSLIST_IGNORE_OLD_DATA=1 tailwindcss -c tailwind.config.cjs -i ./styles/input.css -o ./public/assets/tailwind.css --minify",
+    "tailwind:watch": "mkdir -p ./public/assets && BROWSERSLIST_IGNORE_OLD_DATA=1 tailwindcss -c tailwind.config.cjs -i ./styles/input.css -o ./public/assets/tailwind.css --watch"
   },
   "devDependencies": {
     "tailwindcss": "3.4.17"

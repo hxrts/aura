@@ -38,6 +38,7 @@ pub enum PillTone {
 pub struct ModalView {
     pub title: String,
     pub details: Vec<String>,
+    pub keybind_rows: Vec<(String, String)>,
     pub input_label: Option<String>,
     pub input_value: Option<String>,
     pub enter_label: String,
@@ -152,9 +153,9 @@ pub fn UiModal(
             },
             LbDialogContent {
                 id: Some("aura-modal-content".to_string()),
-                class: Some("w-full max-w-xl shadow-2xl p-0 overflow-hidden".to_string()),
+                class: Some("w-full max-w-xl bg-card text-card-foreground shadow-2xl p-0 overflow-hidden".to_string()),
                 div {
-                    class: "px-4 py-3 border-b border-border flex items-center justify-between gap-3",
+                    class: "bg-card px-4 py-3 border-b border-border flex items-center justify-between gap-3",
                     LbDialogTitle {
                         id: Some("aura-modal-title".to_string()),
                         class: Some("m-0 text-sm font-semibold text-card-foreground".to_string()),
@@ -163,7 +164,7 @@ pub fn UiModal(
                     span { class: "text-[0.66rem] uppercase tracking-[0.06em] text-muted-foreground", "Esc closes" }
                 }
                 div {
-                    class: "px-4 py-3 space-y-2 text-sm text-card-foreground",
+                    class: "bg-card px-4 py-3 space-y-2 text-sm text-card-foreground",
                     LbDialogDescription {
                         id: Some("aura-modal-description".to_string()),
                         class: Some("sr-only".to_string()),
@@ -171,6 +172,24 @@ pub fn UiModal(
                     }
                     for line in modal.details {
                         p { class: "m-0 whitespace-pre-wrap break-words", "{line}" }
+                    }
+                    if !modal.keybind_rows.is_empty() {
+                        div {
+                            class: "rounded-lg border border-border bg-background/70 divide-y divide-border overflow-hidden",
+                            for (keys, description) in modal.keybind_rows {
+                                div {
+                                    class: "flex items-center justify-between gap-3 px-3 py-2",
+                                    kbd {
+                                        class: "rounded border border-border bg-muted px-2 py-1 text-[0.68rem] uppercase tracking-[0.08em] text-foreground whitespace-nowrap",
+                                        "{keys}"
+                                    }
+                                    span {
+                                        class: "text-xs text-muted-foreground text-right",
+                                        "{description}"
+                                    }
+                                }
+                            }
+                        }
                     }
                     if let Some(input_label) = modal.input_label {
                         div {
@@ -194,7 +213,7 @@ pub fn UiModal(
                     }
                 }
                 div {
-                    class: "px-4 py-3 border-t border-border flex items-center justify-end gap-2",
+                    class: "bg-card px-4 py-3 border-t border-border flex items-center justify-end gap-2",
                     UiButton {
                         label: "Cancel".to_string(),
                         variant: ButtonVariant::Secondary,

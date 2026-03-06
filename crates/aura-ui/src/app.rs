@@ -9,11 +9,15 @@ use crate::components::{
 use crate::model::{ModalState, NeighborhoodMode, UiController, UiModel, UiScreen};
 use dioxus::events::KeyboardData;
 use dioxus::prelude::*;
+use dioxus_shadcn::components::button::{
+    Button as ShadButton, ButtonSize as ShadButtonSize, ButtonVariant as ShadButtonVariant,
+};
 use dioxus_shadcn::components::empty::{
     Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle,
 };
 use dioxus_shadcn::components::scroll_area::{ScrollArea, ScrollAreaViewport};
 use dioxus_shadcn::components::toast::{use_toast, ToastOptions, ToastProvider};
+use dioxus_shadcn::theme::{themes, use_theme, ColorScheme, ThemeProvider};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,10 +32,14 @@ const SETTINGS_ROWS: [&str; 5] = [
 #[component]
 pub fn AuraUiRoot(controller: Arc<UiController>) -> Element {
     rsx! {
-        ToastProvider {
-            default_duration: Duration::from_secs(5),
-            max_toasts: 8,
-            AuraUiShell { controller }
+        ThemeProvider {
+            theme: themes::neutral(),
+            color_scheme: ColorScheme::Dark,
+            ToastProvider {
+                default_duration: Duration::from_secs(5),
+                max_toasts: 8,
+                AuraUiShell { controller }
+            }
         }
     }
 }
@@ -42,6 +50,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
     let _render_tick_value = render_tick();
     let mut last_toast_key = use_signal(|| None::<String>);
     let toasts = use_toast();
+    let theme = use_theme();
 
     let Some(model) = controller.ui_model() else {
         return rsx! {
@@ -82,6 +91,8 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         last_toast_key.set(next_key);
     });
+    let resolved_scheme = theme.resolved_scheme();
+    let mut theme_for_toggle = theme.clone();
 
     rsx! {
         main {
@@ -103,34 +114,48 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                 }
             },
             section {
-                class: "relative w-full max-w-[1300px] min-h-[86vh] sm:min-h-[82vh] rounded-2xl border border-border bg-card shadow-2xl overflow-hidden",
+                class: "relative w-full max-w-[1300px] min-h-[86vh] sm:min-h-[82vh] rounded-2xl border border-border bg-card shadow-2xl overflow-hidden flex flex-col",
                 nav {
                     class: "border-b border-border bg-card/95 backdrop-blur px-3 py-2.5 sm:px-4",
                     div {
-                        class: "flex flex-wrap items-center gap-2",
-                        span { class: "mr-2 text-xs uppercase tracking-[0.12em] text-muted-foreground", "Aura" }
-                        for (screen, label, is_active) in screen_tabs(model.screen) {
-                            button {
-                                r#type: "button",
-                                class: if is_active {
-                                    "rounded-md border border-primary/40 bg-primary/15 px-3 py-1.5 text-xs uppercase tracking-[0.08em] text-foreground"
-                                } else {
-                                    "rounded-md border border-transparent bg-transparent px-3 py-1.5 text-xs uppercase tracking-[0.08em] text-muted-foreground hover:border-border hover:text-foreground"
-                                },
-                                onclick: {
-                                    let controller = controller.clone();
-                                    move |_| {
-                                        controller.set_screen(screen);
-                                        render_tick.set(render_tick() + 1);
-                                    }
-                                },
-                                "{label}"
+                        class: "flex flex-wrap items-center justify-between gap-2",
+                        div {
+                            class: "flex flex-wrap items-center gap-2",
+                            span { class: "mr-2 text-xs uppercase tracking-[0.12em] text-muted-foreground", "Aura" }
+                            for (screen, label, is_active) in screen_tabs(model.screen) {
+                                button {
+                                    r#type: "button",
+                                    class: if is_active {
+                                        "rounded-md border border-primary/40 bg-primary/15 px-3 py-1.5 text-xs uppercase tracking-[0.08em] text-foreground"
+                                    } else {
+                                        "rounded-md border border-transparent bg-transparent px-3 py-1.5 text-xs uppercase tracking-[0.08em] text-muted-foreground hover:border-border hover:text-foreground"
+                                    },
+                                    onclick: {
+                                        let controller = controller.clone();
+                                        move |_| {
+                                            controller.set_screen(screen);
+                                            render_tick.set(render_tick() + 1);
+                                        }
+                                    },
+                                    "{label}"
+                                }
                             }
+                        }
+                        ShadButton {
+                            variant: ShadButtonVariant::Ghost,
+                            size: ShadButtonSize::Icon,
+                            is_icon_button: true,
+                            aria_label: Some(match resolved_scheme {
+                                ColorScheme::Dark => "Switch to light mode".to_string(),
+                                _ => "Switch to dark mode".to_string(),
+                            }),
+                            on_click: move |_| theme_for_toggle.toggle_color_scheme(),
+                            span { class: "text-lg leading-none", "◑" }
                         }
                     }
                 }
                 div {
-                    class: "p-3 sm:p-4",
+                    class: "flex-1 min-h-0 overflow-y-auto p-3 sm:p-4",
                     {render_screen_content(&model, controller.clone(), render_tick)}
                 }
 
@@ -470,7 +495,11 @@ fn notifications_screen(
     }
 }
 
-fn settings_screen(model: &UiModel) -> Element {
+fn settings_screen(
+    model: &UiModel,
+    controller: Arc<UiController>,
+    mut render_tick: Signal<u64>,
+) -> Element {
     rsx! {
         div {
             class: "grid gap-3 lg:grid-cols-12",
@@ -479,30 +508,223 @@ fn settings_screen(model: &UiModel) -> Element {
                 subtitle: Some("Storage: IndexedDB".to_string()),
                 extra_class: Some("lg:col-span-4".to_string()),
                 for (idx, section) in SETTINGS_ROWS.iter().enumerate() {
-                    UiListItem {
-                        label: (*section).to_string(),
-                        secondary: None,
-                        active: idx == model.settings_index,
+                    button {
+                        r#type: "button",
+                        class: if idx == model.settings_index {
+                            "w-full text-left rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-2 text-sm text-foreground"
+                        } else {
+                            "w-full text-left rounded-lg border border-border bg-background/60 px-2.5 py-2 text-sm text-muted-foreground hover:text-foreground"
+                        },
+                        onclick: {
+                            let controller = controller.clone();
+                            move |_| {
+                                controller.set_settings_index(idx);
+                                render_tick.set(render_tick() + 1);
+                            }
+                        },
+                        "{section}"
                     }
                 }
             }
 
             UiCard {
-                title: "Profile".to_string(),
-                subtitle: Some("Current values".to_string()),
+                title: settings_panel_title(model.settings_index),
+                subtitle: Some(settings_panel_subtitle(model.settings_index)),
                 extra_class: Some("lg:col-span-8".to_string()),
-                UiListItem {
-                    label: format!("Nickname: {}", model.profile_nickname),
-                    secondary: None,
-                    active: false,
+                if model.settings_index == 0 {
+                    UiListItem {
+                        label: format!("Nickname: {}", model.profile_nickname),
+                        secondary: Some("Update display name for this authority".to_string()),
+                        active: false,
+                    }
+                    UiListItem {
+                        label: format!("Authority: {}", model.authority_id),
+                        secondary: Some("local".to_string()),
+                        active: false,
+                    }
+                    div {
+                        class: "flex flex-wrap gap-2 pt-1",
+                        UiButton {
+                            label: "Edit Nickname".to_string(),
+                            variant: ButtonVariant::Secondary,
+                            on_click: {
+                                let controller = controller.clone();
+                                move |_| {
+                                    controller.send_keys("e");
+                                    render_tick.set(render_tick() + 1);
+                                }
+                            }
+                        }
+                    }
                 }
-                UiListItem {
-                    label: format!("Authority: {}", model.authority_id),
-                    secondary: Some("local".to_string()),
-                    active: false,
+                if model.settings_index == 1 {
+                    UiListItem {
+                        label: "Guardian Setup".to_string(),
+                        secondary: Some("Configure guardian threshold and policy".to_string()),
+                        active: false,
+                    }
+                    UiListItem {
+                        label: "Target threshold: 2 of N".to_string(),
+                        secondary: Some("Adjust in ceremony flow".to_string()),
+                        active: false,
+                    }
+                    div {
+                        class: "flex flex-wrap gap-2 pt-1",
+                        UiButton {
+                            label: "Configure Threshold".to_string(),
+                            variant: ButtonVariant::Secondary,
+                            on_click: {
+                                let controller = controller.clone();
+                                move |_| {
+                                    controller.send_keys("t");
+                                    render_tick.set(render_tick() + 1);
+                                }
+                            }
+                        }
+                    }
+                }
+                if model.settings_index == 2 {
+                    UiListItem {
+                        label: "Recovery request".to_string(),
+                        secondary: Some("Start guardian-assisted recovery flow".to_string()),
+                        active: false,
+                    }
+                    UiListItem {
+                        label: "Last status: idle".to_string(),
+                        secondary: Some("No active recovery session".to_string()),
+                        active: false,
+                    }
+                    div {
+                        class: "flex flex-wrap gap-2 pt-1",
+                        UiButton {
+                            label: "Request Recovery".to_string(),
+                            variant: ButtonVariant::Secondary,
+                            on_click: {
+                                let controller = controller.clone();
+                                move |_| {
+                                    controller.send_keys("s");
+                                    render_tick.set(render_tick() + 1);
+                                }
+                            }
+                        }
+                    }
+                }
+                if model.settings_index == 3 {
+                    UiListItem {
+                        label: "Add device".to_string(),
+                        secondary: Some("Start device enrollment flow".to_string()),
+                        active: false,
+                    }
+                    UiListItem {
+                        label: "Import enrollment code".to_string(),
+                        secondary: Some("Import an existing enrollment code".to_string()),
+                        active: false,
+                    }
+                    UiListItem {
+                        label: "Remove current device".to_string(),
+                        secondary: Some("Current device removal is blocked".to_string()),
+                        active: false,
+                    }
+                    div {
+                        class: "flex flex-wrap gap-2 pt-1",
+                        UiButton {
+                            label: "Add Device".to_string(),
+                            variant: ButtonVariant::Secondary,
+                            on_click: {
+                                let controller = controller.clone();
+                                move |_| {
+                                    controller.send_keys("a");
+                                    render_tick.set(render_tick() + 1);
+                                }
+                            }
+                        }
+                        UiButton {
+                            label: "Import Code".to_string(),
+                            variant: ButtonVariant::Secondary,
+                            on_click: {
+                                let controller = controller.clone();
+                                move |_| {
+                                    controller.send_keys("i");
+                                    render_tick.set(render_tick() + 1);
+                                }
+                            }
+                        }
+                        UiButton {
+                            label: "Remove Device".to_string(),
+                            variant: ButtonVariant::Secondary,
+                            on_click: {
+                                let controller = controller.clone();
+                                move |_| {
+                                    controller.send_keys("r");
+                                    render_tick.set(render_tick() + 1);
+                                }
+                            }
+                        }
+                    }
+                }
+                if model.settings_index == 4 {
+                    UiListItem {
+                        label: format!("Authority ID: {}", model.authority_id),
+                        secondary: Some("Scope: local authority".to_string()),
+                        active: false,
+                    }
+                    UiListItem {
+                        label: "Synchronization".to_string(),
+                        secondary: Some("Trigger neighborhood sync".to_string()),
+                        active: false,
+                    }
+                    UiListItem {
+                        label: "MFA status".to_string(),
+                        secondary: Some("Run multi-factor guard check".to_string()),
+                        active: false,
+                    }
+                    div {
+                        class: "flex flex-wrap gap-2 pt-1",
+                        UiButton {
+                            label: "Sync".to_string(),
+                            variant: ButtonVariant::Secondary,
+                            on_click: {
+                                let controller = controller.clone();
+                                move |_| {
+                                    controller.send_keys("s");
+                                    render_tick.set(render_tick() + 1);
+                                }
+                            }
+                        }
+                        UiButton {
+                            label: "MFA Check".to_string(),
+                            variant: ButtonVariant::Secondary,
+                            on_click: {
+                                let controller = controller.clone();
+                                move |_| {
+                                    controller.send_keys("m");
+                                    render_tick.set(render_tick() + 1);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+fn settings_panel_title(index: usize) -> String {
+    SETTINGS_ROWS
+        .get(index)
+        .copied()
+        .unwrap_or("Settings")
+        .to_string()
+}
+
+fn settings_panel_subtitle(index: usize) -> String {
+    match index {
+        0 => "Current values".to_string(),
+        1 => "Guardian policy".to_string(),
+        2 => "Recovery operations".to_string(),
+        3 => "Device management".to_string(),
+        4 => "Authority scope".to_string(),
+        _ => "Settings details".to_string(),
     }
 }
 
@@ -545,7 +767,7 @@ fn render_screen_content(
         UiScreen::Chat => chat_screen(model, controller, render_tick),
         UiScreen::Contacts => contacts_screen(model, controller, render_tick),
         UiScreen::Notifications => notifications_screen(model, controller, render_tick),
-        UiScreen::Settings => settings_screen(model),
+        UiScreen::Settings => settings_screen(model, controller, render_tick),
     }
 }
 
@@ -580,12 +802,21 @@ fn modal_view(model: &UiModel) -> Option<ModalView> {
     let modal = model.modal?;
     let title = active_modal_title(model).unwrap_or_else(|| "Modal".to_string());
     let mut details = Vec::new();
+    let mut keybind_rows = Vec::new();
     let mut input_label = None;
 
     match modal {
         ModalState::Help => {
-            details.push("Use 1-5 or click tabs to switch screens.".to_string());
-            details.push("Use Enter to confirm and Esc to cancel/close.".to_string());
+            details.push("Keyboard reference".to_string());
+            keybind_rows = vec![
+                ("1-5".to_string(), "Switch screens".to_string()),
+                ("tab / shift+tab".to_string(), "Move selection".to_string()),
+                ("arrow keys".to_string(), "Navigate lists".to_string()),
+                ("i".to_string(), "Create invitation".to_string()),
+                ("n".to_string(), "Create home/channel".to_string()),
+                ("enter".to_string(), "Confirm action".to_string()),
+                ("esc".to_string(), "Close modal / cancel".to_string()),
+            ];
         }
         ModalState::CreateInvitation => {
             details.push("Create an invitation code for a contact.".to_string());
@@ -661,6 +892,7 @@ fn modal_view(model: &UiModel) -> Option<ModalView> {
     Some(ModalView {
         title,
         details,
+        keybind_rows,
         input_label,
         input_value,
         enter_label,
