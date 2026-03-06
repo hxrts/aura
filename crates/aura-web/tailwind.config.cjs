@@ -1,7 +1,7 @@
 /** @type {import('tailwindcss').Config} */
 const userHome = process.env.HOME || process.env.USERPROFILE || '';
-const lumenBlocksGlob = userHome
-  ? `${userHome}/.cargo/git/checkouts/lumen-blocks-*/**/blocks/src/**/*.rs`
+const dioxusShadcnGlob = userHome
+  ? `${userHome}/.cargo/git/checkouts/dioxus-shadcn-*/**/blocks/src/**/*.rs`
   : null;
 
 module.exports = {
@@ -10,7 +10,7 @@ module.exports = {
     './index.html',
     './src/**/*.{rs,html}',
     '../aura-ui/src/**/*.rs',
-    ...(lumenBlocksGlob ? [lumenBlocksGlob] : [])
+    ...(dioxusShadcnGlob ? [dioxusShadcnGlob] : [])
   ],
   theme: {
     extend: {

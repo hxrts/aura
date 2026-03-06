@@ -1,4 +1,4 @@
-//! Reusable UI components built on Lumen Blocks primitives.
+//! Reusable UI components built on Dioxus shadcn primitives.
 //!
 //! Provides styled buttons, cards, pills, modals, and list items that compose
 //! into the Aura application screens with consistent visual appearance.
@@ -6,15 +6,15 @@
 #![allow(clippy::incompatible_msrv)]
 
 use dioxus::prelude::*;
-use lumen_blocks::components::button::{
+use dioxus_shadcn::components::button::{
     Button as LbButton, ButtonSize as LbButtonSize, ButtonVariant as LbButtonVariant,
 };
-use lumen_blocks::components::dialog::{
+use dioxus_shadcn::components::dialog::{
     DialogContent as LbDialogContent, DialogDescription as LbDialogDescription,
     DialogRoot as LbDialogRoot, DialogTitle as LbDialogTitle,
 };
-use lumen_blocks::components::input::Input as LbInput;
-use lumen_blocks::components::label::Label as LbLabel;
+use dioxus_shadcn::components::input::Input as LbInput;
+use dioxus_shadcn::components::label::Label as LbLabel;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ButtonVariant {
@@ -40,7 +40,7 @@ pub struct ModalView {
 
 fn map_button_variant(variant: ButtonVariant) -> LbButtonVariant {
     match variant {
-        ButtonVariant::Primary => LbButtonVariant::Primary,
+        ButtonVariant::Primary => LbButtonVariant::Default,
         ButtonVariant::Secondary => LbButtonVariant::Outline,
     }
 }
@@ -60,7 +60,7 @@ pub fn UiTabButton(
     on_click: EventHandler<MouseEvent>,
 ) -> Element {
     let variant = if active {
-        LbButtonVariant::Primary
+        LbButtonVariant::Default
     } else {
         LbButtonVariant::Outline
     };

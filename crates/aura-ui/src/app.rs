@@ -10,7 +10,7 @@ use crate::components::{
 use crate::model::{ModalState, NeighborhoodMode, UiController, UiModel, UiScreen};
 use dioxus::events::KeyboardData;
 use dioxus::prelude::*;
-use lumen_blocks::components::toast::{use_toast, ToastOptions, ToastProvider};
+use dioxus_shadcn::components::toast::{use_toast, ToastOptions, ToastProvider};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -56,13 +56,15 @@ pub fn AuraUiRoot(controller: Arc<UiController>) -> Element {
                 description: None,
                 duration: Some(Duration::from_secs(5)),
                 permanent: false,
+                action: None,
+                on_dismiss: None,
             });
 
             match toast.icon {
                 'Y' | 'y' | '+' | '✓' => toasts.success(toast.message.clone(), opts),
                 'X' | 'x' | '-' | '!' | '✗' => toasts.error(toast.message.clone(), opts),
                 _ => toasts.info(toast.message.clone(), opts),
-            }
+            };
         }
 
         last_toast_key.set(next_key);
