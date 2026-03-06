@@ -26,8 +26,7 @@ use aura_app::ui::workflows::moderator as moderator_workflows;
 use aura_app::ui::workflows::{
     access as access_workflows, contacts as contacts_workflows, context as context_workflows,
     invitation as invitation_workflows, messaging as messaging_workflows,
-    recovery as recovery_workflows, settings as settings_workflows,
-    time as time_workflows,
+    recovery as recovery_workflows, settings as settings_workflows, time as time_workflows,
 };
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, CeremonyId};
@@ -776,8 +775,8 @@ fn submit_runtime_modal_action(
                             let ceremony_id = CeremonyId::new(start.ceremony_id.to_string());
                             spawn(async move {
                                 loop {
-                                    let _ = time_workflows::sleep_ms(&app_core_for_status, 1_000)
-                                        .await;
+                                    let _ =
+                                        time_workflows::sleep_ms(&app_core_for_status, 1_000).await;
                                     match ceremony_workflows::get_key_rotation_ceremony_status(
                                         &app_core_for_status,
                                         &ceremony_id,
@@ -3399,11 +3398,6 @@ fn settings_screen(
                     div {
                         class: "flex flex-1 min-h-0 flex-col gap-2",
                         UiListItem {
-                            label: "Guardian Setup".to_string(),
-                            secondary: Some("Configure guardian threshold and policy".to_string()),
-                            active: false,
-                        }
-                        UiListItem {
                             label: format!("Target threshold: {} of {}", runtime.threshold_k, runtime.threshold_n.max(runtime.guardian_count as u8)),
                             secondary: Some(format!("Configured guardians: {}", runtime.guardian_count)),
                             active: false,
@@ -3636,9 +3630,9 @@ fn settings_panel_title(index: usize) -> String {
 
 fn settings_panel_subtitle(index: usize) -> String {
     match index {
-        0 => "Current values".to_string(),
-        1 => "Guardian policy".to_string(),
-        2 => "Recovery operations".to_string(),
+        0 => "Identity configuration".to_string(),
+        1 => "Configure guardian policy".to_string(),
+        2 => "Configure recovery operations".to_string(),
         3 => "Device management".to_string(),
         4 => "Authority scope".to_string(),
         5 => "Theme and display".to_string(),
