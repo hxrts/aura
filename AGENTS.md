@@ -61,6 +61,12 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
 - **No direct impure functions** outside effect implementations — no `SystemTime::now()`, `thread_rng()`, `std::fs` in application code
 - **Unified encryption-at-rest**: `aura-effects::EncryptedStorage` wraps `StorageEffects`; no ad-hoc storage encryption
 
+### Conditional Compilation
+
+Use `cfg_if::cfg_if!` to group related conditional items when it improves readability:
+- **Good candidates**: 3+ consecutive items with same `#[cfg(...)]`, mutually exclusive platform code (wasm32 vs native), feature-gated module/import groups
+- **Not recommended**: Individual methods in impl blocks (cfg_if is for top-level items), interleaved conditional and non-conditional exports, simple 2-line patterns
+
 ### Authority Model
 
 - Identity via opaque `AuthorityId` and relational `ContextId`
