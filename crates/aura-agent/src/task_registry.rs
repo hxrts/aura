@@ -11,13 +11,18 @@ use std::time::Duration;
 use aura_core::effects::task::{CancellationToken, TaskSpawner};
 use aura_core::effects::PhysicalTimeEffects;
 use futures::future::BoxFuture;
+#[cfg(not(target_arch = "wasm32"))]
 use parking_lot::Mutex;
 use tokio::sync::watch;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::task::JoinHandle;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local;
 
 #[derive(Debug)]
 pub struct TaskRegistry {
     shutdown_tx: watch::Sender<bool>,
+    #[cfg(not(target_arch = "wasm32"))]
     handles: Mutex<Vec<JoinHandle<()>>>,
 }
 
@@ -26,6 +31,7 @@ impl TaskRegistry {
         let (shutdown_tx, _shutdown_rx) = watch::channel(false);
         Self {
             shutdown_tx,
+            #[cfg(not(target_arch = "wasm32"))]
             handles: Mutex::new(Vec::new()),
         }
     }
@@ -34,8 +40,15 @@ impl TaskRegistry {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let handle = tokio::spawn(fut);
-        self.handles.lock().push(handle);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let handle = tokio::spawn(fut);
+            self.handles.lock().push(handle);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            spawn_local(fut);
+        }
     }
 
     pub fn spawn_cancellable<F>(&self, fut: F)
@@ -43,17 +56,30 @@ impl TaskRegistry {
         F: Future<Output = ()> + Send + 'static,
     {
         let mut shutdown_rx = self.shutdown_tx.subscribe();
-        let handle = tokio::spawn(async move {
-            tokio::select! {
-                _ = shutdown_rx.changed() => {}
-                _ = fut => {}
-            }
-        });
-        self.handles.lock().push(handle);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let handle = tokio::spawn(async move {
+                tokio::select! {
+                    _ = shutdown_rx.changed() => {}
+                    _ = fut => {}
+                }
+            });
+            self.handles.lock().push(handle);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            spawn_local(async move {
+                tokio::select! {
+                    _ = shutdown_rx.changed() => {}
+                    _ = fut => {}
+                }
+            });
+        }
     }
 
     pub fn shutdown(&self) {
         let _ = self.shutdown_tx.send(true);
+        #[cfg(not(target_arch = "wasm32"))]
         for handle in self.handles.lock().drain(..) {
             handle.abort();
         }
@@ -75,28 +101,55 @@ impl TaskRegistry {
         Fut: Future<Output = bool> + Send + 'static,
     {
         let mut shutdown_rx = self.shutdown_tx.subscribe();
-        let handle = tokio::spawn(async move {
-            let interval_ms = interval.as_millis().try_into().unwrap_or(u64::MAX);
-            loop {
-                if *shutdown_rx.borrow() {
-                    break;
-                }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let handle = tokio::spawn(async move {
+                let interval_ms = interval.as_millis().try_into().unwrap_or(u64::MAX);
+                loop {
+                    if *shutdown_rx.borrow() {
+                        break;
+                    }
 
-                if !f().await {
-                    break;
-                }
+                    if !f().await {
+                        break;
+                    }
 
-                tokio::select! {
-                    _ = shutdown_rx.changed() => break,
-                    result = time_effects.sleep_ms(interval_ms) => {
-                        if result.is_err() {
-                            break;
+                    tokio::select! {
+                        _ = shutdown_rx.changed() => break,
+                        result = time_effects.sleep_ms(interval_ms) => {
+                            if result.is_err() {
+                                break;
+                            }
                         }
                     }
                 }
-            }
-        });
-        self.handles.lock().push(handle);
+            });
+            self.handles.lock().push(handle);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            spawn_local(async move {
+                let interval_ms = interval.as_millis().try_into().unwrap_or(u64::MAX);
+                loop {
+                    if *shutdown_rx.borrow() {
+                        break;
+                    }
+
+                    if !f().await {
+                        break;
+                    }
+
+                    tokio::select! {
+                        _ = shutdown_rx.changed() => break,
+                        result = time_effects.sleep_ms(interval_ms) => {
+                            if result.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+        }
     }
 }
 
@@ -109,6 +162,7 @@ impl Default for TaskRegistry {
 impl Drop for TaskRegistry {
     fn drop(&mut self) {
         let _ = self.shutdown_tx.send(true);
+        #[cfg(not(target_arch = "wasm32"))]
         for handle in self.handles.lock().drain(..) {
             handle.abort();
         }
@@ -146,14 +200,27 @@ impl TaskSpawner for TaskRegistry {
 
     fn spawn_cancellable(&self, fut: BoxFuture<'static, ()>, token: Arc<dyn CancellationToken>) {
         let mut shutdown_rx = self.shutdown_tx.subscribe();
-        let handle = tokio::spawn(async move {
-            tokio::select! {
-                _ = shutdown_rx.changed() => {}
-                _ = token.cancelled() => {}
-                _ = fut => {}
-            }
-        });
-        self.handles.lock().push(handle);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let handle = tokio::spawn(async move {
+                tokio::select! {
+                    _ = shutdown_rx.changed() => {}
+                    _ = token.cancelled() => {}
+                    _ = fut => {}
+                }
+            });
+            self.handles.lock().push(handle);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            spawn_local(async move {
+                tokio::select! {
+                    _ = shutdown_rx.changed() => {}
+                    _ = token.cancelled() => {}
+                    _ = fut => {}
+                }
+            });
+        }
     }
 
     fn cancellation_token(&self) -> Arc<dyn CancellationToken> {

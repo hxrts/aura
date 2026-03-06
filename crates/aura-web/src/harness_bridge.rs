@@ -20,10 +20,6 @@ pub fn set_controller(controller: Arc<UiController>) {
     });
 }
 
-pub fn controller() -> Option<Arc<UiController>> {
-    CONTROLLER.with(|slot| slot.borrow().as_ref().cloned())
-}
-
 pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), JsValue> {
     let harness = Object::new();
 

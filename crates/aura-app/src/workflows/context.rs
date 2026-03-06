@@ -21,7 +21,7 @@ use aura_core::{
 use std::sync::Arc;
 
 use crate::workflows::signals::emit_signal;
-use crate::workflows::time::current_time_ms;
+pub use crate::workflows::time::current_time_ms;
 
 const MISSING_ACTIVE_HOME_MESSAGE: &str =
     "No active home selected. Open Neighborhood and create or select a home.";

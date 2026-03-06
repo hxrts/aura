@@ -13,9 +13,18 @@ use aura_core::effects::time::{
 use aura_core::time::{
     LogicalTime, OrderTime, OrderingPolicy, TimeOrdering, TimeStamp, VectorClock,
 };
+use cfg_if::cfg_if;
 use rand::RngCore;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::time::{self, Instant};
+
+cfg_if! {
+    if #[cfg(target_arch = "wasm32")] {
+        use js_sys::Date;
+    } else {
+        use std::time::{SystemTime, UNIX_EPOCH};
+    }
+}
 
 /// Monotonic timestamp helper for layers that need batching or scheduling.
 #[allow(clippy::disallowed_methods)] // Monotonic clock access is permitted in effect handlers
@@ -39,12 +48,18 @@ impl PhysicalTimeHandler {
     /// a best-effort timestamp without spawning a runtime. It still sources time
     /// from the system clock, so simulator-driven tests should prefer the async
     /// `physical_time` trait method for full control.
-    #[allow(clippy::disallowed_methods)] // Effect handler is permitted to read the host clock
     pub fn physical_time_now_ms(&self) -> u64 {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO);
-        now.as_millis() as u64
+        #[cfg(target_arch = "wasm32")]
+        {
+            Date::now() as u64
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO);
+            now.as_millis() as u64
+        }
     }
 
     /// Sleep until a target epoch in seconds (best-effort).
@@ -62,25 +77,25 @@ impl PhysicalTimeHandler {
 #[async_trait]
 impl PhysicalTimeEffects for PhysicalTimeHandler {
     #[tracing::instrument(name = "physical_time", level = "trace")]
-    #[allow(clippy::disallowed_methods)] // Effect implementation legitimately uses system time
     async fn physical_time(&self) -> Result<aura_core::time::PhysicalTime, TimeError> {
-        let start = std::time::Instant::now();
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO);
-
+        let ts_ms = self.physical_time_now_ms();
         let result = aura_core::time::PhysicalTime {
-            ts_ms: now.as_millis() as u64,
+            ts_ms,
             uncertainty: None,
         };
 
+        #[cfg(not(target_arch = "wasm32"))]
+        let start = std::time::Instant::now();
+
         // Record latency metrics
-        let latency = start.elapsed();
-        tracing::trace!(
-            latency_ns = latency.as_nanos(),
-            "physical_time_access_latency"
-        );
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let latency = start.elapsed();
+            tracing::trace!(
+                latency_ns = latency.as_nanos(),
+                "physical_time_access_latency"
+            );
+        }
 
         Ok(result)
     }

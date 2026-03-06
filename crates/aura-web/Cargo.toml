@@ -17,13 +17,16 @@ web = ["dioxus/web"]
 [dependencies]
 aura-app = { path = "../aura-app", features = ["web-js"] }
 aura-agent = { path = "../aura-agent", features = ["web"] }
+aura-core = { path = "../aura-core" }
 aura-ui = { path = "../aura-ui" }
 async-lock = { workspace = true }
 cfg-if = "1"
 dioxus = { version = "0.7", default-features = false, features = ["launch", "macro", "hooks", "signals", "html"] }
+futures = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Window", "Navigator", "Clipboard", "console"] }
+tracing-wasm = "0.2"
+web-sys = { version = "0.3", features = ["Window", "Navigator", "Clipboard", "Storage", "Location", "console"] }

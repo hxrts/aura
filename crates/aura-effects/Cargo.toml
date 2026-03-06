@@ -82,4 +82,5 @@ socket2 = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 indexed_db_futures = { version = "0.6.4", features = ["serde"] }
+js-sys = "0.3"
 wasm-bindgen-futures = "0.4"

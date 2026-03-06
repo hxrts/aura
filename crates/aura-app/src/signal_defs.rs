@@ -298,6 +298,17 @@ pub struct DeviceInfo {
     pub last_seen: Option<u64>,
 }
 
+/// Authority information for settings and authority switching.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AuthorityInfo {
+    /// Authority identifier (hex string).
+    pub id: String,
+    /// Best-effort display label.
+    pub nickname_suggestion: String,
+    /// Whether this is the active authority.
+    pub is_current: bool,
+}
+
 /// Account settings and profile state
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SettingsState {
@@ -317,6 +328,8 @@ pub struct SettingsState {
     pub authority_id: String,
     /// Authority nickname suggestion
     pub authority_nickname: String,
+    /// Known authorities for this device/runtime.
+    pub authorities: Vec<AuthorityInfo>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

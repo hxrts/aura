@@ -13,7 +13,10 @@ use aura_core::identifiers::AuthorityId;
 use aura_journal::fact::Fact;
 use aura_journal::FactRegistry;
 use tokio::sync::{broadcast, mpsc};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::task::JoinHandle;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local;
 
 use super::ViewUpdate;
 use super::{
@@ -32,8 +35,10 @@ pub struct ReactivePipeline {
     shutdown_tx: mpsc::Sender<()>,
     update_tx: broadcast::Sender<ViewUpdate>,
     updates: broadcast::Receiver<ViewUpdate>,
+    #[cfg(not(target_arch = "wasm32"))]
     scheduler_task: Option<JoinHandle<()>>,
     /// Time effects for deterministic simulation support
+    #[cfg(not(target_arch = "wasm32"))]
     time_effects: Arc<dyn PhysicalTimeEffects>,
 }
 
@@ -69,14 +74,19 @@ impl ReactivePipeline {
 
         let updates = scheduler.subscribe();
 
+        #[cfg(not(target_arch = "wasm32"))]
         let scheduler_task = Some(tokio::spawn(async move { scheduler.run().await }));
+        #[cfg(target_arch = "wasm32")]
+        spawn_local(async move { scheduler.run().await });
 
         Self {
             fact_tx,
             shutdown_tx,
             update_tx,
             updates,
+            #[cfg(not(target_arch = "wasm32"))]
             scheduler_task,
+            #[cfg(not(target_arch = "wasm32"))]
             time_effects,
         }
     }
@@ -106,6 +116,7 @@ impl ReactivePipeline {
     /// Shutdown the scheduler.
     ///
     /// Uses effect-injected time for deterministic simulation support.
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn shutdown(mut self) {
         let _ = self.shutdown_tx.send(()).await;
         if let Some(mut handle) = self.scheduler_task.take() {
@@ -121,11 +132,18 @@ impl ReactivePipeline {
             }
         }
     }
+
+    /// Shutdown the scheduler on wasm targets.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn shutdown(self) {
+        let _ = self.shutdown_tx.send(()).await;
+    }
 }
 
 impl Drop for ReactivePipeline {
     fn drop(&mut self) {
         let _ = self.shutdown_tx.try_send(());
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(handle) = self.scheduler_task.as_mut() {
             handle.abort();
         }

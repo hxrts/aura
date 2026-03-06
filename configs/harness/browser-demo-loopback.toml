@@ -1,0 +1,18 @@
+schema_version = 1
+
+[run]
+name = "browser-demo-loopback"
+pty_rows = 40
+pty_cols = 120
+artifact_dir = "artifacts/harness/browser-demo-loopback"
+
+[[instances]]
+id = "bob"
+mode = "browser"
+data_dir = ".tmp/harness-browser/demo-loopback/bob"
+device_id = "bob-browser-demo-01"
+bind_address = "127.0.0.1:52001"
+demo_mode = true
+env = [
+  "AURA_HARNESS_BROWSER_HEADLESS=true",
+]

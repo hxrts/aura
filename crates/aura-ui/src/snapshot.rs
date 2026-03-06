@@ -494,6 +494,26 @@ fn apply_modal_overlay(
                 *right = "only members can be designated as moderators".to_string();
             }
         }
+        ModalState::SwitchAuthority => {
+            if row_idx == 0 {
+                *center = "Switch Authority".to_string();
+            } else if row_idx > 0 {
+                let authority_idx = row_idx - 1;
+                if let Some(authority) = model.authorities.get(authority_idx) {
+                    let prefix = if authority_idx == model.selected_authority_index {
+                        ">"
+                    } else {
+                        " "
+                    };
+                    let current = if authority.is_current {
+                        " (current)"
+                    } else {
+                        ""
+                    };
+                    *right = format!("{prefix} {}{current}", authority.label);
+                }
+            }
+        }
         ModalState::AccessOverride => {
             if row_idx == 0 {
                 *center = "Access Override".to_string();

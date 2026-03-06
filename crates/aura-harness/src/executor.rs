@@ -87,7 +87,9 @@ impl ExpectedConsistency {
 
     fn is_satisfied_by(self, observed: Self) -> bool {
         match self {
-            Self::Accepted => matches!(observed, Self::Accepted | Self::Replicated | Self::Enforced),
+            Self::Accepted => {
+                matches!(observed, Self::Accepted | Self::Replicated | Self::Enforced)
+            }
             Self::Replicated => matches!(observed, Self::Replicated | Self::Enforced),
             Self::Enforced => observed == Self::Enforced,
             Self::PartialTimeout => observed == Self::PartialTimeout,
@@ -1276,7 +1278,10 @@ fn allow_missing_command_result_toast(
         && matches!(expected_status, Some(ExpectedCommandStatus::Ok))
         && expected_reason_code.is_none_or(|value| value.eq_ignore_ascii_case("none"))
     {
-        return matches!(expected_consistency, None | Some(ExpectedConsistency::Accepted));
+        return matches!(
+            expected_consistency,
+            None | Some(ExpectedConsistency::Accepted)
+        );
     }
     false
 }
@@ -1473,18 +1478,25 @@ mod tests {
         assert!(!ExpectedConsistency::Replicated.is_satisfied_by(ExpectedConsistency::Accepted));
         assert!(!ExpectedConsistency::Enforced.is_satisfied_by(ExpectedConsistency::Accepted));
         assert!(!ExpectedConsistency::Enforced.is_satisfied_by(ExpectedConsistency::Replicated));
-        assert!(
-            !ExpectedConsistency::Accepted.is_satisfied_by(ExpectedConsistency::PartialTimeout)
-        );
+        assert!(!ExpectedConsistency::Accepted.is_satisfied_by(ExpectedConsistency::PartialTimeout));
     }
 
     #[test]
     fn help_toast_fallback_is_scoped_to_help_expectations() {
         assert!(allow_missing_help_toast("Use ? for TUI help", Some("help")));
-        assert!(allow_missing_help_toast("/kick <user> [reason]", Some("help kick")));
+        assert!(allow_missing_help_toast(
+            "/kick <user> [reason]",
+            Some("help kick")
+        ));
         assert!(allow_missing_help_toast("Use ? for TUI help", Some("?")));
-        assert!(allow_missing_help_toast("User:", Some("whois authority-abc")));
-        assert!(!allow_missing_help_toast("Use ? for TUI help", Some("join slash-lab")));
+        assert!(allow_missing_help_toast(
+            "User:",
+            Some("whois authority-abc")
+        ));
+        assert!(!allow_missing_help_toast(
+            "Use ? for TUI help",
+            Some("join slash-lab")
+        ));
         assert!(!allow_missing_help_toast("status=ok", Some("help")));
     }
 
@@ -1557,13 +1569,22 @@ mod tests {
 
     #[test]
     fn toast_contains_aliases_retry_variants() {
-        assert!(toast_contains_matches("No message selected", "Retrying message…"));
-        assert!(toast_contains_matches("Neighborhood", "neighborhood updated"));
+        assert!(toast_contains_matches(
+            "No message selected",
+            "Retrying message…"
+        ));
+        assert!(toast_contains_matches(
+            "Neighborhood",
+            "neighborhood updated"
+        ));
         assert!(toast_contains_matches(
             "MFA requires at least 2 devices",
             "Cannot configure multifactor: requires at least 2 devices"
         ));
-        assert!(!toast_contains_matches("No message selected", "Invitation Created"));
+        assert!(!toast_contains_matches(
+            "No message selected",
+            "Invitation Created"
+        ));
     }
 
     #[test]

@@ -15,9 +15,9 @@
 
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
-    BridgeDeviceInfo, CeremonyKind, CeremonyStatus, DeviceEnrollmentStart, InvitationBridgeStatus,
-    InvitationBridgeType, InvitationInfo, KeyRotationCeremonyStatus, LanPeerInfo, RendezvousStatus,
-    RuntimeBridge, SettingsBridgeState, SyncStatus,
+    BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyKind, CeremonyStatus, DeviceEnrollmentStart,
+    InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, KeyRotationCeremonyStatus,
+    LanPeerInfo, RendezvousStatus, RuntimeBridge, SettingsBridgeState, SyncStatus,
 };
 use aura_app::signal_defs::CONTACTS_SIGNAL;
 use aura_app::views::contacts::{Contact, ContactsState, ReadReceiptPolicy};
@@ -1078,6 +1078,14 @@ impl RuntimeBridge for MockRuntimeBridge {
 
     async fn list_devices(&self) -> Vec<BridgeDeviceInfo> {
         self.devices.read().await.clone()
+    }
+
+    async fn list_authorities(&self) -> Vec<BridgeAuthorityInfo> {
+        vec![BridgeAuthorityInfo {
+            id: self.authority_id,
+            nickname_suggestion: Some(self.nickname_suggestion.read().await.clone()),
+            is_current: true,
+        }]
     }
 
     async fn set_nickname_suggestion(&self, name: &str) -> Result<(), IntentError> {

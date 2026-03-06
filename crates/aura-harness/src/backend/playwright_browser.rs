@@ -13,6 +13,13 @@ use crate::backend::InstanceBackend;
 use crate::config::InstanceConfig;
 use crate::tool_api::ToolKey;
 
+const DEFAULT_PAGE_GOTO_TIMEOUT_MS: u64 = 90_000;
+const DEFAULT_HARNESS_READY_TIMEOUT_MS: u64 = 90_000;
+const DEFAULT_START_MAX_ATTEMPTS: u32 = 3;
+const DEFAULT_START_RETRY_BACKOFF_MS: u64 = 1_200;
+const MAX_START_ATTEMPTS: u32 = 10;
+const MAX_TIMEOUT_MS: u64 = 600_000;
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum BackendState {
     Stopped,
@@ -88,26 +95,54 @@ pub struct PlaywrightBrowserBackend {
     headless: bool,
     capture_screenshots: bool,
     artifact_dir: PathBuf,
+    page_goto_timeout_ms: u64,
+    harness_ready_timeout_ms: u64,
+    start_max_attempts: u32,
+    start_retry_backoff_ms: u64,
 }
 
 impl PlaywrightBrowserBackend {
-    pub fn new(config: InstanceConfig) -> Self {
+    pub fn new(config: InstanceConfig) -> Result<Self> {
         let app_url = browser_app_url(&config.env);
-        let headless = parse_bool_env(
-            env_value("AURA_HARNESS_BROWSER_HEADLESS", &config.env)
-                .or_else(|| std::env::var("AURA_HARNESS_BROWSER_HEADLESS").ok()),
-            true,
-        );
-        let capture_screenshots = parse_bool_env(
-            env_value("AURA_HARNESS_BROWSER_SNAPSHOT_SCREENSHOT", &config.env)
-                .or_else(|| std::env::var("AURA_HARNESS_BROWSER_SNAPSHOT_SCREENSHOT").ok()),
+        let headless = parse_bool_setting("AURA_HARNESS_BROWSER_HEADLESS", &config.env, true)?;
+        let capture_screenshots = parse_bool_setting(
+            "AURA_HARNESS_BROWSER_SNAPSHOT_SCREENSHOT",
+            &config.env,
             false,
-        );
+        )?;
         let artifact_dir = env_value("AURA_HARNESS_BROWSER_ARTIFACT_DIR", &config.env)
             .map(PathBuf::from)
             .unwrap_or_else(|| config.data_dir.join("playwright-artifacts"));
+        let page_goto_timeout_ms = parse_u64_setting(
+            "AURA_HARNESS_BROWSER_PAGE_GOTO_TIMEOUT_MS",
+            &config.env,
+            DEFAULT_PAGE_GOTO_TIMEOUT_MS,
+            1,
+            MAX_TIMEOUT_MS,
+        )?;
+        let harness_ready_timeout_ms = parse_u64_setting(
+            "AURA_HARNESS_BROWSER_HARNESS_READY_TIMEOUT_MS",
+            &config.env,
+            DEFAULT_HARNESS_READY_TIMEOUT_MS,
+            1,
+            MAX_TIMEOUT_MS,
+        )?;
+        let start_max_attempts = parse_u32_setting(
+            "AURA_HARNESS_BROWSER_START_MAX_ATTEMPTS",
+            &config.env,
+            DEFAULT_START_MAX_ATTEMPTS,
+            1,
+            MAX_START_ATTEMPTS,
+        )?;
+        let start_retry_backoff_ms = parse_u64_setting(
+            "AURA_HARNESS_BROWSER_START_RETRY_BACKOFF_MS",
+            &config.env,
+            DEFAULT_START_RETRY_BACKOFF_MS,
+            0,
+            MAX_TIMEOUT_MS,
+        )?;
 
-        Self {
+        Ok(Self {
             config,
             state: BackendState::Stopped,
             session: None,
@@ -116,7 +151,11 @@ impl PlaywrightBrowserBackend {
             headless,
             capture_screenshots,
             artifact_dir,
-        }
+            page_goto_timeout_ms,
+            harness_ready_timeout_ms,
+            start_max_attempts,
+            start_retry_backoff_ms,
+        })
     }
 
     fn with_session<T>(
@@ -239,7 +278,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             stderr_thread: Some(stderr_thread),
             request_id: 0,
         };
-        session.rpc_call(
+        let start_result = session.rpc_call(
             "start_page",
             json!({
                 "instance_id": self.config.id,
@@ -247,8 +286,42 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                 "data_dir": absolutize_path(self.config.data_dir.clone()),
                 "artifact_dir": absolutize_path(self.artifact_dir.clone()),
                 "headless": self.headless,
+                "page_goto_timeout_ms": self.page_goto_timeout_ms,
+                "harness_ready_timeout_ms": self.harness_ready_timeout_ms,
+                "start_max_attempts": self.start_max_attempts,
+                "start_retry_backoff_ms": self.start_retry_backoff_ms,
             }),
-        )?;
+        );
+        if let Err(error) = start_result {
+            let _ = session.rpc_call("stop", json!({ "instance_id": self.config.id }));
+            let _ = session.child.kill();
+            let _ = session.child.wait();
+            if let Some(handle) = session.stderr_thread.take() {
+                let _ = handle.join();
+            }
+            let stderr_tail = self
+                .stderr_log
+                .blocking_lock()
+                .iter()
+                .rev()
+                .take(40)
+                .cloned()
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>();
+            if stderr_tail.is_empty() {
+                bail!(
+                    "Playwright startup failed for instance {}: {error}",
+                    self.config.id
+                );
+            }
+            let joined = stderr_tail.join("\n");
+            bail!(
+                "Playwright startup failed for instance {}: {error}\nDriver stderr tail:\n{joined}",
+                self.config.id
+            );
+        }
 
         self.session = Some(Mutex::new(session));
         self.state = BackendState::Running;
@@ -452,14 +525,14 @@ fn browser_app_url(env_entries: &[String]) -> String {
         .unwrap_or_else(|| "http://127.0.0.1:4173".to_string())
 }
 
-fn parse_bool_env(value: Option<String>, default: bool) -> bool {
-    let Some(value) = value else {
-        return default;
+fn parse_bool_setting(key: &str, env_entries: &[String], default: bool) -> Result<bool> {
+    let Some(raw) = env_or_process_value(key, env_entries) else {
+        return Ok(default);
     };
-    match value.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => true,
-        "0" | "false" | "no" | "off" => false,
-        _ => default,
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => bail!("invalid boolean value for {key}: {raw}"),
     }
 }
 
@@ -472,6 +545,41 @@ fn env_value(key: &str, env_entries: &[String]) -> Option<String> {
             None
         }
     })
+}
+
+fn env_or_process_value(key: &str, env_entries: &[String]) -> Option<String> {
+    env_value(key, env_entries).or_else(|| std::env::var(key).ok())
+}
+
+fn parse_u64_setting(
+    key: &str,
+    env_entries: &[String],
+    default: u64,
+    min: u64,
+    max: u64,
+) -> Result<u64> {
+    let Some(raw) = env_or_process_value(key, env_entries) else {
+        return Ok(default);
+    };
+    let value = raw
+        .trim()
+        .parse::<u64>()
+        .with_context(|| format!("invalid integer value for {key}: {raw}"))?;
+    if !(min..=max).contains(&value) {
+        bail!("{key} must be in range [{min}, {max}], got {value}");
+    }
+    Ok(value)
+}
+
+fn parse_u32_setting(
+    key: &str,
+    env_entries: &[String],
+    default: u32,
+    min: u32,
+    max: u32,
+) -> Result<u32> {
+    let value = parse_u64_setting(key, env_entries, default as u64, min as u64, max as u64)?;
+    u32::try_from(value).with_context(|| format!("value for {key} overflows u32: {value}"))
 }
 
 fn absolutize_path(path: PathBuf) -> PathBuf {
@@ -526,7 +634,9 @@ fn require_existing_path(path: &Path, label: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{browser_app_url, parse_bool_env};
+    use super::{
+        browser_app_url, parse_bool_setting, parse_u64_setting, DEFAULT_PAGE_GOTO_TIMEOUT_MS,
+    };
 
     #[test]
     fn browser_app_url_prefers_instance_env_override() {
@@ -538,10 +648,31 @@ mod tests {
     }
 
     #[test]
-    fn parse_bool_env_supports_common_values() {
-        assert!(parse_bool_env(Some("true".to_string()), false));
-        assert!(parse_bool_env(Some("YES".to_string()), false));
-        assert!(!parse_bool_env(Some("off".to_string()), true));
-        assert!(!parse_bool_env(None, false));
+    fn parse_bool_setting_supports_common_values() {
+        const KEY: &str = "AURA_HARNESS_BROWSER_BOOL_TEST";
+        let yes_env = vec![format!("{KEY}=YES")];
+        let no_env = vec![format!("{KEY}=off")];
+        assert!(parse_bool_setting(KEY, &yes_env, false).expect("parse bool"));
+        assert!(!parse_bool_setting(KEY, &no_env, true).expect("parse bool"));
+        assert!(!parse_bool_setting(KEY, &[], false).expect("default"));
+    }
+
+    #[test]
+    fn parse_u64_setting_uses_default_when_missing() {
+        const KEY: &str = "AURA_HARNESS_BROWSER_U64_TEST";
+        let value = parse_u64_setting(KEY, &[], DEFAULT_PAGE_GOTO_TIMEOUT_MS, 1, 600_000)
+            .expect("parse default");
+        assert_eq!(value, DEFAULT_PAGE_GOTO_TIMEOUT_MS);
+    }
+
+    #[test]
+    fn parse_u64_setting_rejects_out_of_range() {
+        const KEY: &str = "AURA_HARNESS_BROWSER_U64_TEST";
+        let env = vec![format!("{KEY}=9999999")];
+        let error = parse_u64_setting(KEY, &env, DEFAULT_PAGE_GOTO_TIMEOUT_MS, 1, 600_000)
+            .expect_err("out of range should fail");
+        assert!(error
+            .to_string()
+            .contains("AURA_HARNESS_BROWSER_U64_TEST must be in range"));
     }
 }

@@ -300,6 +300,7 @@ fn handle_neighborhood_char(model: &mut UiModel, ch: char) {
         ) =>
         {
             model.modal = Some(ModalState::AccessOverride);
+            model.reset_access_override_editor();
             model.modal_hint = "Access Override".to_string();
         }
         'p' if matches!(
@@ -308,6 +309,8 @@ fn handle_neighborhood_char(model: &mut UiModel, ch: char) {
         ) =>
         {
             model.modal = Some(ModalState::CapabilityConfig);
+            model.reset_capability_config_editor();
+            model.modal_buffer = model.capability_full_caps.clone();
             model.modal_hint = "Home Capability Configuration".to_string();
         }
         'i' if matches!(
@@ -330,7 +333,9 @@ fn handle_settings_char(model: &mut UiModel, ch: char) {
             model.modal_hint = "Edit Nickname".to_string();
         }
         't' if model.settings_index == 1 => {
-            open_guardian_setup_wizard(model);
+            if can_open_guardian_setup_wizard(model) {
+                open_guardian_setup_wizard(model);
+            }
         }
         'a' if model.settings_index == 3 => {
             open_add_device_wizard(model);
@@ -343,23 +348,25 @@ fn handle_settings_char(model: &mut UiModel, ch: char) {
             if model.has_secondary_device {
                 open_remove_device_selection(model);
             } else {
-                set_toast(model, '✗', "Cannot remove the current device");
+                set_toast(model, 'ℹ', "Cannot remove the current device");
             }
         }
         's' if model.settings_index == 2 => {
             model.modal = Some(ModalState::RequestRecovery);
             model.modal_hint = "Request Recovery".to_string();
-            set_toast(model, 'ℹ', "guardians for recovery");
         }
         's' if model.settings_index == 4 => {
-            set_toast(
-                model,
-                'ℹ',
-                "Cannot switch authority: only one authority available",
-            );
+            if model.authorities.len() <= 1 {
+                set_toast(model, 'ℹ', "Only one authority available");
+            } else {
+                model.modal = Some(ModalState::SwitchAuthority);
+                model.modal_hint = "Switch Authority".to_string();
+            }
         }
         'm' if model.settings_index == 4 => {
-            open_mfa_setup_wizard(model);
+            if can_open_mfa_setup_wizard(model) {
+                open_mfa_setup_wizard(model);
+            }
         }
         _ => {}
     }
@@ -398,7 +405,9 @@ fn handle_enter(model: &mut UiModel, clipboard: &dyn ClipboardPort) {
                 model.modal_hint = "Edit Nickname".to_string();
             }
             1 => {
-                open_guardian_setup_wizard(model);
+                if can_open_guardian_setup_wizard(model) {
+                    open_guardian_setup_wizard(model);
+                }
             }
             2 => {
                 model.modal = Some(ModalState::RequestRecovery);
@@ -408,7 +417,9 @@ fn handle_enter(model: &mut UiModel, clipboard: &dyn ClipboardPort) {
                 open_add_device_wizard(model);
             }
             4 => {
-                open_mfa_setup_wizard(model);
+                if can_open_mfa_setup_wizard(model) {
+                    open_mfa_setup_wizard(model);
+                }
             }
             _ => {}
         },
@@ -543,8 +554,13 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             ThresholdWizardStep::Selection => {
                 let available = model.contacts.len();
                 if available < 2 {
-                    set_toast(model, '✗', "Add contacts first to set up guardians");
-                    dismiss_modal(model);
+                    set_toast(
+                        model,
+                        '✗',
+                        format!(
+                            "Need at least 2 contacts for this threshold, but only {available} available"
+                        ),
+                    );
                     return;
                 }
                 if model.guardian_selected_indices.len() < 2 {
@@ -569,9 +585,9 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             ThresholdWizardStep::Ceremony => {
                 set_toast(
                     model,
-                    '✓',
+                    'ℹ',
                     format!(
-                        "Guardian ceremony started ({} of {})",
+                        "Guardian ceremony started! Waiting for {}-of-{} guardians to respond",
                         model.guardian_threshold_k, model.guardian_selected_count
                     ),
                 );
@@ -579,7 +595,29 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             }
         },
         ModalState::RequestRecovery => {
-            set_toast(model, '✓', "Recovery request sent to guardians");
+            let required = model.guardian_threshold_k.max(1) as usize;
+            let available = model.contacts.len();
+            if available == 0 {
+                set_toast(
+                    model,
+                    '✗',
+                    "Set up guardians first before requesting recovery",
+                );
+                dismiss_modal(model);
+                return;
+            }
+            if available < required {
+                set_toast(
+                    model,
+                    '✗',
+                    format!(
+                        "Need {required} guardians for recovery, but only {available} configured"
+                    ),
+                );
+                dismiss_modal(model);
+                return;
+            }
+            set_toast(model, 'ℹ', "Recovery process started");
             dismiss_modal(model);
         }
         ModalState::AddDeviceStep1 => match model.add_device_step {
@@ -603,14 +641,7 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
                 model.modal_hint = "Add Device — Step 3 of 3".to_string();
             }
             AddDeviceWizardStep::Confirm => {
-                set_toast(
-                    model,
-                    '✓',
-                    format!(
-                        "Enrollment code for '{}' is ready to share out-of-band",
-                        model.add_device_name
-                    ),
-                );
+                set_toast(model, 'ℹ', "Device enrollment started");
                 dismiss_modal(model);
             }
         },
@@ -628,7 +659,7 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
                 };
                 model.set_secondary_device_name(Some(fallback));
             }
-            set_toast(model, '✓', "membership updated");
+            set_toast(model, '✓', "Device enrollment complete");
             dismiss_modal(model);
         }
         ModalState::SelectDeviceToRemove => {
@@ -641,7 +672,7 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
                 model.set_secondary_device_name(None);
                 set_toast(model, '✓', "Device removal complete");
             } else {
-                set_toast(model, '✗', "Cannot remove the current device");
+                set_toast(model, 'ℹ', "Cannot remove the current device");
             }
             dismiss_modal(model);
         }
@@ -669,9 +700,9 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             ThresholdWizardStep::Ceremony => {
                 set_toast(
                     model,
-                    '✓',
+                    'ℹ',
                     format!(
-                        "Multifactor ceremony started ({} of {})",
+                        "Multifactor ceremony started ({}-of-{})",
                         model.mfa_threshold_k, model.mfa_selected_count
                     ),
                 );
@@ -692,14 +723,22 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             }
             dismiss_modal(model);
         }
+        ModalState::SwitchAuthority => {
+            model.toast = Some(ToastState {
+                icon: '✓',
+                message: "Authority switch requested".to_string(),
+            });
+            dismiss_modal(model);
+        }
         ModalState::AccessOverride => {
             model.toast = Some(ToastState {
-                icon: 'ℹ',
-                message: "Access override preview".to_string(),
+                icon: '✓',
+                message: "Access override updated".to_string(),
             });
             dismiss_modal(model);
         }
         ModalState::CapabilityConfig => {
+            save_capability_config_buffer(model);
             model.toast = Some(ToastState {
                 icon: '✓',
                 message: "Capability config saved".to_string(),
@@ -972,6 +1011,8 @@ fn dismiss_modal(model: &mut UiModel) {
     model.reset_guardian_wizard();
     model.reset_mfa_wizard();
     model.reset_remove_device_flow();
+    model.reset_capability_config_editor();
+    model.reset_access_override_editor();
 }
 
 fn handle_modal_tab(model: &mut UiModel, reverse: bool) -> bool {
@@ -994,6 +1035,26 @@ fn handle_modal_tab(model: &mut UiModel, reverse: bool) -> bool {
         return true;
     }
 
+    if matches!(model.modal, Some(ModalState::CapabilityConfig)) {
+        save_capability_config_buffer(model);
+        if reverse {
+            model.capability_active_field = model.capability_active_field.saturating_sub(1);
+        } else {
+            model.capability_active_field = (model.capability_active_field + 1) % 3;
+        }
+        model.modal_buffer = match model.capability_active_field {
+            0 => model.capability_full_caps.clone(),
+            1 => model.capability_partial_caps.clone(),
+            _ => model.capability_limited_caps.clone(),
+        };
+        return true;
+    }
+
+    if matches!(model.modal, Some(ModalState::AccessOverride)) {
+        model.access_override_partial = !model.access_override_partial;
+        return true;
+    }
+
     false
 }
 
@@ -1012,6 +1073,9 @@ fn modal_accepts_text(model: &UiModel, modal: ModalState) -> bool {
             model.create_channel_step,
             CreateChannelWizardStep::Details | CreateChannelWizardStep::Threshold
         );
+    }
+    if matches!(modal, ModalState::CapabilityConfig) {
+        return true;
     }
     matches!(
         modal,
@@ -1213,12 +1277,30 @@ fn open_add_device_wizard(model: &mut UiModel) {
 fn open_guardian_setup_wizard(model: &mut UiModel) {
     model.modal = Some(ModalState::GuardianSetup);
     model.reset_guardian_wizard();
-    let selected = model.contacts.len().min(2);
-    model.guardian_selected_indices = (0..selected).collect();
+    model.guardian_selected_indices = model
+        .contacts
+        .iter()
+        .enumerate()
+        .filter(|(_, contact)| contact.is_guardian)
+        .map(|(idx, _)| idx)
+        .collect();
+    if model.guardian_selected_indices.is_empty() {
+        let selected = model.contacts.len().min(2);
+        model.guardian_selected_indices = (0..selected).collect();
+    }
+    let selected = model.guardian_selected_indices.len();
     model.guardian_selected_count = selected.max(1) as u8;
     model.guardian_threshold_k = model.guardian_selected_count.clamp(1, 2);
     model.modal_buffer.clear();
     model.modal_hint = "Guardian Setup — Step 1 of 3".to_string();
+}
+
+fn can_open_guardian_setup_wizard(model: &mut UiModel) -> bool {
+    if model.contacts.is_empty() {
+        set_toast(model, '✗', "Add contacts first before setting up guardians");
+        return false;
+    }
+    true
 }
 
 fn open_remove_device_selection(model: &mut UiModel) {
@@ -1240,6 +1322,27 @@ fn open_mfa_setup_wizard(model: &mut UiModel) {
     model.modal_hint = "Multifactor Setup — Step 1 of 3".to_string();
 }
 
+fn save_capability_config_buffer(model: &mut UiModel) {
+    match model.capability_active_field {
+        0 => model.capability_full_caps = model.modal_buffer.clone(),
+        1 => model.capability_partial_caps = model.modal_buffer.clone(),
+        _ => model.capability_limited_caps = model.modal_buffer.clone(),
+    }
+}
+
+fn can_open_mfa_setup_wizard(model: &mut UiModel) -> bool {
+    let available = available_device_count(model) as usize;
+    if available < 2 {
+        set_toast(
+            model,
+            '✗',
+            format!("MFA requires at least 2 devices, but only {available} available"),
+        );
+        return false;
+    }
+    true
+}
+
 fn handle_add_device_modal_char(model: &mut UiModel, ch: char, clipboard: &dyn ClipboardPort) {
     match model.add_device_step {
         AddDeviceWizardStep::Name => {
@@ -1248,6 +1351,7 @@ fn handle_add_device_modal_char(model: &mut UiModel, ch: char, clipboard: &dyn C
         AddDeviceWizardStep::ShareCode | AddDeviceWizardStep::Confirm => {
             if matches!(ch, 'c' | 'y') && !model.add_device_enrollment_code.is_empty() {
                 clipboard.write(&model.add_device_enrollment_code);
+                model.add_device_code_copied = true;
                 set_toast(model, '✓', "Copied to clipboard");
             }
         }
@@ -1338,6 +1442,39 @@ fn handle_wizard_named_key(model: &mut UiModel, key_name: &str) -> bool {
         }
         Some(ModalState::SelectDeviceToRemove) => {
             if matches!(key_name, "up" | "down") {
+                return true;
+            }
+        }
+        Some(ModalState::SwitchAuthority) => {
+            if matches!(key_name, "up" | "down") {
+                if model.authorities.is_empty() {
+                    return true;
+                }
+                let max = model.authorities.len().saturating_sub(1);
+                if key_name == "up" {
+                    model.set_selected_authority_index(
+                        model.selected_authority_index.saturating_sub(1),
+                    );
+                } else {
+                    model.set_selected_authority_index(
+                        (model.selected_authority_index + 1).min(max),
+                    );
+                }
+                return true;
+            }
+        }
+        Some(ModalState::AccessOverride) => {
+            if matches!(key_name, "up" | "down") {
+                if model.contacts.is_empty() {
+                    return true;
+                }
+                let max = model.contacts.len().saturating_sub(1);
+                if key_name == "up" {
+                    model
+                        .set_selected_contact_index(model.selected_contact_index.saturating_sub(1));
+                } else {
+                    model.set_selected_contact_index((model.selected_contact_index + 1).min(max));
+                }
                 return true;
             }
         }
@@ -1746,16 +1883,15 @@ mod tests {
 
         model.settings_index = 1;
         apply_text_keys(&mut model, "t", &clipboard);
-        assert!(matches!(model.modal, Some(ModalState::GuardianSetup)));
-        model.modal = None;
+        assert!(model.modal.is_none());
+        assert_eq!(
+            model.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("Add contacts first before setting up guardians")
+        );
 
         model.settings_index = 2;
         apply_text_keys(&mut model, "s", &clipboard);
         assert!(matches!(model.modal, Some(ModalState::RequestRecovery)));
-        assert_eq!(
-            model.toast.as_ref().map(|toast| toast.message.as_str()),
-            Some("guardians for recovery")
-        );
         model.modal = None;
 
         model.settings_index = 3;
@@ -1778,10 +1914,14 @@ mod tests {
         apply_text_keys(&mut model, "s", &clipboard);
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
-            Some("Cannot switch authority: only one authority available")
+            Some("Only one authority available")
         );
         apply_text_keys(&mut model, "m", &clipboard);
-        assert!(matches!(model.modal, Some(ModalState::MfaSetup)));
+        assert!(model.modal.is_none());
+        assert_eq!(
+            model.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("MFA requires at least 2 devices, but only 1 available")
+        );
     }
 
     #[test]
@@ -1865,7 +2005,7 @@ mod tests {
         assert!(model.modal.is_none());
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
-            Some("Guardian ceremony started (2 of 3)")
+            Some("Guardian ceremony started! Waiting for 2-of-3 guardians to respond")
         );
     }
 
@@ -1891,7 +2031,7 @@ mod tests {
         assert!(model.modal.is_none());
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
-            Some("Multifactor ceremony started (2 of 2)")
+            Some("Multifactor ceremony started (2-of-2)")
         );
     }
 
@@ -1937,6 +2077,44 @@ mod tests {
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
             Some("Copied to clipboard")
+        );
+    }
+
+    #[test]
+    fn request_recovery_requires_guardians_like_tui() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+        model.set_screen(UiScreen::Settings);
+        model.settings_index = 2;
+
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        assert!(matches!(model.modal, Some(ModalState::RequestRecovery)));
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+
+        assert!(model.modal.is_none());
+        assert_eq!(
+            model.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("Set up guardians first before requesting recovery")
+        );
+    }
+
+    #[test]
+    fn request_recovery_starts_when_guardians_available() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+        model.set_screen(UiScreen::Settings);
+        model.settings_index = 2;
+        model.ensure_contact("Alice");
+        model.ensure_contact("Bob");
+        model.guardian_threshold_k = 2;
+
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+
+        assert!(model.modal.is_none());
+        assert_eq!(
+            model.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("Recovery process started")
         );
     }
 

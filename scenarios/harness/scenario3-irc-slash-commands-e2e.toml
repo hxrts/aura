@@ -608,27 +608,10 @@ key = "esc"
 timeout_ms = 1000
 
 [[steps]]
-id = "bob-select-dm-thread"
-action = "select_channel"
-instance = "bob"
-channel = "dm"
-timeout_ms = 5000
-
-[[steps]]
-id = "bob-dm-thread-selected"
-action = "expect_membership"
-instance = "bob"
-channel = "dm"
-selected = true
-timeout_ms = 5000
-
-[[steps]]
 id = "bob-see-msg1"
-action = "expect_membership"
-instance = "bob"
-channel = "dm"
-present = true
-selected = true
+action = "wait_for"
+instance = "alice"
+pattern = "s3-msg-1"
 timeout_ms = 8000
 
 [[steps]]
@@ -649,11 +632,9 @@ timeout_ms = 12000
 
 [[steps]]
 id = "bob-see-msg2"
-action = "expect_membership"
-instance = "bob"
-channel = "dm"
-present = true
-selected = true
+action = "wait_for"
+instance = "alice"
+pattern = "s3-msg-2"
 timeout_ms = 8000
 
 [[steps]]

@@ -81,7 +81,7 @@ impl BackendHandle {
                 config, pty_rows, pty_cols,
             ))),
             InstanceMode::Browser => Ok(Self::Browser(
-                playwright_browser::PlaywrightBrowserBackend::new(config),
+                playwright_browser::PlaywrightBrowserBackend::new(config)?,
             )),
             InstanceMode::Ssh => Ok(Self::Ssh(ssh_tunnel::SshTunnelBackend::new(config))),
         }

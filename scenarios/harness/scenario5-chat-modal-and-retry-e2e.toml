@@ -329,7 +329,7 @@ timeout_ms = 2000
 id = "alice-create-wizard-members-step"
 action = "wait_for"
 instance = "alice"
-pattern = "Invite Contacts"
+pattern = "Step 2 of 3"
 timeout_ms = 8000
 
 [[steps]]
@@ -350,7 +350,7 @@ timeout_ms = 2000
 id = "alice-create-wizard-threshold-step"
 action = "wait_for"
 instance = "alice"
-pattern = "Group Threshold"
+pattern = "Step 3 of 3"
 timeout_ms = 8000
 
 [[steps]]

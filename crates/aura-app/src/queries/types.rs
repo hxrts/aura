@@ -1102,6 +1102,8 @@ impl Query for HomesQuery {
                     pinned_messages: Vec::new(),
                     pinned_metadata: HashMap::default(),
                     mode_flags: None,
+                    access_overrides: HashMap::default(),
+                    access_level_capabilities: None,
                     ban_list: HashMap::default(),
                     mute_list: HashMap::default(),
                     kick_log: Vec::new(),

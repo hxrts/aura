@@ -10,8 +10,8 @@ use crate::handlers::InvitationServiceApi;
 use crate::runtime::consensus::build_consensus_params;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
-    BridgeDeviceInfo, InvitationInfo, LanPeerInfo, RendezvousStatus, RuntimeBridge,
-    SettingsBridgeState, SyncStatus,
+    BridgeAuthorityInfo, BridgeDeviceInfo, InvitationInfo, LanPeerInfo, RendezvousStatus,
+    RuntimeBridge, SettingsBridgeState, SyncStatus,
 };
 use aura_app::signal_defs::INVITATIONS_SIGNAL;
 use aura_app::views::invitations::InvitationStatus;
@@ -26,8 +26,8 @@ use aura_core::effects::{
     reactive::ReactiveEffects,
     task::TaskSpawner,
     time::PhysicalTimeEffects,
-    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, ThresholdSigningEffects,
-    TransportEffects, TransportEnvelope,
+    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, StorageCoreEffects,
+    ThresholdSigningEffects, TransportEffects, TransportEnvelope,
 };
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
@@ -50,11 +50,13 @@ use aura_social::moderation::{
     HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
 };
 use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::core::default_context_id_for_authority;
 use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyInitRequest};
 use crate::runtime::services::ServiceError;
+use aura_app::ui::workflows::authority::{authority_key_prefix, deserialize_authority};
 use aura_core::ceremony::SupersessionReason;
 
 mod amp;
@@ -2840,6 +2842,74 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
 
         devices
+    }
+
+    async fn list_authorities(&self) -> Vec<BridgeAuthorityInfo> {
+        let current_id = self.agent.authority_id();
+        let current_nickname = match self.try_load_account_config().await {
+            Ok(Some((_key, config))) => config
+                .nickname_suggestion
+                .filter(|value| !value.trim().is_empty()),
+            Ok(None) => None,
+            Err(error) => {
+                tracing::warn!("Failed to load account config for authorities: {}", error);
+                None
+            }
+        };
+
+        let mut authorities = vec![BridgeAuthorityInfo {
+            id: current_id,
+            nickname_suggestion: current_nickname,
+            is_current: true,
+        }];
+        let mut seen = HashSet::from([current_id]);
+
+        let effects = self.agent.runtime().effects();
+        let keys = match effects.list_keys(Some(authority_key_prefix())).await {
+            Ok(keys) => keys,
+            Err(error) => {
+                tracing::warn!("Failed to list stored authorities: {}", error);
+                return authorities;
+            }
+        };
+
+        for key in keys {
+            let Some(bytes) = (match effects.retrieve(&key).await {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    tracing::warn!("Failed to read authority record {}: {}", key, error);
+                    continue;
+                }
+            }) else {
+                continue;
+            };
+
+            let record = match deserialize_authority(&bytes) {
+                Ok(record) => record,
+                Err(error) => {
+                    tracing::warn!("Failed to decode authority record {}: {}", key, error);
+                    continue;
+                }
+            };
+
+            if !seen.insert(record.authority_id) {
+                continue;
+            }
+
+            authorities.push(BridgeAuthorityInfo {
+                id: record.authority_id,
+                nickname_suggestion: None,
+                is_current: record.authority_id == current_id,
+            });
+        }
+
+        authorities.sort_by(|left, right| {
+            right
+                .is_current
+                .cmp(&left.is_current)
+                .then_with(|| left.id.to_string().cmp(&right.id.to_string()))
+        });
+        authorities
     }
 
     async fn set_nickname_suggestion(&self, name: &str) -> Result<(), IntentError> {

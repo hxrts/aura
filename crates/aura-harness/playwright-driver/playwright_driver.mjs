@@ -8,8 +8,12 @@ import { chromium } from 'playwright';
 
 const sessions = new Map();
 let requestChain = Promise.resolve();
-const PAGE_GOTO_TIMEOUT_MS = 60000;
-const HARNESS_READY_TIMEOUT_MS = 60000;
+const DEFAULT_PAGE_GOTO_TIMEOUT_MS = 90000;
+const DEFAULT_HARNESS_READY_TIMEOUT_MS = 90000;
+const DEFAULT_START_MAX_ATTEMPTS = 3;
+const DEFAULT_START_RETRY_BACKOFF_MS = 1200;
+const MAX_TIMEOUT_MS = 600000;
+const MAX_START_ATTEMPTS = 10;
 
 function nowIso() {
   return new Date().toISOString();
@@ -62,19 +66,95 @@ function parseSnapshotPayload(payload) {
   };
 }
 
-async function ensureHarness(page) {
+async function ensureHarnessWithTimeout(page, timeoutMs) {
   await page.waitForFunction(() => {
     const bridge = window.__AURA_HARNESS__;
     return bridge && typeof bridge.snapshot === 'function';
-  }, null, { timeout: HARNESS_READY_TIMEOUT_MS });
+  }, null, { timeout: timeoutMs });
 }
 
-async function startPage(params) {
+function parseBoundedInt(params, key, fallback, min, max) {
+  const raw = params?.[key];
+  if (raw == null) {
+    return fallback;
+  }
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || !Number.isInteger(raw)) {
+    throw new Error(`${key} must be an integer number`);
+  }
+  if (raw < min || raw > max) {
+    throw new Error(`${key} must be between ${min} and ${max}, got ${raw}`);
+  }
+  return raw;
+}
+
+function parseStartOptions(params) {
   const instanceId = normalizeInstanceId(params);
   const appUrl = String(params?.app_url ?? 'http://127.0.0.1:4173');
   const dataDir = String(params?.data_dir ?? path.join('.tmp', 'harness', instanceId));
   const headless = params?.headless !== false;
   const artifactDir = params?.artifact_dir ? String(params.artifact_dir) : null;
+  const pageGotoTimeoutMs = parseBoundedInt(
+    params,
+    'page_goto_timeout_ms',
+    DEFAULT_PAGE_GOTO_TIMEOUT_MS,
+    1,
+    MAX_TIMEOUT_MS
+  );
+  const harnessReadyTimeoutMs = parseBoundedInt(
+    params,
+    'harness_ready_timeout_ms',
+    DEFAULT_HARNESS_READY_TIMEOUT_MS,
+    1,
+    MAX_TIMEOUT_MS
+  );
+  const startMaxAttempts = parseBoundedInt(
+    params,
+    'start_max_attempts',
+    DEFAULT_START_MAX_ATTEMPTS,
+    1,
+    MAX_START_ATTEMPTS
+  );
+  const startRetryBackoffMs = parseBoundedInt(
+    params,
+    'start_retry_backoff_ms',
+    DEFAULT_START_RETRY_BACKOFF_MS,
+    0,
+    MAX_TIMEOUT_MS
+  );
+
+  return {
+    instanceId,
+    appUrl,
+    dataDir,
+    headless,
+    artifactDir,
+    pageGotoTimeoutMs,
+    harnessReadyTimeoutMs,
+    startMaxAttempts,
+    startRetryBackoffMs
+  };
+}
+
+function delay(ms) {
+  if (ms <= 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function startPage(params) {
+  const options = parseStartOptions(params);
+  const {
+    instanceId,
+    appUrl,
+    dataDir,
+    headless,
+    artifactDir,
+    pageGotoTimeoutMs,
+    harnessReadyTimeoutMs,
+    startMaxAttempts,
+    startRetryBackoffMs
+  } = options;
 
   if (sessions.has(instanceId)) {
     await stop({ instance_id: instanceId });
@@ -83,42 +163,72 @@ async function startPage(params) {
   ensureDir(dataDir);
   ensureDir(artifactDir);
 
-  const context = await chromium.launchPersistentContext(dataDir, {
-    headless,
-    viewport: { width: 1280, height: 900 },
-    ignoreHTTPSErrors: true
-  });
-
-  const page = context.pages()[0] ?? (await context.newPage());
   const consoleLog = [];
-  page.on('console', (message) => {
-    consoleLog.push(`[${nowIso()}] ${message.type()}: ${message.text()}`);
-  });
+  let lastError = null;
 
-  if (artifactDir) {
-    await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+  for (let attempt = 1; attempt <= startMaxAttempts; attempt += 1) {
+    let context = null;
+    try {
+      context = await chromium.launchPersistentContext(dataDir, {
+        headless,
+        viewport: { width: 1280, height: 900 },
+        ignoreHTTPSErrors: true
+      });
+
+      const page = context.pages()[0] ?? (await context.newPage());
+      page.on('console', (message) => {
+        consoleLog.push(`[${nowIso()}] ${message.type()}: ${message.text()}`);
+      });
+
+      if (artifactDir) {
+        await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+      }
+
+      await page.goto(appUrl, { waitUntil: 'domcontentloaded', timeout: pageGotoTimeoutMs });
+      await ensureHarnessWithTimeout(page, harnessReadyTimeoutMs);
+
+      sessions.set(instanceId, {
+        context,
+        page,
+        headless,
+        appUrl,
+        dataDir,
+        artifactDir,
+        consoleLog,
+        tracePath: artifactDir ? path.join(artifactDir, `${instanceId}-trace.zip`) : null
+      });
+
+      return {
+        instance_id: instanceId,
+        app_url: appUrl,
+        data_dir: dataDir,
+        headless
+      };
+    } catch (error) {
+      lastError = error;
+      consoleLog.push(
+        `[${nowIso()}] start_page attempt ${attempt}/${startMaxAttempts} failed: ${
+          error?.message ?? String(error)
+        }`
+      );
+      if (context) {
+        try {
+          await context.close();
+        } catch {
+          // Continue retries on close errors.
+        }
+      }
+      if (attempt < startMaxAttempts) {
+        await delay(startRetryBackoffMs);
+      }
+    }
   }
 
-  await page.goto(appUrl, { waitUntil: 'domcontentloaded', timeout: PAGE_GOTO_TIMEOUT_MS });
-  await ensureHarness(page);
-
-  sessions.set(instanceId, {
-    context,
-    page,
-    headless,
-    appUrl,
-    dataDir,
-    artifactDir,
-    consoleLog,
-    tracePath: artifactDir ? path.join(artifactDir, `${instanceId}-trace.zip`) : null
-  });
-
-  return {
-    instance_id: instanceId,
-    app_url: appUrl,
-    data_dir: dataDir,
-    headless
-  };
+  throw new Error(
+    `start_page failed after ${startMaxAttempts} attempts for ${instanceId} app_url=${appUrl}: ${
+      lastError?.stack ?? lastError?.message ?? String(lastError)
+    }`
+  );
 }
 
 function getSession(instanceId) {

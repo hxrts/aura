@@ -979,6 +979,34 @@ pub enum SocialFact {
         /// Authority revoking the moderator role
         revoker_id: AuthorityId,
     },
+    /// Explicit per-authority access override within a home.
+    AccessOverrideSet {
+        /// Authority receiving the override.
+        authority_id: AuthorityId,
+        /// Home where the override applies.
+        home_id: HomeId,
+        /// Relational context for the home.
+        context_id: ContextId,
+        /// Override level.
+        access_level: AccessLevel,
+        /// When the override was set.
+        set_at: PhysicalTime,
+    },
+    /// Per-home capability mapping for full/partial/limited access.
+    AccessLevelCapabilitiesConfigured {
+        /// Home whose capability mapping changed.
+        home_id: HomeId,
+        /// Relational context for the home.
+        context_id: ContextId,
+        /// Capabilities granted to full access.
+        full_caps: Vec<String>,
+        /// Capabilities granted to partial access.
+        partial_caps: Vec<String>,
+        /// Capabilities granted to limited access.
+        limited_caps: Vec<String>,
+        /// When the capability mapping was configured.
+        configured_at: PhysicalTime,
+    },
     /// Home storage updated
     StorageUpdated {
         /// Home whose storage changed
@@ -1043,6 +1071,10 @@ impl SocialFact {
             SocialFact::MemberLeft { left_at, .. } => left_at.ts_ms,
             SocialFact::ModeratorGranted { granted_at, .. } => granted_at.ts_ms,
             SocialFact::ModeratorRevoked { revoked_at, .. } => revoked_at.ts_ms,
+            SocialFact::AccessOverrideSet { set_at, .. } => set_at.ts_ms,
+            SocialFact::AccessLevelCapabilitiesConfigured { configured_at, .. } => {
+                configured_at.ts_ms
+            }
             SocialFact::StorageUpdated { updated_at, .. } => updated_at.ts_ms,
             SocialFact::NeighborhoodCreated { created_at, .. } => created_at.ts_ms,
             SocialFact::HomeJoinedNeighborhood { joined_at, .. } => joined_at.ts_ms,
@@ -1081,6 +1113,22 @@ impl SocialFact {
             SocialFact::ModeratorRevoked { authority_id, .. } => SocialFactKey {
                 sub_type: "moderator-revoked",
                 data: authority_id.to_string().into_bytes(),
+            },
+            SocialFact::AccessOverrideSet {
+                authority_id,
+                home_id,
+                ..
+            } => {
+                let mut data = authority_id.to_string().into_bytes();
+                data.extend_from_slice(home_id.as_bytes());
+                SocialFactKey {
+                    sub_type: "access-override-set",
+                    data,
+                }
+            }
+            SocialFact::AccessLevelCapabilitiesConfigured { home_id, .. } => SocialFactKey {
+                sub_type: "access-level-capabilities-configured",
+                data: home_id.as_bytes().to_vec(),
             },
             SocialFact::StorageUpdated { home_id, .. } => SocialFactKey {
                 sub_type: "storage-updated",
@@ -1194,6 +1242,48 @@ impl SocialFact {
             total_bytes,
             updated_at: PhysicalTime {
                 ts_ms: updated_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create an AccessOverrideSet fact with millisecond timestamp.
+    pub fn access_override_set_ms(
+        authority_id: AuthorityId,
+        home_id: HomeId,
+        context_id: ContextId,
+        access_level: AccessLevel,
+        set_at_ms: u64,
+    ) -> Self {
+        Self::AccessOverrideSet {
+            authority_id,
+            home_id,
+            context_id,
+            access_level,
+            set_at: PhysicalTime {
+                ts_ms: set_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create an AccessLevelCapabilitiesConfigured fact with millisecond timestamp.
+    pub fn access_level_capabilities_configured_ms(
+        home_id: HomeId,
+        context_id: ContextId,
+        full_caps: Vec<String>,
+        partial_caps: Vec<String>,
+        limited_caps: Vec<String>,
+        configured_at_ms: u64,
+    ) -> Self {
+        Self::AccessLevelCapabilitiesConfigured {
+            home_id,
+            context_id,
+            full_caps,
+            partial_caps,
+            limited_caps,
+            configured_at: PhysicalTime {
+                ts_ms: configured_at_ms,
                 uncertainty: None,
             },
         }

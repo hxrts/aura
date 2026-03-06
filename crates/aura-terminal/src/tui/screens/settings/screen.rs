@@ -135,15 +135,21 @@ pub fn SettingsScreen(
                 reactive_threshold.set((settings_state.threshold_k, settings_state.threshold_n));
 
                 // Populate authorities from signal
-                let authorities = if settings_state.authority_id.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![AuthorityInfo::new(
-                        settings_state.authority_id.clone(),
-                        settings_state.authority_nickname,
-                    )
-                    .current()]
-                };
+                let authorities = settings_state
+                    .authorities
+                    .iter()
+                    .map(|authority| {
+                        let info = AuthorityInfo::new(
+                            authority.id.clone(),
+                            authority.nickname_suggestion.clone(),
+                        );
+                        if authority.is_current {
+                            info.current()
+                        } else {
+                            info
+                        }
+                    })
+                    .collect();
                 reactive_authorities.set(authorities);
             })
             .await;

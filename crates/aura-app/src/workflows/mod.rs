@@ -63,6 +63,7 @@
 //! }
 //! ```
 
+pub mod access;
 pub mod account;
 pub mod admin;
 pub mod amp;
@@ -98,4 +99,4 @@ pub(crate) mod state_helpers;
 pub mod strong_command;
 pub mod sync;
 pub mod system;
-pub(crate) mod time;
+pub mod time;

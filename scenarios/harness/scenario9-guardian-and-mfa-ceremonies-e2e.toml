@@ -186,7 +186,7 @@ timeout_ms = 8000
 id = "alice-guardian-select-copy-visible"
 action = "wait_for"
 instance = "alice"
-pattern = "Select guardians"
+pattern = "Step 1 of 3"
 timeout_ms = 8000
 
 [[steps]]

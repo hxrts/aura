@@ -14,7 +14,7 @@
 
 use super::{Intent, IntentError, StateSnapshot};
 use crate::runtime_bridge::{
-    BridgeDeviceInfo, LanPeerInfo, RuntimeBridge, SettingsBridgeState,
+    BridgeAuthorityInfo, BridgeDeviceInfo, LanPeerInfo, RuntimeBridge, SettingsBridgeState,
     SyncStatus as RuntimeSyncStatus,
 };
 use crate::views::ViewState;
@@ -713,11 +713,18 @@ impl AppCore {
     }
 
     /// Get settings + device list from the runtime (if available).
-    pub async fn settings_snapshot(&self) -> Option<(SettingsBridgeState, Vec<BridgeDeviceInfo>)> {
+    pub async fn settings_snapshot(
+        &self,
+    ) -> Option<(
+        SettingsBridgeState,
+        Vec<BridgeDeviceInfo>,
+        Vec<BridgeAuthorityInfo>,
+    )> {
         let runtime = self.runtime.as_ref()?;
         let settings = runtime.get_settings().await;
         let devices = runtime.list_devices().await;
-        Some((settings, devices))
+        let authorities = runtime.list_authorities().await;
+        Some((settings, devices, authorities))
     }
 
     /// Get the list of known sync peers

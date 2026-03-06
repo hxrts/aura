@@ -81,14 +81,14 @@ timeout_ms = 8000
 id = "alice-start-recovery"
 action = "send_keys"
 instance = "alice"
-keys = "s"
+keys = "s\n"
 timeout_ms = 2000
 
 [[steps]]
 id = "alice-recovery-guard-toast"
 action = "expect_toast"
 instance = "alice"
-contains = "guardians for recovery"
+contains = "guardians"
 timeout_ms = 8000
 
 [[steps]]

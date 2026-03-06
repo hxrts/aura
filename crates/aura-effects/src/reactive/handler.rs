@@ -15,7 +15,10 @@ use std::future::Future;
 use std::sync::{Arc, RwLock};
 use tokio::sync::broadcast;
 use tokio::sync::watch;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::task::JoinHandle;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local;
 
 use super::graph::SignalGraph;
 
@@ -141,6 +144,7 @@ impl Drop for ReactiveHandler {
 #[derive(Debug)]
 struct ReactiveTaskRegistry {
     shutdown_tx: watch::Sender<bool>,
+    #[cfg(not(target_arch = "wasm32"))]
     handles: std::sync::Mutex<Vec<JoinHandle<()>>>,
 }
 
@@ -149,6 +153,7 @@ impl ReactiveTaskRegistry {
         let (shutdown_tx, _shutdown_rx) = watch::channel(false);
         Self {
             shutdown_tx,
+            #[cfg(not(target_arch = "wasm32"))]
             handles: std::sync::Mutex::new(Vec::new()),
         }
     }
@@ -158,12 +163,22 @@ impl ReactiveTaskRegistry {
         F: Future<Output = ()> + Send + 'static,
     {
         let mut shutdown_rx = self.shutdown_tx.subscribe();
+        #[cfg(target_arch = "wasm32")]
+        spawn_local(async move {
+            tokio::select! {
+                _ = shutdown_rx.changed() => {}
+                _ = fut => {}
+            }
+        });
+
+        #[cfg(not(target_arch = "wasm32"))]
         let handle = tokio::spawn(async move {
             tokio::select! {
                 _ = shutdown_rx.changed() => {}
                 _ = fut => {}
             }
         });
+        #[cfg(not(target_arch = "wasm32"))]
         if let Ok(mut handles) = self.handles.lock() {
             handles.push(handle);
         }
@@ -171,6 +186,7 @@ impl ReactiveTaskRegistry {
 
     fn shutdown(&self) {
         let _ = self.shutdown_tx.send(true);
+        #[cfg(not(target_arch = "wasm32"))]
         if let Ok(mut handles) = self.handles.lock() {
             for handle in handles.drain(..) {
                 handle.abort();

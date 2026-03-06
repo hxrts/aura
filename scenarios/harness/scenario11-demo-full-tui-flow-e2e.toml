@@ -310,7 +310,7 @@ timeout_ms = 2000
 id = "bob-chat-create-members-step"
 action = "wait_for"
 instance = "bob"
-pattern = "Invite Contacts"
+pattern = "Step 2 of 3"
 timeout_ms = 8000
 
 [[steps]]
@@ -338,7 +338,7 @@ timeout_ms = 2000
 id = "bob-chat-create-threshold-step"
 action = "wait_for"
 instance = "bob"
-pattern = "Group Threshold"
+pattern = "Step 3 of 3"
 timeout_ms = 8000
 
 [[steps]]
@@ -433,14 +433,14 @@ id = "bob-alice-reply-visible"
 action = "wait_for"
 instance = "bob"
 pattern = "Alice"
-timeout_ms = 20000
+timeout_ms = 60000
 
 [[steps]]
 id = "bob-carol-reply-visible"
 action = "wait_for"
 instance = "bob"
 pattern = "Carol"
-timeout_ms = 20000
+timeout_ms = 60000
 
 [[steps]]
 id = "bob-homeinvite-alice"

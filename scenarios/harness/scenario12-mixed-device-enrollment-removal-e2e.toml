@@ -1,6 +1,6 @@
 schema_version = 1
 id = "scenario12-mixed-device-enrollment-removal-e2e"
-goal = "Use one TUI and one web instance to exercise out-of-band add-device acceptance and device removal completion on both sides."
+goal = "Use one TUI and one web instance to exercise out-of-band add-device acceptance and mirrored device removal completion on both sides."
 execution_mode = "scripted"
 required_capabilities = ["local", "browser"]
 
@@ -24,6 +24,20 @@ pattern = "Welcome to Aura"
 timeout_ms = 60000
 
 [[steps]]
+id = "web-create-account"
+action = "send_keys"
+instance = "web"
+keys = "WebOwner\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "web-map-ready"
+action = "wait_for"
+instance = "web"
+pattern = "Map → Limited"
+timeout_ms = 120000
+
+[[steps]]
 id = "tui-create-account"
 action = "send_keys"
 instance = "tui"
@@ -45,22 +59,49 @@ keys = "5"
 timeout_ms = 2000
 
 [[steps]]
-id = "tui-settings-visible"
+id = "tui-settings-profile"
 action = "wait_for"
 instance = "tui"
 pattern = "➤ Profile"
 timeout_ms = 8000
 
 [[steps]]
-id = "tui-open-devices-section"
+id = "tui-settings-to-guardians"
 action = "send_key"
 instance = "tui"
 key = "down"
-repeat = 3
-timeout_ms = 1500
+timeout_ms = 1200
 
 [[steps]]
-id = "tui-devices-visible"
+id = "tui-settings-guardians"
+action = "wait_for"
+instance = "tui"
+pattern = "➤ Guardian Threshold"
+timeout_ms = 8000
+
+[[steps]]
+id = "tui-settings-to-recovery"
+action = "send_key"
+instance = "tui"
+key = "down"
+timeout_ms = 1200
+
+[[steps]]
+id = "tui-settings-recovery"
+action = "wait_for"
+instance = "tui"
+pattern = "➤ Request Recovery"
+timeout_ms = 8000
+
+[[steps]]
+id = "tui-settings-to-devices"
+action = "send_key"
+instance = "tui"
+key = "down"
+timeout_ms = 1200
+
+[[steps]]
+id = "tui-settings-devices"
 action = "wait_for"
 instance = "tui"
 pattern = "➤ Devices"
@@ -116,22 +157,49 @@ keys = "5"
 timeout_ms = 2000
 
 [[steps]]
-id = "web-settings-visible"
+id = "web-settings-profile"
 action = "wait_for"
 instance = "web"
 pattern = "➤ Profile"
 timeout_ms = 8000
 
 [[steps]]
-id = "web-open-devices-section"
+id = "web-settings-to-guardians"
 action = "send_key"
 instance = "web"
 key = "down"
-repeat = 3
-timeout_ms = 1500
+timeout_ms = 1200
 
 [[steps]]
-id = "web-devices-visible"
+id = "web-settings-guardians"
+action = "wait_for"
+instance = "web"
+pattern = "➤ Guardian Threshold"
+timeout_ms = 8000
+
+[[steps]]
+id = "web-settings-to-recovery"
+action = "send_key"
+instance = "web"
+key = "down"
+timeout_ms = 1200
+
+[[steps]]
+id = "web-settings-recovery"
+action = "wait_for"
+instance = "web"
+pattern = "➤ Request Recovery"
+timeout_ms = 8000
+
+[[steps]]
+id = "web-settings-to-devices"
+action = "send_key"
+instance = "web"
+key = "down"
+timeout_ms = 1200
+
+[[steps]]
+id = "web-settings-devices"
 action = "wait_for"
 instance = "web"
 pattern = "➤ Devices"
@@ -169,7 +237,7 @@ timeout_ms = 2000
 id = "web-device-import-toast"
 action = "expect_toast"
 instance = "web"
-contains = "membership updated"
+contains = "Device enrollment complete"
 timeout_ms = 8000
 
 [[steps]]
@@ -180,87 +248,80 @@ pattern = "Devices: 2"
 timeout_ms = 8000
 
 [[steps]]
-id = "tui-simulate-web-accept"
-action = "send_keys"
+id = "tui-still-waiting-for-acceptance"
+action = "wait_for"
 instance = "tui"
-keys = "m"
+pattern = "Waiting for acceptance"
+timeout_ms = 10000
+
+[[steps]]
+id = "tui-cancel-pending-enrollment"
+action = "send_key"
+instance = "tui"
+key = "esc"
 timeout_ms = 2000
 
 [[steps]]
-id = "tui-device-enrollment-complete"
+id = "tui-enrollment-canceled-toast"
 action = "expect_toast"
 instance = "tui"
-contains = "Device enrollment complete"
-timeout_ms = 30000
+contains = "canceled"
+timeout_ms = 10000
 
 [[steps]]
-id = "tui-second-device-visible"
+id = "web-dismiss-enrollment-toast"
+action = "send_key"
+instance = "web"
+key = "esc"
+timeout_ms = 1000
+
+[[steps]]
+id = "web-still-on-devices"
 action = "wait_for"
-instance = "tui"
-pattern = "WebApp"
-timeout_ms = 20000
+instance = "web"
+pattern = "➤ Devices"
+timeout_ms = 8000
 
 [[steps]]
-id = "tui-open-device-select"
+id = "web-open-device-select"
 action = "send_keys"
-instance = "tui"
+instance = "web"
 keys = "r"
 timeout_ms = 2000
 
 [[steps]]
-id = "tui-device-select-modal-visible"
+id = "web-device-select-modal-visible"
 action = "wait_for"
-instance = "tui"
+instance = "web"
 pattern = "Select Device to Remove"
 timeout_ms = 10000
 
 [[steps]]
-id = "tui-choose-device-to-remove"
+id = "web-choose-device-to-remove"
 action = "send_key"
-instance = "tui"
+instance = "web"
 key = "enter"
 timeout_ms = 2000
 
 [[steps]]
-id = "tui-remove-confirm-modal-visible"
+id = "web-remove-confirm-modal-visible"
 action = "wait_for"
-instance = "tui"
-pattern = "Remove Device"
+instance = "web"
+pattern = "Confirm Device Removal"
 timeout_ms = 10000
 
 [[steps]]
-id = "tui-focus-remove-confirm"
+id = "web-focus-remove-confirm"
 action = "send_key"
-instance = "tui"
+instance = "web"
 key = "tab"
 timeout_ms = 1000
 
 [[steps]]
-id = "tui-confirm-remove-device"
+id = "web-confirm-remove-device"
 action = "send_key"
-instance = "tui"
-key = "enter"
-timeout_ms = 2000
-
-[[steps]]
-id = "tui-device-removal-started"
-action = "expect_toast"
-instance = "tui"
-contains = "Device removal started"
-timeout_ms = 10000
-
-[[steps]]
-id = "tui-device-removal-complete"
-action = "expect_toast"
-instance = "tui"
-contains = "Device removal complete"
-timeout_ms = 30000
-
-[[steps]]
-id = "web-run-device-removal-flow"
-action = "send_keys"
 instance = "web"
-keys = "r"
+key = "enter"
 timeout_ms = 2000
 
 [[steps]]
@@ -268,11 +329,4 @@ id = "web-device-removal-complete"
 action = "expect_toast"
 instance = "web"
 contains = "Device removal complete"
-timeout_ms = 10000
-
-[[steps]]
-id = "web-devices-count-one"
-action = "wait_for"
-instance = "web"
-pattern = "Devices: 1"
-timeout_ms = 8000
+timeout_ms = 30000

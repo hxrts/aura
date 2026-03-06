@@ -14,7 +14,8 @@ workspace = true
 default = []
 
 [dependencies]
-aura-app = { path = "../aura-app" }
+aura-app = { path = "../aura-app", features = ["signals"] }
+aura-core = { path = "../aura-core" }
 async-lock = { workspace = true }
 cfg-if = "1"
 dioxus = { version = "0.7", default-features = false, features = ["macro", "hooks", "signals", "html"] }

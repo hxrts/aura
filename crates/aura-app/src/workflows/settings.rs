@@ -8,7 +8,9 @@ use crate::workflows::signals::{emit_signal, read_signal};
 use crate::workflows::state_helpers::with_recovery_state;
 use crate::workflows::{channel_ref::ChannelSelector, snapshot_policy::chat_snapshot};
 use crate::{
-    signal_defs::{DeviceInfo, SettingsState, SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME},
+    signal_defs::{
+        AuthorityInfo, DeviceInfo, SettingsState, SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME,
+    },
     thresholds::normalize_recovery_threshold,
     AppCore,
 };
@@ -20,14 +22,14 @@ use std::sync::Arc;
 async fn refresh_settings_signal_from_runtime(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
-    let (settings, devices, authority_id) = {
+    let (settings, devices, authorities, authority_id) = {
         let core = app_core.read().await;
         let authority_id = core
             .runtime()
             .map(|r| r.authority_id().to_string())
             .unwrap_or_default();
         match core.settings_snapshot().await {
-            Some(snapshot) => (snapshot.0, snapshot.1, authority_id),
+            Some(snapshot) => (snapshot.0, snapshot.1, snapshot.2, authority_id),
             None => return Ok(()),
         }
     };
@@ -48,6 +50,14 @@ async fn refresh_settings_signal_from_runtime(
         .collect();
     state.authority_id = authority_id;
     state.authority_nickname = settings.nickname_suggestion;
+    state.authorities = authorities
+        .into_iter()
+        .map(|authority| AuthorityInfo {
+            id: authority.id.to_string(),
+            nickname_suggestion: authority.nickname_suggestion.unwrap_or_default(),
+            is_current: authority.is_current,
+        })
+        .collect();
 
     emit_signal(app_core, &*SETTINGS_SIGNAL, state, SETTINGS_SIGNAL_NAME).await
 }

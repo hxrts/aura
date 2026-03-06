@@ -5,6 +5,7 @@
 
 use crate::workflows::budget::HomeFlowBudget;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, HomeId};
+use aura_social::{AccessLevel, AccessLevelCapabilityConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -170,6 +171,12 @@ pub struct HomeState {
     pub pinned_metadata: HashMap<String, PinnedMessageMeta>,
     /// Channel mode flags (e.g., "moderated", "invite-only")
     pub mode_flags: Option<String>,
+    /// Explicit per-authority access overrides for this home.
+    #[serde(default)]
+    pub access_overrides: HashMap<AuthorityId, AccessLevel>,
+    /// Per-home capability mapping for full/partial/limited access.
+    #[serde(default)]
+    pub access_level_capabilities: Option<AccessLevelCapabilityConfig>,
     /// Persistent ban list (keyed by authority ID)
     #[serde(default)]
     pub ban_list: HashMap<AuthorityId, BanRecord>,
@@ -231,6 +238,8 @@ impl HomeState {
             pinned_messages: Vec::new(),
             pinned_metadata: HashMap::new(),
             mode_flags: None,
+            access_overrides: HashMap::new(),
+            access_level_capabilities: None,
             ban_list: HashMap::new(),
             mute_list: HashMap::new(),
             kick_log: Vec::new(),
@@ -299,6 +308,21 @@ impl HomeState {
     /// Set home name
     pub fn set_name(&mut self, name: String) {
         self.name = name;
+    }
+
+    /// Get a configured access override for the given authority.
+    pub fn access_override(&self, authority_id: &AuthorityId) -> Option<AccessLevel> {
+        self.access_overrides.get(authority_id).copied()
+    }
+
+    /// Set an access override for an authority in this home.
+    pub fn set_access_override(&mut self, authority_id: AuthorityId, access_level: AccessLevel) {
+        self.access_overrides.insert(authority_id, access_level);
+    }
+
+    /// Replace the per-home access capability configuration.
+    pub fn set_access_level_capabilities(&mut self, config: AccessLevelCapabilityConfig) {
+        self.access_level_capabilities = Some(config);
     }
 
     // =========================================================================

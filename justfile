@@ -77,9 +77,13 @@ web-serve port="4173":
     tailwind_pid=$!
     cleanup() {
         kill "$tailwind_pid" 2>/dev/null || true
+        # Restore terminal settings in case dx serve corrupted them
+        stty sane 2>/dev/null || true
     }
-    trap cleanup EXIT
+    trap cleanup EXIT INT TERM
     NO_COLOR=true ../../scripts/run-dx.sh serve --web --package aura-web --bin aura-web --features web --addr 0.0.0.0 --port "$selected_port" --open false
+    # Extra safety: restore terminal after dx exits
+    stty sane 2>/dev/null || true
 
 # Alias for the main web development workflow
 web-dev port="4173":

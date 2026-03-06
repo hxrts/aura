@@ -327,6 +327,17 @@ impl EffectiveName for BridgeDeviceInfo {
     }
 }
 
+/// Bridge-level authority summary for settings and authority switching.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeAuthorityInfo {
+    /// Stable authority identifier.
+    pub id: AuthorityId,
+    /// Best-effort display label or nickname suggestion.
+    pub nickname_suggestion: Option<String>,
+    /// Whether this is the currently active authority for the runtime.
+    pub is_current: bool,
+}
+
 /// Bridge trait for runtime operations
 ///
 /// This trait defines the interface between the pure application core (`aura-app`)
@@ -855,6 +866,9 @@ pub trait RuntimeBridge: Send + Sync {
 
     /// List devices for the current account (best effort).
     async fn list_devices(&self) -> Vec<BridgeDeviceInfo>;
+
+    /// List authorities available to this runtime/device (best effort).
+    async fn list_authorities(&self) -> Vec<BridgeAuthorityInfo>;
 
     /// Update nickname suggestion (what the user wants to be called)
     async fn set_nickname_suggestion(&self, name: &str) -> Result<(), IntentError>;
@@ -1388,6 +1402,10 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         Vec::new()
     }
 
+    async fn list_authorities(&self) -> Vec<BridgeAuthorityInfo> {
+        Vec::new()
+    }
+
     async fn set_nickname_suggestion(&self, _name: &str) -> Result<(), IntentError> {
         Err(IntentError::no_agent(
             "Settings update not available in offline mode",
@@ -1417,10 +1435,17 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     async fn current_time_ms(&self) -> Result<u64, IntentError> {
         // Offline bridge uses best-effort physical time for UI surfaces.
-        let now = std::time::UNIX_EPOCH
-            .elapsed()
-            .map_err(|err| IntentError::internal_error(format!("System clock error: {err}")))?;
-        Ok(now.as_millis() as u64)
+        #[cfg(target_arch = "wasm32")]
+        {
+            Ok(js_sys::Date::now() as u64)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let now = std::time::UNIX_EPOCH.elapsed().map_err(|err| {
+                IntentError::internal_error(format!("System clock error: {err}"))
+            })?;
+            Ok(now.as_millis() as u64)
+        }
     }
 
     async fn sleep_ms(&self, ms: u64) {
