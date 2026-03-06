@@ -182,8 +182,13 @@ fn handle_contacts_char(model: &mut UiModel, ch: char) {
     match ch {
         'n' => {
             model.modal = Some(ModalState::CreateInvitation);
-            model.modal_buffer.clear();
+            model.modal_buffer = model
+                .selected_contact_authority_id()
+                .unwrap_or_default()
+                .to_string();
             model.modal_hint = "Invite Contacts".to_string();
+            model.create_invitation_receiver_label =
+                model.selected_contact_name().map(str::to_string);
         }
         'a' => {
             model.modal = Some(ModalState::AcceptInvitation);
@@ -208,17 +213,8 @@ fn handle_contacts_char(model: &mut UiModel, ch: char) {
             }
         }
         'd' => {
-            model.last_scan = "just now".to_string();
-            model.toast = Some(ToastState {
-                icon: 'ℹ',
-                message: "No LAN peers yet. Press d to rescan.".to_string(),
-            });
         }
         'p' => {
-            model.toast = Some(ToastState {
-                icon: 'ℹ',
-                message: "No LAN peers yet. Press d to rescan.".to_string(),
-            });
         }
         'r' => {
             model.modal = Some(ModalState::RemoveContact);
@@ -239,10 +235,6 @@ fn handle_neighborhood_char(model: &mut UiModel, ch: char) {
             model.modal = Some(ModalState::AcceptInvitation);
             model.modal_buffer.clear();
             model.modal_hint = "Accept Invitation".to_string();
-            model.toast = Some(ToastState {
-                icon: 'ℹ',
-                message: "home invitation".to_string(),
-            });
         }
         'd' => {
             model.access_depth = model.access_depth.next();
@@ -252,22 +244,10 @@ fn handle_neighborhood_char(model: &mut UiModel, ch: char) {
             });
         }
         'm' => {
-            model.toast = Some(ToastState {
-                icon: '✓',
-                message: "neighborhood updated".to_string(),
-            });
         }
         'v' => {
-            model.toast = Some(ToastState {
-                icon: '✓',
-                message: "home added to neighborhood".to_string(),
-            });
         }
         'L' => {
-            model.toast = Some(ToastState {
-                icon: '✓',
-                message: "link membership updated".to_string(),
-            });
         }
         'g' | 'H' => {
             if model.selected_home.is_none() {
@@ -417,8 +397,11 @@ fn handle_enter(model: &mut UiModel, clipboard: &dyn ClipboardPort) {
                 open_add_device_wizard(model);
             }
             4 => {
-                if can_open_mfa_setup_wizard(model) {
-                    open_mfa_setup_wizard(model);
+                if model.authorities.len() <= 1 {
+                    set_toast(model, 'ℹ', "Only one authority available");
+                } else {
+                    model.modal = Some(ModalState::SwitchAuthority);
+                    model.modal_hint = "Switch Authority".to_string();
                 }
             }
             _ => {}
@@ -900,7 +883,7 @@ fn submit_chat_input(model: &mut UiModel, text: &str) {
                             "ok",
                             "none",
                             "enforced",
-                            "home invitation",
+                            "home invitation sent",
                         ));
                     }
                     aura_app::ui::types::ChatCommand::NhLink { .. } => {

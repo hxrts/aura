@@ -11,22 +11,26 @@ use crate::model::{
     AccessDepth, AddDeviceWizardStep, CreateChannelDetailsField, CreateChannelWizardStep,
     ModalState, NeighborhoodMode, ThresholdWizardStep, UiController, UiModel, UiScreen,
 };
-use aura_app::signal_defs::SettingsState;
+use aura_app::signal_defs::{DiscoveredPeersState, SettingsState};
 use aura_app::ui::signals::{
-    NetworkStatus, CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL,
-    NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL,
+    DiscoveredPeerMethod, NetworkStatus, CHAT_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL,
+    ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL,
+    RECOVERY_SIGNAL, SETTINGS_SIGNAL,
     TRANSPORT_PEERS_SIGNAL,
 };
 use aura_app::ui::types::{
-    format_network_status_with_severity, AccessLevel, AppError, ChatState, ContactsState, HomeRole,
-    HomesState, InvitationBridgeType, InvitationsState, NeighborhoodState, RecoveryState,
+    all_command_help, command_help, format_network_status_with_severity, parse_chat_command,
+    AccessLevel, AppError, ChatState, ChatCommand, ContactsState, HomeRole, HomesState,
+    InvitationBridgeType, InvitationsState, NeighborhoodState, RecoveryState,
 };
 use aura_app::ui::workflows::ceremonies as ceremony_workflows;
+use aura_app::ui::workflows::moderation as moderation_workflows;
 use aura_app::ui::workflows::moderator as moderator_workflows;
 use aura_app::ui::workflows::{
     access as access_workflows, contacts as contacts_workflows, context as context_workflows,
     invitation as invitation_workflows, messaging as messaging_workflows,
-    recovery as recovery_workflows, settings as settings_workflows, time as time_workflows,
+    network as network_workflows, recovery as recovery_workflows,
+    query as query_workflows, settings as settings_workflows, time as time_workflows,
 };
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, CeremonyId};
@@ -94,6 +98,8 @@ struct ChatRuntimeChannel {
     topic: String,
     unread_count: u32,
     last_message: Option<String>,
+    member_count: u32,
+    is_dm: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -123,9 +129,17 @@ struct ContactsRuntimeContact {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct ContactsRuntimePeer {
+    authority_id: String,
+    address: String,
+    invited: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct ContactsRuntimeView {
     loaded: bool,
     contacts: Vec<ContactsRuntimeContact>,
+    lan_peers: Vec<ContactsRuntimePeer>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -166,6 +180,21 @@ struct NotificationRuntimeItem {
     subtitle: String,
     detail: String,
     timestamp: u64,
+    action: NotificationRuntimeAction,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum NotificationRuntimeAction {
+    None,
+    ReceivedInvitation,
+    SentInvitation,
+    RecoveryApproval,
+}
+
+impl Default for NotificationRuntimeAction {
+    fn default() -> Self {
+        Self::None
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -401,6 +430,8 @@ fn build_chat_runtime_view(
             topic: channel.topic.clone().unwrap_or_default(),
             unread_count: channel.unread_count,
             last_message: channel.last_message.clone(),
+            member_count: channel.member_count,
+            is_dm: channel.is_dm,
         })
         .collect();
     channels.sort_by(|left, right| left.name.cmp(&right.name));
@@ -458,7 +489,10 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
     runtime
 }
 
-fn build_contacts_runtime_view(contacts: ContactsState) -> ContactsRuntimeView {
+fn build_contacts_runtime_view(
+    contacts: ContactsState,
+    discovered_peers: DiscoveredPeersState,
+) -> ContactsRuntimeView {
     let mut rows: Vec<_> = contacts
         .all_contacts()
         .map(|contact| ContactsRuntimeContact {
@@ -474,9 +508,23 @@ fn build_contacts_runtime_view(contacts: ContactsState) -> ContactsRuntimeView {
         })
         .collect();
     rows.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let mut lan_peers: Vec<_> = discovered_peers
+        .peers
+        .into_iter()
+        .filter(|peer| peer.method == DiscoveredPeerMethod::Lan)
+        .map(|peer| ContactsRuntimePeer {
+            authority_id: peer.authority_id.to_string(),
+            address: peer.address,
+            invited: peer.invited,
+        })
+        .collect();
+    lan_peers.sort_by(|left, right| left.authority_id.cmp(&right.authority_id));
+
     ContactsRuntimeView {
         loaded: true,
         contacts: rows,
+        lan_peers,
     }
 }
 
@@ -485,12 +533,22 @@ async fn load_contacts_runtime_view(controller: Arc<UiController>) -> ContactsRu
         let core = controller.app_core().read().await;
         core.read(&*CONTACTS_SIGNAL).await.unwrap_or_default()
     };
-    let runtime = build_contacts_runtime_view(contacts);
+    let discovered_peers = {
+        let core = controller.app_core().read().await;
+        core.read(&*DISCOVERED_PEERS_SIGNAL).await.unwrap_or_default()
+    };
+    let runtime = build_contacts_runtime_view(contacts, discovered_peers);
     controller.sync_runtime_contacts(
         runtime
             .contacts
             .iter()
-            .map(|contact| (contact.name.clone(), contact.is_guardian))
+            .map(|contact| {
+                (
+                    contact.authority_id.clone(),
+                    contact.name.clone(),
+                    contact.is_guardian,
+                )
+            })
             .collect(),
     );
     runtime
@@ -592,33 +650,152 @@ fn build_notifications_runtime_view(
 
     for invitation in invitations.all_pending() {
         if !matches!(
-            invitation.direction,
-            aura_app::ui::types::InvitationDirection::Received
-        ) || !matches!(
             invitation.status,
             aura_app::ui::types::InvitationStatus::Pending
         ) {
             continue;
         }
 
-        let kind_label = match invitation.invitation_type {
-            aura_app::ui::types::InvitationType::Guardian => "Guardian Request",
-            aura_app::ui::types::InvitationType::Chat => "Contact Request",
-            aura_app::ui::types::InvitationType::Home => "Home Invite",
-        };
+        let (kind_label, title, subtitle, detail, action) =
+            match (invitation.direction, invitation.invitation_type) {
+                (
+                    aura_app::ui::types::InvitationDirection::Received,
+                    aura_app::ui::types::InvitationType::Guardian,
+                ) => (
+                    "Guardian Request",
+                    format!("Guardian Request from {}", invitation.from_name),
+                    invitation
+                        .message
+                        .clone()
+                        .unwrap_or_else(|| "Pending response".to_string()),
+                    invitation
+                        .home_name
+                        .clone()
+                        .unwrap_or_else(|| invitation.from_id.to_string()),
+                    NotificationRuntimeAction::ReceivedInvitation,
+                ),
+                (
+                    aura_app::ui::types::InvitationDirection::Received,
+                    aura_app::ui::types::InvitationType::Chat,
+                ) => (
+                    "Contact Request",
+                    format!("Contact Request from {}", invitation.from_name),
+                    invitation
+                        .message
+                        .clone()
+                        .unwrap_or_else(|| "Pending response".to_string()),
+                    invitation
+                        .home_name
+                        .clone()
+                        .unwrap_or_else(|| invitation.from_id.to_string()),
+                    NotificationRuntimeAction::ReceivedInvitation,
+                ),
+                (
+                    aura_app::ui::types::InvitationDirection::Received,
+                    aura_app::ui::types::InvitationType::Home,
+                ) => (
+                    "Home Invite",
+                    format!("Home Invite from {}", invitation.from_name),
+                    invitation
+                        .message
+                        .clone()
+                        .unwrap_or_else(|| "Pending response".to_string()),
+                    invitation
+                        .home_name
+                        .clone()
+                        .unwrap_or_else(|| invitation.from_id.to_string()),
+                    NotificationRuntimeAction::ReceivedInvitation,
+                ),
+                (
+                    aura_app::ui::types::InvitationDirection::Sent,
+                    aura_app::ui::types::InvitationType::Guardian,
+                ) => (
+                    "Sent Guardian Invite",
+                    format!(
+                        "Guardian invite to {}",
+                        invitation
+                            .to_name
+                            .clone()
+                            .unwrap_or_else(|| "unknown recipient".to_string())
+                    ),
+                    invitation
+                        .message
+                        .clone()
+                        .unwrap_or_else(|| "Waiting for recipient".to_string()),
+                    invitation
+                        .home_name
+                        .clone()
+                        .unwrap_or_else(|| {
+                            invitation
+                                .to_id
+                                .map(|id| id.to_string())
+                                .unwrap_or_else(|| "unknown recipient".to_string())
+                        }),
+                    NotificationRuntimeAction::SentInvitation,
+                ),
+                (
+                    aura_app::ui::types::InvitationDirection::Sent,
+                    aura_app::ui::types::InvitationType::Chat,
+                ) => (
+                    "Sent Contact Invite",
+                    format!(
+                        "Contact invite to {}",
+                        invitation
+                            .to_name
+                            .clone()
+                            .unwrap_or_else(|| "unknown recipient".to_string())
+                    ),
+                    invitation
+                        .message
+                        .clone()
+                        .unwrap_or_else(|| "Waiting for recipient".to_string()),
+                    invitation
+                        .home_name
+                        .clone()
+                        .unwrap_or_else(|| {
+                            invitation
+                                .to_id
+                                .map(|id| id.to_string())
+                                .unwrap_or_else(|| "unknown recipient".to_string())
+                        }),
+                    NotificationRuntimeAction::SentInvitation,
+                ),
+                (
+                    aura_app::ui::types::InvitationDirection::Sent,
+                    aura_app::ui::types::InvitationType::Home,
+                ) => (
+                    "Sent Home Invite",
+                    format!(
+                        "Home invite to {}",
+                        invitation
+                            .to_name
+                            .clone()
+                            .unwrap_or_else(|| "unknown recipient".to_string())
+                    ),
+                    invitation
+                        .message
+                        .clone()
+                        .unwrap_or_else(|| "Waiting for recipient".to_string()),
+                    invitation
+                        .home_name
+                        .clone()
+                        .unwrap_or_else(|| {
+                            invitation
+                                .to_id
+                                .map(|id| id.to_string())
+                                .unwrap_or_else(|| "unknown recipient".to_string())
+                        }),
+                    NotificationRuntimeAction::SentInvitation,
+                ),
+            };
         items.push(NotificationRuntimeItem {
             id: invitation.id.clone(),
             kind_label: kind_label.to_string(),
-            title: format!("{kind_label} from {}", invitation.from_name),
-            subtitle: invitation
-                .message
-                .clone()
-                .unwrap_or_else(|| "Pending response".to_string()),
-            detail: invitation
-                .home_name
-                .clone()
-                .unwrap_or_else(|| invitation.from_id.to_string()),
+            title,
+            subtitle,
+            detail,
             timestamp: invitation.created_at,
+            action,
         });
     }
 
@@ -633,6 +810,7 @@ fn build_notifications_runtime_view(
             ),
             detail: request.account_id.to_string(),
             timestamp: request.initiated_at,
+            action: NotificationRuntimeAction::RecoveryApproval,
         });
     }
 
@@ -644,6 +822,7 @@ fn build_notifications_runtime_view(
             subtitle: error.to_string(),
             detail: "Check browser console and runtime logs for context.".to_string(),
             timestamp: 0,
+            action: NotificationRuntimeAction::None,
         });
     }
 
@@ -884,7 +1063,13 @@ fn submit_runtime_modal_action(
                 match invitation_workflows::import_invitation_details(&app_core, &code).await {
                     Ok(invitation) => {
                         let accepted = match invitation.invitation_type {
-                            InvitationBridgeType::DeviceEnrollment { .. } => Ok(()),
+                            InvitationBridgeType::DeviceEnrollment { .. } => {
+                                invitation_workflows::accept_invitation(
+                                    &app_core,
+                                    &invitation.invitation_id,
+                                )
+                                .await
+                            }
                             _ => {
                                 invitation_workflows::accept_invitation(
                                     &app_core,
@@ -895,7 +1080,21 @@ fn submit_runtime_modal_action(
                         };
 
                         match accepted {
-                            Ok(_) => controller.complete_runtime_invitation_import(),
+                            Ok(_) => {
+                                if matches!(
+                                    invitation.invitation_type,
+                                    InvitationBridgeType::DeviceEnrollment { .. }
+                                ) {
+                                    let _ =
+                                        settings_workflows::refresh_settings_from_runtime(&app_core)
+                                            .await;
+                                    controller.complete_runtime_modal_success(
+                                        "Device enrollment complete",
+                                    );
+                                } else {
+                                    controller.complete_runtime_invitation_import();
+                                }
+                            }
                             Err(error) => controller.runtime_error_toast(error.to_string()),
                         }
                     }
@@ -1571,16 +1770,21 @@ fn submit_runtime_chat_input(
             }
         };
 
-        let result = if let Some(command_input) = trimmed.strip_prefix('/') {
+        let result: Result<Option<String>, aura_core::AuraError> =
+            if let Some(command_input) = trimmed.strip_prefix('/') {
             let raw = format!("/{command_input}");
-            match aura_app::ui::types::parse_chat_command(&raw) {
-                Ok(aura_app::ui::types::ChatCommand::Join { channel }) => {
-                    messaging_workflows::join_channel_by_name(&app_core, &channel).await
+            match parse_chat_command(&raw) {
+                Ok(ChatCommand::Join { channel }) => {
+                    messaging_workflows::join_channel_by_name(&app_core, &channel)
+                        .await
+                        .map(|_| Some(format!("joined #{}", channel.trim_start_matches('#'))))
                 }
-                Ok(aura_app::ui::types::ChatCommand::Leave) => {
-                    messaging_workflows::leave_channel_by_name(&app_core, &channel_name).await
+                Ok(ChatCommand::Leave) => {
+                    messaging_workflows::leave_channel_by_name(&app_core, &channel_name)
+                        .await
+                        .map(|_| Some("left channel".to_string()))
                 }
-                Ok(aura_app::ui::types::ChatCommand::Topic { text }) => {
+                Ok(ChatCommand::Topic { text }) => {
                     messaging_workflows::set_topic_by_name(
                         &app_core,
                         &channel_name,
@@ -1588,8 +1792,9 @@ fn submit_runtime_chat_input(
                         timestamp_ms,
                     )
                     .await
+                    .map(|_| Some("topic updated".to_string()))
                 }
-                Ok(aura_app::ui::types::ChatCommand::Me { action }) => {
+                Ok(ChatCommand::Me { action }) => {
                     messaging_workflows::send_action_by_name(
                         &app_core,
                         &channel_name,
@@ -1597,9 +1802,9 @@ fn submit_runtime_chat_input(
                         timestamp_ms,
                     )
                     .await
-                    .map(|_| ())
+                    .map(|_| Some("action sent".to_string()))
                 }
-                Ok(aura_app::ui::types::ChatCommand::Msg { target, text }) => {
+                Ok(ChatCommand::Msg { target, text }) => {
                     messaging_workflows::send_direct_message(
                         &app_core,
                         &target,
@@ -1607,9 +1812,15 @@ fn submit_runtime_chat_input(
                         timestamp_ms,
                     )
                     .await
-                    .map(|_| ())
+                    .map(|_| Some("direct message sent".to_string()))
                 }
-                Ok(aura_app::ui::types::ChatCommand::Invite { target }) => {
+                Ok(ChatCommand::Nick { name }) => settings_workflows::update_nickname(
+                    &app_core,
+                    name,
+                )
+                .await
+                .map(|_| Some("nickname updated".to_string())),
+                Ok(ChatCommand::Invite { target }) => {
                     messaging_workflows::invite_user_to_channel(
                         &app_core,
                         &target,
@@ -1618,12 +1829,181 @@ fn submit_runtime_chat_input(
                         None,
                     )
                     .await
-                    .map(|_| ())
+                    .map(|_| Some("invitation sent".to_string()))
                 }
-                Ok(command) => Err(aura_core::AuraError::agent(format!(
-                    "Command not wired in web chat yet: {}",
-                    command.name()
-                ))),
+                Ok(ChatCommand::Who) => {
+                    query_workflows::list_participants(&app_core, &channel_name)
+                        .await
+                        .map(|participants| {
+                            Some(if participants.is_empty() {
+                                "No participants".to_string()
+                            } else {
+                                participants.join(", ")
+                            })
+                        })
+                }
+                Ok(ChatCommand::Whois { target }) => {
+                    query_workflows::get_user_info(&app_core, &target)
+                        .await
+                        .map(|contact| {
+                            let id = contact.id.to_string();
+                            let name = if !contact.nickname.is_empty() {
+                                contact.nickname
+                            } else if let Some(value) = contact.nickname_suggestion {
+                                value
+                            } else {
+                                id.chars().take(8).collect::<String>() + "..."
+                            };
+                            Some(format!("User: {name} ({id})"))
+                        })
+                }
+                Ok(ChatCommand::Help { command }) => Ok(Some(match command {
+                    Some(command_name) => {
+                        if let Some(help) = command_help(&command_name) {
+                            format!("/{name} {syntax} — {description}",
+                                name = help.name,
+                                syntax = help.syntax,
+                                description = help.description)
+                        } else {
+                            format!("Unknown command: {command_name}")
+                        }
+                    }
+                    None => {
+                        let commands = all_command_help()
+                            .into_iter()
+                            .take(8)
+                            .map(|help| format!("/{}", help.name))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!("Common commands: {commands}. Use /help <command> for details.")
+                    }
+                })),
+                Ok(ChatCommand::Neighborhood { name }) => {
+                    context_workflows::create_neighborhood(&app_core, name)
+                        .await
+                        .map(|_| Some("neighborhood updated".to_string()))
+                }
+                Ok(ChatCommand::NhAdd { home_id }) => {
+                    context_workflows::add_home_to_neighborhood(&app_core, &home_id)
+                        .await
+                        .map(|_| Some("home added to neighborhood".to_string()))
+                }
+                Ok(ChatCommand::NhLink { home_id }) => {
+                    context_workflows::link_home_one_hop_link(&app_core, &home_id)
+                        .await
+                        .map(|_| Some("home one-hop link linked".to_string()))
+                }
+                Ok(ChatCommand::HomeInvite { target }) => {
+                    let home_id = match context_workflows::current_home_id_or_fallback(&app_core)
+                        .await
+                    {
+                        Ok(home_id) => home_id.to_string(),
+                        Err(error) => {
+                            controller_for_task.runtime_error_toast(error.to_string());
+                            rerender();
+                            return;
+                        }
+                    };
+                    let target_authority = match query_workflows::resolve_contact(&app_core, &target)
+                        .await
+                    {
+                        Ok(contact) => contact.id,
+                        Err(_) => match target.parse::<AuthorityId>() {
+                            Ok(authority_id) => authority_id,
+                            Err(error) => {
+                                controller_for_task.runtime_error_toast(format!(
+                                    "Invalid authority id: {error}"
+                                ));
+                                rerender();
+                                return;
+                            }
+                        },
+                    };
+                    invitation_workflows::create_channel_invitation(
+                        &app_core,
+                        target_authority,
+                        home_id,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                    .await
+                    .map(|_| Some("home invitation sent".to_string()))
+                }
+                Ok(ChatCommand::HomeAccept) => {
+                    invitation_workflows::accept_pending_home_invitation(&app_core)
+                        .await
+                        .map(|_| Some("home invitation accepted".to_string()))
+                }
+                Ok(ChatCommand::Kick { target, reason }) => {
+                    moderation_workflows::kick_user(
+                        &app_core,
+                        &channel_name,
+                        &target,
+                        reason.as_deref(),
+                        timestamp_ms,
+                    )
+                    .await
+                    .map(|_| Some("kick applied".to_string()))
+                }
+                Ok(ChatCommand::Ban { target, reason }) => {
+                    moderation_workflows::ban_user(
+                        &app_core,
+                        Some(&channel_name),
+                        &target,
+                        reason.as_deref(),
+                        timestamp_ms,
+                    )
+                    .await
+                    .map(|_| Some("ban applied".to_string()))
+                }
+                Ok(ChatCommand::Unban { target }) => {
+                    moderation_workflows::unban_user(&app_core, Some(&channel_name), &target)
+                        .await
+                        .map(|_| Some("unban applied".to_string()))
+                }
+                Ok(ChatCommand::Mute { target, duration }) => {
+                    moderation_workflows::mute_user(
+                        &app_core,
+                        Some(&channel_name),
+                        &target,
+                        duration.map(|value| value.as_secs()),
+                        timestamp_ms,
+                    )
+                    .await
+                    .map(|_| Some("mute applied".to_string()))
+                }
+                Ok(ChatCommand::Unmute { target }) => {
+                    moderation_workflows::unmute_user(&app_core, Some(&channel_name), &target)
+                        .await
+                        .map(|_| Some("unmute applied".to_string()))
+                }
+                Ok(ChatCommand::Pin { message_id }) => {
+                    moderation_workflows::pin_message(&app_core, &message_id)
+                        .await
+                        .map(|_| Some("message pinned".to_string()))
+                }
+                Ok(ChatCommand::Unpin { message_id }) => {
+                    moderation_workflows::unpin_message(&app_core, &message_id)
+                        .await
+                        .map(|_| Some("message unpinned".to_string()))
+                }
+                Ok(ChatCommand::Op { target }) => {
+                    moderator_workflows::grant_moderator(&app_core, Some(&channel_name), &target)
+                        .await
+                        .map(|_| Some("moderator granted".to_string()))
+                }
+                Ok(ChatCommand::Deop { target }) => {
+                    moderator_workflows::revoke_moderator(&app_core, Some(&channel_name), &target)
+                        .await
+                        .map(|_| Some("moderator revoked".to_string()))
+                }
+                Ok(ChatCommand::Mode { channel, flags }) => {
+                    settings_workflows::set_channel_mode(&app_core, channel, flags)
+                        .await
+                        .map(|_| Some("channel mode updated".to_string()))
+                }
                 Err(error) => Err(aura_core::AuraError::invalid(error.to_string())),
             }
         } else {
@@ -1634,11 +2014,16 @@ fn submit_runtime_chat_input(
                 timestamp_ms,
             )
             .await
-            .map(|_| ())
+            .map(|_| None)
         };
 
         match result {
-            Ok(()) => controller_for_task.clear_input_buffer(),
+            Ok(message) => {
+                controller_for_task.clear_input_buffer();
+                if let Some(message) = message {
+                    controller_for_task.info_toast(message);
+                }
+            }
             Err(error) => controller_for_task.runtime_error_toast(error.to_string()),
         }
         rerender();
@@ -1646,6 +2031,78 @@ fn submit_runtime_chat_input(
 
     controller.clear_input_buffer();
     true
+}
+
+fn handle_runtime_character_shortcut(
+    controller: Arc<UiController>,
+    model: &UiModel,
+    neighborhood_runtime: &NeighborhoodRuntimeView,
+    key: &str,
+    rerender: Arc<dyn Fn() + Send + Sync>,
+) -> bool {
+    if model.input_mode || model.modal.is_some() {
+        return false;
+    }
+
+    match (model.screen, key) {
+        (UiScreen::Neighborhood, "m") => {
+            let app_core = controller.app_core().clone();
+            spawn(async move {
+                match context_workflows::create_neighborhood(&app_core, "Neighborhood".to_string())
+                    .await
+                {
+                    Ok(_) => controller.info_toast("Neighborhood ready"),
+                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                }
+                rerender();
+            });
+            true
+        }
+        (UiScreen::Neighborhood, "v") => {
+            let Some(home_id) = selected_home_id_for_modal(neighborhood_runtime, model) else {
+                controller.runtime_error_toast("Select a home first");
+                rerender();
+                return true;
+            };
+            let app_core = controller.app_core().clone();
+            spawn(async move {
+                match context_workflows::add_home_to_neighborhood(&app_core, &home_id).await {
+                    Ok(_) => controller.info_toast("Home added to neighborhood"),
+                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                }
+                rerender();
+            });
+            true
+        }
+        (UiScreen::Neighborhood, "L") => {
+            let Some(home_id) = selected_home_id_for_modal(neighborhood_runtime, model) else {
+                controller.runtime_error_toast("Select a home first");
+                rerender();
+                return true;
+            };
+            let app_core = controller.app_core().clone();
+            spawn(async move {
+                match context_workflows::link_home_one_hop_link(&app_core, &home_id).await {
+                    Ok(_) => controller.info_toast("Direct one-hop link created"),
+                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                }
+                rerender();
+            });
+            true
+        }
+        (UiScreen::Contacts, "d") => {
+            let app_core = controller.app_core().clone();
+            spawn(async move {
+                match network_workflows::refresh_discovered_peers(&app_core).await {
+                    Ok(()) => controller.info_toast("Peer discovery refreshed"),
+                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                }
+                rerender();
+            });
+            true
+        }
+        _ => false,
+    }
 }
 
 #[component]
@@ -1690,7 +2147,6 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         };
     };
 
-    let modal = modal_view(&model);
     let controller_for_toast = controller.clone();
     let controller_for_runtime = controller.clone();
 
@@ -1822,6 +2278,21 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
             while stream.recv().await.is_ok() {
                 contacts_for_contacts_signal
                     .set(load_contacts_runtime_view(controller_for_contacts_signal.clone()).await);
+            }
+        });
+
+        let mut contacts_for_discovered_peers = contacts_runtime;
+        let controller_for_discovered_peers = controller_for_runtime.clone();
+        spawn(async move {
+            let mut stream = {
+                let core = controller_for_discovered_peers.app_core().read().await;
+                core.subscribe(&*DISCOVERED_PEERS_SIGNAL)
+            };
+
+            while stream.recv().await.is_ok() {
+                contacts_for_discovered_peers.set(
+                    load_contacts_runtime_view(controller_for_discovered_peers.clone()).await,
+                );
             }
         });
 
@@ -1988,6 +2459,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
     let modal_contacts_runtime = contacts_runtime_snapshot.clone();
     let modal_settings_runtime = settings_runtime_snapshot.clone();
     let modal_model = model.clone();
+    let modal = modal_view(&model, &chat_runtime_snapshot);
     let cancel_add_device_ceremony_id = model.add_device_ceremony_id.clone();
     let rerender = schedule_update();
     let keydown_rerender = rerender.clone();
@@ -2008,6 +2480,18 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
             onkeydown: move |event| {
                 if should_skip_global_key(controller.as_ref(), event.data().as_ref()) {
                     return;
+                }
+                if let Key::Character(text) = event.data().key() {
+                    if handle_runtime_character_shortcut(
+                        controller.clone(),
+                        &model,
+                        &keydown_runtime_snapshot,
+                        &text,
+                        keydown_rerender.clone(),
+                    ) {
+                        event.prevent_default();
+                        return;
+                    }
                 }
                 if matches!(event.data().key(), Key::Enter)
                     && matches!(model.screen, UiScreen::Chat)
@@ -2628,7 +3112,7 @@ fn neighborhood_screen(
                                     }
                                 }
                                 UiButton {
-                                    label: "Access Override Preview".to_string(),
+                                    label: "Access Override".to_string(),
                                     variant: ButtonVariant::Secondary,
                                     on_click: move |_| {
                                         detail_access_override_controller.send_action_keys("x");
@@ -2636,7 +3120,7 @@ fn neighborhood_screen(
                                     }
                                 }
                                 UiButton {
-                                    label: "Capability Preview".to_string(),
+                                    label: "Capability Config".to_string(),
                                     variant: ButtonVariant::Secondary,
                                     on_click: move |_| {
                                         detail_capability_controller.send_action_keys("p");
@@ -2898,6 +3382,8 @@ fn chat_screen(
                 topic: channel.topic.clone(),
                 unread_count: 0,
                 last_message: None,
+                member_count: 0,
+                is_dm: false,
             })
             .collect()
     };
@@ -3089,6 +3575,7 @@ fn contacts_screen(
     let start_chat_controller = controller.clone();
     let edit_controller = controller.clone();
     let remove_controller = controller.clone();
+    let refresh_peers_controller = controller.clone();
 
     rsx! {
         div {
@@ -3098,45 +3585,117 @@ fn contacts_screen(
                 subtitle: Some("Contacts share relational context".to_string()),
                 extra_class: Some("lg:col-span-4".to_string()),
                 div {
-                    class: "flex-1 min-h-0",
-                    if runtime.contacts.is_empty() {
-                        Empty {
-                            class: Some("h-full border-border bg-background".to_string()),
-                            EmptyHeader {
-                                EmptyTitle { "No contacts yet" }
-                                EmptyDescription { "Use the invitation flow to add contacts." }
+                    class: "flex flex-1 min-h-0 flex-col gap-3",
+                    div {
+                        class: "rounded-lg border border-border bg-background/60 px-3 py-3",
+                        div {
+                            class: "flex items-center justify-between gap-3",
+                            p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "LAN Peers" }
+                            UiButton {
+                                label: "Refresh".to_string(),
+                                variant: ButtonVariant::Secondary,
+                                on_click: move |_| {
+                                    let controller = refresh_peers_controller.clone();
+                                    let app_core = controller.app_core().clone();
+                                    let mut tick = render_tick;
+                                    spawn(async move {
+                                        match network_workflows::refresh_discovered_peers(&app_core).await {
+                                            Ok(()) => controller.info_toast("Peer discovery refreshed"),
+                                            Err(error) => controller.runtime_error_toast(error.to_string()),
+                                        }
+                                        tick.set(tick() + 1);
+                                    });
+                                }
                             }
                         }
-                    } else {
-                        ScrollArea {
-                            class: Some("h-full pr-1".to_string()),
-                            ScrollAreaViewport {
-                                class: Some("space-y-2".to_string()),
-                                for (idx, contact) in runtime.contacts.iter().enumerate() {
-                                    button {
-                                        r#type: "button",
-                                        class: "block w-full text-left",
-                                        onclick: {
-                                            let controller = controller.clone();
-                                            move |_| {
-                                                controller.set_selected_contact_index(idx);
-                                                render_tick.set(render_tick() + 1);
-                                            }
-                                        },
-                                        UiListItem {
-                                            label: contact.name.clone(),
-                                            secondary: Some(
-                                                if contact.is_guardian {
-                                                    "Guardian".to_string()
-                                                } else if contact.is_member {
-                                                    "Member".to_string()
-                                                } else if contact.is_online {
-                                                    "Online".to_string()
+                        if runtime.lan_peers.is_empty() {
+                            p { class: "m-0 mt-3 text-sm text-muted-foreground", "No LAN peers discovered yet." }
+                        } else {
+                            div { class: "mt-3 space-y-2",
+                                for peer in &runtime.lan_peers {
+                                    div {
+                                        class: "flex items-center gap-2",
+                                        div { class: "min-w-0 flex-1",
+                                            UiListItem {
+                                                label: peer.authority_id.clone(),
+                                                secondary: Some(if peer.invited {
+                                                    format!("{} • invitation pending", peer.address)
                                                 } else {
-                                                    "\u{00A0}".to_string()
+                                                    peer.address.clone()
+                                                }),
+                                                active: false,
+                                            }
+                                        }
+                                        UiButton {
+                                            label: if peer.invited {
+                                                "Pending".to_string()
+                                            } else {
+                                                "Invite".to_string()
+                                            },
+                                            variant: if peer.invited {
+                                                ButtonVariant::Secondary
+                                            } else {
+                                                ButtonVariant::Primary
+                                            },
+                                            on_click: {
+                                                let controller = controller.clone();
+                                                let authority_id = peer.authority_id.clone();
+                                                let label = peer.authority_id.clone();
+                                                move |_| {
+                                                    controller.open_create_invitation_modal(
+                                                        Some(&authority_id),
+                                                        Some(&label),
+                                                    );
+                                                    render_tick.set(render_tick() + 1);
                                                 }
-                                            ),
-                                            active: model.selected_contact_index == idx,
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    div {
+                        class: "flex-1 min-h-0",
+                        if runtime.contacts.is_empty() {
+                            Empty {
+                                class: Some("h-full border-border bg-background".to_string()),
+                                EmptyHeader {
+                                    EmptyTitle { "No contacts yet" }
+                                    EmptyDescription { "Use the invitation flow to add contacts." }
+                                }
+                            }
+                        } else {
+                            ScrollArea {
+                                class: Some("h-full pr-1".to_string()),
+                                ScrollAreaViewport {
+                                    class: Some("space-y-2".to_string()),
+                                    for (idx, contact) in runtime.contacts.iter().enumerate() {
+                                        button {
+                                            r#type: "button",
+                                            class: "block w-full text-left",
+                                            onclick: {
+                                                let controller = controller.clone();
+                                                move |_| {
+                                                    controller.set_selected_contact_index(idx);
+                                                    render_tick.set(render_tick() + 1);
+                                                }
+                                            },
+                                            UiListItem {
+                                                label: contact.name.clone(),
+                                                secondary: Some(
+                                                    if contact.is_guardian {
+                                                        "Guardian".to_string()
+                                                    } else if contact.is_member {
+                                                        "Member".to_string()
+                                                    } else if contact.is_online {
+                                                        "Online".to_string()
+                                                    } else {
+                                                        "\u{00A0}".to_string()
+                                                    }
+                                                ),
+                                                active: model.selected_contact_index == idx,
+                                            }
                                         }
                                     }
                                 }
@@ -3148,9 +3707,20 @@ fn contacts_screen(
                     UiButton {
                         label: "Invite".to_string(),
                         variant: ButtonVariant::Primary,
-                        on_click: move |_| {
-                            invite_controller.send_action_keys("n");
-                            render_tick.set(render_tick() + 1);
+                        on_click: {
+                            let controller = invite_controller.clone();
+                            let selected_contact = selected_contact.clone();
+                            move |_| {
+                                if let Some(contact) = &selected_contact {
+                                    controller.open_create_invitation_modal(
+                                        Some(&contact.authority_id),
+                                        Some(&contact.name),
+                                    );
+                                } else {
+                                    controller.open_create_invitation_modal(None, Some("New contact"));
+                                }
+                                render_tick.set(render_tick() + 1);
+                            }
                         }
                     }
                 }
@@ -3256,8 +3826,8 @@ fn contacts_screen(
 fn notifications_screen(
     model: &UiModel,
     runtime: &NotificationsRuntimeView,
-    _controller: Arc<UiController>,
-    _render_tick: Signal<u64>,
+    controller: Arc<UiController>,
+    mut render_tick: Signal<u64>,
 ) -> Element {
     let selected = runtime
         .items
@@ -3288,10 +3858,22 @@ fn notifications_screen(
                         ScrollAreaViewport {
                             class: Some("space-y-2".to_string()),
                             for (idx, entry) in runtime.items.iter().enumerate().take(24) {
-                                UiListItem {
-                                    label: entry.title.clone(),
-                                    secondary: Some(entry.kind_label.clone()),
-                                    active: idx == model.selected_notification_index,
+                                button {
+                                    r#type: "button",
+                                    class: "block w-full text-left",
+                                    onclick: {
+                                        let controller = controller.clone();
+                                        let item_count = runtime.items.len();
+                                        move |_| {
+                                            controller.set_selected_notification_index(idx, item_count);
+                                            render_tick.set(render_tick() + 1);
+                                        }
+                                    },
+                                    UiListItem {
+                                        label: entry.title.clone(),
+                                        secondary: Some(entry.kind_label.clone()),
+                                        active: idx == model.selected_notification_index,
+                                    }
                                 }
                             }
                         }
@@ -3314,6 +3896,108 @@ fn notifications_screen(
                             label: item.subtitle,
                             secondary: Some(item.detail),
                             active: false,
+                        }
+                        div {
+                            class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
+                            match item.action {
+                                NotificationRuntimeAction::ReceivedInvitation => rsx! {
+                                    UiButton {
+                                        label: "Accept".to_string(),
+                                        variant: ButtonVariant::Primary,
+                                        on_click: {
+                                            let controller = controller.clone();
+                                            let invitation_id = item.id.clone();
+                                            move |_| {
+                                                let controller = controller.clone();
+                                                let app_core = controller.app_core().clone();
+                                                let mut tick = render_tick;
+                                                let invitation_id = invitation_id.clone();
+                                                spawn(async move {
+                                                    match invitation_workflows::accept_invitation_by_str(&app_core, &invitation_id).await {
+                                                        Ok(()) => controller.complete_runtime_modal_success("Invitation accepted"),
+                                                        Err(error) => controller.runtime_error_toast(error.to_string()),
+                                                    }
+                                                    tick.set(tick() + 1);
+                                                });
+                                            }
+                                        }
+                                    }
+                                    UiButton {
+                                        label: "Decline".to_string(),
+                                        variant: ButtonVariant::Secondary,
+                                        on_click: {
+                                            let controller = controller.clone();
+                                            let invitation_id = item.id.clone();
+                                            move |_| {
+                                                let controller = controller.clone();
+                                                let app_core = controller.app_core().clone();
+                                                let mut tick = render_tick;
+                                                let invitation_id = invitation_id.clone();
+                                                spawn(async move {
+                                                    match invitation_workflows::decline_invitation_by_str(&app_core, &invitation_id).await {
+                                                        Ok(()) => controller.complete_runtime_modal_success("Invitation declined"),
+                                                        Err(error) => controller.runtime_error_toast(error.to_string()),
+                                                    }
+                                                    tick.set(tick() + 1);
+                                                });
+                                            }
+                                        }
+                                    }
+                                },
+                                NotificationRuntimeAction::SentInvitation => rsx! {
+                                    UiButton {
+                                        label: "Copy Code".to_string(),
+                                        variant: ButtonVariant::Primary,
+                                        on_click: {
+                                            let controller = controller.clone();
+                                            let invitation_id = item.id.clone();
+                                            move |_| {
+                                                let controller = controller.clone();
+                                                let app_core = controller.app_core().clone();
+                                                let mut tick = render_tick;
+                                                let invitation_id = invitation_id.clone();
+                                                spawn(async move {
+                                                    match invitation_workflows::export_invitation_by_str(&app_core, &invitation_id).await {
+                                                        Ok(code) => {
+                                                            controller.write_clipboard(&code);
+                                                            controller.complete_runtime_modal_success("Invitation code copied to clipboard");
+                                                        }
+                                                        Err(error) => controller.runtime_error_toast(error.to_string()),
+                                                    }
+                                                    tick.set(tick() + 1);
+                                                });
+                                            }
+                                        }
+                                    }
+                                },
+                                NotificationRuntimeAction::RecoveryApproval => rsx! {
+                                    UiButton {
+                                        label: "Approve Recovery".to_string(),
+                                        variant: ButtonVariant::Primary,
+                                        on_click: {
+                                            let controller = controller.clone();
+                                            let ceremony_id = item.id.clone();
+                                            move |_| {
+                                                let controller = controller.clone();
+                                                let app_core = controller.app_core().clone();
+                                                let mut tick = render_tick;
+                                                let ceremony_id = ceremony_id.clone();
+                                                spawn(async move {
+                                                    match recovery_workflows::approve_recovery(
+                                                        &app_core,
+                                                        &CeremonyId::new(ceremony_id),
+                                                    ).await {
+                                                        Ok(()) => controller.complete_runtime_modal_success("Recovery approved"),
+                                                        Err(error) => controller.runtime_error_toast(error.to_string()),
+                                                    }
+                                                    tick.set(tick() + 1);
+                                                });
+                                            }
+                                        }
+                                    }
+                                },
+                                NotificationRuntimeAction::None => rsx! {},
+                            }
                         }
                     }
                 } else {
@@ -3731,7 +4415,7 @@ fn active_modal_title(model: &UiModel) -> Option<String> {
     )
 }
 
-fn modal_view(model: &UiModel) -> Option<ModalView> {
+fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalView> {
     let modal = model.modal?;
     let title = active_modal_title(model).unwrap_or_else(|| "Modal".to_string());
     let mut details = Vec::new();
@@ -3745,8 +4429,17 @@ fn modal_view(model: &UiModel) -> Option<ModalView> {
             keybind_rows = help_keybind_rows;
         }
         ModalState::CreateInvitation => {
-            details.push("Create an invitation code for a contact.".to_string());
-            details.push("Press Enter to generate and copy the code.".to_string());
+            if let Some(receiver_label) = &model.create_invitation_receiver_label {
+                details.push(format!("Create an invitation code for {receiver_label}."));
+                details.push(
+                    "Review or adjust the authority id, then press Enter to generate and copy the code."
+                        .to_string(),
+                );
+            } else {
+                details.push("Create an invitation code for a contact.".to_string());
+                details.push("Enter the target authority id, then press Enter to generate and copy the code.".to_string());
+            }
+            input_label = Some("Receiver Authority ID".to_string());
         }
         ModalState::AcceptInvitation => {
             details.push("Paste an invitation code, then press Enter.".to_string());
@@ -3805,7 +4498,47 @@ fn modal_view(model: &UiModel) -> Option<ModalView> {
             input_label = Some("Channel Topic".to_string());
         }
         ModalState::ChannelInfo => {
-            details.push("Channel details view.".to_string());
+            let active_channel = if chat_runtime.active_channel.is_empty() {
+                model.selected_channel_name().unwrap_or("general").to_string()
+            } else {
+                chat_runtime.active_channel.clone()
+            };
+            if let Some(channel) = chat_runtime
+                .channels
+                .iter()
+                .find(|channel| channel.name.eq_ignore_ascii_case(&active_channel))
+            {
+                details.push(format!("Channel: #{}", channel.name));
+                details.push(format!(
+                    "Type: {}",
+                    if channel.is_dm {
+                        "Direct Message"
+                    } else {
+                        "Group Channel"
+                    }
+                ));
+                details.push(format!(
+                    "Topic: {}",
+                    if channel.topic.trim().is_empty() {
+                        "No topic set".to_string()
+                    } else {
+                        channel.topic.clone()
+                    }
+                ));
+                details.push(format!("Unread messages: {}", channel.unread_count));
+                details.push(format!(
+                    "Visible messages: {}",
+                    chat_runtime.messages.len()
+                ));
+                if channel.member_count > 0 {
+                    details.push(format!("Known members: {}", channel.member_count));
+                }
+                if let Some(last_message) = &channel.last_message {
+                    details.push(format!("Latest message: {last_message}"));
+                }
+            } else {
+                details.push("No channel selected.".to_string());
+            }
         }
         ModalState::EditNickname => {
             details.push("Update the selected nickname and press Enter.".to_string());
@@ -4144,7 +4877,10 @@ fn help_modal_content(screen: UiScreen) -> (Vec<String>, Vec<(String, String)>) 
                 "up / down".to_string(),
                 "Move notification selection".to_string(),
             ),
-            ("enter".to_string(), "No-op placeholder".to_string()),
+            (
+                "click actions".to_string(),
+                "Accept, decline, export, or approve from the detail pane".to_string(),
+            ),
             ("esc".to_string(), "Close modal".to_string()),
         ],
         UiScreen::Settings => vec![

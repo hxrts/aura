@@ -83,6 +83,7 @@ pub struct ChannelRow {
 
 #[derive(Debug, Clone)]
 pub struct ContactRow {
+    pub authority_id: String,
     pub name: String,
     pub selected: bool,
     pub is_guardian: bool,
@@ -176,6 +177,7 @@ pub struct UiModel {
     pub modal: Option<ModalState>,
     pub modal_buffer: String,
     pub modal_hint: String,
+    pub create_invitation_receiver_label: Option<String>,
     pub create_channel_step: CreateChannelWizardStep,
     pub add_device_step: AddDeviceWizardStep,
     pub add_device_name: String,
@@ -258,6 +260,7 @@ impl UiModel {
             modal: None,
             modal_buffer: String::new(),
             modal_hint: String::new(),
+            create_invitation_receiver_label: None,
             create_channel_step: CreateChannelWizardStep::Details,
             add_device_step: AddDeviceWizardStep::Name,
             add_device_name: String::new(),
@@ -370,6 +373,7 @@ impl UiModel {
             return;
         }
         self.contacts.push(ContactRow {
+            authority_id: name.to_string(),
             name: name.to_string(),
             selected: self.contacts.is_empty(),
             is_guardian: false,
@@ -383,6 +387,12 @@ impl UiModel {
         self.contacts
             .get(self.selected_contact_index)
             .map(|row| row.name.as_str())
+    }
+
+    pub fn selected_contact_authority_id(&self) -> Option<&str> {
+        self.contacts
+            .get(self.selected_contact_index)
+            .map(|row| row.authority_id.as_str())
     }
 
     pub fn set_selected_contact_name(&mut self, value: String) {
@@ -419,6 +429,15 @@ impl UiModel {
         self.selected_neighborhood_member_index = index;
     }
 
+    pub fn set_selected_notification_index(&mut self, index: usize, count: usize) {
+        if count == 0 {
+            self.selected_notification_index = 0;
+            return;
+        }
+
+        self.selected_notification_index = index.min(count.saturating_sub(1));
+    }
+
     pub fn replace_channels(&mut self, channels: Vec<(String, String)>) {
         let previous = self.selected_channel_name().map(str::to_string);
         self.channels = channels
@@ -449,11 +468,12 @@ impl UiModel {
         }
     }
 
-    pub fn replace_contacts(&mut self, contacts: Vec<(String, bool)>) {
+    pub fn replace_contacts(&mut self, contacts: Vec<(String, String, bool)>) {
         let previous = self.selected_contact_name().map(str::to_string);
         self.contacts = contacts
             .into_iter()
-            .map(|(name, is_guardian)| ContactRow {
+            .map(|(authority_id, name, is_guardian)| ContactRow {
+                authority_id,
                 name,
                 selected: false,
                 is_guardian,
@@ -649,6 +669,7 @@ fn dismiss_modal(model: &mut UiModel) {
     model.modal = None;
     model.modal_buffer.clear();
     model.modal_hint.clear();
+    model.create_invitation_receiver_label = None;
     model.reset_create_channel_wizard();
     model.reset_add_device_wizard();
     model.reset_guardian_wizard();
@@ -731,12 +752,28 @@ impl UiController {
         write_model(&self.model).set_selected_neighborhood_member_index(index);
     }
 
+    pub fn set_selected_notification_index(&self, index: usize, count: usize) {
+        write_model(&self.model).set_selected_notification_index(index, count);
+    }
+
     pub fn sync_runtime_channels(&self, channels: Vec<(String, String)>) {
         write_model(&self.model).replace_channels(channels);
     }
 
-    pub fn sync_runtime_contacts(&self, contacts: Vec<(String, bool)>) {
+    pub fn sync_runtime_contacts(&self, contacts: Vec<(String, String, bool)>) {
         write_model(&self.model).replace_contacts(contacts);
+    }
+
+    pub fn open_create_invitation_modal(
+        &self,
+        receiver_id: Option<&str>,
+        receiver_label: Option<&str>,
+    ) {
+        let mut model = write_model(&self.model);
+        model.modal = Some(ModalState::CreateInvitation);
+        model.modal_buffer = receiver_id.unwrap_or_default().to_string();
+        model.modal_hint = "Invite Contacts".to_string();
+        model.create_invitation_receiver_label = receiver_label.map(str::to_string);
     }
 
     pub fn sync_runtime_authorities(&self, authorities: Vec<(String, String, bool)>) {
