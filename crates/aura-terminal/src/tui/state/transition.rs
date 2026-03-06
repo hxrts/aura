@@ -163,6 +163,72 @@ mod tests {
     }
 
     #[test]
+    fn test_contacts_import_control_digit_aliases_append_digits() {
+        use crate::tui::state::modal_queue::QueuedModal;
+        use crate::tui::state::views::ImportInvitationModalState;
+        use aura_core::effects::terminal::{KeyEvent, TerminalEvent};
+
+        let mut state = TuiState::new();
+        state.modal_queue.enqueue(QueuedModal::ContactsImport(
+            ImportInvitationModalState::default(),
+        ));
+
+        let (state, _) = transition(&state, TerminalEvent::Key(KeyEvent::char('\u{1}')));
+        let (state, _) = transition(&state, TerminalEvent::Key(KeyEvent::char('\u{2}')));
+
+        match state.modal_queue.current() {
+            Some(QueuedModal::ContactsImport(modal_state)) => {
+                assert_eq!(modal_state.code, "12");
+            }
+            other => panic!("unexpected modal state: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_contacts_import_demo_ctrl_shortcut_still_autofills() {
+        use crate::tui::state::modal_queue::QueuedModal;
+        use crate::tui::state::views::ImportInvitationModalState;
+        use aura_core::effects::terminal::{KeyEvent, TerminalEvent};
+
+        let mut state = TuiState::new();
+        state.contacts.demo_alice_code = "aura:v1:alice-demo".to_string();
+        state.modal_queue.enqueue(QueuedModal::ContactsImport(
+            ImportInvitationModalState::default(),
+        ));
+
+        let (state, _) = transition(&state, TerminalEvent::Key(KeyEvent::char('\u{1}')));
+
+        match state.modal_queue.current() {
+            Some(QueuedModal::ContactsImport(modal_state)) => {
+                assert_eq!(modal_state.code, "aura:v1:alice-demo");
+            }
+            other => panic!("unexpected modal state: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_device_import_control_digit_aliases_append_digits() {
+        use crate::tui::state::modal_queue::QueuedModal;
+        use crate::tui::state::views::ImportInvitationModalState;
+        use aura_core::effects::terminal::{KeyEvent, TerminalEvent};
+
+        let mut state = TuiState::new();
+        state.modal_queue.enqueue(QueuedModal::SettingsDeviceImport(
+            ImportInvitationModalState::default(),
+        ));
+
+        let (state, _) = transition(&state, TerminalEvent::Key(KeyEvent::char('\u{1}')));
+        let (state, _) = transition(&state, TerminalEvent::Key(KeyEvent::char('\u{2}')));
+
+        match state.modal_queue.current() {
+            Some(QueuedModal::SettingsDeviceImport(modal_state)) => {
+                assert_eq!(modal_state.code, "12");
+            }
+            other => panic!("unexpected modal state: {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_send_message_command() {
         let mut state = TuiState::new();
         state.router.go_to(Screen::Chat);

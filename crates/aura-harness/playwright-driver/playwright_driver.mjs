@@ -8,6 +8,8 @@ import { chromium } from 'playwright';
 
 const sessions = new Map();
 let requestChain = Promise.resolve();
+const PAGE_GOTO_TIMEOUT_MS = 60000;
+const HARNESS_READY_TIMEOUT_MS = 60000;
 
 function nowIso() {
   return new Date().toISOString();
@@ -64,7 +66,7 @@ async function ensureHarness(page) {
   await page.waitForFunction(() => {
     const bridge = window.__AURA_HARNESS__;
     return bridge && typeof bridge.snapshot === 'function';
-  }, null, { timeout: 15000 });
+  }, null, { timeout: HARNESS_READY_TIMEOUT_MS });
 }
 
 async function startPage(params) {
@@ -97,7 +99,7 @@ async function startPage(params) {
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
   }
 
-  await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
+  await page.goto(appUrl, { waitUntil: 'domcontentloaded', timeout: PAGE_GOTO_TIMEOUT_MS });
   await ensureHarness(page);
 
   sessions.set(instanceId, {

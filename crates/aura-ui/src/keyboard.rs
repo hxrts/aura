@@ -4,7 +4,7 @@
 //! input, and dispatch commands across the UI model state machine.
 
 use crate::clipboard::ClipboardPort;
-use crate::model::{AccessDepth, ModalState, ToastState, UiModel, UiScreen};
+use crate::model::{AccessDepth, ChannelRow, ModalState, ToastState, UiModel, UiScreen};
 use aura_app::ui::types::parse_chat_command;
 
 const SETTINGS_ROWS: usize = 6;
@@ -367,7 +367,6 @@ fn handle_settings_char(model: &mut UiModel, ch: char) {
 fn handle_enter(model: &mut UiModel, clipboard: &dyn ClipboardPort) {
     if model.input_mode {
         let text = model.input_buffer.trim().to_string();
-        model.input_mode = false;
         model.input_buffer.clear();
         if !text.is_empty() {
             submit_chat_input(model, &text);
@@ -628,7 +627,11 @@ fn submit_chat_input(model: &mut UiModel, text: &str) {
                     aura_app::ui::types::ChatCommand::Ban { .. }
                     | aura_app::ui::types::ChatCommand::Mute { .. }
                     | aura_app::ui::types::ChatCommand::Unmute { .. }
-                    | aura_app::ui::types::ChatCommand::Unban { .. } => {
+                    | aura_app::ui::types::ChatCommand::Unban { .. }
+                    | aura_app::ui::types::ChatCommand::Pin { .. }
+                    | aura_app::ui::types::ChatCommand::Unpin { .. }
+                    | aura_app::ui::types::ChatCommand::Op { .. }
+                    | aura_app::ui::types::ChatCommand::Deop { .. } => {
                         model.toast = Some(command_toast(
                             '✗',
                             "denied",
@@ -637,8 +640,39 @@ fn submit_chat_input(model: &mut UiModel, text: &str) {
                             "permission denied",
                         ));
                     }
-                    aura_app::ui::types::ChatCommand::Msg { text, .. }
-                    | aura_app::ui::types::ChatCommand::Me { action: text } => {
+                    aura_app::ui::types::ChatCommand::Mode { flags, .. } => {
+                        let trimmed = flags.trim();
+                        if trimmed.starts_with('-') {
+                            model.toast = Some(command_toast(
+                                '✓',
+                                "ok",
+                                "none",
+                                "enforced",
+                                &format!("command {command_name} applied"),
+                            ));
+                        } else {
+                            model.toast = Some(command_toast(
+                                '✗',
+                                "denied",
+                                "permission_denied",
+                                "accepted",
+                                "permission denied",
+                            ));
+                        }
+                    }
+                    aura_app::ui::types::ChatCommand::Msg { text, .. } => {
+                        ensure_dm_channel(model);
+                        model.select_channel_by_name("dm");
+                        model.messages.push(text);
+                        model.toast = Some(command_toast(
+                            '✓',
+                            "ok",
+                            "none",
+                            "accepted",
+                            &format!("command {command_name} applied"),
+                        ));
+                    }
+                    aura_app::ui::types::ChatCommand::Me { action: text } => {
                         model.messages.push(text);
                         model.toast = Some(command_toast(
                             '✓',
@@ -676,6 +710,15 @@ fn submit_chat_input(model: &mut UiModel, text: &str) {
                             "home invitation",
                         ));
                     }
+                    aura_app::ui::types::ChatCommand::NhLink { .. } => {
+                        model.toast = Some(command_toast(
+                            '✗',
+                            "denied",
+                            "permission_denied",
+                            "accepted",
+                            "nhlink permission denied",
+                        ));
+                    }
                     _ => {
                         model.toast = Some(command_toast(
                             '✓',
@@ -688,10 +731,11 @@ fn submit_chat_input(model: &mut UiModel, text: &str) {
                 }
             }
             Err(error) => {
+                let reason_code = parse_reason_code_for_command_error(&error.to_string());
                 model.toast = Some(command_toast(
                     '✗',
                     "invalid",
-                    "invalid_argument",
+                    reason_code,
                     "accepted",
                     &error.to_string(),
                 ));
@@ -728,6 +772,30 @@ fn handle_escape(model: &mut UiModel) {
         return;
     }
     model.toast = None;
+}
+
+fn ensure_dm_channel(model: &mut UiModel) {
+    if model
+        .channels
+        .iter()
+        .any(|row| row.name.eq_ignore_ascii_case("dm"))
+    {
+        return;
+    }
+    model.channels.push(ChannelRow {
+        name: "dm".to_string(),
+        selected: false,
+        topic: String::new(),
+    });
+}
+
+fn parse_reason_code_for_command_error(message: &str) -> &'static str {
+    let lowered = message.to_ascii_lowercase();
+    if lowered.contains("unknown command") || lowered.contains("unrecognized command") {
+        "not_found"
+    } else {
+        "invalid_argument"
+    }
 }
 
 fn dismiss_modal(model: &mut UiModel) {
@@ -892,6 +960,87 @@ mod tests {
         model.modal = None;
         apply_text_keys(&mut model, "i", &clipboard);
         assert!(model.input_mode);
+    }
+
+    #[test]
+    fn chat_enter_keeps_insert_mode_after_sending_message() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+
+        model.set_screen(UiScreen::Chat);
+        model.input_mode = true;
+        model.input_buffer = "hello".to_string();
+
+        apply_text_keys(&mut model, "\n", &clipboard);
+
+        assert!(model.input_mode);
+        assert!(model.input_buffer.is_empty());
+        assert_eq!(model.messages.last().map(String::as_str), Some("hello"));
+    }
+
+    #[test]
+    fn chat_nhlink_command_reports_permission_denied() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+
+        model.set_screen(UiScreen::Chat);
+        model.input_mode = true;
+        model.input_buffer = "/nhlink home".to_string();
+
+        apply_text_keys(&mut model, "\n", &clipboard);
+
+        let toast = model.toast.expect("nhlink should emit a toast");
+        assert!(toast.message.contains("status=denied"));
+        assert!(toast.message.contains("reason=permission_denied"));
+        assert!(toast.message.contains("consistency=accepted"));
+    }
+
+    #[test]
+    fn chat_pin_command_reports_permission_denied() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+
+        model.set_screen(UiScreen::Chat);
+        model.input_mode = true;
+        model.input_buffer = "/pin msg-1".to_string();
+
+        apply_text_keys(&mut model, "\n", &clipboard);
+
+        let toast = model.toast.expect("pin should emit a toast");
+        assert!(toast.message.contains("status=denied"));
+        assert!(toast.message.contains("reason=permission_denied"));
+    }
+
+    #[test]
+    fn chat_mode_minus_reports_enforced_success() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+
+        model.set_screen(UiScreen::Chat);
+        model.input_mode = true;
+        model.input_buffer = "/mode slash-lab -m".to_string();
+
+        apply_text_keys(&mut model, "\n", &clipboard);
+
+        let toast = model.toast.expect("mode -m should emit a toast");
+        assert!(toast.message.contains("status=ok"));
+        assert!(toast.message.contains("consistency=enforced"));
+    }
+
+    #[test]
+    fn chat_unknown_command_reports_not_found_reason() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+
+        model.set_screen(UiScreen::Chat);
+        model.input_mode = true;
+        model.input_buffer = "/unknowncmd".to_string();
+
+        apply_text_keys(&mut model, "\n", &clipboard);
+
+        let toast = model.toast.expect("unknown command should emit a toast");
+        assert!(toast.message.contains("status=invalid"));
+        assert!(toast.message.contains("reason=not_found"));
     }
 
     #[test]

@@ -46,6 +46,25 @@ fn list_nav_from_key(code: &KeyCode) -> Option<NavKey> {
     }
 }
 
+fn digit_alias_from_key(code: &KeyCode) -> Option<char> {
+    match code {
+        // Some PTY paths surface these as control bytes in raw mode.
+        KeyCode::Char('\u{1}') => Some('1'),
+        KeyCode::Char('\u{2}') => Some('2'),
+        _ => None,
+    }
+}
+
+fn modal_text_char_from_key(code: &KeyCode) -> Option<char> {
+    if let Some(alias) = digit_alias_from_key(code) {
+        return Some(alias);
+    }
+    match code {
+        KeyCode::Char(c) if !c.is_control() => Some(*c),
+        _ => None,
+    }
+}
+
 fn warn_no_selection(state: &mut TuiState, entity: &str) {
     state.toast_warning(format!("No {entity} selected"));
 }
@@ -860,6 +879,10 @@ fn handle_import_invitation_key_queue(
     modal_state: ImportInvitationModalState,
     _source_screen: Screen,
 ) {
+    let has_demo_alice_code = !state.contacts.demo_alice_code.is_empty();
+    let has_demo_carol_code = !state.contacts.demo_carol_code.is_empty();
+    let empty_code = modal_state.code.is_empty();
+
     // Demo shortcuts: Ctrl+A / Ctrl+L fill Alice/Carol invite codes.
     //
     // These are handled at the state machine layer so they work consistently
@@ -867,19 +890,17 @@ fn handle_import_invitation_key_queue(
     let is_ctrl_a = (key.modifiers.ctrl()
         && matches!(key.code, KeyCode::Char('a') | KeyCode::Char('A')))
         // Some terminals report Ctrl+a as the control character (SOH, 0x01) with no modifiers.
-        || matches!(key.code, KeyCode::Char('\u{1}'));
+        || (empty_code && has_demo_alice_code && matches!(key.code, KeyCode::Char('\u{1}')));
     let is_ctrl_l = (key.modifiers.ctrl()
         && matches!(key.code, KeyCode::Char('l') | KeyCode::Char('L')))
         // Some terminals report Ctrl+l as the control character (FF, 0x0c) with no modifiers.
-        || matches!(key.code, KeyCode::Char('\u{c}'));
+        || (empty_code && has_demo_carol_code && matches!(key.code, KeyCode::Char('\u{c}')));
     // Harness fallback: some PTY paths do not surface Ctrl modifiers reliably.
     // In demo mode, allow uppercase A/L on an empty field as deterministic autofill.
-    let is_demo_shift_a = modal_state.code.is_empty()
-        && !state.contacts.demo_alice_code.is_empty()
-        && matches!(key.code, KeyCode::Char('A'));
-    let is_demo_shift_l = modal_state.code.is_empty()
-        && !state.contacts.demo_carol_code.is_empty()
-        && matches!(key.code, KeyCode::Char('L'));
+    let is_demo_shift_a =
+        empty_code && has_demo_alice_code && matches!(key.code, KeyCode::Char('A'));
+    let is_demo_shift_l =
+        empty_code && has_demo_carol_code && matches!(key.code, KeyCode::Char('L'));
 
     if is_ctrl_a || is_ctrl_l || is_demo_shift_a || is_demo_shift_l {
         // Dismiss the demo hint toast since the user used a shortcut
@@ -912,7 +933,10 @@ fn handle_import_invitation_key_queue(
                 state.modal_queue.dismiss();
             }
         }
-        KeyCode::Char(c) => {
+        KeyCode::Char(_) => {
+            let Some(c) = modal_text_char_from_key(&key.code) else {
+                return;
+            };
             state.modal_queue.update_active(|modal| match modal {
                 QueuedModal::ContactsImport(ref mut s) => s.code.push(c),
                 _ => {}
@@ -984,7 +1008,10 @@ fn handle_device_import_key_queue(
                 state.modal_queue.dismiss();
             }
         }
-        KeyCode::Char(c) => {
+        KeyCode::Char(_) => {
+            let Some(c) = modal_text_char_from_key(&key.code) else {
+                return;
+            };
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::SettingsDeviceImport(ref mut s) = modal {
                     s.code.push(c);

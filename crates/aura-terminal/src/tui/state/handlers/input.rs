@@ -266,6 +266,63 @@ mod tests {
                 if content == "/kick alice"
         ));
     }
+
+    #[test]
+    fn enter_help_command_emits_local_help_toast() {
+        let mut state = TuiState::new();
+        state.router.go_to(Screen::Chat);
+        state.chat.focus = ChatFocus::Input;
+        state.chat.insert_mode = true;
+        state.chat.input_buffer = "/help".to_string();
+
+        let mut commands = Vec::new();
+        handle_insert_mode_key(&mut state, &mut commands, KeyEvent::press(KeyCode::Enter));
+
+        assert!(commands.is_empty(), "help should be handled locally");
+        let toast = state
+            .toast_queue
+            .current()
+            .expect("help should enqueue a toast");
+        assert!(toast.message.contains("Use ? for TUI help"));
+    }
+
+    #[test]
+    fn enter_help_with_command_emits_command_help_toast() {
+        let mut state = TuiState::new();
+        state.router.go_to(Screen::Chat);
+        state.chat.focus = ChatFocus::Input;
+        state.chat.insert_mode = true;
+        state.chat.input_buffer = "/help kick".to_string();
+
+        let mut commands = Vec::new();
+        handle_insert_mode_key(&mut state, &mut commands, KeyEvent::press(KeyCode::Enter));
+
+        assert!(commands.is_empty(), "help should be handled locally");
+        let toast = state
+            .toast_queue
+            .current()
+            .expect("help should enqueue a toast");
+        assert!(toast.message.contains("/kick <user> [reason]"));
+    }
+
+    #[test]
+    fn enter_whois_command_emits_user_toast() {
+        let mut state = TuiState::new();
+        state.router.go_to(Screen::Chat);
+        state.chat.focus = ChatFocus::Input;
+        state.chat.insert_mode = true;
+        state.chat.input_buffer = "/whois authority-abc".to_string();
+
+        let mut commands = Vec::new();
+        handle_insert_mode_key(&mut state, &mut commands, KeyEvent::press(KeyCode::Enter));
+
+        assert!(commands.is_empty(), "whois should be handled locally");
+        let toast = state
+            .toast_queue
+            .current()
+            .expect("whois should enqueue a toast");
+        assert!(toast.message.contains("User: authority-abc"));
+    }
 }
 
 /// Handle insert mode key events
@@ -339,11 +396,42 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                     let content = state.chat.input_buffer.clone();
                     state.chat.input_buffer.clear();
                     if content.starts_with('/') {
-                        // Route all slash commands through the chat callback strong-command
-                        // pipeline (`ParsedCommand -> ResolvedCommand -> CommandPlan`).
-                        commands.push(TuiCommand::Dispatch(DispatchCommand::SendChatMessage {
-                            content,
-                        }));
+                        match crate::tui::commands::parse_command(&content) {
+                            // Handle /help locally so deterministic UI guidance is shown even
+                            // when command callbacks are unavailable or delayed.
+                            Ok(crate::tui::commands::IrcCommand::Help { command }) => {
+                                let message = if let Some(raw_name) = command
+                                    .as_deref()
+                                    .map(str::trim)
+                                    .filter(|value| !value.is_empty())
+                                {
+                                    let normalized =
+                                        raw_name.trim_start_matches('/').to_lowercase();
+                                    if let Some(help) =
+                                        crate::tui::commands::command_help(&normalized)
+                                    {
+                                        format!("{} — {}", help.syntax, help.description)
+                                    } else {
+                                        format!("Unknown command: /{normalized}")
+                                    }
+                                } else {
+                                    "Use ? for TUI help. Run /help <command> for details. Core commands: /msg /me /nick /who /whois /join /leave /topic /invite /homeinvite /homeaccept /kick /ban /unban /mute /unmute /pin /unpin /op /deop /mode /neighborhood /nhadd /nhlink".to_string()
+                                };
+                                state.toast_info(message);
+                            }
+                            // Keep /whois deterministic in local UI mode (same UX as web shell).
+                            Ok(crate::tui::commands::IrcCommand::Whois { target }) => {
+                                state.toast_info(format!("User: {target}"));
+                            }
+                            _ => {
+                                // Route other slash commands through the chat callback
+                                // strong-command pipeline (`ParsedCommand -> ResolvedCommand
+                                // -> CommandPlan`).
+                                commands.push(TuiCommand::Dispatch(
+                                    DispatchCommand::SendChatMessage { content },
+                                ));
+                            }
+                        }
                     } else {
                         commands.push(TuiCommand::Dispatch(DispatchCommand::SendChatMessage {
                             content,

@@ -148,11 +148,18 @@ impl UiModel {
         Self {
             screen: UiScreen::Neighborhood,
             settings_index: 0,
-            channels: vec![ChannelRow {
-                name: "general".to_string(),
-                selected: true,
-                topic: "bootstrap-topic".to_string(),
-            }],
+            channels: vec![
+                ChannelRow {
+                    name: "general".to_string(),
+                    selected: true,
+                    topic: "bootstrap-topic".to_string(),
+                },
+                ChannelRow {
+                    name: "dm".to_string(),
+                    selected: false,
+                    topic: String::new(),
+                },
+            ],
             contacts: Vec::new(),
             messages: Vec::new(),
             notifications: Vec::new(),
@@ -192,6 +199,9 @@ impl UiModel {
         // (including settings buttons) are not swallowed as hidden text input.
         self.input_mode = false;
         self.input_buffer.clear();
+        if matches!(screen, UiScreen::Neighborhood) {
+            self.neighborhood_mode = NeighborhoodMode::Map;
+        }
         if matches!(self.modal, Some(ModalState::Help)) {
             self.modal_hint = format!("Help - {}", screen.help_label());
         }
@@ -339,6 +349,10 @@ impl UiController {
         write_model(&self.model).set_screen(screen);
     }
 
+    pub fn select_channel_by_name(&self, name: &str) {
+        write_model(&self.model).select_channel_by_name(name);
+    }
+
     pub fn set_modal_buffer(&self, value: &str) {
         write_model(&self.model).modal_buffer = value.to_string();
     }
@@ -426,7 +440,7 @@ fn write_model(model: &AsyncRwLock<UiModel>) -> async_lock::RwLockWriteGuard<'_,
 
 #[cfg(test)]
 mod tests {
-    use super::{UiModel, UiScreen};
+    use super::{NeighborhoodMode, UiModel, UiScreen};
 
     #[test]
     fn set_screen_clears_input_mode_and_buffer() {
@@ -439,5 +453,15 @@ mod tests {
         assert!(!model.input_mode);
         assert!(model.input_buffer.is_empty());
         assert!(matches!(model.screen, UiScreen::Settings));
+    }
+
+    #[test]
+    fn entering_neighborhood_screen_resets_to_map_mode() {
+        let mut model = UiModel::new("authority-local".to_string());
+        model.neighborhood_mode = NeighborhoodMode::Detail;
+
+        model.set_screen(UiScreen::Neighborhood);
+
+        assert!(matches!(model.neighborhood_mode, NeighborhoodMode::Map));
     }
 }

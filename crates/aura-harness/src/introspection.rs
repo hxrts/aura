@@ -148,11 +148,11 @@ pub fn extract_current_selection(screen: &str) -> Option<SelectionSnapshot> {
 }
 
 pub fn extract_toast(screen: &str) -> Option<ToastSnapshot> {
-    for line in screen.lines() {
-        if !line.contains("[Esc] dismiss") {
+    for line in screen.lines().rev() {
+        let stripped = line.trim().trim_matches('│').trim().to_string();
+        if stripped.is_empty() {
             continue;
         }
-        let stripped = line.trim().trim_matches('│').trim().to_string();
         let (level, marker) = if stripped.contains('✓') {
             (ToastLevel::Success, '✓')
         } else if stripped.contains('✗') {
@@ -163,6 +163,10 @@ pub fn extract_toast(screen: &str) -> Option<ToastSnapshot> {
             continue;
         };
         let marker_index = stripped.find(marker)?;
+        // Avoid message-row checkmarks like "authorit 05:30 ✓" in the chat transcript.
+        if marker_index > 2 && !stripped.contains("[Esc] dismiss") {
+            continue;
+        }
         let message_segment = &stripped[marker_index + marker.len_utf8()..];
         let message = message_segment
             .replace("[Esc] dismiss", "")
@@ -358,6 +362,33 @@ mod tests {
             extract_command_consistency(&toast.message).as_deref(),
             Some("enforced")
         );
+    }
+
+    #[test]
+    fn extracts_toast_without_dismiss_hint() {
+        let screen = "\
+│ ✗ [s=denied r=permission_denied c=none] /pin: Permission denied: Only moderators can pin │\n";
+        let toast = match extract_toast(screen) {
+            Some(toast) => toast,
+            None => panic!("toast should parse"),
+        };
+        assert_eq!(toast.level, ToastLevel::Error);
+        assert!(toast.message.contains("s=denied"));
+        assert_eq!(
+            extract_command_status(&toast.message).as_deref(),
+            Some("denied")
+        );
+        assert_eq!(
+            extract_command_reason(&toast.message).as_deref(),
+            Some("permission_denied")
+        );
+    }
+
+    #[test]
+    fn ignores_message_row_checkmark() {
+        let screen = "\
+│                          │ │                           │ authorit  05:30 ✓ │ │\n";
+        assert!(extract_toast(screen).is_none());
     }
 
     #[test]

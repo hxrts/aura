@@ -66,9 +66,16 @@ pub fn UiCard(
     extra_class: Option<String>,
     children: Element,
 ) -> Element {
+    let card_class = match extra_class {
+        Some(extra_class) if !extra_class.is_empty() => {
+            format!("flex h-full min-h-0 flex-col {extra_class}")
+        }
+        _ => "flex h-full min-h-0 flex-col".to_string(),
+    };
+
     rsx! {
         LbCard {
-            class: Some(extra_class.unwrap_or_default()),
+            class: Some(card_class),
             LbCardHeader {
                 class: Some("gap-1 border-b border-border pb-4".to_string()),
                 LbCardTitle {
@@ -80,7 +87,7 @@ pub fn UiCard(
                 }
             }
             LbCardContent {
-                class: Some("space-y-2 text-sm".to_string()),
+                class: Some("flex flex-1 min-h-0 flex-col gap-2 text-sm".to_string()),
                 {children}
             }
         }
@@ -97,6 +104,32 @@ pub fn UiButton(
         LbButton {
             variant: map_button_variant(variant),
             size: LbButtonSize::Small,
+            on_click: move |evt| on_click.call(evt),
+            "{label}"
+        }
+    }
+}
+
+#[component]
+pub fn UiListButton(label: String, active: bool, on_click: EventHandler<MouseEvent>) -> Element {
+    let variant = if active {
+        LbButtonVariant::Secondary
+    } else {
+        LbButtonVariant::Ghost
+    };
+    let class = if active {
+        "h-9 w-full justify-start rounded-md pl-4 text-left bg-accent text-foreground shadow-none"
+    } else {
+        "h-9 w-full justify-start rounded-md pl-4 text-left text-muted-foreground shadow-none hover:bg-accent/60 hover:text-foreground"
+    };
+
+    rsx! {
+        LbButton {
+            variant,
+            size: LbButtonSize::Small,
+            full_width: true,
+            aria_pressed: Some(active),
+            class: "{class}",
             on_click: move |evt| on_click.call(evt),
             "{label}"
         }
@@ -153,7 +186,7 @@ pub fn UiModal(
             },
             LbDialogContent {
                 id: Some("aura-modal-content".to_string()),
-                class: Some("w-full max-w-xl bg-card text-card-foreground shadow-2xl p-0 overflow-hidden".to_string()),
+                class: Some("aura-modal-fade w-full max-w-xl bg-card text-card-foreground shadow-2xl p-0 overflow-hidden".to_string()),
                 div {
                     class: "bg-card px-4 py-3 border-b border-border flex items-center justify-between gap-3",
                     LbDialogTitle {
@@ -231,17 +264,41 @@ pub fn UiModal(
 }
 
 #[component]
-pub fn UiFooter(left: String, right_primary: String, right_secondary: Option<String>) -> Element {
+pub fn UiFooter(
+    left: String,
+    network_status: String,
+    peer_count: String,
+    online_count: String,
+) -> Element {
     rsx! {
         footer {
-            class: "border-t border-border bg-background text-muted-foreground text-xs tracking-[0.02em] flex items-end justify-between gap-3 px-4 py-3 sm:px-6",
-            span { class: "text-card-foreground", "{left}" }
+            class: "shrink-0 overflow-hidden border-t border-border bg-background px-4 py-3 text-xs tracking-[0.02em] text-muted-foreground sm:px-6",
             div {
-                class: "flex flex-col items-end gap-1 text-right",
-                span { "{right_primary}" }
-                if let Some(right_secondary) = right_secondary {
-                    span { "{right_secondary}" }
+                class: "flex h-9 min-w-0 items-center justify-between gap-3 overflow-hidden",
+                span { class: "min-w-0 truncate whitespace-nowrap text-card-foreground leading-none", "{left}" }
+                div {
+                    class: "flex min-w-0 items-center justify-end gap-2 overflow-hidden whitespace-nowrap",
+                    FooterStatusItem { label: "Network", value: network_status }
+                    FooterStatusItem { label: "Peers", value: peer_count }
+                    FooterStatusItem { label: "Online", value: online_count }
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn FooterStatusItem(label: &'static str, value: String) -> Element {
+    rsx! {
+        div {
+            class: "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-border bg-background/70 px-3",
+            span {
+                class: "text-[0.62rem] uppercase tracking-[0.08em] text-muted-foreground",
+                "{label}"
+            }
+            span {
+                class: "text-[0.72rem] text-foreground leading-none",
+                "{value}"
             }
         }
     }

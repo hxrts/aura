@@ -77,4 +77,14 @@
   .slide-out-to-right-full {
     --tw-exit-translate-x: 100%;
   }
+
+  .aura-modal-fade[data-state="open"],
+  .aura-modal-fade[data-state="closed"] {
+    --tw-enter-scale: 1;
+    --tw-exit-scale: 1;
+    --tw-enter-translate-x: 0;
+    --tw-enter-translate-y: 0;
+    --tw-exit-translate-x: 0;
+    --tw-exit-translate-y: 0;
+  }
 }
