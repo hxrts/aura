@@ -3630,10 +3630,10 @@ fn settings_panel_title(index: usize) -> String {
 
 fn settings_panel_subtitle(index: usize) -> String {
     match index {
-        0 => "Identity configuration".to_string(),
+        0 => "Configure nickname".to_string(),
         1 => "Configure guardian policy".to_string(),
         2 => "Configure recovery operations".to_string(),
-        3 => "Device management".to_string(),
+        3 => "Configure devices".to_string(),
         4 => "Authority scope".to_string(),
         5 => "Theme and display".to_string(),
         _ => "Settings details".to_string(),

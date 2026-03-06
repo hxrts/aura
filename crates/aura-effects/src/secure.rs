@@ -6,15 +6,15 @@
 //! **Layer Constraint**: No mock handlers - those belong in aura-testkit (Layer 8).
 //! This module contains only production stateless handlers.
 
+#[cfg(target_arch = "wasm32")]
+use crate::storage::FilesystemStorageHandler;
 use async_trait::async_trait;
 use aura_core::effects::{
     SecureStorageCapability, SecureStorageEffects, SecureStorageError, SecureStorageLocation,
 };
-use cfg_if::cfg_if;
 #[cfg(target_arch = "wasm32")]
 use aura_core::effects::{StorageCoreEffects, StorageExtendedEffects};
-#[cfg(target_arch = "wasm32")]
-use crate::storage::FilesystemStorageHandler;
+use cfg_if::cfg_if;
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 #[cfg(not(target_arch = "wasm32"))]
@@ -78,6 +78,7 @@ impl RealSecureStorageHandler {
         path
     }
 
+    #[allow(clippy::disallowed_methods)] // Effect implementation reads wall clock directly
     fn current_time_ms(&self) -> Result<u64, SecureStorageError> {
         #[cfg(target_arch = "wasm32")]
         {
@@ -117,19 +118,19 @@ impl SecureStorageEffects for RealSecureStorageHandler {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-        let path = self.path_for(location);
-        if let Some(dir) = path.parent() {
-            fs::create_dir_all(dir).map_err(|e| SecureStorageError::storage(e.to_string()))?;
-        }
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&path)
-            .map_err(|e| SecureStorageError::storage(e.to_string()))?;
-        file.write_all(key)
-            .map_err(|e| SecureStorageError::storage(e.to_string()))?;
-        Ok(())
+            let path = self.path_for(location);
+            if let Some(dir) = path.parent() {
+                fs::create_dir_all(dir).map_err(|e| SecureStorageError::storage(e.to_string()))?;
+            }
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&path)
+                .map_err(|e| SecureStorageError::storage(e.to_string()))?;
+            file.write_all(key)
+                .map_err(|e| SecureStorageError::storage(e.to_string()))?;
+            Ok(())
         }
     }
 
@@ -150,8 +151,8 @@ impl SecureStorageEffects for RealSecureStorageHandler {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-        let path = self.path_for(location);
-        fs::read(&path).map_err(|e| SecureStorageError::storage(e.to_string()))
+            let path = self.path_for(location);
+            fs::read(&path).map_err(|e| SecureStorageError::storage(e.to_string()))
         }
     }
 
@@ -172,11 +173,11 @@ impl SecureStorageEffects for RealSecureStorageHandler {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-        let path = self.path_for(location);
-        if path.exists() {
-            fs::remove_file(&path).map_err(|e| SecureStorageError::storage(e.to_string()))?;
-        }
-        Ok(())
+            let path = self.path_for(location);
+            if path.exists() {
+                fs::remove_file(&path).map_err(|e| SecureStorageError::storage(e.to_string()))?;
+            }
+            Ok(())
         }
     }
 
@@ -194,8 +195,8 @@ impl SecureStorageEffects for RealSecureStorageHandler {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-        let path = self.path_for(location);
-        Ok(path.exists())
+            let path = self.path_for(location);
+            Ok(path.exists())
         }
     }
 
@@ -215,20 +216,20 @@ impl SecureStorageEffects for RealSecureStorageHandler {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-        let ns_path = self.base_path.join(namespace);
-        if !ns_path.exists() {
-            return Ok(Vec::new());
-        }
-        let mut keys = Vec::new();
-        for entry in
-            fs::read_dir(&ns_path).map_err(|e| SecureStorageError::storage(e.to_string()))?
-        {
-            let entry = entry.map_err(|e| SecureStorageError::storage(e.to_string()))?;
-            if let Some(name) = entry.file_name().to_str() {
-                keys.push(name.to_string());
+            let ns_path = self.base_path.join(namespace);
+            if !ns_path.exists() {
+                return Ok(Vec::new());
             }
-        }
-        Ok(keys)
+            let mut keys = Vec::new();
+            for entry in
+                fs::read_dir(&ns_path).map_err(|e| SecureStorageError::storage(e.to_string()))?
+            {
+                let entry = entry.map_err(|e| SecureStorageError::storage(e.to_string()))?;
+                if let Some(name) = entry.file_name().to_str() {
+                    keys.push(name.to_string());
+                }
+            }
+            Ok(keys)
         }
     }
 

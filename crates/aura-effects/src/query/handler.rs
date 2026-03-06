@@ -14,6 +14,11 @@ type MonotonicInstant = web_time::Instant;
 #[cfg(not(target_arch = "wasm32"))]
 type MonotonicInstant = std::time::Instant;
 
+#[allow(clippy::disallowed_methods)] // Monotonic clock access is permitted in effect handlers
+fn monotonic_now() -> MonotonicInstant {
+    MonotonicInstant::now()
+}
+
 use aura_core::domain::journal::FactValue;
 use aura_core::domain::ConsistencyMap;
 use aura_core::effects::reactive::SignalId;
@@ -685,7 +690,7 @@ impl QueryHandler {
             tracker.subscribe()
         };
 
-        let deadline = MonotonicInstant::now() + self.consensus_timeout;
+        let deadline = monotonic_now() + self.consensus_timeout;
 
         loop {
             // Check current state
@@ -697,7 +702,7 @@ impl QueryHandler {
             }
 
             // Wait for next notification or timeout
-            let remaining = deadline.saturating_duration_since(MonotonicInstant::now());
+            let remaining = deadline.saturating_duration_since(monotonic_now());
             if remaining.is_zero() {
                 // Return timeout error with the first incomplete consensus ID
                 let tracker = self.consensus_tracker.read().await;

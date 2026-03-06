@@ -117,8 +117,8 @@ impl From<crate::tui::effects::DispatchError> for TerminalError {
             crate::tui::effects::DispatchError::InvalidParameter { param, reason } => {
                 TerminalError::Input(format!("{param}: {reason}"))
             }
-            crate::tui::effects::DispatchError::NotImplemented { command } => {
-                TerminalError::NotImplemented(command)
+            crate::tui::effects::DispatchError::HandledLocally { command } => {
+                TerminalError::Operation(format!("command '{command}' is handled locally"))
             }
         }
     }

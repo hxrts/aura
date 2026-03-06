@@ -455,15 +455,21 @@ ci-agent-wasm:
 # - aura-simulator: native process/simulation host
 # - aura-quint: native quint evaluator dependency path
 # - aura-agent: test suite currently assumes multi-thread tokio runtime
+# - aura-harness: native process/PTY/browser orchestration
+# - aura-testkit: native-heavy integration harness and differential suites
 # Note: intentionally no `-q` because wasm-bindgen-test-runner rejects forwarded `--quiet`.
 ci-workspace-wasm-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
     : "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER:=scripts/wasm-bindgen-test-runner.sh}"
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER" \
-    cargo test --workspace --target wasm32-unknown-unknown \
-      --exclude aura-terminal \
-      --exclude aura-simulator \
-      --exclude aura-quint \
-      --exclude aura-agent
+      cargo test --workspace --target wasm32-unknown-unknown \
+        --exclude aura-terminal \
+        --exclude aura-simulator \
+        --exclude aura-quint \
+        --exclude aura-agent \
+        --exclude aura-harness \
+        --exclude aura-testkit
 
 # Effects system violation checks
 ci-effects:

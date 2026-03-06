@@ -1332,6 +1332,26 @@ impl AccessLevel {
     }
 }
 
+impl From<AccessLevel> for aura_app::ui::types::AccessLevel {
+    fn from(value: AccessLevel) -> Self {
+        match value {
+            AccessLevel::Limited => Self::Limited,
+            AccessLevel::Partial => Self::Partial,
+            AccessLevel::Full => Self::Full,
+        }
+    }
+}
+
+impl From<aura_app::ui::types::AccessLevel> for AccessLevel {
+    fn from(value: aura_app::ui::types::AccessLevel) -> Self {
+        match value {
+            aura_app::ui::types::AccessLevel::Limited => Self::Limited,
+            aura_app::ui::types::AccessLevel::Partial => Self::Partial,
+            aura_app::ui::types::AccessLevel::Full => Self::Full,
+        }
+    }
+}
+
 /// Home summary for neighborhood view
 #[derive(Clone, Debug, Default)]
 pub struct HomeSummary {

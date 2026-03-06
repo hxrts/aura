@@ -652,27 +652,33 @@ mod tests {
         const KEY: &str = "AURA_HARNESS_BROWSER_BOOL_TEST";
         let yes_env = vec![format!("{KEY}=YES")];
         let no_env = vec![format!("{KEY}=off")];
-        assert!(parse_bool_setting(KEY, &yes_env, false).expect("parse bool"));
-        assert!(!parse_bool_setting(KEY, &no_env, true).expect("parse bool"));
-        assert!(!parse_bool_setting(KEY, &[], false).expect("default"));
+        let yes = parse_bool_setting(KEY, &yes_env, false);
+        assert!(matches!(yes, Ok(true)));
+        let no = parse_bool_setting(KEY, &no_env, true);
+        assert!(matches!(no, Ok(false)));
+        let default_value = parse_bool_setting(KEY, &[], false);
+        assert!(matches!(default_value, Ok(false)));
     }
 
     #[test]
     fn parse_u64_setting_uses_default_when_missing() {
         const KEY: &str = "AURA_HARNESS_BROWSER_U64_TEST";
-        let value = parse_u64_setting(KEY, &[], DEFAULT_PAGE_GOTO_TIMEOUT_MS, 1, 600_000)
-            .expect("parse default");
-        assert_eq!(value, DEFAULT_PAGE_GOTO_TIMEOUT_MS);
+        let value = parse_u64_setting(KEY, &[], DEFAULT_PAGE_GOTO_TIMEOUT_MS, 1, 600_000);
+        assert!(matches!(value, Ok(DEFAULT_PAGE_GOTO_TIMEOUT_MS)));
     }
 
     #[test]
     fn parse_u64_setting_rejects_out_of_range() {
         const KEY: &str = "AURA_HARNESS_BROWSER_U64_TEST";
         let env = vec![format!("{KEY}=9999999")];
-        let error = parse_u64_setting(KEY, &env, DEFAULT_PAGE_GOTO_TIMEOUT_MS, 1, 600_000)
-            .expect_err("out of range should fail");
-        assert!(error
-            .to_string()
-            .contains("AURA_HARNESS_BROWSER_U64_TEST must be in range"));
+        let error = parse_u64_setting(KEY, &env, DEFAULT_PAGE_GOTO_TIMEOUT_MS, 1, 600_000);
+        match error {
+            Ok(value) => panic!("expected out-of-range error, got value {value}"),
+            Err(err) => {
+                assert!(err
+                    .to_string()
+                    .contains("AURA_HARNESS_BROWSER_U64_TEST must be in range"));
+            }
+        }
     }
 }

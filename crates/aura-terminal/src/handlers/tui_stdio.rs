@@ -69,6 +69,13 @@ impl PostFullscreenStdio {
     }
 }
 
+impl From<PostFullscreenStdio> for PreFullscreenStdio {
+    fn from(_: PostFullscreenStdio) -> Self {
+        // Reacquire pre-fullscreen capability for a subsequent fullscreen session.
+        Self::new()
+    }
+}
+
 /// Run a future while the fullscreen TUI is active.
 ///
 /// Consumes the pre-fullscreen stdio token, making it unavailable while `fut`

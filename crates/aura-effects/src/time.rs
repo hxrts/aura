@@ -58,6 +58,7 @@ impl PhysicalTimeHandler {
     /// a best-effort timestamp without spawning a runtime. It still sources time
     /// from the system clock, so simulator-driven tests should prefer the async
     /// `physical_time` trait method for full control.
+    #[allow(clippy::disallowed_methods)] // Effect implementation reads wall clock directly
     pub fn physical_time_now_ms(&self) -> u64 {
         #[cfg(target_arch = "wasm32")]
         {

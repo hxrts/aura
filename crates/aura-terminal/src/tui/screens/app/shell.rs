@@ -2767,7 +2767,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 app_core.raw(),
                                                 home_id.as_deref(),
                                                 parsed_target,
-                                                access_level,
+                                                access_level.into(),
                                             )
                                             .await
                                             {

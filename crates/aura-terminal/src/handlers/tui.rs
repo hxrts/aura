@@ -969,7 +969,7 @@ async fn handle_tui_launch(
 
         let authority_switch_handle = ctx.authority_switch_request_handle();
         let (returned_stdio, result) = during_fullscreen(stdio, run_app_with_context(ctx)).await;
-        stdio = returned_stdio;
+        stdio = returned_stdio.into();
         let result = result.map_err(|e| AuraError::internal(format!("TUI failed: {e}")));
 
         #[cfg(feature = "development")]

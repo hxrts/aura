@@ -1276,7 +1276,7 @@ fn allow_missing_command_result_toast(
     };
     if command.starts_with("nhadd ")
         && matches!(expected_status, Some(ExpectedCommandStatus::Ok))
-        && expected_reason_code.is_none_or(|value| value.eq_ignore_ascii_case("none"))
+        && expected_reason_code.map_or(true, |value| value.eq_ignore_ascii_case("none"))
     {
         return matches!(
             expected_consistency,
@@ -1296,9 +1296,11 @@ fn allow_missing_denied_toast(
         return false;
     };
     if command.starts_with("nhlink ")
-        && reason.is_none_or(|value| value == DeniedReason::Permission)
-        && expected_status.is_none_or(|value| value == ExpectedCommandStatus::Denied)
-        && expected_reason_code.is_none_or(|value| value.eq_ignore_ascii_case("permission_denied"))
+        && reason.map_or(true, |value| value == DeniedReason::Permission)
+        && expected_status.map_or(true, |value| value == ExpectedCommandStatus::Denied)
+        && expected_reason_code.map_or(true, |value| {
+            value.eq_ignore_ascii_case("permission_denied")
+        })
     {
         return true;
     }

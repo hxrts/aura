@@ -576,7 +576,6 @@ impl Service for MaintenanceService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::MonotonicInstant;
 
     #[allow(clippy::disallowed_methods)]
     fn monotonic_now() -> MonotonicInstant {

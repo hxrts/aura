@@ -76,7 +76,9 @@ impl StorageCoreEffects for FilesystemStorageHandler {
         let encoded = hex::encode(value);
         self.storage()?
             .set_item(&self.storage_key(key), &encoded)
-            .map_err(|err| StorageError::WriteFailed(format!("localStorage set_item failed: {err:?}")))
+            .map_err(|err| {
+                StorageError::WriteFailed(format!("localStorage set_item failed: {err:?}"))
+            })
     }
 
     async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
@@ -84,11 +86,12 @@ impl StorageCoreEffects for FilesystemStorageHandler {
         match self
             .storage()?
             .get_item(&self.storage_key(key))
-            .map_err(|err| StorageError::ReadFailed(format!("localStorage get_item failed: {err:?}")))?
-        {
-            Some(value) => hex::decode(&value)
-                .map(Some)
-                .map_err(|err| StorageError::ReadFailed(format!("localStorage decode failed: {err}"))),
+            .map_err(|err| {
+                StorageError::ReadFailed(format!("localStorage get_item failed: {err:?}"))
+            })? {
+            Some(value) => hex::decode(&value).map(Some).map_err(|err| {
+                StorageError::ReadFailed(format!("localStorage decode failed: {err}"))
+            }),
             None => Ok(None),
         }
     }
@@ -99,7 +102,9 @@ impl StorageCoreEffects for FilesystemStorageHandler {
         if existed {
             self.storage()?
                 .remove_item(&self.storage_key(key))
-                .map_err(|err| StorageError::DeleteFailed(format!("localStorage remove_item failed: {err:?}")))?;
+                .map_err(|err| {
+                    StorageError::DeleteFailed(format!("localStorage remove_item failed: {err:?}"))
+                })?;
         }
         Ok(existed)
     }
@@ -107,10 +112,12 @@ impl StorageCoreEffects for FilesystemStorageHandler {
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
         let storage = self.storage()?;
         let mut keys = Vec::new();
-        for index in 0..storage.length().map_err(|err| StorageError::ReadFailed(format!("localStorage length failed: {err:?}")))? {
-            let full_key = match storage
-                .key(index)
-                .map_err(|err| StorageError::ReadFailed(format!("localStorage key lookup failed: {err:?}")))? {
+        for index in 0..storage.length().map_err(|err| {
+            StorageError::ReadFailed(format!("localStorage length failed: {err:?}"))
+        })? {
+            let full_key = match storage.key(index).map_err(|err| {
+                StorageError::ReadFailed(format!("localStorage key lookup failed: {err:?}"))
+            })? {
                 Some(value) => value,
                 None => continue,
             };
