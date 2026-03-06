@@ -46,7 +46,7 @@ build-app-host:
 # Check Aura web shell + shared UI core for wasm target
 web-check:
     CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0" cargo check -p aura-ui
-    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0" cargo check -p aura-web --target wasm32-unknown-unknown
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0" cargo check -p aura-web --target wasm32-unknown-unknown --features web
 
 # Rebuild local Tailwind bundle used by aura-web (no CDN)
 web-tailwind-build:
@@ -67,7 +67,19 @@ web-serve port="4173":
         done
     fi
     echo "Serving aura-web on port $selected_port"
-    cd crates/aura-web && NO_COLOR=true trunk serve --address 0.0.0.0 --port "$selected_port"
+    cd crates/aura-web
+    mkdir -p ../../artifacts
+    if [ ! -d node_modules ]; then
+        npm ci
+    fi
+    npm run tailwind:build
+    npm run tailwind:watch > ../../artifacts/aura-web-tailwind.log 2>&1 &
+    tailwind_pid=$!
+    cleanup() {
+        kill "$tailwind_pid" 2>/dev/null || true
+    }
+    trap cleanup EXIT
+    NO_COLOR=true ../../scripts/run-dx.sh serve --web --package aura-web --bin aura-web --features web --addr 0.0.0.0 --port "$selected_port" --open false
 
 # Browser harness driver smoke test
 browser-driver-smoke:
@@ -249,7 +261,9 @@ ci-harness-browser:
     )
     (
       cd crates/aura-web
-      NO_COLOR=true trunk serve --address 0.0.0.0 --port 4173 \
+      npm ci
+      npm run tailwind:build
+      NO_COLOR=true ../../scripts/run-dx.sh serve --web --package aura-web --bin aura-web --features web --addr 0.0.0.0 --port 4173 --open false \
         > ../../artifacts/harness/browser/web-serve.log 2>&1 &
       echo $! > ../../artifacts/harness/browser/web-serve.pid
     )
@@ -263,7 +277,7 @@ ci-harness-browser:
     for _ in $(seq 1 300); do
       if [ -f artifacts/harness/browser/web-serve.pid ]; then
         if ! kill -0 "$(cat artifacts/harness/browser/web-serve.pid)" 2>/dev/null; then
-          echo "trunk serve exited before becoming reachable"
+          echo "dx serve exited before becoming reachable"
           tail -n 200 artifacts/harness/browser/web-serve.log || true
           exit 1
         fi
@@ -275,7 +289,7 @@ ci-harness-browser:
       sleep 1
     done
     if [ "$web_ready" -ne 1 ]; then
-      echo "timed out waiting for trunk serve at http://127.0.0.1:4173/"
+      echo "timed out waiting for dx serve at http://127.0.0.1:4173/"
       tail -n 200 artifacts/harness/browser/web-serve.log || true
       exit 1
     fi
@@ -1306,14 +1320,6 @@ test-nix-all:
 # ═══════════════════════════════════════════════════════════════════════════════
 # WASM / Console
 # ═══════════════════════════════════════════════════════════════════════════════
-
-# Watch and serve the console frontend with hot reload
-serve-console:
-    cd crates/console && trunk serve --open
-
-# Stop any running trunk servers
-stop-console:
-    pgrep -x trunk > /dev/null && pkill trunk && echo "Stopped trunk server" || echo "No trunk server running"
 
 # Build WASM module for db-test
 build-wasm-db-test:

@@ -206,7 +206,6 @@
             # WASM tools
             wasm-pack
             wasm-bindgen-cli
-            trunk
 
             # Build tools
             pkg-config
@@ -339,7 +338,6 @@
             # WASM tools (for agent-wasm CI)
             wasm-pack
             wasm-bindgen-cli
-            trunk
           ];
 
           shellHook = ''

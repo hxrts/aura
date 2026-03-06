@@ -15,6 +15,7 @@ docs/book/
 # WASM artifacts
 pkg/
 dist/
+crates/aura-web/public/
 *.wasm
 *_bg.wasm.d.ts
 

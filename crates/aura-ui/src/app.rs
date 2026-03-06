@@ -5,11 +5,14 @@
 
 use crate::components::{
     ButtonVariant, ModalView, PillTone, UiButton, UiCard, UiFooter, UiListItem, UiModal, UiPill,
-    UiTabButton,
 };
 use crate::model::{ModalState, NeighborhoodMode, UiController, UiModel, UiScreen};
 use dioxus::events::KeyboardData;
 use dioxus::prelude::*;
+use dioxus_shadcn::components::empty::{
+    Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle,
+};
+use dioxus_shadcn::components::scroll_area::{ScrollArea, ScrollAreaViewport};
 use dioxus_shadcn::components::toast::{use_toast, ToastOptions, ToastProvider};
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,6 +27,17 @@ const SETTINGS_ROWS: [&str; 5] = [
 
 #[component]
 pub fn AuraUiRoot(controller: Arc<UiController>) -> Element {
+    rsx! {
+        ToastProvider {
+            default_duration: Duration::from_secs(5),
+            max_toasts: 8,
+            AuraUiShell { controller }
+        }
+    }
+}
+
+#[component]
+fn AuraUiShell(controller: Arc<UiController>) -> Element {
     let mut render_tick = use_signal(|| 0_u64);
     let _render_tick_value = render_tick();
     let mut last_toast_key = use_signal(|| None::<String>);
@@ -32,13 +46,12 @@ pub fn AuraUiRoot(controller: Arc<UiController>) -> Element {
     let Some(model) = controller.ui_model() else {
         return rsx! {
             main {
-                class: "min-h-screen bg-slate-950 text-slate-100 grid place-items-center",
+                class: "min-h-screen bg-background text-foreground grid place-items-center",
                 p { "UI state unavailable" }
             }
         };
     };
 
-    let tabs = screen_tabs(model.screen);
     let modal = modal_view(&model);
     let toast_snapshot = model.toast.clone();
 
@@ -71,18 +84,15 @@ pub fn AuraUiRoot(controller: Arc<UiController>) -> Element {
     });
 
     rsx! {
-        ToastProvider {
-            default_duration: Duration::from_secs(5),
-            max_toasts: 8,
-            main {
-                class: "relative min-h-screen bg-slate-950 text-slate-100 font-mono p-3 sm:p-6 grid place-items-center outline-none",
-                tabindex: 0,
-                autofocus: true,
-                onmounted: move |mounted| {
-                    spawn(async move {
-                        let _ = mounted.data().set_focus(true).await;
-                    });
-                },
+        main {
+            class: "relative min-h-screen bg-background text-foreground font-mono p-3 sm:p-6 grid place-items-center outline-none",
+            tabindex: 0,
+            autofocus: true,
+            onmounted: move |mounted| {
+                spawn(async move {
+                    let _ = mounted.data().set_focus(true).await;
+                });
+            },
             onkeydown: move |event| {
                 if should_skip_global_key(controller.as_ref(), event.data().as_ref()) {
                     return;
@@ -92,88 +102,76 @@ pub fn AuraUiRoot(controller: Arc<UiController>) -> Element {
                     render_tick.set(render_tick() + 1);
                 }
             },
-                div {
-                    class: "pointer-events-none absolute inset-0 opacity-70",
-                    div { class: "absolute left-[-8rem] top-[-7rem] h-[28rem] w-[28rem] rounded-full blur-3xl bg-sky-500/20" }
-                    div { class: "absolute right-[-9rem] top-[-8rem] h-[32rem] w-[32rem] rounded-full blur-3xl bg-teal-500/20" }
-                }
-                section {
-                    class: "relative w-full max-w-[1300px] min-h-[86vh] sm:min-h-[82vh] rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden",
+            section {
+                class: "relative w-full max-w-[1300px] min-h-[86vh] sm:min-h-[82vh] rounded-2xl border border-border bg-card shadow-2xl overflow-hidden",
+                nav {
+                    class: "border-b border-border bg-card/95 backdrop-blur px-3 py-2.5 sm:px-4",
                     div {
-                        class: "px-3 py-2.5 border-b border-slate-800 bg-slate-900/90 flex flex-wrap gap-2",
-                        for (screen, label, active) in tabs {
-                            UiTabButton {
-                                label,
-                                active,
-                                on_click: {
+                        class: "flex flex-wrap items-center gap-2",
+                        span { class: "mr-2 text-xs uppercase tracking-[0.12em] text-muted-foreground", "Aura" }
+                        for (screen, label, is_active) in screen_tabs(model.screen) {
+                            button {
+                                r#type: "button",
+                                class: if is_active {
+                                    "rounded-md border border-primary/40 bg-primary/15 px-3 py-1.5 text-xs uppercase tracking-[0.08em] text-foreground"
+                                } else {
+                                    "rounded-md border border-transparent bg-transparent px-3 py-1.5 text-xs uppercase tracking-[0.08em] text-muted-foreground hover:border-border hover:text-foreground"
+                                },
+                                onclick: {
                                     let controller = controller.clone();
                                     move |_| {
                                         controller.set_screen(screen);
                                         render_tick.set(render_tick() + 1);
                                     }
-                                }
+                                },
+                                "{label}"
                             }
                         }
                     }
+                }
+                div {
+                    class: "p-3 sm:p-4",
+                    {render_screen_content(&model, controller.clone(), render_tick)}
+                }
 
-                    div {
-                        class: "p-3 sm:p-4",
-                        {render_active_screen(&model, controller.clone(), render_tick)}
-                    }
-
-                    if let Some(modal) = modal {
-                        UiModal {
-                            modal,
-                            on_cancel: {
-                                let controller = controller.clone();
-                                move |_| {
-                                    controller.send_key_named("esc", 1);
-                                    render_tick.set(render_tick() + 1);
-                                }
-                            },
-                            on_confirm: {
-                                let controller = controller.clone();
-                                move |_| {
-                                    controller.send_key_named("enter", 1);
-                                    render_tick.set(render_tick() + 1);
-                                }
-                            },
-                            on_input_change: {
-                                let controller = controller.clone();
-                                move |value: String| {
-                                    controller.set_modal_buffer(&value);
-                                    render_tick.set(render_tick() + 1);
-                                }
+                if let Some(modal) = modal {
+                    UiModal {
+                        modal,
+                        on_cancel: {
+                            let controller = controller.clone();
+                            move |_| {
+                                controller.send_key_named("esc", 1);
+                                render_tick.set(render_tick() + 1);
+                            }
+                        },
+                        on_confirm: {
+                            let controller = controller.clone();
+                            move |_| {
+                                controller.send_key_named("enter", 1);
+                                render_tick.set(render_tick() + 1);
+                            }
+                        },
+                        on_input_change: {
+                            let controller = controller.clone();
+                            move |value: String| {
+                                controller.set_modal_buffer(&value);
+                                render_tick.set(render_tick() + 1);
                             }
                         }
                     }
+                }
 
-                    UiFooter {
-                        left: "Keys: 1-5 tab shift+tab arrows enter esc ? i n a c d r".to_string(),
-                        right: format!(
-                            "screen: {} | authority: {} | toast: {}",
-                            screen_label(model.screen),
-                            model.authority_id,
-                            model.toast.is_some()
-                        ),
-                    }
+                UiFooter {
+                    left: "Keys: 1-5 tab shift+tab arrows enter esc ? i n a c d r".to_string(),
+                    right: format!(
+                        "screen: {} | authority: {} | toast: {}",
+                        screen_label(model.screen),
+                        model.authority_id,
+                        model.toast.is_some()
+                    ),
                 }
             }
         }
-    }
-}
-
-fn render_active_screen(
-    model: &UiModel,
-    controller: Arc<UiController>,
-    render_tick: Signal<u64>,
-) -> Element {
-    match model.screen {
-        UiScreen::Neighborhood => neighborhood_screen(model, controller, render_tick),
-        UiScreen::Chat => chat_screen(model, controller, render_tick),
-        UiScreen::Contacts => contacts_screen(model, controller, render_tick),
-        UiScreen::Notifications => notifications_screen(model, controller, render_tick),
-        UiScreen::Settings => settings_screen(model),
     }
 }
 
@@ -246,9 +244,9 @@ fn neighborhood_screen(
                 subtitle: Some("Topology overview".to_string()),
                 extra_class: Some("lg:col-span-5".to_string()),
                 div {
-                    class: "rounded-lg border border-dashed border-slate-700 bg-slate-950/70 p-4 min-h-[15rem]",
-                    p { class: "m-0 text-sm text-slate-300", "Neighborhood map rendering area" }
-                    p { class: "m-0 mt-2 text-xs text-slate-500", "Map mode mirrors the runtime state; interaction remains keyboard-first." }
+                    class: "rounded-lg border border-dashed border-border bg-background p-4 min-h-[15rem]",
+                    p { class: "m-0 text-sm text-foreground", "Neighborhood map rendering area" }
+                    p { class: "m-0 mt-2 text-xs text-muted-foreground", "Map mode mirrors the runtime state; interaction remains keyboard-first." }
                 }
             }
 
@@ -279,6 +277,8 @@ fn chat_screen(
     let active_channel = model.selected_channel_name().unwrap_or("general");
     let topic = model.selected_channel_topic().to_string();
     let mode = if model.input_mode { "insert" } else { "normal" };
+    let new_group_controller = controller.clone();
+    let start_typing_controller = controller.clone();
 
     rsx! {
         div {
@@ -299,7 +299,7 @@ fn chat_screen(
                         label: "New Group".to_string(),
                         variant: ButtonVariant::Primary,
                         on_click: move |_| {
-                            controller.send_keys("n");
+                            new_group_controller.send_keys("n");
                             render_tick.set(render_tick() + 1);
                         }
                     }
@@ -310,28 +310,45 @@ fn chat_screen(
                 title: "Conversation".to_string(),
                 subtitle: Some(format!("Topic: {topic}")),
                 extra_class: Some("lg:col-span-9".to_string()),
-                div { class: "space-y-2 max-h-[22rem] overflow-auto pr-1",
-                    if model.messages.is_empty() {
-                        UiListItem {
-                            label: "No messages yet".to_string(),
-                            secondary: Some("Send one from input mode".to_string()),
-                            active: false,
-                        }
-                    } else {
-                        for message in model.messages.iter().take(16) {
-                            UiListItem {
-                                label: message.clone(),
-                                secondary: None,
-                                active: false,
+                ScrollArea {
+                    max_height: Some("22rem".to_string()),
+                    class: Some("pr-1".to_string()),
+                    ScrollAreaViewport {
+                        class: Some("space-y-2".to_string()),
+                        if model.messages.is_empty() {
+                            Empty {
+                                class: Some("min-h-[14rem] border-border bg-background".to_string()),
+                                EmptyHeader {
+                                    EmptyTitle { "No messages yet" }
+                                    EmptyDescription { "Send one from input mode." }
+                                }
+                                EmptyContent {
+                                    UiButton {
+                                        label: "Start Typing".to_string(),
+                                        variant: ButtonVariant::Primary,
+                                        on_click: move |_| {
+                                            start_typing_controller.send_keys("i");
+                                            render_tick.set(render_tick() + 1);
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            for message in model.messages.iter().take(16) {
+                                UiListItem {
+                                    label: message.clone(),
+                                    secondary: None,
+                                    active: false,
+                                }
                             }
                         }
                     }
                 }
                 div {
-                    class: "mt-2 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2",
-                    p { class: "m-0 text-xs uppercase tracking-[0.08em] text-slate-400", "Composer" }
-                    p { class: "m-0 mt-1 text-sm text-slate-100", "Mode: {mode}" }
-                    p { class: "m-0 mt-1 text-sm text-slate-300 whitespace-pre-wrap break-words", "{model.input_buffer}" }
+                    class: "mt-2 rounded-lg border border-border bg-background px-3 py-2",
+                    p { class: "m-0 text-xs uppercase tracking-[0.08em] text-muted-foreground", "Composer" }
+                    p { class: "m-0 mt-1 text-sm text-foreground", "Mode: {mode}" }
+                    p { class: "m-0 mt-1 text-sm text-muted-foreground whitespace-pre-wrap break-words", "{model.input_buffer}" }
                 }
             }
         }
@@ -346,6 +363,8 @@ fn contacts_screen(
     let selected_name = model
         .selected_contact_name()
         .map_or_else(|| "none".to_string(), |name| name.to_string());
+    let empty_invite_controller = controller.clone();
+    let invite_controller = controller.clone();
 
     rsx! {
         div {
@@ -355,10 +374,22 @@ fn contacts_screen(
                 subtitle: Some("Social graph neighbors".to_string()),
                 extra_class: Some("lg:col-span-4".to_string()),
                 if model.contacts.is_empty() {
-                    UiListItem {
-                        label: "No contacts yet".to_string(),
-                        secondary: Some("Use invitation flow to add contacts".to_string()),
-                        active: false,
+                    Empty {
+                        class: Some("border-border bg-background".to_string()),
+                        EmptyHeader {
+                            EmptyTitle { "No contacts yet" }
+                            EmptyDescription { "Use the invitation flow to add contacts." }
+                        }
+                        EmptyContent {
+                            UiButton {
+                                label: "Invite".to_string(),
+                                variant: ButtonVariant::Primary,
+                                on_click: move |_| {
+                                    empty_invite_controller.send_keys("i");
+                                    render_tick.set(render_tick() + 1);
+                                }
+                            }
+                        }
                     }
                 } else {
                     for (idx, contact) in model.contacts.iter().enumerate() {
@@ -378,7 +409,7 @@ fn contacts_screen(
                         label: "Invite".to_string(),
                         variant: ButtonVariant::Primary,
                         on_click: move |_| {
-                            controller.send_keys("i");
+                            invite_controller.send_keys("i");
                             render_tick.set(render_tick() + 1);
                         }
                     }
@@ -412,17 +443,25 @@ fn notifications_screen(
                 subtitle: Some("Runtime events".to_string()),
                 extra_class: None,
                 if model.notifications.is_empty() {
-                    UiListItem {
-                        label: "No notifications".to_string(),
-                        secondary: Some("Select a notification when events arrive".to_string()),
-                        active: false,
+                    Empty {
+                        class: Some("border-border bg-background".to_string()),
+                        EmptyHeader {
+                            EmptyTitle { "No notifications" }
+                            EmptyDescription { "Runtime events will appear here." }
+                        }
                     }
                 } else {
-                    for (idx, entry) in model.notifications.iter().enumerate().take(24) {
-                        UiListItem {
-                            label: entry.clone(),
-                            secondary: None,
-                            active: idx == model.selected_notification_index,
+                    ScrollArea {
+                        max_height: Some("24rem".to_string()),
+                        ScrollAreaViewport {
+                            class: Some("space-y-2".to_string()),
+                            for (idx, entry) in model.notifications.iter().enumerate().take(24) {
+                                UiListItem {
+                                    label: entry.clone(),
+                                    secondary: None,
+                                    active: idx == model.selected_notification_index,
+                                }
+                            }
                         }
                     }
                 }
@@ -493,6 +532,20 @@ fn screen_label(screen: UiScreen) -> &'static str {
         UiScreen::Contacts => "contacts",
         UiScreen::Notifications => "notifications",
         UiScreen::Settings => "settings",
+    }
+}
+
+fn render_screen_content(
+    model: &UiModel,
+    controller: Arc<UiController>,
+    render_tick: Signal<u64>,
+) -> Element {
+    match model.screen {
+        UiScreen::Neighborhood => neighborhood_screen(model, controller, render_tick),
+        UiScreen::Chat => chat_screen(model, controller, render_tick),
+        UiScreen::Contacts => contacts_screen(model, controller, render_tick),
+        UiScreen::Notifications => notifications_screen(model, controller, render_tick),
+        UiScreen::Settings => settings_screen(model),
     }
 }
 

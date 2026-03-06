@@ -6,8 +6,13 @@
 #![allow(clippy::incompatible_msrv)]
 
 use dioxus::prelude::*;
+use dioxus_shadcn::components::badge::{Badge as LbBadge, BadgeVariant as LbBadgeVariant};
 use dioxus_shadcn::components::button::{
     Button as LbButton, ButtonSize as LbButtonSize, ButtonVariant as LbButtonVariant,
+};
+use dioxus_shadcn::components::card::{
+    Card as LbCard, CardContent as LbCardContent, CardDescription as LbCardDescription,
+    CardHeader as LbCardHeader, CardTitle as LbCardTitle,
 };
 use dioxus_shadcn::components::dialog::{
     DialogContent as LbDialogContent, DialogDescription as LbDialogDescription,
@@ -45,34 +50,11 @@ fn map_button_variant(variant: ButtonVariant) -> LbButtonVariant {
     }
 }
 
-fn pill_tone_class(tone: PillTone) -> &'static str {
+fn pill_tone_variant(tone: PillTone) -> LbBadgeVariant {
     match tone {
-        PillTone::Neutral => "text-slate-300 bg-slate-800 border-slate-700",
-        PillTone::Info => "text-sky-300 bg-sky-500/15 border-sky-500/30",
-        PillTone::Success => "text-emerald-300 bg-emerald-500/15 border-emerald-500/30",
-    }
-}
-
-#[component]
-pub fn UiTabButton(
-    label: &'static str,
-    active: bool,
-    on_click: EventHandler<MouseEvent>,
-) -> Element {
-    let variant = if active {
-        LbButtonVariant::Default
-    } else {
-        LbButtonVariant::Outline
-    };
-
-    rsx! {
-        LbButton {
-            variant,
-            size: LbButtonSize::Small,
-            class: "text-xs uppercase tracking-[0.04em]",
-            on_click: move |evt| on_click.call(evt),
-            "{label}"
-        }
+        PillTone::Neutral => LbBadgeVariant::Outline,
+        PillTone::Info => LbBadgeVariant::Secondary,
+        PillTone::Success => LbBadgeVariant::Default,
     }
 }
 
@@ -83,22 +65,21 @@ pub fn UiCard(
     extra_class: Option<String>,
     children: Element,
 ) -> Element {
-    let card_class = format!(
-        "rounded-xl border border-border bg-card {}",
-        extra_class.unwrap_or_default()
-    );
     rsx! {
-        section {
-            class: "{card_class}",
-            header {
-                class: "px-3 py-2.5 border-b border-border",
-                h3 { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-card-foreground", "{title}" }
+        LbCard {
+            class: Some(extra_class.unwrap_or_default()),
+            LbCardHeader {
+                class: Some("gap-1 border-b border-border pb-4".to_string()),
+                LbCardTitle {
+                    class: Some("text-xs font-semibold uppercase tracking-[0.08em]".to_string()),
+                    "{title}"
+                }
                 if let Some(subtitle) = subtitle {
-                    p { class: "m-0 mt-1 text-xs text-muted-foreground", "{subtitle}" }
+                    LbCardDescription { "{subtitle}" }
                 }
             }
-            div {
-                class: "p-3 space-y-2 text-sm text-card-foreground",
+            LbCardContent {
+                class: Some("space-y-2 text-sm".to_string()),
                 {children}
             }
         }
@@ -123,10 +104,10 @@ pub fn UiButton(
 
 #[component]
 pub fn UiPill(label: String, tone: PillTone) -> Element {
-    let tone_class = pill_tone_class(tone);
     rsx! {
-        span {
-            class: "inline-flex h-6 items-center rounded-full border px-2 text-[0.65rem] uppercase tracking-[0.06em] {tone_class}",
+        LbBadge {
+            variant: pill_tone_variant(tone),
+            class: Some("h-6 rounded-full px-2 text-[0.65rem] uppercase tracking-[0.06em]".to_string()),
             "{label}"
         }
     }

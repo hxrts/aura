@@ -1,0 +1,20 @@
+[application]
+name = "aura-web"
+default_platform = "web"
+out_dir = "dist"
+asset_dir = "public"
+hot_reload = true
+
+[web.app]
+title = "Aura"
+
+[web.watcher]
+index_on_404 = true
+watch_path = ["src", "../aura-ui/src", "styles", "public"]
+
+[web.resource]
+style = ["./styles/tailwind.css"]
+script = []
+
+[web.resource.dev]
+script = []

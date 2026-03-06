@@ -18,7 +18,7 @@ aura-app = { path = "../aura-app" }
 async-lock = { workspace = true }
 cfg-if = "1"
 dioxus = { version = "0.7", default-features = false, features = ["macro", "hooks", "signals", "html"] }
-dioxus-shadcn = { git = "https://github.com/hxrts/dioxus-shadcn.git", rev = "768507cef1d1faf47370a7e11d6dbdabd682a420" }
+dioxus-shadcn = { git = "https://github.com/hxrts/dioxus-shadcn.git", rev = "ee0ac75d68cf351b3fddc182d74f131c8337c585" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

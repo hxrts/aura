@@ -4,10 +4,22 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Aura</title>
-        <link data-trunk rel="css" href="styles/tailwind.css" />
-        <link data-trunk rel="rust" data-bin="aura-web" />
+        <script>
+            if (window.location.hostname.endsWith(".")) {
+                const normalized = window.location.hostname.replace(/\.+$/, "");
+                const target =
+                    window.location.protocol +
+                    "//" +
+                    normalized +
+                    (window.location.port ? ":" + window.location.port : "") +
+                    window.location.pathname +
+                    window.location.search +
+                    window.location.hash;
+                window.location.replace(target);
+            }
+        </script>
     </head>
-    <body>
+    <body class="dark">
         <main id="main"></main>
     </body>
 </html>
