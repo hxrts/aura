@@ -7,7 +7,7 @@ use crate::clipboard::ClipboardPort;
 use crate::model::{AccessDepth, ModalState, ToastState, UiModel, UiScreen};
 use aura_app::ui::types::parse_chat_command;
 
-const SETTINGS_ROWS: usize = 5;
+const SETTINGS_ROWS: usize = 6;
 
 fn set_toast(model: &mut UiModel, icon: char, message: impl Into<String>) {
     model.toast_key = model.toast_key.saturating_add(1);

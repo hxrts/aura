@@ -7,11 +7,10 @@ use crate::components::{
     ButtonVariant, ModalView, PillTone, UiButton, UiCard, UiFooter, UiListItem, UiModal, UiPill,
 };
 use crate::model::{ModalState, NeighborhoodMode, UiController, UiModel, UiScreen};
+use aura_app::ui::signals::NetworkStatus;
+use aura_app::ui::types::format_network_status_with_severity;
 use dioxus::events::KeyboardData;
 use dioxus::prelude::*;
-use dioxus_shadcn::components::button::{
-    Button as ShadButton, ButtonSize as ShadButtonSize, ButtonVariant as ShadButtonVariant,
-};
 use dioxus_shadcn::components::empty::{
     Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle,
 };
@@ -21,12 +20,13 @@ use dioxus_shadcn::theme::{themes, use_theme, ColorScheme, ThemeProvider};
 use std::sync::Arc;
 use std::time::Duration;
 
-const SETTINGS_ROWS: [&str; 5] = [
+const SETTINGS_ROWS: [&str; 6] = [
     "Profile",
     "Guardian Threshold",
     "Request Recovery",
     "Devices",
     "Authority",
+    "Appearance",
 ];
 
 #[component]
@@ -35,10 +35,13 @@ pub fn AuraUiRoot(controller: Arc<UiController>) -> Element {
         ThemeProvider {
             theme: themes::neutral(),
             color_scheme: ColorScheme::Dark,
-            ToastProvider {
-                default_duration: Duration::from_secs(5),
-                max_toasts: 8,
-                AuraUiShell { controller }
+            div {
+                style: "--normal-bg: var(--popover); --normal-text: var(--popover-foreground); --normal-border: var(--border);",
+                ToastProvider {
+                    default_duration: Duration::from_secs(5),
+                    max_toasts: 8,
+                    AuraUiShell { controller }
+                }
             }
         }
     }
@@ -62,18 +65,25 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
     };
 
     let modal = modal_view(&model);
-    let toast_snapshot = model.toast.clone();
+    let controller_for_toast = controller.clone();
 
     use_effect(move || {
-        let next_key = toast_snapshot
-            .as_ref()
-            .map(|toast| format!("{}::{}::{}", model.toast_key, toast.icon, toast.message));
+        let _ = render_tick();
+        let Some(current_model) = controller_for_toast.ui_model() else {
+            return;
+        };
+        let next_key = current_model.toast.as_ref().map(|toast| {
+            format!(
+                "{}::{}::{}",
+                current_model.toast_key, toast.icon, toast.message
+            )
+        });
 
         if last_toast_key() == next_key {
             return;
         }
 
-        if let Some(toast) = &toast_snapshot {
+        if let Some(toast) = &current_model.toast {
             let opts = Some(ToastOptions {
                 description: None,
                 duration: Some(Duration::from_secs(5)),
@@ -92,7 +102,9 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         last_toast_key.set(next_key);
     });
     let resolved_scheme = theme.resolved_scheme();
-    let mut theme_for_toggle = theme.clone();
+    let footer_network_status =
+        format_network_status_with_severity(&NetworkStatus::Disconnected, None).0;
+    let footer_peer_status = "0 P, 0 On".to_string();
 
     rsx! {
         main {
@@ -116,41 +128,36 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
             nav {
                 class: "border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80",
                 div {
-                    class: "flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6",
+                    class: "flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6",
                     div {
-                        class: "flex flex-wrap items-center gap-2",
-                        span { class: "mr-2 text-xs font-bold uppercase tracking-[0.12em] text-white", "AURA" }
-                        for (screen, label, is_active) in screen_tabs(model.screen) {
-                            button {
-                                r#type: "button",
-                                class: nav_tab_class(is_active),
-                                onclick: {
-                                    let controller = controller.clone();
-                                    move |_| {
-                                        controller.set_screen(screen);
-                                        render_tick.set(render_tick() + 1);
-                                    }
-                                },
-                                "{label}"
+                        class: "flex items-center gap-3 sm:min-w-fit",
+                        span { class: "inline-flex h-9 items-center text-xs font-bold uppercase tracking-[0.12em] text-foreground", "AURA" }
+                    }
+                    div {
+                        class: "min-w-0 overflow-x-auto [::-webkit-scrollbar]:hidden sm:flex-1 sm:overflow-visible",
+                        div {
+                            class: "flex min-w-max items-center gap-2 sm:justify-end",
+                            for (screen, label, is_active) in screen_tabs(model.screen) {
+                                button {
+                                    r#type: "button",
+                                    class: nav_tab_class(is_active),
+                                    onclick: {
+                                        let controller = controller.clone();
+                                        move |_| {
+                                            controller.set_screen(screen);
+                                            render_tick.set(render_tick() + 1);
+                                        }
+                                    },
+                                    "{label}"
+                                }
                             }
                         }
-                    }
-                    ShadButton {
-                        variant: ShadButtonVariant::Ghost,
-                        size: ShadButtonSize::Icon,
-                        is_icon_button: true,
-                        aria_label: Some(match resolved_scheme {
-                            ColorScheme::Dark => "Switch to light mode".to_string(),
-                            _ => "Switch to dark mode".to_string(),
-                        }),
-                        on_click: move |_| theme_for_toggle.toggle_color_scheme(),
-                        span { class: "text-lg leading-none", "◑" }
                     }
                 }
             }
             div {
                 class: "flex-1 min-h-0 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5",
-                {render_screen_content(&model, controller.clone(), render_tick)}
+                {render_screen_content(&model, controller.clone(), render_tick, theme.clone(), resolved_scheme)}
             }
 
             if let Some(modal) = modal {
@@ -182,12 +189,8 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
             UiFooter {
                 left: String::new(),
-                right: format!(
-                    "screen: {} | authority: {} | toast: {}",
-                    screen_label(model.screen),
-                    model.authority_id,
-                    model.toast.is_some()
-                ),
+                right_primary: footer_network_status,
+                right_secondary: Some(footer_peer_status),
             }
         }
     }
@@ -481,6 +484,8 @@ fn settings_screen(
     model: &UiModel,
     controller: Arc<UiController>,
     mut render_tick: Signal<u64>,
+    mut theme: dioxus_shadcn::theme::ThemeContext,
+    resolved_scheme: ColorScheme,
 ) -> Element {
     rsx! {
         div {
@@ -694,6 +699,38 @@ fn settings_screen(
                         }
                     }
                 }
+                if model.settings_index == 5 {
+                    UiListItem {
+                        label: format!(
+                            "Color mode: {}",
+                            match resolved_scheme {
+                                ColorScheme::Light => "Light",
+                                _ => "Dark",
+                            }
+                        ),
+                        secondary: Some("Switch the current web theme".to_string()),
+                        active: false,
+                    }
+                    UiListItem {
+                        label: "Palette".to_string(),
+                        secondary: Some("Aura uses the same neutral palette in both modes".to_string()),
+                        active: false,
+                    }
+                    div {
+                        class: "flex flex-wrap gap-2 pt-1",
+                        UiButton {
+                            label: match resolved_scheme {
+                                ColorScheme::Light => "Switch to Dark".to_string(),
+                                _ => "Switch to Light".to_string(),
+                            },
+                            variant: ButtonVariant::Secondary,
+                            on_click: move |_| {
+                                theme.toggle_color_scheme();
+                                render_tick.set(render_tick() + 1);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -714,6 +751,7 @@ fn settings_panel_subtitle(index: usize) -> String {
         2 => "Recovery operations".to_string(),
         3 => "Device management".to_string(),
         4 => "Authority scope".to_string(),
+        5 => "Theme and display".to_string(),
         _ => "Settings details".to_string(),
     }
 }
@@ -737,16 +775,6 @@ fn screen_tabs(active: UiScreen) -> Vec<(UiScreen, &'static str, bool)> {
     .to_vec()
 }
 
-fn screen_label(screen: UiScreen) -> &'static str {
-    match screen {
-        UiScreen::Neighborhood => "neighborhood",
-        UiScreen::Chat => "chat",
-        UiScreen::Contacts => "contacts",
-        UiScreen::Notifications => "notifications",
-        UiScreen::Settings => "settings",
-    }
-}
-
 fn nav_tab_class(is_active: bool) -> &'static str {
     if is_active {
         "rounded-md bg-accent px-3 py-1.5 text-xs uppercase tracking-[0.08em] text-foreground"
@@ -759,13 +787,15 @@ fn render_screen_content(
     model: &UiModel,
     controller: Arc<UiController>,
     render_tick: Signal<u64>,
+    theme: dioxus_shadcn::theme::ThemeContext,
+    resolved_scheme: ColorScheme,
 ) -> Element {
     match model.screen {
         UiScreen::Neighborhood => neighborhood_screen(model, controller, render_tick),
         UiScreen::Chat => chat_screen(model, controller, render_tick),
         UiScreen::Contacts => contacts_screen(model, controller, render_tick),
         UiScreen::Notifications => notifications_screen(model, controller, render_tick),
-        UiScreen::Settings => settings_screen(model, controller, render_tick),
+        UiScreen::Settings => settings_screen(model, controller, render_tick, theme, resolved_scheme),
     }
 }
 
@@ -915,7 +945,7 @@ fn help_modal_content(screen: UiScreen) -> (Vec<String>, Vec<(String, String)>) 
         ],
         UiScreen::Settings => vec![
             "Settings reference".to_string(),
-            "Adjust profile, recovery, devices, and authority-level configuration.".to_string(),
+            "Adjust profile, recovery, devices, authority, and appearance.".to_string(),
         ],
     };
 

@@ -872,9 +872,6 @@ fn handle_import_invitation_key_queue(
         && matches!(key.code, KeyCode::Char('l') | KeyCode::Char('L')))
         // Some terminals report Ctrl+l as the control character (FF, 0x0c) with no modifiers.
         || matches!(key.code, KeyCode::Char('\u{c}'));
-    // Alternate demo shortcuts that are terminal/harness friendly.
-    let is_demo_digit_1 = matches!(key.code, KeyCode::Char('1'));
-    let is_demo_digit_2 = matches!(key.code, KeyCode::Char('2'));
     // Harness fallback: some PTY paths do not surface Ctrl modifiers reliably.
     // In demo mode, allow uppercase A/L on an empty field as deterministic autofill.
     let is_demo_shift_a = modal_state.code.is_empty()
@@ -884,17 +881,11 @@ fn handle_import_invitation_key_queue(
         && !state.contacts.demo_carol_code.is_empty()
         && matches!(key.code, KeyCode::Char('L'));
 
-    if is_ctrl_a
-        || is_ctrl_l
-        || is_demo_shift_a
-        || is_demo_shift_l
-        || is_demo_digit_1
-        || is_demo_digit_2
-    {
+    if is_ctrl_a || is_ctrl_l || is_demo_shift_a || is_demo_shift_l {
         // Dismiss the demo hint toast since the user used a shortcut
         state.toast_queue.dismiss();
 
-        let code = if is_ctrl_a || is_demo_shift_a || is_demo_digit_1 {
+        let code = if is_ctrl_a || is_demo_shift_a {
             state.contacts.demo_alice_code.clone()
         } else {
             state.contacts.demo_carol_code.clone()

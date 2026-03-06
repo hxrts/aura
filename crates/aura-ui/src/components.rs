@@ -231,12 +231,18 @@ pub fn UiModal(
 }
 
 #[component]
-pub fn UiFooter(left: String, right: String) -> Element {
+pub fn UiFooter(left: String, right_primary: String, right_secondary: Option<String>) -> Element {
     rsx! {
         footer {
-            class: "border-t border-border bg-background text-muted-foreground text-xs tracking-[0.02em] flex justify-between gap-3 px-4 py-3 flex-wrap sm:px-6",
+            class: "border-t border-border bg-background text-muted-foreground text-xs tracking-[0.02em] flex items-end justify-between gap-3 px-4 py-3 sm:px-6",
             span { class: "text-card-foreground", "{left}" }
-            span { "{right}" }
+            div {
+                class: "flex flex-col items-end gap-1 text-right",
+                span { "{right_primary}" }
+                if let Some(right_secondary) = right_secondary {
+                    span { "{right_secondary}" }
+                }
+            }
         }
     }
 }

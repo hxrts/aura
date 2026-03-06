@@ -18,6 +18,9 @@ use crate::introspection::{
 };
 use crate::tool_api::{ToolApi, ToolKey, ToolRequest, ToolResponse};
 
+const CLIPBOARD_PASTE_CHUNK_CHARS: usize = 48;
+const CLIPBOARD_PASTE_INTER_CHUNK_DELAY_MS: u64 = 5;
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionMode {
@@ -471,13 +474,7 @@ fn execute_step(
                 }
                 std::thread::sleep(Duration::from_millis(100));
             };
-            dispatch(
-                tool_api,
-                ToolRequest::SendKeys {
-                    instance_id: target_instance_id,
-                    keys: clipboard_text,
-                },
-            )?;
+            dispatch_clipboard_text(tool_api, &target_instance_id, &clipboard_text)?;
             Ok(())
         }
         ScenarioAction::SendKey => {
@@ -1207,6 +1204,48 @@ fn dispatch_payload(tool_api: &mut ToolApi, request: ToolRequest) -> Result<serd
     }
 }
 
+fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str) -> Result<()> {
+    if text.chars().count() <= CLIPBOARD_PASTE_CHUNK_CHARS {
+        return dispatch(
+            tool_api,
+            ToolRequest::SendKeys {
+                instance_id: instance_id.to_string(),
+                keys: text.to_string(),
+            },
+        );
+    }
+
+    let mut chunk = String::with_capacity(CLIPBOARD_PASTE_CHUNK_CHARS);
+    let mut chunk_len = 0usize;
+    for ch in text.chars() {
+        chunk.push(ch);
+        chunk_len += 1;
+        if chunk_len >= CLIPBOARD_PASTE_CHUNK_CHARS {
+            dispatch(
+                tool_api,
+                ToolRequest::SendKeys {
+                    instance_id: instance_id.to_string(),
+                    keys: chunk.clone(),
+                },
+            )?;
+            chunk.clear();
+            chunk_len = 0;
+            std::thread::sleep(Duration::from_millis(CLIPBOARD_PASTE_INTER_CHUNK_DELAY_MS));
+        }
+    }
+
+    if !chunk.is_empty() {
+        dispatch(
+            tool_api,
+            ToolRequest::SendKeys {
+                instance_id: instance_id.to_string(),
+                keys: chunk,
+            },
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1567,5 +1606,137 @@ mod tests {
             sent_to_bob,
             "send_clipboard should eventually send copied text to bob"
         );
+    }
+
+    #[test]
+    fn send_clipboard_long_payload_is_chunked_and_reassembled() {
+        let temp_root = std::env::temp_dir().join("aura-harness-executor-send-clipboard-chunked");
+        let _ = std::fs::create_dir_all(&temp_root);
+        let alice_data = temp_root.join("alice");
+        let bob_data = temp_root.join("bob");
+        let _ = std::fs::create_dir_all(&alice_data);
+        let _ = std::fs::create_dir_all(&bob_data);
+
+        let run = RunConfig {
+            schema_version: 1,
+            run: RunSection {
+                name: "executor-send-clipboard-chunked".to_string(),
+                pty_rows: Some(40),
+                pty_cols: Some(120),
+                artifact_dir: None,
+                global_budget_ms: None,
+                step_budget_ms: None,
+                seed: Some(9),
+                max_cpu_percent: None,
+                max_memory_bytes: None,
+                max_open_files: None,
+                require_remote_artifact_sync: false,
+            },
+            instances: vec![
+                InstanceConfig {
+                    id: "alice".to_string(),
+                    mode: InstanceMode::Local,
+                    data_dir: alice_data.clone(),
+                    device_id: None,
+                    bind_address: "127.0.0.1:45021".to_string(),
+                    demo_mode: false,
+                    command: Some("bash".to_string()),
+                    args: vec!["-lc".to_string(), "cat".to_string()],
+                    env: vec![],
+                    log_path: None,
+                    ssh_host: None,
+                    ssh_user: None,
+                    ssh_port: None,
+                    ssh_strict_host_key_checking: true,
+                    ssh_known_hosts_file: None,
+                    ssh_fingerprint: None,
+                    ssh_require_fingerprint: false,
+                    ssh_dry_run: true,
+                    remote_workdir: None,
+                    lan_discovery: None,
+                    tunnel: None,
+                },
+                InstanceConfig {
+                    id: "bob".to_string(),
+                    mode: InstanceMode::Local,
+                    data_dir: bob_data,
+                    device_id: None,
+                    bind_address: "127.0.0.1:45022".to_string(),
+                    demo_mode: false,
+                    command: Some("bash".to_string()),
+                    args: vec!["-lc".to_string(), "cat".to_string()],
+                    env: vec![],
+                    log_path: None,
+                    ssh_host: None,
+                    ssh_user: None,
+                    ssh_port: None,
+                    ssh_strict_host_key_checking: true,
+                    ssh_known_hosts_file: None,
+                    ssh_fingerprint: None,
+                    ssh_require_fingerprint: false,
+                    ssh_dry_run: true,
+                    remote_workdir: None,
+                    lan_discovery: None,
+                    tunnel: None,
+                },
+            ],
+        };
+
+        let scenario = ScenarioConfig {
+            schema_version: 1,
+            id: "executor-send-clipboard-chunked".to_string(),
+            goal: "verify long clipboard payload chunking".to_string(),
+            execution_mode: Some("scripted".to_string()),
+            required_capabilities: vec![],
+            steps: vec![ScenarioStep {
+                id: "step-1".to_string(),
+                action: ScenarioAction::SendClipboard,
+                instance: Some("bob".to_string()),
+                expect: Some("alice".to_string()),
+                timeout_ms: Some(2000),
+                ..Default::default()
+            }],
+        };
+
+        let long_payload = "aura:v1:".to_string()
+            + &"x".repeat(CLIPBOARD_PASTE_CHUNK_CHARS * 3 + 7)
+            + ":127.0.0.1:41001";
+
+        let mut api = ToolApi::new(
+            HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}")),
+        );
+        if let Err(error) = api.start_all() {
+            panic!("start_all failed: {error}");
+        }
+
+        let clipboard_path = alice_data.join(".harness-clipboard.txt");
+        let _ = std::fs::write(&clipboard_path, format!("{long_payload}\n"));
+
+        if let Err(error) =
+            ScenarioExecutor::new(ExecutionMode::Scripted).execute(&scenario, &mut api)
+        {
+            panic!("send_clipboard execute failed: {error}");
+        }
+
+        if let Err(error) = api.stop_all() {
+            panic!("stop_all failed: {error}");
+        }
+
+        let chunks: Vec<String> = api
+            .action_log()
+            .iter()
+            .filter_map(|entry| match &entry.request {
+                ToolRequest::SendKeys { instance_id, keys } if instance_id == "bob" => {
+                    Some(keys.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            chunks.len() > 1,
+            "expected long clipboard text to be chunked"
+        );
+        let reassembled = chunks.join("");
+        assert_eq!(reassembled, long_payload);
     }
 }
