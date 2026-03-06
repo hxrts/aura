@@ -1658,8 +1658,10 @@ fn handle_device_enrollment_key_queue(
                 state.toast_success("Copied to clipboard");
             }
         }
-        KeyCode::Char('m' | 'M') if key.modifiers.ctrl() => {
-            // Demo mode only: simulate mobile device importing this enrollment code
+        KeyCode::Char('m' | 'M')
+            if key.modifiers.ctrl() || !state.settings.demo_mobile_device_id.is_empty() =>
+        {
+            // Demo mode: allow plain m/M as harness-friendly fallback in addition to Ctrl+M.
             let is_demo = !state.settings.demo_mobile_device_id.is_empty();
             let is_pending = !modal_state.ceremony.is_complete && !modal_state.ceremony.has_failed;
             if is_demo && is_pending && !modal_state.enrollment_code.is_empty() {

@@ -1,0 +1,32 @@
+schema_version = 1
+
+[run]
+name = "mixed-web-tui-loopback"
+pty_rows = 40
+pty_cols = 120
+artifact_dir = "artifacts/harness/mixed-web-tui-loopback"
+
+[[instances]]
+id = "tui"
+mode = "local"
+data_dir = "artifacts/harness/state/mixed-web-tui-loopback/tui"
+device_id = "tui-local-01"
+bind_address = "127.0.0.1:43011"
+demo_mode = false
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "127.0.0.1"
+broadcast_addr = "127.0.0.1"
+port = 19543
+
+[[instances]]
+id = "web"
+mode = "browser"
+data_dir = ".tmp/harness-browser/mixed-web-tui-loopback/web"
+device_id = "web-browser-11"
+bind_address = "127.0.0.1:53011"
+demo_mode = false
+env = [
+  "AURA_HARNESS_BROWSER_HEADLESS=true",
+]

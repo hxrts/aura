@@ -338,7 +338,12 @@ fn handle_settings_char(model: &mut UiModel, ch: char) {
             model.modal_hint = "Import Device Enrollment Code".to_string();
         }
         'r' if model.settings_index == 3 => {
-            set_toast(model, '✗', "Cannot remove the current device");
+            if model.has_secondary_device {
+                model.has_secondary_device = false;
+                set_toast(model, '✓', "Device removal complete");
+            } else {
+                set_toast(model, '✗', "Cannot remove the current device");
+            }
         }
         's' if model.settings_index == 2 => {
             model.modal = Some(ModalState::RequestRecovery);
@@ -555,6 +560,7 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             dismiss_modal(model);
         }
         ModalState::ImportDeviceEnrollmentCode => {
+            model.has_secondary_device = true;
             set_toast(model, '✓', "membership updated");
             dismiss_modal(model);
         }
@@ -1325,5 +1331,23 @@ mod tests {
         assert_eq!(first_message, "Cannot remove the current device");
         assert_eq!(second_message, "Cannot remove the current device");
         assert!(second_key > first_key);
+    }
+
+    #[test]
+    fn settings_remove_device_succeeds_when_secondary_device_exists() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+
+        model.set_screen(UiScreen::Settings);
+        model.settings_index = 3;
+        model.has_secondary_device = true;
+
+        apply_text_keys(&mut model, "r", &clipboard);
+
+        assert!(!model.has_secondary_device);
+        assert_eq!(
+            model.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("Device removal complete")
+        );
     }
 }

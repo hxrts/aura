@@ -279,6 +279,9 @@ fn settings_row(model: &UiModel, row_idx: usize) -> (String, String, String) {
         };
         let right = if idx == 0 {
             format!("Nickname: {}", model.profile_nickname)
+        } else if SETTINGS_ROWS[idx] == "Devices" {
+            let device_count = if model.has_secondary_device { 2 } else { 1 };
+            format!("Devices: {device_count}")
         } else if SETTINGS_ROWS[idx] == "Authority" {
             format!("Authority: {} (local)", model.authority_id)
         } else {

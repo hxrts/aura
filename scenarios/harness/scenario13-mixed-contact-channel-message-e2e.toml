@@ -1,0 +1,241 @@
+schema_version = 1
+id = "scenario13-mixed-contact-channel-message-e2e"
+goal = "Use one TUI and one web instance as distinct users: accept contact invite, join a shared channel, and verify bidirectional message delivery."
+execution_mode = "scripted"
+required_capabilities = ["local", "browser"]
+
+[[steps]]
+id = "launch"
+action = "launch_instances"
+timeout_ms = 15000
+
+[[steps]]
+id = "tui-ready"
+action = "wait_for"
+instance = "tui"
+pattern = "Welcome to Aura"
+timeout_ms = 180000
+
+[[steps]]
+id = "web-ready"
+action = "wait_for"
+instance = "web"
+pattern = "Welcome to Aura"
+timeout_ms = 60000
+
+[[steps]]
+id = "tui-create-account"
+action = "send_keys"
+instance = "tui"
+keys = "TuiUser\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "tui-map-ready"
+action = "wait_for"
+instance = "tui"
+pattern = "Map → Limited"
+timeout_ms = 120000
+
+[[steps]]
+id = "tui-open-contacts"
+action = "send_keys"
+instance = "tui"
+keys = "3"
+timeout_ms = 2000
+
+[[steps]]
+id = "web-open-contacts"
+action = "send_keys"
+instance = "web"
+keys = "3"
+timeout_ms = 2000
+
+[[steps]]
+id = "tui-open-invite-modal"
+action = "send_keys"
+instance = "tui"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "tui-create-contact-invite"
+action = "send_key"
+instance = "tui"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "tui-invite-created"
+action = "wait_for"
+instance = "tui"
+pattern = "Invitation Created"
+timeout_ms = 10000
+
+[[steps]]
+id = "tui-copy-invite-code"
+action = "send_keys"
+instance = "tui"
+keys = "c"
+timeout_ms = 2000
+
+[[steps]]
+id = "tui-copy-toast"
+action = "expect_toast"
+instance = "tui"
+contains = "Copied to clipboard"
+timeout_ms = 8000
+
+[[steps]]
+id = "tui-close-invite-modal"
+action = "send_key"
+instance = "tui"
+key = "esc"
+timeout_ms = 1500
+
+[[steps]]
+id = "tui-dismiss-copy-toast"
+action = "send_key"
+instance = "tui"
+key = "esc"
+timeout_ms = 1000
+
+[[steps]]
+id = "web-open-accept-modal"
+action = "send_keys"
+instance = "web"
+keys = "a"
+timeout_ms = 2000
+
+[[steps]]
+id = "web-accept-modal-visible"
+action = "wait_for"
+instance = "web"
+pattern = "Accept Invitation"
+timeout_ms = 8000
+
+[[steps]]
+id = "web-paste-invite-code"
+action = "send_clipboard"
+instance = "web"
+source_instance = "tui"
+timeout_ms = 12000
+
+[[steps]]
+id = "web-submit-invite"
+action = "send_key"
+instance = "web"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "web-contact-added"
+action = "wait_for"
+instance = "web"
+pattern = "Contacts (1)"
+timeout_ms = 12000
+
+[[steps]]
+id = "tui-open-neighborhood"
+action = "send_keys"
+instance = "tui"
+keys = "1"
+timeout_ms = 2000
+
+[[steps]]
+id = "tui-open-create-home-modal"
+action = "send_keys"
+instance = "tui"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "tui-create-home-modal-visible"
+action = "wait_for"
+instance = "tui"
+pattern = "Create New Home"
+timeout_ms = 8000
+
+[[steps]]
+id = "tui-create-home"
+action = "send_keys"
+instance = "tui"
+keys = "BridgeHome13\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "tui-home-created"
+action = "expect_toast"
+instance = "tui"
+contains = "Home 'BridgeHome13' created"
+timeout_ms = 12000
+
+[[steps]]
+id = "tui-open-chat"
+action = "send_keys"
+instance = "tui"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
+id = "web-open-chat"
+action = "send_keys"
+instance = "web"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
+id = "tui-join-amp-channel"
+action = "send_chat_command"
+instance = "tui"
+command = "/join amp-bridge"
+timeout_ms = 6000
+
+[[steps]]
+id = "tui-channel-visible"
+action = "wait_for"
+instance = "tui"
+pattern = "amp-bridge"
+timeout_ms = 12000
+
+[[steps]]
+id = "web-join-amp-channel"
+action = "send_chat_command"
+instance = "web"
+command = "/join amp-bridge"
+timeout_ms = 6000
+
+[[steps]]
+id = "web-channel-visible"
+action = "wait_for"
+instance = "web"
+pattern = "amp-bridge"
+timeout_ms = 12000
+
+[[steps]]
+id = "tui-send-message-to-web"
+action = "send_keys"
+instance = "tui"
+keys = "ihello-from-tu1\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "web-receives-tui-message"
+action = "wait_for"
+instance = "web"
+pattern = "hello-from-tu1"
+timeout_ms = 12000
+
+[[steps]]
+id = "web-send-message-to-tui"
+action = "send_keys"
+instance = "web"
+keys = "ihello-from-web\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "tui-receives-web-message"
+action = "wait_for"
+instance = "tui"
+pattern = "hello-from-web"
+timeout_ms = 12000

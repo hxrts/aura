@@ -1,0 +1,32 @@
+schema_version = 1
+
+[run]
+name = "mixed-web-tui-demo"
+pty_rows = 40
+pty_cols = 120
+artifact_dir = "artifacts/harness/mixed-web-tui-demo"
+
+[[instances]]
+id = "tui"
+mode = "local"
+data_dir = "artifacts/harness/state/mixed-web-tui-demo/tui"
+device_id = "tui-demo-01"
+bind_address = "127.0.0.1:43001"
+demo_mode = true
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "127.0.0.1"
+broadcast_addr = "127.0.0.1"
+port = 19533
+
+[[instances]]
+id = "web"
+mode = "browser"
+data_dir = ".tmp/harness-browser/mixed-web-tui-demo/web"
+device_id = "web-browser-01"
+bind_address = "127.0.0.1:53001"
+demo_mode = false
+env = [
+  "AURA_HARNESS_BROWSER_HEADLESS=true",
+]

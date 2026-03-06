@@ -106,6 +106,7 @@ impl HarnessCoordinator {
 
     pub fn send_keys(&mut self, instance_id: &str, keys: &str) -> Result<()> {
         let normalized = normalize_key_stream(keys);
+        let sender_mode = self.instance_modes.get(instance_id).cloned();
         {
             let backend = self
                 .backends
@@ -119,10 +120,10 @@ impl HarnessCoordinator {
                 if peer_id == instance_id {
                     continue;
                 }
-                if !matches!(
-                    self.instance_modes.get(peer_id),
-                    Some(InstanceMode::Browser)
-                ) {
+                let peer_mode = self.instance_modes.get(peer_id);
+                let should_inject = matches!(sender_mode, Some(InstanceMode::Browser))
+                    || matches!(peer_mode, Some(InstanceMode::Browser));
+                if !should_inject {
                     continue;
                 }
                 let _ = backend.as_trait_mut().inject_message(&message);

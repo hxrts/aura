@@ -346,6 +346,23 @@ impl InstanceBackend for LocalPtyBackend {
         Ok(())
     }
 
+    fn inject_message(&mut self, message: &str) -> Result<()> {
+        let sanitized = message
+            .chars()
+            .map(|ch| if ch.is_control() { ' ' } else { ch })
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        if sanitized.is_empty() {
+            return Ok(());
+        }
+
+        // Mirror browser-submitted message text by switching to Chat, entering insert
+        // mode, and submitting the message payload.
+        self.send_keys(&format!("\u{1b}2i{sanitized}\r"))
+    }
+
     fn tail_log(&self, lines: usize) -> Result<Vec<String>> {
         let Some(path) = &self.config.log_path else {
             return Ok(Vec::new());

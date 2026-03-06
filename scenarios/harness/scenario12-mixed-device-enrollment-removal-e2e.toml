@@ -1,0 +1,278 @@
+schema_version = 1
+id = "scenario12-mixed-device-enrollment-removal-e2e"
+goal = "Use one TUI and one web instance to exercise out-of-band add-device acceptance and device removal completion on both sides."
+execution_mode = "scripted"
+required_capabilities = ["local", "browser"]
+
+[[steps]]
+id = "launch"
+action = "launch_instances"
+timeout_ms = 15000
+
+[[steps]]
+id = "tui-ready"
+action = "wait_for"
+instance = "tui"
+pattern = "Welcome to Aura"
+timeout_ms = 180000
+
+[[steps]]
+id = "web-ready"
+action = "wait_for"
+instance = "web"
+pattern = "Welcome to Aura"
+timeout_ms = 60000
+
+[[steps]]
+id = "tui-create-account"
+action = "send_keys"
+instance = "tui"
+keys = "TuiOwner\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "tui-map-ready"
+action = "wait_for"
+instance = "tui"
+pattern = "Map → Limited"
+timeout_ms = 120000
+
+[[steps]]
+id = "tui-open-settings"
+action = "send_keys"
+instance = "tui"
+keys = "5"
+timeout_ms = 2000
+
+[[steps]]
+id = "tui-settings-visible"
+action = "wait_for"
+instance = "tui"
+pattern = "➤ Profile"
+timeout_ms = 8000
+
+[[steps]]
+id = "tui-open-devices-section"
+action = "send_key"
+instance = "tui"
+key = "down"
+repeat = 3
+timeout_ms = 1500
+
+[[steps]]
+id = "tui-devices-visible"
+action = "wait_for"
+instance = "tui"
+pattern = "➤ Devices"
+timeout_ms = 8000
+
+[[steps]]
+id = "tui-open-add-device-modal"
+action = "send_keys"
+instance = "tui"
+keys = "a"
+timeout_ms = 2000
+
+[[steps]]
+id = "tui-add-device-modal-visible"
+action = "wait_for"
+instance = "tui"
+pattern = "Add Device — Step 1 of 3"
+timeout_ms = 8000
+
+[[steps]]
+id = "tui-submit-add-device"
+action = "send_keys"
+instance = "tui"
+keys = "WebApp\n"
+timeout_ms = 2000
+
+[[steps]]
+id = "tui-device-enrollment-ceremony-visible"
+action = "wait_for"
+instance = "tui"
+pattern = "Import this code on the new device"
+timeout_ms = 15000
+
+[[steps]]
+id = "tui-copy-device-enrollment-code"
+action = "send_keys"
+instance = "tui"
+keys = "c"
+timeout_ms = 2000
+
+[[steps]]
+id = "tui-copy-toast-visible"
+action = "expect_toast"
+instance = "tui"
+contains = "Copied to clipboard"
+timeout_ms = 8000
+
+[[steps]]
+id = "web-open-settings"
+action = "send_keys"
+instance = "web"
+keys = "5"
+timeout_ms = 2000
+
+[[steps]]
+id = "web-settings-visible"
+action = "wait_for"
+instance = "web"
+pattern = "➤ Profile"
+timeout_ms = 8000
+
+[[steps]]
+id = "web-open-devices-section"
+action = "send_key"
+instance = "web"
+key = "down"
+repeat = 3
+timeout_ms = 1500
+
+[[steps]]
+id = "web-devices-visible"
+action = "wait_for"
+instance = "web"
+pattern = "➤ Devices"
+timeout_ms = 8000
+
+[[steps]]
+id = "web-open-import-device-modal"
+action = "send_keys"
+instance = "web"
+keys = "i"
+timeout_ms = 2000
+
+[[steps]]
+id = "web-import-device-modal-visible"
+action = "wait_for"
+instance = "web"
+pattern = "Import Device Enrollment Code"
+timeout_ms = 8000
+
+[[steps]]
+id = "web-paste-device-code"
+action = "send_clipboard"
+instance = "web"
+source_instance = "tui"
+timeout_ms = 12000
+
+[[steps]]
+id = "web-submit-device-code"
+action = "send_key"
+instance = "web"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "web-device-import-toast"
+action = "expect_toast"
+instance = "web"
+contains = "membership updated"
+timeout_ms = 8000
+
+[[steps]]
+id = "web-devices-count-two"
+action = "wait_for"
+instance = "web"
+pattern = "Devices: 2"
+timeout_ms = 8000
+
+[[steps]]
+id = "tui-simulate-web-accept"
+action = "send_keys"
+instance = "tui"
+keys = "m"
+timeout_ms = 2000
+
+[[steps]]
+id = "tui-device-enrollment-complete"
+action = "expect_toast"
+instance = "tui"
+contains = "Device enrollment complete"
+timeout_ms = 30000
+
+[[steps]]
+id = "tui-second-device-visible"
+action = "wait_for"
+instance = "tui"
+pattern = "WebApp"
+timeout_ms = 20000
+
+[[steps]]
+id = "tui-open-device-select"
+action = "send_keys"
+instance = "tui"
+keys = "r"
+timeout_ms = 2000
+
+[[steps]]
+id = "tui-device-select-modal-visible"
+action = "wait_for"
+instance = "tui"
+pattern = "Select Device to Remove"
+timeout_ms = 10000
+
+[[steps]]
+id = "tui-choose-device-to-remove"
+action = "send_key"
+instance = "tui"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "tui-remove-confirm-modal-visible"
+action = "wait_for"
+instance = "tui"
+pattern = "Remove Device"
+timeout_ms = 10000
+
+[[steps]]
+id = "tui-focus-remove-confirm"
+action = "send_key"
+instance = "tui"
+key = "tab"
+timeout_ms = 1000
+
+[[steps]]
+id = "tui-confirm-remove-device"
+action = "send_key"
+instance = "tui"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "tui-device-removal-started"
+action = "expect_toast"
+instance = "tui"
+contains = "Device removal started"
+timeout_ms = 10000
+
+[[steps]]
+id = "tui-device-removal-complete"
+action = "expect_toast"
+instance = "tui"
+contains = "Device removal complete"
+timeout_ms = 30000
+
+[[steps]]
+id = "web-run-device-removal-flow"
+action = "send_keys"
+instance = "web"
+keys = "r"
+timeout_ms = 2000
+
+[[steps]]
+id = "web-device-removal-complete"
+action = "expect_toast"
+instance = "web"
+contains = "Device removal complete"
+timeout_ms = 10000
+
+[[steps]]
+id = "web-devices-count-one"
+action = "wait_for"
+instance = "web"
+pattern = "Devices: 1"
+timeout_ms = 8000

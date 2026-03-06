@@ -522,6 +522,22 @@ impl IoContext {
                     .map_err(|e| format!("Failed to accept invitation: {e}"))?;
                 Ok(())
             }
+
+            /// Drive ceremony processing on the demo Mobile device.
+            ///
+            /// This is used by demo-mode harness flows to ensure device-threshold
+            /// ceremony packages are consumed by the simulated secondary device.
+            pub async fn process_demo_mobile_ceremony_acceptances(&self) -> Result<(), String> {
+                let agent = self
+                    .demo_mobile_agent
+                    .as_ref()
+                    .ok_or_else(|| "Demo Mobile agent unavailable".to_string())?;
+                agent
+                    .process_ceremony_acceptances()
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| format!("Failed to process demo Mobile ceremonies: {e}"))
+            }
         } else {
             #[must_use]
             pub fn is_demo_mode(&self) -> bool {
