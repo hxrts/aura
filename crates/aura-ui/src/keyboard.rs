@@ -5,7 +5,8 @@
 
 use crate::clipboard::ClipboardPort;
 use crate::model::{
-    AccessDepth, ChannelRow, CreateChannelWizardStep, ModalState, ToastState, UiModel, UiScreen,
+    AccessDepth, AddDeviceWizardStep, ChannelRow, CreateChannelWizardStep, ModalState,
+    ThresholdWizardStep, ToastState, UiModel, UiScreen,
 };
 use aura_app::ui::types::parse_chat_command;
 
@@ -32,8 +33,12 @@ pub fn apply_text_keys(model: &mut UiModel, keys: &str, clipboard: &dyn Clipboar
 
 pub fn apply_named_key(model: &mut UiModel, key: &str, repeat: u16, clipboard: &dyn ClipboardPort) {
     let repeat = repeat.max(1);
+    let key_name = key.trim().to_ascii_lowercase();
     for _ in 0..repeat {
-        match key.trim().to_ascii_lowercase().as_str() {
+        if handle_wizard_named_key(model, key_name.as_str()) {
+            continue;
+        }
+        match key_name.as_str() {
             "enter" => handle_enter(model, clipboard),
             "esc" => handle_escape(model),
             "tab" => {
@@ -67,6 +72,10 @@ fn apply_char(model: &mut UiModel, ch: char, clipboard: &dyn ClipboardPort) {
     }
 
     if let Some(modal) = model.modal {
+        if matches!(modal, ModalState::AddDeviceStep1) {
+            handle_add_device_modal_char(model, ch, clipboard);
+            return;
+        }
         if matches!(modal, ModalState::CreateInvitation) && matches!(ch, 'c' | 'y') {
             if let Some(code) = model.last_invite_code.clone() {
                 clipboard.write(&code);
@@ -74,7 +83,7 @@ fn apply_char(model: &mut UiModel, ch: char, clipboard: &dyn ClipboardPort) {
                 return;
             }
         }
-        if modal_accepts_text(modal) {
+        if modal_accepts_text(model, modal) {
             model.modal_buffer.push(ch);
         }
         return;
@@ -326,12 +335,10 @@ fn handle_settings_char(model: &mut UiModel, ch: char) {
             model.modal_hint = "Edit Nickname".to_string();
         }
         't' if model.settings_index == 1 => {
-            model.modal = Some(ModalState::GuardianSetup);
-            model.modal_hint = "Guardian Setup".to_string();
+            open_guardian_setup_wizard(model);
         }
         'a' if model.settings_index == 3 => {
-            model.modal = Some(ModalState::AddDeviceStep1);
-            model.modal_hint = "Add Device — Step 1 of 3".to_string();
+            open_add_device_wizard(model);
         }
         'i' if model.settings_index == 3 => {
             model.modal = Some(ModalState::ImportDeviceEnrollmentCode);
@@ -339,8 +346,7 @@ fn handle_settings_char(model: &mut UiModel, ch: char) {
         }
         'r' if model.settings_index == 3 => {
             if model.has_secondary_device {
-                model.has_secondary_device = false;
-                set_toast(model, '✓', "Device removal complete");
+                open_remove_device_selection(model);
             } else {
                 set_toast(model, '✗', "Cannot remove the current device");
             }
@@ -358,11 +364,7 @@ fn handle_settings_char(model: &mut UiModel, ch: char) {
             );
         }
         'm' if model.settings_index == 4 => {
-            set_toast(
-                model,
-                '✗',
-                "Cannot configure multifactor: requires at least 2 devices",
-            );
+            open_mfa_setup_wizard(model);
         }
         _ => {}
     }
@@ -401,23 +403,17 @@ fn handle_enter(model: &mut UiModel, clipboard: &dyn ClipboardPort) {
                 model.modal_hint = "Edit Nickname".to_string();
             }
             1 => {
-                model.modal = Some(ModalState::GuardianSetup);
-                model.modal_hint = "Guardian Setup".to_string();
+                open_guardian_setup_wizard(model);
             }
             2 => {
                 model.modal = Some(ModalState::RequestRecovery);
                 model.modal_hint = "Request Recovery".to_string();
             }
             3 => {
-                model.modal = Some(ModalState::AddDeviceStep1);
-                model.modal_hint = "Add Device — Step 1 of 3".to_string();
+                open_add_device_wizard(model);
             }
             4 => {
-                set_toast(
-                    model,
-                    '✗',
-                    "Cannot configure multifactor: requires at least 2 devices",
-                );
+                open_mfa_setup_wizard(model);
             }
             _ => {}
         },
@@ -547,23 +543,140 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             });
             dismiss_modal(model);
         }
-        ModalState::GuardianSetup => {
-            set_toast(model, 'ℹ', "guardians for recovery");
-            dismiss_modal(model);
-        }
+        ModalState::GuardianSetup => match model.guardian_wizard_step {
+            ThresholdWizardStep::Selection => {
+                let available = model.contacts.len() as u8;
+                if available < 2 {
+                    set_toast(model, '✗', "Add contacts first to set up guardians");
+                    dismiss_modal(model);
+                    return;
+                }
+                let requested =
+                    parse_wizard_value(&model.modal_buffer, model.guardian_selected_count);
+                let selected = requested.clamp(2, available);
+                model.guardian_selected_count = selected;
+                model.guardian_threshold_k = model.guardian_threshold_k.clamp(1, selected);
+                model.guardian_wizard_step = ThresholdWizardStep::Threshold;
+                model.modal_buffer = model.guardian_threshold_k.to_string();
+                model.modal_hint = "Guardian Setup — Step 2 of 3".to_string();
+            }
+            ThresholdWizardStep::Threshold => {
+                let k = parse_wizard_value(&model.modal_buffer, model.guardian_threshold_k)
+                    .clamp(1, model.guardian_selected_count);
+                model.guardian_threshold_k = k;
+                model.guardian_wizard_step = ThresholdWizardStep::Ceremony;
+                model.modal_buffer.clear();
+                model.modal_hint = "Guardian Setup — Step 3 of 3".to_string();
+            }
+            ThresholdWizardStep::Ceremony => {
+                set_toast(
+                    model,
+                    '✓',
+                    format!(
+                        "Guardian ceremony started ({} of {})",
+                        model.guardian_threshold_k, model.guardian_selected_count
+                    ),
+                );
+                dismiss_modal(model);
+            }
+        },
         ModalState::RequestRecovery => {
             set_toast(model, '✓', "Recovery request sent to guardians");
             dismiss_modal(model);
         }
-        ModalState::AddDeviceStep1 => {
-            set_toast(model, '✓', "invitation sent");
-            dismiss_modal(model);
-        }
+        ModalState::AddDeviceStep1 => match model.add_device_step {
+            AddDeviceWizardStep::Name => {
+                let name = model.modal_buffer.trim().to_string();
+                if name.is_empty() {
+                    set_toast(model, '✗', "Device name is required");
+                    return;
+                }
+
+                model.add_device_name = name;
+                model.device_enrollment_counter = model.device_enrollment_counter.saturating_add(1);
+                model.add_device_enrollment_code =
+                    format!("DEVICE-ENROLL-{}", model.device_enrollment_counter);
+                model.add_device_step = AddDeviceWizardStep::ShareCode;
+                model.modal_buffer.clear();
+                model.modal_hint = "Add Device — Step 2 of 3".to_string();
+            }
+            AddDeviceWizardStep::ShareCode => {
+                model.add_device_step = AddDeviceWizardStep::Confirm;
+                model.modal_hint = "Add Device — Step 3 of 3".to_string();
+            }
+            AddDeviceWizardStep::Confirm => {
+                set_toast(
+                    model,
+                    '✓',
+                    format!(
+                        "Enrollment code for '{}' is ready to share out-of-band",
+                        model.add_device_name
+                    ),
+                );
+                dismiss_modal(model);
+            }
+        },
         ModalState::ImportDeviceEnrollmentCode => {
+            if model.modal_buffer.trim().is_empty() {
+                set_toast(model, '✗', "Enrollment code is required");
+                return;
+            }
             model.has_secondary_device = true;
+            if model.secondary_device_name().is_none() {
+                let fallback = if model.add_device_name.trim().is_empty() {
+                    "Mobile".to_string()
+                } else {
+                    model.add_device_name.clone()
+                };
+                model.set_secondary_device_name(Some(fallback));
+            }
             set_toast(model, '✓', "membership updated");
             dismiss_modal(model);
         }
+        ModalState::SelectDeviceToRemove => {
+            model.modal = Some(ModalState::ConfirmRemoveDevice);
+            model.modal_hint = "Confirm Device Removal".to_string();
+        }
+        ModalState::ConfirmRemoveDevice => {
+            if model.has_secondary_device {
+                model.has_secondary_device = false;
+                model.set_secondary_device_name(None);
+                set_toast(model, '✓', "Device removal complete");
+            } else {
+                set_toast(model, '✗', "Cannot remove the current device");
+            }
+            dismiss_modal(model);
+        }
+        ModalState::MfaSetup => match model.mfa_wizard_step {
+            ThresholdWizardStep::Selection => {
+                let available = available_device_count(model);
+                let requested = parse_wizard_value(&model.modal_buffer, model.mfa_selected_count);
+                model.mfa_selected_count = requested.clamp(1, available);
+                model.mfa_threshold_k = model.mfa_threshold_k.clamp(1, model.mfa_selected_count);
+                model.mfa_wizard_step = ThresholdWizardStep::Threshold;
+                model.modal_buffer = model.mfa_threshold_k.to_string();
+                model.modal_hint = "Multifactor Setup — Step 2 of 3".to_string();
+            }
+            ThresholdWizardStep::Threshold => {
+                let k = parse_wizard_value(&model.modal_buffer, model.mfa_threshold_k)
+                    .clamp(1, model.mfa_selected_count);
+                model.mfa_threshold_k = k;
+                model.mfa_wizard_step = ThresholdWizardStep::Ceremony;
+                model.modal_buffer.clear();
+                model.modal_hint = "Multifactor Setup — Step 3 of 3".to_string();
+            }
+            ThresholdWizardStep::Ceremony => {
+                set_toast(
+                    model,
+                    '✓',
+                    format!(
+                        "Multifactor ceremony started ({} of {})",
+                        model.mfa_threshold_k, model.mfa_selected_count
+                    ),
+                );
+                dismiss_modal(model);
+            }
+        },
         ModalState::AssignModerator => {
             if model.contacts.is_empty() {
                 model.toast = Some(ToastState {
@@ -851,6 +964,10 @@ fn dismiss_modal(model: &mut UiModel) {
     model.modal_buffer.clear();
     model.modal_hint.clear();
     model.reset_create_channel_wizard();
+    model.reset_add_device_wizard();
+    model.reset_guardian_wizard();
+    model.reset_mfa_wizard();
+    model.reset_remove_device_flow();
 }
 
 fn handle_modal_tab(model: &mut UiModel, reverse: bool) -> bool {
@@ -913,7 +1030,22 @@ fn handle_modal_tab(model: &mut UiModel, reverse: bool) -> bool {
     true
 }
 
-fn modal_accepts_text(modal: ModalState) -> bool {
+fn modal_accepts_text(model: &UiModel, modal: ModalState) -> bool {
+    if matches!(modal, ModalState::AddDeviceStep1) {
+        return matches!(model.add_device_step, AddDeviceWizardStep::Name);
+    }
+    if matches!(modal, ModalState::GuardianSetup) {
+        return matches!(
+            model.guardian_wizard_step,
+            ThresholdWizardStep::Selection | ThresholdWizardStep::Threshold
+        );
+    }
+    if matches!(modal, ModalState::MfaSetup) {
+        return matches!(
+            model.mfa_wizard_step,
+            ThresholdWizardStep::Selection | ThresholdWizardStep::Threshold
+        );
+    }
     matches!(
         modal,
         ModalState::CreateInvitation
@@ -929,8 +1061,135 @@ fn modal_accepts_text(modal: ModalState) -> bool {
 fn backspace(model: &mut UiModel) {
     if model.input_mode {
         model.input_buffer.pop();
-    } else if model.modal.is_some() {
-        model.modal_buffer.pop();
+    } else if let Some(modal) = model.modal {
+        if modal_accepts_text(model, modal) {
+            model.modal_buffer.pop();
+        }
+    }
+}
+
+fn open_add_device_wizard(model: &mut UiModel) {
+    model.modal = Some(ModalState::AddDeviceStep1);
+    model.reset_add_device_wizard();
+    model.modal_buffer.clear();
+    model.modal_hint = "Add Device — Step 1 of 3".to_string();
+}
+
+fn open_guardian_setup_wizard(model: &mut UiModel) {
+    model.modal = Some(ModalState::GuardianSetup);
+    model.reset_guardian_wizard();
+    let available = model.contacts.len() as u8;
+    model.guardian_selected_count = if available >= 2 { 2 } else { available.max(1) };
+    model.guardian_threshold_k = model.guardian_selected_count.clamp(1, 2);
+    model.modal_buffer = model.guardian_selected_count.to_string();
+    model.modal_hint = "Guardian Setup — Step 1 of 3".to_string();
+}
+
+fn open_remove_device_selection(model: &mut UiModel) {
+    model.modal = Some(ModalState::SelectDeviceToRemove);
+    model.remove_device_candidate_name = model
+        .secondary_device_name()
+        .unwrap_or("Secondary device")
+        .to_string();
+    model.modal_hint = "Select Device to Remove".to_string();
+}
+
+fn open_mfa_setup_wizard(model: &mut UiModel) {
+    model.modal = Some(ModalState::MfaSetup);
+    model.reset_mfa_wizard();
+    model.mfa_selected_count = available_device_count(model);
+    model.mfa_threshold_k = model.mfa_selected_count.min(2).max(1);
+    model.modal_buffer = model.mfa_selected_count.to_string();
+    model.modal_hint = "Multifactor Setup — Step 1 of 3".to_string();
+}
+
+fn handle_add_device_modal_char(model: &mut UiModel, ch: char, clipboard: &dyn ClipboardPort) {
+    match model.add_device_step {
+        AddDeviceWizardStep::Name => {
+            model.modal_buffer.push(ch);
+        }
+        AddDeviceWizardStep::ShareCode | AddDeviceWizardStep::Confirm => {
+            if matches!(ch, 'c' | 'y') && !model.add_device_enrollment_code.is_empty() {
+                clipboard.write(&model.add_device_enrollment_code);
+                set_toast(model, '✓', "Copied to clipboard");
+            }
+        }
+    }
+}
+
+fn handle_wizard_named_key(model: &mut UiModel, key_name: &str) -> bool {
+    match model.modal {
+        Some(ModalState::GuardianSetup) => {
+            if matches!(key_name, "up" | "down") {
+                let delta = if key_name == "up" { 1 } else { -1 };
+                adjust_threshold_wizard_input(model, true, delta);
+                return true;
+            }
+        }
+        Some(ModalState::MfaSetup) => {
+            if matches!(key_name, "up" | "down") {
+                let delta = if key_name == "up" { 1 } else { -1 };
+                adjust_threshold_wizard_input(model, false, delta);
+                return true;
+            }
+        }
+        Some(ModalState::SelectDeviceToRemove) => {
+            if matches!(key_name, "up" | "down") {
+                return true;
+            }
+        }
+        _ => {}
+    }
+    false
+}
+
+fn adjust_threshold_wizard_input(model: &mut UiModel, guardian: bool, delta: i8) {
+    let (current, min, max) = if guardian {
+        match model.guardian_wizard_step {
+            ThresholdWizardStep::Selection => {
+                let max_contacts = (model.contacts.len() as u8).max(2);
+                (
+                    parse_wizard_value(&model.modal_buffer, model.guardian_selected_count),
+                    2,
+                    max_contacts,
+                )
+            }
+            ThresholdWizardStep::Threshold => (
+                parse_wizard_value(&model.modal_buffer, model.guardian_threshold_k),
+                1,
+                model.guardian_selected_count.max(1),
+            ),
+            ThresholdWizardStep::Ceremony => return,
+        }
+    } else {
+        match model.mfa_wizard_step {
+            ThresholdWizardStep::Selection => (
+                parse_wizard_value(&model.modal_buffer, model.mfa_selected_count),
+                1,
+                available_device_count(model),
+            ),
+            ThresholdWizardStep::Threshold => (
+                parse_wizard_value(&model.modal_buffer, model.mfa_threshold_k),
+                1,
+                model.mfa_selected_count.max(1),
+            ),
+            ThresholdWizardStep::Ceremony => return,
+        }
+    };
+
+    let adjusted = (current as i16 + delta as i16).clamp(min as i16, max as i16) as u8;
+    model.modal_buffer = adjusted.to_string();
+}
+
+fn parse_wizard_value(value: &str, fallback: u8) -> u8 {
+    value.trim().parse::<u8>().unwrap_or(fallback.max(1))
+}
+
+fn available_device_count(model: &UiModel) -> u8 {
+    if model.has_secondary_device {
+        2
+    } else {
+        1
     }
 }
 
@@ -1031,7 +1290,10 @@ fn command_toast(
 mod tests {
     use super::{apply_named_key, apply_text_keys};
     use crate::clipboard::{ClipboardPort, MemoryClipboard};
-    use crate::model::{CreateChannelWizardStep, ModalState, UiModel, UiScreen};
+    use crate::model::{
+        AddDeviceWizardStep, CreateChannelWizardStep, ModalState, ThresholdWizardStep, UiModel,
+        UiScreen,
+    };
 
     #[test]
     fn contacts_invite_shortcut_opens_invite_modal() {
@@ -1120,12 +1382,18 @@ mod tests {
 
         apply_text_keys(&mut model, "bootstrap-topic", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert_eq!(model.create_channel_step, CreateChannelWizardStep::InviteContacts);
+        assert_eq!(
+            model.create_channel_step,
+            CreateChannelWizardStep::InviteContacts
+        );
         assert_eq!(model.modal_hint, "Invite Contacts");
 
         apply_text_keys(&mut model, "bob", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert_eq!(model.create_channel_step, CreateChannelWizardStep::Threshold);
+        assert_eq!(
+            model.create_channel_step,
+            CreateChannelWizardStep::Threshold
+        );
         assert_eq!(model.modal_hint, "Group Threshold");
 
         apply_text_keys(&mut model, "2", &clipboard);
@@ -1298,10 +1566,7 @@ mod tests {
             Some("Cannot switch authority: only one authority available")
         );
         apply_text_keys(&mut model, "m", &clipboard);
-        assert_eq!(
-            model.toast.as_ref().map(|toast| toast.message.as_str()),
-            Some("Cannot configure multifactor: requires at least 2 devices")
-        );
+        assert!(matches!(model.modal, Some(ModalState::MfaSetup)));
     }
 
     #[test]
@@ -1341,13 +1606,123 @@ mod tests {
         model.set_screen(UiScreen::Settings);
         model.settings_index = 3;
         model.has_secondary_device = true;
+        model.set_secondary_device_name(Some("Laptop".to_string()));
 
         apply_text_keys(&mut model, "r", &clipboard);
+        assert!(matches!(
+            model.modal,
+            Some(ModalState::SelectDeviceToRemove)
+        ));
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        assert!(matches!(model.modal, Some(ModalState::ConfirmRemoveDevice)));
+        apply_named_key(&mut model, "enter", 1, &clipboard);
 
         assert!(!model.has_secondary_device);
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
             Some("Device removal complete")
+        );
+    }
+
+    #[test]
+    fn guardian_setup_wizard_advances_through_steps() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+        model.set_screen(UiScreen::Settings);
+        model.settings_index = 1;
+        model.ensure_contact("Alice");
+        model.ensure_contact("Bob");
+        model.ensure_contact("Carol");
+
+        apply_text_keys(&mut model, "t", &clipboard);
+        assert!(matches!(model.modal, Some(ModalState::GuardianSetup)));
+        assert_eq!(model.guardian_wizard_step, ThresholdWizardStep::Selection);
+
+        apply_text_keys(&mut model, "3", &clipboard);
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        assert_eq!(model.guardian_wizard_step, ThresholdWizardStep::Threshold);
+
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        assert_eq!(model.guardian_wizard_step, ThresholdWizardStep::Ceremony);
+
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        assert!(model.modal.is_none());
+        assert_eq!(
+            model.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("Guardian ceremony started (2 of 3)")
+        );
+    }
+
+    #[test]
+    fn mfa_setup_wizard_advances_through_steps() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+        model.set_screen(UiScreen::Settings);
+        model.settings_index = 4;
+        model.has_secondary_device = true;
+
+        apply_text_keys(&mut model, "m", &clipboard);
+        assert!(matches!(model.modal, Some(ModalState::MfaSetup)));
+        assert_eq!(model.mfa_wizard_step, ThresholdWizardStep::Selection);
+
+        apply_text_keys(&mut model, "2", &clipboard);
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        assert_eq!(model.mfa_wizard_step, ThresholdWizardStep::Threshold);
+
+        apply_text_keys(&mut model, "2", &clipboard);
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        assert_eq!(model.mfa_wizard_step, ThresholdWizardStep::Ceremony);
+
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        assert!(model.modal.is_none());
+        assert_eq!(
+            model.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("Multifactor ceremony started (2 of 2)")
+        );
+    }
+
+    #[test]
+    fn settings_add_device_wizard_requires_name_then_generates_code() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+        model.set_screen(UiScreen::Settings);
+        model.settings_index = 3;
+
+        apply_text_keys(&mut model, "a", &clipboard);
+        assert!(matches!(model.modal, Some(ModalState::AddDeviceStep1)));
+        assert_eq!(model.modal_hint, "Add Device — Step 1 of 3");
+
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        assert!(matches!(model.modal, Some(ModalState::AddDeviceStep1)));
+        assert_eq!(model.add_device_step, AddDeviceWizardStep::Name);
+        assert_eq!(
+            model.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("Device name is required")
+        );
+
+        apply_text_keys(&mut model, "Laptop", &clipboard);
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        assert!(matches!(model.modal, Some(ModalState::AddDeviceStep1)));
+        assert_eq!(model.add_device_step, AddDeviceWizardStep::ShareCode);
+        assert_eq!(model.modal_hint, "Add Device — Step 2 of 3");
+        assert!(!model.add_device_enrollment_code.is_empty());
+    }
+
+    #[test]
+    fn settings_add_device_wizard_can_copy_generated_code() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+        model.set_screen(UiScreen::Settings);
+        model.settings_index = 3;
+
+        apply_text_keys(&mut model, "aPhone\n", &clipboard);
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        apply_text_keys(&mut model, "c", &clipboard);
+
+        assert_eq!(clipboard.read(), model.add_device_enrollment_code);
+        assert_eq!(
+            model.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("Copied to clipboard")
         );
     }
 }

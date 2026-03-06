@@ -3,7 +3,9 @@
 //! Renders the UI model as a deterministic text representation suitable for
 //! snapshot testing and harness assertions across different rendering backends.
 
-use crate::model::{ModalState, NeighborhoodMode, UiModel, UiScreen};
+use crate::model::{
+    AddDeviceWizardStep, ModalState, NeighborhoodMode, ThresholdWizardStep, UiModel, UiScreen,
+};
 
 const PANEL_WIDTH: usize = 38;
 const CONTENT_ROWS: usize = 20;
@@ -376,17 +378,32 @@ fn apply_modal_overlay(
                 *center = "Remove Contact".to_string();
             }
         }
-        ModalState::GuardianSetup => {
-            if row_idx == 0 {
-                *center = "Guardian Setup".to_string();
-            } else if row_idx == 1 {
-                *center = "Select guardians".to_string();
-            } else if row_idx == 2 {
-                *center = "Group Threshold".to_string();
-            } else if row_idx == 3 {
-                *center = "Guardian Threshold".to_string();
+        ModalState::GuardianSetup => match model.guardian_wizard_step {
+            ThresholdWizardStep::Selection => {
+                if row_idx == 0 {
+                    *center = "Guardian Setup — Step 1 of 3".to_string();
+                } else if row_idx == 1 {
+                    *center = model.modal_buffer.clone();
+                }
             }
-        }
+            ThresholdWizardStep::Threshold => {
+                if row_idx == 0 {
+                    *center = "Guardian Setup — Step 2 of 3".to_string();
+                } else if row_idx == 1 {
+                    *center = model.modal_buffer.clone();
+                }
+            }
+            ThresholdWizardStep::Ceremony => {
+                if row_idx == 0 {
+                    *center = "Guardian Setup — Step 3 of 3".to_string();
+                } else if row_idx == 1 {
+                    *center = format!(
+                        "{} of {} approvals",
+                        model.guardian_threshold_k, model.guardian_selected_count
+                    );
+                }
+            }
+        },
         ModalState::RequestRecovery => {
             if row_idx == 0 {
                 *center = "Request Recovery".to_string();
@@ -394,11 +411,29 @@ fn apply_modal_overlay(
                 *center = "Notify guardians to begin recovery".to_string();
             }
         }
-        ModalState::AddDeviceStep1 => {
-            if row_idx == 0 {
-                *center = "Add Device — Step 1 of 3".to_string();
+        ModalState::AddDeviceStep1 => match model.add_device_step {
+            AddDeviceWizardStep::Name => {
+                if row_idx == 0 {
+                    *center = "Add Device — Step 1 of 3".to_string();
+                } else if row_idx == 1 {
+                    *center = model.modal_buffer.clone();
+                }
             }
-        }
+            AddDeviceWizardStep::ShareCode => {
+                if row_idx == 0 {
+                    *center = "Add Device — Step 2 of 3".to_string();
+                } else if row_idx == 1 {
+                    *center = format!("Code: {}", model.add_device_enrollment_code);
+                }
+            }
+            AddDeviceWizardStep::Confirm => {
+                if row_idx == 0 {
+                    *center = "Add Device — Step 3 of 3".to_string();
+                } else if row_idx == 1 {
+                    *center = format!("Invite '{}'", model.add_device_name);
+                }
+            }
+        },
         ModalState::ImportDeviceEnrollmentCode => {
             if row_idx == 0 {
                 *center = "Import Device Enrollment Code".to_string();
@@ -406,6 +441,52 @@ fn apply_modal_overlay(
                 *center = model.modal_buffer.clone();
             }
         }
+        ModalState::SelectDeviceToRemove => {
+            if row_idx == 0 {
+                *center = "Select Device to Remove".to_string();
+            } else if row_idx == 1 {
+                *center = model
+                    .secondary_device_name()
+                    .unwrap_or(model.remove_device_candidate_name.as_str())
+                    .to_string();
+            }
+        }
+        ModalState::ConfirmRemoveDevice => {
+            if row_idx == 0 {
+                *center = "Confirm Device Removal".to_string();
+            } else if row_idx == 1 {
+                *center = model
+                    .secondary_device_name()
+                    .unwrap_or(model.remove_device_candidate_name.as_str())
+                    .to_string();
+            }
+        }
+        ModalState::MfaSetup => match model.mfa_wizard_step {
+            ThresholdWizardStep::Selection => {
+                if row_idx == 0 {
+                    *center = "Multifactor Setup — Step 1 of 3".to_string();
+                } else if row_idx == 1 {
+                    *center = model.modal_buffer.clone();
+                }
+            }
+            ThresholdWizardStep::Threshold => {
+                if row_idx == 0 {
+                    *center = "Multifactor Setup — Step 2 of 3".to_string();
+                } else if row_idx == 1 {
+                    *center = model.modal_buffer.clone();
+                }
+            }
+            ThresholdWizardStep::Ceremony => {
+                if row_idx == 0 {
+                    *center = "Multifactor Setup — Step 3 of 3".to_string();
+                } else if row_idx == 1 {
+                    *center = format!(
+                        "{} of {} signatures",
+                        model.mfa_threshold_k, model.mfa_selected_count
+                    );
+                }
+            }
+        },
         ModalState::AssignModerator => {
             if row_idx == 0 {
                 *center = "Assign Moderator".to_string();

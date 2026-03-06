@@ -8,7 +8,8 @@ use crate::components::{
     UiModal, UiPill,
 };
 use crate::model::{
-    CreateChannelWizardStep, ModalState, NeighborhoodMode, UiController, UiModel, UiScreen,
+    AddDeviceWizardStep, CreateChannelWizardStep, ModalState, NeighborhoodMode,
+    ThresholdWizardStep, UiController, UiModel, UiScreen,
 };
 use aura_app::ui::signals::NetworkStatus;
 use aura_app::ui::types::format_network_status_with_severity;
@@ -693,7 +694,7 @@ fn settings_screen(
                         }
                         UiListItem {
                             label: "Remove current device".to_string(),
-                            secondary: Some("Current device removal is blocked".to_string()),
+                            secondary: Some("Select a removable device, then confirm".to_string()),
                             active: false,
                         }
                         div {
@@ -752,7 +753,7 @@ fn settings_screen(
                         }
                         UiListItem {
                             label: "Multifactor".to_string(),
-                            secondary: Some("Configure MFA ceremony for this authority".to_string()),
+                            secondary: Some("Open multifactor setup wizard".to_string()),
                             active: false,
                         }
                         div {
@@ -909,6 +910,9 @@ fn active_modal_title(model: &UiModel) -> Option<String> {
             ModalState::RequestRecovery => "Request Recovery",
             ModalState::AddDeviceStep1 => "Add Device",
             ModalState::ImportDeviceEnrollmentCode => "Import Device Enrollment Code",
+            ModalState::SelectDeviceToRemove => "Select Device to Remove",
+            ModalState::ConfirmRemoveDevice => "Confirm Device Removal",
+            ModalState::MfaSetup => "Multifactor Setup",
             ModalState::AssignModerator => "Assign Moderator",
             ModalState::AccessOverride => "Access Override",
             ModalState::CapabilityConfig => "Home Capability Configuration",
@@ -942,30 +946,28 @@ fn modal_view(model: &UiModel) -> Option<ModalView> {
             details.push("Enter a new home name and press Enter.".to_string());
             input_label = Some("Home Name".to_string());
         }
-        ModalState::CreateChannel => {
-            match model.create_channel_step {
-                CreateChannelWizardStep::Name => {
-                    details.push("Enter a new channel name.".to_string());
-                    details.push("Press Tab or Enter to continue.".to_string());
-                    input_label = Some("Channel Name".to_string());
-                }
-                CreateChannelWizardStep::Topic => {
-                    details.push("Set an initial topic for the channel.".to_string());
-                    details.push("Press Enter to continue.".to_string());
-                    input_label = Some("Channel Topic".to_string());
-                }
-                CreateChannelWizardStep::InviteContacts => {
-                    details.push("Invite contact names or authority IDs.".to_string());
-                    details.push("Press Enter to continue.".to_string());
-                    input_label = Some("Invite Contacts".to_string());
-                }
-                CreateChannelWizardStep::Threshold => {
-                    details.push("Set a numeric threshold for the group.".to_string());
-                    details.push("Press Enter to create the group.".to_string());
-                    input_label = Some("Threshold".to_string());
-                }
+        ModalState::CreateChannel => match model.create_channel_step {
+            CreateChannelWizardStep::Name => {
+                details.push("Enter a new channel name.".to_string());
+                details.push("Press Tab or Enter to continue.".to_string());
+                input_label = Some("Channel Name".to_string());
             }
-        }
+            CreateChannelWizardStep::Topic => {
+                details.push("Set an initial topic for the channel.".to_string());
+                details.push("Press Enter to continue.".to_string());
+                input_label = Some("Channel Topic".to_string());
+            }
+            CreateChannelWizardStep::InviteContacts => {
+                details.push("Invite contact names or authority IDs.".to_string());
+                details.push("Press Enter to continue.".to_string());
+                input_label = Some("Invite Contacts".to_string());
+            }
+            CreateChannelWizardStep::Threshold => {
+                details.push("Set a numeric threshold for the group.".to_string());
+                details.push("Press Enter to create the group.".to_string());
+                input_label = Some("Threshold".to_string());
+            }
+        },
         ModalState::SetChannelTopic => {
             details.push("Set a topic for the selected channel.".to_string());
             input_label = Some("Channel Topic".to_string());
@@ -981,25 +983,109 @@ fn modal_view(model: &UiModel) -> Option<ModalView> {
             details.push("Remove the selected contact from this authority.".to_string());
             details.push("Press Enter to confirm.".to_string());
         }
-        ModalState::GuardianSetup => {
-            details.push("Guardian setup wizard".to_string());
-            details.push("1. Select guardians".to_string());
-            details.push("2. Configure threshold".to_string());
-            details.push("3. Confirm ceremony".to_string());
-        }
+        ModalState::GuardianSetup => match model.guardian_wizard_step {
+            ThresholdWizardStep::Selection => {
+                let available = model.contacts.len();
+                details.push("Step 1 of 3: Select guardians.".to_string());
+                details.push(format!("Available contacts: {available}"));
+                details.push("Enter the number of guardians to include.".to_string());
+                input_label = Some("Guardian Count".to_string());
+            }
+            ThresholdWizardStep::Threshold => {
+                details.push("Step 2 of 3: Choose threshold.".to_string());
+                details.push(format!(
+                    "Selected guardians: {}",
+                    model.guardian_selected_count
+                ));
+                details.push("Enter k (approvals required).".to_string());
+                input_label = Some("Threshold (k)".to_string());
+            }
+            ThresholdWizardStep::Ceremony => {
+                details.push("Step 3 of 3: Ready to start ceremony.".to_string());
+                details.push(format!(
+                    "Will start guardian setup with {} of {} approvals.",
+                    model.guardian_threshold_k, model.guardian_selected_count
+                ));
+                details.push("Press Enter to start.".to_string());
+            }
+        },
         ModalState::RequestRecovery => {
             details.push("Request guardian-assisted recovery for this authority.".to_string());
             details.push("Press Enter to notify your configured guardians.".to_string());
         }
-        ModalState::AddDeviceStep1 => {
-            details.push("Add Device Wizard".to_string());
-            details.push("Step 1 of 3: Generate enrollment invitation".to_string());
-            details.push("Press Enter to continue.".to_string());
-        }
+        ModalState::AddDeviceStep1 => match model.add_device_step {
+            AddDeviceWizardStep::Name => {
+                details.push("Step 1 of 3: Name the device you want to invite.".to_string());
+                details.push("This is the new device, not the current one.".to_string());
+                details.push("Press Enter to generate an out-of-band enrollment code.".to_string());
+                input_label = Some("Device Name".to_string());
+            }
+            AddDeviceWizardStep::ShareCode => {
+                details
+                    .push("Step 2 of 3: Share this code out-of-band with that device.".to_string());
+                details.push(format!(
+                    "Enrollment Code: {}",
+                    model.add_device_enrollment_code
+                ));
+                details.push("Press c to copy, then press Enter when shared.".to_string());
+            }
+            AddDeviceWizardStep::Confirm => {
+                details.push("Step 3 of 3: Invitation prepared.".to_string());
+                details.push(format!(
+                    "Device '{}' can now import the enrollment code.",
+                    model.add_device_name
+                ));
+                details.push("Press Enter to close.".to_string());
+            }
+        },
         ModalState::ImportDeviceEnrollmentCode => {
             details.push("Import a device enrollment code and press Enter.".to_string());
             input_label = Some("Enrollment Code".to_string());
         }
+        ModalState::SelectDeviceToRemove => {
+            details.push("Select the device to remove.".to_string());
+            details.push(format!(
+                "Selected: {}",
+                model
+                    .secondary_device_name()
+                    .unwrap_or(model.remove_device_candidate_name.as_str())
+            ));
+            details.push("Press Enter to continue.".to_string());
+        }
+        ModalState::ConfirmRemoveDevice => {
+            details.push(format!(
+                "Remove \"{}\" from this authority?",
+                model
+                    .secondary_device_name()
+                    .unwrap_or(model.remove_device_candidate_name.as_str())
+            ));
+            details.push("Press Enter to confirm removal.".to_string());
+        }
+        ModalState::MfaSetup => match model.mfa_wizard_step {
+            ThresholdWizardStep::Selection => {
+                details.push("Step 1 of 3: Select devices for MFA signing.".to_string());
+                details.push(format!(
+                    "Available devices: {}",
+                    if model.has_secondary_device { 2 } else { 1 }
+                ));
+                details.push("Enter how many devices participate.".to_string());
+                input_label = Some("Device Count".to_string());
+            }
+            ThresholdWizardStep::Threshold => {
+                details.push("Step 2 of 3: Configure signing threshold.".to_string());
+                details.push(format!("Selected devices: {}", model.mfa_selected_count));
+                details.push("Enter required signatures (k).".to_string());
+                input_label = Some("Threshold (k)".to_string());
+            }
+            ThresholdWizardStep::Ceremony => {
+                details.push("Step 3 of 3: Ready to start MFA ceremony.".to_string());
+                details.push(format!(
+                    "Will start MFA with {} of {} signatures.",
+                    model.mfa_threshold_k, model.mfa_selected_count
+                ));
+                details.push("Press Enter to start.".to_string());
+            }
+        },
         ModalState::AssignModerator => {
             details.push("Assign moderator role for selected home context.".to_string());
             details.push("Only members can be designated as moderators.".to_string());
@@ -1014,7 +1100,7 @@ fn modal_view(model: &UiModel) -> Option<ModalView> {
         }
     }
 
-    let input_value = if modal_accepts_text(modal) {
+    let input_value = if modal_accepts_text(model, modal) {
         Some(model.modal_buffer.clone())
     } else {
         None
@@ -1025,6 +1111,21 @@ fn modal_view(model: &UiModel) -> Option<ModalView> {
         ModalState::CreateChannel => match model.create_channel_step {
             CreateChannelWizardStep::Threshold => "Create".to_string(),
             _ => "Next".to_string(),
+        },
+        ModalState::AddDeviceStep1 => match model.add_device_step {
+            AddDeviceWizardStep::Name => "Generate Code".to_string(),
+            AddDeviceWizardStep::ShareCode => "Next".to_string(),
+            AddDeviceWizardStep::Confirm => "Close".to_string(),
+        },
+        ModalState::GuardianSetup => match model.guardian_wizard_step {
+            ThresholdWizardStep::Selection => "Next".to_string(),
+            ThresholdWizardStep::Threshold => "Next".to_string(),
+            ThresholdWizardStep::Ceremony => "Start".to_string(),
+        },
+        ModalState::MfaSetup => match model.mfa_wizard_step {
+            ThresholdWizardStep::Selection => "Next".to_string(),
+            ThresholdWizardStep::Threshold => "Next".to_string(),
+            ThresholdWizardStep::Ceremony => "Start".to_string(),
         },
         _ => "Confirm".to_string(),
     };
@@ -1136,7 +1237,22 @@ fn help_modal_content(screen: UiScreen) -> (Vec<String>, Vec<(String, String)>) 
     (details, keybind_rows)
 }
 
-fn modal_accepts_text(modal: ModalState) -> bool {
+fn modal_accepts_text(model: &UiModel, modal: ModalState) -> bool {
+    if matches!(modal, ModalState::AddDeviceStep1) {
+        return matches!(model.add_device_step, AddDeviceWizardStep::Name);
+    }
+    if matches!(modal, ModalState::GuardianSetup) {
+        return matches!(
+            model.guardian_wizard_step,
+            ThresholdWizardStep::Selection | ThresholdWizardStep::Threshold
+        );
+    }
+    if matches!(modal, ModalState::MfaSetup) {
+        return matches!(
+            model.mfa_wizard_step,
+            ThresholdWizardStep::Selection | ThresholdWizardStep::Threshold
+        );
+    }
     matches!(
         modal,
         ModalState::CreateInvitation
@@ -1205,7 +1321,7 @@ fn should_skip_global_key(controller: &UiController, event: &KeyboardData) -> bo
     let Some(modal) = model.modal else {
         return false;
     };
-    if !modal_accepts_text(modal) {
+    if !modal_accepts_text(&model, modal) {
         return false;
     }
     !matches!(event.key(), Key::Enter | Key::Escape)

@@ -108,6 +108,9 @@ pub enum ModalState {
     RequestRecovery,
     AddDeviceStep1,
     ImportDeviceEnrollmentCode,
+    SelectDeviceToRemove,
+    ConfirmRemoveDevice,
+    MfaSetup,
     AssignModerator,
     AccessOverride,
     CapabilityConfig,
@@ -119,6 +122,20 @@ pub enum CreateChannelWizardStep {
     Topic,
     InviteContacts,
     Threshold,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddDeviceWizardStep {
+    Name,
+    ShareCode,
+    Confirm,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThresholdWizardStep {
+    Selection,
+    Threshold,
+    Ceremony,
 }
 
 #[derive(Debug, Clone)]
@@ -138,6 +155,17 @@ pub struct UiModel {
     pub modal_buffer: String,
     pub modal_hint: String,
     pub create_channel_step: CreateChannelWizardStep,
+    pub add_device_step: AddDeviceWizardStep,
+    pub add_device_name: String,
+    pub add_device_enrollment_code: String,
+    pub device_enrollment_counter: u64,
+    pub guardian_wizard_step: ThresholdWizardStep,
+    pub guardian_selected_count: u8,
+    pub guardian_threshold_k: u8,
+    pub mfa_wizard_step: ThresholdWizardStep,
+    pub mfa_selected_count: u8,
+    pub mfa_threshold_k: u8,
+    pub remove_device_candidate_name: String,
     pub create_channel_name: String,
     pub create_channel_topic: String,
     pub create_channel_invitee: String,
@@ -151,6 +179,7 @@ pub struct UiModel {
     pub last_invite_code: Option<String>,
     pub last_scan: String,
     pub has_secondary_device: bool,
+    pub secondary_device_name: Option<String>,
     pub selected_contact_index: usize,
     pub selected_channel_index: usize,
     pub selected_notification_index: usize,
@@ -186,6 +215,17 @@ impl UiModel {
             modal_buffer: String::new(),
             modal_hint: String::new(),
             create_channel_step: CreateChannelWizardStep::Name,
+            add_device_step: AddDeviceWizardStep::Name,
+            add_device_name: String::new(),
+            add_device_enrollment_code: String::new(),
+            device_enrollment_counter: 0,
+            guardian_wizard_step: ThresholdWizardStep::Selection,
+            guardian_selected_count: 2,
+            guardian_threshold_k: 2,
+            mfa_wizard_step: ThresholdWizardStep::Selection,
+            mfa_selected_count: 1,
+            mfa_threshold_k: 1,
+            remove_device_candidate_name: String::new(),
             create_channel_name: String::new(),
             create_channel_topic: String::new(),
             create_channel_invitee: String::new(),
@@ -199,6 +239,7 @@ impl UiModel {
             last_invite_code: None,
             last_scan: "never".to_string(),
             has_secondary_device: false,
+            secondary_device_name: None,
             selected_contact_index: 0,
             selected_channel_index: 0,
             selected_notification_index: 0,
@@ -316,6 +357,36 @@ impl UiModel {
         self.create_channel_topic.clear();
         self.create_channel_invitee.clear();
         self.create_channel_threshold = 1;
+    }
+
+    pub fn reset_add_device_wizard(&mut self) {
+        self.add_device_step = AddDeviceWizardStep::Name;
+        self.add_device_name.clear();
+        self.add_device_enrollment_code.clear();
+    }
+
+    pub fn reset_guardian_wizard(&mut self) {
+        self.guardian_wizard_step = ThresholdWizardStep::Selection;
+        self.guardian_selected_count = 2;
+        self.guardian_threshold_k = 2;
+    }
+
+    pub fn reset_mfa_wizard(&mut self) {
+        self.mfa_wizard_step = ThresholdWizardStep::Selection;
+        self.mfa_selected_count = 1;
+        self.mfa_threshold_k = 1;
+    }
+
+    pub fn reset_remove_device_flow(&mut self) {
+        self.remove_device_candidate_name.clear();
+    }
+
+    pub fn secondary_device_name(&self) -> Option<&str> {
+        self.secondary_device_name.as_deref()
+    }
+
+    pub fn set_secondary_device_name(&mut self, value: Option<String>) {
+        self.secondary_device_name = value;
     }
 }
 
