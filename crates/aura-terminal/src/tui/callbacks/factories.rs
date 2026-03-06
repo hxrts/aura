@@ -1180,22 +1180,6 @@ impl SettingsCallbacks {
             let device_id_clone = device_id;
 
             spawn_ctx(ctx.clone(), async move {
-                #[cfg(feature = "development")]
-                {
-                    if ctx.is_demo_mode() {
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
-                            "device-removal-started",
-                            "Device removal started",
-                        )));
-                        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
-                            "device-removal-complete",
-                            "Device removal complete",
-                        )));
-                        return;
-                    }
-                }
-
                 let ceremony_id = match ctx.start_device_removal(&device_id_clone).await {
                     Ok(id) => id,
                     Err(_e) => {
