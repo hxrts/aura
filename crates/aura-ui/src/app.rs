@@ -8,8 +8,8 @@ use crate::components::{
     UiModal, UiPill,
 };
 use crate::model::{
-    AddDeviceWizardStep, CreateChannelWizardStep, ModalState, NeighborhoodMode,
-    ThresholdWizardStep, UiController, UiModel, UiScreen,
+    AddDeviceWizardStep, CreateChannelDetailsField, CreateChannelWizardStep, ModalState,
+    NeighborhoodMode, ThresholdWizardStep, UiController, UiModel, UiScreen,
 };
 use aura_app::ui::signals::NetworkStatus;
 use aura_app::ui::types::format_network_status_with_severity;
@@ -947,24 +947,46 @@ fn modal_view(model: &UiModel) -> Option<ModalView> {
             input_label = Some("Home Name".to_string());
         }
         ModalState::CreateChannel => match model.create_channel_step {
-            CreateChannelWizardStep::Name => {
-                details.push("Enter a new channel name.".to_string());
-                details.push("Press Tab or Enter to continue.".to_string());
-                input_label = Some("Channel Name".to_string());
+            CreateChannelWizardStep::Details => {
+                let active = match model.create_channel_active_field {
+                    CreateChannelDetailsField::Name => "Group Name",
+                    CreateChannelDetailsField::Topic => "Topic",
+                };
+                details.push("Step 1 of 3: Configure group details.".to_string());
+                details.push(format!("Group name: {}", model.create_channel_name));
+                details.push(format!("Topic: {}", model.create_channel_topic));
+                details.push(format!("Active field: {active} (Tab to switch)"));
+                input_label = Some(active.to_string());
             }
-            CreateChannelWizardStep::Topic => {
-                details.push("Set an initial topic for the channel.".to_string());
-                details.push("Press Enter to continue.".to_string());
-                input_label = Some("Channel Topic".to_string());
-            }
-            CreateChannelWizardStep::InviteContacts => {
-                details.push("Invite contact names or authority IDs.".to_string());
-                details.push("Press Enter to continue.".to_string());
-                input_label = Some("Invite Contacts".to_string());
+            CreateChannelWizardStep::Members => {
+                details.push("Step 2 of 3: Select members to invite.".to_string());
+                if model.contacts.is_empty() {
+                    details.push("No contacts available.".to_string());
+                } else {
+                    for (idx, contact) in model.contacts.iter().enumerate() {
+                        let focused = if idx == model.create_channel_member_focus {
+                            ">"
+                        } else {
+                            " "
+                        };
+                        let selected = if model.create_channel_selected_members.contains(&idx) {
+                            "[x]"
+                        } else {
+                            "[ ]"
+                        };
+                        details.push(format!("{focused} {selected} {}", contact.name));
+                    }
+                }
+                details.push("Use ↑/↓ to move, Space to toggle, Enter to continue.".to_string());
             }
             CreateChannelWizardStep::Threshold => {
-                details.push("Set a numeric threshold for the group.".to_string());
-                details.push("Press Enter to create the group.".to_string());
+                let participant_total = model
+                    .create_channel_selected_members
+                    .len()
+                    .saturating_add(1);
+                details.push("Step 3 of 3: Set threshold.".to_string());
+                details.push(format!("Participants (including you): {participant_total}"));
+                details.push("Use ↑/↓ to adjust, Enter to create.".to_string());
                 input_label = Some("Threshold".to_string());
             }
         },
@@ -985,11 +1007,25 @@ fn modal_view(model: &UiModel) -> Option<ModalView> {
         }
         ModalState::GuardianSetup => match model.guardian_wizard_step {
             ThresholdWizardStep::Selection => {
-                let available = model.contacts.len();
                 details.push("Step 1 of 3: Select guardians.".to_string());
-                details.push(format!("Available contacts: {available}"));
-                details.push("Enter the number of guardians to include.".to_string());
-                input_label = Some("Guardian Count".to_string());
+                if model.contacts.is_empty() {
+                    details.push("No contacts available.".to_string());
+                } else {
+                    for (idx, contact) in model.contacts.iter().enumerate() {
+                        let focused = if idx == model.guardian_focus_index {
+                            ">"
+                        } else {
+                            " "
+                        };
+                        let selected = if model.guardian_selected_indices.contains(&idx) {
+                            "[x]"
+                        } else {
+                            "[ ]"
+                        };
+                        details.push(format!("{focused} {selected} {}", contact.name));
+                    }
+                }
+                details.push("Use ↑/↓ to move, Space to toggle, Enter to continue.".to_string());
             }
             ThresholdWizardStep::Threshold => {
                 details.push("Step 2 of 3: Choose threshold.".to_string());
@@ -1064,12 +1100,31 @@ fn modal_view(model: &UiModel) -> Option<ModalView> {
         ModalState::MfaSetup => match model.mfa_wizard_step {
             ThresholdWizardStep::Selection => {
                 details.push("Step 1 of 3: Select devices for MFA signing.".to_string());
-                details.push(format!(
-                    "Available devices: {}",
-                    if model.has_secondary_device { 2 } else { 1 }
-                ));
-                details.push("Enter how many devices participate.".to_string());
-                input_label = Some("Device Count".to_string());
+                let devices = if model.has_secondary_device {
+                    vec![
+                        "This Device".to_string(),
+                        model
+                            .secondary_device_name()
+                            .unwrap_or("Secondary Device")
+                            .to_string(),
+                    ]
+                } else {
+                    vec!["This Device".to_string()]
+                };
+                for (idx, device) in devices.iter().enumerate() {
+                    let focused = if idx == model.mfa_focus_index {
+                        ">"
+                    } else {
+                        " "
+                    };
+                    let selected = if model.mfa_selected_indices.contains(&idx) {
+                        "[x]"
+                    } else {
+                        "[ ]"
+                    };
+                    details.push(format!("{focused} {selected} {device}"));
+                }
+                details.push("Use ↑/↓ to move, Space to toggle, Enter to continue.".to_string());
             }
             ThresholdWizardStep::Threshold => {
                 details.push("Step 2 of 3: Configure signing threshold.".to_string());
@@ -1238,27 +1293,26 @@ fn help_modal_content(screen: UiScreen) -> (Vec<String>, Vec<(String, String)>) 
 }
 
 fn modal_accepts_text(model: &UiModel, modal: ModalState) -> bool {
+    if matches!(modal, ModalState::CreateChannel) {
+        return matches!(
+            model.create_channel_step,
+            CreateChannelWizardStep::Details | CreateChannelWizardStep::Threshold
+        );
+    }
     if matches!(modal, ModalState::AddDeviceStep1) {
         return matches!(model.add_device_step, AddDeviceWizardStep::Name);
     }
     if matches!(modal, ModalState::GuardianSetup) {
-        return matches!(
-            model.guardian_wizard_step,
-            ThresholdWizardStep::Selection | ThresholdWizardStep::Threshold
-        );
+        return matches!(model.guardian_wizard_step, ThresholdWizardStep::Threshold);
     }
     if matches!(modal, ModalState::MfaSetup) {
-        return matches!(
-            model.mfa_wizard_step,
-            ThresholdWizardStep::Selection | ThresholdWizardStep::Threshold
-        );
+        return matches!(model.mfa_wizard_step, ThresholdWizardStep::Threshold);
     }
     matches!(
         modal,
         ModalState::CreateInvitation
             | ModalState::AcceptInvitation
             | ModalState::CreateHome
-            | ModalState::CreateChannel
             | ModalState::SetChannelTopic
             | ModalState::EditNickname
             | ModalState::ImportDeviceEnrollmentCode

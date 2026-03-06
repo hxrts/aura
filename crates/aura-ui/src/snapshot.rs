@@ -383,7 +383,7 @@ fn apply_modal_overlay(
                 if row_idx == 0 {
                     *center = "Guardian Setup — Step 1 of 3".to_string();
                 } else if row_idx == 1 {
-                    *center = model.modal_buffer.clone();
+                    *center = format!("selected: {}", model.guardian_selected_indices.len());
                 }
             }
             ThresholdWizardStep::Threshold => {
@@ -466,7 +466,7 @@ fn apply_modal_overlay(
                 if row_idx == 0 {
                     *center = "Multifactor Setup — Step 1 of 3".to_string();
                 } else if row_idx == 1 {
-                    *center = model.modal_buffer.clone();
+                    *center = format!("selected: {}", model.mfa_selected_indices.len());
                 }
             }
             ThresholdWizardStep::Threshold => {

@@ -118,10 +118,15 @@ pub enum ModalState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CreateChannelWizardStep {
+    Details,
+    Members,
+    Threshold,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateChannelDetailsField {
     Name,
     Topic,
-    InviteContacts,
-    Threshold,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,15 +165,21 @@ pub struct UiModel {
     pub add_device_enrollment_code: String,
     pub device_enrollment_counter: u64,
     pub guardian_wizard_step: ThresholdWizardStep,
+    pub guardian_focus_index: usize,
+    pub guardian_selected_indices: Vec<usize>,
     pub guardian_selected_count: u8,
     pub guardian_threshold_k: u8,
     pub mfa_wizard_step: ThresholdWizardStep,
+    pub mfa_focus_index: usize,
+    pub mfa_selected_indices: Vec<usize>,
     pub mfa_selected_count: u8,
     pub mfa_threshold_k: u8,
     pub remove_device_candidate_name: String,
+    pub create_channel_active_field: CreateChannelDetailsField,
+    pub create_channel_member_focus: usize,
+    pub create_channel_selected_members: Vec<usize>,
     pub create_channel_name: String,
     pub create_channel_topic: String,
-    pub create_channel_invitee: String,
     pub create_channel_threshold: u8,
     pub selected_home: Option<String>,
     pub neighborhood_mode: NeighborhoodMode,
@@ -214,21 +225,27 @@ impl UiModel {
             modal: None,
             modal_buffer: String::new(),
             modal_hint: String::new(),
-            create_channel_step: CreateChannelWizardStep::Name,
+            create_channel_step: CreateChannelWizardStep::Details,
             add_device_step: AddDeviceWizardStep::Name,
             add_device_name: String::new(),
             add_device_enrollment_code: String::new(),
             device_enrollment_counter: 0,
             guardian_wizard_step: ThresholdWizardStep::Selection,
+            guardian_focus_index: 0,
+            guardian_selected_indices: Vec::new(),
             guardian_selected_count: 2,
             guardian_threshold_k: 2,
             mfa_wizard_step: ThresholdWizardStep::Selection,
+            mfa_focus_index: 0,
+            mfa_selected_indices: Vec::new(),
             mfa_selected_count: 1,
             mfa_threshold_k: 1,
             remove_device_candidate_name: String::new(),
+            create_channel_active_field: CreateChannelDetailsField::Name,
+            create_channel_member_focus: 0,
+            create_channel_selected_members: Vec::new(),
             create_channel_name: String::new(),
             create_channel_topic: String::new(),
-            create_channel_invitee: String::new(),
             create_channel_threshold: 1,
             selected_home: None,
             neighborhood_mode: NeighborhoodMode::Map,
@@ -352,10 +369,12 @@ impl UiModel {
     }
 
     pub fn reset_create_channel_wizard(&mut self) {
-        self.create_channel_step = CreateChannelWizardStep::Name;
+        self.create_channel_step = CreateChannelWizardStep::Details;
+        self.create_channel_active_field = CreateChannelDetailsField::Name;
+        self.create_channel_member_focus = 0;
+        self.create_channel_selected_members.clear();
         self.create_channel_name.clear();
         self.create_channel_topic.clear();
-        self.create_channel_invitee.clear();
         self.create_channel_threshold = 1;
     }
 
@@ -367,12 +386,16 @@ impl UiModel {
 
     pub fn reset_guardian_wizard(&mut self) {
         self.guardian_wizard_step = ThresholdWizardStep::Selection;
+        self.guardian_focus_index = 0;
+        self.guardian_selected_indices.clear();
         self.guardian_selected_count = 2;
         self.guardian_threshold_k = 2;
     }
 
     pub fn reset_mfa_wizard(&mut self) {
         self.mfa_wizard_step = ThresholdWizardStep::Selection;
+        self.mfa_focus_index = 0;
+        self.mfa_selected_indices.clear();
         self.mfa_selected_count = 1;
         self.mfa_threshold_k = 1;
     }
