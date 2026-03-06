@@ -29,6 +29,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
 use tokio::sync::RwLock;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local;
 
 use super::lan_discovery::{LanDiscoveryMetrics, LanDiscoveryService};
 use super::state::{with_state_mut, with_state_mut_validated};
@@ -135,6 +137,7 @@ pub enum RendezvousManagerState {
 struct RendezvousState {
     status: RendezvousManagerState,
     service: Option<Arc<RendezvousService>>,
+    #[cfg(not(target_arch = "wasm32"))]
     cleanup_task: Option<tokio::task::JoinHandle<()>>,
     lan_discovery: Option<Arc<LanDiscoveryService>>,
     lan_tasks: LanTaskHandles,
@@ -147,6 +150,7 @@ impl RendezvousState {
         Self {
             status: RendezvousManagerState::Stopped,
             service: None,
+            #[cfg(not(target_arch = "wasm32"))]
             cleanup_task: None,
             lan_discovery: None,
             lan_tasks: None,
@@ -165,6 +169,7 @@ impl RendezvousState {
             return Err("rendezvous stopped with active service".to_string());
         }
         // cleanup_task can exist during Running (active) and Stopping (being shut down)
+        #[cfg(not(target_arch = "wasm32"))]
         if self.cleanup_task.is_some()
             && !matches!(
                 self.status,
@@ -334,6 +339,7 @@ impl RendezvousManager {
         }
 
         // Start LAN discovery if enabled
+        #[cfg(not(target_arch = "wasm32"))]
         if self.config.lan_discovery.enabled {
             if let Err(e) = self.start_lan_discovery().await {
                 tracing::warn!("Failed to start LAN discovery: {}", e);
@@ -366,7 +372,9 @@ impl RendezvousManager {
         self.stop_lan_discovery().await;
 
         // Cancel cleanup task if running
+        #[cfg(not(target_arch = "wasm32"))]
         let cleanup_task = with_state_mut(&self.state, |state| state.cleanup_task.take()).await;
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(handle) = cleanup_task {
             let _ = handle.await;
         }
@@ -392,6 +400,7 @@ impl RendezvousManager {
         let mut shutdown_rx = self.shutdown_tx.subscribe();
         let time = self.time.clone();
 
+        #[cfg(not(target_arch = "wasm32"))]
         let handle = tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -422,12 +431,42 @@ impl RendezvousManager {
             }
         });
 
+        #[cfg(not(target_arch = "wasm32"))]
         with_state_mut_validated(
             &self.state,
             |state| state.cleanup_task = Some(handle),
             |state| state.validate(),
         )
         .await;
+
+        #[cfg(target_arch = "wasm32")]
+        spawn_local(async move {
+            loop {
+                tokio::select! {
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() {
+                            break;
+                        }
+                    }
+                    _ = time.sleep_ms(interval.as_millis() as u64) => {
+                        if state.read().await.status != RendezvousManagerState::Running {
+                            break;
+                        }
+
+                        let now_ms = match time.physical_time().await {
+                            Ok(t) => t.ts_ms,
+                            Err(_) => continue,
+                        };
+                        with_state_mut(&state, |state| {
+                            state
+                                .descriptor_cache
+                                .retain(|_, descriptor| descriptor.is_valid(now_ms));
+                        })
+                        .await;
+                    }
+                }
+            }
+        });
     }
 
     // ========================================================================

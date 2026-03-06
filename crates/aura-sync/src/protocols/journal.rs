@@ -48,6 +48,11 @@ use aura_core::{AccountId, AttestedOp, DeviceId};
 use aura_guards::BiscuitGuardEvaluator;
 use futures;
 
+#[cfg(target_arch = "wasm32")]
+type MonotonicInstant = web_time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+type MonotonicInstant = std::time::Instant;
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -268,7 +273,7 @@ impl JournalSyncProtocol {
         &mut self,
         effects: &E,
         peers: Vec<DeviceId>,
-        start: std::time::Instant,
+        start: MonotonicInstant,
     ) -> SyncResult<JournalSyncResult>
     where
         E: JournalEffects + NetworkEffects + Send + Sync + PhysicalTimeEffects,

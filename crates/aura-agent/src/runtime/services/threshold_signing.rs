@@ -578,11 +578,6 @@ impl ThresholdSigningService {
 #[async_trait]
 impl ThresholdSigningEffects for ThresholdSigningService {
     async fn bootstrap_authority(&self, authority: &AuthorityId) -> Result<Vec<u8>, AuraError> {
-        tracing::info!(
-            ?authority,
-            "Bootstrapping authority with 1-of-1 Ed25519 keys"
-        );
-
         let epoch = 0u64;
         let participant = ParticipantIdentity::guardian(*authority);
         let participants = vec![participant.clone()];
@@ -722,12 +717,6 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             |state_map| state_map.validate(),
         )
         .await;
-
-        tracing::info!(
-            ?authority,
-            mode = %key_result.mode,
-            "Authority bootstrapped with 1-of-1 signing keys"
-        );
 
         Ok(key_result.public_key_package)
     }

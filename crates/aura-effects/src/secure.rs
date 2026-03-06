@@ -10,10 +10,24 @@ use async_trait::async_trait;
 use aura_core::effects::{
     SecureStorageCapability, SecureStorageEffects, SecureStorageError, SecureStorageLocation,
 };
+use cfg_if::cfg_if;
+#[cfg(target_arch = "wasm32")]
+use aura_core::effects::{StorageCoreEffects, StorageExtendedEffects};
+#[cfg(target_arch = "wasm32")]
+use crate::storage::FilesystemStorageHandler;
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+cfg_if! {
+    if #[cfg(target_arch = "wasm32")] {
+        use js_sys::Date;
+    } else {
+        use std::time::{SystemTime, UNIX_EPOCH};
+    }
+}
 
 /// Real secure storage handler for production use
 #[derive(Debug)]
@@ -55,12 +69,32 @@ impl RealSecureStorageHandler {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn path_for(&self, location: &SecureStorageLocation) -> PathBuf {
         let mut path = self.base_path.join(&location.namespace).join(&location.key);
         if let Some(sub) = &location.sub_key {
             path = path.join(sub);
         }
         path
+    }
+
+    fn current_time_ms(&self) -> Result<u64, SecureStorageError> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            Ok(Date::now() as u64)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Ok(SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| SecureStorageError::storage(e.to_string()))?
+                .as_millis() as u64)
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn wasm_storage(&self) -> FilesystemStorageHandler {
+        FilesystemStorageHandler::new(self.base_path.clone())
     }
 }
 
@@ -73,6 +107,16 @@ impl SecureStorageEffects for RealSecureStorageHandler {
         caps: &[aura_core::effects::SecureStorageCapability],
     ) -> Result<(), SecureStorageError> {
         self.require_capability(caps, SecureStorageCapability::Write)?;
+        #[cfg(target_arch = "wasm32")]
+        {
+            return self
+                .wasm_storage()
+                .store(&location.full_path(), key.to_vec())
+                .await
+                .map_err(|e| SecureStorageError::storage(e.to_string()));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
         let path = self.path_for(location);
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir).map_err(|e| SecureStorageError::storage(e.to_string()))?;
@@ -86,6 +130,7 @@ impl SecureStorageEffects for RealSecureStorageHandler {
         file.write_all(key)
             .map_err(|e| SecureStorageError::storage(e.to_string()))?;
         Ok(())
+        }
     }
 
     async fn secure_retrieve(
@@ -94,8 +139,20 @@ impl SecureStorageEffects for RealSecureStorageHandler {
         caps: &[aura_core::effects::SecureStorageCapability],
     ) -> Result<Vec<u8>, SecureStorageError> {
         self.require_capability(caps, SecureStorageCapability::Read)?;
+        #[cfg(target_arch = "wasm32")]
+        {
+            return self
+                .wasm_storage()
+                .retrieve(&location.full_path())
+                .await
+                .map_err(|e| SecureStorageError::storage(e.to_string()))?
+                .ok_or_else(|| SecureStorageError::storage("secure key not found"));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
         let path = self.path_for(location);
         fs::read(&path).map_err(|e| SecureStorageError::storage(e.to_string()))
+        }
     }
 
     async fn secure_delete(
@@ -104,19 +161,42 @@ impl SecureStorageEffects for RealSecureStorageHandler {
         caps: &[aura_core::effects::SecureStorageCapability],
     ) -> Result<(), SecureStorageError> {
         self.require_capability(caps, SecureStorageCapability::Delete)?;
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = self
+                .wasm_storage()
+                .remove(&location.full_path())
+                .await
+                .map_err(|e| SecureStorageError::storage(e.to_string()))?;
+            return Ok(());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
         let path = self.path_for(location);
         if path.exists() {
             fs::remove_file(&path).map_err(|e| SecureStorageError::storage(e.to_string()))?;
         }
         Ok(())
+        }
     }
 
     async fn secure_exists(
         &self,
         location: &SecureStorageLocation,
     ) -> Result<bool, SecureStorageError> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            return self
+                .wasm_storage()
+                .exists(&location.full_path())
+                .await
+                .map_err(|e| SecureStorageError::storage(e.to_string()));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
         let path = self.path_for(location);
         Ok(path.exists())
+        }
     }
 
     async fn secure_list_keys(
@@ -125,6 +205,16 @@ impl SecureStorageEffects for RealSecureStorageHandler {
         caps: &[aura_core::effects::SecureStorageCapability],
     ) -> Result<Vec<String>, SecureStorageError> {
         self.require_capability(caps, SecureStorageCapability::List)?;
+        #[cfg(target_arch = "wasm32")]
+        {
+            return self
+                .wasm_storage()
+                .list_keys(Some(&format!("{namespace}/")))
+                .await
+                .map_err(|e| SecureStorageError::storage(e.to_string()));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
         let ns_path = self.base_path.join(namespace);
         if !ns_path.exists() {
             return Ok(Vec::new());
@@ -139,6 +229,7 @@ impl SecureStorageEffects for RealSecureStorageHandler {
             }
         }
         Ok(keys)
+        }
     }
 
     async fn secure_generate_key(
@@ -187,11 +278,7 @@ impl SecureStorageEffects for RealSecureStorageHandler {
             SecureStorageError::serialization(e.to_string())
         })?;
 
-        #[allow(clippy::disallowed_methods)] // Production security handler needs real system time
-        let now_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| SecureStorageError::storage(e.to_string()))?
-            .as_millis() as u64;
+        let now_ms = self.current_time_ms()?;
         if now_ms > expires_at_ms {
             return Err(SecureStorageError::permission_denied(
                 "secure access token expired",
@@ -209,11 +296,7 @@ impl SecureStorageEffects for RealSecureStorageHandler {
             capabilities: Vec<String>,
         }
 
-        #[allow(clippy::disallowed_methods)]
-        let issued_at_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| SecureStorageError::storage(e.to_string()))?
-            .as_millis() as u64;
+        let issued_at_ms = self.current_time_ms()?;
 
         let attestation = Attestation {
             platform: &self.platform_config,

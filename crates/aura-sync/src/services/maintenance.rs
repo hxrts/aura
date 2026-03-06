@@ -39,12 +39,12 @@
 use parking_lot::RwLock;
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{HealthCheck, HealthStatus, Service, ServiceState};
+use super::{HealthCheck, HealthStatus, MonotonicInstant, Service, ServiceState};
 use crate::core::{sync_session_error, SyncResult};
 use crate::infrastructure::CacheManager;
 use crate::protocols::{OTAConfig, OTAProtocol, SnapshotConfig, SnapshotProtocol, UpgradeKind};
@@ -145,7 +145,7 @@ pub struct MaintenanceService {
     cache_manager: Arc<RwLock<CacheManager>>,
 
     /// Service start time
-    started_at: Arc<RwLock<Option<Instant>>>,
+    started_at: Arc<RwLock<Option<MonotonicInstant>>>,
 
     /// Last snapshot epoch
     last_snapshot_epoch: Arc<RwLock<Option<Epoch>>>,
@@ -460,7 +460,7 @@ impl MaintenanceService {
     pub async fn start_with_time_effects<T: PhysicalTimeEffects>(
         &self,
         time_effects: &T,
-        now_instant: std::time::Instant,
+        now_instant: MonotonicInstant,
     ) -> SyncResult<()> {
         {
             let mut state = self.state.write();
@@ -470,7 +470,7 @@ impl MaintenanceService {
             *state = ServiceState::Starting;
         } // Lock dropped here
 
-        // Use PhysicalTimeEffects for deterministic wall-clock; store Instant for uptime tracking
+        // Use PhysicalTimeEffects for deterministic wall-clock; store MonotonicInstant for uptime tracking
         let _ts = time_effects
             .physical_time()
             .await
@@ -484,7 +484,7 @@ impl MaintenanceService {
 
 #[async_trait::async_trait]
 impl Service for MaintenanceService {
-    async fn start(&self, now: Instant) -> SyncResult<()> {
+    async fn start(&self, now: MonotonicInstant) -> SyncResult<()> {
         // NOTE: Prefer start_with_time_effects() for proper effect system integration
         let mut state = self.state.write();
         if *state == ServiceState::Running {
@@ -498,7 +498,7 @@ impl Service for MaintenanceService {
         Ok(())
     }
 
-    async fn stop(&self, _now: Instant) -> SyncResult<()> {
+    async fn stop(&self, _now: MonotonicInstant) -> SyncResult<()> {
         {
             let mut state = self.state.write();
             if *state == ServiceState::Stopped {
@@ -576,11 +576,11 @@ impl Service for MaintenanceService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
+    use std::time::MonotonicInstant;
 
     #[allow(clippy::disallowed_methods)]
-    fn monotonic_now() -> Instant {
-        type MonoClock = Instant;
+    fn monotonic_now() -> MonotonicInstant {
+        type MonoClock = MonotonicInstant;
         MonoClock::now()
     }
 

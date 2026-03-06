@@ -29,11 +29,11 @@
 
 use parking_lot::RwLock;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use super::{HealthCheck, HealthStatus, Service, ServiceMetrics, ServiceState};
+use super::{HealthCheck, HealthStatus, MonotonicInstant, Service, ServiceMetrics, ServiceState};
 use crate::core::{
     sync_session_error, MetricsCollector, SessionConfig, SessionManager, SyncResult,
 };
@@ -150,7 +150,7 @@ pub struct SyncService {
     metrics: Arc<RwLock<MetricsCollector>>,
 
     /// Service start time
-    started_at: Arc<RwLock<Option<Instant>>>,
+    started_at: Arc<RwLock<Option<MonotonicInstant>>>,
 
     /// Time effects for unified time operations
     time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
@@ -162,10 +162,10 @@ impl SyncService {
     /// This intentionally lives in the sync layer to avoid leaking runtime clock calls
     /// into application code that is subject to effects-enforcement checks.
     #[allow(clippy::disallowed_methods)]
-    pub fn monotonic_now() -> Instant {
+    pub fn monotonic_now() -> MonotonicInstant {
         // Alias to keep monotonic semantics without exposing runtime clock calls
         // monotonic semantics required by rate limiting and session management.
-        type MonoTime = Instant;
+        type MonoTime = MonotonicInstant;
         MonoTime::now()
     }
 
@@ -177,7 +177,7 @@ impl SyncService {
     pub async fn new(
         config: SyncServiceConfig,
         time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
-        now_instant: std::time::Instant,
+        now_instant: MonotonicInstant,
     ) -> SyncResult<Self> {
         let peer_manager = PeerManager::new(config.peer_discovery.clone());
         let rate_limiter = RateLimiter::new(config.rate_limit.clone(), now_instant);
@@ -217,7 +217,7 @@ impl SyncService {
         &self,
         effects: &E,
         peers: Vec<DeviceId>,
-        now_instant: std::time::Instant,
+        now_instant: MonotonicInstant,
     ) -> SyncResult<()>
     where
         E: SyncProtocolEffects,
@@ -296,7 +296,7 @@ impl SyncService {
     pub async fn discover_and_sync<E>(
         &self,
         effects: &E,
-        now_instant: std::time::Instant,
+        now_instant: MonotonicInstant,
     ) -> SyncResult<()>
     where
         E: SyncProtocolEffects,
@@ -401,7 +401,7 @@ impl SyncService {
         rate_limiter: &Arc<RwLock<RateLimiter>>,
         max_concurrent: usize, // usize ok: function parameter for collection sizing
         time_effects: &T,
-        now_instant: std::time::Instant,
+        now_instant: MonotonicInstant,
     ) -> SyncResult<()> {
         let tick_ts = time_effects
             .physical_time()
@@ -497,7 +497,7 @@ impl SyncService {
     async fn check_rate_limits(
         &self,
         peers: &[DeviceId],
-        now_instant: std::time::Instant,
+        now_instant: MonotonicInstant,
     ) -> SyncResult<Vec<DeviceId>> {
         let mut allowed_peers = Vec::new();
         let mut rate_limiter = self.rate_limiter.write();
@@ -670,7 +670,7 @@ impl SyncService {
     /// - `start_instant`: Starting monotonic time instant (obtain from runtime layer)
     async fn wait_for_sessions_to_complete(
         &self,
-        start_instant: std::time::Instant,
+        start_instant: MonotonicInstant,
     ) -> SyncResult<()> {
         self.wait_for_sessions_to_complete_with_time_effects(&self.time_effects, start_instant)
             .await
@@ -684,7 +684,7 @@ impl SyncService {
     async fn wait_for_sessions_to_complete_with_time_effects<T: PhysicalTimeEffects>(
         &self,
         time_effects: &T,
-        start_instant: std::time::Instant,
+        start_instant: MonotonicInstant,
     ) -> SyncResult<()> {
         let timeout = Duration::from_secs(30); // 30 second timeout
         let check_interval = Duration::from_millis(100);
@@ -837,9 +837,9 @@ impl SyncService {
     pub async fn start_with_time_effects<T: aura_core::effects::PhysicalTimeEffects>(
         &self,
         time_effects: &T,
-        now_instant: std::time::Instant,
+        now_instant: MonotonicInstant,
     ) -> SyncResult<()> {
-        // Use PhysicalTimeEffects for deterministic wall-clock; store Instant for uptime tracking
+        // Use PhysicalTimeEffects for deterministic wall-clock; store MonotonicInstant for uptime tracking
         let _ts = time_effects
             .physical_time()
             .await
@@ -851,7 +851,7 @@ impl SyncService {
 
 #[async_trait::async_trait]
 impl Service for SyncService {
-    async fn start(&self, now: Instant) -> SyncResult<()> {
+    async fn start(&self, now: MonotonicInstant) -> SyncResult<()> {
         {
             let mut state = self.state.write();
             if *state == ServiceState::Running {
@@ -869,7 +869,7 @@ impl Service for SyncService {
         Ok(())
     }
 
-    async fn stop(&self, now: std::time::Instant) -> SyncResult<()> {
+    async fn stop(&self, now: MonotonicInstant) -> SyncResult<()> {
         {
             let mut state = self.state.write();
             if *state == ServiceState::Stopped {
@@ -974,7 +974,7 @@ impl SyncServiceBuilder {
     pub async fn build(
         self,
         time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
-        now_instant: std::time::Instant,
+        now_instant: MonotonicInstant,
     ) -> SyncResult<SyncService> {
         let config = self.config.unwrap_or_default();
         SyncService::new(config, time_effects, now_instant).await

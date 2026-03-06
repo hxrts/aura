@@ -67,9 +67,14 @@ pub use maintenance::{MaintenanceService, MaintenanceServiceConfig, UpgradePropo
 pub use sync::{SyncService, SyncServiceBuilder, SyncServiceConfig, SyncServiceHealth};
 
 use serde::{Deserialize, Serialize};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::core::SyncResult;
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) type MonotonicInstant = web_time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) type MonotonicInstant = std::time::Instant;
 
 // =============================================================================
 // Unified Service Interface
@@ -120,13 +125,13 @@ pub trait Service: Send + Sync {
     ///
     /// Note: Callers should obtain `now` from their chosen clock (e.g., `PhysicalTimeEffects`)
     /// and pass it to this method for consistent uptime accounting.
-    async fn start(&self, now: Instant) -> SyncResult<()>;
+    async fn start(&self, now: MonotonicInstant) -> SyncResult<()>;
 
     /// Stop the service gracefully
     ///
     /// Note: Callers should obtain `now` from their chosen clock source
     /// and pass it to this method for consistent timeout tracking during shutdown.
-    async fn stop(&self, now: Instant) -> SyncResult<()>;
+    async fn stop(&self, now: MonotonicInstant) -> SyncResult<()>;
 
     /// Check service health
     async fn health_check(&self) -> SyncResult<HealthCheck>;

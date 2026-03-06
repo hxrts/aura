@@ -39,7 +39,12 @@
 //! # }
 //! ```
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+#[cfg(target_arch = "wasm32")]
+type MonotonicInstant = web_time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+type MonotonicInstant = std::time::Instant;
 
 // Re-export unified rate limiting types from aura-core
 pub use aura_core::{
@@ -60,7 +65,7 @@ pub fn check_rate_limit_sync(
     limiter: &mut RateLimiter,
     peer_id: DeviceId,
     cost: u32,
-    now: Instant,
+    now: MonotonicInstant,
 ) -> SyncResult<()> {
     limiter
         .check_rate_limit(peer_id, cost, now)
@@ -69,7 +74,7 @@ pub fn check_rate_limit_sync(
 }
 
 /// Create a default rate limiter for sync operations (convenience function)
-pub fn default_sync_rate_limiter(now: Instant) -> RateLimiter {
+pub fn default_sync_rate_limiter(now: MonotonicInstant) -> RateLimiter {
     let config = RateLimitConfig {
         global_ops_per_second: 1000,
         peer_ops_per_second: 100,

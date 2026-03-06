@@ -298,7 +298,7 @@ mod tests {
             );
         }
 
-        let start = std::time::Instant::now();
+        let start = aura_effects::time::monotonic_now();
 
         // Query by predicate
         let facts = handler.facts_by_predicate("key.50").await.unwrap();

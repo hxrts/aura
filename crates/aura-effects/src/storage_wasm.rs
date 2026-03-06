@@ -1,28 +1,18 @@
-//! WASM storage handler backed by IndexedDB.
+//! WASM storage handler backed by browser localStorage.
 //!
 //! On wasm32 targets we keep the existing `FilesystemStorageHandler` name for API
-//! compatibility, but route persistence to browser IndexedDB.
+//! compatibility, but route persistence to browser localStorage.
 
 use async_trait::async_trait;
 use aura_core::effects::{StorageCoreEffects, StorageError, StorageExtendedEffects, StorageStats};
-use futures::channel::oneshot;
-use indexed_db_futures::{
-    database::Database,
-    prelude::*,
-    transaction::{Transaction, TransactionMode},
-};
 use std::collections::HashMap;
-use std::future::Future;
 use std::path::PathBuf;
-use wasm_bindgen_futures::spawn_local;
+use web_sys::{window, Storage};
 
-const STORAGE_VERSION: u8 = 1;
-const OBJECT_STORE_NAME: &str = "kv";
-
-/// WASM storage handler using IndexedDB persistence.
+/// WASM storage handler using browser localStorage persistence.
 #[derive(Debug, Clone)]
 pub struct FilesystemStorageHandler {
-    db_name: String,
+    namespace: String,
 }
 
 impl FilesystemStorageHandler {
@@ -30,8 +20,8 @@ impl FilesystemStorageHandler {
     pub fn new(base_path: PathBuf) -> Self {
         let path_str = base_path.to_string_lossy();
         let digest = aura_core::hash::hash(path_str.as_bytes());
-        let db_name = format!("aura_storage_{}", hex::encode(&digest[..8]));
-        Self { db_name }
+        let namespace = format!("aura_storage_{}", hex::encode(&digest[..8]));
+        Self { namespace }
     }
 
     /// Alias for clarity; avoids relying on `new` naming in higher layers.
@@ -54,188 +44,28 @@ impl FilesystemStorageHandler {
         }
     }
 
-    fn map_read<E: std::fmt::Display>(op: &str, err: E) -> StorageError {
-        StorageError::ReadFailed(format!("IndexedDB {op} failed: {err}"))
+    fn storage(&self) -> Result<Storage, StorageError> {
+        let win = window().ok_or_else(|| StorageError::ConfigurationError {
+            reason: "window is unavailable".to_string(),
+        })?;
+        let storage = win
+            .local_storage()
+            .map_err(|err| StorageError::ConfigurationError {
+                reason: format!("localStorage lookup failed: {err:?}"),
+            })?
+            .ok_or_else(|| StorageError::ConfigurationError {
+                reason: "localStorage is unavailable".to_string(),
+            })?;
+        Ok(storage)
     }
 
-    fn map_write<E: std::fmt::Display>(op: &str, err: E) -> StorageError {
-        StorageError::WriteFailed(format!("IndexedDB {op} failed: {err}"))
+    fn storage_key(&self, key: &str) -> String {
+        format!("{}::{}", self.namespace, key)
     }
 
-    fn map_delete<E: std::fmt::Display>(op: &str, err: E) -> StorageError {
-        StorageError::DeleteFailed(format!("IndexedDB {op} failed: {err}"))
-    }
-
-    async fn run_local<T, Mk, Fut>(op: &'static str, make_fut: Mk) -> Result<T, StorageError>
-    where
-        T: 'static,
-        Mk: FnOnce() -> Fut + 'static,
-        Fut: Future<Output = Result<T, StorageError>> + 'static,
-    {
-        let (tx, rx) = oneshot::channel();
-        spawn_local(async move {
-            let _ = tx.send(make_fut().await);
-        });
-
-        rx.await.map_err(|_| StorageError::ConfigurationError {
-            reason: format!("IndexedDB operation '{op}' task dropped"),
-        })?
-    }
-
-    async fn open_db(db_name: &str) -> Result<Database, StorageError> {
-        Database::open(db_name)
-            .with_version(STORAGE_VERSION)
-            .with_on_upgrade_needed(|_event, db| {
-                let has_store = db
-                    .object_store_names()
-                    .any(|name| name == OBJECT_STORE_NAME);
-                if !has_store {
-                    let _ = db.create_object_store(OBJECT_STORE_NAME).build()?;
-                }
-                Ok(())
-            })
-            .await
-            .map_err(|e| StorageError::ConfigurationError {
-                reason: format!("IndexedDB open failed for '{db_name}': {e}"),
-            })
-    }
-
-    fn open_tx<'a>(
-        db: &'a Database,
-        mode: TransactionMode,
-    ) -> Result<Transaction<'a>, StorageError> {
-        db.transaction(OBJECT_STORE_NAME)
-            .with_mode(mode)
-            .build()
-            .map_err(|e| StorageError::ConfigurationError {
-                reason: format!("IndexedDB transaction open failed: {e}"),
-            })
-    }
-
-    async fn store_inner(db_name: String, key: String, value: Vec<u8>) -> Result<(), StorageError> {
-        let db = Self::open_db(&db_name).await?;
-        let tx = Self::open_tx(&db, TransactionMode::Readwrite)?;
-        let store = tx
-            .object_store(OBJECT_STORE_NAME)
-            .map_err(|e| Self::map_write("open object_store", e))?;
-
-        store
-            .put(value)
-            .with_key(key)
-            .without_key_type()
-            .serde()
-            .map_err(|e| Self::map_write("put request", e))?
-            .await
-            .map_err(|e| Self::map_write("put await", e))?;
-
-        tx.commit()
-            .await
-            .map_err(|e| Self::map_write("commit", e))?;
-        Ok(())
-    }
-
-    async fn retrieve_inner(db_name: String, key: String) -> Result<Option<Vec<u8>>, StorageError> {
-        let db = Self::open_db(&db_name).await?;
-        let tx = Self::open_tx(&db, TransactionMode::Readonly)?;
-        let store = tx
-            .object_store(OBJECT_STORE_NAME)
-            .map_err(|e| Self::map_read("open object_store", e))?;
-
-        store
-            .get(key)
-            .serde()
-            .map_err(|e| Self::map_read("get request", e))?
-            .await
-            .map_err(|e| Self::map_read("get await", e))
-    }
-
-    async fn delete_inner(db_name: String, key: String) -> Result<(), StorageError> {
-        let db = Self::open_db(&db_name).await?;
-        let tx = Self::open_tx(&db, TransactionMode::Readwrite)?;
-        let store = tx
-            .object_store(OBJECT_STORE_NAME)
-            .map_err(|e| Self::map_delete("open object_store", e))?;
-
-        store
-            .delete(key)
-            .primitive()
-            .map_err(|e| Self::map_delete("delete request", e))?
-            .await
-            .map_err(|e| Self::map_delete("delete await", e))?;
-
-        tx.commit()
-            .await
-            .map_err(|e| Self::map_delete("commit", e))?;
-        Ok(())
-    }
-
-    async fn list_keys_inner(db_name: String) -> Result<Vec<String>, StorageError> {
-        let db = Self::open_db(&db_name).await?;
-        let tx = Self::open_tx(&db, TransactionMode::Readonly)?;
-        let store = tx
-            .object_store(OBJECT_STORE_NAME)
-            .map_err(|e| Self::map_read("open object_store", e))?;
-
-        let keys_iter = store
-            .get_all_keys()
-            .primitive()
-            .map_err(|e| Self::map_read("get_all_keys request", e))?
-            .await
-            .map_err(|e| Self::map_read("get_all_keys await", e))?;
-
-        let mut keys: Vec<String> = Vec::new();
-        for key_res in keys_iter {
-            keys.push(key_res.map_err(|e| Self::map_read("key decode", e))?);
-        }
-        keys.sort();
-        Ok(keys)
-    }
-
-    async fn store_batch_inner(
-        db_name: String,
-        pairs: HashMap<String, Vec<u8>>,
-    ) -> Result<(), StorageError> {
-        let db = Self::open_db(&db_name).await?;
-        let tx = Self::open_tx(&db, TransactionMode::Readwrite)?;
-        let store = tx
-            .object_store(OBJECT_STORE_NAME)
-            .map_err(|e| Self::map_write("open object_store", e))?;
-
-        for (key, value) in pairs {
-            Self::invalid_key(&key)?;
-            store
-                .put(value)
-                .with_key(key)
-                .without_key_type()
-                .serde()
-                .map_err(|e| Self::map_write("batch put request", e))?
-                .await
-                .map_err(|e| Self::map_write("batch put await", e))?;
-        }
-
-        tx.commit()
-            .await
-            .map_err(|e| Self::map_write("commit", e))?;
-        Ok(())
-    }
-
-    async fn clear_all_inner(db_name: String) -> Result<(), StorageError> {
-        let db = Self::open_db(&db_name).await?;
-        let tx = Self::open_tx(&db, TransactionMode::Readwrite)?;
-        let store = tx
-            .object_store(OBJECT_STORE_NAME)
-            .map_err(|e| Self::map_delete("open object_store", e))?;
-
-        store
-            .clear()
-            .map_err(|e| Self::map_delete("clear request", e))?
-            .await
-            .map_err(|e| Self::map_delete("clear await", e))?;
-
-        tx.commit()
-            .await
-            .map_err(|e| Self::map_delete("commit", e))?;
-        Ok(())
+    fn decode_storage_key<'a>(&self, key: &'a str) -> Option<&'a str> {
+        let prefix = format!("{}::", self.namespace);
+        key.strip_prefix(&prefix)
     }
 }
 
@@ -243,36 +73,58 @@ impl FilesystemStorageHandler {
 impl StorageCoreEffects for FilesystemStorageHandler {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         Self::invalid_key(key)?;
-        let db_name = self.db_name.clone();
-        let key = key.to_string();
-        Self::run_local("store", move || Self::store_inner(db_name, key, value)).await
+        let encoded = hex::encode(value);
+        self.storage()?
+            .set_item(&self.storage_key(key), &encoded)
+            .map_err(|err| StorageError::WriteFailed(format!("localStorage set_item failed: {err:?}")))
     }
 
     async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
         Self::invalid_key(key)?;
-        let db_name = self.db_name.clone();
-        let key = key.to_string();
-        Self::run_local("retrieve", move || Self::retrieve_inner(db_name, key)).await
+        match self
+            .storage()?
+            .get_item(&self.storage_key(key))
+            .map_err(|err| StorageError::ReadFailed(format!("localStorage get_item failed: {err:?}")))?
+        {
+            Some(value) => hex::decode(&value)
+                .map(Some)
+                .map_err(|err| StorageError::ReadFailed(format!("localStorage decode failed: {err}"))),
+            None => Ok(None),
+        }
     }
 
     async fn remove(&self, key: &str) -> Result<bool, StorageError> {
         Self::invalid_key(key)?;
-        if !self.exists(key).await? {
-            return Ok(false);
+        let existed = self.exists(key).await?;
+        if existed {
+            self.storage()?
+                .remove_item(&self.storage_key(key))
+                .map_err(|err| StorageError::DeleteFailed(format!("localStorage remove_item failed: {err:?}")))?;
         }
-
-        let db_name = self.db_name.clone();
-        let key = key.to_string();
-        Self::run_local("remove", move || Self::delete_inner(db_name, key)).await?;
-        Ok(true)
+        Ok(existed)
     }
 
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
-        let db_name = self.db_name.clone();
-        let mut keys = Self::run_local("list_keys", move || Self::list_keys_inner(db_name)).await?;
-        if let Some(prefix) = prefix {
-            keys.retain(|k| k.starts_with(prefix));
+        let storage = self.storage()?;
+        let mut keys = Vec::new();
+        for index in 0..storage.length().map_err(|err| StorageError::ReadFailed(format!("localStorage length failed: {err:?}")))? {
+            let full_key = match storage
+                .key(index)
+                .map_err(|err| StorageError::ReadFailed(format!("localStorage key lookup failed: {err:?}")))? {
+                Some(value) => value,
+                None => continue,
+            };
+            let Some(decoded) = self.decode_storage_key(&full_key) else {
+                continue;
+            };
+            if let Some(prefix) = prefix {
+                if !decoded.starts_with(prefix) {
+                    continue;
+                }
+            }
+            keys.push(decoded.to_string());
         }
+        keys.sort();
         Ok(keys)
     }
 }
@@ -284,15 +136,10 @@ impl StorageExtendedEffects for FilesystemStorageHandler {
     }
 
     async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
-        if pairs.is_empty() {
-            return Ok(());
+        for (key, value) in pairs {
+            self.store(&key, value).await?;
         }
-
-        let db_name = self.db_name.clone();
-        Self::run_local("store_batch", move || {
-            Self::store_batch_inner(db_name, pairs)
-        })
-        .await
+        Ok(())
     }
 
     async fn retrieve_batch(
@@ -309,8 +156,11 @@ impl StorageExtendedEffects for FilesystemStorageHandler {
     }
 
     async fn clear_all(&self) -> Result<(), StorageError> {
-        let db_name = self.db_name.clone();
-        Self::run_local("clear_all", move || Self::clear_all_inner(db_name)).await
+        let keys = self.list_keys(None).await?;
+        for key in keys {
+            let _ = self.remove(&key).await?;
+        }
+        Ok(())
     }
 
     async fn stats(&self) -> Result<StorageStats, StorageError> {
@@ -326,7 +176,7 @@ impl StorageExtendedEffects for FilesystemStorageHandler {
             key_count: keys.len() as u64,
             total_size,
             available_space: None,
-            backend_type: "indexeddb".to_string(),
+            backend_type: "localstorage".to_string(),
         })
     }
 }

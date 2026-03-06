@@ -396,7 +396,7 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                     let content = state.chat.input_buffer.clone();
                     state.chat.input_buffer.clear();
                     if content.starts_with('/') {
-                        match crate::tui::commands::parse_command(&content) {
+                        match crate::tui::commands::parse_chat_command(&content) {
                             // Handle /help locally so deterministic UI guidance is shown even
                             // when command callbacks are unavailable or delayed.
                             Ok(crate::tui::commands::IrcCommand::Help { command }) => {

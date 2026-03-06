@@ -50,6 +50,9 @@ aura-testkit = { path = "../aura-testkit" }
 aura-macros = { path = "../aura-macros" }
 tokio = { workspace = true }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-time = "1"
+
 
 
 [lints]

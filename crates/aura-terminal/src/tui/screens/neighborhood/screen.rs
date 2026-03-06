@@ -86,7 +86,7 @@ fn HomeMap(props: &HomeMapProps) -> impl Into<AnyElement<'static>> {
                     vec![
                         element! {
                             View(flex_direction: FlexDirection::Column, gap: 1) {
-                                Text(content: "No homes yet", color: Theme::TEXT_MUTED)
+                                Text(content: "No home yet", color: Theme::TEXT_MUTED)
                                 View(height: 1)
                                 Text(content: "To get started:", color: Theme::TEXT)
                                 View(flex_direction: FlexDirection::Column, padding_left: 1) {

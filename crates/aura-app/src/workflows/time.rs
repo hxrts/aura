@@ -17,3 +17,11 @@ pub async fn current_time_ms(app_core: &Arc<RwLock<AppCore>>) -> Result<u64, Aur
         .await
         .map_err(|e| AuraError::agent(format!("Failed to get time: {e}")))
 }
+
+/// Sleep through the runtime bridge so callers stay runtime-neutral.
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
+pub async fn sleep_ms(app_core: &Arc<RwLock<AppCore>>, ms: u64) -> Result<(), AuraError> {
+    let runtime = require_runtime(app_core).await?;
+    runtime.sleep_ms(ms).await;
+    Ok(())
+}

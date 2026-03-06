@@ -27,6 +27,7 @@ use aura_app::ui::workflows::{
     access as access_workflows, contacts as contacts_workflows, context as context_workflows,
     invitation as invitation_workflows, messaging as messaging_workflows,
     recovery as recovery_workflows, settings as settings_workflows,
+    time as time_workflows,
 };
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, CeremonyId};
@@ -775,7 +776,8 @@ fn submit_runtime_modal_action(
                             let ceremony_id = CeremonyId::new(start.ceremony_id.to_string());
                             spawn(async move {
                                 loop {
-                                    tokio::time::sleep(Duration::from_secs(1)).await;
+                                    let _ = time_workflows::sleep_ms(&app_core_for_status, 1_000)
+                                        .await;
                                     match ceremony_workflows::get_key_rotation_ceremony_status(
                                         &app_core_for_status,
                                         &ceremony_id,
@@ -2663,7 +2665,7 @@ fn neighborhood_screen(
                             Empty {
                                 class: Some("flex-1 min-h-[16rem] border-border bg-background/40".to_string()),
                                 EmptyHeader {
-                                    EmptyTitle { "No homes yet" }
+                                    EmptyTitle { "No home yet" }
                                     EmptyDescription { "Create a new home or accept an invitation to join an existing one." }
                                 }
                             }

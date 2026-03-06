@@ -563,21 +563,27 @@ impl RuntimeSystem {
         self.flow_budget_manager
             .start(self.runtime_tasks.clone())
             .await?;
+        tracing::info!("Flow budget manager started");
         self.receipt_manager
             .start(self.runtime_tasks.clone())
             .await?;
+        tracing::info!("Receipt manager started");
         self.ceremony_tracker
             .start(self.runtime_tasks.clone())
             .await?;
+        tracing::info!("Ceremony tracker started");
         self.threshold_signing
             .start(self.runtime_tasks.clone())
             .await?;
+        tracing::info!("Threshold signing started");
 
         if let Some(social_manager) = &self.social_manager {
             social_manager.start(self.runtime_tasks.clone()).await?;
+            tracing::info!("Social manager started");
         }
         if let Some(rendezvous_manager) = &self.rendezvous_manager {
             RuntimeService::start(rendezvous_manager, self.runtime_tasks.clone()).await?;
+            tracing::info!("Rendezvous manager service start completed");
             if let Err(e) = self.publish_lan_descriptor().await {
                 tracing::warn!(error = %e, "Failed to publish LAN descriptor");
             }
@@ -587,12 +593,14 @@ impl RuntimeSystem {
             self.start_lan_transport_listener();
         }
         if let Some(sync_manager) = &self.sync_manager {
+            tracing::info!("Starting sync manager");
             let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
                 Arc::new(self.effect_system.time_effects().clone());
             sync_manager
                 .start(time_effects)
                 .await
                 .map_err(|e| ServiceError::startup_failed("sync_service", e))?;
+            tracing::info!("Sync manager started");
         }
 
         Ok(())

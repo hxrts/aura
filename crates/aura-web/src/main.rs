@@ -114,7 +114,11 @@ cfg_if! {
 
         fn main() {
             aura_app::platform::wasm::initialize();
-            tracing_wasm::set_as_global_default();
+            let mut tracing_config = tracing_wasm::WASMLayerConfigBuilder::new();
+            tracing_config
+                .set_max_level(tracing::Level::INFO)
+                .set_report_logs_in_timings(false);
+            tracing_wasm::set_as_global_default_with_config(tracing_config.build());
             dioxus::launch(App);
         }
 
@@ -122,6 +126,12 @@ cfg_if! {
         fn App() -> Element {
             let mut bootstrap_state = use_signal(|| None::<Result<Arc<UiController>, String>>);
             let mut bootstrap_started = use_signal(|| false);
+
+            use_effect(|| {
+                if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+                    document.set_title("Aura");
+                }
+            });
 
             use_effect(move || {
                 if bootstrap_started() {

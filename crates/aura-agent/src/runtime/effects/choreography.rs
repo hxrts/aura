@@ -148,7 +148,7 @@ impl ChoreographicEffects for AuraEffectSystem {
             let state = self.choreography_state.read();
             state.timeout_ms.unwrap_or(5000)
         };
-        let start = std::time::Instant::now();
+        let start = aura_effects::time::monotonic_now();
         let poll_interval = std::time::Duration::from_millis(50);
 
         let source_authority = AuthorityId::from_uuid(role.device_id.0);

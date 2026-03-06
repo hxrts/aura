@@ -9,6 +9,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, RwLock};
 
+#[cfg(target_arch = "wasm32")]
+type MonotonicInstant = web_time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+type MonotonicInstant = std::time::Instant;
+
 use aura_core::domain::journal::FactValue;
 use aura_core::domain::ConsistencyMap;
 use aura_core::effects::reactive::SignalId;
@@ -680,7 +685,7 @@ impl QueryHandler {
             tracker.subscribe()
         };
 
-        let deadline = tokio::time::Instant::now() + self.consensus_timeout;
+        let deadline = MonotonicInstant::now() + self.consensus_timeout;
 
         loop {
             // Check current state
@@ -692,7 +697,7 @@ impl QueryHandler {
             }
 
             // Wait for next notification or timeout
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let remaining = deadline.saturating_duration_since(MonotonicInstant::now());
             if remaining.is_zero() {
                 // Return timeout error with the first incomplete consensus ID
                 let tracker = self.consensus_tracker.read().await;
@@ -934,7 +939,7 @@ impl QueryEffects for QueryHandler {
         &self,
         query: &Q,
     ) -> Result<(Q::Result, QueryStats), QueryError> {
-        let start = std::time::Instant::now();
+        let start = crate::time::monotonic_now();
 
         // Execute the query
         let result = self.query(query).await?;
@@ -970,7 +975,7 @@ impl QueryEffects for QueryHandler {
         query: &Q,
         isolation: QueryIsolation,
     ) -> Result<(Q::Result, QueryStats), QueryError> {
-        let start = std::time::Instant::now();
+        let start = crate::time::monotonic_now();
 
         // Execute with isolation
         let result = self.query_with_isolation(query, isolation.clone()).await?;

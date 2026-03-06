@@ -15,12 +15,22 @@ use aura_core::time::{
 };
 use cfg_if::cfg_if;
 use rand::RngCore;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
-use tokio::time::{self, Instant};
+
+#[cfg(target_arch = "wasm32")]
+type MonotonicInstant = web_time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+type MonotonicInstant = std::time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::time;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::{closure::Closure, JsCast};
 
 cfg_if! {
     if #[cfg(target_arch = "wasm32")] {
         use js_sys::Date;
+        use web_sys::window;
     } else {
         use std::time::{SystemTime, UNIX_EPOCH};
     }
@@ -28,8 +38,8 @@ cfg_if! {
 
 /// Monotonic timestamp helper for layers that need batching or scheduling.
 #[allow(clippy::disallowed_methods)] // Monotonic clock access is permitted in effect handlers
-pub fn monotonic_now() -> Instant {
-    Instant::now()
+pub fn monotonic_now() -> MonotonicInstant {
+    MonotonicInstant::now()
 }
 
 /// Production physical clock handler backed by the system clock.
@@ -68,7 +78,7 @@ impl PhysicalTimeHandler {
             let now_secs = now.ts_ms / 1000;
             if target_epoch_secs > now_secs {
                 let delta = target_epoch_secs - now_secs;
-                time::sleep(Duration::from_secs(delta)).await;
+                let _ = self.sleep_ms(delta.saturating_mul(1000)).await;
             }
         }
     }
@@ -84,12 +94,10 @@ impl PhysicalTimeEffects for PhysicalTimeHandler {
             uncertainty: None,
         };
 
-        #[cfg(not(target_arch = "wasm32"))]
-        let start = std::time::Instant::now();
-
         // Record latency metrics
         #[cfg(not(target_arch = "wasm32"))]
         {
+            let start = monotonic_now();
             let latency = start.elapsed();
             tracing::trace!(
                 latency_ns = latency.as_nanos(),
@@ -101,7 +109,32 @@ impl PhysicalTimeEffects for PhysicalTimeHandler {
     }
 
     async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
-        time::sleep(Duration::from_millis(ms)).await;
+        #[cfg(target_arch = "wasm32")]
+        {
+            let window = window().ok_or(TimeError::ServiceUnavailable)?;
+            let receiver = {
+                let (sender, receiver) = futures::channel::oneshot::channel::<()>();
+                let callback = Closure::once(move || {
+                    let _ = sender.send(());
+                });
+                let timeout_ms = i32::try_from(ms.min(i32::MAX as u64)).unwrap_or(i32::MAX);
+                window
+                    .set_timeout_with_callback_and_timeout_and_arguments_0(
+                        callback.as_ref().unchecked_ref(),
+                        timeout_ms,
+                    )
+                    .map_err(|err| TimeError::OperationFailed {
+                        reason: format!("setTimeout failed: {err:?}"),
+                    })?;
+                callback.forget();
+                receiver
+            };
+            let _ = receiver.await;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            time::sleep(Duration::from_millis(ms)).await;
+        }
         Ok(())
     }
 }
@@ -169,7 +202,7 @@ impl LogicalClockEffects for LogicalClockHandler {
         &self,
         observed: Option<&VectorClock>,
     ) -> Result<LogicalTime, TimeError> {
-        let start = std::time::Instant::now();
+        let start = monotonic_now();
 
         // Since this handler is now stateless, return a default logical time
         // that starts from epoch. In a real application, the caller would need to
@@ -191,7 +224,7 @@ impl LogicalClockEffects for LogicalClockHandler {
     #[tracing::instrument(name = "logical_now", level = "trace")]
     #[allow(clippy::disallowed_methods)] // Effect implementation uses Instant for metrics
     async fn logical_now(&self) -> Result<LogicalTime, TimeError> {
-        let start = std::time::Instant::now();
+        let start = monotonic_now();
 
         // Since this handler is now stateless, return epoch logical time.
         // In a real application, the caller would manage the current logical clock state.
@@ -221,7 +254,7 @@ impl OrderClockEffects for OrderClockHandler {
     #[tracing::instrument(name = "order_time", level = "trace")]
     #[allow(clippy::disallowed_methods)] // This IS the time handler implementation
     async fn order_time(&self) -> Result<OrderTime, TimeError> {
-        let start = std::time::Instant::now();
+        let start = monotonic_now();
 
         // Order clock must be unpredictable but stateless; use OS entropy here (allowed in L3 handler).
         let entropy = rand::rngs::OsRng.next_u64().to_le_bytes();
