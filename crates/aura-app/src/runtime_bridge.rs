@@ -1435,16 +1435,15 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     async fn current_time_ms(&self) -> Result<u64, IntentError> {
         // Offline bridge uses best-effort physical time for UI surfaces.
-        #[cfg(target_arch = "wasm32")]
-        {
-            Ok(js_sys::Date::now() as u64)
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let now = std::time::UNIX_EPOCH.elapsed().map_err(|err| {
-                IntentError::internal_error(format!("System clock error: {err}"))
-            })?;
-            Ok(now.as_millis() as u64)
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                Ok(js_sys::Date::now() as u64)
+            } else {
+                let now = std::time::UNIX_EPOCH.elapsed().map_err(|err| {
+                    IntentError::internal_error(format!("System clock error: {err}"))
+                })?;
+                Ok(now.as_millis() as u64)
+            }
         }
     }
 

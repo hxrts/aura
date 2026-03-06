@@ -26,24 +26,21 @@
 
 #![allow(clippy::disallowed_types)]
 
-#[cfg(feature = "simulation")]
-use aura_core::effects::{
-    SimulationEnvironmentConfig, SimulationEnvironmentError, SimulationEnvironmentFactory,
-    TransportEnvelope,
-};
-#[cfg(feature = "simulation")]
-use aura_core::hash::hash;
-#[cfg(feature = "simulation")]
-use aura_core::identifiers::AuthorityId;
-#[cfg(feature = "simulation")]
-use std::sync::Arc;
+cfg_if::cfg_if! {
+    if #[cfg(feature = "simulation")] {
+        use aura_core::effects::{
+            SimulationEnvironmentConfig, SimulationEnvironmentError, SimulationEnvironmentFactory,
+            TransportEnvelope,
+        };
+        use aura_core::hash::hash;
+        use aura_core::identifiers::AuthorityId;
+        use std::sync::Arc;
 
-#[cfg(feature = "simulation")]
-use super::effects::AuraEffectSystem;
-#[cfg(feature = "simulation")]
-use crate::core::AgentConfig;
-#[cfg(feature = "simulation")]
-use parking_lot::RwLock;
+        use super::effects::AuraEffectSystem;
+        use crate::core::AgentConfig;
+        use parking_lot::RwLock;
+    }
+}
 
 /// Factory for creating `AuraEffectSystem` instances for simulation
 ///

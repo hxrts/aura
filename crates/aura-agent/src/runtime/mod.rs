@@ -52,17 +52,16 @@ pub mod simulation_factory;
 pub mod reliability;
 
 // Choreography integration
-#[cfg(feature = "choreo-backend-telltale-vm")]
-pub mod choreo_engine;
 pub mod choreography_adapter;
-#[cfg(feature = "choreo-backend-telltale-vm")]
-pub mod effect_trace_capture;
-#[cfg(feature = "choreo-backend-telltale-vm")]
-pub mod parity_policy;
-#[cfg(feature = "choreo-backend-telltale-vm")]
-pub mod vm_effect_handler;
-#[cfg(feature = "choreo-backend-telltale-vm")]
-pub mod vm_hardening;
+cfg_if::cfg_if! {
+    if #[cfg(feature = "choreo-backend-telltale-vm")] {
+        pub mod choreo_engine;
+        pub mod effect_trace_capture;
+        pub mod parity_policy;
+        pub mod vm_effect_handler;
+        pub mod vm_hardening;
+    }
+}
 
 // Runtime utilities
 pub mod migration;
