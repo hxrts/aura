@@ -207,6 +207,28 @@ mod tests {
     }
 
     #[test]
+    fn test_contacts_import_demo_digit_shortcut_autofills() {
+        use crate::tui::state::modal_queue::QueuedModal;
+        use crate::tui::state::views::ImportInvitationModalState;
+        use aura_core::effects::terminal::{KeyEvent, TerminalEvent};
+
+        let mut state = TuiState::new();
+        state.contacts.demo_alice_code = "aura:v1:alice-demo".to_string();
+        state.modal_queue.enqueue(QueuedModal::ContactsImport(
+            ImportInvitationModalState::default(),
+        ));
+
+        let (state, _) = transition(&state, TerminalEvent::Key(KeyEvent::char('1')));
+
+        match state.modal_queue.current() {
+            Some(QueuedModal::ContactsImport(modal_state)) => {
+                assert_eq!(modal_state.code, "aura:v1:alice-demo");
+            }
+            other => panic!("unexpected modal state: {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_device_import_control_digit_aliases_append_digits() {
         use crate::tui::state::modal_queue::QueuedModal;
         use crate::tui::state::views::ImportInvitationModalState;

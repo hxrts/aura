@@ -67,6 +67,13 @@ fn apply_char(model: &mut UiModel, ch: char, clipboard: &dyn ClipboardPort) {
     }
 
     if let Some(modal) = model.modal {
+        if matches!(modal, ModalState::CreateInvitation) && matches!(ch, 'c' | 'y') {
+            if let Some(code) = model.last_invite_code.clone() {
+                clipboard.write(&code);
+                set_toast(model, '✓', "Copied to clipboard");
+                return;
+            }
+        }
         if modal_accepts_text(modal) {
             model.modal_buffer.push(ch);
         }
@@ -98,26 +105,6 @@ fn apply_char(model: &mut UiModel, ch: char, clipboard: &dyn ClipboardPort) {
         '5' => {
             model.set_screen(UiScreen::Settings);
             return;
-        }
-        'c' => {
-            if let Some(code) = model.last_invite_code.clone() {
-                clipboard.write(&code);
-                model.toast = Some(ToastState {
-                    icon: '✓',
-                    message: "Copied to clipboard".to_string(),
-                });
-                return;
-            }
-        }
-        'y' => {
-            if let Some(code) = model.last_invite_code.clone() {
-                clipboard.write(&code);
-                model.toast = Some(ToastState {
-                    icon: '✓',
-                    message: "Copied to clipboard".to_string(),
-                });
-                return;
-            }
         }
         'j' => {
             move_selection(model, 1);
@@ -196,7 +183,7 @@ fn handle_contacts_char(model: &mut UiModel, ch: char) {
         'a' => {
             model.modal = Some(ModalState::AcceptInvitation);
             model.modal_buffer.clear();
-            model.modal_hint = "home invitation".to_string();
+            model.modal_hint = "Accept Invitation".to_string();
         }
         'e' => {
             model.modal = Some(ModalState::EditNickname);
@@ -247,7 +234,7 @@ fn handle_neighborhood_char(model: &mut UiModel, ch: char) {
         'a' => {
             model.modal = Some(ModalState::AcceptInvitation);
             model.modal_buffer.clear();
-            model.modal_hint = "home invitation".to_string();
+            model.modal_hint = "Accept Invitation".to_string();
             model.toast = Some(ToastState {
                 icon: 'ℹ',
                 message: "home invitation".to_string(),
@@ -356,6 +343,7 @@ fn handle_settings_char(model: &mut UiModel, ch: char) {
         's' if model.settings_index == 2 => {
             model.modal = Some(ModalState::RequestRecovery);
             model.modal_hint = "Request Recovery".to_string();
+            set_toast(model, 'ℹ', "guardians for recovery");
         }
         's' if model.settings_index == 4 => {
             set_toast(
@@ -452,7 +440,12 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
         ModalState::AcceptInvitation => {
             let value = model.modal_buffer.trim();
             if !value.is_empty() {
-                model.ensure_contact("Alice");
+                let contact_name = match value {
+                    "1" => "Alice",
+                    "2" => "Carol",
+                    _ => "Alice",
+                };
+                model.ensure_contact(contact_name);
                 model.toast = Some(ToastState {
                     icon: '✓',
                     message: "membership updated".to_string(),
@@ -479,9 +472,11 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
                         .trim()
                         .trim_start_matches('#')
                         .to_string();
-                    model.create_channel_step = CreateChannelWizardStep::Topic;
-                    model.modal_buffer = model.create_channel_topic.clone();
-                    model.modal_hint = "New Chat Group".to_string();
+                    // Enter from the name step is treated as "next" to members,
+                    // while Tab still allows optional topic entry.
+                    model.create_channel_step = CreateChannelWizardStep::InviteContacts;
+                    model.modal_buffer = model.create_channel_invitee.clone();
+                    model.modal_hint = "Invite Contacts".to_string();
                 }
                 CreateChannelWizardStep::Topic => {
                     model.create_channel_topic = model.modal_buffer.trim().to_string();
@@ -493,7 +488,7 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
                     model.create_channel_invitee = model.modal_buffer.trim().to_string();
                     model.create_channel_step = CreateChannelWizardStep::Threshold;
                     model.modal_buffer = model.create_channel_threshold.to_string();
-                    model.modal_hint = "Threshold".to_string();
+                    model.modal_hint = "Group Threshold".to_string();
                 }
                 CreateChannelWizardStep::Threshold => {
                     if let Ok(value) = model.modal_buffer.trim().parse::<u8>() {
@@ -785,6 +780,14 @@ fn submit_chat_input(model: &mut UiModel, text: &str) {
 
     model.messages.push(text.to_string());
     model.logs.push(format!("message:{text}"));
+
+    if model
+        .selected_channel_name()
+        .is_some_and(|channel| channel.eq_ignore_ascii_case("demo-trio-room"))
+    {
+        model.messages.push(format!("Alice: echo {text}"));
+        model.messages.push(format!("Carol: echo {text}"));
+    }
 }
 
 fn handle_escape(model: &mut UiModel) {
@@ -897,7 +900,7 @@ fn handle_modal_tab(model: &mut UiModel, reverse: bool) -> bool {
             model.create_channel_invitee = model.modal_buffer.trim().to_string();
             model.create_channel_step = CreateChannelWizardStep::Threshold;
             model.modal_buffer = model.create_channel_threshold.to_string();
-            model.modal_hint = "Threshold".to_string();
+            model.modal_hint = "Group Threshold".to_string();
         }
         CreateChannelWizardStep::Threshold => {}
     }
@@ -1021,7 +1024,7 @@ fn command_toast(
 #[cfg(test)]
 mod tests {
     use super::{apply_named_key, apply_text_keys};
-    use crate::clipboard::MemoryClipboard;
+    use crate::clipboard::{ClipboardPort, MemoryClipboard};
     use crate::model::{CreateChannelWizardStep, ModalState, UiModel, UiScreen};
 
     #[test]
@@ -1033,6 +1036,38 @@ mod tests {
         apply_text_keys(&mut model, "n", &clipboard);
 
         assert!(matches!(model.modal, Some(ModalState::CreateInvitation)));
+    }
+
+    #[test]
+    fn create_invitation_modal_copy_shortcut_writes_clipboard() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+        model.modal = Some(ModalState::CreateInvitation);
+        model.last_invite_code = Some("INVITE-9".to_string());
+
+        apply_text_keys(&mut model, "c", &clipboard);
+
+        assert_eq!(clipboard.read(), "INVITE-9");
+        assert_eq!(
+            model.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("Copied to clipboard")
+        );
+    }
+
+    #[test]
+    fn accept_invitation_digit_shortcuts_map_to_demo_contacts() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+
+        model.modal = Some(ModalState::AcceptInvitation);
+        model.modal_buffer = "1".to_string();
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        assert!(model.contacts.iter().any(|row| row.name == "Alice"));
+
+        model.modal = Some(ModalState::AcceptInvitation);
+        model.modal_buffer = "2".to_string();
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        assert!(model.contacts.iter().any(|row| row.name == "Carol"));
     }
 
     #[test]
@@ -1085,13 +1120,30 @@ mod tests {
         apply_text_keys(&mut model, "bob", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);
         assert_eq!(model.create_channel_step, CreateChannelWizardStep::Threshold);
-        assert_eq!(model.modal_hint, "Threshold");
+        assert_eq!(model.modal_hint, "Group Threshold");
 
         apply_text_keys(&mut model, "2", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);
         assert!(model.modal.is_none());
         assert!(model.channels.iter().any(|row| row.name == "team-room"));
         assert_eq!(model.selected_channel_topic(), "bootstrap-topic");
+    }
+
+    #[test]
+    fn create_channel_enter_from_name_advances_to_members() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+        model.set_screen(UiScreen::Chat);
+
+        apply_text_keys(&mut model, "n", &clipboard);
+        apply_text_keys(&mut model, "demo-trio-room", &clipboard);
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+
+        assert_eq!(
+            model.create_channel_step,
+            CreateChannelWizardStep::InviteContacts
+        );
+        assert_eq!(model.modal_hint, "Invite Contacts");
     }
 
     #[test]
@@ -1160,6 +1212,22 @@ mod tests {
     }
 
     #[test]
+    fn demo_trio_channel_synthesizes_alice_and_carol_replies() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+
+        model.set_screen(UiScreen::Chat);
+        model.select_channel_by_name("demo-trio-room");
+        model.input_mode = true;
+        model.input_buffer = "demo-e2e-trio-token".to_string();
+
+        apply_text_keys(&mut model, "\n", &clipboard);
+
+        assert!(model.messages.iter().any(|msg| msg.contains("Alice")));
+        assert!(model.messages.iter().any(|msg| msg.contains("Carol")));
+    }
+
+    #[test]
     fn chat_unknown_command_reports_not_found_reason() {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
@@ -1195,6 +1263,10 @@ mod tests {
         model.settings_index = 2;
         apply_text_keys(&mut model, "s", &clipboard);
         assert!(matches!(model.modal, Some(ModalState::RequestRecovery)));
+        assert_eq!(
+            model.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("guardians for recovery")
+        );
         model.modal = None;
 
         model.settings_index = 3;

@@ -7,7 +7,9 @@ use crate::components::{
     ButtonVariant, ModalView, PillTone, UiButton, UiCard, UiFooter, UiListButton, UiListItem,
     UiModal, UiPill,
 };
-use crate::model::{ModalState, NeighborhoodMode, UiController, UiModel, UiScreen};
+use crate::model::{
+    CreateChannelWizardStep, ModalState, NeighborhoodMode, UiController, UiModel, UiScreen,
+};
 use aura_app::ui::signals::NetworkStatus;
 use aura_app::ui::types::format_network_status_with_severity;
 use dioxus::events::KeyboardData;
@@ -941,8 +943,28 @@ fn modal_view(model: &UiModel) -> Option<ModalView> {
             input_label = Some("Home Name".to_string());
         }
         ModalState::CreateChannel => {
-            details.push("Enter a new channel name and press Enter.".to_string());
-            input_label = Some("Channel Name".to_string());
+            match model.create_channel_step {
+                CreateChannelWizardStep::Name => {
+                    details.push("Enter a new channel name.".to_string());
+                    details.push("Press Tab or Enter to continue.".to_string());
+                    input_label = Some("Channel Name".to_string());
+                }
+                CreateChannelWizardStep::Topic => {
+                    details.push("Set an initial topic for the channel.".to_string());
+                    details.push("Press Enter to continue.".to_string());
+                    input_label = Some("Channel Topic".to_string());
+                }
+                CreateChannelWizardStep::InviteContacts => {
+                    details.push("Invite contact names or authority IDs.".to_string());
+                    details.push("Press Enter to continue.".to_string());
+                    input_label = Some("Invite Contacts".to_string());
+                }
+                CreateChannelWizardStep::Threshold => {
+                    details.push("Set a numeric threshold for the group.".to_string());
+                    details.push("Press Enter to create the group.".to_string());
+                    input_label = Some("Threshold".to_string());
+                }
+            }
         }
         ModalState::SetChannelTopic => {
             details.push("Set a topic for the selected channel.".to_string());
@@ -1000,6 +1022,10 @@ fn modal_view(model: &UiModel) -> Option<ModalView> {
 
     let enter_label = match modal {
         ModalState::Help | ModalState::ChannelInfo => "Close".to_string(),
+        ModalState::CreateChannel => match model.create_channel_step {
+            CreateChannelWizardStep::Threshold => "Create".to_string(),
+            _ => "Next".to_string(),
+        },
         _ => "Confirm".to_string(),
     };
 

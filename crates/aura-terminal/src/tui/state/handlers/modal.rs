@@ -901,12 +901,22 @@ fn handle_import_invitation_key_queue(
         empty_code && has_demo_alice_code && matches!(key.code, KeyCode::Char('A'));
     let is_demo_shift_l =
         empty_code && has_demo_carol_code && matches!(key.code, KeyCode::Char('L'));
+    let is_demo_digit_1 =
+        empty_code && has_demo_alice_code && matches!(key.code, KeyCode::Char('1'));
+    let is_demo_digit_2 =
+        empty_code && has_demo_carol_code && matches!(key.code, KeyCode::Char('2'));
 
-    if is_ctrl_a || is_ctrl_l || is_demo_shift_a || is_demo_shift_l {
+    if is_ctrl_a
+        || is_ctrl_l
+        || is_demo_shift_a
+        || is_demo_shift_l
+        || is_demo_digit_1
+        || is_demo_digit_2
+    {
         // Dismiss the demo hint toast since the user used a shortcut
         state.toast_queue.dismiss();
 
-        let code = if is_ctrl_a || is_demo_shift_a {
+        let code = if is_ctrl_a || is_demo_shift_a || is_demo_digit_1 {
             state.contacts.demo_alice_code.clone()
         } else {
             state.contacts.demo_carol_code.clone()

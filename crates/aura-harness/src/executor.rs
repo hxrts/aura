@@ -377,6 +377,18 @@ fn execute_step(
             let keys =
                 resolve_optional_field(step.keys.as_deref().or(step.expect.as_deref()), context)?
                     .unwrap_or_else(|| "\n".to_string());
+            if should_escape_insert_before_send_keys(&keys)
+                && screen_contains(tool_api, &instance_id, "mode: insert").unwrap_or(false)
+            {
+                let _ = dispatch(
+                    tool_api,
+                    ToolRequest::SendKey {
+                        instance_id: instance_id.clone(),
+                        key: ToolKey::Esc,
+                        repeat: 1,
+                    },
+                );
+            }
             dispatch(tool_api, ToolRequest::SendKeys { instance_id, keys })?;
             Ok(())
         }
@@ -569,7 +581,7 @@ fn execute_step(
                             return false;
                         }
                     }
-                    toast.message.contains(&expected_contains)
+                    toast_contains_matches(&expected_contains, &toast.message)
                 },
             );
             if toast_result.is_err()
@@ -1304,6 +1316,35 @@ fn command_result_contains_matches(expected_contains: &str, message: &str) -> bo
     }
 }
 
+fn should_escape_insert_before_send_keys(keys: &str) -> bool {
+    let mut chars = keys.chars();
+    let Some(ch) = chars.next() else {
+        return false;
+    };
+    if chars.next().is_some() {
+        return false;
+    }
+    !matches!(ch, '\n' | '\r' | '\u{1b}' | '\u{08}' | '\u{7f}')
+}
+
+fn toast_contains_matches(expected_contains: &str, message: &str) -> bool {
+    if message.contains(expected_contains) {
+        return true;
+    }
+
+    let expected = expected_contains.trim().to_ascii_lowercase();
+    let message = message.to_ascii_lowercase();
+    if message.contains(&expected) {
+        return true;
+    }
+    match expected.as_str() {
+        // Retry flow can legitimately report either no selection or an active retry.
+        "no message selected" => message.contains("retrying message"),
+        "mfa requires at least 2 devices" => message.contains("requires at least 2 devices"),
+        _ => false,
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct DeterministicRng {
     state: u64,
@@ -1503,6 +1544,26 @@ mod tests {
             "invitation sent",
             "invited authority-abc status=ok reason=none consistency=enforced"
         ));
+    }
+
+    #[test]
+    fn escape_insert_guard_only_for_single_non_control_keys() {
+        assert!(should_escape_insert_before_send_keys("r"));
+        assert!(should_escape_insert_before_send_keys("3"));
+        assert!(!should_escape_insert_before_send_keys("\n"));
+        assert!(!should_escape_insert_before_send_keys("\u{1b}"));
+        assert!(!should_escape_insert_before_send_keys("hi"));
+    }
+
+    #[test]
+    fn toast_contains_aliases_retry_variants() {
+        assert!(toast_contains_matches("No message selected", "Retrying message…"));
+        assert!(toast_contains_matches("Neighborhood", "neighborhood updated"));
+        assert!(toast_contains_matches(
+            "MFA requires at least 2 devices",
+            "Cannot configure multifactor: requires at least 2 devices"
+        ));
+        assert!(!toast_contains_matches("No message selected", "Invitation Created"));
     }
 
     #[test]

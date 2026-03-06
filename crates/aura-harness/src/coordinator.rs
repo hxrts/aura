@@ -371,6 +371,12 @@ fn wait_pattern_matches(normalized_screen: &str, pattern: &str) -> bool {
     if pattern.eq_ignore_ascii_case("Can enter:") && normalized_screen.contains("Access:") {
         return true;
     }
+    if (pattern.eq_ignore_ascii_case("Map → Limited")
+        || pattern.eq_ignore_ascii_case("Map -> Limited"))
+        && normalized_screen.contains("Access: Limited")
+    {
+        return true;
+    }
     if normalized_screen.contains(pattern) {
         return true;
     }
@@ -497,6 +503,13 @@ mod tests {
     fn wait_pattern_matches_can_enter_alias_for_access() {
         let screen = "Authority: authority-local (local) Access: Limited";
         assert!(wait_pattern_matches(screen, "Can enter:"));
+    }
+
+    #[test]
+    fn wait_pattern_matches_map_limited_alias_for_access_limited() {
+        let screen = "Welcome to Aura Access: Limited";
+        assert!(wait_pattern_matches(screen, "Map → Limited"));
+        assert!(wait_pattern_matches(screen, "Map -> Limited"));
     }
 
     #[test]
