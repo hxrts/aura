@@ -306,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn enter_whois_command_emits_user_toast() {
+    fn enter_whois_command_dispatches_through_chat_pipeline() {
         let mut state = TuiState::new();
         state.router.go_to(Screen::Chat);
         state.chat.focus = ChatFocus::Input;
@@ -316,12 +316,19 @@ mod tests {
         let mut commands = Vec::new();
         handle_insert_mode_key(&mut state, &mut commands, KeyEvent::press(KeyCode::Enter));
 
-        assert!(commands.is_empty(), "whois should be handled locally");
-        let toast = state
-            .toast_queue
-            .current()
-            .expect("whois should enqueue a toast");
-        assert!(toast.message.contains("User: authority-abc"));
+        assert_eq!(commands.len(), 1, "whois should dispatch through chat pipeline");
+        assert!(
+            matches!(
+                &commands[0],
+                TuiCommand::Dispatch(DispatchCommand::SendChatMessage { content })
+                    if content == "/whois authority-abc"
+            ),
+            "whois should be forwarded unchanged as a chat command"
+        );
+        assert!(
+            state.toast_queue.current().is_none(),
+            "whois should not enqueue a local placeholder toast"
+        );
     }
 }
 
@@ -418,10 +425,6 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                                     "Use ? for TUI help. Run /help <command> for details. Core commands: /msg /me /nick /who /whois /join /leave /topic /invite /homeinvite /homeaccept /kick /ban /unban /mute /unmute /pin /unpin /op /deop /mode /neighborhood /nhadd /nhlink".to_string()
                                 };
                                 state.toast_info(message);
-                            }
-                            // Keep /whois deterministic in local UI mode (same UX as web shell).
-                            Ok(crate::tui::commands::IrcCommand::Whois { target }) => {
-                                state.toast_info(format!("User: {target}"));
                             }
                             _ => {
                                 // Route other slash commands through the chat callback

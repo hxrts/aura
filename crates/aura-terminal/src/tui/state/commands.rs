@@ -160,7 +160,8 @@ pub enum DispatchCommand {
     },
     /// Open device selection modal (for device removal)
     OpenDeviceSelectModal,
-    /// Demo-only: import device enrollment code on the Mobile agent.
+    /// Import a device enrollment code on the target device runtime.
+    /// In demo mode this routes to the simulated Mobile agent.
     ImportDeviceEnrollmentOnMobile {
         code: String,
     },

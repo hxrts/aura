@@ -1263,7 +1263,6 @@ impl SettingsCallbacks {
         })
     }
 
-    #[cfg(feature = "development")]
     fn make_import_device_enrollment(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
@@ -1272,11 +1271,11 @@ impl SettingsCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             spawn_ctx(ctx.clone(), async move {
-                match ctx.import_invitation_on_mobile(&code).await {
+                match ctx.import_device_enrollment_code(&code).await {
                     Ok(()) => {
                         let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
                             "devices",
-                            "Mobile device accepted enrollment invitation",
+                            "Device enrollment invitation accepted",
                         )));
                     }
                     Err(e) => {
@@ -1285,16 +1284,6 @@ impl SettingsCallbacks {
                     }
                 }
             });
-        })
-    }
-
-    #[cfg(not(feature = "development"))]
-    fn make_import_device_enrollment(
-        _ctx: Arc<IoContext>,
-        _tx: UiUpdateSender,
-    ) -> ImportDeviceEnrollmentCallback {
-        Arc::new(move |_code: String| {
-            // No-op in production builds
         })
     }
 }

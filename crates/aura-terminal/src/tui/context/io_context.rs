@@ -34,6 +34,8 @@ use aura_app::ui::signals::{
     ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, DISCOVERED_PEERS_SIGNAL, ERROR_SIGNAL,
     SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
 };
+use aura_app::ui::types::InvitationBridgeType;
+use aura_app::ui::workflows::invitation::{accept_invitation, import_invitation_details};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::Epoch;
 
@@ -811,6 +813,32 @@ impl IoContext {
             }
             None => Err("RemoveDevice not handled".to_string()),
         }
+    }
+
+    pub async fn import_device_enrollment_code(&self, code: &str) -> Result<(), String> {
+        cfg_if! {
+            if #[cfg(feature = "development")] {
+                if self.demo_mobile_agent.is_some() {
+                    return self.import_invitation_on_mobile(code).await;
+                }
+            }
+        }
+
+        let app_core = self.app_core_raw();
+        let invitation = import_invitation_details(app_core, code)
+            .await
+            .map_err(|e| format!("Failed to import invitation: {e}"))?;
+
+        if !matches!(
+            invitation.invitation_type,
+            InvitationBridgeType::DeviceEnrollment { .. }
+        ) {
+            return Err("Code is not a device enrollment invitation".to_string());
+        }
+
+        accept_invitation(app_core, &invitation.invitation_id)
+            .await
+            .map_err(|e| format!("Failed to accept device enrollment invitation: {e}"))
     }
 
     pub async fn dispatch_send_message(

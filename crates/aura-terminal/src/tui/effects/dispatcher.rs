@@ -72,8 +72,8 @@ pub enum DispatchError {
         /// Error message
         reason: String,
     },
-    /// Command not yet implemented
-    NotImplemented {
+    /// Command is handled locally by the UI instead of the effect layer
+    HandledLocally {
         /// Command name
         command: String,
     },
@@ -93,60 +93,14 @@ impl std::fmt::Display for DispatchError {
             Self::InvalidParameter { param, reason } => {
                 write!(f, "Invalid parameter '{param}': {reason}")
             }
-            Self::NotImplemented { command } => {
-                write!(f, "Command '{command}' not yet implemented")
+            Self::HandledLocally { command } => {
+                write!(f, "Command '{command}' is handled locally")
             }
         }
     }
 }
 
 impl std::error::Error for DispatchError {}
-
-/// Stub Biscuit capability checker for integration with RuntimeBridge.
-///
-/// This function provides a template for integrating Biscuit token verification
-/// into the command dispatcher. In production, this should delegate to
-/// RuntimeBridge.has_command_capability().
-///
-/// # Example Integration
-/// ```ignore
-/// use crate::tui::effects::dispatcher::{CommandDispatcher, biscuit_capability_stub};
-///
-/// let runtime_bridge = Arc::new(RwLock::new(runtime_bridge));
-/// let checker = move |cap: &CommandCapability| -> bool {
-///     if *cap == CommandCapability::None { return true; }
-///
-///     // Try RuntimeBridge capability check
-///     if let Some(bridge) = runtime_bridge.try_read() {
-///         bridge.has_command_capability(cap.as_str())
-///     } else {
-///         // Fallback: use stub or deny
-///         biscuit_capability_stub(cap)
-///     }
-/// };
-///
-/// let dispatcher = CommandDispatcher::with_biscuit_policy(Box::new(checker));
-/// ```
-pub fn biscuit_capability_stub(cap: &CommandCapability) -> bool {
-    // Stub implementation: Allow a baseline set of capabilities
-    // In production, this should check Biscuit tokens via RuntimeBridge
-    match cap {
-        CommandCapability::None => true,
-        CommandCapability::SendDm | CommandCapability::ViewMembers => {
-            // Basic messaging capabilities - allowed in stub
-            tracing::debug!("Biscuit stub: allowing basic capability {:?}", cap);
-            true
-        }
-        _ => {
-            // Advanced capabilities require Biscuit token verification
-            tracing::warn!(
-                "Biscuit stub: denying advanced capability {:?} (token verification not implemented)",
-                cap
-            );
-            false
-        }
-    }
-}
 
 /// Command dispatcher that maps IRC commands to effect commands
 ///
@@ -178,7 +132,7 @@ impl CommandDispatcher {
         }
     }
 
-    /// Create a dispatcher with Biscuit-based capability checking.
+    /// Create a dispatcher with RuntimeBridge-backed capability checking.
     ///
     /// This is a convenience constructor for integrating with Biscuit token
     /// verification via RuntimeBridge. Pass a closure that checks capabilities
@@ -195,14 +149,6 @@ impl CommandDispatcher {
         checker: Box<dyn Fn(&CommandCapability) -> bool + Send + Sync>,
     ) -> Self {
         Self::with_policy(CapabilityPolicy::Custom(checker))
-    }
-
-    /// Create a dispatcher with the stub Biscuit checker.
-    ///
-    /// This uses the built-in `biscuit_capability_stub()` which allows basic
-    /// capabilities but denies advanced ones. Useful for development/testing.
-    pub fn with_stub_biscuit() -> Self {
-        Self::with_biscuit_policy(Box::new(biscuit_capability_stub))
     }
 
     /// Set the capability policy
@@ -318,7 +264,7 @@ impl CommandDispatcher {
 
             IrcCommand::Help { .. } => {
                 // Help is handled locally, not via effect system
-                Err(DispatchError::NotImplemented {
+                Err(DispatchError::HandledLocally {
                     command: "help".to_string(),
                 })
             }
@@ -658,8 +604,8 @@ mod tests {
     fn test_deny_non_public_allows_help() {
         let dispatcher = CommandDispatcher::with_policy(CapabilityPolicy::DenyNonPublic);
 
-        // Help command has no capability requirement, should pass check
-        // (but returns NotImplemented from dispatch, which is fine)
+        // Help command has no capability requirement, even though the UI
+        // handles it locally instead of routing it into the effect layer.
         let cmd = IrcCommand::Help { command: None };
 
         let result = dispatcher.check_capability(&cmd);
