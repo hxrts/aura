@@ -13,6 +13,14 @@ use contact::InvitationContactHandler;
 use crate::core::{default_context_id_for_authority, AgentError, AgentResult, AuthorityContext};
 use crate::runtime::services::InvitationManager;
 use crate::runtime::AuraEffectSystem;
+#[cfg(feature = "choreo-backend-telltale-vm")]
+use crate::runtime::{
+    build_vm_config, AuraChoreoEngine, AuraVmHardeningProfile, AuraVmParityProfile,
+};
+#[cfg(feature = "choreo-backend-telltale-vm")]
+use crate::runtime::vm_host_bridge::{
+    blocked_recv_edge, build_role_scoped_code_image, AuraQueuedVmBridgeHandler,
+};
 use crate::InvitationServiceApi;
 use device_enrollment::InvitationDeviceEnrollmentHandler;
 use guardian::InvitationGuardianHandler;
@@ -37,24 +45,17 @@ use aura_guards::types::CapabilityId;
 use aura_invitation::guards::GuardSnapshot;
 use aura_invitation::{InvitationConfig, InvitationService as CoreInvitationService};
 use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
-use aura_invitation::protocol::exchange_runners::{
-    execute_as as invitation_execute_as, InvitationExchangeRole,
-};
+#[cfg(not(feature = "choreo-backend-telltale-vm"))]
+use aura_invitation::protocol::exchange_runners::InvitationExchangeRole;
 use aura_invitation::protocol::exchange::telltale_session_types_invitation::message_wrappers::{
     InvitationAck as ExchangeInvitationAck,
     InvitationOffer as ExchangeInvitationOffer,
     InvitationResponse as ExchangeInvitationResponse,
 };
-use aura_invitation::protocol::guardian_runners::{
-    execute_as as guardian_execute_as, GuardianInvitationRole,
-};
 use aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::message_wrappers::{
     GuardianAccept as GuardianInvitationAccept,
     GuardianConfirm as GuardianInvitationConfirm,
     GuardianRequest as GuardianInvitationRequest,
-};
-use aura_invitation::protocol::device_enrollment_runners::{
-    execute_as as device_enrollment_execute_as, DeviceEnrollmentRole,
 };
 use aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::message_wrappers::{
     DeviceEnrollmentAccept as DeviceEnrollmentAcceptWrapper,
@@ -74,14 +75,19 @@ use aura_protocol::amp::AmpJournalEffects;
 use aura_protocol::effects::EffectApiEffects;
 use aura_protocol::effects::ChoreographyError;
 use aura_core::effects::TransportError;
-use aura_core::util::serialization::from_slice;
-use crate::runtime::choreography_adapter::AuraProtocolAdapter;
+use aura_core::util::serialization::{from_slice, to_vec};
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
 use std::collections::{BTreeSet, HashMap, HashSet};
 #[cfg(test)]
 use std::str::FromStr;
 use uuid::Uuid;
 use validation::InvitationValidationHandler;
+#[cfg(feature = "choreo-backend-telltale-vm")]
+use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, RoleIndex};
+#[cfg(feature = "choreo-backend-telltale-vm")]
+use telltale_vm::runtime_contracts::RuntimeContracts;
+#[cfg(feature = "choreo-backend-telltale-vm")]
+use telltale_vm::vm::StepResult;
 
 mod cache;
 mod channel;
@@ -1409,8 +1415,269 @@ impl InvitationHandler {
         }
     }
 
-    fn type_matches(type_name: &str, expected_suffix: &str) -> bool {
-        type_name.ends_with(expected_suffix)
+    #[cfg(feature = "choreo-backend-telltale-vm")]
+    fn invitation_exchange_peer_roles(
+        authority_id: AuthorityId,
+        peer_id: AuthorityId,
+    ) -> (ChoreographicRole, ChoreographicRole, Vec<ChoreographicRole>) {
+        let sender_index = RoleIndex::new(0).expect("sender role index");
+        let receiver_index = RoleIndex::new(0).expect("receiver role index");
+        let local_role =
+            ChoreographicRole::new(aura_core::DeviceId::from_uuid(authority_id.0), sender_index);
+        let peer_role =
+            ChoreographicRole::new(aura_core::DeviceId::from_uuid(peer_id.0), receiver_index);
+        (local_role, peer_role, vec![local_role, peer_role])
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-vm")]
+    fn build_invitation_exchange_vm_engine(
+        active_role: &str,
+    ) -> AgentResult<(
+        AuraChoreoEngine<AuraQueuedVmBridgeHandler>,
+        Arc<AuraQueuedVmBridgeHandler>,
+        telltale_vm::SessionId,
+    )> {
+        let global_type =
+            aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::global_type();
+        let local_types =
+            aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::local_types();
+        let image = build_role_scoped_code_image(
+            aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::role_names(),
+            active_role,
+            &global_type,
+            &local_types,
+        )
+        .map_err(AgentError::internal)?;
+
+        let handler = Arc::new(AuraQueuedVmBridgeHandler::default());
+        let config = build_vm_config(
+            AuraVmHardeningProfile::Prod,
+            AuraVmParityProfile::RuntimeDefault,
+        );
+        let mut engine = AuraChoreoEngine::new_with_contracts(
+            config,
+            Arc::clone(&handler),
+            Some(RuntimeContracts::full()),
+        )
+        .map_err(|error| AgentError::internal(format!("failed to create VM engine: {error}")))?;
+        let sid = engine
+            .open_session(&image)
+            .map_err(|error| AgentError::internal(format!("failed to open VM session: {error}")))?;
+
+        Ok((engine, handler, sid))
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-vm")]
+    async fn flush_invitation_vm_sends(
+        effects: &AuraEffectSystem,
+        handler: &AuraQueuedVmBridgeHandler,
+        peer_role: ChoreographicRole,
+    ) -> AgentResult<()> {
+        for pending in handler.drain_pending_sends() {
+            effects
+                .send_to_role_bytes(peer_role, pending.payload)
+                .await
+                .map_err(|error| {
+                    AgentError::internal(format!(
+                        "failed to bridge VM send {}->{}:{}: {error}",
+                        pending.from_role, pending.to_role, pending.label
+                    ))
+                })?;
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-vm")]
+    async fn execute_invitation_exchange_sender_vm(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        invitation: &Invitation,
+    ) -> AgentResult<()> {
+        let authority_id = self.context.authority.authority_id();
+        let (_local_role, peer_role, roles) =
+            Self::invitation_exchange_peer_roles(authority_id, invitation.receiver_id);
+        let session_id = Self::invitation_session_id(&invitation.invitation_id);
+        let offer = ExchangeInvitationOffer(Self::build_invitation_offer(invitation));
+
+        effects
+            .start_session(session_id, roles)
+            .await
+            .map_err(|error| {
+                AgentError::internal(format!("invitation VM session start failed: {error}"))
+            })?;
+
+        let result = async {
+            let (mut engine, handler, vm_sid) =
+                Self::build_invitation_exchange_vm_engine("Sender")?;
+            handler.push_send_bytes(
+                to_vec(&offer).map_err(|error| {
+                    AgentError::internal(format!("offer encode failed: {error}"))
+                })?,
+            );
+
+            loop {
+                let step = engine.step().map_err(|error| {
+                    AgentError::internal(format!("invitation sender VM step failed: {error}"))
+                })?;
+                Self::flush_invitation_vm_sends(effects.as_ref(), handler.as_ref(), peer_role)
+                    .await?;
+
+                if let Some((from_role, to_role)) = blocked_recv_edge(engine.vm(), vm_sid, "Sender")
+                {
+                    match effects.receive_from_role_bytes(peer_role).await {
+                        Ok(bytes) => {
+                            let response: ExchangeInvitationResponse =
+                                from_slice(&bytes).map_err(|error| {
+                                    AgentError::internal(format!(
+                                        "invitation response decode failed: {error}"
+                                    ))
+                                })?;
+                            let status = if response.0.accepted {
+                                aura_invitation::InvitationAckStatus::Accepted
+                            } else {
+                                aura_invitation::InvitationAckStatus::Declined
+                            };
+                            let ack = ExchangeInvitationAck(InvitationAck {
+                                invitation_id: invitation.invitation_id.clone(),
+                                success: true,
+                                status,
+                            });
+                            handler.push_send_bytes(to_vec(&ack).map_err(|error| {
+                                AgentError::internal(format!(
+                                    "invitation ack encode failed: {error}"
+                                ))
+                            })?);
+                            engine
+                                .vm_mut()
+                                .inject_message(
+                                    vm_sid,
+                                    &from_role,
+                                    &to_role,
+                                    AuraQueuedVmBridgeHandler::bytes_to_value(&bytes),
+                                )
+                                .map_err(|error| {
+                                    AgentError::internal(format!(
+                                        "failed to inject invitation response into VM: {error}"
+                                    ))
+                                })?;
+                            continue;
+                        }
+                        Err(error) if Self::is_transport_no_message(&error) => break Ok(()),
+                        Err(error) => {
+                            break Err(AgentError::internal(format!(
+                                "invitation sender receive failed: {error}"
+                            )));
+                        }
+                    }
+                }
+
+                match step {
+                    StepResult::AllDone => break Ok(()),
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(AgentError::internal(
+                            "invitation sender VM became stuck without a pending receive"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+        .await;
+
+        let _ = effects.end_session().await;
+        result
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-vm")]
+    async fn execute_invitation_exchange_receiver_vm(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        invitation: &Invitation,
+        accepted: bool,
+    ) -> AgentResult<()> {
+        let authority_id = self.context.authority.authority_id();
+        let (_local_role, peer_role, roles) =
+            Self::invitation_exchange_peer_roles(authority_id, invitation.sender_id);
+        let session_id = Self::invitation_session_id(&invitation.invitation_id);
+        let response = ExchangeInvitationResponse(InvitationResponse {
+            invitation_id: invitation.invitation_id.clone(),
+            accepted,
+            message: None,
+            signature: Vec::new(),
+        });
+        let mut response_queued = false;
+
+        effects
+            .start_session(session_id, roles)
+            .await
+            .map_err(|error| {
+                AgentError::internal(format!("invitation VM session start failed: {error}"))
+            })?;
+
+        let result = async {
+            let (mut engine, handler, vm_sid) =
+                Self::build_invitation_exchange_vm_engine("Receiver")?;
+
+            loop {
+                let step = engine.step().map_err(|error| {
+                    AgentError::internal(format!("invitation receiver VM step failed: {error}"))
+                })?;
+                Self::flush_invitation_vm_sends(effects.as_ref(), handler.as_ref(), peer_role)
+                    .await?;
+
+                if let Some((from_role, to_role)) =
+                    blocked_recv_edge(engine.vm(), vm_sid, "Receiver")
+                {
+                    let bytes =
+                        effects
+                            .receive_from_role_bytes(peer_role)
+                            .await
+                            .map_err(|error| {
+                                AgentError::internal(format!(
+                                    "invitation receiver receive failed: {error}"
+                                ))
+                            })?;
+                    if !response_queued {
+                        handler.push_send_bytes(to_vec(&response).map_err(|error| {
+                            AgentError::internal(format!(
+                                "invitation response encode failed: {error}"
+                            ))
+                        })?);
+                        response_queued = true;
+                    }
+                    engine
+                        .vm_mut()
+                        .inject_message(
+                            vm_sid,
+                            &from_role,
+                            &to_role,
+                            AuraQueuedVmBridgeHandler::bytes_to_value(&bytes),
+                        )
+                        .map_err(|error| {
+                            AgentError::internal(format!(
+                                "failed to inject invitation receiver message into VM: {error}"
+                            ))
+                        })?;
+                    continue;
+                }
+
+                match step {
+                    StepResult::AllDone => break Ok(()),
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(AgentError::internal(
+                            "invitation receiver VM became stuck without a pending receive"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+        .await;
+
+        let _ = effects.end_session().await;
+        result
     }
 
     async fn execute_invitation_exchange_sender(
@@ -1418,69 +1685,8 @@ impl InvitationHandler {
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,
     ) -> AgentResult<()> {
-        use crate::core::AgentError;
-
-        let authority_id = self.context.authority.authority_id();
-        let mut role_map = HashMap::new();
-        role_map.insert(InvitationExchangeRole::Sender, authority_id);
-        role_map.insert(InvitationExchangeRole::Receiver, invitation.receiver_id);
-
-        let offer = ExchangeInvitationOffer(Self::build_invitation_offer(invitation));
-        let invitation_id = invitation.invitation_id.clone();
-
-        let mut adapter = AuraProtocolAdapter::new(
-            effects.clone(),
-            authority_id,
-            InvitationExchangeRole::Sender,
-            role_map,
-        )
-        .with_message_provider(move |request, received| {
-            if Self::type_matches(request.type_name, "InvitationOffer") {
-                return Some(Box::new(offer.clone()));
-            }
-
-            if Self::type_matches(request.type_name, "InvitationAck") {
-                let mut accepted = false;
-                for msg in received {
-                    if Self::type_matches(msg.type_name, "InvitationResponse") {
-                        if let Ok(response) = from_slice::<InvitationResponse>(&msg.bytes) {
-                            accepted = response.accepted;
-                            break;
-                        }
-                    }
-                }
-                let status = if accepted {
-                    aura_invitation::InvitationAckStatus::Accepted
-                } else {
-                    aura_invitation::InvitationAckStatus::Declined
-                };
-                let ack = ExchangeInvitationAck(InvitationAck {
-                    invitation_id: invitation_id.clone(),
-                    success: true,
-                    status,
-                });
-                return Some(Box::new(ack));
-            }
-
-            None
-        });
-
-        let session_id = Self::invitation_session_id(&invitation.invitation_id);
-        adapter
-            .start_session(session_id)
+        self.execute_invitation_exchange_sender_vm(effects, invitation)
             .await
-            .map_err(|e| AgentError::internal(format!("invitation start failed: {e}")))?;
-
-        let result = invitation_execute_as(InvitationExchangeRole::Sender, &mut adapter).await;
-
-        let _ = adapter.end_session().await;
-        match result {
-            Ok(()) => Ok(()),
-            Err(err) if Self::is_transport_no_message(&err) => Ok(()),
-            Err(err) => Err(AgentError::internal(format!(
-                "invitation exchange failed: {err}"
-            ))),
-        }
     }
 
     async fn execute_invitation_exchange_receiver(
@@ -1489,44 +1695,8 @@ impl InvitationHandler {
         invitation: &Invitation,
         accepted: bool,
     ) -> AgentResult<()> {
-        use crate::core::AgentError;
-
-        let authority_id = self.context.authority.authority_id();
-        let mut role_map = HashMap::new();
-        role_map.insert(InvitationExchangeRole::Sender, invitation.sender_id);
-        role_map.insert(InvitationExchangeRole::Receiver, authority_id);
-
-        let response = ExchangeInvitationResponse(InvitationResponse {
-            invitation_id: invitation.invitation_id.clone(),
-            accepted,
-            message: None,
-            signature: Vec::new(),
-        });
-        let mut adapter = AuraProtocolAdapter::new(
-            effects.clone(),
-            authority_id,
-            InvitationExchangeRole::Receiver,
-            role_map,
-        )
-        .with_message_provider(move |request, _received| {
-            if Self::type_matches(request.type_name, "InvitationResponse") {
-                return Some(Box::new(response.clone()));
-            }
-            None
-        });
-
-        let session_id = Self::invitation_session_id(&invitation.invitation_id);
-        adapter
-            .start_session(session_id)
+        self.execute_invitation_exchange_receiver_vm(effects, invitation, accepted)
             .await
-            .map_err(|e| AgentError::internal(format!("invitation start failed: {e}")))?;
-
-        let result = invitation_execute_as(InvitationExchangeRole::Receiver, &mut adapter)
-            .await
-            .map_err(|e| AgentError::internal(format!("invitation exchange failed: {e}")));
-
-        let _ = adapter.end_session().await;
-        result
     }
 
     async fn execute_guardian_invitation_principal(
@@ -2625,8 +2795,9 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([128u8; 32]);
         let receiver_id = AuthorityId::new_from_entropy([129u8; 32]);
         let config = AgentConfig::default();
-        let effects =
-            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, sender_id).unwrap());
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, sender_id).unwrap(),
+        );
         let handler = InvitationHandler::new(AuthorityContext::new(sender_id)).unwrap();
 
         handler
@@ -2675,8 +2846,9 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([130u8; 32]);
         let receiver_id = AuthorityId::new_from_entropy([131u8; 32]);
         let config = AgentConfig::default();
-        let effects =
-            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, sender_id).unwrap());
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, sender_id).unwrap(),
+        );
         let handler = InvitationHandler::new(AuthorityContext::new(sender_id)).unwrap();
 
         let context_id = default_context_id_for_authority(sender_id);
@@ -2850,8 +3022,9 @@ mod tests {
         let authority = AuthorityId::new_from_entropy([201u8; 32]);
         let peer = AuthorityId::new_from_entropy([202u8; 32]);
         let config = AgentConfig::default();
-        let effects =
-            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap());
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap(),
+        );
         let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
 
         let context_id = ContextId::new_from_entropy([203u8; 32]);
@@ -2922,8 +3095,9 @@ mod tests {
         let authority = AuthorityId::new_from_entropy([205u8; 32]);
         let peer = AuthorityId::new_from_entropy([206u8; 32]);
         let config = AgentConfig::default();
-        let effects =
-            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap());
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap(),
+        );
         let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
 
         let context_id = ContextId::new_from_entropy([207u8; 32]);
@@ -2982,8 +3156,9 @@ mod tests {
         let authority = AuthorityId::new_from_entropy([208u8; 32]);
         let peer = AuthorityId::new_from_entropy([209u8; 32]);
         let config = AgentConfig::default();
-        let effects =
-            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap());
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap(),
+        );
         let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
 
         let context_id = ContextId::new_from_entropy([210u8; 32]);
@@ -3044,8 +3219,9 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([211u8; 32]);
         let receiver_id = AuthorityId::new_from_entropy([212u8; 32]);
         let config = AgentConfig::default();
-        let effects =
-            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap());
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap(),
+        );
 
         let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
 
@@ -3116,8 +3292,9 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([213u8; 32]);
         let receiver_id = AuthorityId::new_from_entropy([214u8; 32]);
         let config = AgentConfig::default();
-        let effects =
-            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap());
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap(),
+        );
         let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
 
         let invitation_id = InvitationId::new("inv-materialize-home-1");
@@ -3191,8 +3368,9 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([217u8; 32]);
         let receiver_id = AuthorityId::new_from_entropy([218u8; 32]);
         let config = AgentConfig::default();
-        let effects =
-            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap());
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap(),
+        );
         let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
 
         let invitation_id = InvitationId::new("inv-materialize-bootstrap-1");
@@ -3261,8 +3439,9 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([215u8; 32]);
         let receiver_id = AuthorityId::new_from_entropy([216u8; 32]);
         let config = AgentConfig::default();
-        let effects =
-            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap());
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap(),
+        );
         let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
 
         let invitation_id = InvitationId::new("inv-materialize-home-context");
@@ -3338,8 +3517,9 @@ mod tests {
     async fn imported_invitation_is_resolvable_across_handler_instances() {
         let own_authority = AuthorityId::new_from_entropy([122u8; 32]);
         let config = AgentConfig::default();
-        let effects =
-            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap());
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap(),
+        );
 
         let authority_context = AuthorityContext::new(own_authority);
 
@@ -3404,8 +3584,9 @@ mod tests {
         // a new handler with an empty in-memory cache).
         let own_authority = AuthorityId::new_from_entropy([124u8; 32]);
         let config = AgentConfig::default();
-        let effects =
-            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap());
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap(),
+        );
 
         let authority_context = AuthorityContext::new(own_authority);
 
@@ -3739,8 +3920,9 @@ mod tests {
     async fn importing_multiple_contact_invitations_sequentially() {
         let own_authority = AuthorityId::new_from_entropy([150u8; 32]);
         let config = AgentConfig::default();
-        let effects =
-            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap());
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap(),
+        );
 
         let authority_context = AuthorityContext::new(own_authority);
         let handler = InvitationHandler::new(authority_context).unwrap();

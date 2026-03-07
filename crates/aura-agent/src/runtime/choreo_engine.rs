@@ -334,11 +334,9 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
 
     /// Execute one scheduler step using the configured effect handler.
     pub fn step(&mut self) -> Result<StepResult, AuraChoreoEngineError> {
-        let result = self
-            .vm
-            .step(self.handler.as_ref())
-            .map_err(|error| self.map_vm_error(error))?;
-        self.refresh_active_sessions();
+        let result = self.vm.step(self.handler.as_ref());
+        self.cleanup_terminal_sessions();
+        let result = result.map_err(|error| self.map_vm_error(error))?;
         Ok(result)
     }
 
@@ -523,11 +521,9 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
 
         let mut near_limit_logged = false;
         loop {
-            let step = self
-                .vm
-                .step(handler)
-                .map_err(|error| self.map_vm_error(error))?;
-            self.refresh_active_sessions();
+            let step = self.vm.step(handler);
+            self.cleanup_terminal_sessions();
+            let step = step.map_err(|error| self.map_vm_error(error))?;
 
             if let Err(error) = budget.check_progress() {
                 if let TerminationBudgetError::BoundExceeded {
@@ -624,6 +620,40 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
         });
         self.session_protocol_classes
             .retain(|sid, _| self.active_sessions.contains(sid));
+    }
+
+    fn cleanup_terminal_sessions(&mut self) {
+        let sessions_to_close = self
+            .vm
+            .sessions()
+            .session_ids()
+            .into_iter()
+            .filter_map(|sid| {
+                let session = self.vm.sessions().get(sid)?;
+                if session.status != SessionStatus::Active {
+                    return None;
+                }
+                let has_coroutines = self
+                    .vm
+                    .coroutines()
+                    .iter()
+                    .any(|coro| coro.session_id == sid);
+                let all_terminal = self
+                    .vm
+                    .coroutines()
+                    .iter()
+                    .filter(|coro| coro.session_id == sid)
+                    .all(|coro| coro.is_terminal());
+                (has_coroutines && all_terminal).then_some(sid)
+            })
+            .collect::<Vec<_>>();
+
+        for sid in sessions_to_close {
+            let _ = self.vm.sessions_mut().close(sid);
+        }
+        self.refresh_active_sessions();
+        let _ = self.vm.reap_closed_sessions();
+        self.refresh_active_sessions();
     }
 
     fn map_vm_error(&self, error: VMError) -> AuraChoreoEngineError {
@@ -735,5 +765,35 @@ impl AuraChoreoEngine<AuraVmEffectHandler> {
         }
 
         Ok(results)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_mpst::telltale_types::{GlobalType, LocalTypeR};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn step_reaps_completed_sessions() {
+        let image = CodeImage::from_local_types(
+            &BTreeMap::from([("Solo".to_string(), LocalTypeR::End)]),
+            &GlobalType::End,
+        );
+        let mut engine = AuraChoreoEngine::new(
+            vm_config_for_profile(AuraVmHardeningProfile::Prod),
+            Arc::new(AuraVmEffectHandler::default()),
+        );
+
+        let sid = engine.open_session(&image).expect("session opens");
+        assert!(engine.active_sessions().contains(&sid));
+        assert!(engine.vm().sessions().get(sid).is_some());
+
+        let status = engine.run(8).expect("run succeeds");
+
+        assert!(matches!(status, RunStatus::AllDone));
+        assert!(!engine.active_sessions().contains(&sid));
+        assert!(engine.vm().sessions().get(sid).is_none());
+        assert_eq!(engine.vm().sessions().archived_closed().len(), 1);
     }
 }

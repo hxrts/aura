@@ -94,7 +94,7 @@ wasm-bindgen-futures = "0.4"
 
 
 [features]
-default = []
+default = ["choreo-backend-telltale-vm"]
 # qrcode = ["dep:qrcode"]  # commented out - qrcode not in workspace
 real-android-keystore = []  # Enable real Android Keystore implementation
 
@@ -103,7 +103,8 @@ real-android-keystore = []  # Enable real Android Keystore implementation
 simulation = ["aura-core/simulation"]
 
 # Choreography backend switch flags.
-# If none is set, runtime defaults to telltale adapter behavior.
+# Production/default runtime uses the Telltale VM backend.
+# The adapter backend remains opt-in while migration work is being retired.
 choreo-backend-telltale-adapter = []
 choreo-backend-telltale-vm = ["dep:telltale-vm", "aura-effects/telltale-runtime-capability"]
 

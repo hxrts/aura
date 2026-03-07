@@ -29,21 +29,6 @@ pub(super) fn validate_guardian_setup_inputs(
     Ok(())
 }
 
-pub(super) fn collect_guardian_acceptances(
-    received: &[ReceivedMessage],
-    acceptance_type: &'static str,
-) -> Vec<GuardianAcceptance> {
-    let mut acceptances = Vec::new();
-    for msg in received {
-        if msg.type_name == acceptance_type {
-            if let Ok(acceptance) = from_slice::<GuardianAcceptance>(&msg.bytes) {
-                acceptances.push(acceptance);
-            }
-        }
-    }
-    acceptances
-}
-
 pub(super) fn build_guardian_setup_completion(
     setup_id: &str,
     threshold: u16,

@@ -219,13 +219,12 @@ pub use fact_registry::build_fact_registry;
 /// Selected choreography backend label for migration gating.
 ///
 /// Priority:
-/// - `choreo-backend-telltale-vm`
 /// - `choreo-backend-telltale-adapter`
-/// - default (unset): telltale adapter
-pub const CHOREO_BACKEND: &str = if cfg!(feature = "choreo-backend-telltale-vm") {
-    "telltale_vm"
-} else {
+/// - default / `choreo-backend-telltale-vm`
+pub const CHOREO_BACKEND: &str = if cfg!(feature = "choreo-backend-telltale-adapter") {
     "telltale_adapter"
+} else {
+    "telltale_vm"
 };
 
 /// Create a production agent (convenience function)

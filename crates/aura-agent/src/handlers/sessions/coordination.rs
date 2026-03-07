@@ -6,8 +6,11 @@ use super::shared::*;
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::fact_types::{SESSION_CREATED_FACT_TYPE_ID, SESSION_INVITATION_SENT_FACT_TYPE_ID};
 use crate::handlers::shared::HandlerUtilities;
-use crate::runtime::choreography_adapter::{AuraProtocolAdapter, ReceivedMessage};
 use crate::runtime::services::SessionManager;
+use crate::runtime::vm_host_bridge::{
+    close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
+    open_role_scoped_vm_session, receive_blocked_vm_message,
+};
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{
@@ -15,13 +18,16 @@ use aura_core::effects::{
 };
 use aura_core::hash;
 use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId, SessionId};
+use aura_core::util::serialization::to_vec;
 use aura_core::FlowCost;
 use aura_macros::choreography;
-use aura_protocol::effects::{ChoreographicRole, EffectApiEffects, RoleIndex};
+use aura_protocol::effects::{
+    ChoreographicEffects, ChoreographicRole, EffectApiEffects, RoleIndex,
+};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
+use telltale_vm::vm::StepResult;
 
 // Session coordination choreography protocol
 //
@@ -31,9 +37,6 @@ use std::sync::Arc;
 // 3. Participants approve or reject session participation
 // 4. Coordinator creates session and distributes session handles
 choreography!(include_str!("src/handlers/sessions/coordination.choreo"));
-
-use self::telltale_session_types_session_coordination::runners::execute_as as coordination_execute_as;
-use self::telltale_session_types_session_coordination::session_coordination::SessionCoordinationChoreographyRole;
 
 // Re-export role type for external use (tests, etc.)
 pub use self::telltale_session_types_session_coordination::session_coordination::SessionCoordinationChoreographyRole as SessionCoordinationRole;
@@ -569,64 +572,81 @@ impl SessionOperations {
     ) -> AgentResult<()> {
         let authority_id = self.authority_context.authority_id();
 
-        let (role_map, participant_roles) =
-            build_session_role_map(authority_id, coordinator_id, &participants);
-
-        let request_type = std::any::type_name::<SessionRequest>();
-        let created_type = std::any::type_name::<SessionCreated>();
-        let failed_type = std::any::type_name::<SessionCreationFailed>();
-
-        let created = SessionCreated {
-            session_id: session_request.session_id,
-            session_handle: placeholder_session_handle(
-                session_request.session_id,
-                session_request.session_type.clone(),
-                authority_id,
-            ),
-            created_at: self.effects.current_timestamp().await.unwrap_or(0),
-        };
-        let failed = SessionCreationFailed {
-            session_id: session_request.session_id,
-            reason: "session_creation_failed".to_string(),
-            failed_at: self.effects.current_timestamp().await.unwrap_or(0),
-        };
-
-        let request_payload = session_request.clone();
-        let created_payload = created.clone();
-        let failed_payload = failed.clone();
-
-        let mut adapter = AuraProtocolAdapter::new(
-            self.effects.clone(),
-            authority_id,
-            SessionCoordinationChoreographyRole::Initiator,
-            role_map,
-        )
-        .with_role_family("Participants", participant_roles)
-        .with_message_provider(move |request, _received| {
-            if request.type_name == request_type {
-                return Some(Box::new(request_payload.clone()) as Box<dyn std::any::Any + Send>);
-            }
-            if request.type_name == created_type {
-                return Some(Box::new(created_payload.clone()) as Box<dyn std::any::Any + Send>);
-            }
-            if request.type_name == failed_type {
-                return Some(Box::new(failed_payload.clone()) as Box<dyn std::any::Any + Send>);
-            }
-            None
-        });
-
         let session_uuid = session_coordination_session_id(&session_request.session_id)?;
-        adapter
-            .start_session(session_uuid)
+        let mut roles = vec![coordination_role(authority_id, 0)];
+        roles.push(coordination_role(coordinator_id, 0));
+        for participant in &participants {
+            roles.push(coordination_role(*participant, 0));
+        }
+        let peer_roles = BTreeMap::from([(
+            "Coordinator".to_string(),
+            coordination_role(coordinator_id, 0),
+        )]);
+        let global_type =
+            self::telltale_session_types_session_coordination::vm_artifacts::global_type();
+        let local_types =
+            self::telltale_session_types_session_coordination::vm_artifacts::local_types();
+
+        self.effects
+            .start_session(session_uuid, roles)
             .await
             .map_err(|e| AgentError::internal(format!("session coordination start failed: {e}")))?;
 
-        let result =
-            coordination_execute_as(SessionCoordinationChoreographyRole::Initiator, &mut adapter)
-                .await
-                .map_err(|e| AgentError::internal(format!("session coordination failed: {e}")));
+        let result = async {
+            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
+                self::telltale_session_types_session_coordination::vm_artifacts::role_names(),
+                "Initiator",
+                &global_type,
+                &local_types,
+            )
+            .map_err(AgentError::internal)?;
+            handler.push_send_bytes(
+                to_vec(&session_request)
+                    .map_err(|error| AgentError::internal(format!("session request encode failed: {error}")))?,
+            );
 
-        let _ = adapter.end_session().await;
+            loop {
+                let step = engine.step().map_err(|error| {
+                    AgentError::internal(format!("session coordination initiator VM step failed: {error}"))
+                })?;
+                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
+                    .await
+                    .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = receive_blocked_vm_message(
+                    self.effects.as_ref(),
+                    engine.vm(),
+                    vm_sid,
+                    "Initiator",
+                    &peer_roles,
+                )
+                .await
+                .map_err(|error| {
+                    AgentError::internal(format!("session coordination initiator receive failed: {error}"))
+                })? {
+                    inject_vm_receive(&mut engine, vm_sid, &blocked).map_err(AgentError::internal)?;
+                    continue;
+                }
+
+                match step {
+                    StepResult::AllDone => break Ok(()),
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(AgentError::internal(
+                            "session coordination initiator VM became stuck without a pending receive"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
+            .and_then(|result| {
+                let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+                Ok(result)
+            })
+        }
+        .await;
+
+        let _ = self.effects.end_session().await;
         result
     }
 
@@ -641,111 +661,209 @@ impl SessionOperations {
         accept_threshold: usize, // usize ok: function parameter, not serialized
     ) -> AgentResult<()> {
         let authority_id = self.authority_context.authority_id();
-
-        let (role_map, participant_roles) =
-            build_session_role_map(initiator_id, authority_id, &participants);
-
-        let invitation_type = std::any::type_name::<ParticipantInvitation>();
-        let decision_type = std::any::type_name::<SessionDecision>();
-        let created_type = std::any::type_name::<SessionCreated>();
-        let failed_type = std::any::type_name::<SessionCreationFailed>();
-
-        let mut invitations = VecDeque::new();
-        for _ in &participants {
-            invitations.push_back(invitation.clone());
-        }
-
-        let mut adapter = AuraProtocolAdapter::new(
-            self.effects.clone(),
-            authority_id,
-            SessionCoordinationChoreographyRole::Coordinator,
-            role_map,
-        )
-        .with_role_family("Participants", participant_roles)
-        .with_message_provider(move |request, received| {
-            if request.type_name == invitation_type {
-                return invitations
-                    .pop_front()
-                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
-            }
-
-            if request.type_name == created_type || request.type_name == failed_type {
-                let accepted = count_session_decisions(received, decision_type);
-                if accepted >= accept_threshold {
-                    return Some(Box::new(created.clone()));
-                }
-                return Some(Box::new(failed.clone()));
-            }
-
-            None
-        })
-        .with_branch_decider(move |received| {
-            let accepted = count_session_decisions(received, decision_type);
-            if accepted >= accept_threshold {
-                Some("Success".to_string())
-            } else {
-                Some("Failure".to_string())
-            }
-        });
-
         let session_uuid = session_coordination_session_id(&invitation.session_id)?;
-        adapter
-            .start_session(session_uuid)
+        let mut roles = vec![coordination_role(authority_id, 0)];
+        roles.push(coordination_role(initiator_id, 0));
+        for participant in &participants {
+            roles.push(coordination_role(*participant, 0));
+        }
+        let mut peer_roles =
+            BTreeMap::from([("Initiator".to_string(), coordination_role(initiator_id, 0))]);
+        for (idx, participant) in participants.iter().enumerate() {
+            peer_roles.insert(
+                format!("Participant{idx}"),
+                coordination_role(*participant, 0),
+            );
+        }
+        let global_type =
+            self::telltale_session_types_session_coordination::vm_artifacts::global_type();
+        let local_types =
+            self::telltale_session_types_session_coordination::vm_artifacts::local_types();
+
+        self.effects
+            .start_session(session_uuid, roles)
             .await
             .map_err(|e| AgentError::internal(format!("session coordination start failed: {e}")))?;
 
-        let result = coordination_execute_as(
-            SessionCoordinationChoreographyRole::Coordinator,
-            &mut adapter,
-        )
-        .await
-        .map_err(|e| AgentError::internal(format!("session coordination failed: {e}")));
+        let result = async {
+            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
+                self::telltale_session_types_session_coordination::vm_artifacts::role_names(),
+                "Coordinator",
+                &global_type,
+                &local_types,
+            )
+            .map_err(AgentError::internal)?;
+            for _ in &participants {
+                handler.push_send_bytes(
+                    to_vec(&invitation).map_err(|error| {
+                        AgentError::internal(format!("participant invitation encode failed: {error}"))
+                    })?,
+                );
+            }
+            let mut decisions = Vec::new();
+            let mut branch_queued = false;
 
-        let _ = adapter.end_session().await;
+            loop {
+                let step = engine.step().map_err(|error| {
+                    AgentError::internal(format!("session coordination coordinator VM step failed: {error}"))
+                })?;
+                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
+                    .await
+                    .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = receive_blocked_vm_message(
+                    self.effects.as_ref(),
+                    engine.vm(),
+                    vm_sid,
+                    "Coordinator",
+                    &peer_roles,
+                )
+                .await
+                .map_err(|error| {
+                    AgentError::internal(format!("session coordination coordinator receive failed: {error}"))
+                })? {
+                    let decision: SessionDecision = serde_json::from_slice(&blocked.payload)
+                        .map_err(|error| {
+                            AgentError::internal(format!("session decision decode failed: {error}"))
+                        })?;
+                    decisions.push(decision);
+                    if !branch_queued && decisions.len() == participants.len() {
+                        let accepted = decisions.iter().filter(|decision| decision.accepted).count();
+                        let success = accepted >= accept_threshold;
+                        handler.push_choice_label(if success { "Success" } else { "Failure" });
+                        if success {
+                            let initiator_payload = to_vec(&created).map_err(|error| {
+                                AgentError::internal(format!("session created encode failed: {error}"))
+                            })?;
+                            handler.push_send_bytes(initiator_payload.clone());
+                            for _ in &participants {
+                                handler.push_send_bytes(initiator_payload.clone());
+                            }
+                        } else {
+                            let initiator_payload = to_vec(&failed).map_err(|error| {
+                                AgentError::internal(format!("session failure encode failed: {error}"))
+                            })?;
+                            handler.push_send_bytes(initiator_payload.clone());
+                            for _ in &participants {
+                                handler.push_send_bytes(initiator_payload.clone());
+                            }
+                        }
+                        branch_queued = true;
+                    }
+                    inject_vm_receive(&mut engine, vm_sid, &blocked).map_err(AgentError::internal)?;
+                    continue;
+                }
+
+                match step {
+                    StepResult::AllDone => break Ok(()),
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(AgentError::internal(
+                            "session coordination coordinator VM became stuck without a pending receive"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
+            .and_then(|result| {
+                let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+                Ok(result)
+            })
+        }
+        .await;
+
+        let _ = self.effects.end_session().await;
         result
     }
 
     /// Execute session coordination as a participant (accept or reject).
     pub async fn execute_session_coordination_participant(
         &self,
-        initiator_id: AuthorityId,
+        _initiator_id: AuthorityId,
         coordinator_id: AuthorityId,
         participants: Vec<AuthorityId>,
         decision: SessionDecision,
     ) -> AgentResult<()> {
         let authority_id = self.authority_context.authority_id();
-
-        let (role_map, participant_roles) =
-            build_session_role_map(initiator_id, coordinator_id, &participants);
-
-        let decision_type = std::any::type_name::<SessionDecision>();
-        let decision_payload = decision.clone();
-
-        let role = session_participant_role(authority_id, &participants)?;
-
-        let mut adapter =
-            AuraProtocolAdapter::new(self.effects.clone(), authority_id, role, role_map)
-                .with_role_family("Participants", participant_roles)
-                .with_message_provider(move |request, _received| {
-                    if request.type_name == decision_type {
-                        return Some(
-                            Box::new(decision_payload.clone()) as Box<dyn std::any::Any + Send>
-                        );
-                    }
-                    None
-                });
-
         let session_uuid = session_coordination_session_id(&decision.session_id)?;
-        adapter
-            .start_session(session_uuid)
+        let participant_index = participants
+            .iter()
+            .position(|id| *id == authority_id)
+            .ok_or_else(|| AgentError::invalid("authority not listed in session participants"))?;
+        let active_role_name = format!("Participant{participant_index}");
+        let roles = vec![
+            coordination_role(coordinator_id, 0),
+            coordination_role(authority_id, 0),
+        ];
+        let peer_roles = BTreeMap::from([(
+            "Coordinator".to_string(),
+            coordination_role(coordinator_id, 0),
+        )]);
+        let global_type =
+            self::telltale_session_types_session_coordination::vm_artifacts::global_type();
+        let local_types =
+            self::telltale_session_types_session_coordination::vm_artifacts::local_types();
+
+        self.effects
+            .start_session(session_uuid, roles)
             .await
             .map_err(|e| AgentError::internal(format!("session coordination start failed: {e}")))?;
 
-        let result = coordination_execute_as(role, &mut adapter)
-            .await
-            .map_err(|e| AgentError::internal(format!("session coordination failed: {e}")));
+        let result = async {
+            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
+                self::telltale_session_types_session_coordination::vm_artifacts::role_names(),
+                &active_role_name,
+                &global_type,
+                &local_types,
+            )
+            .map_err(AgentError::internal)?;
+            handler.push_send_bytes(
+                to_vec(&decision)
+                    .map_err(|error| AgentError::internal(format!("session decision encode failed: {error}")))?,
+            );
 
-        let _ = adapter.end_session().await;
+            loop {
+                let step = engine.step().map_err(|error| {
+                    AgentError::internal(format!("session coordination participant VM step failed: {error}"))
+                })?;
+                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
+                    .await
+                    .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = receive_blocked_vm_message(
+                    self.effects.as_ref(),
+                    engine.vm(),
+                    vm_sid,
+                    &active_role_name,
+                    &peer_roles,
+                )
+                .await
+                .map_err(|error| {
+                    AgentError::internal(format!("session coordination participant receive failed: {error}"))
+                })? {
+                    inject_vm_receive(&mut engine, vm_sid, &blocked).map_err(AgentError::internal)?;
+                    continue;
+                }
+
+                match step {
+                    StepResult::AllDone => break Ok(()),
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(AgentError::internal(
+                            "session coordination participant VM became stuck without a pending receive"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
+            .and_then(|result| {
+                let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+                Ok(result)
+            })
+        }
+        .await;
+
+        let _ = self.effects.end_session().await;
         result
     }
 }
@@ -762,71 +880,11 @@ fn session_coordination_session_id(session_id: &SessionId) -> AgentResult<uuid::
     Ok(session_id.uuid())
 }
 
-fn build_session_role_map(
-    initiator: AuthorityId,
-    coordinator: AuthorityId,
-    participants: &[AuthorityId],
-) -> (
-    HashMap<SessionCoordinationChoreographyRole, AuthorityId>,
-    Vec<SessionCoordinationChoreographyRole>,
-) {
-    let mut role_map = HashMap::new();
-    role_map.insert(SessionCoordinationChoreographyRole::Initiator, initiator);
-    role_map.insert(
-        SessionCoordinationChoreographyRole::Coordinator,
-        coordinator,
-    );
-
-    let mut roles = Vec::new();
-    for (idx, participant) in participants.iter().enumerate() {
-        let role = SessionCoordinationChoreographyRole::Participants(idx as u32);
-        role_map.insert(role, *participant);
-        roles.push(role);
-    }
-
-    (role_map, roles)
-}
-
-fn session_participant_role(
-    authority_id: AuthorityId,
-    participants: &[AuthorityId],
-) -> AgentResult<SessionCoordinationChoreographyRole> {
-    participants
-        .iter()
-        .position(|id| *id == authority_id)
-        .map(|idx| SessionCoordinationChoreographyRole::Participants(idx as u32))
-        .ok_or_else(|| AgentError::invalid("authority not listed in session participants"))
-}
-
-fn placeholder_session_handle(
-    session_id: SessionId,
-    session_type: SessionType,
-    authority_id: AuthorityId,
-) -> SessionHandle {
-    let role_index = RoleIndex::new(0).expect("role index");
-    SessionHandle {
-        session_id,
-        session_type,
-        participants: vec![DeviceId::from_uuid(authority_id.0)],
-        my_role: ChoreographicRole::new(DeviceId::from_uuid(authority_id.0), role_index),
-        epoch: 0,
-        start_time: 0,
-        metadata: HashMap::new(),
-    }
-}
-
-fn count_session_decisions(received: &[ReceivedMessage], decision_type: &'static str) -> usize {
-    let mut accepted = 0usize;
-    for msg in received {
-        if msg.type_name == decision_type {
-            if let Ok(decision) = serde_json::from_slice::<SessionDecision>(&msg.bytes) {
-                if decision.accepted {
-                    accepted += 1;
-                }
-            }
-        }
-    }
-    accepted
+fn coordination_role(authority_id: AuthorityId, role_index: u16) -> ChoreographicRole {
+    ChoreographicRole::new(
+        DeviceId::from_uuid(authority_id.0),
+        RoleIndex::new(role_index.into()).expect("role index"),
+    )
 }
 
 /// Internal type for tracking participant responses

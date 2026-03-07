@@ -65,8 +65,10 @@
 //! ```
 
 // Canonical Telltale re-exports for Aura choreography/runtime integration.
+pub use serde_json;
 pub use telltale;
 pub use telltale_choreography;
+pub use telltale_types;
 
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};

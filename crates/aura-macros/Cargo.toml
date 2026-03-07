@@ -19,6 +19,7 @@ telltale-choreography = { workspace = true }
 telltale-theory = { workspace = true }
 futures = "0.3"
 thiserror = "1.0"
+serde_json = { workspace = true }
 
 # Async trait support for generated code  
 async-trait = "0.1"

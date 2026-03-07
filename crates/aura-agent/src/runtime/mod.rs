@@ -59,6 +59,7 @@ cfg_if::cfg_if! {
         pub mod effect_trace_capture;
         pub mod parity_policy;
         pub mod vm_effect_handler;
+        pub mod vm_host_bridge;
         pub mod vm_hardening;
     }
 }

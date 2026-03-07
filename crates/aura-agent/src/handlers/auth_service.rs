@@ -5,21 +5,24 @@
 
 use super::auth::{AuthChallenge, AuthHandler, AuthMethod, AuthResponse, AuthResult};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
-use crate::runtime::choreography_adapter::AuraProtocolAdapter;
+use crate::runtime::vm_host_bridge::{
+    close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
+    open_role_scoped_vm_session, receive_blocked_vm_message,
+};
 use crate::runtime::AuraEffectSystem;
 use aura_authentication::dkd::{DkdMessage, DkdSessionId};
-use aura_authentication::dkd_runners::{execute_as as dkd_execute_as, DkdChoreographyRole};
 use aura_authentication::guardian_auth_relational::{
     GuardianAuthProof, GuardianAuthRequest, GuardianAuthResponse,
-};
-use aura_authentication::guardian_auth_runners::{
-    execute_as as guardian_auth_execute_as, GuardianAuthRelationalRole,
 };
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash;
 use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
-use std::collections::{HashMap, VecDeque};
+use aura_core::util::serialization::to_vec;
+use aura_mpst::telltale_types::{GlobalType, LocalTypeR};
+use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, RoleIndex};
+use std::collections::BTreeMap;
 use std::sync::Arc;
+use telltale_vm::vm::StepResult;
 use uuid::Uuid;
 
 /// Authentication service API
@@ -108,6 +111,316 @@ impl AuthServiceApi {
         vec![AuthMethod::DeviceKey, AuthMethod::ThresholdSignature]
     }
 
+    fn auth_role(authority_id: AuthorityId) -> ChoreographicRole {
+        ChoreographicRole::new(
+            DeviceId::from_uuid(authority_id.0),
+            RoleIndex::new(0).expect("role index"),
+        )
+    }
+
+    async fn run_vm_protocol(
+        &self,
+        session_uuid: Uuid,
+        roles: Vec<ChoreographicRole>,
+        peer_roles: BTreeMap<String, ChoreographicRole>,
+        active_role: &str,
+        role_names: &[&str],
+        global_type: &GlobalType,
+        local_types: &BTreeMap<String, LocalTypeR>,
+        initial_payloads: Vec<Vec<u8>>,
+    ) -> AgentResult<()> {
+        self.effects
+            .start_session(session_uuid, roles)
+            .await
+            .map_err(|error| {
+                AgentError::internal(format!("auth VM session start failed: {error}"))
+            })?;
+
+        let result = async {
+            let (mut engine, handler, vm_sid) =
+                open_role_scoped_vm_session(role_names, active_role, global_type, local_types)
+                    .map_err(AgentError::internal)?;
+
+            for payload in initial_payloads {
+                handler.push_send_bytes(payload);
+            }
+
+            let loop_result = loop {
+                let step = engine.step().map_err(|error| {
+                    AgentError::internal(format!("auth {active_role} VM step failed: {error}"))
+                })?;
+                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
+                    .await
+                    .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = receive_blocked_vm_message(
+                    self.effects.as_ref(),
+                    engine.vm(),
+                    vm_sid,
+                    active_role,
+                    &peer_roles,
+                )
+                .await
+                .map_err(|error| {
+                    AgentError::internal(format!("auth {active_role} VM receive failed: {error}"))
+                })? {
+                    inject_vm_receive(&mut engine, vm_sid, &blocked)
+                        .map_err(AgentError::internal)?;
+                    continue;
+                }
+
+                match step {
+                    StepResult::AllDone => break Ok(()),
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(AgentError::internal(format!(
+                            "auth {active_role} VM became stuck without a pending receive"
+                        )));
+                    }
+                }
+            };
+
+            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            loop_result
+        }
+        .await;
+
+        let _ = self.effects.end_session().await;
+        result
+    }
+
+    async fn execute_dkd_initiator_vm(
+        &self,
+        participant: AuthorityId,
+    ) -> AgentResult<DkdSessionId> {
+        let authority_id = self.handler.authority_context().authority_id();
+        let session_id = DkdSessionId::deterministic(&authority_id.to_string());
+        let timestamp = self
+            .effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
+        let roles = vec![Self::auth_role(authority_id), Self::auth_role(participant)];
+        let peer_roles =
+            BTreeMap::from([("Participant".to_string(), Self::auth_role(participant))]);
+        let global_type =
+            aura_authentication::dkd::telltale_session_types_dkd_protocol::vm_artifacts::global_type();
+        let local_types =
+            aura_authentication::dkd::telltale_session_types_dkd_protocol::vm_artifacts::local_types();
+        let payloads = vec![
+            DkdMessage {
+                session_id: session_id.clone(),
+                message_type: "initiate".to_string(),
+                payload: hash::hash(format!("init:{}", session_id.0).as_bytes()).to_vec(),
+                sender: DeviceId::from_uuid(authority_id.0),
+                timestamp,
+            },
+            DkdMessage {
+                session_id: session_id.clone(),
+                message_type: "reveal_request".to_string(),
+                payload: hash::hash(format!("reveal:{}", session_id.0).as_bytes()).to_vec(),
+                sender: DeviceId::from_uuid(authority_id.0),
+                timestamp,
+            },
+            DkdMessage {
+                session_id: session_id.clone(),
+                message_type: "key_derived".to_string(),
+                payload: hash::hash(format!("key:{}", session_id.0).as_bytes()).to_vec(),
+                sender: DeviceId::from_uuid(authority_id.0),
+                timestamp,
+            },
+        ]
+        .into_iter()
+        .map(|message| {
+            to_vec(&message)
+                .map_err(|error| AgentError::internal(format!("DKD encode failed: {error}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+        self.run_vm_protocol(
+            dkd_session_uuid(&session_id),
+            roles,
+            peer_roles,
+            "Initiator",
+            aura_authentication::dkd::telltale_session_types_dkd_protocol::vm_artifacts::role_names(
+            ),
+            &global_type,
+            &local_types,
+            payloads,
+        )
+        .await?;
+
+        Ok(session_id)
+    }
+
+    async fn execute_dkd_participant_vm(
+        &self,
+        initiator: AuthorityId,
+        session_id: DkdSessionId,
+    ) -> AgentResult<()> {
+        let authority_id = self.handler.authority_context().authority_id();
+        let timestamp = self
+            .effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
+        let roles = vec![Self::auth_role(initiator), Self::auth_role(authority_id)];
+        let peer_roles = BTreeMap::from([("Initiator".to_string(), Self::auth_role(initiator))]);
+        let global_type =
+            aura_authentication::dkd::telltale_session_types_dkd_protocol::vm_artifacts::global_type();
+        let local_types =
+            aura_authentication::dkd::telltale_session_types_dkd_protocol::vm_artifacts::local_types();
+        let payloads = vec![
+            DkdMessage {
+                session_id: session_id.clone(),
+                message_type: "commitment".to_string(),
+                payload: hash::hash(format!("commit:{}", session_id.0).as_bytes()).to_vec(),
+                sender: DeviceId::from_uuid(authority_id.0),
+                timestamp,
+            },
+            DkdMessage {
+                session_id: session_id.clone(),
+                message_type: "reveal".to_string(),
+                payload: hash::hash(format!("reveal:{}", session_id.0).as_bytes()).to_vec(),
+                sender: DeviceId::from_uuid(authority_id.0),
+                timestamp,
+            },
+        ]
+        .into_iter()
+        .map(|message| {
+            to_vec(&message)
+                .map_err(|error| AgentError::internal(format!("DKD encode failed: {error}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+        self.run_vm_protocol(
+            dkd_session_uuid(&session_id),
+            roles,
+            peer_roles,
+            "Participant",
+            aura_authentication::dkd::telltale_session_types_dkd_protocol::vm_artifacts::role_names(
+            ),
+            &global_type,
+            &local_types,
+            payloads,
+        )
+        .await
+    }
+
+    async fn execute_guardian_auth_as_account_vm(
+        &self,
+        coordinator: AuthorityId,
+        guardian: AuthorityId,
+        context_id: ContextId,
+        request: GuardianAuthRequest,
+    ) -> AgentResult<()> {
+        let authority_id = self.handler.authority_context().authority_id();
+        let roles = vec![
+            Self::auth_role(authority_id),
+            Self::auth_role(guardian),
+            Self::auth_role(coordinator),
+        ];
+        let peer_roles =
+            BTreeMap::from([("Coordinator".to_string(), Self::auth_role(coordinator))]);
+        let global_type = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::global_type();
+        let local_types = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::local_types();
+
+        self.run_vm_protocol(
+            guardian_auth_session_uuid(&context_id, &request),
+            roles,
+            peer_roles,
+            "Account",
+            aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::role_names(),
+            &global_type,
+            &local_types,
+            vec![to_vec(&request).map_err(|error| {
+                AgentError::internal(format!("guardian auth request encode failed: {error}"))
+            })?],
+        )
+        .await
+    }
+
+    async fn execute_guardian_auth_as_coordinator_vm(
+        &self,
+        account: AuthorityId,
+        guardian: AuthorityId,
+        context_id: ContextId,
+        request: GuardianAuthRequest,
+    ) -> AgentResult<()> {
+        let authority_id = self.handler.authority_context().authority_id();
+        let response = GuardianAuthResponse {
+            success: true,
+            authorized: true,
+            error: None,
+        };
+        let roles = vec![
+            Self::auth_role(account),
+            Self::auth_role(guardian),
+            Self::auth_role(authority_id),
+        ];
+        let peer_roles = BTreeMap::from([
+            ("Account".to_string(), Self::auth_role(account)),
+            ("Guardian".to_string(), Self::auth_role(guardian)),
+        ]);
+        let global_type = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::global_type();
+        let local_types = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::local_types();
+
+        self.run_vm_protocol(
+            guardian_auth_session_uuid(&context_id, &request),
+            roles,
+            peer_roles,
+            "Coordinator",
+            aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::role_names(),
+            &global_type,
+            &local_types,
+            vec![
+                to_vec(&request).map_err(|error| {
+                    AgentError::internal(format!("guardian auth request encode failed: {error}"))
+                })?,
+                to_vec(&response).map_err(|error| {
+                    AgentError::internal(format!("guardian auth response encode failed: {error}"))
+                })?,
+            ],
+        )
+        .await
+    }
+
+    async fn execute_guardian_auth_as_guardian_vm(
+        &self,
+        account: AuthorityId,
+        coordinator: AuthorityId,
+        context_id: ContextId,
+        request: GuardianAuthRequest,
+        proof: GuardianAuthProof,
+    ) -> AgentResult<()> {
+        let authority_id = self.handler.authority_context().authority_id();
+        let roles = vec![
+            Self::auth_role(account),
+            Self::auth_role(authority_id),
+            Self::auth_role(coordinator),
+        ];
+        let peer_roles =
+            BTreeMap::from([("Coordinator".to_string(), Self::auth_role(coordinator))]);
+        let global_type = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::global_type();
+        let local_types = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::local_types();
+
+        self.run_vm_protocol(
+            guardian_auth_session_uuid(&context_id, &request),
+            roles,
+            peer_roles,
+            "Guardian",
+            aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::role_names(),
+            &global_type,
+            &local_types,
+            vec![to_vec(&proof).map_err(|error| {
+                AgentError::internal(format!("guardian auth proof encode failed: {error}"))
+            })?],
+        )
+        .await
+    }
+
     // ========================================================================
     // DKD Choreography (execute_as)
     // ========================================================================
@@ -117,74 +430,7 @@ impl AuthServiceApi {
         &self,
         participant: AuthorityId,
     ) -> AgentResult<DkdSessionId> {
-        use crate::core::AgentError;
-
-        let authority_id = self.handler.authority_context().authority_id();
-        // Use authority_id for deterministic session ID instead of random UUID
-        let session_id = DkdSessionId::deterministic(&authority_id.to_string());
-        let timestamp = self
-            .effects
-            .physical_time()
-            .await
-            .map(|t| t.ts_ms)
-            .unwrap_or(0);
-
-        let mut role_map = HashMap::new();
-        role_map.insert(DkdChoreographyRole::Initiator, authority_id);
-        role_map.insert(DkdChoreographyRole::Participant, participant);
-
-        let initiate_type = std::any::type_name::<DkdMessage>();
-
-        let mut outbound = VecDeque::new();
-        outbound.push_back(DkdMessage {
-            session_id: session_id.clone(),
-            message_type: "initiate".to_string(),
-            payload: hash::hash(format!("init:{}", session_id.0).as_bytes()).to_vec(),
-            sender: DeviceId::from_uuid(authority_id.0),
-            timestamp,
-        });
-        outbound.push_back(DkdMessage {
-            session_id: session_id.clone(),
-            message_type: "reveal_request".to_string(),
-            payload: hash::hash(format!("reveal:{}", session_id.0).as_bytes()).to_vec(),
-            sender: DeviceId::from_uuid(authority_id.0),
-            timestamp,
-        });
-        outbound.push_back(DkdMessage {
-            session_id: session_id.clone(),
-            message_type: "key_derived".to_string(),
-            payload: hash::hash(format!("key:{}", session_id.0).as_bytes()).to_vec(),
-            sender: DeviceId::from_uuid(authority_id.0),
-            timestamp,
-        });
-
-        let mut adapter = AuraProtocolAdapter::new(
-            self.effects.clone(),
-            authority_id,
-            DkdChoreographyRole::Initiator,
-            role_map,
-        )
-        .with_message_provider(move |request, _received| {
-            if request.type_name == initiate_type {
-                return outbound
-                    .pop_front()
-                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
-            }
-            None
-        });
-
-        let session_uuid = dkd_session_uuid(&session_id);
-        adapter
-            .start_session(session_uuid)
-            .await
-            .map_err(|e| AgentError::internal(format!("dkd start failed: {e}")))?;
-
-        let result = dkd_execute_as(DkdChoreographyRole::Initiator, &mut adapter)
-            .await
-            .map_err(|e| AgentError::internal(format!("dkd failed: {e}")));
-
-        let _ = adapter.end_session().await;
-        result.map(|_| session_id)
+        self.execute_dkd_initiator_vm(participant).await
     }
 
     /// Execute DKD choreography as the participant for an existing session.
@@ -193,65 +439,7 @@ impl AuthServiceApi {
         initiator: AuthorityId,
         session_id: DkdSessionId,
     ) -> AgentResult<()> {
-        use crate::core::AgentError;
-
-        let authority_id = self.handler.authority_context().authority_id();
-        let timestamp = self
-            .effects
-            .physical_time()
-            .await
-            .map(|t| t.ts_ms)
-            .unwrap_or(0);
-
-        let mut role_map = HashMap::new();
-        role_map.insert(DkdChoreographyRole::Initiator, initiator);
-        role_map.insert(DkdChoreographyRole::Participant, authority_id);
-
-        let message_type = std::any::type_name::<DkdMessage>();
-
-        let mut outbound = VecDeque::new();
-        outbound.push_back(DkdMessage {
-            session_id: session_id.clone(),
-            message_type: "commitment".to_string(),
-            payload: hash::hash(format!("commit:{}", session_id.0).as_bytes()).to_vec(),
-            sender: DeviceId::from_uuid(authority_id.0),
-            timestamp,
-        });
-        outbound.push_back(DkdMessage {
-            session_id: session_id.clone(),
-            message_type: "reveal".to_string(),
-            payload: hash::hash(format!("reveal:{}", session_id.0).as_bytes()).to_vec(),
-            sender: DeviceId::from_uuid(authority_id.0),
-            timestamp,
-        });
-
-        let mut adapter = AuraProtocolAdapter::new(
-            self.effects.clone(),
-            authority_id,
-            DkdChoreographyRole::Participant,
-            role_map,
-        )
-        .with_message_provider(move |request, _received| {
-            if request.type_name == message_type {
-                return outbound
-                    .pop_front()
-                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
-            }
-            None
-        });
-
-        let session_uuid = dkd_session_uuid(&session_id);
-        adapter
-            .start_session(session_uuid)
-            .await
-            .map_err(|e| AgentError::internal(format!("dkd start failed: {e}")))?;
-
-        let result = dkd_execute_as(DkdChoreographyRole::Participant, &mut adapter)
-            .await
-            .map_err(|e| AgentError::internal(format!("dkd failed: {e}")));
-
-        let _ = adapter.end_session().await;
-        result
+        self.execute_dkd_participant_vm(initiator, session_id).await
     }
 
     // ========================================================================
@@ -278,41 +466,8 @@ impl AuthServiceApi {
         context_id: ContextId,
         request: GuardianAuthRequest,
     ) -> AgentResult<()> {
-        let authority_id = self.handler.authority_context().authority_id();
-
-        let mut role_map = HashMap::new();
-        role_map.insert(GuardianAuthRelationalRole::Account, authority_id);
-        role_map.insert(GuardianAuthRelationalRole::Coordinator, coordinator);
-        role_map.insert(GuardianAuthRelationalRole::Guardian, guardian);
-
-        let request_type = std::any::type_name::<GuardianAuthRequest>();
-        let request_clone = request.clone();
-
-        let mut adapter = AuraProtocolAdapter::new(
-            self.effects.clone(),
-            authority_id,
-            GuardianAuthRelationalRole::Account,
-            role_map,
-        )
-        .with_message_provider(move |req_ctx, _received| {
-            if req_ctx.type_name == request_type {
-                return Some(Box::new(request_clone.clone()) as Box<dyn std::any::Any + Send>);
-            }
-            None
-        });
-
-        let session_uuid = guardian_auth_session_uuid(&context_id, &request);
-        adapter
-            .start_session(session_uuid)
+        self.execute_guardian_auth_as_account_vm(coordinator, guardian, context_id, request)
             .await
-            .map_err(|e| AgentError::internal(format!("guardian auth start failed: {e}")))?;
-
-        guardian_auth_execute_as(GuardianAuthRelationalRole::Account, &mut adapter)
-            .await
-            .map_err(|e| AgentError::internal(format!("guardian auth failed: {e}")))?;
-
-        let _ = adapter.end_session().await;
-        Ok(())
     }
 
     /// Execute GuardianAuthRelational choreography as the Coordinator role.
@@ -335,63 +490,8 @@ impl AuthServiceApi {
         context_id: ContextId,
         request: GuardianAuthRequest,
     ) -> AgentResult<()> {
-        let authority_id = self.handler.authority_context().authority_id();
-
-        let mut role_map = HashMap::new();
-        role_map.insert(GuardianAuthRelationalRole::Account, account);
-        role_map.insert(GuardianAuthRelationalRole::Coordinator, authority_id);
-        role_map.insert(GuardianAuthRelationalRole::Guardian, guardian);
-
-        // Coordinator forwards the request to guardian and then builds response
-        let request_type = std::any::type_name::<GuardianAuthRequest>();
-        let response_type = std::any::type_name::<GuardianAuthResponse>();
-        let request_clone = request.clone();
-
-        // Create a queue for outbound messages
-        let mut outbound_requests: VecDeque<GuardianAuthRequest> = VecDeque::new();
-        outbound_requests.push_back(request_clone.clone());
-
-        let mut outbound_responses: VecDeque<GuardianAuthResponse> = VecDeque::new();
-        // We'll prepare a default response; the actual response will be populated
-        // after receiving the guardian's proof in a real implementation
-        outbound_responses.push_back(GuardianAuthResponse {
-            success: true,
-            authorized: true,
-            error: None,
-        });
-
-        let mut adapter = AuraProtocolAdapter::new(
-            self.effects.clone(),
-            authority_id,
-            GuardianAuthRelationalRole::Coordinator,
-            role_map,
-        )
-        .with_message_provider(move |req_ctx, _received| {
-            if req_ctx.type_name == request_type {
-                return outbound_requests
-                    .pop_front()
-                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
-            }
-            if req_ctx.type_name == response_type {
-                return outbound_responses
-                    .pop_front()
-                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
-            }
-            None
-        });
-
-        let session_uuid = guardian_auth_session_uuid(&context_id, &request);
-        adapter
-            .start_session(session_uuid)
+        self.execute_guardian_auth_as_coordinator_vm(account, guardian, context_id, request)
             .await
-            .map_err(|e| AgentError::internal(format!("guardian auth start failed: {e}")))?;
-
-        guardian_auth_execute_as(GuardianAuthRelationalRole::Coordinator, &mut adapter)
-            .await
-            .map_err(|e| AgentError::internal(format!("guardian auth failed: {e}")))?;
-
-        let _ = adapter.end_session().await;
-        Ok(())
     }
 
     /// Execute GuardianAuthRelational choreography as the Guardian role.
@@ -416,41 +516,8 @@ impl AuthServiceApi {
         request: GuardianAuthRequest,
         proof: GuardianAuthProof,
     ) -> AgentResult<()> {
-        let authority_id = self.handler.authority_context().authority_id();
-
-        let mut role_map = HashMap::new();
-        role_map.insert(GuardianAuthRelationalRole::Account, account);
-        role_map.insert(GuardianAuthRelationalRole::Coordinator, coordinator);
-        role_map.insert(GuardianAuthRelationalRole::Guardian, authority_id);
-
-        let proof_type = std::any::type_name::<GuardianAuthProof>();
-        let proof_clone = proof.clone();
-
-        let mut adapter = AuraProtocolAdapter::new(
-            self.effects.clone(),
-            authority_id,
-            GuardianAuthRelationalRole::Guardian,
-            role_map,
-        )
-        .with_message_provider(move |req_ctx, _received| {
-            if req_ctx.type_name == proof_type {
-                return Some(Box::new(proof_clone.clone()) as Box<dyn std::any::Any + Send>);
-            }
-            None
-        });
-
-        let session_uuid = guardian_auth_session_uuid(&context_id, &request);
-        adapter
-            .start_session(session_uuid)
+        self.execute_guardian_auth_as_guardian_vm(account, coordinator, context_id, request, proof)
             .await
-            .map_err(|e| AgentError::internal(format!("guardian auth start failed: {e}")))?;
-
-        guardian_auth_execute_as(GuardianAuthRelationalRole::Guardian, &mut adapter)
-            .await
-            .map_err(|e| AgentError::internal(format!("guardian auth failed: {e}")))?;
-
-        let _ = adapter.end_session().await;
-        Ok(())
     }
 }
 

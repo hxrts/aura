@@ -12,6 +12,54 @@ use aura_protocol::effects::{
 };
 use std::collections::HashMap;
 
+fn current_session_snapshot(
+    effects: &AuraEffectSystem,
+) -> Result<crate::runtime::subsystems::choreography::ChoreographySessionState, ChoreographyError> {
+    effects
+        .choreography_state
+        .read()
+        .current_session()
+        .ok_or(ChoreographyError::SessionNotStarted)
+}
+
+fn take_session_envelope(
+    effects: &AuraEffectSystem,
+    session_id: uuid::Uuid,
+    source: AuthorityId,
+    context: ContextId,
+) -> Option<TransportEnvelope> {
+    let self_device_id = effects.config.device_id.to_string();
+    let session_ref = session_id.to_string();
+    let inbox = effects.transport.inbox();
+    let mut inbox = inbox.write();
+
+    inbox
+        .iter()
+        .position(|env| {
+            let session_match = env
+                .metadata
+                .get("session-id")
+                .is_some_and(|value| value == &session_ref);
+            let device_match = env
+                .metadata
+                .get("aura-destination-device-id")
+                .is_some_and(|dst| dst == &self_device_id);
+
+            if env.destination == effects.authority_id {
+                session_match
+                    && env.source == source
+                    && env.context == context
+                    && match env.metadata.get("aura-destination-device-id") {
+                        Some(dst) => dst == &self_device_id,
+                        None => true,
+                    }
+            } else {
+                session_match && env.source == source && env.context == context && device_match
+            }
+        })
+        .map(|pos| inbox.remove(pos))
+}
+
 // Implementation of ChoreographicEffects
 #[async_trait]
 impl ChoreographicEffects for AuraEffectSystem {
@@ -20,26 +68,19 @@ impl ChoreographicEffects for AuraEffectSystem {
         role: ChoreographicRole,
         message: Vec<u8>,
     ) -> Result<(), ChoreographyError> {
-        let (context_id, current_role) = {
-            let state = self.choreography_state.read();
-            (
-                state
-                    .context_id
-                    .ok_or(ChoreographyError::SessionNotStarted)?,
-                state
-                    .current_role
-                    .ok_or(ChoreographyError::SessionNotStarted)?,
-            )
-        };
+        let session = current_session_snapshot(self)?;
+        let context_id = session.context_id;
+        let current_role = session.current_role;
 
         let peer = AuthorityId::from_uuid(role.device_id.0);
-        eprintln!(
-            "[DEBUG] Choreography send: from {:?} to {:?} (authority {}), context {:?}, {} bytes",
-            current_role.device_id,
-            role.device_id,
-            peer,
-            context_id,
-            message.len()
+        tracing::debug!(
+            session_id = %session.session_id,
+            from = ?current_role.device_id,
+            to = ?role.device_id,
+            peer = %peer,
+            ?context_id,
+            bytes = message.len(),
+            "choreography send"
         );
         let kb_units = ((message.len() as u32).saturating_add(1023)) / 1024;
         let flow_cost = DEFAULT_CHOREO_FLOW_COST
@@ -99,14 +140,7 @@ impl ChoreographicEffects for AuraEffectSystem {
             "content-type".to_string(),
             "application/aura-choreography".to_string(),
         );
-
-        // Include session_id so guardians can join the correct session
-        {
-            let state = self.choreography_state.read();
-            if let Some(session_id) = state.session_id {
-                metadata.insert("session-id".to_string(), session_id.to_string());
-            }
-        }
+        metadata.insert("session-id".to_string(), session.session_id.to_string());
 
         let envelope = TransportEnvelope {
             destination: peer,
@@ -125,7 +159,11 @@ impl ChoreographicEffects for AuraEffectSystem {
 
         {
             let mut state = self.choreography_state.write();
-            state.metrics.messages_sent = state.metrics.messages_sent.saturating_add(1);
+            state
+                .with_current_session_mut(|session| {
+                    session.metrics.messages_sent = session.metrics.messages_sent.saturating_add(1);
+                })
+                .map_err(|message| ChoreographyError::InternalError { message })?;
         }
         Ok(())
     }
@@ -135,24 +173,19 @@ impl ChoreographicEffects for AuraEffectSystem {
         &self,
         role: ChoreographicRole,
     ) -> Result<Vec<u8>, ChoreographyError> {
-        let context_id = {
-            let state = self.choreography_state.read();
-            state
-                .context_id
-                .ok_or(ChoreographyError::SessionNotStarted)?
-        };
+        let session = current_session_snapshot(self)?;
+        let context_id = session.context_id;
+        let session_id = session.session_id;
 
         // Poll for messages with timeout to allow async guardians time to respond.
         // Default timeout of 5 seconds with 50ms polling interval.
-        let timeout_ms = {
-            let state = self.choreography_state.read();
-            state.timeout_ms.unwrap_or(5000)
-        };
+        let timeout_ms = session.timeout_ms.unwrap_or(5000);
         let start = aura_effects::time::monotonic_now();
         let poll_interval = std::time::Duration::from_millis(50);
 
         let source_authority = AuthorityId::from_uuid(role.device_id.0);
         tracing::debug!(
+            session_id = %session_id,
             "Choreography receive: waiting for message from {:?} (authority {:?}) in context {:?}, timeout={}ms",
             role.device_id,
             source_authority,
@@ -161,53 +194,60 @@ impl ChoreographicEffects for AuraEffectSystem {
         );
 
         let envelope = loop {
-            match TransportEffects::receive_envelope_from(
-                self,
-                AuthorityId::from_uuid(role.device_id.0),
-                context_id,
-            )
-            .await
+            if let Some(env) = take_session_envelope(self, session_id, source_authority, context_id)
             {
-                Ok(env) => break env,
-                Err(aura_core::effects::TransportError::NoMessage) => {
-                    // Check timeout
-                    if start.elapsed().as_millis() as u64 > timeout_ms {
-                        return Err(ChoreographyError::Transport {
-                            source: Box::new(aura_core::effects::TransportError::NoMessage),
-                        });
-                    }
-                    // Yield to allow other tasks (like demo simulators or browser tasks) to process.
-                    let _ = self
-                        .time_handler
-                        .sleep_ms(poll_interval.as_millis() as u64)
-                        .await;
-                }
-                Err(e) => {
-                    return Err(ChoreographyError::Transport {
-                        source: Box::new(e),
-                    });
-                }
+                self.transport.record_receive();
+                break env;
+            }
+
+            if start.elapsed().as_millis() as u64 > timeout_ms {
+                let mut state = self.choreography_state.write();
+                let _ = state.with_current_session_mut(|session| {
+                    session.metrics.timeout_count = session.metrics.timeout_count.saturating_add(1);
+                });
+                return Err(ChoreographyError::Transport {
+                    source: Box::new(aura_core::effects::TransportError::NoMessage),
+                });
+            }
+
+            self.time_handler
+                .sleep_ms(poll_interval.as_millis() as u64)
+                .await;
+
+            if !self.choreography_state.read().is_active() {
+                return Err(ChoreographyError::SessionNotStarted);
+            }
+            if self
+                .choreography_state
+                .read()
+                .current_session_id()
+                .is_some_and(|active| active != session_id)
+            {
+                return Err(ChoreographyError::InternalError {
+                    message: format!(
+                        "choreography session binding changed while waiting for receive: {session_id}"
+                    ),
+                });
             }
         };
 
         {
             let mut state = self.choreography_state.write();
-            state.metrics.messages_received = state.metrics.messages_received.saturating_add(1);
+            state
+                .with_current_session_mut(|session| {
+                    session.metrics.messages_received =
+                        session.metrics.messages_received.saturating_add(1);
+                })
+                .map_err(|message| ChoreographyError::InternalError { message })?;
         }
 
         Ok(envelope.payload)
     }
 
     async fn broadcast_bytes(&self, message: Vec<u8>) -> Result<(), ChoreographyError> {
-        let (roles, current_role) = {
-            let state = self.choreography_state.read();
-            (
-                state.roles.clone(),
-                state
-                    .current_role
-                    .ok_or(ChoreographyError::SessionNotStarted)?,
-            )
-        };
+        let session = current_session_snapshot(self)?;
+        let roles = session.roles.clone();
+        let current_role = session.current_role;
 
         for role in roles {
             if role.device_id == current_role.device_id {
@@ -221,29 +261,32 @@ impl ChoreographicEffects for AuraEffectSystem {
 
     #[allow(clippy::disallowed_methods)]
     fn current_role(&self) -> ChoreographicRole {
-        let state = self.choreography_state.read();
-        state.current_role.unwrap_or_else(|| {
-            let role_index = RoleIndex::new(0).expect("role index");
-            ChoreographicRole::new(DeviceId::from_uuid(self.authority_id.0), role_index)
-        })
+        current_session_snapshot(self).map_or_else(
+            |_| {
+                let role_index = RoleIndex::new(0).expect("role index");
+                ChoreographicRole::new(DeviceId::from_uuid(self.authority_id.0), role_index)
+            },
+            |session| session.current_role,
+        )
     }
 
     fn all_roles(&self) -> Vec<ChoreographicRole> {
-        let state = self.choreography_state.read();
-        if state.roles.is_empty() {
-            vec![self.current_role()]
-        } else {
-            state.roles.clone()
-        }
+        current_session_snapshot(self).map_or_else(
+            |_| vec![self.current_role()],
+            |session| {
+                if session.roles.is_empty() {
+                    vec![self.current_role()]
+                } else {
+                    session.roles
+                }
+            },
+        )
     }
 
     async fn is_role_active(&self, role: ChoreographicRole) -> bool {
-        let context_id = {
-            let state = self.choreography_state.read();
-            match state.context_id {
-                Some(context_id) => context_id,
-                None => return false,
-            }
+        let context_id = match current_session_snapshot(self) {
+            Ok(session) => session.context_id,
+            Err(_) => return false,
         };
 
         TransportEffects::is_channel_established(
@@ -286,16 +329,22 @@ impl ChoreographicEffects for AuraEffectSystem {
             .unwrap_or_default();
 
         let mut state = self.choreography_state.write();
-        if let Some(active) = state.session_id {
-            return Err(ChoreographyError::SessionAlreadyExists { session_id: active });
-        }
-
-        state.session_id = Some(session_id);
-        state.context_id = Some(context_id);
-        state.roles = roles;
-        state.current_role = Some(current_role);
-        state.started_at_ms = Some(started_at_ms);
-        Ok(())
+        state
+            .start_session(
+                session_id,
+                context_id,
+                roles,
+                current_role,
+                None,
+                started_at_ms,
+            )
+            .map_err(|message| {
+                if message.contains("already exists") {
+                    ChoreographyError::SessionAlreadyExists { session_id }
+                } else {
+                    ChoreographyError::InternalError { message }
+                }
+            })
     }
 
     async fn end_session(&self) -> Result<(), ChoreographyError> {
@@ -306,21 +355,10 @@ impl ChoreographicEffects for AuraEffectSystem {
             .unwrap_or_default();
 
         let mut state = self.choreography_state.write();
-        if state.session_id.is_none() {
-            return Err(ChoreographyError::SessionNotStarted);
-        }
-
-        if let Some(started_at_ms) = state.started_at_ms {
-            state.metrics.total_duration_ms = ended_at_ms.saturating_sub(started_at_ms);
-        }
-
-        state.session_id = None;
-        state.context_id = None;
-        state.roles.clear();
-        state.current_role = None;
-        state.timeout_ms = None;
-        state.started_at_ms = None;
-        Ok(())
+        state
+            .end_session(ended_at_ms)
+            .map(|_| ())
+            .map_err(|_| ChoreographyError::SessionNotStarted)
     }
 
     async fn emit_choreo_event(&self, event: ChoreographyEvent) -> Result<(), ChoreographyError> {
@@ -330,11 +368,158 @@ impl ChoreographicEffects for AuraEffectSystem {
 
     async fn set_timeout(&self, timeout_ms: u64) {
         let mut state = self.choreography_state.write();
-        state.timeout_ms = Some(timeout_ms);
+        let _ = state.with_current_session_mut(|session| {
+            session.timeout_ms = Some(timeout_ms);
+        });
     }
 
     async fn get_metrics(&self) -> ChoreographyMetrics {
-        let state = self.choreography_state.read();
-        state.metrics.clone()
+        current_session_snapshot(self).map_or_else(|_| default_metrics(), |session| session.metrics)
+    }
+}
+
+fn default_metrics() -> ChoreographyMetrics {
+    ChoreographyMetrics {
+        messages_sent: 0,
+        messages_received: 0,
+        avg_latency_ms: 0.0,
+        timeout_count: 0,
+        retry_count: 0,
+        total_duration_ms: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::AgentConfig;
+    use aura_core::DeviceId;
+    use std::sync::Arc;
+    use tokio::sync::Barrier;
+    use uuid::Uuid;
+
+    fn test_effects(authority_id: AuthorityId) -> Arc<AuraEffectSystem> {
+        Arc::new(
+            AuraEffectSystem::testing_for_authority(&AgentConfig::default(), authority_id)
+                .expect("testing effect system"),
+        )
+    }
+
+    fn authority_device_role(authority_id: AuthorityId, role_index: u16) -> ChoreographicRole {
+        ChoreographicRole::new(
+            DeviceId::from_uuid(Uuid::from_bytes(authority_id.to_bytes())),
+            RoleIndex::new(role_index.into()).expect("role index"),
+        )
+    }
+
+    #[tokio::test]
+    async fn concurrent_sessions_are_isolated_per_task() {
+        let authority_id = AuthorityId::from_uuid(Uuid::from_bytes([7; 16]));
+        let effects = test_effects(authority_id);
+        let barrier = Arc::new(Barrier::new(3));
+
+        let session_a = Uuid::from_u128(1);
+        let session_b = Uuid::from_u128(2);
+        let peer_a = ChoreographicRole::new(
+            DeviceId::from_uuid(Uuid::from_u128(11)),
+            RoleIndex::new(1).expect("role index"),
+        );
+        let peer_b = ChoreographicRole::new(
+            DeviceId::from_uuid(Uuid::from_u128(12)),
+            RoleIndex::new(1).expect("role index"),
+        );
+
+        let task_a_effects = Arc::clone(&effects);
+        let task_a_barrier = Arc::clone(&barrier);
+        let task_a = tokio::spawn(async move {
+            task_a_effects
+                .start_session(
+                    session_a,
+                    vec![authority_device_role(authority_id, 0), peer_a],
+                )
+                .await
+                .expect("session a starts");
+            task_a_barrier.wait().await;
+            assert_eq!(
+                task_a_effects.current_role(),
+                authority_device_role(authority_id, 0)
+            );
+            assert_eq!(task_a_effects.all_roles().len(), 2);
+            task_a_effects.set_timeout(111).await;
+            assert_eq!(task_a_effects.get_metrics().await.messages_sent, 0);
+            task_a_effects.end_session().await.expect("session a ends");
+        });
+
+        let task_b_effects = Arc::clone(&effects);
+        let task_b_barrier = Arc::clone(&barrier);
+        let task_b = tokio::spawn(async move {
+            task_b_effects
+                .start_session(
+                    session_b,
+                    vec![authority_device_role(authority_id, 0), peer_b],
+                )
+                .await
+                .expect("session b starts");
+            task_b_barrier.wait().await;
+            assert_eq!(
+                task_b_effects.current_role(),
+                authority_device_role(authority_id, 0)
+            );
+            assert_eq!(task_b_effects.all_roles().len(), 2);
+            task_b_effects.set_timeout(222).await;
+            assert_eq!(task_b_effects.get_metrics().await.messages_received, 0);
+            task_b_effects.end_session().await.expect("session b ends");
+        });
+
+        barrier.wait().await;
+        task_a.await.expect("task a");
+        task_b.await.expect("task b");
+        assert_eq!(effects.choreography_state.read().active_session_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn receive_filters_by_session_id_metadata() {
+        let authority_id = AuthorityId::from_uuid(Uuid::from_bytes([9; 16]));
+        let peer_authority = AuthorityId::from_uuid(Uuid::from_bytes([10; 16]));
+        let effects = test_effects(authority_id);
+        let session_id = Uuid::from_u128(33);
+        let wrong_session_id = Uuid::from_u128(34);
+        let self_role = authority_device_role(authority_id, 0);
+        let peer_role = authority_device_role(peer_authority, 1);
+
+        effects
+            .start_session(session_id, vec![self_role, peer_role])
+            .await
+            .expect("session starts");
+
+        let context_id = ContextId::new_from_entropy(hash(session_id.as_bytes()));
+        for (sid, payload) in [
+            (wrong_session_id, b"wrong".to_vec()),
+            (session_id, b"correct".to_vec()),
+        ] {
+            let mut metadata = HashMap::new();
+            metadata.insert(
+                "content-type".to_string(),
+                "application/aura-choreography".to_string(),
+            );
+            metadata.insert("session-id".to_string(), sid.to_string());
+            effects.transport.queue_envelope(TransportEnvelope {
+                destination: authority_id,
+                source: peer_authority,
+                context: context_id,
+                payload,
+                metadata,
+                receipt: None,
+            });
+        }
+
+        let payload = effects
+            .receive_from_role_bytes(peer_role)
+            .await
+            .expect("session-scoped receive succeeds");
+        assert_eq!(payload, b"correct".to_vec());
+        assert_eq!(effects.transport.inbox_len(), 1);
+
+        effects.end_session().await.expect("session ends");
     }
 }

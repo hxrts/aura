@@ -21,7 +21,8 @@ use syn::{
 };
 use telltale_choreography::{
     ast::{
-        choreography_to_global, Choreography, GlobalTypeCore, MessageType, PayloadSort, Protocol,
+        choreography_to_global, local_to_local_r, Choreography, GlobalTypeCore, MessageType,
+        PayloadSort, Protocol,
     },
     compiler::{codegen::generate_choreography_code, parse_choreography_str, project},
 };
@@ -518,6 +519,101 @@ fn generate_helpers(messages: &[MessageType]) -> TokenStream {
         #(#message_structs)*
         type Channel = Bidirectional<UnboundedSender<Label>, UnboundedReceiver<Label>>;
     }
+}
+
+fn generate_vm_projection_artifacts(
+    choreography: &Choreography,
+    local_types: &[(
+        telltale_choreography::ast::Role,
+        telltale_choreography::ast::LocalType,
+    )],
+) -> Result<TokenStream, syn::Error> {
+    let global_type = choreography_to_global(choreography).map_err(|error| {
+        syn::Error::new(
+            proc_macro2::Span::call_site(),
+            format!("failed to derive VM global type: {error}"),
+        )
+    })?;
+
+    let mut local_type_map = BTreeMap::new();
+    for (role, local_type) in local_types {
+        let local_type_r = local_to_local_r(local_type).map_err(|error| {
+            syn::Error::new(
+                proc_macro2::Span::call_site(),
+                format!(
+                    "failed to derive VM local type for role {}: {error}",
+                    role.name()
+                ),
+            )
+        })?;
+        local_type_map.insert(role.name().to_string(), local_type_r);
+    }
+
+    let global_json = serde_json::to_string(&global_type).map_err(|error| {
+        syn::Error::new(
+            proc_macro2::Span::call_site(),
+            format!("failed to encode VM global type artifact: {error}"),
+        )
+    })?;
+    let local_types_json = serde_json::to_string(&local_type_map).map_err(|error| {
+        syn::Error::new(
+            proc_macro2::Span::call_site(),
+            format!("failed to encode VM local-type artifacts: {error}"),
+        )
+    })?;
+
+    let global_json_lit = LitStr::new(&global_json, proc_macro2::Span::call_site());
+    let local_types_json_lit = LitStr::new(&local_types_json, proc_macro2::Span::call_site());
+    let role_names = choreography.roles.iter().map(|role| {
+        let name = role.name().to_string();
+        LitStr::new(&name, proc_macro2::Span::call_site())
+    });
+
+    Ok(quote! {
+        /// VM projection artifacts derived from the authoritative choreography source.
+        pub mod vm_artifacts {
+            use std::collections::BTreeMap;
+            use std::sync::OnceLock;
+
+            fn decode_global_type() -> &'static ::aura_mpst::telltale_types::GlobalType {
+                static GLOBAL_TYPE: OnceLock<::aura_mpst::telltale_types::GlobalType> =
+                    OnceLock::new();
+                GLOBAL_TYPE.get_or_init(|| {
+                    ::aura_mpst::serde_json::from_str(#global_json_lit)
+                        .expect("macro-generated VM global type must decode")
+                })
+            }
+
+            fn decode_local_types(
+            ) -> &'static BTreeMap<String, ::aura_mpst::telltale_types::LocalTypeR> {
+                static LOCAL_TYPES: OnceLock<
+                    BTreeMap<String, ::aura_mpst::telltale_types::LocalTypeR>,
+                > = OnceLock::new();
+                LOCAL_TYPES.get_or_init(|| {
+                    ::aura_mpst::serde_json::from_str(#local_types_json_lit)
+                        .expect("macro-generated VM local types must decode")
+                })
+            }
+
+            pub fn role_names() -> &'static [&'static str] {
+                &[#(#role_names),*]
+            }
+
+            pub fn global_type() -> ::aura_mpst::telltale_types::GlobalType {
+                decode_global_type().clone()
+            }
+
+            pub fn local_types() -> BTreeMap<String, ::aura_mpst::telltale_types::LocalTypeR> {
+                decode_local_types().clone()
+            }
+
+            pub fn local_type(
+                role: &str,
+            ) -> Option<::aura_mpst::telltale_types::LocalTypeR> {
+                decode_local_types().get(role).cloned()
+            }
+        }
+    })
 }
 
 fn hoist_choice_blocks(tokens: TokenStream) -> TokenStream {
@@ -2120,6 +2216,7 @@ fn choreography_impl_namespace_aware(
     collect_messages(&choreography.protocol, &mut message_map);
     let messages: Vec<_> = message_map.into_values().collect();
     let helpers = generate_helpers(&messages);
+    let vm_projection_artifacts = generate_vm_projection_artifacts(choreography, &local_types)?;
 
     // Generate code and hoist inline choice enums (choices need item-level definitions)
     let generated_code = generate_choreography_code(
@@ -2200,6 +2297,7 @@ fn choreography_impl_namespace_aware(
             #imports
             #helpers
             #generated_code
+            #vm_projection_artifacts
             #message_wrapper_module
         }
     })

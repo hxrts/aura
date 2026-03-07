@@ -8,11 +8,14 @@ use super::recovery::{
     RecoveryState,
 };
 use crate::core::{AgentError, AgentResult, AuthorityContext};
-use crate::runtime::choreography_adapter::{AuraProtocolAdapter, ReceivedMessage};
 use crate::runtime::services::ceremony_runner::{
     CeremonyCommitMetadata, CeremonyInitRequest, CeremonyRunner,
 };
 use crate::runtime::services::{CeremonyTracker, ReconfigurationManager};
+use crate::runtime::vm_host_bridge::{
+    close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
+    open_role_scoped_vm_session, receive_blocked_vm_message,
+};
 use crate::runtime::AuraEffectSystem;
 use aura_core::crypto::Ed25519Signature;
 use aura_core::effects::{CryptoCoreEffects, PhysicalTimeEffects, RandomCoreEffects};
@@ -20,13 +23,14 @@ use aura_core::hash::hash;
 use aura_core::identifiers::CeremonyId;
 use aura_core::identifiers::{AuthorityId, RecoveryId};
 use aura_core::time::{PhysicalTime, TimeStamp};
-use aura_core::util::serialization::from_slice;
+use aura_core::util::serialization::{from_slice, to_vec};
 use aura_core::{SessionId, TimeEffects};
 use aura_journal::fact::{ProtocolRelationalFact, RelationalFact};
-use aura_protocol::effects::{ChoreographyError, TreeEffects};
+use aura_protocol::effects::{
+    ChoreographicEffects, ChoreographicRole, ChoreographyError, RoleIndex, TreeEffects,
+};
 use aura_recovery::ceremony_runners::{
-    execute_as as guardian_execute_as, AbortCeremony, CommitCeremony, GuardianCeremonyRole,
-    ProposeRotation,
+    AbortCeremony, CommitCeremony, GuardianCeremonyRole, ProposeRotation,
 };
 // Note: RespondCeremony is a received message type (Guardian -> Initiator) so we don't need
 // to construct it - we only match on the type name suffix when processing received messages.
@@ -38,18 +42,16 @@ use aura_recovery::guardian_membership::{
     ChangeCompletion, GuardianVote, MembershipChange, MembershipProposal,
 };
 use aura_recovery::guardian_setup::{GuardianAcceptance, GuardianInvitation, SetupCompletion};
-use aura_recovery::membership_runners::{
-    execute_as as membership_execute_as, GuardianMembershipChangeRole,
-};
+use aura_recovery::membership_runners::GuardianMembershipChangeRole;
 use aura_recovery::recovery_protocol::{
     GuardianApproval as ProtocolGuardianApproval, RecoveryOperation as ProtocolRecoveryOperation,
     RecoveryOutcome, RecoveryRequest as ProtocolRecoveryRequest,
 };
-use aura_recovery::recovery_runners::{execute_as as recovery_execute_as, RecoveryProtocolRole};
-use aura_recovery::setup_runners::{execute_as as setup_execute_as, GuardianSetupRole};
+use aura_recovery::setup_runners::GuardianSetupRole;
 use aura_recovery::types::{GuardianProfile, GuardianSet};
-use std::collections::{HashMap, VecDeque};
+use std::collections::BTreeMap;
 use std::sync::Arc;
+use telltale_vm::vm::StepResult;
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
@@ -77,6 +79,13 @@ impl std::fmt::Debug for RecoveryServiceApi {
 }
 
 impl RecoveryServiceApi {
+    fn role(authority_id: AuthorityId, role_index: u16) -> ChoreographicRole {
+        ChoreographicRole::new(
+            aura_core::DeviceId::from_uuid(authority_id.0),
+            RoleIndex::new(role_index.into()).expect("role index"),
+        )
+    }
+
     /// Create a new recovery service
     pub fn new(
         effects: Arc<AuraEffectSystem>,
@@ -521,8 +530,6 @@ impl RecoveryServiceApi {
         approval: &GuardianApproval,
         account_authority: AuthorityId,
     ) -> AgentResult<()> {
-        use crate::core::AgentError;
-
         let signature = Ed25519Signature::try_from(approval.signature.clone())
             .map_err(|e| AgentError::invalid(format!("Invalid guardian signature: {e}")))?;
 
@@ -535,38 +542,80 @@ impl RecoveryServiceApi {
                 uncertainty: None,
             }),
         };
-
-        let mut role_map = HashMap::new();
-        role_map.insert(RecoveryProtocolRole::Account, account_authority);
-        role_map.insert(RecoveryProtocolRole::Coordinator, account_authority);
-        role_map.insert(RecoveryProtocolRole::Guardian, approval.guardian_id);
-
-        let approval_type = std::any::type_name::<ProtocolGuardianApproval>();
-
-        let mut adapter = AuraProtocolAdapter::new(
-            self.effects.clone(),
-            approval.guardian_id,
-            RecoveryProtocolRole::Guardian,
-            role_map,
-        )
-        .with_message_provider(move |request_ctx, _received| {
-            if request_ctx.type_name == approval_type {
-                return Some(Box::new(protocol_approval.clone()));
-            }
-            None
-        });
-
         let session_id = recovery_session_id(&approval.recovery_id, &approval.guardian_id);
-        adapter
-            .start_session(session_id)
-            .await
-            .map_err(|e| AgentError::internal(format!("recovery guardian start failed: {e}")))?;
+        let roles = vec![
+            Self::role(account_authority, 0),
+            Self::role(account_authority, 1),
+            Self::role(approval.guardian_id, 0),
+        ];
+        let peer_roles =
+            BTreeMap::from([("Coordinator".to_string(), Self::role(account_authority, 1))]);
+        let global_type = aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::global_type();
+        let local_types = aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::local_types();
 
-        let result = recovery_execute_as(RecoveryProtocolRole::Guardian, &mut adapter)
+        self.effects
+            .start_session(session_id, roles)
             .await
-            .map_err(|e| AgentError::internal(format!("recovery guardian failed: {e}")));
+            .map_err(|error| {
+                AgentError::internal(format!("recovery guardian VM start failed: {error}"))
+            })?;
 
-        let _ = adapter.end_session().await;
+        let result = async {
+            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
+                aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::role_names(),
+                "Guardian",
+                &global_type,
+                &local_types,
+            )
+            .map_err(AgentError::internal)?;
+            handler.push_send_bytes(
+                to_vec(&protocol_approval).map_err(|error| {
+                    AgentError::internal(format!("guardian approval encode failed: {error}"))
+                })?,
+            );
+
+            let loop_result = loop {
+                let step = engine.step().map_err(|error| {
+                    AgentError::internal(format!("recovery guardian VM step failed: {error}"))
+                })?;
+                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
+                    .await
+                    .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = receive_blocked_vm_message(
+                    self.effects.as_ref(),
+                    engine.vm(),
+                    vm_sid,
+                    "Guardian",
+                    &peer_roles,
+                )
+                .await
+                .map_err(|error| {
+                    AgentError::internal(format!("recovery guardian receive failed: {error}"))
+                })? {
+                    inject_vm_receive(&mut engine, vm_sid, &blocked)
+                        .map_err(AgentError::internal)?;
+                    continue;
+                }
+
+                match step {
+                    StepResult::AllDone => break Ok(()),
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(AgentError::internal(
+                            "recovery guardian VM became stuck without a pending receive"
+                                .to_string(),
+                        ));
+                    }
+                }
+            };
+
+            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            loop_result
+        }
+        .await;
+
+        let _ = self.effects.end_session().await;
         result
     }
 
@@ -849,15 +898,6 @@ impl RecoveryServiceApi {
         guardians: Vec<AuthorityId>,
         key_packages: Vec<Vec<u8>>,
     ) -> AgentResult<Vec<AuthorityId>> {
-        use crate::core::AgentError;
-        use std::sync::Arc;
-        use tokio::sync::RwLock;
-
-        eprintln!(
-            "[DEBUG] execute_guardian_ceremony_initiator: guardians={:?}",
-            guardians.iter().map(|g| g.to_string()).collect::<Vec<_>>()
-        );
-
         if guardians.len() != key_packages.len() {
             return Err(AgentError::invalid(
                 "guardian list and key package length mismatch",
@@ -881,138 +921,15 @@ impl RecoveryServiceApi {
         guardian_packages.sort_by_key(|(g, _)| *g);
         let (sorted_guardians, sorted_key_packages): (Vec<_>, Vec<_>) =
             guardian_packages.into_iter().unzip();
-
-        let mut role_map = HashMap::new();
-        role_map.insert(GuardianCeremonyRole::Initiator, authority_id);
-        role_map.insert(GuardianCeremonyRole::Guardian1, sorted_guardians[0]);
-        role_map.insert(GuardianCeremonyRole::Guardian2, sorted_guardians[1]);
-
-        let mut proposals = VecDeque::new();
-        for key_package in sorted_key_packages.iter() {
-            let nonce_bytes = self.effects.random_bytes(12).await;
-            let mut encryption_nonce = [0u8; 12];
-            encryption_nonce.copy_from_slice(&nonce_bytes[..12]);
-            let ephemeral_public_key = self.effects.random_bytes(32).await;
-            proposals.push_back(CeremonyProposal {
-                ceremony_id,
-                initiator_id: authority_id,
-                prestate_hash,
-                operation: operation.clone(),
-                encrypted_key_package: key_package.clone(),
-                encryption_nonce,
-                ephemeral_public_key,
-            });
-        }
-
-        let threshold_k = operation.threshold_k as usize;
-        // Shared state to capture accepted guardians for return
-        let accepted_guardians: Arc<RwLock<Vec<AuthorityId>>> = Arc::new(RwLock::new(Vec::new()));
-        let accepted_guardians_capture = accepted_guardians.clone();
-
-        // The choreography macro generates wrapper types with these message labels:
-        // - ProposeRotation (wraps CeremonyProposal)
-        // - RespondCeremony (wraps CeremonyResponseMsg)
-        // - CommitCeremony (wraps CeremonyCommit)
-        // - AbortCeremony (wraps CeremonyAbort)
-        // We match on the suffix since the full path varies.
-
-        let mut adapter = AuraProtocolAdapter::new(
-            self.effects.clone(),
-            authority_id,
-            GuardianCeremonyRole::Initiator,
-            role_map,
-        )
-        .with_message_provider(move |request, received| {
-            eprintln!(
-                "[DEBUG] message_provider called for type: {}, received.len={}",
-                request.type_name,
-                received.len()
-            );
-            // Match on message labels (suffixes) since the macro generates wrapper types
-            if request.type_name.ends_with("ProposeRotation") {
-                return proposals.pop_front().map(|proposal| {
-                    Box::new(ProposeRotation(proposal)) as Box<dyn std::any::Any + Send>
-                });
-            }
-
-            if request.type_name.ends_with("CommitCeremony") {
-                let mut accepted = Vec::new();
-                for msg in received {
-                    if msg.type_name.ends_with("RespondCeremony") {
-                        if let Ok(response) = from_slice::<CeremonyResponseMsg>(&msg.bytes) {
-                            if response.response == CeremonyResponse::Accept {
-                                accepted.push(response.guardian_id);
-                            }
-                        }
-                    }
-                }
-                // Capture accepted guardians in shared state
-                if let Ok(mut guard) = accepted_guardians_capture.try_write() {
-                    *guard = accepted.clone();
-                }
-                let commit = CeremonyCommit {
-                    ceremony_id,
-                    new_epoch: operation.new_epoch,
-                    threshold_signature: Vec::new(),
-                    participants: accepted,
-                };
-                return Some(Box::new(CommitCeremony(commit)));
-            }
-
-            if request.type_name.ends_with("AbortCeremony") {
-                let mut declined = false;
-                for msg in received {
-                    if msg.type_name.ends_with("RespondCeremony") {
-                        if let Ok(response) = from_slice::<CeremonyResponseMsg>(&msg.bytes) {
-                            if response.response == CeremonyResponse::Decline {
-                                declined = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-                let reason = if declined {
-                    "guardian_declined"
-                } else {
-                    "threshold_not_met"
-                };
-                let abort = CeremonyAbort {
-                    ceremony_id,
-                    reason: reason.to_string(),
-                };
-                return Some(Box::new(AbortCeremony(abort)));
-            }
-
-            None
-        })
-        .with_branch_decider(move |received| {
-            let mut accepted = 0usize;
-            let mut declined = 0usize;
-            for msg in received {
-                if msg.type_name.ends_with("RespondCeremony") {
-                    if let Ok(response) = from_slice::<CeremonyResponseMsg>(&msg.bytes) {
-                        match response.response {
-                            CeremonyResponse::Accept => accepted += 1,
-                            CeremonyResponse::Decline => declined += 1,
-                            CeremonyResponse::Pending => {}
-                        }
-                    }
-                }
-            }
-            if declined > 0 {
-                Some("cancel".to_string())
-            } else if accepted >= threshold_k {
-                Some("finalize".to_string())
-            } else {
-                Some("cancel".to_string())
-            }
-        });
-
         let session_id = Self::ceremony_session_id(ceremony_id);
-        eprintln!("[DEBUG] starting session with session_id={}", session_id);
         let mut attempt = 0usize;
+        let roles = vec![
+            Self::role(authority_id, 0),
+            Self::role(sorted_guardians[0], 0),
+            Self::role(sorted_guardians[1], 0),
+        ];
         loop {
-            match adapter.start_session(session_id).await {
+            match self.effects.start_session(session_id, roles.clone()).await {
                 Ok(()) => break,
                 Err(ChoreographyError::SessionAlreadyExists { .. }) => {
                     if attempt >= CHOREO_START_RETRY_LIMIT {
@@ -1031,42 +948,150 @@ impl RecoveryServiceApi {
                 }
             }
         }
-        eprintln!("[DEBUG] session started, executing guardian_execute_as...");
 
-        let execute_result =
-            guardian_execute_as(GuardianCeremonyRole::Initiator, &mut adapter).await;
+        let result = async {
+            let global_type = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::global_type();
+            let local_types = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::local_types();
+            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
+                aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::role_names(),
+                "Initiator",
+                &global_type,
+                &local_types,
+            )
+            .map_err(AgentError::internal)?;
 
-        if let Err(err) = adapter.end_session().await {
-            tracing::warn!("guardian ceremony end_session failed: {err}");
-        }
-
-        match execute_result {
-            Ok(()) => {
-                // Return the captured accepted guardians
-                let accepted = accepted_guardians.read().await.clone();
-                Ok(accepted)
+            for key_package in &sorted_key_packages {
+                let nonce_bytes = self.effects.random_bytes(12).await;
+                let mut encryption_nonce = [0u8; 12];
+                encryption_nonce.copy_from_slice(&nonce_bytes[..12]);
+                let ephemeral_public_key = self.effects.random_bytes(32).await;
+                handler.push_send_bytes(
+                    to_vec(&ProposeRotation(CeremonyProposal {
+                        ceremony_id,
+                        initiator_id: authority_id,
+                        prestate_hash,
+                        operation: operation.clone(),
+                        encrypted_key_package: key_package.clone(),
+                        encryption_nonce,
+                        ephemeral_public_key,
+                    }))
+                    .map_err(|error| {
+                        AgentError::internal(format!("guardian proposal encode failed: {error}"))
+                    })?,
+                );
             }
-            Err(e) => {
-                let error_str = e.to_string();
-                eprintln!("[DEBUG] guardian_execute_as failed with: {}", error_str);
-                // Detect peer connectivity issues and provide actionable error message
-                if error_str.contains("message provider returned None")
-                    || error_str.contains("Protocol violation")
-                    || error_str.contains("Transport error")
-                    || error_str.contains("No message available")
-                {
-                    Err(AgentError::internal(
-                        "guardian ceremony failed: no responses received from guardians. \
-                         Ensure guardian peers are online and connected."
-                            .to_string(),
-                    ))
-                } else {
-                    Err(AgentError::internal(format!(
-                        "guardian ceremony failed: {e}"
-                    )))
+
+            let peer_roles = BTreeMap::from([
+                ("Guardian1".to_string(), Self::role(sorted_guardians[0], 0)),
+                ("Guardian2".to_string(), Self::role(sorted_guardians[1], 0)),
+            ]);
+            let mut responses = Vec::new();
+            let mut branch_queued = false;
+
+            let loop_result = loop {
+                let step = engine.step().map_err(|error| {
+                    AgentError::internal(format!("guardian ceremony initiator VM step failed: {error}"))
+                })?;
+                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
+                    .await
+                    .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = receive_blocked_vm_message(
+                    self.effects.as_ref(),
+                    engine.vm(),
+                    vm_sid,
+                    "Initiator",
+                    &peer_roles,
+                )
+                .await
+                .map_err(|error| {
+                    AgentError::internal(format!("guardian ceremony receive failed: {error}"))
+                })? {
+                    let response: CeremonyResponseMsg =
+                        from_slice(&blocked.payload).map_err(|error| {
+                            AgentError::internal(format!(
+                                "guardian ceremony response decode failed: {error}"
+                            ))
+                        })?;
+                    responses.push(response);
+
+                    if !branch_queued && responses.len() == 2 {
+                        let accepted: Vec<AuthorityId> = responses
+                            .iter()
+                            .filter(|response| response.response == CeremonyResponse::Accept)
+                            .map(|response| response.guardian_id)
+                            .collect();
+                        let declined = responses
+                            .iter()
+                            .any(|response| response.response == CeremonyResponse::Decline);
+                        let finalize = !declined && accepted.len() >= operation.threshold_k as usize;
+                        handler.push_choice_label(if finalize { "finalize" } else { "cancel" });
+                        if finalize {
+                            let commit = CommitCeremony(CeremonyCommit {
+                                ceremony_id,
+                                new_epoch: operation.new_epoch,
+                                threshold_signature: Vec::new(),
+                                participants: accepted,
+                            });
+                            let payload = to_vec(&commit).map_err(|error| {
+                                AgentError::internal(format!(
+                                    "guardian ceremony commit encode failed: {error}"
+                                ))
+                            })?;
+                            handler.push_send_bytes(payload.clone());
+                            handler.push_send_bytes(payload);
+                        } else {
+                            let reason = if declined {
+                                "guardian_declined"
+                            } else {
+                                "threshold_not_met"
+                            };
+                            let abort = AbortCeremony(CeremonyAbort {
+                                ceremony_id,
+                                reason: reason.to_string(),
+                            });
+                            let payload = to_vec(&abort).map_err(|error| {
+                                AgentError::internal(format!(
+                                    "guardian ceremony abort encode failed: {error}"
+                                ))
+                            })?;
+                            handler.push_send_bytes(payload.clone());
+                            handler.push_send_bytes(payload);
+                        }
+                        branch_queued = true;
+                    }
+
+                    inject_vm_receive(&mut engine, vm_sid, &blocked)
+                        .map_err(AgentError::internal)?;
+                    continue;
                 }
-            }
+
+                match step {
+                    StepResult::AllDone => {
+                        let accepted = responses
+                            .iter()
+                            .filter(|response| response.response == CeremonyResponse::Accept)
+                            .map(|response| response.guardian_id)
+                            .collect();
+                        break Ok(accepted);
+                    }
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(AgentError::internal(
+                            "guardian ceremony initiator VM became stuck without a pending receive"
+                                .to_string(),
+                        ));
+                    }
+                }
+            };
+
+            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            loop_result
         }
+        .await;
+
+        let _ = self.effects.end_session().await;
+        result
     }
 
     /// Execute guardian ceremony as a guardian (accept/decline).
@@ -1081,8 +1106,6 @@ impl RecoveryServiceApi {
         response: CeremonyResponse,
         role_index: usize,
     ) -> AgentResult<()> {
-        use crate::core::AgentError;
-
         let authority_id = self.handler.authority_context().authority_id();
 
         // Determine which guardian role this peer plays
@@ -1097,31 +1120,22 @@ impl RecoveryServiceApi {
             }
         };
 
-        let mut role_map = HashMap::new();
-        role_map.insert(GuardianCeremonyRole::Initiator, initiator_id);
-        role_map.insert(guardian_role, authority_id);
-
-        let response_type = std::any::type_name::<CeremonyResponseMsg>();
         let response_msg = CeremonyResponseMsg {
             ceremony_id,
             guardian_id: authority_id,
             response,
             signature: Vec::new(),
         };
-
-        let mut adapter =
-            AuraProtocolAdapter::new(self.effects.clone(), authority_id, guardian_role, role_map)
-                .with_message_provider(move |request, _received| {
-                    if request.type_name == response_type {
-                        return Some(Box::new(response_msg.clone()));
-                    }
-                    None
-                });
-
         let session_id = Self::ceremony_session_id(ceremony_id);
         let mut attempt = 0usize;
+        let active_role_name = match guardian_role {
+            GuardianCeremonyRole::Guardian1 => "Guardian1",
+            GuardianCeremonyRole::Guardian2 => "Guardian2",
+            GuardianCeremonyRole::Initiator => unreachable!(),
+        };
+        let roles = vec![Self::role(initiator_id, 0), Self::role(authority_id, 0)];
         loop {
-            match adapter.start_session(session_id).await {
+            match self.effects.start_session(session_id, roles.clone()).await {
                 Ok(()) => break,
                 Err(ChoreographyError::SessionAlreadyExists { .. }) => {
                     if attempt >= CHOREO_START_RETRY_LIMIT {
@@ -1141,11 +1155,66 @@ impl RecoveryServiceApi {
             }
         }
 
-        let result = guardian_execute_as(guardian_role, &mut adapter)
-            .await
-            .map_err(|e| AgentError::internal(format!("guardian ceremony failed: {e}")));
+        let result = async {
+            let global_type = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::global_type();
+            let local_types = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::local_types();
+            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
+                aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::role_names(),
+                active_role_name,
+                &global_type,
+                &local_types,
+            )
+            .map_err(AgentError::internal)?;
+            handler.push_send_bytes(
+                to_vec(&response_msg).map_err(|error| {
+                    AgentError::internal(format!("guardian ceremony response encode failed: {error}"))
+                })?,
+            );
+            let peer_roles =
+                BTreeMap::from([("Initiator".to_string(), Self::role(initiator_id, 0))]);
 
-        let _ = adapter.end_session().await;
+            let loop_result = loop {
+                let step = engine.step().map_err(|error| {
+                    AgentError::internal(format!("guardian ceremony VM step failed: {error}"))
+                })?;
+                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
+                    .await
+                    .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = receive_blocked_vm_message(
+                    self.effects.as_ref(),
+                    engine.vm(),
+                    vm_sid,
+                    active_role_name,
+                    &peer_roles,
+                )
+                .await
+                .map_err(|error| {
+                    AgentError::internal(format!("guardian ceremony receive failed: {error}"))
+                })? {
+                    inject_vm_receive(&mut engine, vm_sid, &blocked)
+                        .map_err(AgentError::internal)?;
+                    continue;
+                }
+
+                match step {
+                    StepResult::AllDone => break Ok(()),
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(AgentError::internal(
+                            "guardian ceremony VM became stuck without a pending receive"
+                                .to_string(),
+                        ));
+                    }
+                }
+            };
+
+            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            loop_result
+        }
+        .await;
+
+        let _ = self.effects.end_session().await;
         result
     }
 
@@ -1171,88 +1240,128 @@ impl RecoveryServiceApi {
         guardians: Vec<AuthorityId>,
         threshold: u16,
     ) -> AgentResult<SetupCompletion> {
-        use crate::core::AgentError;
-
         validate_guardian_setup_inputs(&guardians, threshold)?;
 
         let authority_id = self.handler.authority_context().authority_id();
         let timestamp = self.guardian_setup_timestamp().await?;
-
-        let mut invitations = VecDeque::new();
-        for _ in 0..guardians.len() {
-            invitations.push_back(GuardianInvitation {
-                setup_id: setup_id.to_string(),
-                account_id,
-                target_guardians: guardians.clone(),
-                threshold,
-                timestamp: timestamp.clone(),
-            });
-        }
-
-        let mut role_map = HashMap::new();
-        role_map.insert(GuardianSetupRole::SetupInitiator, authority_id);
-        role_map.insert(GuardianSetupRole::Guardian1, guardians[0]);
-        role_map.insert(GuardianSetupRole::Guardian2, guardians[1]);
-        role_map.insert(GuardianSetupRole::Guardian3, guardians[2]);
-
-        let invitation_type = std::any::type_name::<GuardianInvitation>();
-        let completion_type = std::any::type_name::<SetupCompletion>();
-        let acceptance_type = std::any::type_name::<GuardianAcceptance>();
-
-        let setup_id_owned = setup_id.to_string();
-        let mut adapter = AuraProtocolAdapter::new(
-            self.effects.clone(),
-            authority_id,
-            GuardianSetupRole::SetupInitiator,
-            role_map,
-        )
-        .with_message_provider(move |request, received| {
-            if request.type_name == invitation_type {
-                return invitations
-                    .pop_front()
-                    .map(|inv| Box::new(inv) as Box<dyn std::any::Any + Send>);
-            }
-
-            if request.type_name == completion_type {
-                let acceptances = collect_guardian_acceptances(received, acceptance_type);
-                let completion =
-                    build_guardian_setup_completion(&setup_id_owned, threshold, acceptances);
-                return Some(Box::new(completion));
-            }
-
-            None
-        });
-
         let session_id = guardian_setup_session_id(setup_id);
-        adapter
-            .start_session(session_id)
-            .await
-            .map_err(|e| AgentError::internal(format!("guardian setup start failed: {e}")))?;
+        let roles = vec![
+            Self::role(authority_id, 0),
+            Self::role(guardians[0], 0),
+            Self::role(guardians[1], 0),
+            Self::role(guardians[2], 0),
+        ];
+        let peer_roles = BTreeMap::from([
+            ("Guardian1".to_string(), Self::role(guardians[0], 0)),
+            ("Guardian2".to_string(), Self::role(guardians[1], 0)),
+            ("Guardian3".to_string(), Self::role(guardians[2], 0)),
+        ]);
+        let global_type =
+            aura_recovery::guardian_setup::telltale_session_types_guardian_setup::vm_artifacts::global_type();
+        let local_types =
+            aura_recovery::guardian_setup::telltale_session_types_guardian_setup::vm_artifacts::local_types();
 
-        let result = setup_execute_as(GuardianSetupRole::SetupInitiator, &mut adapter)
+        self.effects
+            .start_session(session_id, roles)
             .await
-            .map_err(|e| {
-                let error_str = e.to_string();
-                // Detect peer connectivity issues and provide actionable error message
-                if error_str.contains("message provider returned None")
-                    || error_str.contains("Protocol violation")
-                {
-                    AgentError::internal(
-                        "guardian setup failed: no responses received from guardians. \
-                         Ensure guardian peers are online and connected."
-                            .to_string(),
-                    )
-                } else {
-                    AgentError::internal(format!("guardian setup failed: {e}"))
+            .map_err(|error| {
+                AgentError::internal(format!("guardian setup VM start failed: {error}"))
+            })?;
+
+        let result = async {
+            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
+                aura_recovery::guardian_setup::telltale_session_types_guardian_setup::vm_artifacts::role_names(),
+                "SetupInitiator",
+                &global_type,
+                &local_types,
+            )
+            .map_err(AgentError::internal)?;
+
+            for _ in 0..guardians.len() {
+                handler.push_send_bytes(
+                    to_vec(&GuardianInvitation {
+                        setup_id: setup_id.to_string(),
+                        account_id,
+                        target_guardians: guardians.clone(),
+                        threshold,
+                        timestamp: timestamp.clone(),
+                    })
+                    .map_err(|error| {
+                        AgentError::internal(format!("guardian invitation encode failed: {error}"))
+                    })?,
+                );
+            }
+
+            let mut acceptances = Vec::new();
+            let mut completion_queued = false;
+
+            let loop_result = loop {
+                let step = engine.step().map_err(|error| {
+                    AgentError::internal(format!("guardian setup initiator VM step failed: {error}"))
+                })?;
+                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
+                    .await
+                    .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = receive_blocked_vm_message(
+                    self.effects.as_ref(),
+                    engine.vm(),
+                    vm_sid,
+                    "SetupInitiator",
+                    &peer_roles,
+                )
+                .await
+                .map_err(|error| {
+                    AgentError::internal(format!("guardian setup receive failed: {error}"))
+                })? {
+                    let acceptance: GuardianAcceptance =
+                        from_slice(&blocked.payload).map_err(|error| {
+                            AgentError::internal(format!(
+                                "guardian acceptance decode failed: {error}"
+                            ))
+                        })?;
+                    acceptances.push(acceptance);
+                    if !completion_queued && acceptances.len() == guardians.len() {
+                        let completion =
+                            build_guardian_setup_completion(setup_id, threshold, acceptances.clone());
+                        let payload = to_vec(&completion).map_err(|error| {
+                            AgentError::internal(format!(
+                                "guardian setup completion encode failed: {error}"
+                            ))
+                        })?;
+                        for _ in 0..guardians.len() {
+                            handler.push_send_bytes(payload.clone());
+                        }
+                        completion_queued = true;
+                    }
+                    inject_vm_receive(&mut engine, vm_sid, &blocked)
+                        .map_err(AgentError::internal)?;
+                    continue;
                 }
-            });
 
-        let acceptances =
-            collect_guardian_acceptances(adapter.received_messages(), acceptance_type);
-        let completion = build_guardian_setup_completion(setup_id, threshold, acceptances);
+                match step {
+                    StepResult::AllDone => break Ok(build_guardian_setup_completion(
+                        setup_id,
+                        threshold,
+                        acceptances.clone(),
+                    )),
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(AgentError::internal(
+                            "guardian setup initiator VM became stuck without a pending receive"
+                                .to_string(),
+                        ));
+                    }
+                }
+            };
 
-        let _ = adapter.end_session().await;
-        result.map(|_| completion)
+            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            loop_result
+        }
+        .await;
+
+        let _ = self.effects.end_session().await;
+        result
     }
 
     /// Execute guardian setup ceremony as a guardian (accept/decline).
@@ -1261,8 +1370,6 @@ impl RecoveryServiceApi {
         invitation: GuardianInvitation,
         accepted: bool,
     ) -> AgentResult<()> {
-        use crate::core::AgentError;
-
         validate_guardian_setup_inputs(&invitation.target_guardians, invitation.threshold)?;
 
         let authority_id = self.handler.authority_context().authority_id();
@@ -1285,13 +1392,6 @@ impl RecoveryServiceApi {
             }
         };
 
-        let mut role_map = HashMap::new();
-        role_map.insert(GuardianSetupRole::SetupInitiator, invitation.account_id);
-        role_map.insert(GuardianSetupRole::Guardian1, invitation.target_guardians[0]);
-        role_map.insert(GuardianSetupRole::Guardian2, invitation.target_guardians[1]);
-        role_map.insert(GuardianSetupRole::Guardian3, invitation.target_guardians[2]);
-
-        let acceptance_type = std::any::type_name::<GuardianAcceptance>();
         let setup_id = invitation.setup_id.clone();
         let timestamp = self.guardian_setup_timestamp().await?;
         let (_, public_key) = self
@@ -1306,27 +1406,86 @@ impl RecoveryServiceApi {
             public_key,
             timestamp,
         };
-
-        let mut adapter =
-            AuraProtocolAdapter::new(self.effects.clone(), authority_id, guardian_role, role_map)
-                .with_message_provider(move |request, _received| {
-                    if request.type_name == acceptance_type {
-                        return Some(Box::new(acceptance.clone()));
-                    }
-                    None
-                });
-
         let session_id = guardian_setup_session_id(&setup_id);
-        adapter
-            .start_session(session_id)
-            .await
-            .map_err(|e| AgentError::internal(format!("guardian setup start failed: {e}")))?;
+        let active_role_name = match guardian_role {
+            GuardianSetupRole::Guardian1 => "Guardian1",
+            GuardianSetupRole::Guardian2 => "Guardian2",
+            GuardianSetupRole::Guardian3 => "Guardian3",
+            GuardianSetupRole::SetupInitiator => unreachable!(),
+        };
+        let roles = vec![
+            Self::role(invitation.account_id, 0),
+            Self::role(authority_id, 0),
+        ];
+        let peer_roles = BTreeMap::from([(
+            "SetupInitiator".to_string(),
+            Self::role(invitation.account_id, 0),
+        )]);
+        let global_type =
+            aura_recovery::guardian_setup::telltale_session_types_guardian_setup::vm_artifacts::global_type();
+        let local_types =
+            aura_recovery::guardian_setup::telltale_session_types_guardian_setup::vm_artifacts::local_types();
 
-        let result = setup_execute_as(guardian_role, &mut adapter)
+        self.effects
+            .start_session(session_id, roles)
             .await
-            .map_err(|e| AgentError::internal(format!("guardian setup failed: {e}")));
+            .map_err(|error| {
+                AgentError::internal(format!("guardian setup VM start failed: {error}"))
+            })?;
 
-        let _ = adapter.end_session().await;
+        let result = async {
+            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
+                aura_recovery::guardian_setup::telltale_session_types_guardian_setup::vm_artifacts::role_names(),
+                active_role_name,
+                &global_type,
+                &local_types,
+            )
+            .map_err(AgentError::internal)?;
+            handler.push_send_bytes(to_vec(&acceptance).map_err(|error| {
+                AgentError::internal(format!("guardian acceptance encode failed: {error}"))
+            })?);
+
+            let loop_result = loop {
+                let step = engine.step().map_err(|error| {
+                    AgentError::internal(format!("guardian setup VM step failed: {error}"))
+                })?;
+                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
+                    .await
+                    .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = receive_blocked_vm_message(
+                    self.effects.as_ref(),
+                    engine.vm(),
+                    vm_sid,
+                    active_role_name,
+                    &peer_roles,
+                )
+                .await
+                .map_err(|error| {
+                    AgentError::internal(format!("guardian setup receive failed: {error}"))
+                })? {
+                    inject_vm_receive(&mut engine, vm_sid, &blocked)
+                        .map_err(AgentError::internal)?;
+                    continue;
+                }
+
+                match step {
+                    StepResult::AllDone => break Ok(()),
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(AgentError::internal(
+                            "guardian setup VM became stuck without a pending receive".to_string(),
+                        ));
+                    }
+                }
+            };
+
+            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            loop_result
+        }
+        .await;
+
+        let _ = self.effects.end_session().await;
         result
     }
 
@@ -1386,8 +1545,6 @@ impl RecoveryServiceApi {
         threshold: u32,
         new_threshold: Option<u16>,
     ) -> AgentResult<ChangeCompletion> {
-        use crate::core::AgentError;
-
         if guardians.len() != 3 {
             return Err(AgentError::invalid(
                 "Guardian membership change choreography requires exactly three guardians"
@@ -1404,129 +1561,156 @@ impl RecoveryServiceApi {
             .unwrap_or_default();
 
         let change_id = format!("membership_{}_{}", authority_id, now_ms);
-
-        // Build role mapping: ChangeInitiator + Guardian1/2/3
-        let mut role_map = HashMap::new();
-        role_map.insert(GuardianMembershipChangeRole::ChangeInitiator, authority_id);
-        role_map.insert(GuardianMembershipChangeRole::Guardian1, guardians[0]);
-        role_map.insert(GuardianMembershipChangeRole::Guardian2, guardians[1]);
-        role_map.insert(GuardianMembershipChangeRole::Guardian3, guardians[2]);
-
-        // Build proposals for each guardian (Phase 1)
-        let mut proposals = VecDeque::new();
-        for _ in 0..3 {
-            proposals.push_back(MembershipProposal {
-                change_id: change_id.clone(),
-                account_id: authority_id, // Account is the initiator
-                proposer_id: authority_id,
-                change: change.clone(),
-                new_threshold,
-                timestamp: TimeStamp::PhysicalClock(PhysicalTime {
-                    ts_ms: now_ms,
-                    uncertainty: None,
-                }),
-            });
-        }
-
-        // Type names for message provider
-        let proposal_type = std::any::type_name::<MembershipProposal>();
-        let completion_type = std::any::type_name::<ChangeCompletion>();
-        let vote_type = std::any::type_name::<GuardianVote>();
-
         let threshold_usize = threshold as usize;
-        let change_id_owned = change_id.clone();
         let new_threshold_final = new_threshold.unwrap_or(threshold as u16);
-
-        let mut adapter = AuraProtocolAdapter::new(
-            self.effects.clone(),
-            authority_id,
-            GuardianMembershipChangeRole::ChangeInitiator,
-            role_map,
-        )
-        .with_message_provider(move |request, received| {
-            // Phase 1: Provide proposals to guardians
-            if request.type_name == proposal_type {
-                return proposals
-                    .pop_front()
-                    .map(|p| Box::new(p) as Box<dyn std::any::Any + Send>);
-            }
-
-            // Phase 3: Build completion based on votes received
-            if request.type_name == completion_type {
-                let mut accepted_guardians = Vec::new();
-                for msg in received {
-                    if msg.type_name == vote_type {
-                        if let Ok(vote) = from_slice::<GuardianVote>(&msg.bytes) {
-                            if vote.approved {
-                                accepted_guardians.push(vote.guardian_id);
-                            }
-                        }
-                    }
-                }
-
-                let success = accepted_guardians.len() >= threshold_usize;
-                let new_guardian_set = GuardianSet::new(
-                    accepted_guardians
-                        .iter()
-                        .copied()
-                        .map(GuardianProfile::new)
-                        .collect(),
-                );
-
-                let completion = ChangeCompletion {
-                    change_id: change_id_owned.clone(),
-                    success,
-                    new_guardian_set,
-                    new_threshold: new_threshold_final,
-                    change_evidence: Vec::new(),
-                };
-                return Some(Box::new(completion));
-            }
-
-            None
-        });
-
         let session_id = membership_session_id(&change_id);
-        adapter
-            .start_session(session_id)
+        let roles = vec![
+            Self::role(authority_id, 0),
+            Self::role(guardians[0], 0),
+            Self::role(guardians[1], 0),
+            Self::role(guardians[2], 0),
+        ];
+        let peer_roles = BTreeMap::from([
+            ("Guardian1".to_string(), Self::role(guardians[0], 0)),
+            ("Guardian2".to_string(), Self::role(guardians[1], 0)),
+            ("Guardian3".to_string(), Self::role(guardians[2], 0)),
+        ]);
+        let global_type = aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::global_type();
+        let local_types = aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::local_types();
+
+        self.effects
+            .start_session(session_id, roles)
             .await
-            .map_err(|e| AgentError::internal(format!("membership change start failed: {e}")))?;
+            .map_err(|error| {
+                AgentError::internal(format!("membership change VM start failed: {error}"))
+            })?;
 
-        let result =
-            membership_execute_as(GuardianMembershipChangeRole::ChangeInitiator, &mut adapter)
+        let completion = async {
+            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
+                aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::role_names(),
+                "ChangeInitiator",
+                &global_type,
+                &local_types,
+            )
+            .map_err(AgentError::internal)?;
+
+            for _ in 0..3 {
+                handler.push_send_bytes(
+                    to_vec(&MembershipProposal {
+                        change_id: change_id.clone(),
+                        account_id: authority_id,
+                        proposer_id: authority_id,
+                        change: change.clone(),
+                        new_threshold,
+                        timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                            ts_ms: now_ms,
+                            uncertainty: None,
+                        }),
+                    })
+                    .map_err(|error| {
+                        AgentError::internal(format!("membership proposal encode failed: {error}"))
+                    })?,
+                );
+            }
+
+            let mut votes = Vec::new();
+            let mut completion_queued = false;
+
+            let loop_result = loop {
+                let step = engine.step().map_err(|error| {
+                    AgentError::internal(format!("membership change initiator VM step failed: {error}"))
+                })?;
+                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
+                    .await
+                    .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = receive_blocked_vm_message(
+                    self.effects.as_ref(),
+                    engine.vm(),
+                    vm_sid,
+                    "ChangeInitiator",
+                    &peer_roles,
+                )
                 .await
-                .map_err(|e| AgentError::internal(format!("membership change failed: {e}")));
+                .map_err(|error| {
+                    AgentError::internal(format!("membership change receive failed: {error}"))
+                })? {
+                    let vote: GuardianVote = from_slice(&blocked.payload).map_err(|error| {
+                        AgentError::internal(format!("guardian vote decode failed: {error}"))
+                    })?;
+                    votes.push(vote);
 
-        // Extract the completion from received messages
-        let completion = {
-            let vote_type_str = std::any::type_name::<GuardianVote>();
-            let mut accepted_guardians = Vec::new();
-            for msg in adapter.received_messages() {
-                if msg.type_name == vote_type_str {
-                    if let Ok(vote) = from_slice::<GuardianVote>(&msg.bytes) {
-                        if vote.approved {
-                            accepted_guardians.push(vote.guardian_id);
+                    if !completion_queued && votes.len() == 3 {
+                        let accepted_guardians: Vec<AuthorityId> = votes
+                            .iter()
+                            .filter(|vote| vote.approved)
+                            .map(|vote| vote.guardian_id)
+                            .collect();
+                        let completion = ChangeCompletion {
+                            change_id: change_id.clone(),
+                            success: accepted_guardians.len() >= threshold_usize,
+                            new_guardian_set: GuardianSet::new(
+                                accepted_guardians
+                                    .iter()
+                                    .copied()
+                                    .map(GuardianProfile::new)
+                                    .collect(),
+                            ),
+                            new_threshold: new_threshold_final,
+                            change_evidence: Vec::new(),
+                        };
+                        let payload = to_vec(&completion).map_err(|error| {
+                            AgentError::internal(format!(
+                                "membership completion encode failed: {error}"
+                            ))
+                        })?;
+                        for _ in 0..3 {
+                            handler.push_send_bytes(payload.clone());
                         }
+                        completion_queued = true;
+                    }
+
+                    inject_vm_receive(&mut engine, vm_sid, &blocked)
+                        .map_err(AgentError::internal)?;
+                    continue;
+                }
+
+                match step {
+                    StepResult::AllDone => {
+                        let accepted_guardians: Vec<AuthorityId> = votes
+                            .iter()
+                            .filter(|vote| vote.approved)
+                            .map(|vote| vote.guardian_id)
+                            .collect();
+                        break Ok(ChangeCompletion {
+                            change_id: change_id.clone(),
+                            success: accepted_guardians.len() >= threshold_usize,
+                            new_guardian_set: GuardianSet::new(
+                                accepted_guardians
+                                    .into_iter()
+                                    .map(GuardianProfile::new)
+                                    .collect(),
+                            ),
+                            new_threshold: new_threshold_final,
+                            change_evidence: Vec::new(),
+                        });
+                    }
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(AgentError::internal(
+                            "membership change initiator VM became stuck without a pending receive"
+                                .to_string(),
+                        ));
                     }
                 }
-            }
+            };
 
-            ChangeCompletion {
-                change_id,
-                success: accepted_guardians.len() >= threshold_usize,
-                new_guardian_set: GuardianSet::new(
-                    accepted_guardians
-                        .into_iter()
-                        .map(GuardianProfile::new)
-                        .collect(),
-                ),
-                new_threshold: new_threshold_final,
-                change_evidence: Vec::new(),
-            }
-        };
+            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            loop_result
+        }
+        .await?;
 
-        let _ = adapter.end_session().await;
-        result.map(|_| completion.clone())?;
+        let _ = self.effects.end_session().await;
 
         if completion.success {
             self.apply_guardian_handoff_reconfiguration(&completion, &change)
@@ -1557,8 +1741,6 @@ impl RecoveryServiceApi {
         approved: bool,
         rationale: String,
     ) -> AgentResult<GuardianVote> {
-        use crate::core::AgentError;
-
         let authority_id = self.handler.authority_context().authority_id();
 
         let guardian_role = match guardian_index {
@@ -1598,34 +1780,79 @@ impl RecoveryServiceApi {
             }),
         };
 
-        // Build role mapping
-        let mut role_map = HashMap::new();
-        role_map.insert(GuardianMembershipChangeRole::ChangeInitiator, initiator_id);
-        // We only know the initiator; other guardians are resolved by transport
-
-        let vote_type = std::any::type_name::<GuardianVote>();
-        let vote_clone = vote.clone();
-
-        let mut adapter =
-            AuraProtocolAdapter::new(self.effects.clone(), authority_id, guardian_role, role_map)
-                .with_message_provider(move |request, _received| {
-                    if request.type_name == vote_type {
-                        return Some(Box::new(vote_clone.clone()));
-                    }
-                    None
-                });
-
         let session_id = membership_session_id(&proposal.change_id);
-        adapter
-            .start_session(session_id)
-            .await
-            .map_err(|e| AgentError::internal(format!("membership vote start failed: {e}")))?;
+        let active_role_name = match guardian_role {
+            GuardianMembershipChangeRole::Guardian1 => "Guardian1",
+            GuardianMembershipChangeRole::Guardian2 => "Guardian2",
+            GuardianMembershipChangeRole::Guardian3 => "Guardian3",
+            GuardianMembershipChangeRole::ChangeInitiator => unreachable!(),
+        };
+        let roles = vec![Self::role(initiator_id, 0), Self::role(authority_id, 0)];
+        let peer_roles =
+            BTreeMap::from([("ChangeInitiator".to_string(), Self::role(initiator_id, 0))]);
+        let global_type = aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::global_type();
+        let local_types = aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::local_types();
 
-        let result = membership_execute_as(guardian_role, &mut adapter)
+        self.effects
+            .start_session(session_id, roles)
             .await
-            .map_err(|e| AgentError::internal(format!("membership vote failed: {e}")));
+            .map_err(|error| {
+                AgentError::internal(format!("membership vote VM start failed: {error}"))
+            })?;
 
-        let _ = adapter.end_session().await;
+        let result = async {
+            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
+                aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::role_names(),
+                active_role_name,
+                &global_type,
+                &local_types,
+            )
+            .map_err(AgentError::internal)?;
+            handler.push_send_bytes(to_vec(&vote).map_err(|error| {
+                AgentError::internal(format!("guardian vote encode failed: {error}"))
+            })?);
+
+            let loop_result = loop {
+                let step = engine.step().map_err(|error| {
+                    AgentError::internal(format!("membership vote VM step failed: {error}"))
+                })?;
+                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
+                    .await
+                    .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = receive_blocked_vm_message(
+                    self.effects.as_ref(),
+                    engine.vm(),
+                    vm_sid,
+                    active_role_name,
+                    &peer_roles,
+                )
+                .await
+                .map_err(|error| {
+                    AgentError::internal(format!("membership vote receive failed: {error}"))
+                })? {
+                    inject_vm_receive(&mut engine, vm_sid, &blocked)
+                        .map_err(AgentError::internal)?;
+                    continue;
+                }
+
+                match step {
+                    StepResult::AllDone => break Ok(()),
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(AgentError::internal(
+                            "membership vote VM became stuck without a pending receive".to_string(),
+                        ));
+                    }
+                }
+            };
+
+            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            loop_result
+        }
+        .await;
+
+        let _ = self.effects.end_session().await;
         result.map(|_| vote)
     }
 
@@ -1774,13 +2001,6 @@ fn membership_session_id(change_id: &str) -> Uuid {
 
 fn validate_guardian_setup_inputs(guardians: &[AuthorityId], threshold: u16) -> AgentResult<()> {
     ceremony_types::validate_guardian_setup_inputs(guardians, threshold)
-}
-
-fn collect_guardian_acceptances(
-    received: &[ReceivedMessage],
-    acceptance_type: &'static str,
-) -> Vec<GuardianAcceptance> {
-    ceremony_types::collect_guardian_acceptances(received, acceptance_type)
 }
 
 fn build_guardian_setup_completion(

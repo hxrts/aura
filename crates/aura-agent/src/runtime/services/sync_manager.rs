@@ -7,24 +7,27 @@ use super::state::{with_state_mut, with_state_mut_validated};
 use super::traits::{RuntimeService, ServiceError, ServiceHealth};
 use super::{ReconfigurationManager, RuntimeTaskRegistry};
 use crate::core::default_context_id_for_authority;
-use crate::runtime::choreography_adapter::AuraProtocolAdapter;
+use crate::runtime::vm_host_bridge::{
+    close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
+    open_role_scoped_vm_session_admitted, receive_blocked_vm_message,
+};
 use crate::runtime::AuraEffectSystem;
 use async_trait::async_trait;
 use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash::hash;
 use aura_core::{AuthorityId, DelegationReceipt, DeviceId, SessionId};
-use aura_effects::RuntimeCapabilityHandler;
 use aura_protocol::admission::{required_capability_keys, PROTOCOL_SYNC_EPOCH_ROTATION};
-use aura_sync::protocols::epoch_runners::{
-    execute_as as epoch_execute_as, EpochRotationProtocolRole,
-};
+use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, RoleIndex};
+use aura_sync::protocols::epoch_runners::EpochRotationProtocolRole;
 use aura_sync::protocols::{EpochCommit, EpochConfirmation, EpochRotationProposal};
 use aura_sync::services::{Service, SyncService, SyncServiceConfig};
 use aura_sync::verification::{MerkleVerifier, VerificationResult};
-use std::collections::{HashMap, VecDeque};
+use aura_core::util::serialization::to_vec;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
+use telltale_vm::vm::StepResult;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -611,6 +614,13 @@ impl SyncServiceManager {
 // =============================================================================
 
 impl SyncServiceManager {
+    fn epoch_role(authority_id: AuthorityId, role_index: u16) -> ChoreographicRole {
+        ChoreographicRole::new(
+            DeviceId::from_uuid(Uuid::from_bytes(authority_id.to_bytes())),
+            RoleIndex::new(role_index.into()).expect("role index"),
+        )
+    }
+
     /// Execute epoch rotation protocol as coordinator.
     pub async fn execute_epoch_rotation_coordinator(
         &self,
@@ -621,60 +631,99 @@ impl SyncServiceManager {
         proposal: EpochRotationProposal,
         commit: EpochCommit,
     ) -> Result<(), String> {
-        let mut role_map = HashMap::new();
-        role_map.insert(EpochRotationProtocolRole::Coordinator, coordinator_id);
-        role_map.insert(EpochRotationProtocolRole::Participant1, participant1_id);
-        role_map.insert(EpochRotationProtocolRole::Participant2, participant2_id);
-
-        let proposal_type = std::any::type_name::<EpochRotationProposal>();
-        let commit_type = std::any::type_name::<EpochCommit>();
-
         let session_id = epoch_rotation_session_id(&proposal.rotation_id);
         self.record_native_epoch_session(coordinator_id, session_id)
             .await;
-        let mut proposals = VecDeque::new();
-        proposals.push_back(proposal);
-        let mut commits = VecDeque::new();
-        commits.push_back(commit);
-
         let required_capabilities = required_capability_keys(PROTOCOL_SYNC_EPOCH_ROTATION);
-        let capability_handler = Arc::new(RuntimeCapabilityHandler::from_pairs(
-            required_capabilities
-                .iter()
-                .map(|capability| (capability.as_str(), true)),
-        ));
+        let required_capability_refs: Vec<&str> = required_capabilities
+            .iter()
+            .map(|capability| capability.as_str())
+            .collect();
+        let roles = vec![
+            Self::epoch_role(coordinator_id, 0),
+            Self::epoch_role(participant1_id, 0),
+            Self::epoch_role(participant2_id, 0),
+        ];
+        let peer_roles = BTreeMap::from([
+            ("Participant1".to_string(), Self::epoch_role(participant1_id, 0)),
+            ("Participant2".to_string(), Self::epoch_role(participant2_id, 0)),
+        ]);
+        let global_type =
+            aura_sync::protocols::epochs::telltale_session_types_epoch_rotation::vm_artifacts::global_type();
+        let local_types =
+            aura_sync::protocols::epochs::telltale_session_types_epoch_rotation::vm_artifacts::local_types();
 
-        let mut adapter = AuraProtocolAdapter::new(
-            effects,
-            coordinator_id,
-            EpochRotationProtocolRole::Coordinator,
-            role_map,
-        )
-        .with_runtime_capability_admission(capability_handler, required_capabilities)
-        .with_message_provider(move |request, _received| {
-            if request.type_name == proposal_type {
-                return proposals
-                    .pop_front()
-                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
-            }
-            if request.type_name == commit_type {
-                return commits
-                    .pop_front()
-                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
-            }
-            None
-        });
-
-        adapter
-            .start_session(session_id)
+        effects
+            .start_session(session_id, roles)
             .await
             .map_err(|e| format!("epoch rotation start failed: {e}"))?;
 
-        let result = epoch_execute_as(EpochRotationProtocolRole::Coordinator, &mut adapter)
-            .await
-            .map_err(|e| format!("epoch rotation failed: {e}"));
+        let result = async {
+            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session_admitted(
+                aura_sync::protocols::epochs::telltale_session_types_epoch_rotation::vm_artifacts::role_names(),
+                "Coordinator",
+                &global_type,
+                &local_types,
+                &required_capability_refs,
+            )
+            .await?;
+            handler.push_send_bytes(
+                to_vec(&proposal).map_err(|error| format!("epoch proposal encode failed: {error}"))?,
+            );
+            let mut confirmations = Vec::new();
+            let mut commit_queued = false;
 
-        let _ = adapter.end_session().await;
+            loop {
+                let step = engine
+                    .step()
+                    .map_err(|error| format!("epoch rotation coordinator VM step failed: {error}"))?;
+                flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles)
+                    .await?;
+
+                if let Some(blocked) = receive_blocked_vm_message(
+                    effects.as_ref(),
+                    engine.vm(),
+                    vm_sid,
+                    "Coordinator",
+                    &peer_roles,
+                )
+                .await
+                .map_err(|error| format!("epoch rotation coordinator receive failed: {error}"))? {
+                    let confirmation: EpochConfirmation = aura_core::util::serialization::from_slice(
+                        &blocked.payload,
+                    )
+                    .map_err(|error| format!("epoch confirmation decode failed: {error}"))?;
+                    confirmations.push(confirmation);
+                    if !commit_queued && confirmations.len() == 2 {
+                        let payload =
+                            to_vec(&commit).map_err(|error| format!("epoch commit encode failed: {error}"))?;
+                        handler.push_send_bytes(payload.clone());
+                        handler.push_send_bytes(payload);
+                        commit_queued = true;
+                    }
+                    inject_vm_receive(&mut engine, vm_sid, &blocked)?;
+                    continue;
+                }
+
+                match step {
+                    StepResult::AllDone => break Ok(()),
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(
+                            "epoch rotation coordinator VM became stuck without a pending receive"
+                                .to_string(),
+                        );
+                    }
+                }
+            }
+            .and_then(|result| {
+                let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+                Ok(result)
+            })
+        }
+        .await;
+
+        let _ = effects.end_session().await;
         result
     }
 
@@ -695,47 +744,90 @@ impl SyncServiceManager {
                 return Err("participant role required".to_string())
             }
         };
-
-        let mut role_map = HashMap::new();
-        role_map.insert(EpochRotationProtocolRole::Coordinator, coordinator_id);
-        role_map.insert(EpochRotationProtocolRole::Participant1, participant1_id);
-        role_map.insert(EpochRotationProtocolRole::Participant2, participant2_id);
-
-        let confirmation_type = std::any::type_name::<EpochConfirmation>();
         let session_id = epoch_rotation_session_id(&confirmation.rotation_id);
         self.record_native_epoch_session(participant_id, session_id)
             .await;
-        let mut confirmations = VecDeque::new();
-        confirmations.push_back(confirmation);
-
         let required_capabilities = required_capability_keys(PROTOCOL_SYNC_EPOCH_ROTATION);
-        let capability_handler = Arc::new(RuntimeCapabilityHandler::from_pairs(
-            required_capabilities
-                .iter()
-                .map(|capability| (capability.as_str(), true)),
-        ));
+        let required_capability_refs: Vec<&str> = required_capabilities
+            .iter()
+            .map(|capability| capability.as_str())
+            .collect();
+        let active_role_name = match role {
+            EpochRotationProtocolRole::Participant1 => "Participant1",
+            EpochRotationProtocolRole::Participant2 => "Participant2",
+            EpochRotationProtocolRole::Coordinator => unreachable!(),
+        };
+        let roles = vec![
+            Self::epoch_role(coordinator_id, 0),
+            Self::epoch_role(participant_id, 0),
+        ];
+        let peer_roles = BTreeMap::from([(
+            "Coordinator".to_string(),
+            Self::epoch_role(coordinator_id, 0),
+        )]);
+        let global_type =
+            aura_sync::protocols::epochs::telltale_session_types_epoch_rotation::vm_artifacts::global_type();
+        let local_types =
+            aura_sync::protocols::epochs::telltale_session_types_epoch_rotation::vm_artifacts::local_types();
 
-        let mut adapter = AuraProtocolAdapter::new(effects, participant_id, role, role_map)
-            .with_runtime_capability_admission(capability_handler, required_capabilities)
-            .with_message_provider(move |request, _received| {
-                if request.type_name == confirmation_type {
-                    return confirmations
-                        .pop_front()
-                        .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
-                }
-                None
-            });
-
-        adapter
-            .start_session(session_id)
+        effects
+            .start_session(session_id, roles)
             .await
             .map_err(|e| format!("epoch rotation start failed: {e}"))?;
 
-        let result = epoch_execute_as(role, &mut adapter)
-            .await
-            .map_err(|e| format!("epoch rotation failed: {e}"));
+        let result = async {
+            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session_admitted(
+                aura_sync::protocols::epochs::telltale_session_types_epoch_rotation::vm_artifacts::role_names(),
+                active_role_name,
+                &global_type,
+                &local_types,
+                &required_capability_refs,
+            )
+            .await?;
+            handler.push_send_bytes(
+                to_vec(&confirmation)
+                    .map_err(|error| format!("epoch confirmation encode failed: {error}"))?,
+            );
 
-        let _ = adapter.end_session().await;
+            loop {
+                let step = engine
+                    .step()
+                    .map_err(|error| format!("epoch rotation participant VM step failed: {error}"))?;
+                flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles)
+                    .await?;
+
+                if let Some(blocked) = receive_blocked_vm_message(
+                    effects.as_ref(),
+                    engine.vm(),
+                    vm_sid,
+                    active_role_name,
+                    &peer_roles,
+                )
+                .await
+                .map_err(|error| format!("epoch rotation participant receive failed: {error}"))? {
+                    inject_vm_receive(&mut engine, vm_sid, &blocked)?;
+                    continue;
+                }
+
+                match step {
+                    StepResult::AllDone => break Ok(()),
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(
+                            "epoch rotation participant VM became stuck without a pending receive"
+                                .to_string(),
+                        );
+                    }
+                }
+            }
+            .and_then(|result| {
+                let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+                Ok(result)
+            })
+        }
+        .await;
+
+        let _ = effects.end_session().await;
         result
     }
 

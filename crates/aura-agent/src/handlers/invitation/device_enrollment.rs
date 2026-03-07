@@ -1,4 +1,9 @@
 use super::*;
+use crate::runtime::vm_host_bridge::{
+    close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
+    open_role_scoped_vm_session, receive_blocked_vm_message,
+};
+use std::collections::BTreeMap;
 
 pub(super) struct InvitationDeviceEnrollmentHandler<'a> {
     handler: &'a InvitationHandler,
@@ -7,6 +12,13 @@ pub(super) struct InvitationDeviceEnrollmentHandler<'a> {
 impl<'a> InvitationDeviceEnrollmentHandler<'a> {
     pub(super) fn new(handler: &'a InvitationHandler) -> Self {
         Self { handler }
+    }
+
+    fn role(authority_id: AuthorityId) -> ChoreographicRole {
+        ChoreographicRole::new(
+            aura_core::DeviceId::from_uuid(authority_id.0),
+            RoleIndex::new(0).expect("role index"),
+        )
     }
 
     pub(super) async fn resolve_device_enrollment_invitation(
@@ -83,13 +95,7 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,
     ) -> AgentResult<()> {
-        use crate::core::AgentError;
-
         let authority_id = self.handler.context.authority.authority_id();
-        let mut role_map = HashMap::new();
-        role_map.insert(DeviceEnrollmentRole::Initiator, authority_id);
-        role_map.insert(DeviceEnrollmentRole::Invitee, invitation.receiver_id);
-
         let (subject_authority, ceremony_id, pending_epoch, device_id) =
             match &invitation.invitation_type {
                 InvitationType::DeviceEnrollment {
@@ -120,48 +126,97 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
         });
         let invitation_id = invitation.invitation_id.clone();
         let ceremony_id_for_confirm = ceremony_id.clone();
-
-        let mut adapter = AuraProtocolAdapter::new(
-            effects.clone(),
-            authority_id,
-            DeviceEnrollmentRole::Initiator,
-            role_map,
-        )
-        .with_message_provider(move |request_ctx, _received| {
-            if InvitationHandler::type_matches(request_ctx.type_name, "DeviceEnrollmentRequest") {
-                return Some(Box::new(request.clone()));
-            }
-
-            if InvitationHandler::type_matches(request_ctx.type_name, "DeviceEnrollmentConfirm") {
-                let confirm = DeviceEnrollmentConfirmWrapper(DeviceEnrollmentConfirm {
-                    invitation_id: invitation_id.clone(),
-                    ceremony_id: ceremony_id_for_confirm.clone(),
-                    established: true,
-                    new_epoch: Some(pending_epoch),
-                });
-                return Some(Box::new(confirm));
-            }
-
-            None
+        let session_id = InvitationHandler::invitation_session_id(&invitation.invitation_id);
+        let roles = vec![Self::role(authority_id), Self::role(invitation.receiver_id)];
+        let peer_roles =
+            BTreeMap::from([("Invitee".to_string(), Self::role(invitation.receiver_id))]);
+        let global_type = aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::global_type();
+        let local_types = aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::local_types();
+        let confirm = DeviceEnrollmentConfirmWrapper(DeviceEnrollmentConfirm {
+            invitation_id: invitation_id.clone(),
+            ceremony_id: ceremony_id_for_confirm.clone(),
+            established: true,
+            new_epoch: Some(pending_epoch),
         });
 
-        let session_id = InvitationHandler::invitation_session_id(&invitation.invitation_id);
-        adapter
-            .start_session(session_id)
+        effects
+            .start_session(session_id, roles)
             .await
-            .map_err(|e| AgentError::internal(format!("device enrollment start failed: {e}")))?;
+            .map_err(|error| {
+                AgentError::internal(format!("device enrollment VM start failed: {error}"))
+            })?;
 
-        let result =
-            device_enrollment_execute_as(DeviceEnrollmentRole::Initiator, &mut adapter).await;
+        let result = async {
+            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
+                aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::role_names(),
+                "Initiator",
+                &global_type,
+                &local_types,
+            )
+            .map_err(AgentError::internal)?;
+            handler.push_send_bytes(
+                to_vec(&request).map_err(|error| {
+                    AgentError::internal(format!("device enrollment request encode failed: {error}"))
+                })?,
+            );
+            handler.push_send_bytes(
+                to_vec(&confirm).map_err(|error| {
+                    AgentError::internal(format!("device enrollment confirm encode failed: {error}"))
+                })?,
+            );
 
-        let _ = adapter.end_session().await;
-        match result {
-            Ok(()) => Ok(()),
-            Err(err) if InvitationHandler::is_transport_no_message(&err) => Ok(()),
-            Err(err) => Err(AgentError::internal(format!(
-                "device enrollment choreography failed: {err}"
-            ))),
+            let loop_result = loop {
+                let step = engine.step().map_err(|error| {
+                    AgentError::internal(format!("device enrollment initiator VM step failed: {error}"))
+                })?;
+                flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles)
+                    .await
+                    .map_err(AgentError::internal)?;
+
+                match receive_blocked_vm_message(
+                    effects.as_ref(),
+                    engine.vm(),
+                    vm_sid,
+                    "Initiator",
+                    &peer_roles,
+                )
+                .await
+                {
+                    Ok(Some(blocked)) => {
+                        inject_vm_receive(&mut engine, vm_sid, &blocked)
+                            .map_err(AgentError::internal)?;
+                        continue;
+                    }
+                    Ok(None) => {}
+                    Err(error) if InvitationHandler::is_transport_no_message(&error) => {
+                        break Ok(());
+                    }
+                    Err(error) => {
+                        break Err(AgentError::internal(format!(
+                            "device enrollment initiator receive failed: {error}"
+                        )));
+                    }
+                }
+
+                match step {
+                    StepResult::AllDone => break Ok(()),
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(AgentError::internal(
+                            "device enrollment initiator VM became stuck without a pending receive"
+                                .to_string(),
+                        ));
+                    }
+                }
+            };
+
+            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            loop_result
         }
+        .await;
+
+        let _ = effects.end_session().await;
+        result
     }
 
     pub(super) async fn execute_device_enrollment_invitee(
@@ -169,13 +224,7 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,
     ) -> AgentResult<()> {
-        use crate::core::AgentError;
-
         let authority_id = self.handler.context.authority.authority_id();
-        let mut role_map = HashMap::new();
-        role_map.insert(DeviceEnrollmentRole::Initiator, invitation.sender_id);
-        role_map.insert(DeviceEnrollmentRole::Invitee, authority_id);
-
         let (ceremony_id, device_id) = match &invitation.invitation_type {
             InvitationType::DeviceEnrollment {
                 ceremony_id,
@@ -194,31 +243,76 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
             ceremony_id,
             device_id,
         });
-
-        let mut adapter = AuraProtocolAdapter::new(
-            effects.clone(),
-            authority_id,
-            DeviceEnrollmentRole::Invitee,
-            role_map,
-        )
-        .with_message_provider(move |request, _received| {
-            if InvitationHandler::type_matches(request.type_name, "DeviceEnrollmentAccept") {
-                return Some(Box::new(accept.clone()));
-            }
-            None
-        });
-
         let session_id = InvitationHandler::invitation_session_id(&invitation.invitation_id);
-        adapter
-            .start_session(session_id)
-            .await
-            .map_err(|e| AgentError::internal(format!("device enrollment start failed: {e}")))?;
+        let roles = vec![Self::role(invitation.sender_id), Self::role(authority_id)];
+        let peer_roles =
+            BTreeMap::from([("Initiator".to_string(), Self::role(invitation.sender_id))]);
+        let global_type = aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::global_type();
+        let local_types = aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::local_types();
 
-        let result = device_enrollment_execute_as(DeviceEnrollmentRole::Invitee, &mut adapter)
+        effects
+            .start_session(session_id, roles)
             .await
-            .map_err(|e| AgentError::internal(format!("device enrollment failed: {e}")));
+            .map_err(|error| {
+                AgentError::internal(format!("device enrollment VM start failed: {error}"))
+            })?;
 
-        let _ = adapter.end_session().await;
+        let result = async {
+            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
+                aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::role_names(),
+                "Invitee",
+                &global_type,
+                &local_types,
+            )
+            .map_err(AgentError::internal)?;
+            handler.push_send_bytes(
+                to_vec(&accept).map_err(|error| {
+                    AgentError::internal(format!("device enrollment accept encode failed: {error}"))
+                })?,
+            );
+
+            let loop_result = loop {
+                let step = engine.step().map_err(|error| {
+                    AgentError::internal(format!("device enrollment invitee VM step failed: {error}"))
+                })?;
+                flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles)
+                    .await
+                    .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = receive_blocked_vm_message(
+                    effects.as_ref(),
+                    engine.vm(),
+                    vm_sid,
+                    "Invitee",
+                    &peer_roles,
+                )
+                .await
+                .map_err(|error| {
+                    AgentError::internal(format!("device enrollment invitee receive failed: {error}"))
+                })? {
+                    inject_vm_receive(&mut engine, vm_sid, &blocked)
+                        .map_err(AgentError::internal)?;
+                    continue;
+                }
+
+                match step {
+                    StepResult::AllDone => break Ok(()),
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(AgentError::internal(
+                            "device enrollment invitee VM became stuck without a pending receive"
+                                .to_string(),
+                        ));
+                    }
+                }
+            };
+
+            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            loop_result
+        }
+        .await;
+
+        let _ = effects.end_session().await;
         result
     }
 }

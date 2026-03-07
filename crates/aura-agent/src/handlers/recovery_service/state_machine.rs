@@ -1,4 +1,19 @@
 use super::*;
+use crate::runtime::vm_host_bridge::{
+    close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
+    open_role_scoped_vm_session, receive_blocked_vm_message,
+};
+use aura_core::util::serialization::to_vec;
+use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, RoleIndex};
+use std::collections::BTreeMap;
+use telltale_vm::vm::StepResult;
+
+fn recovery_role(authority_id: AuthorityId, role_index: u16) -> ChoreographicRole {
+    ChoreographicRole::new(
+        aura_core::DeviceId::from_uuid(authority_id.0),
+        RoleIndex::new(role_index.into()).expect("role index"),
+    )
+}
 
 pub(super) async fn execute_recovery_protocol_account(
     effects: Arc<AuraEffectSystem>,
@@ -6,39 +21,76 @@ pub(super) async fn execute_recovery_protocol_account(
     guardian_id: AuthorityId,
     request: ProtocolRecoveryRequest,
 ) -> AgentResult<()> {
-    use crate::core::AgentError;
-
-    let mut role_map = HashMap::new();
-    role_map.insert(RecoveryProtocolRole::Account, authority_id);
-    role_map.insert(RecoveryProtocolRole::Coordinator, authority_id);
-    role_map.insert(RecoveryProtocolRole::Guardian, guardian_id);
-
-    let request_type = std::any::type_name::<ProtocolRecoveryRequest>();
-
     let session_id = recovery_session_id(&request.recovery_id, &guardian_id);
-    let request_clone = request.clone();
-    let mut adapter = AuraProtocolAdapter::new(
-        effects.clone(),
-        authority_id,
-        RecoveryProtocolRole::Account,
-        role_map,
-    )
-    .with_message_provider(move |request_ctx, _received| {
-        if request_ctx.type_name == request_type {
-            return Some(Box::new(request_clone.clone()));
-        }
-        None
-    });
-    adapter
-        .start_session(session_id)
-        .await
-        .map_err(|e| AgentError::internal(format!("recovery account start failed: {e}")))?;
+    let roles = vec![
+        recovery_role(authority_id, 0),
+        recovery_role(authority_id, 1),
+        recovery_role(guardian_id, 0),
+    ];
+    let peer_roles = BTreeMap::from([("Coordinator".to_string(), recovery_role(authority_id, 1))]);
+    let global_type =
+        aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::global_type();
+    let local_types =
+        aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::local_types();
 
-    let result = recovery_execute_as(RecoveryProtocolRole::Account, &mut adapter)
+    effects
+        .start_session(session_id, roles)
         .await
-        .map_err(|e| AgentError::internal(format!("recovery account failed: {e}")));
+        .map_err(|error| {
+            AgentError::internal(format!("recovery account VM start failed: {error}"))
+        })?;
 
-    let _ = adapter.end_session().await;
+    let result = async {
+        let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
+            aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::role_names(),
+            "Account",
+            &global_type,
+            &local_types,
+        )
+        .map_err(AgentError::internal)?;
+        handler.push_send_bytes(
+            to_vec(&request)
+                .map_err(|error| AgentError::internal(format!("recovery request encode failed: {error}")))?,
+        );
+
+        let loop_result = loop {
+            let step = engine.step().map_err(|error| {
+                AgentError::internal(format!("recovery account VM step failed: {error}"))
+            })?;
+            flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles)
+                .await
+                .map_err(AgentError::internal)?;
+
+            if let Some(blocked) = receive_blocked_vm_message(
+                effects.as_ref(),
+                engine.vm(),
+                vm_sid,
+                "Account",
+                &peer_roles,
+            )
+            .await
+            .map_err(|error| AgentError::internal(format!("recovery account receive failed: {error}")))? {
+                inject_vm_receive(&mut engine, vm_sid, &blocked).map_err(AgentError::internal)?;
+                continue;
+            }
+
+            match step {
+                StepResult::AllDone => break Ok(()),
+                StepResult::Continue => {}
+                StepResult::Stuck => {
+                    break Err(AgentError::internal(
+                        "recovery account VM became stuck without a pending receive".to_string(),
+                    ));
+                }
+            }
+        };
+
+        let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+        loop_result
+    }
+    .await;
+
+    let _ = effects.end_session().await;
     result
 }
 
@@ -48,66 +100,100 @@ pub(super) async fn execute_recovery_protocol_coordinator(
     guardian_id: AuthorityId,
     request: ProtocolRecoveryRequest,
 ) -> AgentResult<()> {
-    use crate::core::AgentError;
-
-    let mut role_map = HashMap::new();
-    role_map.insert(RecoveryProtocolRole::Account, authority_id);
-    role_map.insert(RecoveryProtocolRole::Coordinator, authority_id);
-    role_map.insert(RecoveryProtocolRole::Guardian, guardian_id);
-
-    let request_type = std::any::type_name::<ProtocolRecoveryRequest>();
-    let approval_type = std::any::type_name::<ProtocolGuardianApproval>();
-    let outcome_type = std::any::type_name::<RecoveryOutcome>();
-
     let session_id = recovery_session_id(&request.recovery_id, &guardian_id);
-    let request_clone = request.clone();
-    let mut adapter = AuraProtocolAdapter::new(
-        effects.clone(),
-        authority_id,
-        RecoveryProtocolRole::Coordinator,
-        role_map,
-    )
-    .with_message_provider(move |request_ctx, received| {
-        if request_ctx.type_name == request_type {
-            return Some(Box::new(request_clone.clone()));
-        }
+    let roles = vec![
+        recovery_role(authority_id, 0),
+        recovery_role(authority_id, 1),
+        recovery_role(guardian_id, 0),
+    ];
+    let peer_roles = BTreeMap::from([
+        ("Account".to_string(), recovery_role(authority_id, 0)),
+        ("Guardian".to_string(), recovery_role(guardian_id, 0)),
+    ]);
+    let global_type =
+        aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::global_type();
+    let local_types =
+        aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::local_types();
 
-        if request_ctx.type_name == outcome_type {
-            let mut approvals = Vec::new();
-            for msg in received {
-                if msg.type_name == approval_type {
-                    if let Ok(approval) = from_slice::<ProtocolGuardianApproval>(&msg.bytes) {
-                        approvals.push(approval);
-                    }
+    effects
+        .start_session(session_id, roles)
+        .await
+        .map_err(|error| {
+            AgentError::internal(format!("recovery coordinator VM start failed: {error}"))
+        })?;
+
+    let result = async {
+        let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
+            aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::role_names(),
+            "Coordinator",
+            &global_type,
+            &local_types,
+        )
+        .map_err(AgentError::internal)?;
+        handler.push_send_bytes(
+            to_vec(&request)
+                .map_err(|error| AgentError::internal(format!("recovery request encode failed: {error}")))?,
+        );
+        let mut approvals = Vec::new();
+
+        let loop_result = loop {
+            let step = engine.step().map_err(|error| {
+                AgentError::internal(format!("recovery coordinator VM step failed: {error}"))
+            })?;
+            flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles)
+                .await
+                .map_err(AgentError::internal)?;
+
+            if let Some(blocked) = receive_blocked_vm_message(
+                effects.as_ref(),
+                engine.vm(),
+                vm_sid,
+                "Coordinator",
+                &peer_roles,
+            )
+            .await
+            .map_err(|error| {
+                AgentError::internal(format!("recovery coordinator receive failed: {error}"))
+            })? {
+                let approval: ProtocolGuardianApproval = from_slice(&blocked.payload).map_err(
+                    |error| {
+                        AgentError::internal(format!("guardian approval decode failed: {error}"))
+                    },
+                )?;
+                approvals.push(approval.clone());
+                handler.push_send_bytes(
+                    to_vec(&RecoveryOutcome {
+                        success: true,
+                        recovery_grant: None,
+                        error: None,
+                        approvals: approvals.clone(),
+                    })
+                    .map_err(|error| {
+                        AgentError::internal(format!("recovery outcome encode failed: {error}"))
+                    })?,
+                );
+                inject_vm_receive(&mut engine, vm_sid, &blocked).map_err(AgentError::internal)?;
+                continue;
+            }
+
+            match step {
+                StepResult::AllDone => break Ok(()),
+                StepResult::Continue => {}
+                StepResult::Stuck => {
+                    break Err(AgentError::internal(
+                        "recovery coordinator VM became stuck without a pending receive"
+                            .to_string(),
+                    ));
                 }
             }
-            let success = !approvals.is_empty();
-            let outcome = RecoveryOutcome {
-                success,
-                recovery_grant: None,
-                error: if success {
-                    None
-                } else {
-                    Some("no approvals".to_string())
-                },
-                approvals,
-            };
-            return Some(Box::new(outcome));
-        }
+        };
 
-        None
-    });
+        let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+        loop_result
+    }
+    .await;
 
-    adapter
-        .start_session(session_id)
-        .await
-        .map_err(|e| AgentError::internal(format!("recovery coordinator start failed: {e}")))?;
-
-    let result = recovery_execute_as(RecoveryProtocolRole::Coordinator, &mut adapter)
-        .await
-        .map_err(|e| AgentError::internal(format!("recovery coordinator failed: {e}")));
-
-    let _ = adapter.end_session().await;
+    let _ = effects.end_session().await;
     result
 }
 

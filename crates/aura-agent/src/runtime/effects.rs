@@ -399,7 +399,7 @@ impl AuraEffectSystem {
             }
         };
 
-        Self {
+        let effect_system = Self {
             config,
             authority_id: authority,
             execution_mode,
@@ -424,7 +424,18 @@ impl AuraEffectSystem {
             network_connections: parking_lot::RwLock::new(HashMap::new()),
             #[cfg(target_arch = "wasm32")]
             network_connections: parking_lot::RwLock::new(HashMap::new()),
-        }
+        };
+
+        tracing::info!(
+            authority_id = %effect_system.authority_id,
+            execution_mode = ?effect_system.execution_mode,
+            choreography_backend = crate::CHOREO_BACKEND,
+            choreography_session_mode = "per-session-task-bound",
+            active_choreography_sessions = effect_system.choreography_state.read().active_session_count(),
+            "initialized aura runtime effect system"
+        );
+
+        effect_system
     }
 
     /// Check if the effect system is in test mode (bypasses authorization guards)
@@ -887,7 +898,12 @@ impl AuraEffectSystem {
     }
 
     fn identity_from_location(location: &Location<'_>) -> String {
-        format!("{}:{}:{}", location.file(), location.line(), location.column())
+        format!(
+            "{}:{}:{}",
+            location.file(),
+            location.line(),
+            location.column()
+        )
     }
 
     fn derive_test_seed(identity: &str, extra_salt: u64) -> u64 {
@@ -898,7 +914,11 @@ impl AuraEffectSystem {
         u64::from_le_bytes(seed_bytes)
     }
 
-    fn register_test_seed(seed: u64, identity: &str, location: &Location<'_>) -> Result<(), crate::core::AgentError> {
+    fn register_test_seed(
+        seed: u64,
+        identity: &str,
+        location: &Location<'_>,
+    ) -> Result<(), crate::core::AgentError> {
         let registry = TEST_SEED_REGISTRY.get_or_init(|| parking_lot::Mutex::new(HashMap::new()));
         let usage = TestSeedUsage {
             identity: identity.to_string(),
@@ -1405,14 +1425,21 @@ mod tests {
         let seed_b = AuraEffectSystem::derive_test_seed(identity, 0);
         let seed_c = AuraEffectSystem::derive_test_seed(identity, 1);
         assert_eq!(seed_a, seed_b, "same identity/salt must be deterministic");
-        assert_ne!(seed_a, seed_c, "different salt must produce a different seed");
+        assert_ne!(
+            seed_a, seed_c,
+            "different salt must produce a different seed"
+        );
     }
 
     #[tokio::test]
     async fn test_duplicate_seed_registration_is_rejected() {
         let config = AgentConfig::default();
         let mut attempts = Vec::new();
-        for _ in 0..2 { attempts.push(AuraEffectSystem::simulation_for_named_test_with_salt(&config, "dup-seed", 7)); }
+        for _ in 0..2 {
+            attempts.push(AuraEffectSystem::simulation_for_named_test_with_salt(
+                &config, "dup-seed", 7,
+            ));
+        }
         assert!(
             attempts[0].is_ok(),
             "first deterministic allocation should succeed"
