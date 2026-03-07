@@ -1,4 +1,5 @@
-name: Quint Scheduled
+name: CI / Scheduled Quint
+run-name: ci/scheduled-quint/${{ github.event_name }}
 
 on:
   schedule:
@@ -21,9 +22,15 @@ jobs:
         with:
           cache-name: quint-typecheck
       - run: nix develop --command just ci-quint-typecheck
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: quint
+          replay-command: nix develop --command just ci-quint-typecheck
 
   quint-verify:
-    name: Quint Verify
+    name: Quint Verification
     needs: quint-typecheck
     runs-on: ubuntu-latest
     steps:
@@ -32,3 +39,9 @@ jobs:
         with:
           cache-name: quint-verify
       - run: nix develop --command just ci-quint-verify
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: quint
+          replay-command: nix develop --command just ci-quint-verify

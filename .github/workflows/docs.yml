@@ -1,4 +1,5 @@
-name: Docs
+name: Docs / Site
+run-name: docs/site/${{ github.event_name }}
 
 on:
   push:
@@ -18,7 +19,7 @@ env:
 
 jobs:
   links:
-    name: Links
+    name: Docs Links
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,9 +30,15 @@ jobs:
           config-file: ".github/config/markdown-link-check.json"
           base-branch: "main"
           folder-path: "docs"
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: docs
+          replay-command: nix develop --command just ci-book
 
   crate-links:
-    name: Crate Links
+    name: Crate Doc Links
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,16 +46,28 @@ jobs:
         with:
           cache-name: crate-links
       - run: nix develop --command just ci-crates-doc-links
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: docs
+          replay-command: nix develop --command just ci-crates-doc-links
 
   text-formatting:
-    name: Text Formatting
+    name: Text Formatting Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: ./scripts/check-text-formatting.sh
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: docs
+          replay-command: ./scripts/check-text-formatting.sh
 
   build:
-    name: Build
+    name: Docs Build
     needs: [links, crate-links, text-formatting]
     runs-on: ubuntu-latest
     steps:
@@ -62,9 +81,15 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs/book
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: docs
+          replay-command: nix develop --command just ci-book
 
   deploy:
-    name: Deploy
+    name: Docs Deploy
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: [build]
     permissions:
@@ -79,8 +104,14 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Setup Pages
         uses: actions/configure-pages@v4
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: docs

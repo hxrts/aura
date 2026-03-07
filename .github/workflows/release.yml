@@ -1,4 +1,5 @@
-name: Release On Tag
+name: Release / Tag
+run-name: release/tag/${{ github.ref_name }}
 
 on:
   push:
@@ -15,7 +16,7 @@ concurrency:
 
 jobs:
   ensure-release:
-    name: Ensure GitHub Release Exists
+    name: Ensure Release Exists
     runs-on: ubuntu-latest
     steps:
       - name: Create release if missing

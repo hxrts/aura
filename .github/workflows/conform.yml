@@ -1,10 +1,15 @@
-name: Conform
+name: CI / Deep Conformance
+run-name: ci/deep-conformance/${{ github.event_name }}
 
 on:
   push:
     branches: [main, develop]
-  pull_request:
-    branches: [main, develop]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+  schedule:
+    - cron: '0 5 * * *'
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -12,7 +17,7 @@ env:
 
 jobs:
   conformance:
-    name: Conformance
+    name: Conformance Suite
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,16 +34,22 @@ jobs:
           AURA_CONFORMANCE_ARTIFACT_DIR: artifacts/conformance
           AURA_CONFORMANCE_ROTATING_WINDOW: 8
           AURA_CONFORMANCE_ITF_SEED_WINDOW: 8
-      - name: Upload artifacts
+      - name: Upload conformance artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: conformance-${{ github.run_id }}
           path: artifacts/conformance
           if-no-files-found: warn
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: conform-deep
+          replay-command: nix develop --command just ci-conformance
 
   itf-conformance:
-    name: ITF Conformance
+    name: Conformance ITF
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -46,9 +57,15 @@ jobs:
         with:
           cache-name: itf-conformance
       - run: nix develop --command just ci-conformance-itf
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: conform-deep
+          replay-command: nix develop --command just ci-conformance-itf
 
   differential:
-    name: Differential
+    name: Conformance Differential
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,9 +76,15 @@ jobs:
         run: nix develop --command just lean-oracle-build
       - name: Run differential tests
         run: nix develop --command just ci-conformance-diff
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: conform-deep
+          replay-command: nix develop --command 'just lean-oracle-build && just ci-conformance-diff'
 
   choreo-parity:
-    name: Choreo Parity
+    name: Choreography Parity
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,20 +92,25 @@ jobs:
         with:
           cache-name: choreo-parity
       - name: Run parity gates
-        # Use minimal CI shell (excludes Aeneas/Lean which have flaky OCaml deps)
         run: nix develop .#ci --command just ci-choreo-parity
         env:
           CARGO_BUILD_JOBS: 4
-      - name: Upload artifacts
+      - name: Upload parity artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: choreo-parity-${{ github.run_id }}
           path: artifacts/choreo-parity
           if-no-files-found: warn
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: conform-deep
+          replay-command: nix develop .#ci --command just ci-choreo-parity
 
   property-monitor:
-    name: Property Monitor
+    name: Property Monitor Suite
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -90,29 +118,39 @@ jobs:
         with:
           cache-name: property-monitor
       - name: Run property-monitored simulations
-        # Use minimal CI shell (excludes Aeneas/Lean which have flaky OCaml deps)
         run: nix develop .#ci --command just ci-property-monitor
-      - name: Upload artifacts
+      - name: Upload property artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: property-monitor-${{ github.run_id }}
           path: artifacts/property-monitor
           if-no-files-found: warn
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: conform-deep
+          replay-command: nix develop .#ci --command just ci-property-monitor
 
   effects:
-    name: Effects
+    name: Effects Gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: effects
-      # Use minimal CI shell (excludes Aeneas/Lean which have flaky OCaml deps)
       - run: nix develop .#ci --command just ci-effects
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: conform-deep
+          replay-command: nix develop .#ci --command just ci-effects
 
   agent-wasm:
-    name: Agent WASM
+    name: Agent WASM Gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -120,7 +158,12 @@ jobs:
         with:
           cache-name: agent-wasm
       - name: Check WASM backends
-        # Use minimal CI shell (excludes Aeneas/Lean which have flaky OCaml deps)
         run: nix develop .#ci --command just ci-agent-wasm
         env:
           CARGO_BUILD_JOBS: 4
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: conform-deep
+          replay-command: nix develop .#ci --command just ci-agent-wasm

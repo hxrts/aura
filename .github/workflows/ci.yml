@@ -1,10 +1,23 @@
-name: CI
+name: CI / Fast
+run-name: ci/fast/${{ github.ref_name }}
 
 on:
   push:
     branches: [main, develop]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
   pull_request:
     branches: [main, develop]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+  merge_group:
+    types: [checks_requested]
+
+concurrency:
+  group: ci-fast-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -13,7 +26,7 @@ env:
 
 jobs:
   format:
-    name: Format
+    name: Format Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,9 +34,15 @@ jobs:
         with:
           cache-name: format
       - run: nix develop --command just ci-format
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: ci-fast
+          replay-command: nix develop --command just ci-format
 
   clippy:
-    name: Clippy
+    name: Clippy Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,9 +50,15 @@ jobs:
         with:
           cache-name: clippy
       - run: nix develop --command just ci-clippy
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: ci-fast
+          replay-command: nix develop --command just ci-clippy
 
   build:
-    name: Build
+    name: Build Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,9 +66,47 @@ jobs:
         with:
           cache-name: build
       - run: nix develop --command just ci-build
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: ci-fast
+          replay-command: nix develop --command just ci-build
+
+  arch:
+    name: Architecture Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: arch
+      - run: nix develop --command scripts/check-arch.sh --quick
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: ci-fast
+          replay-command: nix develop --command scripts/check-arch.sh --quick
+
+  ux-flow-coverage:
+    name: UX Flow Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: ux-flow-coverage
+      - run: nix develop --command just ci-ux-flow-coverage
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: ci-fast
+          replay-command: nix develop --command just ci-ux-flow-coverage
 
   test:
-    name: Test
+    name: Tests + Protocol Compat
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,55 +139,11 @@ jobs:
           CARGO_BUILD_JOBS: 4
           CARGO_PROFILE_DEV_DEBUG: 0
           CARGO_INCREMENTAL: 0
-      - name: Run protocol compatibility gate
+      - name: Protocol compatibility
         run: nix develop --command just ci-protocol-compat
-
-  holepunch-tier1:
-    name: Holepunch Tier 1
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
         with:
-          cache-name: holepunch-tier1
-      - name: Run deterministic/property holepunch tests
-        run: nix develop .#nightly --command just ci-holepunch-tier1
-
-  holepunch-tier2:
-    name: Holepunch Tier 2
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: holepunch-tier2
-      - name: Enable unprivileged user namespaces for patchbay
-        run: |
-          # Ubuntu 24.04+ with AppArmor restricts unprivileged user namespaces by default.
-          # Patchbay requires user namespaces for network simulation without root.
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          # Verify the setting
-          echo "AppArmor userns restriction: $(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)"
-      - name: Run Patchbay NAT traversal scenarios
-        run: nix develop --command just ci-holepunch-tier2
-      - name: Upload holepunch artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: holepunch-tier2-${{ github.run_id }}
-          path: artifacts/holepunch
-          if-no-files-found: warn
-
-  unused-deps:
-    name: Unused Deps
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: unused-deps
-      - name: Check unused dependencies
-        run: |
-          nix develop .#nightly --command bash -c \
-            'cargo +nightly udeps --all-targets 2>&1 | grep -E "^(unused|warning:)" || echo "No unused dependencies found"'
+          name: ci-fast
+          replay-command: nix develop --command 'just ci-test && just ci-protocol-compat'

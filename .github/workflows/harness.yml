@@ -1,11 +1,13 @@
-name: Harness
+name: CI / Deep Harness
+run-name: ci/deep-harness/${{ github.event_name }}
 
 on:
   workflow_dispatch:
   push:
     branches: [main, develop]
-  pull_request:
-    branches: [main, develop]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
   schedule:
     - cron: "0 7 * * *"
 
@@ -15,7 +17,7 @@ env:
 
 jobs:
   build:
-    name: Build
+    name: Harness Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,9 +25,15 @@ jobs:
         with:
           cache-name: harness-build
       - run: nix develop --command just ci-harness-build
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: harness-deep
+          replay-command: nix develop --command just ci-harness-build
 
   contract:
-    name: Contract
+    name: Harness Contract
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,10 +41,16 @@ jobs:
         with:
           cache-name: harness-contract
       - run: nix develop --command just ci-harness-contract
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: harness-deep
+          replay-command: nix develop --command just ci-harness-contract
 
   replay:
-    name: Replay
-    if: github.event_name == 'schedule'
+    name: Harness Replay
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,16 +58,21 @@ jobs:
         with:
           cache-name: harness-replay
       - run: nix develop --command just ci-harness-replay
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: harness-deep
+          replay-command: nix develop --command just ci-harness-replay
 
   browser:
-    name: Browser
+    name: Harness Browser
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: harness-browser
-      # Nix-provided ldd can mis-detect Ubuntu host libs for Playwright browsers in CI.
       - run: nix develop --command just ci-harness-browser
         env:
           PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS: "1"
@@ -64,3 +83,9 @@ jobs:
           name: harness-browser-${{ github.run_id }}
           path: artifacts/harness/browser
           if-no-files-found: warn
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: harness-deep
+          replay-command: nix develop --command just ci-harness-browser
