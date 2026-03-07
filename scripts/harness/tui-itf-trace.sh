@@ -2,8 +2,8 @@
 # tui-itf-trace.sh - Generate or check TUI ITF traces
 #
 # Usage:
-#   ./scripts/tui-itf-trace.sh generate [output]   # Generate trace (default)
-#   ./scripts/tui-itf-trace.sh check [expected]    # Check trace matches regeneration
+#   ./scripts/harness/tui-itf-trace.sh generate [output]   # Generate trace (default)
+#   ./scripts/harness/tui-itf-trace.sh check [expected]    # Check trace matches regeneration
 #
 # Environment:
 #   TUI_ITF_SEED       - Random seed (default: 424242)
@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SPEC="$ROOT/verification/quint/tui_state_machine.qnt"
 DEFAULT_TRACE="$ROOT/verification/quint/traces/tui_trace.itf.json"
 

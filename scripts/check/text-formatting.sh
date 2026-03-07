@@ -2,8 +2,8 @@
 # Check for emojis in non-gitignored project files
 #
 # Usage:
-#   ./check-text-formatting.sh           # Check only (for CI)
-#   ./check-text-formatting.sh --replace # Check and auto-fix
+#   ./scripts/check/text-formatting.sh           # Check only (for CI)
+#   ./scripts/check/text-formatting.sh --replace # Check and auto-fix
 #
 # Auto-replacements (with --replace):
 #   ✅ (green check) → ✓
@@ -49,7 +49,7 @@ if [[ "$REPLACE_MODE" == true ]]; then
 
     while IFS= read -r file; do
         # Skip this script itself (contains emoji documentation)
-        if [[ "$file" == "scripts/check-text-formatting.sh" ]]; then
+        if [[ "$file" == "scripts/check/text-formatting.sh" ]]; then
             continue
         fi
 
@@ -97,7 +97,7 @@ fi
 # Check for all emojis (including auto-fixable ones in check-only mode)
 while IFS= read -r file; do
     # Skip this script itself (contains emoji documentation)
-    if [[ "$file" == "scripts/check-text-formatting.sh" ]]; then
+    if [[ "$file" == "scripts/check/text-formatting.sh" ]]; then
         continue
     fi
 

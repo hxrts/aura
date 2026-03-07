@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# verify.sh - Unified verification scripting
+# workflow.sh - Unified verification scripting
 #
 # Usage:
-#   ./scripts/verify.sh coverage [--md|--json]  # Generate verification coverage report
-#   ./scripts/verify.sh quint-types [--verbose] # Check Quint-Rust type correspondence
-#   ./scripts/verify.sh kani                    # Run Kani bounded model checking suite
+#   ./scripts/verify/workflow.sh coverage [--md|--json]  # Generate verification coverage report
+#   ./scripts/verify/workflow.sh quint-types [--verbose] # Check Quint-Rust type correspondence
+#   ./scripts/verify/workflow.sh kani                    # Run Kani bounded model checking suite
 #
 # Run without arguments to see available commands.
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Colors
 RED='\033[0;31m'

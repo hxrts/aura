@@ -6,6 +6,13 @@
 set -euo pipefail
 
 # ───────────────────────────────────────────────────────────────────────────────
+# Paths
+# ───────────────────────────────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$PROJECT_ROOT"
+
+# ───────────────────────────────────────────────────────────────────────────────
 # Styling
 # ───────────────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -18,7 +25,7 @@ usage() {
   cat <<'EOF'
 Aura Architectural Compliance Checker
 
-Usage: scripts/check-arch.sh [OPTIONS]
+Usage: scripts/check/arch.sh [OPTIONS]
 
 Options (run all when none given):
   --layers         Layer boundary and purity checks
@@ -129,12 +136,12 @@ VIOLATION_DETAILS=()
 # ───────────────────────────────────────────────────────────────────────────────
 # Output Helpers
 # ───────────────────────────────────────────────────────────────────────────────
-violation() { ((VIOLATIONS++)) || true; VIOLATION_DETAILS+=("$1"); echo -e "${RED}✖${NC} $1"; }
-warning()   { violation "$1"; }  # Warnings treated as violations for strict compliance
-info()      { echo -e "${BLUE}•${NC} $1"; }
-section()   { echo -e "\n${BOLD}${CYAN}$1${NC}"; }
-verbose()   { $VERBOSE && echo -e "${BLUE}  ↳${NC} $1" || true; }
-hint()      { echo -e "    ${YELLOW}Fix:${NC} $1"; }
+printc()    { printf '%b\n' "$1"; }
+violation() { ((VIOLATIONS++)) || true; VIOLATION_DETAILS+=("$1"); printc "${RED}✖${NC} $1"; }
+info()      { printc "${BLUE}•${NC} $1"; }
+section()   { printc "\n${BOLD}${CYAN}$1${NC}"; }
+verbose()   { $VERBOSE && printc "${BLUE}  ↳${NC} $1" || true; }
+hint()      { printc "    ${YELLOW}Fix:${NC} $1"; }
 
 # ───────────────────────────────────────────────────────────────────────────────
 # Layer Utilities
@@ -151,12 +158,6 @@ layer_of() {
     aura-testkit|aura-quint) echo 8 ;;
     *) echo 0 ;;
   esac
-}
-
-get_layer_from_path() {
-  local crate
-  crate=$(echo "$1" | sed 's|^crates/||' | cut -d/ -f1)
-  layer_of "$crate"
 }
 
 layer_filter_matches() {
@@ -250,6 +251,13 @@ check_cargo() {
   return 1
 }
 
+run_check() {
+  local enabled="$1" check_fn="$2"
+  if $RUN_ALL || $enabled; then
+    "$check_fn"
+  fi
+}
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CHECK: Layer Purity
@@ -299,6 +307,10 @@ check_deps() {
   section "Dependency direction — no upward deps (Lx→Ly where y>x)"
 
   if check_cargo; then
+    if ! command -v jq >/dev/null 2>&1; then
+      violation "jq unavailable; dependency direction not checked"
+      return
+    fi
     local deps clean=true
     deps=$(cargo metadata --format-version 1 --no-deps 2>/dev/null | jq -r '.packages[] | select(.name | startswith("aura-")) | [.name, (.dependencies[] | select(.name | startswith("aura-")) | .name)] | @tsv') || deps=""
     while IFS=$'\t' read -r src dst; do
@@ -340,21 +352,17 @@ check_effects() {
   local infra_traits="CryptoEffects|NetworkEffects|StorageEffects|PhysicalTimeEffects|LogicalClockEffects|OrderClockEffects|TimeAttestationEffects|RandomEffects|ConsoleEffects|ConfigurationEffects|LeakageEffects"
   local infra_defs
   infra_defs=$(find crates/ -name "*.rs" -not -path "*/aura-core/*" -exec grep -El "pub trait ($infra_traits)" {} + 2>/dev/null || true)
-  if [[ -n "$infra_defs" ]]; then
-    violation "Infrastructure effect traits defined outside aura-core:"
-    echo "$infra_defs"
-  else
-    info "Infra effect traits: only in aura-core"
-  fi
+  emit_hits "Infrastructure effect traits defined outside aura-core" "$infra_defs"
 
   # Stateful constructs in aura-effects (should be stateless)
   local stateful
   stateful=$(grep -R "Arc<Mutex\|Arc<RwLock\|Rc<RefCell" crates/aura-effects/src 2>/dev/null | grep -v "test" | grep -v "reactive/handler.rs" | grep -v "query/handler.rs" || true)
-  [[ -n "$stateful" ]] && { violation "aura-effects contains stateful constructs"; echo "$stateful"; }
+  emit_hits "Stateful constructs in aura-effects" "$stateful"
 
   # Mock handlers in wrong location
-  grep -R "Mock.*Handler\|InMemory.*Handler" crates/aura-effects/src 2>/dev/null | grep -v "test" >/dev/null && \
-    violation "Mock handlers in aura-effects (should be in aura-testkit)"
+  local mock_handlers
+  mock_handlers=$(grep -R "Mock.*Handler\|InMemory.*Handler" crates/aura-effects/src 2>/dev/null | grep -v "test" || true)
+  emit_hits "Mock handlers in aura-effects (should be in aura-testkit)" "$mock_handlers"
 
   # Infrastructure effects outside aura-effects
   local infra_impls
@@ -366,7 +374,7 @@ check_effects() {
   local app_effects="JournalEffects|AuthorityEffects|FlowBudgetEffects|AuthorizationEffects|RelationalContextEffects|GuardianEffects|ChoreographicEffects|EffectApiEffects|SyncEffects"
   local app_impls
   app_impls=$(grep -R "impl.*\($app_effects\)" crates/aura-effects/src 2>/dev/null | grep -v "test" || true)
-  [[ -n "$app_impls" ]] && violation "Application effects in aura-effects (should be in domain crates)" || info "No app effects in aura-effects"
+  emit_hits "Application effects in aura-effects (should be in domain crates)" "$app_impls"
 
   # ─── Direct OS operations ───
   section "Direct OS operations — use effect traits instead"
@@ -1291,9 +1299,10 @@ check_test_seeds() {
   section "Test seed uniqueness — ensure test isolation"
 
   # Run the dedicated test seed checker script
-  if ! bash scripts/check-test-seeds.sh; then
-    VIOLATIONS=$((VIOLATIONS + 1))
-    VIOLATION_DETAILS+=("Test seed uniqueness violations detected")
+  if bash scripts/check/test-seeds.sh; then
+    info "Test seed uniqueness: clean"
+  else
+    violation "Test seed uniqueness violations detected (see checker output above)"
   fi
 }
 
@@ -1368,38 +1377,46 @@ check_todos() {
 # ═══════════════════════════════════════════════════════════════════════════════
 # Main Execution
 # ═══════════════════════════════════════════════════════════════════════════════
-{ $RUN_ALL || $RUN_LAYERS; }       && check_layers
-{ $RUN_ALL || $RUN_DEPS; }         && check_deps
-{ $RUN_ALL || $RUN_EFFECTS; }      && check_effects
-{ $RUN_ALL || $RUN_GUARDS; }       && check_guards
-{ $RUN_ALL || $RUN_INVARIANTS; }   && check_invariants
-{ $RUN_ALL || $RUN_REG; }          && check_registration
-{ $RUN_ALL || $RUN_CRYPTO; }       && check_crypto
-{ $RUN_ALL || $RUN_CONCURRENCY; }  && check_concurrency
-{ $RUN_ALL || $RUN_REACTIVE; }     && check_reactive
-{ $RUN_ALL || $RUN_CEREMONIES; }   && check_ceremonies
-{ $RUN_ALL || $RUN_UI; }           && check_ui
-{ $RUN_ALL || $RUN_WORKFLOWS; }    && check_workflows
-{ $RUN_ALL || $RUN_SERIALIZATION; } && { check_serialization; check_handler_hygiene; }
-{ $RUN_ALL || $RUN_STYLE; }        && check_style
-{ $RUN_ALL || $RUN_TEST_SEEDS; }   && check_test_seeds
-{ $RUN_ALL || $RUN_TODOS; }        && check_todos
+run_check "$RUN_LAYERS" check_layers
+run_check "$RUN_DEPS" check_deps
+run_check "$RUN_EFFECTS" check_effects
+run_check "$RUN_GUARDS" check_guards
+run_check "$RUN_INVARIANTS" check_invariants
+run_check "$RUN_REG" check_registration
+run_check "$RUN_CRYPTO" check_crypto
+run_check "$RUN_CONCURRENCY" check_concurrency
+run_check "$RUN_REACTIVE" check_reactive
+run_check "$RUN_CEREMONIES" check_ceremonies
+run_check "$RUN_UI" check_ui
+run_check "$RUN_WORKFLOWS" check_workflows
+if $RUN_ALL || $RUN_SERIALIZATION; then
+  check_serialization
+  check_handler_hygiene
+fi
+run_check "$RUN_STYLE" check_style
+run_check "$RUN_TEST_SEEDS" check_test_seeds
+run_check "$RUN_TODOS" check_todos
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Summary
 # ═══════════════════════════════════════════════════════════════════════════════
-echo -e "\n${BOLD}${CYAN}Summary${NC}"
+section "Summary"
 if [[ $VIOLATIONS -eq 0 ]]; then
-  echo -e "${GREEN}✔ No violations${NC}"
+  printc "${GREEN}✔ No violations${NC}"
 else
-  echo -e "${RED}✖ $VIOLATIONS violation(s)${NC}"
+  printc "${RED}✖ $VIOLATIONS violation(s)${NC}"
   if $VERBOSE && [[ ${#VIOLATION_DETAILS[@]} -gt 0 ]]; then
-    echo -e "\n${BOLD}Violation details:${NC}"
+    printc "\n${BOLD}Violation details:${NC}"
     for d in "${VIOLATION_DETAILS[@]}"; do echo "  - $d"; done
   fi
 fi
 
-[[ $VIOLATIONS -gt 10 ]] && ! $RUN_QUICK && echo -e "\n${YELLOW}Tip:${NC} Use --quick to skip TODO/placeholder checks"
+if [[ $VIOLATIONS -gt 10 ]] && ! $RUN_QUICK; then
+  printc "\n${YELLOW}Tip:${NC} Use --quick to skip TODO/placeholder checks"
+fi
 
-exit $([[ $VIOLATIONS -eq 0 ]] && echo 0 || echo 1)
+if [[ $VIOLATIONS -eq 0 ]]; then
+  exit 0
+fi
+exit 1

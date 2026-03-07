@@ -1343,7 +1343,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     // Note: Domain data (channels, messages, guardians, etc.) is no longer passed to screens.
     // Each screen subscribes to signals directly via AppCoreContext.
-    // See check-arch.sh --reactive for architectural enforcement.
+    // See scripts/check/arch.sh --reactive for architectural enforcement.
 
     // Read TUI state for rendering via type-safe handle.
     // This MUST be used for all render-time state access - it reads the version to establish

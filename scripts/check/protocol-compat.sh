@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 run_pair() {
@@ -26,7 +26,7 @@ run_fixture_breaking() {
 
 if [[ "${1:-}" == "--pair" ]]; then
   if [[ "$#" -ne 3 ]]; then
-    echo "usage: scripts/check-protocol-compat.sh --pair <baseline.choreo> <current.choreo>"
+    echo "usage: scripts/check/protocol-compat.sh --pair <baseline.choreo> <current.choreo>"
     exit 2
   fi
   run_pair "$2" "$3"

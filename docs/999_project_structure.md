@@ -971,7 +971,7 @@ This is acceptable technical debt - the pattern consistency outweighs the semant
 The project includes an automated architectural compliance checker to enforce these layering principles:
 
 **Command**: `just check-arch`  
-**Script**: `scripts/arch-check.sh`
+**Script**: `scripts/check/arch.sh`
 
 **What it validates**:
 - Layer boundary violations (no upward dependencies)

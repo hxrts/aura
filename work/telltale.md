@@ -364,7 +364,7 @@ TCP-based transport with:
 **Why**: Makes protocol-breaking changes explicit in PRs.
 
 **Where**:
-- `scripts/check-protocol-compat.sh` (new)
+- `scripts/check/protocol-compat.sh` (new)
 - Optional Rust helper under `crates/aura-testkit` or a small `xtask` binary
 - CI wiring in `.github/workflows/*` and `justfile`
 
@@ -479,7 +479,7 @@ TCP-based transport with:
     - A reviewer can classify a change without reading implementation code.
 
 - [x] **Implement CI compatibility checker as tooling (not runtime)**
-  - Add `scripts/check-protocol-compat.sh` (new), or equivalent tooling command.
+  - Add `scripts/check/protocol-compat.sh` (new), or equivalent tooling command.
   - Compare baseline projections vs. current projections via `async_subtype`.
   - Done when:
     - Script exits non-zero on an intentionally breaking fixture.
@@ -614,7 +614,7 @@ Version policy:
 |---------|----------|--------|--------|
 | Coherence checking | P0 | Medium | [x] Implemented in macro pipeline with deterministic model derivation and compile-fail coverage |
 | Orphan-free validation | P0 | Low | [x] Implemented via shared testkit helpers and recovery/consensus tests |
-| Async subtyping CI gate | P1 | Medium | [x] Implemented via `scripts/check-protocol-compat.sh` + CI/Just wiring |
+| Async subtyping CI gate | P1 | Medium | [x] Implemented via `scripts/check/protocol-compat.sh` + CI/Just wiring |
 | Fault injection patterns | P2 | Medium | [x] Gap assessed and selected fault/trigger abstractions implemented in simulator |
 | Lean bridge integration | P3 | High | [x] Evaluated; deferred (no new dependency or lane added) |
 | RuntimeContracts/TheoremPack | P3 | High | [ ] Not needed yet |
