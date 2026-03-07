@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use aura_harness::api_version::TOOL_API_VERSIONS;
 use aura_harness::artifact_sync::RemoteArtifactSyncReport;
+use aura_harness::config::ScreenSource;
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::{build_seed_bundle, SeedBundle};
 use aura_harness::replay::ReplayBundle;
@@ -197,6 +198,7 @@ args = ["-lc", "yes churn"]
         instance_id: "alice".to_string(),
         pattern: "__never_matches__".to_string(),
         timeout_ms: 500,
+        screen_source: ScreenSource::Default,
     });
     let elapsed = started_at.elapsed();
 

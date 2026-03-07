@@ -443,6 +443,8 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 
 **Key characteristics**: Mock handlers in `aura-testkit` are allowed to be stateful (using `Arc<Mutex<>>`, etc.) since they need controllable, deterministic state for testing. This maintains the stateless principle for production handlers in `aura-effects` while enabling comprehensive testing.
 
+**Deterministic seed policy**: Test construction of `AuraEffectSystem` must use seeded helper constructors (`simulation_for_test*`). Do not call legacy `testing*` or raw `simulation*` constructors from test code. For multiple instances from the same callsite, use `simulation_for_named_test_with_salt(...)` so each seed is unique and replayable.
+
 **Dependencies**: `aura-core` (for aura-harness); `aura-agent`, `aura-composition`, `aura-journal`, `aura-transport`, `aura-core`, `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy` (for aura-testkit and aura-quint).
 
 ## Workspace Structure

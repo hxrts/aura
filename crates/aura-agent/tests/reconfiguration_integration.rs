@@ -23,7 +23,7 @@ async fn device_migration_delegation_persists_audit_fact_and_coherence() {
     let session_id = session(9);
 
     let effects =
-        AuraEffectSystem::simulation_for_authority(&AgentConfig::default(), 701, from_authority)
+        AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), from_authority)
             .expect("simulation effect system");
     let manager = ReconfigurationManager::new();
 
@@ -113,7 +113,7 @@ async fn guardian_handoff_delegation_records_guardian_bundle() {
     let session_id = session(33);
 
     let effects =
-        AuraEffectSystem::simulation_for_authority(&AgentConfig::default(), 902, authority(9))
+        AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), authority(9))
             .expect("simulation effect system");
     let manager = ReconfigurationManager::new();
     manager

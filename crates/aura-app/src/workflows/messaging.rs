@@ -1437,7 +1437,19 @@ pub async fn start_direct_chat_with_authority(
     // Get contact name from ViewState for the channel name
     let contact_name = contacts
         .contact(&contact_authority)
-        .map(|c| c.nickname.clone())
+        .map(|c| {
+            if !c.nickname.trim().is_empty() {
+                c.nickname.clone()
+            } else if let Some(suggestion) = c
+                .nickname_suggestion
+                .as_ref()
+                .filter(|value| !value.trim().is_empty())
+            {
+                suggestion.clone()
+            } else {
+                format!("DM with {}", &contact_id[..8.min(contact_id.len())])
+            }
+        })
         .unwrap_or_else(|| format!("DM with {}", &contact_id[..8.min(contact_id.len())]));
 
     if backend == MessagingBackend::Runtime {
@@ -1515,7 +1527,7 @@ pub async fn start_direct_chat_with_authority(
             chat_state.upsert_channel(Channel {
                 id: channel_id,
                 context_id: Some(context_id),
-                name: contact_name.clone(),
+                name: channel_name.clone(),
                 topic: Some(format!("Direct messages with {contact_id}")),
                 channel_type: ChannelType::DirectMessage,
                 unread_count: 0,
@@ -1539,7 +1551,11 @@ pub async fn start_direct_chat_with_authority(
     let dm_channel = Channel {
         id: channel_id,
         context_id: None,
-        name: contact_name,
+        name: if contact_name.trim().is_empty() {
+            format!("dm-{}", &contact_id[..8.min(contact_id.len())])
+        } else {
+            format!("DM: {contact_name}")
+        },
         topic: Some(format!("Direct messages with {contact_id}")),
         channel_type: ChannelType::DirectMessage,
         unread_count: 0,

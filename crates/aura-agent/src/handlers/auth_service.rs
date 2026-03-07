@@ -486,7 +486,7 @@ mod tests {
         let account_id = AccountId::new_from_entropy([82u8; 32]);
 
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
 
         let service = AuthServiceApi::new(effects, authority_context, account_id).unwrap();
 
@@ -500,7 +500,7 @@ mod tests {
         let account_id = AccountId::new_from_entropy([85u8; 32]);
 
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
 
         let service = AuthServiceApi::new(effects, authority_context, account_id).unwrap();
 
@@ -522,7 +522,7 @@ mod tests {
         let account_id = AccountId::new_from_entropy([88u8; 32]);
 
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
 
         let service = AuthServiceApi::new(effects, authority_context, account_id).unwrap();
 
@@ -539,7 +539,7 @@ mod tests {
         let account_id = AccountId::new_from_entropy([91u8; 32]);
 
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
 
         let service = AuthServiceApi::new(effects, authority_context, account_id).unwrap();
 

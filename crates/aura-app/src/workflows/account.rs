@@ -13,8 +13,13 @@
 //! Account backup operations (encode/decode/validate) are portable business
 //! logic. The actual file I/O for export/import remains in aura-terminal.
 
+use crate::workflows::runtime::require_runtime;
+use crate::workflows::settings;
+use crate::AppCore;
+use async_lock::RwLock;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
+use std::sync::Arc;
 
 /// Threshold configuration for account setup
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -259,6 +264,33 @@ pub fn can_submit_account_setup(
     is_success: bool,
 ) -> bool {
     is_valid_nickname_suggestion(nickname_suggestion) && !is_creating && !is_success
+}
+
+/// Returns true when a runtime-backed account configuration exists.
+pub async fn has_runtime_account_config(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<bool, AuraError> {
+    let runtime = require_runtime(app_core).await?;
+    runtime
+        .has_account_config()
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to check account config: {e}")))
+}
+
+/// Persist first-run account configuration for the current runtime authority.
+pub async fn initialize_runtime_account(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname_suggestion: String,
+) -> Result<(), AuraError> {
+    let nickname_suggestion = validate_nickname_suggestion(&nickname_suggestion)
+        .map_err(|error| AuraError::invalid(error.to_string()))?;
+    let runtime = require_runtime(app_core).await?;
+    runtime
+        .initialize_account(&nickname_suggestion)
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to initialize account: {e}")))?;
+    settings::refresh_settings_from_runtime(app_core).await?;
+    Ok(())
 }
 
 // =============================================================================

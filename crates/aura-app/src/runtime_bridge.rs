@@ -864,6 +864,15 @@ pub trait RuntimeBridge: Send + Sync {
     /// Get current settings state
     async fn get_settings(&self) -> SettingsBridgeState;
 
+    /// Returns true when an account configuration has been persisted for this runtime.
+    async fn has_account_config(&self) -> Result<bool, IntentError>;
+
+    /// Initialize account configuration for the current authority/runtime.
+    ///
+    /// This persists the current authority/context bootstrap metadata and
+    /// nickname suggestion for first-run onboarding.
+    async fn initialize_account(&self, nickname_suggestion: &str) -> Result<(), IntentError>;
+
     /// List devices for the current account (best effort).
     async fn list_devices(&self) -> Vec<BridgeDeviceInfo>;
 
@@ -1396,6 +1405,16 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     async fn get_settings(&self) -> SettingsBridgeState {
         SettingsBridgeState::default()
+    }
+
+    async fn has_account_config(&self) -> Result<bool, IntentError> {
+        Ok(false)
+    }
+
+    async fn initialize_account(&self, _nickname_suggestion: &str) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Account initialization not available in offline mode",
+        ))
     }
 
     async fn list_devices(&self) -> Vec<BridgeDeviceInfo> {

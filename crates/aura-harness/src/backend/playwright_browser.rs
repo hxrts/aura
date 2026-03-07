@@ -1,11 +1,14 @@
 use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Arc;
 use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
+use nix::poll::{poll, PollFd, PollFlags};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
@@ -15,6 +18,8 @@ use crate::tool_api::ToolKey;
 
 const DEFAULT_PAGE_GOTO_TIMEOUT_MS: u64 = 90_000;
 const DEFAULT_HARNESS_READY_TIMEOUT_MS: u64 = 90_000;
+const DEFAULT_RPC_TIMEOUT_MS: u64 = 15_000;
+const WAIT_RPC_TIMEOUT_MARGIN_MS: u64 = 5_000;
 const DEFAULT_START_MAX_ATTEMPTS: u32 = 3;
 const DEFAULT_START_RETRY_BACKOFF_MS: u64 = 1_200;
 const MAX_START_ATTEMPTS: u32 = 10;
@@ -31,11 +36,81 @@ struct RunningSession {
     stdin: BufWriter<ChildStdin>,
     stdout: BufReader<ChildStdout>,
     stderr_thread: Option<thread::JoinHandle<()>>,
+    stderr_log: Arc<Mutex<Vec<String>>>,
     request_id: u64,
+    rpc_timeout_ms: u64,
 }
 
 impl RunningSession {
-    fn rpc_call(&mut self, method: &str, params: Value) -> Result<Value> {
+    fn stderr_tail(&self, lines: usize) -> Vec<String> {
+        self.stderr_log
+            .blocking_lock()
+            .iter()
+            .rev()
+            .take(lines)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect()
+    }
+
+    fn wait_for_response_ready(&mut self, method: &str, request_id: u64, deadline: Instant) -> Result<()> {
+        let now = Instant::now();
+        if now >= deadline {
+            return self.rpc_timeout(method, request_id, "deadline exceeded before response");
+        }
+
+        let remaining = deadline.saturating_duration_since(now);
+        let timeout_ms = remaining.as_millis().clamp(1, i32::MAX as u128) as i32;
+        let fd = self.stdout.get_ref().as_raw_fd();
+        let mut pollfd = [PollFd::new(fd, PollFlags::POLLIN)];
+        let poll_result = poll(&mut pollfd, timeout_ms);
+        let pollfd = pollfd[0];
+        let poll_result = poll_result.map_err(|error| {
+            anyhow!(
+                "Playwright driver {method} failed while polling for response to request {request_id}: {error}"
+            )
+        })?;
+        if poll_result == 0 {
+            return self.rpc_timeout(method, request_id, "timed out waiting for driver stdout");
+        }
+
+        let revents = pollfd.revents().unwrap_or(PollFlags::empty());
+        if revents.contains(PollFlags::POLLNVAL) {
+            return Err(anyhow!(
+                "Playwright driver {method} encountered invalid stdout fd for request {request_id}"
+            ));
+        }
+        if revents.contains(PollFlags::POLLERR) {
+            let status = self.child.try_wait().ok().flatten();
+            return Err(anyhow!(
+                "Playwright driver {method} encountered stdout error for request {request_id} (child_status={status:?})"
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn rpc_timeout(&mut self, method: &str, request_id: u64, context: &str) -> Result<()> {
+        let child_status = self.child.try_wait().ok().flatten();
+        let stderr_tail = self.stderr_tail(40);
+        let stderr_block = if stderr_tail.is_empty() {
+            "none".to_string()
+        } else {
+            stderr_tail.join("\n")
+        };
+        Err(anyhow!(
+            "Playwright driver {method} timed out for request {request_id}: {context} (child_status={child_status:?}, stderr_tail=\n{stderr_block})"
+        ))
+    }
+
+    fn rpc_call_with_timeout(
+        &mut self,
+        method: &str,
+        params: Value,
+        timeout_ms: u64,
+    ) -> Result<Value> {
         self.request_id = self.request_id.saturating_add(1);
         let request_id = self.request_id;
         let payload = json!({
@@ -49,15 +124,26 @@ impl RunningSession {
             .flush()
             .with_context(|| format!("failed flushing Playwright request {method}"))?;
 
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
         let mut line = Vec::new();
         loop {
+            self.wait_for_response_ready(method, request_id, deadline)?;
             line.clear();
             let read = self
                 .stdout
                 .read_until(b'\n', &mut line)
                 .with_context(|| format!("failed reading Playwright response for {method}"))?;
             if read == 0 {
-                bail!("Playwright driver closed stdout while awaiting {method}");
+                let child_status = self.child.try_wait().ok().flatten();
+                let stderr_tail = self.stderr_tail(40);
+                let stderr_block = if stderr_tail.is_empty() {
+                    "none".to_string()
+                } else {
+                    stderr_tail.join("\n")
+                };
+                bail!(
+                    "Playwright driver closed stdout while awaiting {method} (child_status={child_status:?}, stderr_tail=\n{stderr_block})"
+                );
             }
 
             let line_text =
@@ -84,6 +170,10 @@ impl RunningSession {
             bail!("Playwright driver {method} failed: {error}");
         }
     }
+
+    fn rpc_call(&mut self, method: &str, params: Value) -> Result<Value> {
+        self.rpc_call_with_timeout(method, params, self.rpc_timeout_ms)
+    }
 }
 
 pub struct PlaywrightBrowserBackend {
@@ -97,6 +187,7 @@ pub struct PlaywrightBrowserBackend {
     artifact_dir: PathBuf,
     page_goto_timeout_ms: u64,
     harness_ready_timeout_ms: u64,
+    rpc_timeout_ms: u64,
     start_max_attempts: u32,
     start_retry_backoff_ms: u64,
 }
@@ -127,6 +218,13 @@ impl PlaywrightBrowserBackend {
             1,
             MAX_TIMEOUT_MS,
         )?;
+        let rpc_timeout_ms = parse_u64_setting(
+            "AURA_HARNESS_BROWSER_RPC_TIMEOUT_MS",
+            &config.env,
+            DEFAULT_RPC_TIMEOUT_MS,
+            1,
+            MAX_TIMEOUT_MS,
+        )?;
         let start_max_attempts = parse_u32_setting(
             "AURA_HARNESS_BROWSER_START_MAX_ATTEMPTS",
             &config.env,
@@ -153,6 +251,7 @@ impl PlaywrightBrowserBackend {
             artifact_dir,
             page_goto_timeout_ms,
             harness_ready_timeout_ms,
+            rpc_timeout_ms,
             start_max_attempts,
             start_retry_backoff_ms,
         })
@@ -276,9 +375,16 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             stdin: BufWriter::new(stdin),
             stdout: BufReader::new(stdout),
             stderr_thread: Some(stderr_thread),
+            stderr_log: Arc::clone(&self.stderr_log),
             request_id: 0,
+            rpc_timeout_ms: self.rpc_timeout_ms,
         };
-        let start_result = session.rpc_call(
+        let start_timeout_ms = self
+            .page_goto_timeout_ms
+            .saturating_add(self.harness_ready_timeout_ms)
+            .saturating_add(30_000)
+            .max(self.rpc_timeout_ms);
+        let start_result = session.rpc_call_with_timeout(
             "start_page",
             json!({
                 "instance_id": self.config.id,
@@ -291,6 +397,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                 "start_max_attempts": self.start_max_attempts,
                 "start_retry_backoff_ms": self.start_retry_backoff_ms,
             }),
+            start_timeout_ms,
         );
         if let Err(error) = start_result {
             let _ = session.rpc_call("stop", json!({ "instance_id": self.config.id }));
@@ -351,6 +458,61 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         Ok(screen)
     }
 
+    fn snapshot_dom(&self) -> Result<String> {
+        let payload = self.with_session(|session| {
+            session.rpc_call("dom_snapshot", json!({ "instance_id": self.config.id }))
+        })?;
+        let screen = payload
+            .get("authoritative_screen")
+            .and_then(Value::as_str)
+            .or_else(|| payload.get("screen").and_then(Value::as_str))
+            .unwrap_or_default()
+            .to_string();
+        Ok(screen)
+    }
+
+    fn wait_for_dom_patterns(&self, patterns: &[String], timeout_ms: u64) -> Option<Result<String>> {
+        Some(self.with_session(|session| {
+            let payload = session.rpc_call_with_timeout(
+                "wait_for_dom_patterns",
+                json!({
+                    "instance_id": self.config.id,
+                    "patterns": patterns,
+                    "timeout_ms": timeout_ms,
+                }),
+                timeout_ms.saturating_add(WAIT_RPC_TIMEOUT_MARGIN_MS),
+            )?;
+            let screen = payload
+                .get("authoritative_screen")
+                .and_then(Value::as_str)
+                .or_else(|| payload.get("screen").and_then(Value::as_str))
+                .unwrap_or_default()
+                .to_string();
+            Ok(screen)
+        }))
+    }
+
+    fn wait_for_target(&self, selector: &str, timeout_ms: u64) -> Option<Result<String>> {
+        Some(self.with_session(|session| {
+            let payload = session.rpc_call_with_timeout(
+                "wait_for_selector",
+                json!({
+                    "instance_id": self.config.id,
+                    "selector": selector,
+                    "timeout_ms": timeout_ms,
+                }),
+                timeout_ms.saturating_add(WAIT_RPC_TIMEOUT_MARGIN_MS),
+            )?;
+            let screen = payload
+                .get("authoritative_screen")
+                .and_then(Value::as_str)
+                .or_else(|| payload.get("screen").and_then(Value::as_str))
+                .unwrap_or_default()
+                .to_string();
+            Ok(screen)
+        }))
+    }
+
     fn send_keys(&mut self, keys: &str) -> Result<()> {
         self.with_session(|session| {
             session.rpc_call(
@@ -372,6 +534,46 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                     "instance_id": self.config.id,
                     "key": tool_key_name(key),
                     "repeat": repeat.max(1),
+                }),
+            )?;
+            Ok(())
+        })
+    }
+
+    fn click_button(&mut self, label: &str) -> Result<()> {
+        self.with_session(|session| {
+            session.rpc_call(
+                "click_button",
+                json!({
+                    "instance_id": self.config.id,
+                    "label": label,
+                }),
+            )?;
+            Ok(())
+        })
+    }
+
+    fn click_target(&mut self, selector: &str) -> Result<()> {
+        self.with_session(|session| {
+            session.rpc_call(
+                "click_button",
+                json!({
+                    "instance_id": self.config.id,
+                    "selector": selector,
+                }),
+            )?;
+            Ok(())
+        })
+    }
+
+    fn fill_input(&mut self, selector: &str, value: &str) -> Result<()> {
+        self.with_session(|session| {
+            session.rpc_call(
+                "fill_input",
+                json!({
+                    "instance_id": self.config.id,
+                    "selector": selector,
+                    "value": value,
                 }),
             )?;
             Ok(())

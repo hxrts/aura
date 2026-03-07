@@ -167,6 +167,9 @@ impl EffectSystemBuilder {
             }
             ExecutionMode::Testing => {
                 let executor = EffectExecutor::testing(authority_id, registry.clone());
+                // Runtime builder intentionally uses explicit execution-mode constructors.
+                // Test-only callsites must use simulation_for_test* helpers instead.
+                #[allow(clippy::disallowed_methods)]
                 let system = super::AuraEffectSystem::testing_for_authority(&config, authority_id)
                     .map_err(|e| e.to_string())?;
                 (executor, system)
@@ -174,6 +177,7 @@ impl EffectSystemBuilder {
             ExecutionMode::Simulation { seed } => {
                 let executor = EffectExecutor::simulation(authority_id, seed, registry.clone());
                 // Use shared transport inbox if provided, otherwise standard simulation mode
+                #[allow(clippy::disallowed_methods)]
                 let system = if let Some(shared) = self.shared_transport {
                     super::AuraEffectSystem::simulation_with_shared_transport_for_authority(
                         &config,

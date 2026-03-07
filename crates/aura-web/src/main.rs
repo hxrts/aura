@@ -15,6 +15,10 @@ cfg_if! {
         use async_lock::RwLock;
         use aura_agent::AgentBuilder;
         use aura_app::{AppConfig, AppCore};
+        use aura_app::ui::workflows::account as account_workflows;
+        use aura_app::ui::workflows::invitation as invitation_workflows;
+        use aura_app::ui::workflows::settings as settings_workflows;
+        use aura_app::ui::types::InvitationBridgeType;
         use aura_core::identifiers::AuthorityId;
         use aura_ui::{AuraUiRoot, UiController};
         use dioxus::prelude::*;
@@ -93,11 +97,23 @@ cfg_if! {
                 .map_err(|error| format!("failed to reload page: {:?}", error))
         }
 
-        async fn bootstrap_controller() -> Result<Arc<UiController>, String> {
+        #[derive(Clone, PartialEq)]
+        struct BootstrapState {
+            controller: Arc<UiController>,
+            account_ready: bool,
+        }
+
+        async fn bootstrap_controller() -> Result<BootstrapState, String> {
             let storage_prefix = active_storage_prefix();
             let authority_storage_key = selected_authority_key(&storage_prefix);
             let selected_authority = load_selected_authority(&authority_storage_key);
+            let harness_instance = harness_instance_id();
             let builder = AgentBuilder::web().storage_prefix(&storage_prefix);
+            let builder = if harness_instance.is_some() {
+                builder.testing_mode()
+            } else {
+                builder
+            };
             let builder = if let Some(authority_id) = selected_authority {
                 builder.authority(authority_id)
             } else {
@@ -110,6 +126,12 @@ cfg_if! {
                     .await
                     .map_err(|error| format!("failed to build web runtime: {error}"))?,
             );
+            let account_ready = agent
+                .clone()
+                .as_runtime_bridge()
+                .has_account_config()
+                .await
+                .map_err(|error| format!("failed to load account bootstrap state: {error}"))?;
 
             let current_authority = agent.authority_id().clone();
             if let Err(error) = persist_selected_authority(&authority_storage_key, &current_authority)
@@ -150,6 +172,7 @@ cfg_if! {
                     }
                 })),
             ));
+            controller.set_account_setup_state(account_ready, "", None);
 
             harness_bridge::set_controller(controller.clone());
             if let Err(error) = harness_bridge::install_window_harness_api(controller.clone()) {
@@ -159,7 +182,15 @@ cfg_if! {
             }
 
             controller.push_log("runtime bootstrap enabled in web shell");
-            Ok(controller)
+            if let Some(instance_id) = harness_instance {
+                controller.push_log(&format!(
+                    "web harness instance {instance_id} booted in testing mode"
+                ));
+            }
+            Ok(BootstrapState {
+                controller,
+                account_ready,
+            })
         }
 
         fn main() {
@@ -174,8 +205,7 @@ cfg_if! {
 
         #[component]
         fn App() -> Element {
-            let mut bootstrap_state = use_signal(|| None::<Result<Arc<UiController>, String>>);
-            let mut bootstrap_started = use_signal(|| false);
+            let bootstrap = use_resource(|| async move { bootstrap_controller().await });
 
             use_effect(|| {
                 if let Some(document) = web_sys::window().and_then(|window| window.document()) {
@@ -183,26 +213,15 @@ cfg_if! {
                 }
             });
 
-            use_effect(move || {
-                if bootstrap_started() {
-                    return;
-                }
-
-                bootstrap_started.set(true);
-                spawn(async move {
-                    bootstrap_state.set(Some(bootstrap_controller().await));
-                });
-            });
-
-            if let Some(Ok(controller)) = bootstrap_state().as_ref() {
+            if let Some(Ok(state)) = &*bootstrap.read_unchecked() {
                 return rsx! {
-                    AuraUiRoot {
-                        controller: controller.clone(),
+                    BootstrappedApp {
+                        state: state.clone(),
                     }
                 };
             }
 
-            if let Some(Err(error)) = bootstrap_state().as_ref() {
+            if let Some(Err(error)) = &*bootstrap.read_unchecked() {
                 return rsx! {
                     main {
                         class: "min-h-screen bg-background text-foreground grid place-items-center px-6",
@@ -223,6 +242,231 @@ cfg_if! {
                         class: "max-w-xl space-y-3 text-center",
                         h1 { class: "text-sm font-semibold uppercase tracking-[0.12em]", "Aura" }
                         p { class: "text-sm text-muted-foreground", "Initializing web runtime..." }
+                    }
+                }
+            }
+        }
+
+        #[component]
+        fn BootstrappedApp(state: BootstrapState) -> Element {
+            let controller = state.controller.clone();
+            let account_ready = use_signal(|| state.account_ready);
+            let mut account_name = use_signal(String::new);
+            let mut account_error = use_signal(|| Option::<String>::None);
+            let creating_account = use_signal(|| false);
+            let mut import_code = use_signal(String::new);
+            let mut import_error = use_signal(|| Option::<String>::None);
+            let importing_code = use_signal(|| false);
+
+            if account_ready() {
+                controller.set_account_setup_state(true, "", None);
+                return rsx! {
+                    AuraUiRoot {
+                        controller: controller.clone(),
+                    }
+                };
+            }
+
+            let submit_account = {
+                let controller = controller.clone();
+                let mut account_ready = account_ready.clone();
+                let account_name = account_name.clone();
+                let mut account_error = account_error.clone();
+                let mut creating_account = creating_account.clone();
+                move |_| {
+                    if creating_account() {
+                        return;
+                    }
+
+                    let nickname = account_name();
+                    creating_account.set(true);
+                    account_error.set(None);
+                    controller.set_account_setup_state(false, nickname.clone(), None);
+
+                    let controller = controller.clone();
+                    spawn(async move {
+                        match account_workflows::initialize_runtime_account(
+                            controller.app_core(),
+                            nickname.clone(),
+                        )
+                        .await
+                        {
+                            Ok(()) => {
+                                controller.set_account_setup_state(true, "", None);
+                                account_ready.set(true);
+                                creating_account.set(false);
+                            }
+                            Err(error) => {
+                                let message = error.to_string();
+                                controller.set_account_setup_state(
+                                    false,
+                                    nickname.clone(),
+                                    Some(message.clone()),
+                                );
+                                account_error.set(Some(message));
+                                creating_account.set(false);
+                            }
+                        }
+                    });
+                }
+            };
+
+            let submit_import = {
+                let controller = controller.clone();
+                let import_code = import_code.clone();
+                let mut import_error = import_error.clone();
+                let mut importing_code = importing_code.clone();
+                let mut account_ready = account_ready.clone();
+                move |_| {
+                    if importing_code() {
+                        return;
+                    }
+
+                    let code = import_code();
+                    importing_code.set(true);
+                    import_error.set(None);
+
+                    let controller = controller.clone();
+                    spawn(async move {
+                        let app_core = controller.app_core().clone();
+                        let result = async {
+                            let invitation =
+                                invitation_workflows::import_invitation_details(&app_core, &code)
+                                    .await?;
+                            if !matches!(
+                                invitation.invitation_type,
+                                InvitationBridgeType::DeviceEnrollment { .. }
+                            ) {
+                                return Err(aura_core::AuraError::invalid(
+                                    "Code is not a device enrollment invitation",
+                                ));
+                            }
+
+                            invitation_workflows::accept_invitation(
+                                &app_core,
+                                &invitation.invitation_id,
+                            )
+                            .await?;
+                            settings_workflows::refresh_settings_from_runtime(&app_core).await?;
+                            let settings = settings_workflows::get_settings(&app_core).await?;
+                            let nickname = settings.nickname_suggestion.trim();
+                            let bootstrap_name = if nickname.is_empty() {
+                                "Aura User".to_string()
+                            } else {
+                                nickname.to_string()
+                            };
+                            account_workflows::initialize_runtime_account(
+                                &app_core,
+                                bootstrap_name,
+                            )
+                            .await
+                        }
+                        .await;
+
+                        match result {
+                            Ok(()) => {
+                                controller.info_toast("Device enrollment complete");
+                                controller.set_account_setup_state(true, "", None);
+                                account_ready.set(true);
+                                importing_code.set(false);
+                            }
+                            Err(error) => {
+                                let message = error.to_string();
+                                controller.set_account_setup_state(
+                                    false,
+                                    "",
+                                    Some(message.clone()),
+                                );
+                                import_error.set(Some(message));
+                                importing_code.set(false);
+                            }
+                        }
+                    });
+                }
+            };
+
+            rsx! {
+                main {
+                    id: "aura-onboarding-root",
+                    class: "min-h-screen bg-background text-foreground grid place-items-center px-6",
+                    div {
+                        id: "aura-onboarding-card",
+                        class: "w-full max-w-md rounded-3xl border border-border bg-card px-6 py-8 shadow-sm",
+                        div {
+                            class: "space-y-2",
+                            h1 { class: "text-sm font-semibold uppercase tracking-[0.12em]", "Aura" }
+                            h2 { class: "text-2xl font-semibold", "Welcome to Aura" }
+                            p {
+                                class: "text-sm text-muted-foreground",
+                                "Create the local account profile for this browser before entering the app."
+                            }
+                        }
+                        div {
+                            class: "mt-6 space-y-4",
+                            label {
+                                class: "block space-y-2",
+                                span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Nickname" }
+                                input {
+                                    id: "aura-account-name-input",
+                                    class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+                                    value: "{account_name()}",
+                                    disabled: creating_account(),
+                                    oninput: move |event| {
+                                        let value = event.value();
+                                        account_name.set(value.clone());
+                                        account_error.set(None);
+                                        controller.set_account_setup_state(false, value, None);
+                                    },
+                                }
+                            }
+                            if let Some(error) = account_error() {
+                                p { class: "text-sm text-destructive", "{error}" }
+                            }
+                            button {
+                                id: "aura-onboarding-create-account-button",
+                                class: "inline-flex h-10 w-full items-center justify-center rounded-md bg-foreground px-4 text-sm font-medium text-background transition-colors disabled:pointer-events-none disabled:opacity-50",
+                                disabled: creating_account() || account_name().trim().is_empty(),
+                                onclick: submit_account,
+                                if creating_account() {
+                                    "Creating Account..."
+                                } else {
+                                    "Create Account"
+                                }
+                            }
+                            div { class: "flex items-center gap-3 py-1",
+                                div { class: "h-px flex-1 bg-border" }
+                                span { class: "text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground", "or" }
+                                div { class: "h-px flex-1 bg-border" }
+                            }
+                            label {
+                                class: "block space-y-2",
+                                span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Device Enrollment Code" }
+                                input {
+                                    id: "aura-account-import-code-input",
+                                    class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+                                    value: "{import_code()}",
+                                    disabled: importing_code(),
+                                    oninput: move |event| {
+                                        import_code.set(event.value());
+                                        import_error.set(None);
+                                    },
+                                }
+                            }
+                            if let Some(error) = import_error() {
+                                p { class: "text-sm text-destructive", "{error}" }
+                            }
+                            button {
+                                id: "aura-onboarding-import-device-button",
+                                class: "inline-flex h-10 w-full items-center justify-center rounded-md border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors disabled:pointer-events-none disabled:opacity-50",
+                                disabled: importing_code() || import_code().trim().is_empty(),
+                                onclick: submit_import,
+                                if importing_code() {
+                                    "Importing Device..."
+                                } else {
+                                    "Import Device"
+                                }
+                            }
+                        }
                     }
                 }
             }

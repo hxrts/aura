@@ -176,8 +176,11 @@ impl ChoreographicEffects for AuraEffectSystem {
                             source: Box::new(aura_core::effects::TransportError::NoMessage),
                         });
                     }
-                    // Yield to allow other tasks (like DemoSimulator) to process
-                    tokio::time::sleep(poll_interval).await;
+                    // Yield to allow other tasks (like demo simulators or browser tasks) to process.
+                    let _ = self
+                        .time_handler
+                        .sleep_ms(poll_interval.as_millis() as u64)
+                        .await;
                 }
                 Err(e) => {
                     return Err(ChoreographyError::Transport {

@@ -233,6 +233,8 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
         crate::ids::authority_id("guardian:dave"),
     ];
 
+    // Scenario simulation wiring intentionally uses explicit runtime simulation constructors.
+    #[allow(clippy::disallowed_methods)]
     let initiator_effects = Arc::new(
         AuraEffectSystem::simulation_with_shared_transport_for_authority(
             &config,
@@ -246,6 +248,7 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
 
     let mut guardian_services = Vec::with_capacity(guardians.len());
     for (index, guardian_id) in guardians.iter().copied().enumerate() {
+        #[allow(clippy::disallowed_methods)]
         let guardian_effects = Arc::new(
             AuraEffectSystem::simulation_with_shared_transport_for_authority(
                 &config,

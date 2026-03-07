@@ -3,7 +3,7 @@
 use std::fs;
 use std::process::Command;
 
-use aura_harness::config::{InstanceConfig, InstanceMode, RunConfig, RunSection};
+use aura_harness::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, ScreenSource};
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::tool_api::{ToolApi, ToolRequest, ToolResponse};
 
@@ -56,11 +56,13 @@ fn two_local_instances_are_controllable() {
         instance_id: "alice".to_string(),
         pattern: "alice-msg".to_string(),
         timeout_ms: 2000,
+        screen_source: ScreenSource::Default,
     }));
     assert_ok(tool_api.handle_request(ToolRequest::WaitFor {
         instance_id: "bob".to_string(),
         pattern: "bob-msg".to_string(),
         timeout_ms: 2000,
+        screen_source: ScreenSource::Default,
     }));
 
     if let Err(error) = tool_api.stop_all() {

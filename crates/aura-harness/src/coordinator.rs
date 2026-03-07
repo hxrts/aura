@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, Result};
 
 use crate::backend::BackendHandle;
-use crate::config::{InstanceMode, RunConfig};
+use crate::config::{InstanceMode, RunConfig, ScreenSource};
 use crate::events::EventStream;
 use crate::screen_normalization::normalize_screen;
 use crate::tool_api::ToolKey;
@@ -65,7 +65,7 @@ impl HarnessCoordinator {
 
     fn clear_stale_local_state(&mut self) -> Result<()> {
         for (instance_id, mode) in &self.instance_modes {
-            if !matches!(mode, InstanceMode::Local) {
+            if !matches!(mode, InstanceMode::Local | InstanceMode::Browser) {
                 continue;
             }
             let data_dir = self
@@ -97,37 +97,28 @@ impl HarnessCoordinator {
     }
 
     pub fn screen(&self, instance_id: &str) -> Result<String> {
+        self.screen_with_source(instance_id, ScreenSource::Default)
+    }
+
+    pub fn screen_with_source(&self, instance_id: &str, source: ScreenSource) -> Result<String> {
         let backend = self
             .backends
             .get(instance_id)
             .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        backend.as_trait().snapshot()
+        match source {
+            ScreenSource::Default => backend.as_trait().snapshot(),
+            ScreenSource::Dom => backend.as_trait().snapshot_dom(),
+        }
     }
 
     pub fn send_keys(&mut self, instance_id: &str, keys: &str) -> Result<()> {
         let normalized = normalize_key_stream(keys);
-        let sender_mode = self.instance_modes.get(instance_id).cloned();
         {
             let backend = self
                 .backends
                 .get_mut(instance_id)
                 .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
             backend.as_trait_mut().send_keys(normalized.as_ref())?;
-        }
-
-        if let Some(message) = extract_submitted_plain_message(normalized.as_ref()) {
-            for (peer_id, backend) in &mut self.backends {
-                if peer_id == instance_id {
-                    continue;
-                }
-                let peer_mode = self.instance_modes.get(peer_id);
-                let should_inject = matches!(sender_mode, Some(InstanceMode::Browser))
-                    || matches!(peer_mode, Some(InstanceMode::Browser));
-                if !should_inject {
-                    continue;
-                }
-                let _ = backend.as_trait_mut().inject_message(&message);
-            }
         }
 
         self.events.push(
@@ -156,12 +147,93 @@ impl HarnessCoordinator {
         backend.as_trait_mut().send_key(key, repeat)
     }
 
+    pub fn click_button(&mut self, instance_id: &str, label: &str) -> Result<()> {
+        let backend = self
+            .backends
+            .get_mut(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        self.events.push(
+            "action",
+            "click_button",
+            Some(instance_id.to_string()),
+            serde_json::json!({ "label": label }),
+        );
+        backend.as_trait_mut().click_button(label)
+    }
+
+    pub fn click_target(&mut self, instance_id: &str, selector: &str) -> Result<()> {
+        let backend = self
+            .backends
+            .get_mut(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        self.events.push(
+            "action",
+            "click_target",
+            Some(instance_id.to_string()),
+            serde_json::json!({ "selector": selector }),
+        );
+        backend.as_trait_mut().click_target(selector)
+    }
+
+    pub fn fill_input(&mut self, instance_id: &str, selector: &str, value: &str) -> Result<()> {
+        let backend = self
+            .backends
+            .get_mut(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        self.events.push(
+            "action",
+            "fill_input",
+            Some(instance_id.to_string()),
+            serde_json::json!({
+                "selector": selector,
+                "bytes": value.len()
+            }),
+        );
+        backend.as_trait_mut().fill_input(selector, value)
+    }
+
     pub fn wait_for(
         &mut self,
         instance_id: &str,
         pattern: &str,
         timeout_ms: u64,
     ) -> Result<String> {
+        self.wait_for_with_source(instance_id, pattern, timeout_ms, ScreenSource::Default)
+    }
+
+    pub fn wait_for_with_source(
+        &mut self,
+        instance_id: &str,
+        pattern: &str,
+        timeout_ms: u64,
+        source: ScreenSource,
+    ) -> Result<String> {
+        if matches!(source, ScreenSource::Dom) {
+            let patterns = wait_pattern_candidates(pattern);
+            if let Some(result) = self
+                .backends
+                .get(instance_id)
+                .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?
+                .as_trait()
+                .wait_for_dom_patterns(&patterns, timeout_ms)
+            {
+                let screen = result?;
+                self.events.push(
+                    "observation",
+                    "wait_for",
+                    Some(instance_id.to_string()),
+                    serde_json::json!({
+                        "pattern": pattern,
+                        "normalized_pattern": normalize_screen(pattern),
+                        "attempts": 1,
+                        "matched_view": "normalized",
+                        "source": format!("{source:?}").to_ascii_lowercase()
+                    }),
+                );
+                return Ok(screen);
+            }
+        }
+
         let poll_ms: u64 = 40;
         let mut attempts = 0_u64;
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);
@@ -170,7 +242,7 @@ impl HarnessCoordinator {
             if Instant::now() >= deadline {
                 break;
             }
-            let screen = self.screen(instance_id)?;
+            let screen = self.screen_with_source(instance_id, source)?;
             let normalized = normalize_screen(&screen);
             if wait_pattern_matches(&normalized, pattern) {
                 self.events.push(
@@ -181,7 +253,8 @@ impl HarnessCoordinator {
                         "pattern": pattern,
                         "normalized_pattern": normalize_screen(pattern),
                         "attempts": attempts + 1,
-                        "matched_view": "normalized"
+                        "matched_view": "normalized",
+                        "source": format!("{source:?}").to_ascii_lowercase()
                     }),
                 );
                 return Ok(screen);
@@ -205,12 +278,40 @@ impl HarnessCoordinator {
             serde_json::json!({
                 "pattern": pattern,
                 "normalized_pattern": normalize_screen(pattern),
-                "timeout_ms": timeout_ms
+                "timeout_ms": timeout_ms,
+                "source": format!("{source:?}").to_ascii_lowercase()
             }),
         );
         bail!(
             "wait_for timed out for instance {instance_id} pattern {pattern:?} timeout_ms={timeout_ms}"
         )
+    }
+
+    pub fn wait_for_selector(
+        &mut self,
+        instance_id: &str,
+        selector: &str,
+        timeout_ms: u64,
+    ) -> Result<String> {
+        let backend = self
+            .backends
+            .get(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        if let Some(result) = backend.as_trait().wait_for_target(selector, timeout_ms) {
+            let screen = result?;
+            self.events.push(
+                "observation",
+                "wait_for_selector",
+                Some(instance_id.to_string()),
+                serde_json::json!({
+                    "selector": selector,
+                    "timeout_ms": timeout_ms,
+                }),
+            );
+            return Ok(screen);
+        }
+
+        bail!("wait_for_selector is not supported by backend {}", backend.as_trait().backend_kind())
     }
 
     pub fn tail_log(&mut self, instance_id: &str, lines: usize) -> Result<Vec<String>> {
@@ -362,42 +463,36 @@ fn normalize_key_stream(keys: &str) -> Cow<'_, str> {
 }
 
 fn wait_pattern_matches(normalized_screen: &str, pattern: &str) -> bool {
-    let pattern = pattern.trim();
-    if pattern.is_empty() {
-        return false;
-    }
-    if pattern.eq_ignore_ascii_case("Map") && normalized_screen.contains("Neighborhood") {
-        return true;
-    }
-    if pattern.eq_ignore_ascii_case("Can enter:") && normalized_screen.contains("Access:") {
-        return true;
-    }
-    if (pattern.eq_ignore_ascii_case("Map → Limited")
-        || pattern.eq_ignore_ascii_case("Map -> Limited"))
-        && normalized_screen.contains("Access: Limited")
-    {
-        return true;
-    }
-    if normalized_screen.contains(pattern) {
-        return true;
-    }
-    let normalized_pattern = normalize_screen(pattern);
-    normalized_pattern != pattern && normalized_screen.contains(&normalized_pattern)
+    wait_pattern_candidates(pattern)
+        .iter()
+        .any(|candidate| normalized_screen.contains(candidate))
 }
 
-fn extract_submitted_plain_message(keys: &str) -> Option<String> {
-    let normalized = keys.replace('\r', "\n");
-    let newline_idx = normalized.rfind('\n')?;
-    let before_enter = &normalized[..newline_idx];
-    let insert_idx = before_enter.rfind('i')?;
-    let candidate = before_enter[insert_idx + 1..]
-        .replace('\u{1b}', "")
-        .trim()
-        .to_string();
-    if candidate.is_empty() || candidate.starts_with('/') {
-        return None;
+fn wait_pattern_candidates(pattern: &str) -> Vec<String> {
+    let pattern = pattern.trim();
+    if pattern.is_empty() {
+        return Vec::new();
     }
-    Some(candidate)
+
+    let mut candidates = vec![pattern.to_string()];
+    let normalized_pattern = normalize_screen(pattern);
+    if normalized_pattern != pattern {
+        candidates.push(normalized_pattern);
+    }
+    if pattern.eq_ignore_ascii_case("Map") {
+        candidates.push("Neighborhood".to_string());
+    }
+    if pattern.eq_ignore_ascii_case("Can enter:") {
+        candidates.push("Access:".to_string());
+    }
+    if pattern.eq_ignore_ascii_case("Map → Limited")
+        || pattern.eq_ignore_ascii_case("Map -> Limited")
+    {
+        candidates.push("Access: Limited".to_string());
+    }
+    candidates.sort();
+    candidates.dedup();
+    candidates
 }
 
 fn absolutize_path(path: PathBuf) -> PathBuf {

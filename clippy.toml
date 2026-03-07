@@ -26,6 +26,15 @@ disallowed-methods = [
     "std::process::id",
     "std::thread::current",
 
+    # Test effect-system construction policy:
+    # use AuraEffectSystem::simulation_for_test* helpers (seeded + uniqueness guard)
+    "aura_agent::AuraEffectSystem::testing",
+    "aura_agent::AuraEffectSystem::testing_for_authority",
+    "aura_agent::AuraEffectSystem::testing_with_shared_transport",
+    "aura_agent::AuraEffectSystem::simulation",
+    "aura_agent::AuraEffectSystem::simulation_for_authority",
+    "aura_agent::AuraEffectSystem::simulation_with_shared_transport_for_authority",
+
     # Hashing - CENTRALIZED TRAIT STRATEGY
     # All hashing MUST go through aura_core::hash::{hash, hasher}
     # This ensures a single source of truth for the hash algorithm

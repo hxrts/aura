@@ -36,6 +36,9 @@ use aura_app::ui::signals::{
 };
 use aura_app::ui::types::InvitationBridgeType;
 use aura_app::ui::workflows::invitation::{accept_invitation, import_invitation_details};
+use aura_app::ui::workflows::{
+    context as context_workflows, settings as settings_workflows, system as system_workflows,
+};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::Epoch;
 use aura_core::AuthorityId;
@@ -624,6 +627,19 @@ impl IoContext {
             }
         }
 
+        // Seed the shared signals with a real initial home/neighborhood so all
+        // frontends have a current home immediately after account creation.
+        context_workflows::create_home(
+            self.app_core_raw(),
+            Some(format!("{nickname_suggestion}'s Home")),
+            None,
+        )
+        .await
+        .map_err(|e| TerminalError::Operation(format!("Failed to create initial home: {e}")))?;
+
+        let _ = settings_workflows::refresh_settings_from_runtime(self.app_core_raw()).await;
+        let _ = system_workflows::refresh_account(self.app_core_raw()).await;
+
         Ok(())
     }
 
@@ -634,7 +650,24 @@ impl IoContext {
     ) -> TerminalResult<()> {
         self.account_files
             .restore_recovered_account(recovered_authority_id, recovered_context_id)
-            .await
+            .await?;
+
+        {
+            let mut core = self.app_core_raw().write().await;
+            core.set_authority(recovered_authority_id);
+        }
+
+        context_workflows::create_home(
+            self.app_core_raw(),
+            Some("Recovered Home".to_string()),
+            None,
+        )
+        .await
+        .map_err(|e| TerminalError::Operation(format!("Failed to create initial home: {e}")))?;
+
+        let _ = settings_workflows::refresh_settings_from_runtime(self.app_core_raw()).await;
+        let _ = system_workflows::refresh_account(self.app_core_raw()).await;
+        Ok(())
     }
 
     pub async fn export_account_backup(&self) -> TerminalResult<String> {

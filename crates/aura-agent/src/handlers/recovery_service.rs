@@ -1805,7 +1805,7 @@ mod tests {
     async fn test_recovery_service_creation() {
         let authority_context = create_test_authority(150);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
 
         let service = RecoveryServiceApi::new(effects, authority_context);
         assert!(service.is_ok());
@@ -1815,7 +1815,7 @@ mod tests {
     async fn test_add_device_recovery() {
         let authority_context = create_test_authority(151);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
         let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
 
         let guardians = vec![
@@ -1842,7 +1842,7 @@ mod tests {
     async fn test_remove_device_recovery() {
         let authority_context = create_test_authority(154);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
         let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
 
         let guardians = vec![AuthorityId::new_from_entropy([155u8; 32])];
@@ -1859,7 +1859,7 @@ mod tests {
     async fn test_replace_tree_recovery() {
         let authority_context = create_test_authority(156);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
         let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
 
         let guardians = vec![
@@ -1887,7 +1887,7 @@ mod tests {
     async fn test_update_guardians_recovery() {
         let authority_context = create_test_authority(160);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
         let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
 
         let current_guardians = vec![AuthorityId::new_from_entropy([161u8; 32])];
@@ -1915,7 +1915,7 @@ mod tests {
     async fn test_full_recovery_flow() {
         let authority_context = create_test_authority(164);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
         let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
 
         let guardians = vec![AuthorityId::new_from_entropy([165u8; 32])];
@@ -1954,7 +1954,7 @@ mod tests {
     async fn test_list_active() {
         let authority_context = create_test_authority(166);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
         let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
 
         // Initially empty
@@ -1992,7 +1992,7 @@ mod tests {
     async fn test_membership_change_requires_three_guardians() {
         let authority_context = create_test_authority(170);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
         let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
 
         // Two guardians should fail
@@ -2023,7 +2023,7 @@ mod tests {
     async fn test_membership_change_invalid_guardian_index() {
         let authority_context = create_test_authority(174);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
         let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
 
         let proposal = MembershipProposal {
@@ -2077,7 +2077,8 @@ mod tests {
         let context_id = crate::core::default_context_id_for_authority(account_authority);
         let config = AgentConfig::default();
         let effects = Arc::new(
-            AuraEffectSystem::simulation_for_authority(&config, 1107, account_authority).unwrap(),
+            AuraEffectSystem::simulation_for_test_for_authority(&config, account_authority)
+                .unwrap(),
         );
         let service = RecoveryServiceApi::new(effects.clone(), authority_context).unwrap();
 

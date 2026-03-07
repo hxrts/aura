@@ -457,7 +457,8 @@ impl InvitationHandler {
         );
 
         // Execute the outcome (handles denial and effects)
-        execute_guard_outcome(outcome, &self.context.authority, effects.as_ref()).await?;
+        execute_guard_outcome_for_accept(outcome, &self.context.authority, effects.as_ref())
+            .await?;
 
         let invitation = Invitation {
             invitation_id: invitation_id.clone(),
@@ -574,8 +575,9 @@ impl InvitationHandler {
             "Guard outcome for invitation accept"
         );
 
-        // Execute the outcome
-        execute_guard_outcome(outcome, &self.context.authority, effects.as_ref()).await?;
+        // Accept should not be blocked by best-effort budget/notify side effects.
+        execute_guard_outcome_for_accept(outcome, &self.context.authority, effects.as_ref())
+            .await?;
 
         // Best-effort: accepting a contact invitation should add the sender as a contact.
         //
@@ -613,12 +615,6 @@ impl InvitationHandler {
                     crate::core::AgentError::effects(format!("commit contact fact: {e}"))
                 })?;
 
-            // Wait for the reactive scheduler to process the committed fact.
-            // This ensures the contact appears in the UI before we return "success".
-            // Without this, there's a race condition where the TUI refreshes before
-            // the scheduler has processed the new ContactFact.
-            effects.await_next_view_update().await;
-
             // Promote LAN-discovered descriptor into the local context so that
             // is_peer_online() / resolve_peer_addr() can find it immediately.
             if let Some(rendezvous) = effects.rendezvous_manager() {
@@ -644,14 +640,16 @@ impl InvitationHandler {
             );
         }
 
-        if let Err(e) = self
+        // Best-effort sender notification for contact acceptance. Keep acceptance
+        // successful even when notification delivery fails.
+        if let Err(error) = self
             .notify_contact_invitation_acceptance(effects.as_ref(), invitation_id)
             .await
         {
-            tracing::debug!(
+            tracing::warn!(
                 invitation_id = %invitation_id,
-                error = %e,
-                "Failed to notify contact invitation acceptance"
+                error = %error,
+                "Contact acceptance notification failed; continuing"
             );
         }
 
@@ -839,7 +837,31 @@ impl InvitationHandler {
             .load_invitation_for_choreography(effects.as_ref(), invitation_id)
             .await
         {
+            if matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
+                tracing::debug!(
+                    invitation_id = %invitation_id,
+                    "Returning immediately after local contact invitation acceptance"
+                );
+                return Ok(InvitationResult {
+                    success: true,
+                    invitation_id: invitation_id.clone(),
+                    new_status: Some(InvitationStatus::Accepted),
+                    error: None,
+                });
+            }
+        }
+
+        if let Some(invitation) = self
+            .load_invitation_for_choreography(effects.as_ref(), invitation_id)
+            .await
+        {
             match invitation.invitation_type {
+                InvitationType::Contact { .. } => {
+                    tracing::debug!(
+                        invitation_id = %invitation_id,
+                        "Skipping synchronous invitation exchange receiver for accepted contact invitation"
+                    );
+                }
                 InvitationType::Guardian { .. } => {
                     let _ = self
                         .execute_guardian_invitation_guardian(effects.clone(), &invitation)
@@ -855,7 +877,7 @@ impl InvitationHandler {
                             .await;
                     }
                 }
-                _ => {
+                InvitationType::Channel { .. } => {
                     let _ = self
                         .execute_invitation_exchange_receiver(effects.clone(), &invitation, true)
                         .await;
@@ -1820,6 +1842,61 @@ pub async fn execute_guard_outcome(
     Ok(())
 }
 
+pub async fn execute_guard_outcome_for_accept(
+    outcome: aura_invitation::guards::GuardOutcome,
+    authority: &AuthorityContext,
+    effects: &AuraEffectSystem,
+) -> AgentResult<()> {
+    if outcome.is_denied() {
+        let reason = outcome
+            .decision
+            .denial_reason()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "Operation denied".to_string());
+        return Err(AgentError::effects(format!(
+            "Guard denied operation: {}",
+            reason
+        )));
+    }
+
+    let context_id = authority.default_context_id();
+    let charge_peer = resolve_charge_peer(&outcome.effects, authority.authority_id());
+    let mut pending_receipt: Option<Receipt> = None;
+
+    for command in outcome.effects {
+        let is_network_side_effect = matches!(
+            command,
+            aura_invitation::guards::EffectCommand::ChargeFlowBudget { .. }
+                | aura_invitation::guards::EffectCommand::NotifyPeer { .. }
+                | aura_invitation::guards::EffectCommand::RecordReceipt { .. }
+        );
+
+        match execute_effect_command(
+            command,
+            authority,
+            context_id,
+            effects,
+            charge_peer,
+            &mut pending_receipt,
+        )
+        .await
+        {
+            Ok(()) => {}
+            Err(error) if is_network_side_effect => {
+                tracing::warn!(
+                    authority = %authority.authority_id(),
+                    context = %context_id,
+                    "Invitation accept continuing after best-effort network side-effect failure: {}",
+                    error
+                );
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    Ok(())
+}
+
 fn resolve_charge_peer(
     commands: &[aura_invitation::guards::EffectCommand],
     fallback: AuthorityId,
@@ -2101,12 +2178,13 @@ mod tests {
         AuthorityContext::new(authority_id)
     }
 
+    #[track_caller]
     fn effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem> {
         let config = AgentConfig {
             device_id: authority.device_id(),
             ..Default::default()
         };
-        Arc::new(AuraEffectSystem::testing(&config).unwrap())
+        Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap())
     }
 
     fn canonical_home_id(seed: u8) -> ChannelId {
@@ -2166,12 +2244,42 @@ mod tests {
     #[tokio::test]
     async fn test_execute_notify_peer() {
         let authority = create_test_authority(134);
-        let effects = effects_for(&authority);
-
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let config = AgentConfig::default();
         let peer = AuthorityId::new_from_entropy([135u8; 32]);
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                authority.authority_id(),
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
+        // Materialize a destination participant on the shared transport.
+        let _peer_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                peer,
+                shared_transport,
+            )
+            .unwrap(),
+        );
+        let handler = InvitationHandler::new(authority.clone()).unwrap();
+
+        let invitation = handler
+            .create_invitation(
+                effects.clone(),
+                peer,
+                InvitationType::Contact { nickname: None },
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
         let outcome = GuardOutcome::allowed(vec![EffectCommand::NotifyPeer {
             peer,
-            invitation_id: InvitationId::new("inv-notify"),
+            invitation_id: invitation.invitation_id,
         }]);
 
         let result = execute_guard_outcome(outcome, &authority, effects.as_ref()).await;
@@ -2195,16 +2303,45 @@ mod tests {
     #[tokio::test]
     async fn test_execute_multiple_commands() {
         let authority = create_test_authority(138);
-        let effects = effects_for(&authority);
-
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let config = AgentConfig::default();
         let peer = AuthorityId::new_from_entropy([139u8; 32]);
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                authority.authority_id(),
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
+        // Materialize a destination participant on the shared transport.
+        let _peer_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                peer,
+                shared_transport,
+            )
+            .unwrap(),
+        );
+        let handler = InvitationHandler::new(authority.clone()).unwrap();
+
+        let invitation = handler
+            .create_invitation(
+                effects.clone(),
+                peer,
+                InvitationType::Contact { nickname: None },
+                None,
+                None,
+            )
+            .await
+            .unwrap();
         let outcome = GuardOutcome::allowed(vec![
             EffectCommand::ChargeFlowBudget {
                 cost: FlowCost::new(1),
             },
             EffectCommand::NotifyPeer {
                 peer,
-                invitation_id: InvitationId::new("inv-multi"),
+                invitation_id: invitation.invitation_id,
             },
             EffectCommand::RecordReceipt {
                 operation: InvitationOperation::SendInvitation,
@@ -2318,9 +2455,8 @@ mod tests {
     async fn importing_and_accepting_contact_invitation_commits_contact_fact() {
         let own_authority = AuthorityId::new_from_entropy([120u8; 32]);
         let config = AgentConfig::default();
-        // Use unique deterministic seed to avoid master key caching issues
         let effects = Arc::new(
-            AuraEffectSystem::simulation_for_authority(&config, 10006, own_authority).unwrap(),
+            AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap(),
         );
 
         let authority_context = AuthorityContext::new(own_authority);
@@ -2402,18 +2538,16 @@ mod tests {
         let receiver_id = AuthorityId::new_from_entropy([125u8; 32]);
 
         let sender_effects = Arc::new(
-            AuraEffectSystem::simulation_with_shared_transport_for_authority(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
                 &config,
-                20011,
                 sender_id,
                 shared_transport.clone(),
             )
             .unwrap(),
         );
         let receiver_effects = Arc::new(
-            AuraEffectSystem::simulation_with_shared_transport_for_authority(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
                 &config,
-                20012,
                 receiver_id,
                 shared_transport.clone(),
             )
@@ -2492,7 +2626,7 @@ mod tests {
         let receiver_id = AuthorityId::new_from_entropy([129u8; 32]);
         let config = AgentConfig::default();
         let effects =
-            Arc::new(AuraEffectSystem::testing_for_authority(&config, sender_id).unwrap());
+            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, sender_id).unwrap());
         let handler = InvitationHandler::new(AuthorityContext::new(sender_id)).unwrap();
 
         handler
@@ -2542,7 +2676,7 @@ mod tests {
         let receiver_id = AuthorityId::new_from_entropy([131u8; 32]);
         let config = AgentConfig::default();
         let effects =
-            Arc::new(AuraEffectSystem::testing_for_authority(&config, sender_id).unwrap());
+            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, sender_id).unwrap());
         let handler = InvitationHandler::new(AuthorityContext::new(sender_id)).unwrap();
 
         let context_id = default_context_id_for_authority(sender_id);
@@ -2642,18 +2776,16 @@ mod tests {
         let receiver_id = AuthorityId::new_from_entropy([127u8; 32]);
 
         let sender_effects = Arc::new(
-            AuraEffectSystem::simulation_with_shared_transport_for_authority(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
                 &config,
-                20013,
                 sender_id,
                 shared_transport.clone(),
             )
             .unwrap(),
         );
         let receiver_effects = Arc::new(
-            AuraEffectSystem::simulation_with_shared_transport_for_authority(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
                 &config,
-                20014,
                 receiver_id,
                 shared_transport.clone(),
             )
@@ -2719,7 +2851,7 @@ mod tests {
         let peer = AuthorityId::new_from_entropy([202u8; 32]);
         let config = AgentConfig::default();
         let effects =
-            Arc::new(AuraEffectSystem::testing_for_authority(&config, authority).unwrap());
+            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap());
         let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
 
         let context_id = ContextId::new_from_entropy([203u8; 32]);
@@ -2791,7 +2923,7 @@ mod tests {
         let peer = AuthorityId::new_from_entropy([206u8; 32]);
         let config = AgentConfig::default();
         let effects =
-            Arc::new(AuraEffectSystem::testing_for_authority(&config, authority).unwrap());
+            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap());
         let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
 
         let context_id = ContextId::new_from_entropy([207u8; 32]);
@@ -2851,7 +2983,7 @@ mod tests {
         let peer = AuthorityId::new_from_entropy([209u8; 32]);
         let config = AgentConfig::default();
         let effects =
-            Arc::new(AuraEffectSystem::testing_for_authority(&config, authority).unwrap());
+            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap());
         let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
 
         let context_id = ContextId::new_from_entropy([210u8; 32]);
@@ -2913,7 +3045,7 @@ mod tests {
         let receiver_id = AuthorityId::new_from_entropy([212u8; 32]);
         let config = AgentConfig::default();
         let effects =
-            Arc::new(AuraEffectSystem::testing_for_authority(&config, receiver_id).unwrap());
+            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap());
 
         let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
 
@@ -2985,7 +3117,7 @@ mod tests {
         let receiver_id = AuthorityId::new_from_entropy([214u8; 32]);
         let config = AgentConfig::default();
         let effects =
-            Arc::new(AuraEffectSystem::testing_for_authority(&config, receiver_id).unwrap());
+            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap());
         let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
 
         let invitation_id = InvitationId::new("inv-materialize-home-1");
@@ -3060,7 +3192,7 @@ mod tests {
         let receiver_id = AuthorityId::new_from_entropy([218u8; 32]);
         let config = AgentConfig::default();
         let effects =
-            Arc::new(AuraEffectSystem::testing_for_authority(&config, receiver_id).unwrap());
+            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap());
         let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
 
         let invitation_id = InvitationId::new("inv-materialize-bootstrap-1");
@@ -3130,7 +3262,7 @@ mod tests {
         let receiver_id = AuthorityId::new_from_entropy([216u8; 32]);
         let config = AgentConfig::default();
         let effects =
-            Arc::new(AuraEffectSystem::testing_for_authority(&config, receiver_id).unwrap());
+            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap());
         let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
 
         let invitation_id = InvitationId::new("inv-materialize-home-context");
@@ -3207,7 +3339,7 @@ mod tests {
         let own_authority = AuthorityId::new_from_entropy([122u8; 32]);
         let config = AgentConfig::default();
         let effects =
-            Arc::new(AuraEffectSystem::testing_for_authority(&config, own_authority).unwrap());
+            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap());
 
         let authority_context = AuthorityContext::new(own_authority);
 
@@ -3273,7 +3405,7 @@ mod tests {
         let own_authority = AuthorityId::new_from_entropy([124u8; 32]);
         let config = AgentConfig::default();
         let effects =
-            Arc::new(AuraEffectSystem::testing_for_authority(&config, own_authority).unwrap());
+            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap());
 
         let authority_context = AuthorityContext::new(own_authority);
 
@@ -3608,7 +3740,7 @@ mod tests {
         let own_authority = AuthorityId::new_from_entropy([150u8; 32]);
         let config = AgentConfig::default();
         let effects =
-            Arc::new(AuraEffectSystem::testing_for_authority(&config, own_authority).unwrap());
+            Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap());
 
         let authority_context = AuthorityContext::new(own_authority);
         let handler = InvitationHandler::new(authority_context).unwrap();

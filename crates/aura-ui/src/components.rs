@@ -8,9 +8,6 @@
 use aura_core::identifiers::AuthorityId;
 use dioxus::prelude::*;
 use dioxus_shadcn::components::badge::{Badge as LbBadge, BadgeVariant as LbBadgeVariant};
-use dioxus_shadcn::components::button::{
-    Button as LbButton, ButtonSize as LbButtonSize, ButtonVariant as LbButtonVariant,
-};
 use dioxus_shadcn::components::card::{
     Card as LbCard, CardContent as LbCardContent, CardDescription as LbCardDescription,
     CardHeader as LbCardHeader, CardTitle as LbCardTitle,
@@ -53,10 +50,14 @@ pub struct AuthorityPickerItem {
     pub is_selected: bool,
 }
 
-fn map_button_variant(variant: ButtonVariant) -> LbButtonVariant {
+fn ui_button_class(variant: ButtonVariant) -> &'static str {
     match variant {
-        ButtonVariant::Primary => LbButtonVariant::Default,
-        ButtonVariant::Secondary => LbButtonVariant::Outline,
+        ButtonVariant::Primary => {
+            "inline-flex h-8 items-center justify-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        }
+        ButtonVariant::Secondary => {
+            "inline-flex h-8 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+        }
     }
 }
 
@@ -105,41 +106,42 @@ pub fn UiCard(
 
 #[component]
 pub fn UiButton(
+    id: Option<String>,
     label: String,
     variant: ButtonVariant,
-    on_click: EventHandler<MouseEvent>,
+    onclick: EventHandler<MouseEvent>,
 ) -> Element {
     rsx! {
-        LbButton {
-            variant: map_button_variant(variant),
-            size: LbButtonSize::Small,
-            on_click: move |evt| on_click.call(evt),
+        button {
+            r#type: "button",
+            id,
+            class: ui_button_class(variant),
+            onclick: move |evt| onclick.call(evt),
             "{label}"
         }
     }
 }
 
 #[component]
-pub fn UiListButton(label: String, active: bool, on_click: EventHandler<MouseEvent>) -> Element {
-    let variant = if active {
-        LbButtonVariant::Secondary
-    } else {
-        LbButtonVariant::Ghost
-    };
+pub fn UiListButton(
+    id: Option<String>,
+    label: String,
+    active: bool,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
     let class = if active {
-        "h-9 w-full justify-start rounded-md pl-4 text-left bg-accent text-foreground shadow-none"
+        "inline-flex h-9 w-full items-center justify-start rounded-md bg-accent pl-4 text-left text-sm font-medium text-foreground"
     } else {
-        "h-9 w-full justify-start rounded-md pl-4 text-left text-muted-foreground shadow-none hover:bg-accent/60 hover:text-foreground"
+        "inline-flex h-9 w-full items-center justify-start rounded-md pl-4 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
     };
 
     rsx! {
-        LbButton {
-            variant,
-            size: LbButtonSize::Small,
-            full_width: true,
+        button {
+            r#type: "button",
+            id,
             aria_pressed: Some(active),
             class: "{class}",
-            on_click: move |evt| on_click.call(evt),
+            onclick: move |evt| onclick.call(evt),
             "{label}"
         }
     }
@@ -257,14 +259,16 @@ pub fn UiModal(
                 div {
                     class: "bg-card px-4 py-3 border-t border-border flex items-center justify-end gap-2",
                     UiButton {
+                        id: Some("aura-modal-cancel-button".to_string()),
                         label: "Cancel".to_string(),
                         variant: ButtonVariant::Secondary,
-                        on_click: move |_| on_cancel.call(()),
+                        onclick: move |_| on_cancel.call(()),
                     }
                     UiButton {
+                        id: Some("aura-modal-confirm-button".to_string()),
                         label: modal.enter_label.clone(),
                         variant: ButtonVariant::Primary,
-                        on_click: move |_| on_confirm.call(()),
+                        onclick: move |_| on_confirm.call(()),
                     }
                 }
             }
@@ -409,27 +413,30 @@ pub fn UiDeviceEnrollmentModal(
                     div {
                         class: "flex items-center gap-2",
                         UiButton {
+                            id: Some("aura-device-enrollment-cancel-button".to_string()),
                             label: if is_complete || has_failed {
                                 "Close".to_string()
                             } else {
                                 "Cancel".to_string()
                             },
                             variant: ButtonVariant::Secondary,
-                            on_click: move |_| on_cancel.call(()),
+                            onclick: move |_| on_cancel.call(()),
                         }
                         UiButton {
+                            id: Some("aura-device-enrollment-copy-button".to_string()),
                             label: if copied {
                                 "Copied".to_string()
                             } else {
                                 "Copy Code".to_string()
                             },
                             variant: ButtonVariant::Secondary,
-                            on_click: move |_| on_copy.call(()),
+                            onclick: move |_| on_copy.call(()),
                         }
                         UiButton {
+                            id: Some("aura-device-enrollment-primary-button".to_string()),
                             label: primary_label,
                             variant: ButtonVariant::Primary,
-                            on_click: move |_| on_primary.call(()),
+                            onclick: move |_| on_primary.call(()),
                         }
                     }
                 }
@@ -544,6 +551,7 @@ pub fn UiAuthorityPickerModal(
                                 for (index, authority) in authorities.into_iter().enumerate() {
                                     button {
                                         r#type: "button",
+                                        id: format!("aura-authority-picker-item-{}", authority.id),
                                         class: if authority.is_selected {
                                             "flex w-full items-start justify-between rounded-lg border border-primary/40 bg-primary/10 px-3 py-3 text-left"
                                         } else {
@@ -595,14 +603,16 @@ pub fn UiAuthorityPickerModal(
                     div {
                         class: "flex items-center gap-2",
                         UiButton {
+                            id: Some("aura-authority-picker-cancel-button".to_string()),
                             label: "Cancel".to_string(),
                             variant: ButtonVariant::Secondary,
-                            on_click: move |_| on_cancel.call(()),
+                            onclick: move |_| on_cancel.call(()),
                         }
                         UiButton {
+                            id: Some("aura-authority-picker-confirm-button".to_string()),
                             label: "Switch".to_string(),
                             variant: ButtonVariant::Primary,
-                            on_click: move |_| on_confirm.call(()),
+                            onclick: move |_| on_confirm.call(()),
                         }
                     }
                 }

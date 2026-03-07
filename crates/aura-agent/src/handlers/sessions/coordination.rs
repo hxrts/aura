@@ -1010,7 +1010,7 @@ mod tests {
         let account_id = AccountId::new_from_entropy([3u8; 32]);
 
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);
 
@@ -1036,8 +1036,11 @@ mod tests {
         // Use shared transport inbox to verify messages are sent
         let shared_transport = crate::runtime::SharedTransport::new();
         let effects = Arc::new(
-            AuraEffectSystem::testing_with_shared_transport(&config, shared_transport.clone())
-                .unwrap(),
+            AuraEffectSystem::simulation_for_test_with_shared_transport(
+                &config,
+                shared_transport.clone(),
+            )
+            .unwrap(),
         );
         let sessions = SessionOperations::new(effects.clone(), authority_context, account_id);
 
@@ -1068,8 +1071,7 @@ mod tests {
         let authority_context = AuthorityContext::new(AuthorityId::new_from_entropy([71u8; 32]));
         let account_id = AccountId::new_from_entropy([14u8; 32]);
         let config = AgentConfig::default();
-        // Use unique deterministic seed to avoid master key caching issues
-        let effects = Arc::new(AuraEffectSystem::simulation(&config, 10005).unwrap());
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
         let sessions = SessionOperations::new(effects.clone(), authority_context, account_id);
 
         let handle = sessions
@@ -1088,7 +1090,7 @@ mod tests {
         let authority_context = AuthorityContext::new(AuthorityId::new_from_entropy([72u8; 32]));
         let account_id = AccountId::new_from_entropy([15u8; 32]);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
         let sessions = SessionOperations::new(effects, authority_context, account_id);
 
         let err = sessions

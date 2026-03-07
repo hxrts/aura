@@ -23,6 +23,7 @@ dioxus-shadcn = { git = "https://github.com/hxrts/dioxus-shadcn.git", rev = "ee0
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
 

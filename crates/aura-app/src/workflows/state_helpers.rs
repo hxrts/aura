@@ -9,10 +9,13 @@ use std::sync::Arc;
 use async_lock::RwLock;
 
 use crate::signal_defs::{
-    CHAT_SIGNAL, CHAT_SIGNAL_NAME, NEIGHBORHOOD_SIGNAL, NEIGHBORHOOD_SIGNAL_NAME, RECOVERY_SIGNAL,
-    RECOVERY_SIGNAL_NAME,
+    CHAT_SIGNAL, CHAT_SIGNAL_NAME, CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME, NEIGHBORHOOD_SIGNAL,
+    NEIGHBORHOOD_SIGNAL_NAME, RECOVERY_SIGNAL, RECOVERY_SIGNAL_NAME,
 };
-use crate::views::{chat::ChatState, neighborhood::NeighborhoodState, recovery::RecoveryState};
+use crate::views::{
+    chat::ChatState, contacts::ContactsState, neighborhood::NeighborhoodState,
+    recovery::RecoveryState,
+};
 use crate::workflows::signals::emit_signal;
 use crate::AppCore;
 use aura_core::AuraError;
@@ -61,6 +64,29 @@ pub async fn with_recovery_state<T>(
 
     // Also emit to RECOVERY_SIGNAL for ReactiveEffects subscribers
     emit_signal(app_core, &*RECOVERY_SIGNAL, state, RECOVERY_SIGNAL_NAME).await?;
+
+    Ok(output)
+}
+
+/// Read-modify-write helper for contacts state.
+///
+/// This helper updates both:
+/// 1. ViewState (for futures-signals subscribers)
+/// 2. CONTACTS_SIGNAL (for ReactiveEffects subscribers)
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
+pub async fn with_contacts_state<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    update: impl FnOnce(&mut ContactsState) -> T,
+) -> Result<T, AuraError> {
+    let (output, state) = {
+        let mut core = app_core.write().await;
+        let mut state = core.snapshot().contacts;
+        let output = update(&mut state);
+        core.views_mut().set_contacts(state.clone());
+        (output, state)
+    };
+
+    emit_signal(app_core, &*CONTACTS_SIGNAL, state, CONTACTS_SIGNAL_NAME).await?;
 
     Ok(output)
 }

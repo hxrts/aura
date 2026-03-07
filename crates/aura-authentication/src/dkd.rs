@@ -1001,7 +1001,7 @@ mod tests {
     async fn test_contribution_generation() {
         let config = create_test_config(2, 3);
         let protocol = DkdProtocol::new(config);
-        let effects = AuraEffectSystem::testing(&AgentConfig::default()).unwrap();
+        let effects = AuraEffectSystem::simulation_for_test(&AgentConfig::default()).unwrap();
 
         let session_id = DkdSessionId::deterministic("test");
         let device_id = device(4);

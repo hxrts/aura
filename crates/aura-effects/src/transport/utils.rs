@@ -8,6 +8,11 @@ use std::net::{IpAddr, ToSocketAddrs};
 use std::time::Duration;
 use tokio::time::timeout;
 
+#[cfg(target_arch = "wasm32")]
+type MonotonicInstant = web_time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+type MonotonicInstant = std::time::Instant;
+
 /// Address resolution utilities
 pub struct AddressResolver;
 
@@ -180,9 +185,9 @@ pub struct ConnectionMetrics {
     /// Number of messages received
     pub messages_received: u64,
     /// When the connection was established
-    pub connection_time: Option<std::time::Instant>,
+    pub connection_time: Option<MonotonicInstant>,
     /// Last activity timestamp
-    pub last_activity: Option<std::time::Instant>,
+    pub last_activity: Option<MonotonicInstant>,
 }
 
 impl ConnectionMetrics {
@@ -195,7 +200,7 @@ impl ConnectionMetrics {
     ///
     /// Note: Callers should obtain `now` via `std::time::Instant::now()` only in effect handlers.
     /// Application code should use physical_time() from the effect system.
-    pub fn record_sent(&mut self, bytes: u64, now: std::time::Instant) {
+    pub fn record_sent(&mut self, bytes: u64, now: MonotonicInstant) {
         self.bytes_sent += bytes;
         self.messages_sent += 1;
         self.last_activity = Some(now);
@@ -205,7 +210,7 @@ impl ConnectionMetrics {
     ///
     /// Note: Callers should obtain `now` via `std::time::Instant::now()` only in effect handlers.
     /// Application code should use physical_time() from the effect system.
-    pub fn record_received(&mut self, bytes: u64, now: std::time::Instant) {
+    pub fn record_received(&mut self, bytes: u64, now: MonotonicInstant) {
         self.bytes_received += bytes;
         self.messages_received += 1;
         self.last_activity = Some(now);
@@ -215,7 +220,7 @@ impl ConnectionMetrics {
     ///
     /// Note: Callers should obtain `now` via `std::time::Instant::now()` only in effect handlers.
     /// Application code should use physical_time() from the effect system.
-    pub fn connected(&mut self, now: std::time::Instant) {
+    pub fn connected(&mut self, now: MonotonicInstant) {
         self.connection_time = Some(now);
         self.last_activity = Some(now);
     }

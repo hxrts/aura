@@ -3,7 +3,9 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use aura_harness::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, TunnelConfig};
+use aura_harness::config::{
+    InstanceConfig, InstanceMode, RunConfig, RunSection, ScreenSource, TunnelConfig,
+};
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::build_seed_bundle;
 use aura_harness::replay::{ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
@@ -30,6 +32,7 @@ fn contract_pty_control_path() {
         instance_id: "alice".to_string(),
         pattern: "contract-pty".to_string(),
         timeout_ms: 2000,
+        screen_source: ScreenSource::Default,
     }));
 
     if let Err(error) = api.stop_all() {
@@ -73,6 +76,7 @@ fn contract_replay_and_artifacts_subsystems() {
         instance_id: "alice".to_string(),
         pattern: "contract-replay".to_string(),
         timeout_ms: 2000,
+        screen_source: ScreenSource::Default,
     }));
 
     if let Err(error) = api.stop_all() {

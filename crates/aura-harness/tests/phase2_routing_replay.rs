@@ -2,7 +2,9 @@
 
 use std::path::PathBuf;
 
-use aura_harness::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, TunnelConfig};
+use aura_harness::config::{
+    InstanceConfig, InstanceMode, RunConfig, RunSection, ScreenSource, TunnelConfig,
+};
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::build_seed_bundle;
 use aura_harness::replay::{parse_bundle, ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
@@ -61,6 +63,7 @@ fn replay_runner_reexecutes_recorded_actions_without_llm() {
         instance_id: "alice".to_string(),
         pattern: "phase2-replay".to_string(),
         timeout_ms: 2000,
+        screen_source: ScreenSource::Default,
     }));
     if let Err(error) = tool_api.stop_all() {
         panic!("stop_all failed: {error}");

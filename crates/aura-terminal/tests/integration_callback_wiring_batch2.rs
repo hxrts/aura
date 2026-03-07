@@ -29,25 +29,42 @@
 use async_lock::RwLock;
 use std::sync::Arc;
 
-use aura_app::signal_defs::{CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, SYNC_STATUS_SIGNAL};
+use aura_app::signal_defs::{
+    CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, SYNC_STATUS_SIGNAL,
+};
 use aura_app::views::chat::ChannelType;
 use aura_app::{AppConfig, AppCore};
-use aura_core::crypto::hash::hash;
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::identifiers::{AuthorityId, ChannelId};
+use aura_core::identifiers::AuthorityId;
 use aura_terminal::handlers::tui::TuiMode;
+use aura_terminal::ids;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
 use aura_testkit::MockRuntimeBridge;
-
-/// Helper to create a DM channel ID the same way the messaging workflow does
-fn dm_channel_id(target: &str) -> ChannelId {
-    let descriptor = format!("dm:{target}");
-    ChannelId::from_bytes(hash(descriptor.as_bytes()))
-}
+use base64::Engine;
 
 fn peer_authority_id(seed: u8) -> AuthorityId {
     AuthorityId::new_from_entropy([seed; 32])
+}
+
+fn generate_demo_invite_code(name: &str, seed: u64) -> String {
+    let sender_id = ids::authority_id(&format!("demo:{seed}:{name}:authority"));
+    let invitation_id = ids::uuid(&format!("demo:{seed}:{name}:invitation"));
+    let invitation_data = serde_json::json!({
+        "version": 1,
+        "invitation_id": invitation_id.to_string(),
+        "sender_id": sender_id.uuid().to_string(),
+        "invitation_type": {
+            "Contact": {
+                "nickname": name
+            }
+        },
+        "expires_at": null,
+        "message": format!("Contact invitation from {name} (demo)")
+    });
+    let json_str = serde_json::to_string(&invitation_data).unwrap_or_default();
+    let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json_str.as_bytes());
+    format!("aura:v1:{b64}")
 }
 
 // ============================================================================
@@ -233,14 +250,28 @@ async fn test_invitation_roundtrip_preserves_data() {
 /// 3. Channel is selected after creation
 /// 4. Channel has correct type (DirectMessage)
 ///
-/// Signal propagation for DM channels not working in test environment.
-/// StartDirectChat succeeds but CHAT_SIGNAL is not updated.
 #[tokio::test]
-#[ignore = "requires full signal propagation - StartDirectChat succeeds but CHAT_SIGNAL not updated"]
 async fn test_start_direct_chat_creates_dm_channel() {
     println!("\n=== Start Direct Chat Creates DM Channel Test ===\n");
 
     let (ctx, app_core) = setup_test_env("dm-start").await;
+    let alice_code = generate_demo_invite_code("alice", 2024);
+
+    ctx.dispatch(EffectCommand::ImportInvitation { code: alice_code })
+        .await
+        .expect("Import should succeed");
+
+    let contact_id = {
+        let core = app_core.read().await;
+        let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
+        let id = contacts
+            .all_contacts()
+            .next()
+            .expect("Alice should exist")
+            .id
+            .to_string();
+        id
+    };
 
     // Phase 1: Get initial channel count
     println!("Phase 1: Get initial chat state");
@@ -254,10 +285,9 @@ async fn test_start_direct_chat_creates_dm_channel() {
 
     // Phase 2: Start a direct chat
     println!("\nPhase 2: Start direct chat with contact");
-    let contact_id = "contact-alice-123";
     let result = ctx
         .dispatch(EffectCommand::StartDirectChat {
-            contact_id: contact_id.to_string(),
+            contact_id: contact_id.clone(),
         })
         .await;
     assert!(result.is_ok(), "StartDirectChat should succeed: {result:?}");
@@ -265,18 +295,14 @@ async fn test_start_direct_chat_creates_dm_channel() {
 
     // Phase 3: Verify DM channel was created
     println!("\nPhase 3: Verify DM channel was created");
-    let expected_channel_id = dm_channel_id(contact_id);
-    let chat = wait_for_chat(&app_core, |chat| {
-        chat.all_channels().any(|c| c.id == expected_channel_id)
-    })
-    .await;
+    let chat = wait_for_chat(&app_core, |chat| chat.all_channels().any(|c| c.is_dm)).await;
 
     assert!(
         chat.channel_count() > initial_count,
         "Should have more channels after DM start"
     );
 
-    let dm_channel = chat.all_channels().find(|c| c.id == expected_channel_id);
+    let dm_channel = chat.all_channels().find(|c| c.is_dm);
     assert!(dm_channel.is_some(), "DM channel should exist");
     let dm = dm_channel.unwrap();
     assert!(dm.is_dm, "Channel should be marked as DM");
@@ -303,13 +329,28 @@ async fn test_start_direct_chat_creates_dm_channel() {
 /// 2. Message is added to the channel
 /// 3. Message content matches what was sent
 ///
-/// Signal propagation for DM messages not working in test environment.
 #[tokio::test]
-#[ignore = "requires full signal propagation - SendDirectMessage succeeds but CHAT_SIGNAL not updated"]
 async fn test_send_direct_message_adds_message() {
     println!("\n=== Send Direct Message Adds Message Test ===\n");
 
     let (ctx, app_core) = setup_test_env("dm-send").await;
+    let alice_code = generate_demo_invite_code("alice", 2024);
+
+    ctx.dispatch(EffectCommand::ImportInvitation { code: alice_code })
+        .await
+        .expect("Import should succeed");
+
+    let target = {
+        let core = app_core.read().await;
+        let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
+        let id = contacts
+            .all_contacts()
+            .next()
+            .expect("Alice should exist")
+            .id
+            .to_string();
+        id
+    };
 
     // Phase 1: Get initial state
     println!("Phase 1: Get initial state");
@@ -325,11 +366,10 @@ async fn test_send_direct_message_adds_message() {
 
     // Phase 2: Send a direct message
     println!("\nPhase 2: Send direct message");
-    let target = "alice";
     let content = "Hello Alice, this is a test DM!";
     let result = ctx
         .dispatch(EffectCommand::SendDirectMessage {
-            target: target.to_string(),
+            target: target.clone(),
             content: content.to_string(),
         })
         .await;
@@ -341,18 +381,16 @@ async fn test_send_direct_message_adds_message() {
 
     // Phase 3: Verify DM channel was created
     println!("\nPhase 3: Verify DM channel was created");
-    let expected_channel_id = dm_channel_id(target);
     let chat = wait_for_chat(&app_core, |chat| {
-        chat.all_channels().any(|c| c.id == expected_channel_id)
-            && !chat.messages_for_channel(&expected_channel_id).is_empty()
+        chat.all_channels()
+            .any(|c| c.is_dm && !chat.messages_for_channel(&c.id).is_empty())
     })
     .await;
 
-    let dm_channel = chat.all_channels().find(|c| c.id == expected_channel_id);
-    assert!(
-        dm_channel.is_some(),
-        "DM channel should be created: {expected_channel_id}"
-    );
+    let dm_channel = chat
+        .all_channels()
+        .find(|c| c.is_dm && !chat.messages_for_channel(&c.id).is_empty());
+    assert!(dm_channel.is_some(), "DM channel should be created");
     let channel = dm_channel.unwrap();
     assert!(channel.is_dm, "Channel should be marked as DM");
     println!(
@@ -368,7 +406,7 @@ async fn test_send_direct_message_adds_message() {
 
     // Phase 4: Verify message was added
     println!("\nPhase 4: Verify message was added");
-    let channel_messages = chat.messages_for_channel(&expected_channel_id);
+    let channel_messages = chat.messages_for_channel(&channel.id);
     assert!(
         chat.message_count() > initial_message_count,
         "Should have more messages after send"
@@ -888,20 +926,33 @@ async fn test_all_snapshots_consistent() {
 
 /// Test complete DM flow: start chat -> send messages -> verify
 ///
-/// Signal propagation for DM flows not working in test environment.
 #[tokio::test]
-#[ignore = "requires full signal propagation - DM commands succeed but CHAT_SIGNAL not updated"]
 async fn test_complete_dm_flow() {
     println!("\n=== Complete DM Flow Test ===\n");
 
     let (ctx, app_core) = setup_test_env("dm-flow").await;
+    let alice_code = generate_demo_invite_code("alice", 2024);
 
-    let contact_id = "alice-for-dm";
+    ctx.dispatch(EffectCommand::ImportInvitation { code: alice_code })
+        .await
+        .expect("Import should succeed");
+
+    let contact_id = {
+        let core = app_core.read().await;
+        let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
+        let id = contacts
+            .all_contacts()
+            .next()
+            .expect("Alice should exist")
+            .id
+            .to_string();
+        id
+    };
 
     // Phase 1: Start direct chat
     println!("Phase 1: Start direct chat with Alice");
     ctx.dispatch(EffectCommand::StartDirectChat {
-        contact_id: contact_id.to_string(),
+        contact_id: contact_id.clone(),
     })
     .await
     .expect("StartDirectChat should succeed");
@@ -910,7 +961,7 @@ async fn test_complete_dm_flow() {
     // Phase 2: Send first message
     println!("\nPhase 2: Send first message");
     ctx.dispatch(EffectCommand::SendDirectMessage {
-        target: contact_id.to_string(),
+        target: contact_id.clone(),
         content: "Hey Alice!".to_string(),
     })
     .await
@@ -920,7 +971,7 @@ async fn test_complete_dm_flow() {
     // Phase 3: Send second message
     println!("\nPhase 3: Send second message");
     ctx.dispatch(EffectCommand::SendDirectMessage {
-        target: contact_id.to_string(),
+        target: contact_id.clone(),
         content: "How are you?".to_string(),
     })
     .await

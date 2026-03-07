@@ -145,36 +145,9 @@ use crate::workflows::signals::read_signal_or_default;
 use crate::{views::invitations::InvitationsState, AppCore};
 use async_lock::RwLock;
 use aura_core::effects::amp::ChannelBootstrapPackage;
-#[cfg(feature = "signals")]
-use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
 use aura_core::AuraError;
 use std::sync::Arc;
-
-#[cfg(feature = "signals")]
-async fn yield_once() {
-    use std::future::Future;
-    use std::pin::Pin;
-    use std::task::{Context, Poll};
-
-    struct YieldOnce(bool);
-
-    impl Future for YieldOnce {
-        type Output = ();
-
-        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-            if self.0 {
-                Poll::Ready(())
-            } else {
-                self.0 = true;
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            }
-        }
-    }
-
-    YieldOnce(false).await;
-}
 
 // ============================================================================
 // Invitation Creation via RuntimeBridge
@@ -336,61 +309,10 @@ pub async fn accept_invitation(
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
-    #[cfg(feature = "signals")]
-    let initial_contact_count = {
-        read_signal(
-            app_core,
-            &*crate::signal_defs::CONTACTS_SIGNAL,
-            crate::signal_defs::CONTACTS_SIGNAL_NAME,
-        )
-        .await
-        .unwrap_or_default()
-        .contact_count()
-    };
-
-    #[cfg(feature = "signals")]
-    let mut contacts_stream = {
-        let core = app_core.read().await;
-        core.subscribe(&*crate::signal_defs::CONTACTS_SIGNAL)
-    };
-
     runtime
         .accept_invitation(invitation_id.as_str())
         .await
         .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {e}")))?;
-
-    // Give the runtime fact pipeline a bounded chance to publish CONTACTS_SIGNAL before we refresh
-    // derived UI signals like CONNECTION_STATUS_SIGNAL.
-    #[cfg(feature = "signals")]
-    {
-        for _ in 0..4096 {
-            // Prefer consuming emissions if available (fast path).
-            if let Some(state) = contacts_stream.try_recv() {
-                if state.contact_count() > initial_contact_count {
-                    break;
-                }
-            } else {
-                // Fallback: check current state (covers missed emissions).
-                let contacts_len = read_signal(
-                    app_core,
-                    &*crate::signal_defs::CONTACTS_SIGNAL,
-                    crate::signal_defs::CONTACTS_SIGNAL_NAME,
-                )
-                .await
-                .unwrap_or_default()
-                .contact_count();
-
-                if contacts_len > initial_contact_count {
-                    break;
-                }
-            }
-
-            yield_once().await;
-        }
-    }
-
-    // Best-effort: refresh signals so UI status (e.g. online contact count) updates immediately.
-    let _ = super::system::refresh_account(app_core).await;
 
     Ok(())
 }

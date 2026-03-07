@@ -258,7 +258,7 @@ mod tests {
     async fn test_check_for_updates_returns_none() {
         let authority = create_test_authority(202);
         let config = AgentConfig::default();
-        let effects = AuraEffectSystem::testing(&config).unwrap();
+        let effects = AuraEffectSystem::simulation_for_test(&config).unwrap();
         let handler = OtaHandler::new(authority, "0.1.0".to_string()).unwrap();
 
         let update = handler.check_for_updates(&effects).await.unwrap();
@@ -279,7 +279,7 @@ mod tests {
     async fn test_verify_update_with_valid_signature() {
         let authority = create_test_authority(204);
         let config = AgentConfig::default();
-        let effects = AuraEffectSystem::testing(&config).unwrap();
+        let effects = AuraEffectSystem::simulation_for_test(&config).unwrap();
         let handler = OtaHandler::new(authority, "0.1.0".to_string()).unwrap();
 
         // Generate a test keypair
@@ -317,7 +317,7 @@ mod tests {
     async fn test_verify_update_with_invalid_hash() {
         let authority = create_test_authority(205);
         let config = AgentConfig::default();
-        let effects = AuraEffectSystem::testing(&config).unwrap();
+        let effects = AuraEffectSystem::simulation_for_test(&config).unwrap();
         let handler = OtaHandler::new(authority, "0.1.0".to_string()).unwrap();
 
         let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();

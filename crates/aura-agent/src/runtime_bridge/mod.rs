@@ -2912,6 +2912,14 @@ impl RuntimeBridge for AgentRuntimeBridge {
         authorities
     }
 
+    async fn has_account_config(&self) -> Result<bool, IntentError> {
+        AgentRuntimeBridge::has_account_config(self).await
+    }
+
+    async fn initialize_account(&self, nickname_suggestion: &str) -> Result<(), IntentError> {
+        AgentRuntimeBridge::initialize_account(self, nickname_suggestion).await
+    }
+
     async fn set_nickname_suggestion(&self, name: &str) -> Result<(), IntentError> {
         let (key, mut config) = self.load_account_config().await?;
         config.nickname_suggestion = Some(name.to_string());

@@ -12,6 +12,10 @@ use crate::model::{
 const PANEL_WIDTH: usize = 38;
 const CONTENT_ROWS: usize = 20;
 pub fn render_canonical_snapshot(model: &UiModel) -> String {
+    if !model.account_ready {
+        return render_account_setup_snapshot(model);
+    }
+
     let mut lines = Vec::with_capacity(CONTENT_ROWS + 4);
     let authority_label = format!("Authority: {} (local)", model.authority_id);
     let mut authority_written = false;
@@ -40,6 +44,18 @@ pub fn render_canonical_snapshot(model: &UiModel) -> String {
         ));
     }
 
+    lines.join("\n")
+}
+
+fn render_account_setup_snapshot(model: &UiModel) -> String {
+    let mut lines = vec![
+        "Welcome to Aura".to_string(),
+        "Create Account".to_string(),
+        format!("Nickname: {}", model.account_setup_name),
+    ];
+    if let Some(error) = &model.account_setup_error {
+        lines.push(format!("Error: {error}"));
+    }
     lines.join("\n")
 }
 

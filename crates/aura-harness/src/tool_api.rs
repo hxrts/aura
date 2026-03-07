@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::api_version::{negotiate, TOOL_API_DEFAULT_VERSION, TOOL_API_VERSIONS};
-use crate::config::RunConfig;
+use crate::config::{RunConfig, ScreenSource};
 use crate::coordinator::HarnessCoordinator;
 use crate::introspection::{
     extract_authority_id, extract_channels, extract_contacts, extract_current_selection,
@@ -64,6 +64,8 @@ pub enum ToolRequest {
     },
     Screen {
         instance_id: String,
+        #[serde(default)]
+        screen_source: ScreenSource,
     },
     SendKeys {
         instance_id: String,
@@ -75,10 +77,23 @@ pub enum ToolRequest {
         #[serde(default)]
         repeat: u16,
     },
+    ClickButton {
+        instance_id: String,
+        label: String,
+        selector: Option<String>,
+    },
+    FillInput {
+        instance_id: String,
+        selector: String,
+        value: String,
+    },
     WaitFor {
         instance_id: String,
         pattern: String,
         timeout_ms: u64,
+        #[serde(default)]
+        screen_source: ScreenSource,
+        selector: Option<String>,
     },
     TailLog {
         instance_id: String,
@@ -175,8 +190,13 @@ impl ToolApi {
                     })
                 })
             }
-            ToolRequest::Screen { instance_id } => {
-                self.coordinator.screen(&instance_id).map(|screen| {
+            ToolRequest::Screen {
+                instance_id,
+                screen_source,
+            } => self
+                .coordinator
+                .screen_with_source(&instance_id, screen_source)
+                .map(|screen| {
                     let authoritative = authoritative_screen(&screen);
                     let normalized = normalize_screen(&screen);
                     serde_json::json!({
@@ -184,10 +204,10 @@ impl ToolApi {
                         "raw_screen": screen,
                         "authoritative_screen": &authoritative,
                         "normalized_screen": normalized,
-                        "capture_consistency": "settled"
+                        "capture_consistency": "settled",
+                        "screen_source": format!("{screen_source:?}").to_ascii_lowercase()
                     })
-                })
-            }
+                }),
             ToolRequest::SendKeys { instance_id, keys } => self
                 .coordinator
                 .send_keys(&instance_id, &keys)
@@ -200,14 +220,41 @@ impl ToolApi {
                 .coordinator
                 .send_key(&instance_id, key, repeat)
                 .map(|_| serde_json::json!({ "status": "sent" })),
+            ToolRequest::ClickButton {
+                instance_id,
+                label,
+                selector,
+            } => {
+                let result = if let Some(selector) = selector.as_deref() {
+                    self.coordinator.click_target(&instance_id, selector)
+                } else {
+                    self.coordinator.click_button(&instance_id, &label)
+                };
+                result.map(|_| serde_json::json!({ "status": "clicked" }))
+            }
+            ToolRequest::FillInput {
+                instance_id,
+                selector,
+                value,
+            } => self
+                .coordinator
+                .fill_input(&instance_id, &selector, &value)
+                .map(|_| serde_json::json!({ "status": "filled" })),
             ToolRequest::WaitFor {
                 instance_id,
                 pattern,
                 timeout_ms,
-            } => self
-                .coordinator
-                .wait_for(&instance_id, &pattern, timeout_ms)
-                .map(|screen| {
+                screen_source,
+                selector,
+            } => {
+                let result = if let Some(selector) = selector.as_deref() {
+                    self.coordinator
+                        .wait_for_selector(&instance_id, selector, timeout_ms)
+                } else {
+                    self.coordinator
+                        .wait_for_with_source(&instance_id, &pattern, timeout_ms, screen_source)
+                };
+                result.map(|screen| {
                     let authoritative = authoritative_screen(&screen);
                     let normalized = normalize_screen(&screen);
                     serde_json::json!({
@@ -216,9 +263,11 @@ impl ToolApi {
                         "raw_screen": screen,
                         "authoritative_screen": &authoritative,
                         "normalized_screen": normalized,
-                        "matched_view": "normalized"
+                        "matched_view": "normalized",
+                        "screen_source": format!("{screen_source:?}").to_ascii_lowercase()
                     })
-                }),
+                })
+            }
             ToolRequest::TailLog { instance_id, lines } => self
                 .coordinator
                 .tail_log(

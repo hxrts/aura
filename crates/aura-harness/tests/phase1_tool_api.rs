@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use aura_harness::config::{InstanceConfig, InstanceMode, RunConfig, RunSection};
+use aura_harness::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, ScreenSource};
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::tool_api::{ToolApi, ToolKey, ToolRequest, ToolResponse};
 
@@ -72,6 +72,7 @@ fn tool_api_primitives_control_local_pty_instance() {
         instance_id: "alice".to_string(),
         pattern: "hello-pty".to_string(),
         timeout_ms: 2000,
+        screen_source: ScreenSource::Default,
     }) {
         ToolResponse::Ok { .. } => {}
         ToolResponse::Error { message } => panic!("wait_for failed: {message}"),
@@ -96,6 +97,7 @@ fn tool_api_primitives_control_local_pty_instance() {
         instance_id: "alice".to_string(),
         pattern: "hello-key".to_string(),
         timeout_ms: 2000,
+        screen_source: ScreenSource::Default,
     }) {
         ToolResponse::Ok { .. } => {}
         ToolResponse::Error { message } => panic!("wait_for hello-key failed: {message}"),
@@ -103,6 +105,7 @@ fn tool_api_primitives_control_local_pty_instance() {
 
     let screen_payload = match tool_api.handle_request(ToolRequest::Screen {
         instance_id: "alice".to_string(),
+        screen_source: ScreenSource::Default,
     }) {
         ToolResponse::Ok { payload } => payload,
         ToolResponse::Error { message } => panic!("screen failed: {message}"),

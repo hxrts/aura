@@ -13,6 +13,15 @@ pub trait InstanceBackend {
     fn start(&mut self) -> Result<()>;
     fn stop(&mut self) -> Result<()>;
     fn snapshot(&self) -> Result<String>;
+    fn snapshot_dom(&self) -> Result<String> {
+        self.snapshot()
+    }
+    fn wait_for_dom_patterns(&self, _patterns: &[String], _timeout_ms: u64) -> Option<Result<String>> {
+        None
+    }
+    fn wait_for_target(&self, _selector: &str, _timeout_ms: u64) -> Option<Result<String>> {
+        None
+    }
     fn send_keys(&mut self, keys: &str) -> Result<()>;
     fn send_key(&mut self, key: ToolKey, repeat: u16) -> Result<()> {
         let sequence = tool_key_sequence(key);
@@ -21,6 +30,26 @@ pub trait InstanceBackend {
             self.send_keys(sequence)?;
         }
         Ok(())
+    }
+    fn click_button(&mut self, _label: &str) -> Result<()> {
+        bail!(
+            "button clicks are not supported by backend {}",
+            self.backend_kind()
+        )
+    }
+    fn click_target(&mut self, selector: &str) -> Result<()> {
+        let _ = selector;
+        bail!(
+            "selector clicks are not supported by backend {}",
+            self.backend_kind()
+        )
+    }
+    fn fill_input(&mut self, selector: &str, value: &str) -> Result<()> {
+        let _ = (selector, value);
+        bail!(
+            "input filling is not supported by backend {}",
+            self.backend_kind()
+        )
     }
     fn tail_log(&self, lines: usize) -> Result<Vec<String>>;
     fn inject_message(&mut self, _message: &str) -> Result<()> {

@@ -181,9 +181,17 @@ async fn test_hello_world_protocol() -> aura_core::AuraResult<()> {
     // Create test fixture with automatic tracing
     let fixture = create_test_fixture().await?;
 
-    // Create simple effect systems for testing
-    let alice_effects = AuraEffectSystem::testing(&AgentConfig::default())?;
-    let bob_effects = AuraEffectSystem::testing(&AgentConfig::default())?;
+    // Create deterministic test effect systems
+    let alice_effects = AuraEffectSystem::simulation_for_named_test_with_salt(
+        &AgentConfig::default(),
+        "test_hello_world_protocol",
+        0,
+    )?;
+    let bob_effects = AuraEffectSystem::simulation_for_named_test_with_salt(
+        &AgentConfig::default(),
+        "test_hello_world_protocol",
+        1,
+    )?;
 
     // Get device IDs for routing
     let alice_device = fixture.create_device_id();
@@ -207,7 +215,7 @@ async fn test_hello_world_protocol() -> aura_core::AuraResult<()> {
 }
 ```
 
-This test creates stateless effect systems for Alice and Bob using testing configuration. The systems are context-free and provide deterministic behavior for testing protocol logic. For comprehensive testing approaches, see [Testing Guide](804_testing_guide.md).
+This test creates deterministic, seeded effect systems for Alice and Bob using `simulation_for_named_test_with_salt(...)`. The identity + salt pair makes failures reproducible. For comprehensive testing approaches, see [Testing Guide](804_testing_guide.md).
 
 Run the test:
 

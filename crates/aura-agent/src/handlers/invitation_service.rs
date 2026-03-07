@@ -72,8 +72,7 @@ impl InvitationServiceApi {
     fn should_track_ceremony(invitation_type: &InvitationType) -> bool {
         matches!(
             invitation_type,
-            InvitationType::Contact { .. }
-                | InvitationType::Guardian { .. }
+            InvitationType::Guardian { .. }
                 | InvitationType::Channel { .. }
         )
     }
@@ -487,22 +486,28 @@ mod tests {
         AuthorityContext::new(authority_id)
     }
 
+    #[track_caller]
     fn effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem> {
         let config = AgentConfig {
             device_id: authority.device_id(),
             ..Default::default()
         };
-        Arc::new(AuraEffectSystem::testing(&config).unwrap())
+        Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap())
     }
 
+    #[track_caller]
     fn effects_for_simulation(authority: &AuthorityContext, seed: u64) -> Arc<AuraEffectSystem> {
         let config = AgentConfig {
             device_id: authority.device_id(),
             ..Default::default()
         };
         Arc::new(
-            AuraEffectSystem::simulation_for_authority(&config, seed, authority.authority_id())
-                .unwrap(),
+            AuraEffectSystem::simulation_for_test_for_authority_with_salt(
+                &config,
+                authority.authority_id(),
+                seed,
+            )
+            .unwrap(),
         )
     }
 

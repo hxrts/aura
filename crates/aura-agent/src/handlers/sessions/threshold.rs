@@ -89,7 +89,7 @@ mod tests {
         let account_id = AccountId::new_from_entropy([30u8; 32]);
 
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::testing(&config).unwrap();
+        let effect_system = AuraEffectSystem::simulation_for_test(&config).unwrap();
         let effects = Arc::new(effect_system);
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);
@@ -122,7 +122,7 @@ mod tests {
         let account_id = AccountId::new_from_entropy([31u8; 32]);
 
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::testing(&config).unwrap();
+        let effect_system = AuraEffectSystem::simulation_for_test(&config).unwrap();
         let effects = Arc::new(effect_system);
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);

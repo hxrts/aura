@@ -79,6 +79,13 @@ impl NetworkChangeStream for DebouncedNetworkChangeStream {
             return Ok(Some(change));
         }
 
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Browser harness/runtime paths do not have a Send-safe debounce timer future here.
+            // Deliver unusable transitions immediately on wasm instead of hanging the async_trait future.
+            return Ok(Some(change));
+        }
+
         let mut pending_unusable = change;
         let timer = tokio::time::sleep(self.unusable_debounce);
         tokio::pin!(timer);

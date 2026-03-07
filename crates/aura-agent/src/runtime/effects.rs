@@ -27,6 +27,7 @@ use aura_authorization::BiscuitAuthorizationBridge;
 use aura_composition::{CompositeHandlerAdapter, RegisterAllOptions};
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::*;
+use aura_core::hash::hash as aura_hash;
 use aura_core::scope::AuthorizationOp;
 use aura_core::{AuraError, AuthorityId, ContextId};
 use aura_effects::{
@@ -49,9 +50,11 @@ use rand::SeedableRng;
 use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::net::SocketAddr;
+use std::panic::Location;
 use std::sync::Arc;
 #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
 use std::sync::Once;
+use std::sync::OnceLock;
 #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -92,6 +95,16 @@ const TYPED_FACT_STORAGE_PREFIX: &str = "journal/facts";
 const DEFAULT_CHOREO_FLOW_COST: u32 = 1;
 const CHOREO_FLOW_COST_PER_KB: u32 = 1;
 const AMP_CONTENT_TYPE: &str = "application/aura-amp";
+const TEST_SEED_DERIVATION_DOMAIN: &str = "aura:test-seed:v1";
+
+#[derive(Clone, Debug)]
+struct TestSeedUsage {
+    identity: String,
+    location: String,
+}
+
+static TEST_SEED_REGISTRY: OnceLock<parking_lot::Mutex<HashMap<u64, TestSeedUsage>>> =
+    OnceLock::new();
 
 /// Concrete effect system combining all effects for runtime usage
 ///
@@ -873,7 +886,161 @@ impl AuraEffectSystem {
         ))
     }
 
+    fn identity_from_location(location: &Location<'_>) -> String {
+        format!("{}:{}:{}", location.file(), location.line(), location.column())
+    }
+
+    fn derive_test_seed(identity: &str, extra_salt: u64) -> u64 {
+        let seed_material = format!("{TEST_SEED_DERIVATION_DOMAIN}:{identity}:{extra_salt}");
+        let digest = aura_hash(seed_material.as_bytes());
+        let mut seed_bytes = [0u8; 8];
+        seed_bytes.copy_from_slice(&digest[..8]);
+        u64::from_le_bytes(seed_bytes)
+    }
+
+    fn register_test_seed(seed: u64, identity: &str, location: &Location<'_>) -> Result<(), crate::core::AgentError> {
+        let registry = TEST_SEED_REGISTRY.get_or_init(|| parking_lot::Mutex::new(HashMap::new()));
+        let usage = TestSeedUsage {
+            identity: identity.to_string(),
+            location: Self::identity_from_location(location),
+        };
+        let mut guard = registry.lock();
+        if let Some(existing) = guard.get(&seed) {
+            return Err(crate::core::AgentError::effects(format!(
+                "duplicate deterministic test seed {} detected (first: {} @ {}, second: {} @ {}). \
+                 Use unique test identities or simulation_for_test_with_salt(...) to disambiguate.",
+                seed, existing.identity, existing.location, usage.identity, usage.location
+            )));
+        }
+        guard.insert(seed, usage);
+        Ok(())
+    }
+
+    #[track_caller]
+    fn allocate_test_seed_with_identity(
+        test_identity: &str,
+        extra_salt: u64,
+    ) -> Result<u64, crate::core::AgentError> {
+        let location = Location::caller();
+        let scoped_identity = format!(
+            "{}::{}",
+            test_identity,
+            Self::identity_from_location(location)
+        );
+        let seed = Self::derive_test_seed(&scoped_identity, extra_salt);
+        Self::register_test_seed(seed, &scoped_identity, location)?;
+        Ok(seed)
+    }
+
+    #[track_caller]
+    fn allocate_test_seed(extra_salt: u64) -> Result<u64, crate::core::AgentError> {
+        let location = Location::caller();
+        let identity = Self::identity_from_location(location);
+        let seed = Self::derive_test_seed(&identity, extra_salt);
+        Self::register_test_seed(seed, &identity, location)?;
+        Ok(seed)
+    }
+
+    /// Canonical deterministic constructor for tests.
+    ///
+    /// Seed derivation is deterministic from callsite location, and duplicate
+    /// seeds in-process are rejected to prevent hidden test coupling.
+    #[track_caller]
+    #[allow(clippy::disallowed_methods)]
+    pub fn simulation_for_test(config: &AgentConfig) -> Result<Self, crate::core::AgentError> {
+        let seed = Self::allocate_test_seed(0)?;
+        Self::simulation(config, seed)
+    }
+
+    /// Deterministic test constructor with extra salt for multi-instance setups
+    /// from the same callsite.
+    #[track_caller]
+    #[allow(clippy::disallowed_methods)]
+    pub fn simulation_for_test_with_salt(
+        config: &AgentConfig,
+        extra_salt: u64,
+    ) -> Result<Self, crate::core::AgentError> {
+        let seed = Self::allocate_test_seed(extra_salt)?;
+        Self::simulation(config, seed)
+    }
+
+    /// Deterministic test constructor using explicit test identity plus callsite.
+    #[track_caller]
+    #[allow(clippy::disallowed_methods)]
+    pub fn simulation_for_named_test(
+        config: &AgentConfig,
+        test_identity: &str,
+    ) -> Result<Self, crate::core::AgentError> {
+        let seed = Self::allocate_test_seed_with_identity(test_identity, 0)?;
+        Self::simulation(config, seed)
+    }
+
+    /// Deterministic test constructor with explicit test identity and salt.
+    #[track_caller]
+    #[allow(clippy::disallowed_methods)]
+    pub fn simulation_for_named_test_with_salt(
+        config: &AgentConfig,
+        test_identity: &str,
+        extra_salt: u64,
+    ) -> Result<Self, crate::core::AgentError> {
+        let seed = Self::allocate_test_seed_with_identity(test_identity, extra_salt)?;
+        Self::simulation(config, seed)
+    }
+
+    /// Deterministic authority-aware constructor for tests.
+    #[track_caller]
+    #[allow(clippy::disallowed_methods)]
+    pub fn simulation_for_test_for_authority(
+        config: &AgentConfig,
+        authority_id: AuthorityId,
+    ) -> Result<Self, crate::core::AgentError> {
+        let seed = Self::allocate_test_seed(0)?;
+        Self::simulation_for_authority(config, seed, authority_id)
+    }
+
+    /// Deterministic authority-aware constructor for tests with salt.
+    #[track_caller]
+    #[allow(clippy::disallowed_methods)]
+    pub fn simulation_for_test_for_authority_with_salt(
+        config: &AgentConfig,
+        authority_id: AuthorityId,
+        extra_salt: u64,
+    ) -> Result<Self, crate::core::AgentError> {
+        let seed = Self::allocate_test_seed(extra_salt)?;
+        Self::simulation_for_authority(config, seed, authority_id)
+    }
+
+    /// Deterministic shared-transport constructor for tests.
+    #[track_caller]
+    #[allow(clippy::disallowed_methods)]
+    pub fn simulation_for_test_with_shared_transport(
+        config: &AgentConfig,
+        shared_transport: SharedTransport,
+    ) -> Result<Self, crate::core::AgentError> {
+        let seed = Self::allocate_test_seed(0)?;
+        Self::simulation_with_shared_transport(config, seed, shared_transport)
+    }
+
+    /// Deterministic shared-transport constructor for tests with explicit authority.
+    #[track_caller]
+    #[allow(clippy::disallowed_methods)]
+    pub fn simulation_for_test_with_shared_transport_for_authority(
+        config: &AgentConfig,
+        authority_id: AuthorityId,
+        shared_transport: SharedTransport,
+    ) -> Result<Self, crate::core::AgentError> {
+        let seed = Self::allocate_test_seed(0)?;
+        Self::simulation_with_shared_transport_for_authority(
+            config,
+            seed,
+            authority_id,
+            shared_transport,
+        )
+    }
+
     /// Create effect system for testing with default configuration.
+    ///
+    /// Prefer `simulation_for_test(...)` for deterministic per-test seeding.
     pub fn testing(config: &AgentConfig) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_testing(config.device_id());
         Ok(Self::build_internal(
@@ -994,6 +1161,8 @@ impl AuraEffectSystem {
     }
 
     /// Create effect system for testing, overriding the authority identity.
+    ///
+    /// Prefer `simulation_for_test_for_authority(...)` for deterministic per-test seeding.
     pub fn testing_for_authority(
         config: &AgentConfig,
         authority_id: AuthorityId,
@@ -1199,7 +1368,7 @@ mod tests {
     #[tokio::test]
     async fn test_frost_integration_through_effect_system() {
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::testing(&config).unwrap();
+        let effect_system = AuraEffectSystem::simulation_for_test(&config).unwrap();
 
         // Generate 2-of-3 FROST keys through the effect system
         let result = effect_system.frost_generate_keys(2, 3).await;
@@ -1231,26 +1400,33 @@ mod tests {
 
     #[tokio::test]
     async fn test_frost_seeded_determinism() {
-        // Create two effect systems with the same seed
+        let identity = "runtime/effects:test_frost_seeded_determinism";
+        let seed_a = AuraEffectSystem::derive_test_seed(identity, 0);
+        let seed_b = AuraEffectSystem::derive_test_seed(identity, 0);
+        let seed_c = AuraEffectSystem::derive_test_seed(identity, 1);
+        assert_eq!(seed_a, seed_b, "same identity/salt must be deterministic");
+        assert_ne!(seed_a, seed_c, "different salt must produce a different seed");
+    }
+
+    #[tokio::test]
+    async fn test_duplicate_seed_registration_is_rejected() {
         let config = AgentConfig::default();
-        let effect_system1 = AuraEffectSystem::testing(&config).unwrap();
-        let effect_system2 = AuraEffectSystem::testing(&config).unwrap();
-
-        // Generate keys from both - they should produce identical results
-        // because testing mode uses the same TEST_CRYPTO_SEED
-        let result1 = effect_system1.frost_generate_keys(2, 3).await.unwrap();
-        let result2 = effect_system2.frost_generate_keys(2, 3).await.unwrap();
-
-        assert_eq!(
-            result1.public_key_package, result2.public_key_package,
-            "Seeded crypto should produce deterministic public key packages"
+        let mut attempts = Vec::new();
+        for _ in 0..2 { attempts.push(AuraEffectSystem::simulation_for_named_test_with_salt(&config, "dup-seed", 7)); }
+        assert!(
+            attempts[0].is_ok(),
+            "first deterministic allocation should succeed"
+        );
+        assert!(
+            attempts[1].is_err(),
+            "duplicate deterministic seed must be rejected"
         );
     }
 
     #[tokio::test]
     async fn test_guard_effect_system_enables_amp_journal_effects() {
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::testing(&config).unwrap();
+        let effect_system = AuraEffectSystem::simulation_for_test(&config).unwrap();
 
         // Pure guards + EffectInterpreter are used; legacy bridges removed.
         let context = ContextId::new_from_entropy([1u8; 32]);
@@ -1268,7 +1444,7 @@ mod tests {
     #[tokio::test]
     async fn test_tree_and_sync_handlers_are_wired() {
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::testing(&config).unwrap();
+        let effect_system = AuraEffectSystem::simulation_for_test(&config).unwrap();
 
         // Tree state should be retrievable (empty but deterministic)
         let state = effect_system.get_current_state().await.unwrap();

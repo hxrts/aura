@@ -1076,6 +1076,15 @@ impl RuntimeBridge for MockRuntimeBridge {
         }
     }
 
+    async fn has_account_config(&self) -> Result<bool, IntentError> {
+        Ok(true)
+    }
+
+    async fn initialize_account(&self, nickname_suggestion: &str) -> Result<(), IntentError> {
+        *self.nickname_suggestion.write().await = nickname_suggestion.to_string();
+        Ok(())
+    }
+
     async fn list_devices(&self) -> Vec<BridgeDeviceInfo> {
         self.devices.read().await.clone()
     }

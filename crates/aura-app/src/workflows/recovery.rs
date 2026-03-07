@@ -3,13 +3,14 @@
 //! This module contains guardian recovery operations that are portable
 //! across all frontends. Uses typed reactive signals for state reads/writes.
 
+use crate::views::contacts::{Contact, ReadReceiptPolicy};
 use crate::workflows::ceremonies::{
     CeremonyLifecycle, CeremonyLifecycleState, CeremonyPollPolicy, CeremonyStatusLike,
 };
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::require_runtime;
 use crate::workflows::snapshot_policy::recovery_snapshot;
-use crate::workflows::state_helpers::with_recovery_state;
+use crate::workflows::state_helpers::{with_contacts_state, with_recovery_state};
 use crate::workflows::time::current_time_ms;
 use crate::{
     runtime_bridge::CeremonyStatus,
@@ -211,6 +212,24 @@ pub async fn toggle_guardian_contact(
         Ok(())
     })
     .await??;
+
+    with_contacts_state(app_core, |state| {
+        if let Some(existing) = state.contact_mut(&contact) {
+            existing.is_guardian = !was_guardian;
+        } else {
+            state.apply_contact(Contact {
+                id: contact,
+                nickname: String::new(),
+                nickname_suggestion: None,
+                is_guardian: !was_guardian,
+                is_member: false,
+                last_interaction: Some(timestamp_ms),
+                is_online: false,
+                read_receipt_policy: ReadReceiptPolicy::default(),
+            });
+        }
+    })
+    .await?;
 
     Ok(!was_guardian)
 }

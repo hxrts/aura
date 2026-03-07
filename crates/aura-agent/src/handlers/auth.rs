@@ -479,7 +479,7 @@ mod tests {
         let authority_context = AuthorityContext::new(authority_id);
 
         let config = AgentConfig::default();
-        let effects = AuraEffectSystem::testing(&config).unwrap();
+        let effects = AuraEffectSystem::simulation_for_test(&config).unwrap();
         let handler = AuthHandler::new(authority_context.clone()).unwrap();
 
         handler.authenticate(&effects).await.unwrap();
@@ -491,7 +491,7 @@ mod tests {
         let authority_context = AuthorityContext::new(authority_id);
 
         let config = AgentConfig::default();
-        let effects = AuraEffectSystem::testing(&config).unwrap();
+        let effects = AuraEffectSystem::simulation_for_test(&config).unwrap();
         let handler = AuthHandler::new(authority_context).unwrap();
 
         let challenge = handler.create_challenge(&effects).await.unwrap();
@@ -506,7 +506,7 @@ mod tests {
         let authority_context = AuthorityContext::new(authority_id);
 
         let config = AgentConfig::default();
-        let effects = AuraEffectSystem::testing(&config).unwrap();
+        let effects = AuraEffectSystem::simulation_for_test(&config).unwrap();
         let handler = AuthHandler::new(authority_context).unwrap();
 
         // Create a response for a non-existent challenge
@@ -528,7 +528,7 @@ mod tests {
         let authority_context = AuthorityContext::new(authority_id);
 
         let config = AgentConfig::default();
-        let effects = AuraEffectSystem::testing(&config).unwrap();
+        let effects = AuraEffectSystem::simulation_for_test(&config).unwrap();
         let handler = AuthHandler::new(authority_context).unwrap();
 
         // Step 1: Generate threshold keys (2-of-3) via standardized API
@@ -583,7 +583,7 @@ mod tests {
         let authority_context = AuthorityContext::new(authority_id);
 
         let config = AgentConfig::default();
-        let effects = AuraEffectSystem::testing(&config).unwrap();
+        let effects = AuraEffectSystem::simulation_for_test(&config).unwrap();
         let handler = AuthHandler::new(authority_context).unwrap();
 
         // Create a challenge

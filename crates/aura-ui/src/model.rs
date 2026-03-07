@@ -9,7 +9,7 @@ use crate::snapshot::render_canonical_snapshot;
 use async_lock::RwLock as AsyncRwLock;
 use aura_app::AppCore;
 use aura_core::identifiers::{AuthorityId, CeremonyId};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiScreen {
@@ -410,6 +410,18 @@ impl SettingsSection {
     }
 
     #[must_use]
+    pub const fn dom_id(self) -> &'static str {
+        match self {
+            Self::Profile => "profile",
+            Self::GuardianThreshold => "guardian-threshold",
+            Self::RequestRecovery => "request-recovery",
+            Self::Devices => "devices",
+            Self::Authority => "authority",
+            Self::Appearance => "appearance",
+        }
+    }
+
+    #[must_use]
     pub const fn index(self) -> usize {
         match self {
             Self::Profile => 0,
@@ -496,6 +508,9 @@ impl AccessOverrideLevel {
 
 #[derive(Debug, Clone)]
 pub struct UiModel {
+    pub account_ready: bool,
+    pub account_setup_name: String,
+    pub account_setup_error: Option<String>,
     pub screen: UiScreen,
     pub settings_section: SettingsSection,
     pub channels: Vec<ChannelRow>,
@@ -533,6 +548,9 @@ pub struct UiModel {
 impl UiModel {
     pub fn new(authority_id: String) -> Self {
         Self {
+            account_ready: true,
+            account_setup_name: String::new(),
+            account_setup_error: None,
             screen: UiScreen::Neighborhood,
             settings_section: SettingsSection::Profile,
             channels: vec![
@@ -892,6 +910,34 @@ impl UiModel {
         }
     }
 
+    pub fn ensure_runtime_contact(
+        &mut self,
+        authority_id: AuthorityId,
+        name: String,
+        is_guardian: bool,
+    ) {
+        if let Some(existing) = self
+            .contacts
+            .iter_mut()
+            .find(|row| row.authority_id == authority_id)
+        {
+            existing.name = name;
+            existing.is_guardian = is_guardian;
+            return;
+        }
+
+        self.contacts.push(ContactRow {
+            authority_id,
+            name,
+            selected: self.contacts.is_empty(),
+            is_guardian,
+        });
+
+        if self.selected_contact_id.is_none() {
+            self.selected_contact_id = Some(authority_id);
+        }
+    }
+
     pub fn selected_contact_name(&self) -> Option<&str> {
         self.selected_contact_index()
             .and_then(|index| self.contacts.get(index))
@@ -945,6 +991,20 @@ impl UiModel {
         for (idx, contact) in self.contacts.iter_mut().enumerate() {
             contact.selected = idx == selected_index;
         }
+    }
+
+    pub fn set_selected_contact_authority_id(&mut self, authority_id: AuthorityId) {
+        if self.contacts.is_empty() {
+            self.selected_contact_id = None;
+            return;
+        }
+
+        let selected_index = self
+            .contacts
+            .iter()
+            .position(|contact| contact.authority_id == authority_id)
+            .unwrap_or(0);
+        self.set_selected_contact_index(selected_index);
     }
 
     pub fn set_selected_authority_index(&mut self, index: usize) {
@@ -1156,9 +1216,10 @@ pub struct RenderedHarnessSnapshot {
 
 pub struct UiController {
     app_core: Arc<AsyncRwLock<AppCore>>,
-    model: AsyncRwLock<UiModel>,
+    model: RwLock<UiModel>,
     clipboard: Arc<dyn ClipboardPort>,
     authority_switcher: Option<Arc<dyn Fn(AuthorityId) + Send + Sync>>,
+    rerender: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl PartialEq for UiController {
@@ -1199,15 +1260,32 @@ impl UiController {
 
         Self {
             app_core,
-            model: AsyncRwLock::new(UiModel::new(authority_id)),
+            model: RwLock::new(UiModel::new(authority_id)),
             clipboard,
             authority_switcher,
+            rerender: Mutex::new(None),
+        }
+    }
+
+    pub fn set_rerender_callback(&self, rerender: Arc<dyn Fn() + Send + Sync>) {
+        if let Ok(mut slot) = self.rerender.lock() {
+            *slot = Some(rerender);
+        }
+    }
+
+    pub fn request_rerender(&self) {
+        if let Ok(slot) = self.rerender.lock() {
+            if let Some(rerender) = slot.as_ref() {
+                rerender();
+            }
         }
     }
 
     pub fn send_keys(&self, keys: &str) {
         let mut model = write_model(&self.model);
         apply_text_keys(&mut model, keys, self.clipboard.as_ref());
+        drop(model);
+        self.request_rerender();
     }
 
     pub fn send_action_keys(&self, keys: &str) {
@@ -1215,39 +1293,55 @@ impl UiController {
         model.input_mode = false;
         model.input_buffer.clear();
         apply_text_keys(&mut model, keys, self.clipboard.as_ref());
+        drop(model);
+        self.request_rerender();
     }
 
     pub fn send_key_named(&self, key: &str, repeat: u16) {
         let mut model = write_model(&self.model);
         apply_named_key(&mut model, key, repeat, self.clipboard.as_ref());
+        drop(model);
+        self.request_rerender();
     }
 
     pub fn set_screen(&self, screen: UiScreen) {
         write_model(&self.model).set_screen(screen);
+        self.request_rerender();
     }
 
     pub fn select_channel_by_name(&self, name: &str) {
         write_model(&self.model).select_channel_by_name(name);
+        self.request_rerender();
     }
 
     pub fn select_home(&self, id: impl Into<String>, name: impl Into<String>) {
         write_model(&self.model).select_home(id, name);
+        self.request_rerender();
     }
 
     pub fn set_modal_buffer(&self, value: &str) {
         write_model(&self.model).set_modal_text_value(value);
+        self.request_rerender();
     }
 
     pub fn clear_input_buffer(&self) {
         write_model(&self.model).input_buffer.clear();
+        self.request_rerender();
     }
 
     pub fn set_selected_contact_index(&self, index: usize) {
         write_model(&self.model).set_selected_contact_index(index);
+        self.request_rerender();
+    }
+
+    pub fn set_selected_contact_authority_id(&self, authority_id: AuthorityId) {
+        write_model(&self.model).set_selected_contact_authority_id(authority_id);
+        self.request_rerender();
     }
 
     pub fn set_selected_authority_index(&self, index: usize) {
         write_model(&self.model).set_selected_authority_index(index);
+        self.request_rerender();
     }
 
     pub fn set_selected_neighborhood_member_key(
@@ -1255,10 +1349,12 @@ impl UiController {
         key: Option<NeighborhoodMemberSelectionKey>,
     ) {
         write_model(&self.model).set_selected_neighborhood_member_key(key);
+        self.request_rerender();
     }
 
     pub fn set_selected_notification_index(&self, index: usize, count: usize) {
         write_model(&self.model).set_selected_notification_index(index, count);
+        self.request_rerender();
     }
 
     pub fn sync_runtime_notifications(
@@ -1276,6 +1372,16 @@ impl UiController {
         write_model(&self.model).replace_contacts(contacts);
     }
 
+    pub fn ensure_runtime_contact(
+        &self,
+        authority_id: AuthorityId,
+        name: String,
+        is_guardian: bool,
+    ) {
+        write_model(&self.model).ensure_runtime_contact(authority_id, name, is_guardian);
+        self.request_rerender();
+    }
+
     pub fn open_create_invitation_modal(
         &self,
         receiver_id: Option<&AuthorityId>,
@@ -1286,6 +1392,8 @@ impl UiController {
             receiver_id: receiver_id.map(ToString::to_string).unwrap_or_default(),
             receiver_label: receiver_label.map(str::to_string),
         }));
+        drop(model);
+        self.request_rerender();
     }
 
     pub fn sync_runtime_authorities(&self, authorities: Vec<(AuthorityId, String, bool)>) {
@@ -1319,18 +1427,24 @@ impl UiController {
         model.neighborhood_mode = NeighborhoodMode::Map;
         set_toast(&mut model, '✓', format!("Home '{name}' created"));
         dismiss_modal(&mut model);
+        drop(model);
+        self.request_rerender();
     }
 
     pub fn complete_runtime_invitation_import(&self) {
         let mut model = write_model(&self.model);
         set_toast(&mut model, '✓', "Invitation imported");
         dismiss_modal(&mut model);
+        drop(model);
+        self.request_rerender();
     }
 
     pub fn complete_runtime_modal_success(&self, message: impl Into<String>) {
         let mut model = write_model(&self.model);
         set_toast(&mut model, '✓', message);
         dismiss_modal(&mut model);
+        drop(model);
+        self.request_rerender();
     }
 
     pub fn complete_runtime_device_enrollment_started(&self, name: &str, enrollment_code: &str) {
@@ -1343,6 +1457,8 @@ impl UiController {
             code_copied: false,
             ..AddDeviceModalState::default()
         }));
+        drop(model);
+        self.request_rerender();
     }
 
     pub fn set_runtime_device_enrollment_ceremony_id(&self, ceremony_id: CeremonyId) {
@@ -1350,6 +1466,8 @@ impl UiController {
         if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
             state.ceremony_id = Some(ceremony_id);
         }
+        drop(model);
+        self.request_rerender();
     }
 
     pub fn update_runtime_device_enrollment_status(
@@ -1379,6 +1497,8 @@ impl UiController {
                 }
             }
         }
+        drop(model);
+        self.request_rerender();
     }
 
     pub fn mark_add_device_code_copied(&self) {
@@ -1386,6 +1506,8 @@ impl UiController {
         if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
             state.code_copied = true;
         }
+        drop(model);
+        self.request_rerender();
     }
 
     pub fn advance_runtime_device_enrollment_share(&self) {
@@ -1394,11 +1516,15 @@ impl UiController {
         if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
             state.step = AddDeviceWizardStep::Confirm;
         }
+        drop(model);
+        self.request_rerender();
     }
 
     pub fn complete_runtime_device_enrollment_ready(&self) {
         let mut model = write_model(&self.model);
         dismiss_modal(&mut model);
+        drop(model);
+        self.request_rerender();
     }
 
     pub fn complete_runtime_enter_home(&self, name: &str, depth: AccessDepth) {
@@ -1410,16 +1536,22 @@ impl UiController {
         model.access_depth = depth;
         model.neighborhood_mode = NeighborhoodMode::Detail;
         model.selected_neighborhood_member_key = None;
+        drop(model);
+        self.request_rerender();
     }
 
     pub fn runtime_error_toast(&self, message: impl Into<String>) {
         let mut model = write_model(&self.model);
         set_toast(&mut model, '✗', message);
+        drop(model);
+        self.request_rerender();
     }
 
     pub fn info_toast(&self, message: impl Into<String>) {
         let mut model = write_model(&self.model);
         set_toast(&mut model, '✓', message);
+        drop(model);
+        self.request_rerender();
     }
 
     pub fn snapshot(&self) -> RenderedHarnessSnapshot {
@@ -1464,12 +1596,28 @@ impl UiController {
         write_model(&self.model).logs.push(line.to_string());
     }
 
+    pub fn set_account_setup_state(
+        &self,
+        account_ready: bool,
+        account_setup_name: impl Into<String>,
+        account_setup_error: Option<String>,
+    ) {
+        let mut model = write_model(&self.model);
+        model.account_ready = account_ready;
+        model.account_setup_name = account_setup_name.into();
+        model.account_setup_error = account_setup_error;
+        drop(model);
+        self.request_rerender();
+    }
+
     pub fn set_authority_id(&self, authority_id: &str) {
         write_model(&self.model).authority_id = authority_id.to_string();
+        self.request_rerender();
     }
 
     pub fn set_settings_section(&self, section: SettingsSection) {
         write_model(&self.model).settings_section = section;
+        self.request_rerender();
     }
 
     pub fn authority_id(&self) -> String {
@@ -1485,22 +1633,12 @@ impl UiController {
     }
 }
 
-fn read_model(model: &AsyncRwLock<UiModel>) -> async_lock::RwLockReadGuard<'_, UiModel> {
-    loop {
-        if let Some(guard) = model.try_read() {
-            return guard;
-        }
-        std::hint::spin_loop();
-    }
+fn read_model(model: &RwLock<UiModel>) -> RwLockReadGuard<'_, UiModel> {
+    model.read().expect("ui model read lock poisoned")
 }
 
-fn write_model(model: &AsyncRwLock<UiModel>) -> async_lock::RwLockWriteGuard<'_, UiModel> {
-    loop {
-        if let Some(guard) = model.try_write() {
-            return guard;
-        }
-        std::hint::spin_loop();
-    }
+fn write_model(model: &RwLock<UiModel>) -> RwLockWriteGuard<'_, UiModel> {
+    model.write().expect("ui model write lock poisoned")
 }
 
 #[cfg(test)]

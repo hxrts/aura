@@ -107,7 +107,13 @@ async fn test_threshold_workflow() -> aura_core::AuraResult<()> {
         .collect();
 
     let effect_systems: Result<Vec<_>, _> = (0..5)
-        .map(|_| AuraEffectSystem::testing(&AgentConfig::default()))
+        .map(|i| {
+            AuraEffectSystem::simulation_for_named_test_with_salt(
+                &AgentConfig::default(),
+                "test_threshold_workflow",
+                i as u64,
+            )
+        })
         .collect();
 
     let result = execute_protocol(&effect_systems?, &device_ids).await?;
@@ -115,6 +121,10 @@ async fn test_threshold_workflow() -> aura_core::AuraResult<()> {
     Ok(())
 }
 ```
+
+Use `simulation_for_test*` helpers for all tests. For multi-instance tests from one callsite,
+use `simulation_for_named_test_with_salt(...)` and keep the identity/salt stable so failures
+can be replayed deterministically.
 
 ## 6. Property-Based Testing
 

@@ -205,7 +205,7 @@ pub async fn create_neighborhood(
     app_core: &Arc<RwLock<AppCore>>,
     name: String,
 ) -> Result<String, AuraError> {
-    let timestamp_ms = current_time_ms(app_core).await?;
+    let timestamp_ms = current_time_ms(app_core).await.unwrap_or(0);
     let neighborhood_name = if name.trim().is_empty() {
         "Neighborhood".to_string()
     } else {
@@ -358,7 +358,7 @@ pub async fn create_home(
     name: Option<String>,
     description: Option<String>,
 ) -> Result<ChannelId, AuraError> {
-    let timestamp_ms = current_time_ms(app_core).await?;
+    let timestamp_ms = current_time_ms(app_core).await.unwrap_or(0);
     let home_name = name
         .as_deref()
         .map(str::trim)

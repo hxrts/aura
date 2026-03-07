@@ -137,9 +137,11 @@ impl TestFixture {
     ///
     /// Requires the `full-effect-system` feature to be enabled.
     #[cfg(feature = "full-effect-system")]
+    #[track_caller]
     pub fn effect_system(&self) -> Arc<AuraEffectSystem> {
         let config = AgentConfig::default();
-        let system = AuraEffectSystem::testing(&config).expect("build test effect system");
+        let system =
+            AuraEffectSystem::simulation_for_test(&config).expect("build test effect system");
         Arc::new(system)
     }
 
@@ -152,9 +154,11 @@ impl TestFixture {
     ///
     /// Requires the `full-effect-system` feature to be enabled.
     #[cfg(feature = "full-effect-system")]
+    #[track_caller]
     pub fn effect_system_arc(&self) -> Arc<AuraEffectSystem> {
         let config = AgentConfig::default();
-        let system = AuraEffectSystem::testing(&config).expect("build test effect system");
+        let system =
+            AuraEffectSystem::simulation_for_test(&config).expect("build test effect system");
         Arc::new(system)
     }
 
@@ -167,9 +171,10 @@ impl TestFixture {
     ///
     /// Requires the `full-effect-system` feature to be enabled.
     #[cfg(feature = "full-effect-system")]
+    #[track_caller]
     pub fn effect_system_direct(&self) -> AuraEffectSystem {
         let config = AgentConfig::default();
-        AuraEffectSystem::testing(&config).expect("build test effect system")
+        AuraEffectSystem::simulation_for_test(&config).expect("build test effect system")
     }
 
     /// Get an effect system wrapped for AuraEffects compatibility
@@ -181,9 +186,11 @@ impl TestFixture {
     ///
     /// Requires the `full-effect-system` feature to be enabled.
     #[cfg(feature = "full-effect-system")]
+    #[track_caller]
     pub fn effect_system_wrapped(&self) -> Arc<AuraEffectSystem> {
         let config = AgentConfig::default();
-        let system = AuraEffectSystem::testing(&config).expect("build test effect system");
+        let system =
+            AuraEffectSystem::simulation_for_test(&config).expect("build test effect system");
         Arc::new(system)
     }
 

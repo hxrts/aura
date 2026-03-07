@@ -17,6 +17,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(target_arch = "wasm32")]
+use js_sys::Date;
+#[cfg(target_arch = "wasm32")]
+use std::time::SystemTime;
+
 /// Fallback simulation handler (Null Object Pattern)
 ///
 /// Provides no-op implementations of simulation effects for contexts where full simulation
@@ -108,9 +113,17 @@ where
 
     #[allow(clippy::disallowed_methods)]
     async fn get_simulation_time(&self) -> Result<SimulationTime> {
-        // SystemTime::now() is allowed in production handlers (Layer 3) that bridge to system time.
-        // In actual simulation mode, this would be overridden with a simulation-specific implementation.
-        Ok(SimulationTime::new(std::time::SystemTime::now()))
+        #[cfg(target_arch = "wasm32")]
+        {
+            let now = SystemTime::UNIX_EPOCH + Duration::from_millis(Date::now() as u64);
+            Ok(SimulationTime::new(now))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // SystemTime::now() is allowed in production handlers (Layer 3) that bridge to system time.
+            // In actual simulation mode, this would be overridden with a simulation-specific implementation.
+            Ok(SimulationTime::new(std::time::SystemTime::now()))
+        }
     }
 
     async fn set_manual_time_control(&self, _enabled: bool) -> Result<()> {

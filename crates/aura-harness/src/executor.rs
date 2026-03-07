@@ -11,7 +11,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 
-use crate::config::{ScenarioAction, ScenarioConfig, ScenarioStep};
+use crate::config::{ScenarioAction, ScenarioConfig, ScenarioStep, ScreenSource};
 use crate::introspection::{
     extract_command_consistency, extract_command_reason, extract_command_status, extract_toast,
     ToastLevel,
@@ -216,12 +216,21 @@ impl ScenarioExecutor {
         let mut scenario_rng = DeterministicRng::new(budgets.scenario_seed);
         let mut fault_rng = DeterministicRng::new(budgets.fault_seed);
         let mut context = ScenarioContext::default();
+        let verbose_steps = std::env::var_os("AURA_HARNESS_VERBOSE_STEPS").is_some();
 
         loop {
             let state = machine
                 .states
                 .get(&current)
                 .ok_or_else(|| anyhow!("missing state {current}"))?;
+            if verbose_steps {
+                eprintln!(
+                    "[harness] step={} action={} instance={}",
+                    state.id,
+                    state.step.action,
+                    state.step.instance.as_deref().unwrap_or("-")
+                );
+            }
             let step_budget = state
                 .step
                 .timeout_ms
@@ -350,7 +359,13 @@ fn execute_step(
                 context,
             )?;
             let field = parse_screen_field(step.from.as_deref().unwrap_or("screen"))?;
-            let payload = dispatch_payload(tool_api, ToolRequest::Screen { instance_id })?;
+            let payload = dispatch_payload(
+                tool_api,
+                ToolRequest::Screen {
+                    instance_id,
+                    screen_source: step.screen_source.unwrap_or_default(),
+                },
+            )?;
             let source = screen_field_value(&payload, field);
             let regex = Regex::new(&regex_pattern)
                 .map_err(|error| anyhow!("step {} invalid regex: {error}", step.id))?;
@@ -436,6 +451,8 @@ fn execute_step(
                     instance_id: instance_id.clone(),
                     pattern: "Channels".to_string(),
                     timeout_ms: step.timeout_ms.unwrap_or(step_budget_ms).min(1500),
+                    screen_source: ScreenSource::Default,
+                    selector: None,
                 },
             );
             // First Esc can be consumed by mode normalization; send a second Esc
@@ -533,7 +550,43 @@ fn execute_step(
                 }
                 std::thread::sleep(Duration::from_millis(100));
             };
-            dispatch_clipboard_text(tool_api, &target_instance_id, &clipboard_text)?;
+            if let Some(selector) =
+                resolve_optional_field(step.selector.as_deref(), context)?
+            {
+                dispatch(
+                    tool_api,
+                    ToolRequest::FillInput {
+                        instance_id: target_instance_id,
+                        selector,
+                        value: clipboard_text,
+                    },
+                )?;
+            } else {
+                dispatch_clipboard_text(tool_api, &target_instance_id, &clipboard_text)?;
+            }
+            Ok(())
+        }
+        ScenarioAction::ReadClipboard => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let var = step
+                .var
+                .as_deref()
+                .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
+            let payload = dispatch_payload(
+                tool_api,
+                ToolRequest::ReadClipboard {
+                    instance_id,
+                },
+            )?;
+            let text = payload
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+                .ok_or_else(|| anyhow!("step {} read_clipboard response missing text", step.id))?;
+            if text.trim().is_empty() {
+                bail!("step {} read_clipboard returned empty text", step.id);
+            }
+            context.vars.insert(var.to_string(), text);
             Ok(())
         }
         ScenarioAction::SendKey => {
@@ -555,20 +608,89 @@ fn execute_step(
             )?;
             Ok(())
         }
-        ScenarioAction::WaitFor => {
+        ScenarioAction::ClickButton => {
             let instance_id = resolve_required_instance(step, context)?;
-            let pattern = resolve_required_field(
+            let selector = match step.selector.as_deref() {
+                Some(selector) => Some(resolve_template(selector, context)?),
+                None => None,
+            };
+            let label = if selector.is_none() {
+                resolve_required_field(
+                    step,
+                    "label",
+                    step.label.as_deref().or(step.expect.as_deref()),
+                    context,
+                )?
+            } else {
+                step.label
+                    .as_deref()
+                    .map(|value| resolve_template(value, context))
+                    .transpose()?
+                    .unwrap_or_default()
+            };
+            dispatch(
+                tool_api,
+                ToolRequest::ClickButton {
+                    instance_id,
+                    label,
+                    selector,
+                },
+            )?;
+            Ok(())
+        }
+        ScenarioAction::FillInput => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let selector = resolve_required_field(
                 step,
-                "pattern",
-                step.pattern.as_deref().or(step.expect.as_deref()),
+                "selector",
+                step.selector.as_deref(),
                 context,
             )?;
+            let value = resolve_required_field(
+                step,
+                "value",
+                step.value.as_deref().or(step.expect.as_deref()),
+                context,
+            )?;
+            dispatch(
+                tool_api,
+                ToolRequest::FillInput {
+                    instance_id,
+                    selector,
+                    value,
+                },
+            )?;
+            Ok(())
+        }
+        ScenarioAction::WaitFor => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let selector = match step.selector.as_deref() {
+                Some(selector) => Some(resolve_template(selector, context)?),
+                None => None,
+            };
+            let pattern = if selector.is_none() {
+                resolve_required_field(
+                    step,
+                    "pattern",
+                    step.pattern.as_deref().or(step.expect.as_deref()),
+                    context,
+                )?
+            } else {
+                step.pattern
+                    .as_deref()
+                    .or(step.expect.as_deref())
+                    .map(|value| resolve_template(value, context))
+                    .transpose()?
+                    .unwrap_or_default()
+            };
             dispatch(
                 tool_api,
                 ToolRequest::WaitFor {
                     instance_id,
                     pattern,
                     timeout_ms: step.timeout_ms.unwrap_or(step_budget_ms),
+                    screen_source: step.screen_source.unwrap_or_default(),
+                    selector,
                 },
             )?;
             Ok(())
@@ -1039,6 +1161,7 @@ fn screen_contains(tool_api: &mut ToolApi, instance_id: &str, needle: &str) -> R
         tool_api,
         ToolRequest::Screen {
             instance_id: instance_id.to_string(),
+            screen_source: ScreenSource::Default,
         },
     )?;
     let screen = payload
@@ -1066,6 +1189,7 @@ where
             tool_api,
             ToolRequest::Screen {
                 instance_id: instance_id.to_string(),
+                screen_source: step.screen_source.unwrap_or_default(),
             },
         )?;
         let screen = payload
@@ -1795,6 +1919,7 @@ mod tests {
                 instance_id,
                 pattern,
                 timeout_ms: _,
+                ..
             } => {
                 assert_eq!(instance_id, "alice");
                 assert_eq!(pattern, "Channels");

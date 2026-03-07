@@ -117,6 +117,9 @@ impl SimulationEnvironmentFactory for EffectSystemFactory {
             }
         };
 
+        // Simulation factory is runtime infrastructure and intentionally uses
+        // explicit simulation constructors with externally provided seeds.
+        #[allow(clippy::disallowed_methods)]
         let effect_system =
             AuraEffectSystem::simulation_for_authority(&agent_config, config.seed, authority_id)
                 .map_err(|e| SimulationEnvironmentError::CreationFailed(e.to_string()))?;

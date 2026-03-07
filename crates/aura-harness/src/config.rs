@@ -124,7 +124,10 @@ pub enum ScenarioAction {
     SendKeys,
     SendChatCommand,
     SendClipboard,
+    ReadClipboard,
     SendKey,
+    ClickButton,
+    FillInput,
     WaitFor,
     ExpectToast,
     ExpectCommandResult,
@@ -142,6 +145,14 @@ pub enum ScenarioAction {
     FaultTunnelDrop,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ScreenSource {
+    #[default]
+    Default,
+    Dom,
+}
+
 impl fmt::Display for ScenarioAction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match self {
@@ -152,7 +163,10 @@ impl fmt::Display for ScenarioAction {
             Self::SendKeys => "send_keys",
             Self::SendChatCommand => "send_chat_command",
             Self::SendClipboard => "send_clipboard",
+            Self::ReadClipboard => "read_clipboard",
             Self::SendKey => "send_key",
+            Self::ClickButton => "click_button",
+            Self::FillInput => "fill_input",
             Self::WaitFor => "wait_for",
             Self::ExpectToast => "expect_toast",
             Self::ExpectCommandResult => "expect_command_result",
@@ -188,12 +202,18 @@ pub struct ScenarioStep {
     pub request_id: Option<u64>,
     /// Explicit key stream for `send_keys`.
     pub keys: Option<String>,
+    /// Screen observation source for browser-oriented waits/assertions.
+    pub screen_source: Option<ScreenSource>,
     /// Explicit slash-command body for `send_chat_command`.
     pub command: Option<String>,
     /// Explicit screen pattern for `wait_for`.
     pub pattern: Option<String>,
     /// Explicit named key for `send_key`.
     pub key: Option<String>,
+    /// Visible button label for `click_button` when no selector is supplied.
+    pub label: Option<String>,
+    /// CSS selector for `fill_input` and optional stable target selector for `click_button`.
+    pub selector: Option<String>,
     /// Repeat count for `send_key` actions.
     pub repeat: Option<u16>,
     /// Explicit source instance for `send_clipboard`.
