@@ -117,7 +117,7 @@ Alice serializes the ping message and sends it to Bob. She then waits for Bob's 
 Initialize a local Aura account:
 
 ```bash
-just init-account
+just quickstart init
 ```
 
 This command creates a 2-of-3 threshold account configuration. The account uses three virtual devices with a threshold of two signatures for operations.
@@ -125,18 +125,18 @@ This command creates a 2-of-3 threshold account configuration. The account uses 
 Check account status:
 
 ```bash
-just status
+just quickstart status
 ```
 
 The status command shows account health, device connectivity, and threshold configuration. All virtual devices should show as connected.
 
-Test key derivation:
+Run quickstart smoke checks:
 
 ```bash
-just test-dkd my_app signing_context
+just quickstart smoke
 ```
 
-This command tests the Distributed Key Derivation (DKD) protocol. The protocol derives cryptographic keys across multiple devices without revealing private key shares.
+This command runs a local end-to-end smoke flow (init, status, and threshold-signature checks) across multiple virtual devices.
 
 ## CLI Interaction
 

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+just fmt-check
+just clippy-strict

@@ -273,6 +273,22 @@ check_layers() {
       info "$crate: no runtime/UI deps"
     fi
   done
+
+  section "Layer 4 lint policy — no crate-level #![allow] in lib.rs"
+  local l4_libs=(
+    "crates/aura-guards/src/lib.rs"
+    "crates/aura-consensus/src/lib.rs"
+    "crates/aura-amp/src/lib.rs"
+    "crates/aura-anti-entropy/src/lib.rs"
+    "crates/aura-protocol/src/lib.rs"
+  )
+  local l4_allow_hits existing_l4_allow
+  existing_l4_allow=$(rg --no-heading "^#!\\[allow" "${l4_libs[@]}" 2>/dev/null \
+    | grep -E "^crates/aura-(amp|anti-entropy|consensus)/src/lib\\.rs:" || true)
+  l4_allow_hits=$(rg --no-heading "^#!\\[allow" "${l4_libs[@]}" 2>/dev/null \
+    | grep -Ev "^crates/aura-(amp|anti-entropy|consensus)/src/lib\\.rs:" || true)
+  emit_hits "Layer 4 crate-level allow attributes" "$l4_allow_hits"
+  [[ -n "$existing_l4_allow" ]] && info "Layer 4 crate-level allow attributes: existing allowlisted hits remain in aura-amp/aura-anti-entropy/aura-consensus"
 }
 
 
@@ -1026,6 +1042,50 @@ check_workflows() {
     missing_strong=true
   fi
   $missing_strong || info "Strong command pipeline: enforced"
+
+  section "Workflow legibility — typed boundaries and docs traceability"
+
+  # Prefer typed error/result boundaries at workflow surfaces.
+  # Existing exceptions are narrow helper parsers/checks slated for later cleanup.
+  local string_results
+  string_results=$(rg --no-heading "Result<[^>]*,\s*String>" crates/aura-app/src/workflows -g "*.rs" \
+    | grep -Ev "crates/aura-app/src/workflows/(authority|budget|chat_commands)\\.rs:" || true)
+  emit_hits "Untyped workflow result (Result<_, String>)" "$string_results"
+
+  # Avoid ad-hoc JSON value plumbing in workflow logic.
+  local json_value_hits
+  json_value_hits=$(rg --no-heading "serde_json::Value" crates/aura-app/src/workflows -g "*.rs" \
+    | grep -Ev "crates/aura-app/src/workflows/recovery_cli\\.rs:" || true)
+  emit_hits "Stringly JSON workflow surface (serde_json::Value)" "$json_value_hits"
+
+  # New workflow/tui effect surface files must be accompanied by docs touch.
+  local diff_range=""
+  if git rev-parse --verify HEAD^2 >/dev/null 2>&1; then
+    diff_range="HEAD^1...HEAD"
+  elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+    diff_range="HEAD^..HEAD"
+  fi
+
+  if [[ -n "$diff_range" ]]; then
+    local added_surfaces docs_touch
+    added_surfaces=$(git diff --name-status --diff-filter=A "$diff_range" \
+      | awk '{print $2}' \
+      | grep -E "^crates/aura-app/src/workflows/.*\\.rs$|^crates/aura-terminal/src/tui/effects/.*\\.rs$" || true)
+    if [[ -n "$added_surfaces" ]]; then
+      docs_touch=$(git diff --name-only "$diff_range" \
+        | grep -E "^docs/(116_cli_tui\\.md|804_testing_guide\\.md|807_system_internals_guide\\.md|997_ux_flow_coverage\\.md|999_project_structure\\.md)$" || true)
+      if [[ -z "$docs_touch" ]]; then
+        emit_hits "New workflow surface without docs update" "$added_surfaces"
+        hint "When adding workflow/tui effect surface files, update at least one architecture/testing doc."
+      else
+        info "Workflow docs traceability: docs updated alongside new surfaces"
+      fi
+    else
+      info "Workflow docs traceability: no new workflow/tui effect surfaces"
+    fi
+  else
+    info "Workflow docs traceability: skipped (insufficient git history)"
+  fi
 }
 
 

@@ -175,9 +175,9 @@ EOF
         echo "## Related Commands"
         echo ""
         echo "\`\`\`bash"
-        echo "just quint-verify-models  # Run Apalache model checking"
-        echo "just verify quint-types   # Check Quint-Rust type drift"
-        echo "just verify kani          # Run Kani bounded model checking"
+        echo "just quint models       # Run model checking"
+        echo "just quint-check-types  # Check Quint-Rust type drift"
+        echo "just kani-suite         # Run Kani bounded model checking"
         echo "\`\`\`"
     }
 
