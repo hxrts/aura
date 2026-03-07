@@ -131,6 +131,7 @@ pub mod errors;
 pub mod policies;
 pub mod queries;
 pub mod runtime_bridge;
+pub mod scenario_contract;
 pub mod signal_defs;
 pub mod thresholds;
 pub mod ui;
@@ -158,9 +159,16 @@ pub use crate::runtime_bridge::{
     BoxedRuntimeBridge, LanPeerInfo, OfflineRuntimeBridge, RendezvousStatus, RuntimeBridge,
     RuntimeStatus, SyncStatus,
 };
+pub use crate::scenario_contract::{
+    ActorId as ScenarioActorId, EnvironmentAction as SemanticEnvironmentAction,
+    Expectation as ScenarioExpectation, InputKey as ScenarioInputKey,
+    ScenarioAction as SemanticScenarioAction, ScenarioDefinition,
+    ScenarioStep as SemanticScenarioStep, UiAction as SemanticUiAction,
+    VariableAction as SemanticVariableAction,
+};
 pub use crate::ui_contract::{
-    ControlId, FieldId, ListId, ModalId, OperationSnapshot, OperationState, ScreenId,
-    SelectionSnapshot as UiSelectionSnapshot, ToastKind, ToastSnapshot as UiToastSnapshot,
+    ControlId, FieldId, ListId, ModalId, OperationId, OperationSnapshot, OperationState, ScreenId,
+    SelectionSnapshot as UiSelectionSnapshot, ToastId, ToastKind, ToastSnapshot as UiToastSnapshot,
     UiReadiness, UiSnapshot,
 };
 pub use crate::views::{

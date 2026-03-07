@@ -9,6 +9,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
+use aura_app::scenario_contract::{
+    ActorId, EnvironmentAction, Expectation, ExtractSource, InputKey,
+    ScenarioAction as SemanticAction, ScenarioDefinition, ScenarioStep as SemanticStep,
+    SemanticScenarioFile, UiAction, VariableAction,
+};
+use aura_app::ui::contract::{ControlId, FieldId, ListId, ModalId, ScreenId, ToastKind};
 use serde::{Deserialize, Serialize};
 
 pub const RUN_SCHEMA_VERSION: u32 = 1;
@@ -214,6 +220,18 @@ pub struct ScenarioStep {
     pub label: Option<String>,
     /// CSS selector for `fill_input` and optional stable target selector for `click_button`.
     pub selector: Option<String>,
+    /// Semantic screen reference for typed scenario actions/expectations.
+    pub screen_id: Option<ScreenId>,
+    /// Semantic control reference for typed scenario actions/expectations.
+    pub control_id: Option<ControlId>,
+    /// Semantic field reference for typed scenario actions.
+    pub field_id: Option<FieldId>,
+    /// Semantic modal reference for typed scenario expectations.
+    pub modal_id: Option<ModalId>,
+    /// Semantic list reference for typed scenario expectations.
+    pub list_id: Option<ListId>,
+    /// Stable list item identifier for typed list expectations.
+    pub item_id: Option<String>,
     /// Repeat count for `send_key` actions.
     pub repeat: Option<u16>,
     /// Explicit source instance for `send_clipboard`.
@@ -250,6 +268,199 @@ pub struct ScenarioStep {
     pub contains_any: Option<Vec<String>>,
 }
 
+impl ScenarioStep {
+    pub fn to_semantic_step(&self) -> Result<Option<SemanticStep>> {
+        let actor = self.instance.clone().map(ActorId);
+        let timeout_ms = self.timeout_ms;
+        let id = self.id.clone();
+
+        let action = match self.action {
+            ScenarioAction::LaunchInstances => {
+                Some(SemanticAction::Environment(EnvironmentAction::LaunchActors))
+            }
+            ScenarioAction::Noop => None,
+            ScenarioAction::SetVar => Some(SemanticAction::Variables(VariableAction::Set {
+                name: required_field(self.var.clone(), "var", self.action)?,
+                value: required_field(
+                    self.value.clone().or_else(|| self.expect.clone()),
+                    "value",
+                    self.action,
+                )?,
+            })),
+            ScenarioAction::ExtractVar => {
+                Some(SemanticAction::Variables(VariableAction::Extract {
+                    name: required_field(self.var.clone(), "var", self.action)?,
+                    regex: required_field(self.regex.clone(), "regex", self.action)?,
+                    group: self.group.unwrap_or(0),
+                    from: parse_extract_source(self.from.as_deref().unwrap_or("screen"))?,
+                }))
+            }
+            ScenarioAction::SendKeys => {
+                Some(SemanticAction::Ui(UiAction::InputText(required_field(
+                    self.keys.clone().or_else(|| self.expect.clone()),
+                    "keys",
+                    self.action,
+                )?)))
+            }
+            ScenarioAction::SendClipboard => Some(SemanticAction::Ui(UiAction::PasteClipboard {
+                source_actor: self.source_instance.clone().map(ActorId),
+            })),
+            ScenarioAction::ReadClipboard => Some(SemanticAction::Ui(UiAction::ReadClipboard)),
+            ScenarioAction::SendKey => Some(SemanticAction::Ui(UiAction::PressKey(
+                parse_input_key(self.key.as_deref().unwrap_or_default())?,
+                self.repeat.unwrap_or(1).max(1),
+            ))),
+            ScenarioAction::ClickButton => match self.control_id {
+                Some(control_id) => Some(SemanticAction::Ui(UiAction::Activate(control_id))),
+                None => None,
+            },
+            ScenarioAction::FillInput => match self.field_id {
+                Some(field_id) => Some(SemanticAction::Ui(UiAction::Fill(
+                    field_id,
+                    required_field(
+                        self.value.clone().or_else(|| self.expect.clone()),
+                        "value",
+                        self.action,
+                    )?,
+                ))),
+                None => None,
+            },
+            ScenarioAction::WaitFor => expectation_from_step(self)?,
+            ScenarioAction::ExpectToast => {
+                Some(SemanticAction::Expect(Expectation::ToastContains {
+                    kind: self.level.as_deref().map(parse_toast_kind).transpose()?,
+                    message_contains: required_field(
+                        self.contains.clone().or_else(|| self.expect.clone()),
+                        "contains",
+                        self.action,
+                    )?,
+                }))
+            }
+            ScenarioAction::Restart => Some(SemanticAction::Environment(
+                EnvironmentAction::RestartActor {
+                    actor: actor
+                        .clone()
+                        .ok_or_else(|| anyhow!("step {} requires instance", self.id))?,
+                },
+            )),
+            ScenarioAction::Kill => {
+                Some(SemanticAction::Environment(EnvironmentAction::KillActor {
+                    actor: actor
+                        .clone()
+                        .ok_or_else(|| anyhow!("step {} requires instance", self.id))?,
+                }))
+            }
+            ScenarioAction::FaultDelay => {
+                Some(SemanticAction::Environment(EnvironmentAction::FaultDelay {
+                    actor: actor
+                        .clone()
+                        .ok_or_else(|| anyhow!("step {} requires instance", self.id))?,
+                    delay_ms: self.timeout_ms.unwrap_or_default(),
+                }))
+            }
+            ScenarioAction::FaultLoss => {
+                Some(SemanticAction::Environment(EnvironmentAction::FaultLoss {
+                    actor: actor
+                        .clone()
+                        .ok_or_else(|| anyhow!("step {} requires instance", self.id))?,
+                    loss_percent: 100,
+                }))
+            }
+            ScenarioAction::FaultTunnelDrop => Some(SemanticAction::Environment(
+                EnvironmentAction::FaultTunnelDrop {
+                    actor: actor
+                        .clone()
+                        .ok_or_else(|| anyhow!("step {} requires instance", self.id))?,
+                },
+            )),
+            ScenarioAction::SendChatCommand
+            | ScenarioAction::ExpectCommandResult
+            | ScenarioAction::ExpectMembership
+            | ScenarioAction::ExpectDenied
+            | ScenarioAction::GetAuthorityId
+            | ScenarioAction::ListChannels
+            | ScenarioAction::CurrentSelection
+            | ScenarioAction::ListContacts
+            | ScenarioAction::SelectChannel => None,
+        };
+
+        Ok(action.map(|action| SemanticStep {
+            id,
+            actor,
+            timeout_ms,
+            action,
+        }))
+    }
+}
+
+fn required_field(value: Option<String>, field: &str, action: ScenarioAction) -> Result<String> {
+    value.ok_or_else(|| anyhow!("action {} requires {field}", action))
+}
+
+fn parse_extract_source(value: &str) -> Result<ExtractSource> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "screen" => Ok(ExtractSource::Screen),
+        "raw_screen" => Ok(ExtractSource::RawScreen),
+        "authoritative_screen" => Ok(ExtractSource::AuthoritativeScreen),
+        "normalized_screen" => Ok(ExtractSource::NormalizedScreen),
+        other => bail!("unsupported extract source: {other}"),
+    }
+}
+
+fn parse_input_key(value: &str) -> Result<InputKey> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "enter" => Ok(InputKey::Enter),
+        "esc" => Ok(InputKey::Esc),
+        "tab" => Ok(InputKey::Tab),
+        "backtab" | "back_tab" | "shift_tab" => Ok(InputKey::BackTab),
+        "up" => Ok(InputKey::Up),
+        "down" => Ok(InputKey::Down),
+        "left" => Ok(InputKey::Left),
+        "right" => Ok(InputKey::Right),
+        "home" => Ok(InputKey::Home),
+        "end" => Ok(InputKey::End),
+        "pageup" | "page_up" => Ok(InputKey::PageUp),
+        "pagedown" | "page_down" => Ok(InputKey::PageDown),
+        "backspace" => Ok(InputKey::Backspace),
+        "delete" => Ok(InputKey::Delete),
+        other => bail!("unsupported semantic key: {other}"),
+    }
+}
+
+fn parse_toast_kind(value: &str) -> Result<ToastKind> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "success" => Ok(ToastKind::Success),
+        "info" => Ok(ToastKind::Info),
+        "error" => Ok(ToastKind::Error),
+        other => bail!("unsupported toast kind: {other}"),
+    }
+}
+
+fn expectation_from_step(step: &ScenarioStep) -> Result<Option<SemanticAction>> {
+    if let Some(screen_id) = step.screen_id {
+        return Ok(Some(SemanticAction::Expect(Expectation::ScreenIs(
+            screen_id,
+        ))));
+    }
+    if let Some(control_id) = step.control_id {
+        return Ok(Some(SemanticAction::Expect(Expectation::ControlVisible(
+            control_id,
+        ))));
+    }
+    if let Some(modal_id) = step.modal_id {
+        return Ok(Some(SemanticAction::Expect(Expectation::ModalOpen(
+            modal_id,
+        ))));
+    }
+    if let (Some(list_id), Some(item_id)) = (step.list_id, step.item_id.clone()) {
+        return Ok(Some(SemanticAction::Expect(Expectation::ListContains {
+            list: list_id,
+            item_id,
+        })));
+    }
+    Ok(None)
+}
+
 pub fn load_run_config(path: &Path) -> Result<RunConfig> {
     let body = fs::read_to_string(path)
         .with_context(|| format!("failed to read run config at {}", path.display()))?;
@@ -264,6 +475,27 @@ pub fn load_scenario_config(path: &Path) -> Result<ScenarioConfig> {
     let config: ScenarioConfig = toml::from_str(&body)
         .with_context(|| format!("failed to parse scenario config TOML at {}", path.display()))?;
     Ok(config)
+}
+
+pub fn load_semantic_scenario_definition(path: &Path) -> Result<ScenarioDefinition> {
+    let body = fs::read_to_string(path).with_context(|| {
+        format!(
+            "failed to read semantic scenario config at {}",
+            path.display()
+        )
+    })?;
+    let file: SemanticScenarioFile = toml::from_str(&body).with_context(|| {
+        format!(
+            "failed to parse semantic scenario config TOML at {}",
+            path.display()
+        )
+    })?;
+    ScenarioDefinition::try_from(file).map_err(|error| {
+        anyhow!(
+            "failed to convert semantic scenario at {}: {error}",
+            path.display()
+        )
+    })
 }
 
 impl RunConfig {
@@ -446,6 +678,20 @@ impl ScenarioConfig {
         }
 
         Ok(())
+    }
+
+    pub fn to_semantic_definition(&self) -> Result<ScenarioDefinition> {
+        let mut steps = Vec::new();
+        for step in &self.steps {
+            if let Some(semantic_step) = step.to_semantic_step()? {
+                steps.push(semantic_step);
+            }
+        }
+        Ok(ScenarioDefinition {
+            id: self.id.clone(),
+            goal: self.goal.clone(),
+            steps,
+        })
     }
 }
 
@@ -643,6 +889,126 @@ mod tests {
 
         let parsed: Result<ScenarioConfig, _> = toml::from_str(body);
         assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn semantic_translation_maps_typed_wait_and_fill_steps() {
+        let config = ScenarioConfig {
+            schema_version: SCENARIO_SCHEMA_VERSION,
+            id: "semantic".to_string(),
+            goal: "semantic translation".to_string(),
+            required_capabilities: vec![],
+            execution_mode: Some("scripted".to_string()),
+            steps: vec![
+                ScenarioStep {
+                    id: "fill-nickname".to_string(),
+                    action: ScenarioAction::FillInput,
+                    instance: Some("web".to_string()),
+                    field_id: Some(FieldId::Nickname),
+                    value: Some("Ops".to_string()),
+                    ..ScenarioStep::default()
+                },
+                ScenarioStep {
+                    id: "wait-settings".to_string(),
+                    action: ScenarioAction::WaitFor,
+                    instance: Some("web".to_string()),
+                    screen_id: Some(ScreenId::Settings),
+                    ..ScenarioStep::default()
+                },
+            ],
+        };
+
+        let semantic = config
+            .to_semantic_definition()
+            .unwrap_or_else(|error| panic!("semantic translation failed: {error}"));
+        assert_eq!(semantic.id, "semantic");
+        assert_eq!(semantic.steps.len(), 2);
+        assert!(matches!(
+            semantic.steps[0].action,
+            SemanticAction::Ui(UiAction::Fill(FieldId::Nickname, ref value)) if value == "Ops"
+        ));
+        assert!(matches!(
+            semantic.steps[1].action,
+            SemanticAction::Expect(Expectation::ScreenIs(ScreenId::Settings))
+        ));
+    }
+
+    #[test]
+    fn semantic_translation_rejects_missing_required_fields() {
+        let step = ScenarioStep {
+            id: "bad-fill".to_string(),
+            action: ScenarioAction::FillInput,
+            instance: Some("web".to_string()),
+            field_id: Some(FieldId::Nickname),
+            ..ScenarioStep::default()
+        };
+
+        let error = step
+            .to_semantic_step()
+            .expect_err("fill input without value must fail");
+        assert!(error
+            .to_string()
+            .contains("action fill_input requires value"));
+    }
+
+    #[test]
+    fn semantic_translation_maps_toast_expectation_kind() {
+        let step = ScenarioStep {
+            id: "toast".to_string(),
+            action: ScenarioAction::ExpectToast,
+            level: Some("error".to_string()),
+            contains: Some("denied".to_string()),
+            ..ScenarioStep::default()
+        };
+
+        let semantic = step
+            .to_semantic_step()
+            .unwrap_or_else(|error| panic!("toast semantic translation failed: {error}"))
+            .expect("toast step should map");
+
+        assert!(matches!(
+            semantic.action,
+            SemanticAction::Expect(Expectation::ToastContains {
+                kind: Some(ToastKind::Error),
+                message_contains
+            }) if message_contains == "denied"
+        ));
+    }
+
+    #[test]
+    fn semantic_scenario_file_loads_from_toml() {
+        let body = r#"
+            id = "semantic-file"
+            goal = "semantic file parsing"
+
+            [[steps]]
+            id = "nav"
+            action = "navigate"
+            screen_id = "chat"
+
+            [[steps]]
+            id = "toast"
+            action = "toast_contains"
+            kind = "success"
+            value = "done"
+        "#;
+
+        let file: SemanticScenarioFile = toml::from_str(body)
+            .unwrap_or_else(|error| panic!("semantic file parse failed: {error}"));
+        let definition = ScenarioDefinition::try_from(file)
+            .unwrap_or_else(|error| panic!("semantic file conversion failed: {error}"));
+        assert_eq!(definition.steps.len(), 2);
+        assert!(matches!(
+            definition.steps[0].action,
+            SemanticAction::Ui(UiAction::Navigate(ScreenId::Chat))
+        ));
+        assert!(matches!(
+            &definition.steps[1].action,
+            SemanticAction::Expect(Expectation::ToastContains {
+                kind: Some(ToastKind::Success),
+                message_contains
+            }) if message_contains == "done"
+        ));
     }
 
     #[test]

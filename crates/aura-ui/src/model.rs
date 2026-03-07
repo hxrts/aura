@@ -9,8 +9,8 @@ use crate::snapshot::render_canonical_snapshot;
 use async_lock::RwLock as AsyncRwLock;
 use aura_app::{
     ui::contract::{
-        ControlId, ListId, ListItemSnapshot, ListSnapshot, ModalId, SelectionSnapshot, ToastKind,
-        ToastSnapshot, UiReadiness, UiSnapshot,
+        ControlId, ListId, ListItemSnapshot, ListSnapshot, ModalId, SelectionSnapshot, ToastId,
+        ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
     },
     AppCore,
 };
@@ -1316,6 +1316,7 @@ impl UiModel {
                 _ => ToastKind::Error,
             };
             toasts.push(ToastSnapshot {
+                id: ToastId(format!("toast-{}", self.toast_key)),
                 kind,
                 message: toast.message.clone(),
             });

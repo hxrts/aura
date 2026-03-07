@@ -55,9 +55,16 @@ pub mod signals {
 
 pub mod contract {
     pub use crate::ui_contract::{
-        ControlId, FieldId, ListId, ListItemSnapshot, ListSnapshot, ModalId, OperationSnapshot,
-        OperationState, ScreenId, SelectionSnapshot, ToastKind, ToastSnapshot, UiReadiness,
-        UiSnapshot,
+        ControlId, FieldId, ListId, ListItemSnapshot, ListSnapshot, ModalId, OperationId,
+        OperationSnapshot, OperationState, ScreenId, SelectionSnapshot, ToastId, ToastKind,
+        ToastSnapshot, UiReadiness, UiSnapshot,
+    };
+}
+
+pub mod scenarios {
+    pub use crate::scenario_contract::{
+        ActorId, EnvironmentAction, Expectation, ExtractSource, InputKey, ScenarioAction,
+        ScenarioDefinition, ScenarioStep, UiAction, VariableAction,
     };
 }
 
@@ -187,7 +194,9 @@ pub mod types {
     pub use crate::effects::reactive::{ReactiveHandler, SignalGraph, SignalGraphStats};
     #[cfg(feature = "signals")]
     pub use crate::reactive_state::{ReactiveState, ReactiveVec};
-    pub use crate::ui_contract::{ControlId, FieldId, ListId, ModalId, ScreenId, UiSnapshot};
+    pub use crate::ui_contract::{
+        ControlId, FieldId, ListId, ModalId, OperationId, ScreenId, ToastId, UiSnapshot,
+    };
     pub use crate::views::wizards::{
         format_wizard_progress, wizard_progress_percent, AccountSetupStep, CreateChannelStep,
         RecoverySetupStep,

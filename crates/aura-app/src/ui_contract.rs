@@ -107,6 +107,10 @@ pub enum ToastKind {
     Error,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ToastId(pub String);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UiReadiness {
@@ -123,8 +127,13 @@ pub enum OperationState {
     Failed,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct OperationId(pub String);
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToastSnapshot {
+    pub id: ToastId,
     pub kind: ToastKind,
     pub message: String,
 }
@@ -149,7 +158,7 @@ pub struct SelectionSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationSnapshot {
-    pub id: String,
+    pub id: OperationId,
     pub state: OperationState,
 }
 
