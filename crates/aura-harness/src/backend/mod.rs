@@ -3,6 +3,7 @@ pub mod playwright_browser;
 pub mod ssh_tunnel;
 
 use anyhow::{bail, Result};
+use aura_app::ui::contract::UiSnapshot;
 
 use crate::config::{InstanceConfig, InstanceMode};
 use crate::tool_api::ToolKey;
@@ -16,7 +17,17 @@ pub trait InstanceBackend {
     fn snapshot_dom(&self) -> Result<String> {
         self.snapshot()
     }
-    fn wait_for_dom_patterns(&self, _patterns: &[String], _timeout_ms: u64) -> Option<Result<String>> {
+    fn ui_snapshot(&self) -> Result<UiSnapshot> {
+        bail!(
+            "structured UI snapshots are not supported by backend {}",
+            self.backend_kind()
+        )
+    }
+    fn wait_for_dom_patterns(
+        &self,
+        _patterns: &[String],
+        _timeout_ms: u64,
+    ) -> Option<Result<String>> {
         None
     }
     fn wait_for_target(&self, _selector: &str, _timeout_ms: u64) -> Option<Result<String>> {

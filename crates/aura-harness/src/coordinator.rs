@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
+use aura_app::ui::contract::UiSnapshot;
 
 use crate::backend::BackendHandle;
 use crate::config::{InstanceMode, RunConfig, ScreenSource};
@@ -109,6 +110,24 @@ impl HarnessCoordinator {
             ScreenSource::Default => backend.as_trait().snapshot(),
             ScreenSource::Dom => backend.as_trait().snapshot_dom(),
         }
+    }
+
+    pub fn ui_snapshot(&self, instance_id: &str) -> Result<UiSnapshot> {
+        let backend = self
+            .backends
+            .get(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        let snapshot = backend.as_trait().ui_snapshot()?;
+        self.events.push(
+            "observation",
+            "ui_snapshot",
+            Some(instance_id.to_string()),
+            serde_json::json!({
+                "screen": format!("{:?}", snapshot.screen).to_ascii_lowercase(),
+                "open_modal": snapshot.open_modal.map(|modal| format!("{modal:?}").to_ascii_lowercase()),
+            }),
+        );
+        Ok(snapshot)
     }
 
     pub fn send_keys(&mut self, instance_id: &str, keys: &str) -> Result<()> {
@@ -311,7 +330,10 @@ impl HarnessCoordinator {
             return Ok(screen);
         }
 
-        bail!("wait_for_selector is not supported by backend {}", backend.as_trait().backend_kind())
+        bail!(
+            "wait_for_selector is not supported by backend {}",
+            backend.as_trait().backend_kind()
+        )
     }
 
     pub fn tail_log(&mut self, instance_id: &str, lines: usize) -> Result<Vec<String>> {

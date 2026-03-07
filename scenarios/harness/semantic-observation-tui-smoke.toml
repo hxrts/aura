@@ -1,0 +1,31 @@
+schema_version = 1
+id = "semantic-observation-tui-smoke"
+goal = "Validate PTY harness structured observation using semantic waits for screens and modals."
+execution_mode = "scripted"
+required_capabilities = ["local"]
+
+[[steps]]
+id = "launch"
+action = "launch_instances"
+timeout_ms = 15000
+
+[[steps]]
+id = "alice-onboarding-visible"
+action = "wait_for"
+instance = "alice"
+control_id = "onboarding_root"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-create-account"
+action = "send_keys"
+instance = "alice"
+keys = "Alice\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-neighborhood-visible"
+action = "wait_for"
+instance = "alice"
+screen_id = "neighborhood"
+timeout_ms = 30000

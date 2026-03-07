@@ -47,6 +47,7 @@ use crate::tui::components::{
 };
 use crate::tui::context::IoContext;
 use crate::tui::hooks::{AppCoreContext, CallbackContext};
+use crate::tui::harness_state::maybe_export_ui_snapshot;
 use crate::tui::keymap::{global_footer_hints, screen_footer_hints};
 use crate::tui::layout::dim;
 use crate::tui::navigation::clamp_list_index;
@@ -1350,6 +1351,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // reactivity, ensuring the component re-renders when state changes via tui.replace().
     // See TuiStateHandle and TuiStateSnapshot docs for the reactivity model.
     let tui_snapshot = tui.read_for_render();
+    maybe_export_ui_snapshot(&tui_snapshot, &app_ctx.snapshot());
 
     // Callbacks registry and individual callback extraction for screen props
     let callbacks = props.callbacks.clone();

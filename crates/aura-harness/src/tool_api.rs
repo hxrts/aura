@@ -3,6 +3,7 @@
 //! Defines request/response types and dispatch logic for the harness tool API,
 //! enabling test clients to send input, capture screens, and query instance state.
 
+use aura_app::ui::contract::UiSnapshot;
 use serde::{Deserialize, Serialize};
 
 use crate::api_version::{negotiate, TOOL_API_DEFAULT_VERSION, TOOL_API_VERSIONS};
@@ -66,6 +67,9 @@ pub enum ToolRequest {
         instance_id: String,
         #[serde(default)]
         screen_source: ScreenSource,
+    },
+    UiState {
+        instance_id: String,
     },
     SendKeys {
         instance_id: String,
@@ -208,6 +212,10 @@ impl ToolApi {
                         "screen_source": format!("{screen_source:?}").to_ascii_lowercase()
                     })
                 }),
+            ToolRequest::UiState { instance_id } => self
+                .coordinator
+                .ui_snapshot(&instance_id)
+                .and_then(|snapshot: UiSnapshot| serde_json::to_value(snapshot).map_err(Into::into)),
             ToolRequest::SendKeys { instance_id, keys } => self
                 .coordinator
                 .send_keys(&instance_id, &keys)
@@ -251,8 +259,12 @@ impl ToolApi {
                     self.coordinator
                         .wait_for_selector(&instance_id, selector, timeout_ms)
                 } else {
-                    self.coordinator
-                        .wait_for_with_source(&instance_id, &pattern, timeout_ms, screen_source)
+                    self.coordinator.wait_for_with_source(
+                        &instance_id,
+                        &pattern,
+                        timeout_ms,
+                        screen_source,
+                    )
                 };
                 result.map(|screen| {
                     let authoritative = authoritative_screen(&screen);

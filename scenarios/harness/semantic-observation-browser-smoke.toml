@@ -1,0 +1,39 @@
+schema_version = 1
+id = "semantic-observation-browser-smoke"
+goal = "Validate browser harness structured observation using semantic waits for onboarding, screens, and modals."
+execution_mode = "scripted"
+required_capabilities = ["local", "browser"]
+
+[[steps]]
+id = "launch"
+action = "launch_instances"
+timeout_ms = 15000
+
+[[steps]]
+id = "alice-onboarding-visible"
+action = "wait_for"
+instance = "alice"
+control_id = "onboarding_root"
+timeout_ms = 60000
+
+[[steps]]
+id = "alice-fill-account-name"
+action = "fill_input"
+instance = "alice"
+selector = "#aura-account-name-input"
+value = "Alice"
+timeout_ms = 4000
+
+[[steps]]
+id = "alice-create-account"
+action = "click_button"
+instance = "alice"
+selector = "#aura-onboarding-create-account-button"
+timeout_ms = 4000
+
+[[steps]]
+id = "alice-neighborhood-visible"
+action = "wait_for"
+instance = "alice"
+screen_id = "neighborhood"
+timeout_ms = 120000

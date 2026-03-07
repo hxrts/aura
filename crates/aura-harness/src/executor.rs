@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
+use aura_app::ui::contract::{ControlId, ModalId, ScreenId, UiSnapshot};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
@@ -550,9 +551,7 @@ fn execute_step(
                 }
                 std::thread::sleep(Duration::from_millis(100));
             };
-            if let Some(selector) =
-                resolve_optional_field(step.selector.as_deref(), context)?
-            {
+            if let Some(selector) = resolve_optional_field(step.selector.as_deref(), context)? {
                 dispatch(
                     tool_api,
                     ToolRequest::FillInput {
@@ -572,12 +571,7 @@ fn execute_step(
                 .var
                 .as_deref()
                 .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
-            let payload = dispatch_payload(
-                tool_api,
-                ToolRequest::ReadClipboard {
-                    instance_id,
-                },
-            )?;
+            let payload = dispatch_payload(tool_api, ToolRequest::ReadClipboard { instance_id })?;
             let text = payload
                 .get("text")
                 .and_then(serde_json::Value::as_str)
@@ -640,12 +634,8 @@ fn execute_step(
         }
         ScenarioAction::FillInput => {
             let instance_id = resolve_required_instance(step, context)?;
-            let selector = resolve_required_field(
-                step,
-                "selector",
-                step.selector.as_deref(),
-                context,
-            )?;
+            let selector =
+                resolve_required_field(step, "selector", step.selector.as_deref(), context)?;
             let value = resolve_required_field(
                 step,
                 "value",
@@ -664,6 +654,19 @@ fn execute_step(
         }
         ScenarioAction::WaitFor => {
             let instance_id = resolve_required_instance(step, context)?;
+            if step.screen_id.is_some()
+                || step.control_id.is_some()
+                || step.modal_id.is_some()
+                || step.list_id.is_some()
+            {
+                wait_for_semantic_state(
+                    step,
+                    tool_api,
+                    &instance_id,
+                    step.timeout_ms.unwrap_or(step_budget_ms),
+                )?;
+                return Ok(());
+            }
             let selector = match step.selector.as_deref() {
                 Some(selector) => Some(resolve_template(selector, context)?),
                 None => None,
@@ -1154,6 +1157,137 @@ fn screen_field_value(payload: &serde_json::Value, field: ScreenField) -> &str {
             .and_then(serde_json::Value::as_str)
             .unwrap_or(fallback),
     }
+}
+
+fn fetch_ui_snapshot(tool_api: &mut ToolApi, instance_id: &str) -> Result<UiSnapshot> {
+    let payload = dispatch_payload(
+        tool_api,
+        ToolRequest::UiState {
+            instance_id: instance_id.to_string(),
+        },
+    )?;
+    serde_json::from_value(payload).map_err(Into::into)
+}
+
+fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
+    if let Some(screen_id) = step.screen_id {
+        if snapshot.screen != screen_id {
+            return false;
+        }
+    }
+
+    if let Some(modal_id) = step.modal_id {
+        if snapshot.open_modal != Some(modal_id) {
+            return false;
+        }
+    }
+
+    if let Some(control_id) = step.control_id {
+        let control_visible = match control_id {
+            ControlId::Screen(screen) => snapshot.screen == screen,
+            ControlId::List(list) => snapshot.lists.iter().any(|candidate| candidate.id == list),
+            ControlId::Modal(modal) => snapshot.open_modal == Some(modal),
+            _ => snapshot.focused_control == Some(control_id),
+        };
+        if !control_visible {
+            return false;
+        }
+    }
+
+    if let Some(list_id) = step.list_id {
+        let Some(list) = snapshot.lists.iter().find(|candidate| candidate.id == list_id) else {
+            return false;
+        };
+        if let Some(item_id) = step.item_id.as_deref() {
+            if !list.items.iter().any(|item| item.id == item_id) {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+fn semantic_wait_description(step: &ScenarioStep) -> String {
+    if let Some(screen_id) = step.screen_id {
+        return format!("screen={}", semantic_screen_name(screen_id));
+    }
+    if let Some(modal_id) = step.modal_id {
+        return format!("modal={}", semantic_modal_name(modal_id));
+    }
+    if let Some(control_id) = step.control_id {
+        return format!("control={control_id:?}");
+    }
+    if let Some(list_id) = step.list_id {
+        if let Some(item_id) = step.item_id.as_deref() {
+            return format!("list={list_id:?} item={item_id}");
+        }
+        return format!("list={list_id:?}");
+    }
+    "semantic state".to_string()
+}
+
+fn semantic_screen_name(screen: ScreenId) -> &'static str {
+    match screen {
+        ScreenId::Neighborhood => "neighborhood",
+        ScreenId::Chat => "chat",
+        ScreenId::Contacts => "contacts",
+        ScreenId::Notifications => "notifications",
+        ScreenId::Settings => "settings",
+    }
+}
+
+fn semantic_modal_name(modal: ModalId) -> &'static str {
+    match modal {
+        ModalId::Help => "help",
+        ModalId::CreateInvitation => "create_invitation",
+        ModalId::AcceptInvitation => "accept_invitation",
+        ModalId::CreateHome => "create_home",
+        ModalId::CreateChannel => "create_channel",
+        ModalId::SetChannelTopic => "set_channel_topic",
+        ModalId::ChannelInfo => "channel_info",
+        ModalId::EditNickname => "edit_nickname",
+        ModalId::RemoveContact => "remove_contact",
+        ModalId::GuardianSetup => "guardian_setup",
+        ModalId::RequestRecovery => "request_recovery",
+        ModalId::AddDevice => "add_device",
+        ModalId::ImportDeviceEnrollmentCode => "import_device_enrollment_code",
+        ModalId::SelectDeviceToRemove => "select_device_to_remove",
+        ModalId::ConfirmRemoveDevice => "confirm_remove_device",
+        ModalId::MfaSetup => "mfa_setup",
+        ModalId::AssignModerator => "assign_moderator",
+        ModalId::SwitchAuthority => "switch_authority",
+        ModalId::AccessOverride => "access_override",
+        ModalId::CapabilityConfig => "capability_config",
+    }
+}
+
+fn wait_for_semantic_state(
+    step: &ScenarioStep,
+    tool_api: &mut ToolApi,
+    instance_id: &str,
+    timeout_ms: u64,
+) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let mut last_snapshot = None;
+    loop {
+        let snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
+        if semantic_wait_matches(step, &snapshot) {
+            return Ok(());
+        }
+        last_snapshot = Some(snapshot);
+        if Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(40));
+    }
+    bail!(
+        "step {} semantic wait timed out on instance {} ({}) last_snapshot={:?}",
+        step.id,
+        instance_id,
+        semantic_wait_description(step),
+        last_snapshot
+    )
 }
 
 fn screen_contains(tool_api: &mut ToolApi, instance_id: &str, needle: &str) -> Result<bool> {

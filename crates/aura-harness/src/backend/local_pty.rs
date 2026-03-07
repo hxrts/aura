@@ -7,6 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use aura_app::ui::contract::UiSnapshot;
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use tokio::sync::Mutex;
 
@@ -38,6 +39,10 @@ pub struct LocalPtyBackend {
 }
 
 impl LocalPtyBackend {
+    fn ui_state_file(&self) -> PathBuf {
+        self.config.data_dir.join(".ui-state.json")
+    }
+
     pub fn new(config: InstanceConfig, pty_rows: Option<u16>, pty_cols: Option<u16>) -> Self {
         Self {
             config,
@@ -182,6 +187,13 @@ impl InstanceBackend for LocalPtyBackend {
                 clipboard_file.to_string_lossy().to_string(),
             );
         }
+        if Self::env_value("AURA_TUI_UI_STATE_FILE", &self.config.env).is_none() {
+            let ui_state_file = Self::absolutize_path(self.ui_state_file());
+            command.env(
+                "AURA_TUI_UI_STATE_FILE",
+                ui_state_file.to_string_lossy().to_string(),
+            );
+        }
 
         for item in &self.config.env {
             if let Some((key, value)) = item.split_once('=') {
@@ -203,6 +215,7 @@ impl InstanceBackend for LocalPtyBackend {
                 self.config.data_dir.display()
             )
         })?;
+        let _ = fs::remove_file(self.ui_state_file());
 
         let child = pair
             .slave
@@ -304,6 +317,32 @@ impl InstanceBackend for LocalPtyBackend {
         }
 
         Ok(self.select_authoritative_screen(recovered_screen))
+    }
+
+    fn ui_snapshot(&self) -> Result<UiSnapshot> {
+        let path = self.ui_state_file();
+        const SNAPSHOT_WAIT_ATTEMPTS: usize = 50;
+        const SNAPSHOT_WAIT_DELAY_MS: u64 = 100;
+
+        let mut last_error = None;
+        for _ in 0..SNAPSHOT_WAIT_ATTEMPTS {
+            match fs::read_to_string(&path) {
+                Ok(content) => match serde_json::from_str(&content) {
+                    Ok(snapshot) => return Ok(snapshot),
+                    Err(error) => last_error = Some(format!("parse error: {error}")),
+                },
+                Err(error) => last_error = Some(format!("read error: {error}")),
+            }
+            thread::sleep(Duration::from_millis(SNAPSHOT_WAIT_DELAY_MS));
+        }
+
+        let detail = last_error.unwrap_or_else(|| "no snapshot produced".to_string());
+        anyhow::bail!(
+            "failed to read TUI UI snapshot {} after {} attempts: {}",
+            path.display(),
+            SNAPSHOT_WAIT_ATTEMPTS,
+            detail
+        )
     }
 
     fn send_keys(&mut self, keys: &str) -> Result<()> {

@@ -8,6 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
+use aura_app::ui::contract::UiSnapshot;
 use nix::poll::{poll, PollFd, PollFlags};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
@@ -55,7 +56,12 @@ impl RunningSession {
             .collect()
     }
 
-    fn wait_for_response_ready(&mut self, method: &str, request_id: u64, deadline: Instant) -> Result<()> {
+    fn wait_for_response_ready(
+        &mut self,
+        method: &str,
+        request_id: u64,
+        deadline: Instant,
+    ) -> Result<()> {
         let now = Instant::now();
         if now >= deadline {
             return self.rpc_timeout(method, request_id, "deadline exceeded before response");
@@ -471,7 +477,23 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         Ok(screen)
     }
 
-    fn wait_for_dom_patterns(&self, patterns: &[String], timeout_ms: u64) -> Option<Result<String>> {
+    fn ui_snapshot(&self) -> Result<UiSnapshot> {
+        let payload = self.with_session(|session| {
+            session.rpc_call("ui_state", json!({ "instance_id": self.config.id }))
+        })?;
+        serde_json::from_value(payload).with_context(|| {
+            format!(
+                "failed to decode browser UiSnapshot for instance {}",
+                self.config.id
+            )
+        })
+    }
+
+    fn wait_for_dom_patterns(
+        &self,
+        patterns: &[String],
+        timeout_ms: u64,
+    ) -> Option<Result<String>> {
         Some(self.with_session(|session| {
             let payload = session.rpc_call_with_timeout(
                 "wait_for_dom_patterns",

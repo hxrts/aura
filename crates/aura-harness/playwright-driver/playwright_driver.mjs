@@ -884,6 +884,39 @@ async function snapshot(params) {
   };
 }
 
+async function uiState(params) {
+  const instanceId = normalizeInstanceId(params);
+  const session = getSession(instanceId);
+
+  let payload;
+  try {
+    payload = await withOperationTimeout(
+      'ui_state',
+      session.page.evaluate(() => {
+        if (typeof window.__AURA_UI_STATE__ === 'function') {
+          return window.__AURA_UI_STATE__();
+        }
+        if (typeof window.__AURA_HARNESS__?.ui_state === 'function') {
+          return window.__AURA_HARNESS__.ui_state();
+        }
+        return null;
+      })
+    );
+  } catch (error) {
+    throw new Error(
+      `${error}\nBrowser console tail:\n${consoleTailText(session)}`
+    );
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    throw new Error(
+      `browser UI state export is unavailable for instance ${instanceId}\nBrowser console tail:\n${consoleTailText(session)}`
+    );
+  }
+
+  return payload;
+}
+
 async function domSnapshot(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
@@ -1073,6 +1106,8 @@ async function dispatch(method, params) {
       return fillInput(params);
     case 'snapshot':
       return snapshot(params);
+    case 'ui_state':
+      return uiState(params);
     case 'dom_snapshot':
       return domSnapshot(params);
     case 'wait_for_dom_patterns':

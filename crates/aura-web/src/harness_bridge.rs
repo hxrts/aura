@@ -3,8 +3,10 @@
 //! Exposes the UiController to JavaScript via window.harness, enabling the test
 //! harness to send keys, capture screenshots, and query UI state from Playwright.
 
+use aura_app::ui::contract::UiSnapshot;
 use aura_ui::UiController;
 use js_sys::{Array, Object, Reflect};
+use serde_wasm_bindgen::to_value;
 use std::cell::RefCell;
 use std::sync::Arc;
 use wasm_bindgen::closure::Closure;
@@ -18,6 +20,18 @@ pub fn set_controller(controller: Arc<UiController>) {
     CONTROLLER.with(|slot| {
         *slot.borrow_mut() = Some(controller);
     });
+}
+
+fn serialize_ui_snapshot(snapshot: &UiSnapshot) -> JsValue {
+    match to_value(snapshot) {
+        Ok(value) => value,
+        Err(error) => {
+            web_sys::console::error_1(
+                &JsValue::from_str(&format!("failed to serialize UiSnapshot: {error}")),
+            );
+            JsValue::NULL
+        }
+    }
 }
 
 pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), JsValue> {
@@ -92,6 +106,17 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
     )?;
     snapshot.forget();
 
+    let ui_state_controller = controller.clone();
+    let ui_state = Closure::wrap(Box::new(move || -> JsValue {
+        serialize_ui_snapshot(&ui_state_controller.ui_snapshot())
+    }) as Box<dyn FnMut() -> JsValue>);
+    Reflect::set(
+        &harness,
+        &JsValue::from_str("ui_state"),
+        ui_state.as_ref().unchecked_ref(),
+    )?;
+    ui_state.forget();
+
     let read_clipboard_controller = controller.clone();
     let read_clipboard = Closure::wrap(Box::new(move || -> JsValue {
         JsValue::from_str(&read_clipboard_controller.read_clipboard())
@@ -153,6 +178,16 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
         &JsValue::from_str("__AURA_HARNESS__"),
         &harness,
     )?;
+    let read_only_ui_state_controller = controller;
+    let read_only_ui_state = Closure::wrap(Box::new(move || -> JsValue {
+        serialize_ui_snapshot(&read_only_ui_state_controller.ui_snapshot())
+    }) as Box<dyn FnMut() -> JsValue>);
+    Reflect::set(
+        window.as_ref(),
+        &JsValue::from_str("__AURA_UI_STATE__"),
+        read_only_ui_state.as_ref().unchecked_ref(),
+    )?;
+    read_only_ui_state.forget();
 
     Ok(())
 }

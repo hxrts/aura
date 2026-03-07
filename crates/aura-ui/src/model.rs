@@ -1324,7 +1324,11 @@ impl UiModel {
 
         UiSnapshot {
             screen: self.screen,
-            focused_control: Some(ControlId::Screen(self.screen)),
+            focused_control: Some(if self.account_ready {
+                ControlId::Screen(self.screen)
+            } else {
+                ControlId::OnboardingRoot
+            }),
             open_modal: self.modal_state().map(ModalState::contract_id),
             readiness: if self.account_ready {
                 UiReadiness::Ready
@@ -1702,6 +1706,10 @@ impl UiController {
             normalized_screen,
             raw_screen: screen,
         }
+    }
+
+    pub fn ui_snapshot(&self) -> UiSnapshot {
+        read_model(&self.model).semantic_snapshot()
     }
 
     pub fn read_clipboard(&self) -> String {
