@@ -69,16 +69,106 @@ pub use telltale;
 pub use telltale_choreography;
 
 use async_trait::async_trait;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-/// Aura extension for choreographic adapters.
+/// Aura compatibility adapter for generated choreography runners.
 ///
-/// Generated runners call `provide_message` and `select_branch` to source
-/// outbound messages and choice decisions. This trait extends the upstream
-/// adapter with those hooks.
+/// Telltale 3.0 moved generated choreography execution toward `ChoreoHandler`
+/// effect programs. Aura still has a large surface area built around the
+/// simpler runner adapter model, so `aura-macros` continues generating against
+/// this compatibility trait while the underlying dependency stack is on
+/// Telltale 3.0.
 #[async_trait]
-pub trait ChoreographicAdapterExt: telltale_choreography::ChoreographicAdapter {
+pub trait ChoreographicAdapter: Send {
+    /// The error type for this adapter.
+    type Error: std::error::Error + Send + Sync + 'static;
+    /// The role identifier type for this adapter.
+    type Role: telltale_choreography::RoleId;
+
+    /// Send a message to a specific role.
+    async fn send<M: Serialize + Send + Sync + 'static>(
+        &mut self,
+        to: Self::Role,
+        msg: M,
+    ) -> Result<(), Self::Error>;
+
+    /// Receive a message from a specific role.
+    async fn recv<M: DeserializeOwned + Send + 'static>(
+        &mut self,
+        from: Self::Role,
+    ) -> Result<M, Self::Error>;
+
+    /// Broadcast a message to multiple roles.
+    async fn broadcast<M: Serialize + Clone + Send + Sync + 'static>(
+        &mut self,
+        to: &[Self::Role],
+        msg: M,
+    ) -> Result<(), Self::Error> {
+        for role in to {
+            self.send(*role, msg.clone()).await?;
+        }
+        Ok(())
+    }
+
+    /// Collect messages from multiple roles.
+    async fn collect<M: DeserializeOwned + Send + 'static>(
+        &mut self,
+        from: &[Self::Role],
+    ) -> Result<Vec<M>, Self::Error> {
+        let mut messages = Vec::with_capacity(from.len());
+        for role in from {
+            messages.push(self.recv::<M>(*role).await?);
+        }
+        Ok(messages)
+    }
+
+    /// Broadcast a branch label.
+    async fn choose(
+        &mut self,
+        to: Self::Role,
+        label: <Self::Role as telltale_choreography::RoleId>::Label,
+    ) -> Result<(), Self::Error> {
+        self.send(to, ChoiceLabel(label)).await
+    }
+
+    /// Receive a branch label.
+    async fn offer(
+        &mut self,
+        from: Self::Role,
+    ) -> Result<<Self::Role as telltale_choreography::RoleId>::Label, Self::Error> {
+        let choice: ChoiceLabel<<Self::Role as telltale_choreography::RoleId>::Label> =
+            self.recv(from).await?;
+        Ok(choice.0)
+    }
+
+    /// Resolve all instances of a parameterized role family.
+    fn resolve_family(&self, family: &str) -> Result<Vec<Self::Role>, Self::Error>;
+
+    /// Resolve a role family range `[start, end)`.
+    fn resolve_range(
+        &self,
+        family: &str,
+        start: u32,
+        end: u32,
+    ) -> Result<Vec<Self::Role>, Self::Error>;
+
+    /// Get the total count of instances in a role family.
+    fn family_size(&self, family: &str) -> Result<usize, Self::Error> {
+        self.resolve_family(family).map(|roles| roles.len())
+    }
+}
+
+/// Optional lifecycle hooks for compatibility runners.
+#[async_trait]
+pub trait ChoreographicAdapterExt: ChoreographicAdapter {
+    /// Called before protocol execution starts.
+    async fn setup(&mut self) -> Result<(), Self::Error>;
+
+    /// Called after protocol execution completes.
+    async fn teardown(&mut self) -> Result<(), Self::Error>;
+
     /// Provide the next outbound message for a send.
-    async fn provide_message<M: telltale_choreography::Message>(
+    async fn provide_message<M: Send + 'static>(
         &mut self,
         to: Self::Role,
     ) -> Result<M, Self::Error>;
@@ -88,6 +178,54 @@ pub trait ChoreographicAdapterExt: telltale_choreography::ChoreographicAdapter {
         &mut self,
         choices: &[L],
     ) -> Result<L, Self::Error>;
+}
+
+/// A branch label wrapper used by compatibility runners.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ChoiceLabel<L: telltale_choreography::LabelId>(pub L);
+
+impl<L: telltale_choreography::LabelId> Serialize for ChoiceLabel<L> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.0.as_str())
+    }
+}
+
+impl<'de, L: telltale_choreography::LabelId> Deserialize<'de> for ChoiceLabel<L> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let label = String::deserialize(deserializer)?;
+        L::from_str(&label)
+            .map(ChoiceLabel)
+            .ok_or_else(|| serde::de::Error::custom("unknown choice label"))
+    }
+}
+
+/// Context metadata passed to generated runner functions.
+#[derive(Debug, Clone)]
+pub struct ProtocolContext {
+    /// Name of the protocol being executed.
+    pub protocol: &'static str,
+    /// Name of the role being executed.
+    pub role: telltale_choreography::RoleName,
+    /// Optional index for parameterized roles.
+    pub index: Option<u32>,
+}
+
+impl ProtocolContext {
+    /// Create a context from a concrete role value.
+    #[must_use]
+    pub fn for_role<R: telltale_choreography::RoleId>(protocol: &'static str, role: R) -> Self {
+        Self {
+            protocol,
+            role: role.role_name(),
+            index: role.role_index(),
+        }
+    }
 }
 
 /// AST extraction and annotation parsing for Aura choreographies

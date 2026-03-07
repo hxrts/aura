@@ -275,11 +275,102 @@ pub enum ChoreographyError {
     },
 }
 
+pub fn map_telltale_choreography_error(
+    error: aura_mpst::telltale_choreography::ChoreographyError,
+) -> ChoreographyError {
+    use aura_core::effects::TransportError;
+    use aura_mpst::telltale_choreography::ChoreographyError as TelltaleChoreographyError;
+
+    fn parse_transport_error(message: &str) -> Option<TransportError> {
+        let message = message.trim();
+
+        if let Some(rest) = message.strip_prefix("execution error: ") {
+            return parse_transport_error(rest);
+        }
+        if let Some(rest) = message.strip_prefix("Transport error: ") {
+            return parse_transport_error(rest);
+        }
+        if let Some(rest) = message.strip_prefix("transport error: ") {
+            return parse_transport_error(rest);
+        }
+
+        if message == "No message available" {
+            return Some(TransportError::NoMessage);
+        }
+
+        if let Some(destination) = message.strip_prefix("Destination unreachable: ") {
+            return destination
+                .parse()
+                .ok()
+                .map(|destination| TransportError::DestinationUnreachable { destination });
+        }
+
+        None
+    }
+
+    match error {
+        TelltaleChoreographyError::Transport(message) => {
+            if let Some(source) = parse_transport_error(&message) {
+                ChoreographyError::Transport {
+                    source: Box::new(source),
+                }
+            } else {
+                ChoreographyError::Transport {
+                    source: Box::new(TransportError::ProtocolError { details: message }),
+                }
+            }
+        }
+        TelltaleChoreographyError::Serialization(reason)
+        | TelltaleChoreographyError::MessageSerializationFailed { reason, .. }
+        | TelltaleChoreographyError::LabelSerializationFailed { reason, .. } => {
+            ChoreographyError::SerializationFailed { reason }
+        }
+        TelltaleChoreographyError::Timeout(timeout) => ChoreographyError::InternalError {
+            message: format!("timeout after {timeout:?}"),
+        },
+        TelltaleChoreographyError::ProtocolViolation(message)
+        | TelltaleChoreographyError::ChoiceError {
+            details: message, ..
+        }
+        | TelltaleChoreographyError::InvalidChoice {
+            actual: message, ..
+        } => ChoreographyError::ProtocolViolation { message },
+        TelltaleChoreographyError::UnknownRole(role) => ChoreographyError::InternalError {
+            message: format!("unknown role: {role}"),
+        },
+        TelltaleChoreographyError::ProtocolContext { inner, .. }
+        | TelltaleChoreographyError::RoleContext { inner, .. }
+        | TelltaleChoreographyError::MessageContext { inner, .. }
+        | TelltaleChoreographyError::WithContext { inner, .. } => {
+            map_telltale_choreography_error(*inner)
+        }
+        TelltaleChoreographyError::ExecutionError(message) => {
+            if let Some(source) = parse_transport_error(&message) {
+                ChoreographyError::Transport {
+                    source: Box::new(source),
+                }
+            } else {
+                ChoreographyError::InternalError { message }
+            }
+        }
+        TelltaleChoreographyError::EmptyRoleFamily(family) => {
+            ChoreographyError::EmptyRoleFamily { family }
+        }
+        TelltaleChoreographyError::RoleFamilyNotFound(family) => {
+            ChoreographyError::RoleFamilyNotFound { family }
+        }
+        TelltaleChoreographyError::InvalidRoleRange { family, start, end } => {
+            ChoreographyError::InvalidRoleFamilyRange { family, start, end }
+        }
+        other => ChoreographyError::InternalError {
+            message: other.to_string(),
+        },
+    }
+}
+
 impl From<aura_mpst::telltale_choreography::ChoreographyError> for ChoreographyError {
     fn from(e: aura_mpst::telltale_choreography::ChoreographyError) -> Self {
-        ChoreographyError::InternalError {
-            message: e.to_string(),
-        }
+        map_telltale_choreography_error(e)
     }
 }
 

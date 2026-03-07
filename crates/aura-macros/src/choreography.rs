@@ -633,6 +633,487 @@ fn rewrite_generated_code(tokens: TokenStream, role_ident: &Ident) -> TokenStrea
     quote! { #file }
 }
 
+fn generate_compat_runners(
+    protocol_name: &str,
+    roles: &[telltale_choreography::ast::Role],
+    local_types: &[(
+        telltale_choreography::ast::Role,
+        telltale_choreography::ast::LocalType,
+    )],
+) -> TokenStream {
+    let mut label_names = BTreeSet::new();
+    for (_, local_type) in local_types {
+        collect_runner_branch_labels(local_type, &mut label_names);
+    }
+
+    let branch_label_enum = generate_runner_branch_label_enum(&label_names);
+    let role_enum = generate_runner_role_enum(roles);
+    let output_types = generate_runner_output_types(roles);
+    let runner_fns: Vec<_> = local_types
+        .iter()
+        .map(|(role, local_type)| generate_runner_fn(protocol_name, role, local_type))
+        .collect();
+    let execute_as = generate_runner_execute_as(protocol_name, roles);
+
+    quote! {
+        #branch_label_enum
+        #role_enum
+
+        #[allow(dead_code, unused_imports, unused_variables)]
+        pub mod runners {
+            use super::*;
+            use ::aura_mpst::{ChoreographicAdapterExt as ChoreographicAdapter, ProtocolContext};
+
+            #output_types
+            #(#runner_fns)*
+            #execute_as
+        }
+    }
+}
+
+fn collect_runner_branch_labels(
+    local_type: &telltale_choreography::ast::LocalType,
+    labels: &mut BTreeSet<String>,
+) {
+    use telltale_choreography::ast::LocalType;
+
+    match local_type {
+        LocalType::Select { branches, .. }
+        | LocalType::Branch { branches, .. }
+        | LocalType::LocalChoice { branches } => {
+            for (label, branch) in branches {
+                labels.insert(label.to_string());
+                collect_runner_branch_labels(branch, labels);
+            }
+        }
+        LocalType::Send { continuation, .. }
+        | LocalType::Receive { continuation, .. }
+        | LocalType::Loop {
+            body: continuation, ..
+        }
+        | LocalType::Rec {
+            body: continuation, ..
+        }
+        | LocalType::Timeout {
+            body: continuation, ..
+        } => collect_runner_branch_labels(continuation, labels),
+        LocalType::Var(_) | LocalType::End => {}
+    }
+}
+
+fn generate_runner_branch_label_enum(labels: &BTreeSet<String>) -> TokenStream {
+    if labels.is_empty() {
+        return quote! {
+            #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+            pub enum BranchLabel {}
+
+            impl ::aura_mpst::telltale_choreography::LabelId for BranchLabel {
+                fn as_str(&self) -> &'static str {
+                    match *self {}
+                }
+
+                fn from_str(_label: &str) -> Option<Self> {
+                    None
+                }
+            }
+        };
+    }
+
+    let variants = labels.iter().map(|label| {
+        let ident = quote::format_ident!("{}", label);
+        quote! { #ident }
+    });
+    let as_str_arms = labels.iter().map(|label| {
+        let ident = quote::format_ident!("{}", label);
+        quote! { BranchLabel::#ident => #label }
+    });
+    let from_str_arms = labels.iter().map(|label| {
+        let ident = quote::format_ident!("{}", label);
+        quote! { #label => Some(BranchLabel::#ident) }
+    });
+
+    quote! {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub enum BranchLabel {
+            #(#variants),*
+        }
+
+        impl ::aura_mpst::telltale_choreography::LabelId for BranchLabel {
+            fn as_str(&self) -> &'static str {
+                match self {
+                    #(#as_str_arms),*
+                }
+            }
+
+            fn from_str(label: &str) -> Option<Self> {
+                match label {
+                    #(#from_str_arms),*,
+                    _ => None,
+                }
+            }
+        }
+    }
+}
+
+fn generate_runner_role_enum(roles: &[telltale_choreography::ast::Role]) -> TokenStream {
+    let role_variants: Vec<_> = roles
+        .iter()
+        .map(|role| {
+            let name = role.name();
+            if role.index().is_some() || role.param().is_some() {
+                quote! { #name(u32) }
+            } else {
+                quote! { #name }
+            }
+        })
+        .collect();
+
+    let role_name_arms: Vec<_> = roles.iter().map(|role| {
+        let name = role.name();
+        let role_str = role.name().to_string();
+        if role.index().is_some() || role.param().is_some() {
+            quote! { RuntimeRole::#name(_) => ::aura_mpst::telltale_choreography::RoleName::from_static(#role_str) }
+        } else {
+            quote! { RuntimeRole::#name => ::aura_mpst::telltale_choreography::RoleName::from_static(#role_str) }
+        }
+    }).collect();
+
+    let role_index_arms: Vec<_> = roles
+        .iter()
+        .map(|role| {
+            let name = role.name();
+            if role.index().is_some() || role.param().is_some() {
+                quote! { RuntimeRole::#name(index) => Some(*index) }
+            } else {
+                quote! { RuntimeRole::#name => None }
+            }
+        })
+        .collect();
+
+    quote! {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub enum RuntimeRole {
+            #(#role_variants),*
+        }
+
+        impl ::aura_mpst::telltale_choreography::RoleId for RuntimeRole {
+            type Label = BranchLabel;
+
+            fn role_name(&self) -> ::aura_mpst::telltale_choreography::RoleName {
+                match self {
+                    #(#role_name_arms),*
+                }
+            }
+
+            fn role_index(&self) -> Option<u32> {
+                match self {
+                    #(#role_index_arms),*
+                }
+            }
+        }
+    }
+}
+
+fn generate_runner_output_types(roles: &[telltale_choreography::ast::Role]) -> TokenStream {
+    let outputs = roles.iter().map(|role| {
+        let output_name = quote::format_ident!("{}Output", role.name());
+        quote! {
+            #[derive(Debug, Default)]
+            pub struct #output_name;
+        }
+    });
+
+    quote! { #(#outputs)* }
+}
+
+fn generate_runner_fn(
+    protocol_name: &str,
+    role: &telltale_choreography::ast::Role,
+    local_type: &telltale_choreography::ast::LocalType,
+) -> TokenStream {
+    let role_name = role.name();
+    let fn_name = quote::format_ident!("run_{}", role_name.to_string().to_lowercase());
+    let output_type = quote::format_ident!("{}Output", role_name);
+    let role_variant = if role.index().is_some() || role.param().is_some() {
+        quote! { RuntimeRole::#role_name(index) }
+    } else {
+        quote! { RuntimeRole::#role_name }
+    };
+    let body = generate_runner_body(local_type);
+
+    let signature = if role.index().is_some() || role.param().is_some() {
+        quote! {
+            pub async fn #fn_name<A: ChoreographicAdapter<Role = RuntimeRole>>(
+                adapter: &mut A,
+                index: u32,
+            ) -> Result<#output_type, A::Error>
+            where
+                A::Error: From<::aura_mpst::telltale_choreography::ChoreographyError>
+        }
+    } else {
+        quote! {
+            pub async fn #fn_name<A: ChoreographicAdapter<Role = RuntimeRole>>(
+                adapter: &mut A,
+            ) -> Result<#output_type, A::Error>
+            where
+                A::Error: From<::aura_mpst::telltale_choreography::ChoreographyError>
+        }
+    };
+
+    quote! {
+        #signature {
+            let _ctx = ProtocolContext::for_role(#protocol_name, #role_variant);
+            let output = #output_type::default();
+            #body
+            Ok(output)
+        }
+    }
+}
+
+fn generate_runner_execute_as(
+    _protocol_name: &str,
+    roles: &[telltale_choreography::ast::Role],
+) -> TokenStream {
+    let match_arms: Vec<_> = roles
+        .iter()
+        .map(|role| {
+            let name = role.name();
+            let fn_name = quote::format_ident!("run_{}", name.to_string().to_lowercase());
+            if role.index().is_some() || role.param().is_some() {
+                quote! { RuntimeRole::#name(index) => { #fn_name(adapter, index).await?; } }
+            } else {
+                quote! { RuntimeRole::#name => { #fn_name(adapter).await?; } }
+            }
+        })
+        .collect();
+
+    quote! {
+        pub async fn execute_as<A: ChoreographicAdapter<Role = RuntimeRole>>(
+            role: RuntimeRole,
+            adapter: &mut A,
+        ) -> Result<(), A::Error>
+        where
+            A::Error: From<::aura_mpst::telltale_choreography::ChoreographyError>
+        {
+            match role {
+                #(#match_arms)*
+            }
+            Ok(())
+        }
+    }
+}
+
+fn generate_runner_body(local_type: &telltale_choreography::ast::LocalType) -> TokenStream {
+    use telltale_choreography::ast::LocalType;
+
+    match local_type {
+        LocalType::Send {
+            to,
+            message,
+            continuation,
+        } => {
+            let msg_type = &message.name;
+            let cont = generate_runner_body(continuation);
+            if let Some(index) = to.index() {
+                match index {
+                    telltale_choreography::ast::role::RoleIndex::Wildcard => {
+                        let family_name = to.name().to_string();
+                        return quote! {
+                            let roles = adapter.resolve_family(#family_name)?;
+                            if roles.is_empty() {
+                                return Err(::aura_mpst::telltale_choreography::ChoreographyError::EmptyRoleFamily(#family_name.to_string()).into());
+                            }
+                            let msg: #msg_type = adapter.provide_message(roles[0]).await?;
+                            adapter.broadcast(&roles, msg).await?;
+                            #cont
+                        };
+                    }
+                    telltale_choreography::ast::role::RoleIndex::Range(range) => {
+                        let family_name = to.name().to_string();
+                        let (start_expr, end_expr) = generate_runner_range_exprs(range);
+                        return quote! {
+                            let roles = adapter.resolve_range(#family_name, #start_expr, #end_expr)?;
+                            if roles.is_empty() {
+                                return Err(::aura_mpst::telltale_choreography::ChoreographyError::EmptyRoleFamily(#family_name.to_string()).into());
+                            }
+                            let msg: #msg_type = adapter.provide_message(roles[0]).await?;
+                            adapter.broadcast(&roles, msg).await?;
+                            #cont
+                        };
+                    }
+                    _ => {}
+                }
+            }
+
+            let to_role = generate_runner_role_id(to);
+            quote! {
+                let msg: #msg_type = adapter.provide_message(#to_role).await?;
+                adapter.send(#to_role, msg).await?;
+                #cont
+            }
+        }
+        LocalType::Receive {
+            from,
+            message,
+            continuation,
+        } => {
+            let msg_type = &message.name;
+            let cont = generate_runner_body(continuation);
+            if let Some(index) = from.index() {
+                match index {
+                    telltale_choreography::ast::role::RoleIndex::Wildcard => {
+                        let family_name = from.name().to_string();
+                        return quote! {
+                            let roles = adapter.resolve_family(#family_name)?;
+                            if roles.is_empty() {
+                                return Err(::aura_mpst::telltale_choreography::ChoreographyError::EmptyRoleFamily(#family_name.to_string()).into());
+                            }
+                            let _msgs: Vec<#msg_type> = adapter.collect(&roles).await?;
+                            #cont
+                        };
+                    }
+                    telltale_choreography::ast::role::RoleIndex::Range(range) => {
+                        let family_name = from.name().to_string();
+                        let (start_expr, end_expr) = generate_runner_range_exprs(range);
+                        return quote! {
+                            let roles = adapter.resolve_range(#family_name, #start_expr, #end_expr)?;
+                            if roles.is_empty() {
+                                return Err(::aura_mpst::telltale_choreography::ChoreographyError::EmptyRoleFamily(#family_name.to_string()).into());
+                            }
+                            let _msgs: Vec<#msg_type> = adapter.collect(&roles).await?;
+                            #cont
+                        };
+                    }
+                    _ => {}
+                }
+            }
+
+            let from_role = generate_runner_role_id(from);
+            quote! {
+                let _msg: #msg_type = adapter.recv(#from_role).await?;
+                #cont
+            }
+        }
+        LocalType::Select { to, branches } => {
+            let to_role = generate_runner_role_id(to);
+            let match_arms: Vec<_> = branches
+                .iter()
+                .map(|(label, cont_type)| {
+                    let cont = generate_runner_body(cont_type);
+                    quote! { BranchLabel::#label => { adapter.choose(#to_role, BranchLabel::#label).await?; #cont } }
+                })
+                .collect();
+            let choices: Vec<_> = branches
+                .iter()
+                .map(|(label, _)| quote! { BranchLabel::#label })
+                .collect();
+            quote! {
+                let choice = adapter.select_branch(&[#(#choices),*]).await?;
+                match choice {
+                    #(#match_arms),*
+                }
+            }
+        }
+        LocalType::Branch { from, branches } => {
+            let from_role = generate_runner_role_id(from);
+            let match_arms: Vec<_> = branches
+                .iter()
+                .map(|(label, cont_type)| {
+                    let cont = generate_runner_body(cont_type);
+                    quote! { BranchLabel::#label => { #cont } }
+                })
+                .collect();
+            quote! {
+                let label = adapter.offer(#from_role).await?;
+                match label {
+                    #(#match_arms),*
+                }
+            }
+        }
+        LocalType::LocalChoice { branches } => {
+            let match_arms: Vec<_> = branches
+                .iter()
+                .map(|(label, cont_type)| {
+                    let cont = generate_runner_body(cont_type);
+                    quote! { BranchLabel::#label => { #cont } }
+                })
+                .collect();
+            let choices: Vec<_> = branches
+                .iter()
+                .map(|(label, _)| quote! { BranchLabel::#label })
+                .collect();
+            quote! {
+                let choice = adapter.select_branch(&[#(#choices),*]).await?;
+                match choice {
+                    #(#match_arms),*
+                }
+            }
+        }
+        LocalType::Loop { condition, body } => {
+            let loop_body = generate_runner_body(body);
+            match condition {
+                Some(telltale_choreography::ast::Condition::Count(n)) => {
+                    quote! { for _i in 0..#n { #loop_body } }
+                }
+                _ => loop_body,
+            }
+        }
+        LocalType::Rec { body, .. } | LocalType::Timeout { body, .. } => generate_runner_body(body),
+        LocalType::Var(_) | LocalType::End => quote! {},
+    }
+}
+
+fn generate_runner_range_exprs(
+    range: &telltale_choreography::ast::role::RoleRange,
+) -> (TokenStream, TokenStream) {
+    use telltale_choreography::ast::role::RangeExpr;
+
+    let start_expr = match &range.start {
+        RangeExpr::Concrete(n) => quote! { #n },
+        RangeExpr::Symbolic(var) => {
+            let var_ident = quote::format_ident!("{}", var);
+            quote! { #var_ident }
+        }
+    };
+    let end_expr = match &range.end {
+        RangeExpr::Concrete(n) => quote! { #n },
+        RangeExpr::Symbolic(var) => {
+            let var_ident = quote::format_ident!("{}", var);
+            quote! { #var_ident }
+        }
+    };
+    (start_expr, end_expr)
+}
+
+fn generate_runner_role_id(role: &telltale_choreography::ast::Role) -> TokenStream {
+    use telltale_choreography::ast::role::RoleIndex;
+
+    let name = role.name();
+    if let Some(index) = role.index() {
+        match index {
+            RoleIndex::Concrete(n) => quote! { RuntimeRole::#name(#n) },
+            RoleIndex::Symbolic(var) => {
+                let var_ident = quote::format_ident!("{}", var);
+                quote! { RuntimeRole::#name(#var_ident) }
+            }
+            RoleIndex::Wildcard => quote! {{
+                return Err(::aura_mpst::telltale_choreography::ChoreographyError::ExecutionError(
+                    "wildcard roles must be resolved with resolve_family()".to_string()
+                ).into());
+            }},
+            RoleIndex::Range(_) => quote! {{
+                return Err(::aura_mpst::telltale_choreography::ChoreographyError::ExecutionError(
+                    "range roles must be resolved with resolve_range()".to_string()
+                ).into());
+            }},
+        }
+    } else if role.param().is_some() {
+        quote! { RuntimeRole::#name(index) }
+    } else {
+        quote! { RuntimeRole::#name }
+    }
+}
+
 fn rewrite_runner_modules(items: &mut [syn::Item]) {
     for item in items.iter_mut() {
         if let syn::Item::Mod(module) = item {
@@ -650,51 +1131,16 @@ fn rewrite_runner_modules(items: &mut [syn::Item]) {
     }
 }
 
-fn rewrite_runner_imports(items: &mut Vec<syn::Item>) {
-    let mut insert_pos = 0usize;
-    let mut has_adapter_alias = false;
-
-    for (idx, item) in items.iter_mut().enumerate() {
+fn rewrite_runner_imports(items: &mut [syn::Item]) {
+    for item in items.iter_mut() {
         if let syn::Item::Use(item_use) = item {
-            if is_super_glob(item_use) {
-                insert_pos = idx + 1;
-            }
-
             if use_tree_contains_adapter(item_use) {
                 strip_adapter_from_use(item_use);
             }
-
-            if is_adapter_alias_use(item_use) {
-                has_adapter_alias = true;
-            }
         }
-    }
-
-    if !has_adapter_alias {
-        let adapter_use: syn::ItemUse = syn::parse_quote! {
-            use ::aura_mpst::ChoreographicAdapterExt as ChoreographicAdapter;
-        };
-        items.insert(insert_pos, syn::Item::Use(adapter_use));
     }
 
     strip_output_metadata_updates(items);
-}
-
-fn is_super_glob(item_use: &syn::ItemUse) -> bool {
-    matches!(
-        &item_use.tree,
-        syn::UseTree::Path(path)
-            if path.ident == "super" && matches!(&*path.tree, syn::UseTree::Glob(_))
-    )
-}
-
-fn is_adapter_alias_use(item_use: &syn::ItemUse) -> bool {
-    match &item_use.tree {
-        syn::UseTree::Path(path) if path.ident == "aura_mpst" => {
-            matches!(&*path.tree, syn::UseTree::Rename(rename) if rename.ident == "ChoreographicAdapter")
-        }
-        _ => false,
-    }
 }
 
 fn use_tree_contains_adapter(item_use: &syn::ItemUse) -> bool {
@@ -1684,6 +2130,11 @@ fn choreography_impl_namespace_aware(
     let generated_code = hoist_choice_blocks(generated_code);
     let role_ident = quote::format_ident!("{}Role", choreography.name);
     let generated_code = rewrite_generated_code(generated_code, &role_ident);
+    let compat_runners = generate_compat_runners(
+        &choreography.name.to_string(),
+        &choreography.roles,
+        &local_types,
+    );
 
     let generated_code = if let Some(ns) = &choreography.namespace {
         let ns_ident = quote::format_ident!("{}", ns);
@@ -1691,8 +2142,13 @@ fn choreography_impl_namespace_aware(
             pub mod #ns_ident {
                 use super::*;
                 #generated_code
+                pub type #role_ident = super::RuntimeRole;
+                pub mod runners {
+                    pub use super::super::runners::*;
+                }
             }
             pub use #ns_ident::*;
+            #compat_runners
         }
     } else {
         quote! {
@@ -1701,6 +2157,7 @@ fn choreography_impl_namespace_aware(
                 #generated_code
             }
             pub use __generated_choreography::*;
+            #compat_runners
         }
     };
 

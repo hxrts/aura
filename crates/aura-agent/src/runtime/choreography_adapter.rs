@@ -35,14 +35,18 @@ use aura_core::FlowCost;
 use aura_guards::guards::journal::JournalCoupler;
 use aura_guards::prelude::{GuardContextProvider, GuardEffects, SendGuardChain};
 use aura_guards::LeakageBudget;
-use aura_mpst::telltale_choreography::{LabelId, Message, RoleId};
+use aura_mpst::telltale_choreography::{
+    ChoreoHandler, ChoreoHandlerExt, ChoreoResult, ChoreographyError as TelltaleChoreographyError,
+    LabelId, RoleId,
+};
 use aura_mpst::ChoreographicAdapterExt;
 use aura_protocol::effects::{
-    ChoreographicEffects, ChoreographicRole, ChoreographyError, RoleIndex,
+    ChoreographicEffects, ChoreographicRole, ChoreographyError as AuraChoreographyError, RoleIndex,
 };
 use std::any::Any;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
@@ -405,7 +409,7 @@ where
         self.journal_coupler.as_ref()
     }
 
-    pub fn push_message<M: Message>(&mut self, message: M) {
+    pub fn push_message<M: Send + 'static>(&mut self, message: M) {
         self.outbound.push_back(Box::new(message));
     }
 
@@ -417,7 +421,7 @@ where
         &self.received
     }
 
-    async fn ensure_runtime_admission(&mut self) -> Result<(), ChoreographyError> {
+    async fn ensure_runtime_admission(&mut self) -> Result<(), AuraChoreographyError> {
         let Some(admission) = self.runtime_admission.as_mut() else {
             return Ok(());
         };
@@ -430,7 +434,7 @@ where
             .capability_effects
             .capability_inventory()
             .await
-            .map_err(|_| ChoreographyError::AuthorizationFailed {
+            .map_err(|_| AuraChoreographyError::AuthorizationFailed {
                 reason: "TheoremPackAdmission inventory unavailable".to_string(),
             })?;
         let _inventory_size = inventory.len();
@@ -453,14 +457,16 @@ where
                 }
                 AdmissionError::Internal { .. } => "TheoremPackAdmission failed".to_string(),
             };
-            return Err(ChoreographyError::AuthorizationFailed { reason });
+            return Err(AuraChoreographyError::AuthorizationFailed { reason });
         }
         admission.admitted = true;
         Ok(())
     }
 
-    pub async fn start_session(&mut self, session_id: Uuid) -> Result<(), ChoreographyError> {
-        self.ensure_runtime_admission().await?;
+    pub async fn start_session(&mut self, session_id: Uuid) -> Result<(), AuraChoreographyError> {
+        self.ensure_runtime_admission()
+            .await
+            .map_err(|error| TelltaleChoreographyError::ExecutionError(error.to_string()))?;
         let mut roles = Vec::new();
         let self_role = self.map_role(self.self_role)?;
         roles.push(self_role);
@@ -475,18 +481,18 @@ where
         self.effects.start_session(session_id, roles).await
     }
 
-    pub async fn end_session(&mut self) -> Result<(), ChoreographyError> {
+    pub async fn end_session(&mut self) -> Result<(), AuraChoreographyError> {
         self.effects.end_session().await
     }
 
-    fn map_role(&self, role: R) -> Result<ChoreographicRole, ChoreographyError> {
+    fn map_role(&self, role: R) -> Result<ChoreographicRole, AuraChoreographyError> {
         let authority_id = if role == self.self_role {
             self.authority_id
         } else {
             *self
                 .role_map
                 .get(&role)
-                .ok_or_else(|| ChoreographyError::RoleNotFound {
+                .ok_or_else(|| AuraChoreographyError::RoleNotFound {
                     role: ChoreographicRole::new(
                         aura_core::DeviceId::from_uuid(self.authority_id.0),
                         RoleIndex::new(0).expect("role index"),
@@ -496,7 +502,7 @@ where
 
         let role_index = role.role_index().unwrap_or(0);
         let role_index =
-            RoleIndex::new(role_index).ok_or_else(|| ChoreographyError::ProtocolViolation {
+            RoleIndex::new(role_index).ok_or_else(|| AuraChoreographyError::ProtocolViolation {
                 message: format!("invalid role index: {role_index}"),
             })?;
 
@@ -508,8 +514,7 @@ where
 }
 
 #[async_trait]
-impl<E, R> aura_mpst::telltale_choreography::runtime::ChoreographicAdapter
-    for AuraProtocolAdapter<E, R>
+impl<E, R> ChoreoHandler for AuraProtocolAdapter<E, R>
 where
     E: ChoreographicEffects
         + GuardEffects
@@ -518,15 +523,21 @@ where
         + aura_core::TimeEffects,
     R: RoleId,
 {
-    type Error = ChoreographyError;
     type Role = R;
+    type Endpoint = ();
 
-    async fn send<M: Message>(&mut self, to: Self::Role, msg: M) -> Result<(), Self::Error> {
-        self.ensure_runtime_admission().await?;
-        let role = self.map_role(to)?;
-        let payload = to_vec(&msg).map_err(|err| ChoreographyError::SerializationFailed {
-            reason: err.to_string(),
-        })?;
+    async fn send<M: serde::Serialize + Send + Sync>(
+        &mut self,
+        _ep: &mut Self::Endpoint,
+        to: Self::Role,
+        msg: &M,
+    ) -> ChoreoResult<()> {
+        self.ensure_runtime_admission()
+            .await
+            .map_err(|error| TelltaleChoreographyError::ExecutionError(error.to_string()))?;
+        let role = map_runtime_role(self.map_role(to))?;
+        let payload =
+            to_vec(msg).map_err(|err| TelltaleChoreographyError::Serialization(err.to_string()))?;
 
         // Track receipt from guard evaluation for journal coupling
         let mut guard_receipt: Option<aura_core::Receipt> = None;
@@ -558,17 +569,17 @@ where
                 }
 
                 let result = guard.evaluate(&*self.effects).await.map_err(|e| {
-                    ChoreographyError::AuthorizationFailed {
-                        reason: format!("Guard chain evaluation failed: {e}"),
-                    }
+                    TelltaleChoreographyError::ExecutionError(format!(
+                        "guard chain evaluation failed: {e}"
+                    ))
                 })?;
 
                 if !result.authorized {
-                    return Err(ChoreographyError::AuthorizationFailed {
-                        reason: result
+                    return Err(TelltaleChoreographyError::ExecutionError(
+                        result
                             .denial_reason
-                            .unwrap_or_else(|| "Guard chain denied send".to_string()),
-                    });
+                            .unwrap_or_else(|| "guard chain denied send".to_string()),
+                    ));
                 }
 
                 debug!(
@@ -582,7 +593,10 @@ where
         }
 
         // Send the message
-        self.effects.send_to_role_bytes(role, payload).await?;
+        self.effects
+            .send_to_role_bytes(role, payload)
+            .await
+            .map_err(|error| TelltaleChoreographyError::ExecutionError(error.to_string()))?;
 
         // Couple journal operations after successful send
         if let Some(ref coupler) = self.journal_coupler {
@@ -600,9 +614,9 @@ where
                         error = %e,
                         "Journal coupling failed after send (message was sent)"
                     );
-                    ChoreographyError::InternalError {
-                        message: format!("Journal coupling failed: {e}"),
-                    }
+                    TelltaleChoreographyError::ExecutionError(format!(
+                        "journal coupling failed: {e}"
+                    ))
                 })?;
 
             if coupling_result.operations_applied > 0 {
@@ -617,74 +631,155 @@ where
         Ok(())
     }
 
-    async fn recv<M: Message>(&mut self, from: Self::Role) -> Result<M, Self::Error> {
-        self.ensure_runtime_admission().await?;
-        let role = self.map_role(from)?;
-        let payload = self.effects.receive_from_role_bytes(role).await?;
+    async fn recv<M: serde::de::DeserializeOwned + Send>(
+        &mut self,
+        _ep: &mut Self::Endpoint,
+        from: Self::Role,
+    ) -> ChoreoResult<M> {
+        self.ensure_runtime_admission()
+            .await
+            .map_err(|error| TelltaleChoreographyError::ExecutionError(error.to_string()))?;
+        let role = map_runtime_role(self.map_role(from))?;
+        let payload = self
+            .effects
+            .receive_from_role_bytes(role)
+            .await
+            .map_err(|error| TelltaleChoreographyError::ExecutionError(error.to_string()))?;
         self.received.push(ReceivedMessage {
             type_name: std::any::type_name::<M>(),
             bytes: payload.clone(),
         });
-        from_slice(&payload).map_err(|err| ChoreographyError::DeserializationFailed {
-            reason: err.to_string(),
+        from_slice(&payload)
+            .map_err(|err| TelltaleChoreographyError::Serialization(err.to_string()))
+    }
+
+    async fn choose(
+        &mut self,
+        ep: &mut Self::Endpoint,
+        who: Self::Role,
+        label: <Self::Role as RoleId>::Label,
+    ) -> ChoreoResult<()> {
+        self.send(ep, who, &label.as_str().to_string()).await
+    }
+
+    async fn offer(
+        &mut self,
+        ep: &mut Self::Endpoint,
+        from: Self::Role,
+    ) -> ChoreoResult<<Self::Role as RoleId>::Label> {
+        let label: String = self.recv(ep, from).await?;
+        <Self::Role as RoleId>::Label::from_str(&label).ok_or_else(|| {
+            TelltaleChoreographyError::InvalidChoice {
+                expected: Vec::new(),
+                actual: label,
+            }
         })
     }
 
-    /// Resolve all instances of a parameterized role family.
-    ///
-    /// For a choreography with `roles Coordinator, Witness[N]`, calling
-    /// `resolve_family("Witness")` returns all registered witness roles.
-    fn resolve_family(&self, family: &str) -> Result<Vec<Self::Role>, Self::Error> {
-        let roles = self.role_families.get(family).ok_or_else(|| {
-            ChoreographyError::RoleFamilyNotFound {
-                family: family.to_string(),
-            }
-        })?;
+    async fn with_timeout<F, T>(
+        &mut self,
+        _ep: &mut Self::Endpoint,
+        _at: Self::Role,
+        dur: Duration,
+        body: F,
+    ) -> ChoreoResult<T>
+    where
+        F: std::future::Future<Output = ChoreoResult<T>> + Send,
+    {
+        tokio::time::timeout(dur, body)
+            .await
+            .map_err(|_| TelltaleChoreographyError::Timeout(dur))?
+    }
+}
 
-        if roles.is_empty() {
-            return Err(ChoreographyError::EmptyRoleFamily {
-                family: family.to_string(),
-            });
-        }
-
-        Ok(roles.clone())
+#[async_trait]
+impl<E, R> ChoreoHandlerExt for AuraProtocolAdapter<E, R>
+where
+    E: ChoreographicEffects
+        + GuardEffects
+        + GuardContextProvider
+        + aura_core::PhysicalTimeEffects
+        + aura_core::TimeEffects,
+    R: RoleId,
+{
+    async fn setup(&mut self, _role: Self::Role) -> ChoreoResult<Self::Endpoint> {
+        Ok(())
     }
 
-    /// Resolve a range of role instances [start, end).
-    ///
-    /// For a choreography with `Witness[0..3]`, this returns witnesses at indices 0, 1, 2.
+    async fn teardown(&mut self, _ep: Self::Endpoint) -> ChoreoResult<()> {
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl<E, R> aura_mpst::ChoreographicAdapter for AuraProtocolAdapter<E, R>
+where
+    E: ChoreographicEffects
+        + GuardEffects
+        + GuardContextProvider
+        + aura_core::PhysicalTimeEffects
+        + aura_core::TimeEffects,
+    R: RoleId,
+{
+    type Error = AuraChoreographyError;
+    type Role = R;
+
+    async fn send<M: serde::Serialize + Send + Sync + 'static>(
+        &mut self,
+        to: Self::Role,
+        msg: M,
+    ) -> Result<(), Self::Error> {
+        let mut endpoint = ();
+        ChoreoHandler::send(self, &mut endpoint, to, &msg)
+            .await
+            .map_err(map_telltale_error)
+    }
+
+    async fn recv<M: serde::de::DeserializeOwned + Send + 'static>(
+        &mut self,
+        from: Self::Role,
+    ) -> Result<M, Self::Error> {
+        let mut endpoint = ();
+        ChoreoHandler::recv(self, &mut endpoint, from)
+            .await
+            .map_err(map_telltale_error)
+    }
+
+    fn resolve_family(&self, family: &str) -> Result<Vec<Self::Role>, Self::Error> {
+        self.role_families
+            .get(family)
+            .cloned()
+            .ok_or_else(|| AuraChoreographyError::RoleFamilyNotFound {
+                family: family.to_string(),
+            })
+            .and_then(|roles| {
+                if roles.is_empty() {
+                    Err(AuraChoreographyError::EmptyRoleFamily {
+                        family: family.to_string(),
+                    })
+                } else {
+                    Ok(roles)
+                }
+            })
+    }
+
     fn resolve_range(
         &self,
         family: &str,
         start: u32,
         end: u32,
     ) -> Result<Vec<Self::Role>, Self::Error> {
-        let all_roles = self.role_families.get(family).ok_or_else(|| {
-            ChoreographyError::RoleFamilyNotFound {
-                family: family.to_string(),
-            }
-        })?;
-
+        let roles = self.resolve_family(family)?;
         let start_idx = start as usize;
         let end_idx = end as usize;
-
-        if start_idx >= all_roles.len() || end_idx > all_roles.len() || start_idx >= end_idx {
-            return Err(ChoreographyError::InvalidRoleFamilyRange {
+        if start_idx >= roles.len() || end_idx > roles.len() || start_idx >= end_idx {
+            return Err(AuraChoreographyError::InvalidRoleFamilyRange {
                 family: family.to_string(),
                 start,
                 end,
             });
         }
-
-        let roles: Vec<Self::Role> = all_roles[start_idx..end_idx].to_vec();
-
-        if roles.is_empty() {
-            return Err(ChoreographyError::EmptyRoleFamily {
-                family: family.to_string(),
-            });
-        }
-
-        Ok(roles)
+        Ok(roles[start_idx..end_idx].to_vec())
     }
 }
 
@@ -698,7 +793,18 @@ where
         + aura_core::TimeEffects,
     R: RoleId,
 {
-    async fn provide_message<M: Message>(&mut self, to: Self::Role) -> Result<M, Self::Error> {
+    async fn setup(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    async fn teardown(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    async fn provide_message<M: Send + 'static>(
+        &mut self,
+        to: Self::Role,
+    ) -> Result<M, Self::Error> {
         self.ensure_runtime_admission().await?;
         let boxed = match self.outbound.pop_front() {
             Some(boxed) => boxed,
@@ -711,26 +817,27 @@ where
                         },
                         &self.received,
                     )
-                    .ok_or_else(|| ChoreographyError::ProtocolViolation {
-                        message: "message provider returned None".to_string(),
+                    .ok_or_else(|| {
+                        AuraChoreographyError::ProtocolViolation {
+                            message: "message provider returned None".to_string(),
+                        }
                     })?
                 } else {
-                    return Err(ChoreographyError::ProtocolViolation {
+                    return Err(AuraChoreographyError::ProtocolViolation {
                         message: "no queued message for provide_message".to_string(),
                     });
                 }
             }
         };
 
-        boxed
-            .downcast::<M>()
-            .map(|msg| *msg)
-            .map_err(|_| ChoreographyError::ProtocolViolation {
+        boxed.downcast::<M>().map(|msg| *msg).map_err(|_| {
+            AuraChoreographyError::ProtocolViolation {
                 message: format!(
                     "queued message type mismatch (expected {})",
                     std::any::type_name::<M>()
                 ),
-            })
+            }
+        })
     }
 
     async fn select_branch<L: LabelId>(&mut self, choices: &[L]) -> Result<L, Self::Error> {
@@ -740,7 +847,7 @@ where
             None => {
                 if let Some(decider) = self.branch_decider.as_mut() {
                     let label = decider(&self.received).ok_or_else(|| {
-                        ChoreographyError::ProtocolViolation {
+                        AuraChoreographyError::ProtocolViolation {
                             message: "branch decider returned None".to_string(),
                         }
                     })?;
@@ -748,11 +855,11 @@ where
                         .iter()
                         .copied()
                         .find(|choice| choice.as_str() == label);
-                    return selected.ok_or_else(|| ChoreographyError::ProtocolViolation {
-                        message: "branch decider returned invalid label".to_string(),
+                    return selected.ok_or_else(|| AuraChoreographyError::ProtocolViolation {
+                        message: format!("branch decider returned invalid label: {label}"),
                     });
                 }
-                return Err(ChoreographyError::ProtocolViolation {
+                return Err(AuraChoreographyError::ProtocolViolation {
                     message: "no queued branch choice for select_branch".to_string(),
                 });
             }
@@ -763,7 +870,7 @@ where
             .copied()
             .find(|label| label.as_str() == choice.as_str());
 
-        selected.ok_or_else(|| ChoreographyError::ProtocolViolation {
+        selected.ok_or_else(|| AuraChoreographyError::ProtocolViolation {
             message: "queued branch choice is not valid for this choice".to_string(),
         })
     }
@@ -771,6 +878,16 @@ where
 
 /// Public API alias for the choreography adapter.
 pub type ChoreographyAdapter = AuraHandlerAdapter;
+
+fn map_runtime_role(
+    result: Result<ChoreographicRole, AuraChoreographyError>,
+) -> ChoreoResult<ChoreographicRole> {
+    result.map_err(|error| TelltaleChoreographyError::ExecutionError(error.to_string()))
+}
+
+fn map_telltale_error(error: TelltaleChoreographyError) -> AuraChoreographyError {
+    aura_protocol::effects::choreographic::map_telltale_choreography_error(error)
+}
 
 fn capability_key_ref(key: &str) -> String {
     let digest = hash(key.as_bytes());

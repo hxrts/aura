@@ -18,7 +18,7 @@ See [Formal Verification Reference](119_verification.md#assurance-summary) for t
 | Quint Temporal Properties | 11 |
 | Quint Type Definitions | 362 |
 | Lean Source Files | 38 |
-| Lean Theorems | 119 |
+| Lean Theorems | 118 |
 | Conformance Fixtures | 4 |
 | ITF Trace Harnesses | 8 |
 | Testkit Tests | 113 |
@@ -150,7 +150,7 @@ Lean 4 mathematical proofs in `verification/lean/` providing formal guarantees.
 | `Domain/KeyDerivation.lean` | Key derivation types |
 | `Domain/ContextIsolation.lean` | Context isolation model |
 
-#### Proof Modules (14 files, 119 theorems)
+#### Proof Modules (14 files, 118 theorems)
 
 **Consensus Proofs:**
 
