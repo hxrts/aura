@@ -4,6 +4,7 @@ pub mod ssh_tunnel;
 
 use anyhow::{bail, Result};
 use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
+use std::time::Duration;
 
 use crate::config::{InstanceConfig, InstanceMode};
 use crate::tool_api::ToolKey;
@@ -98,6 +99,9 @@ pub trait InstanceBackend {
     }
     fn health_check(&self) -> Result<bool> {
         Ok(self.is_healthy())
+    }
+    fn wait_until_ready(&self, _timeout: Duration) -> Result<()> {
+        Ok(())
     }
     fn restart(&mut self) -> Result<()> {
         self.stop()?;

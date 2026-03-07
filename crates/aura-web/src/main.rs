@@ -69,6 +69,22 @@ cfg_if! {
             WEB_STORAGE_PREFIX.to_string()
         }
 
+        fn apply_harness_mode_document_flags() {
+            if harness_instance_id().is_none() {
+                return;
+            }
+            let Some(window) = web_sys::window() else {
+                return;
+            };
+            let Some(document) = window.document() else {
+                return;
+            };
+            let Some(root) = document.document_element() else {
+                return;
+            };
+            let _ = root.set_attribute("data-aura-harness-mode", "1");
+        }
+
         fn load_selected_authority(storage_key: &str) -> Option<AuthorityId> {
             let window = web_sys::window()?;
             let storage = window.local_storage().ok().flatten()?;
@@ -196,6 +212,7 @@ cfg_if! {
 
         fn main() {
             aura_app::platform::wasm::initialize();
+            apply_harness_mode_document_flags();
             let mut tracing_config = tracing_wasm::WASMLayerConfigBuilder::new();
             tracing_config
                 .set_max_level(tracing::Level::INFO)

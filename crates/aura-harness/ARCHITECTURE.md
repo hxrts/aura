@@ -3,6 +3,7 @@
 ## Purpose
 Provide a multi-instance orchestration harness for Aura runtime testing and operator workflows.
 The crate coordinates local PTY and SSH-backed instances, exposes a structured tool API, runs scripted scenarios, and produces replay and artifact bundles.
+By default it is intended to validate the real Aura runtime and real user interfaces, not to act as a simulator-specific runner.
 
 ## Inputs
 - Run configuration and scenario configuration files.
@@ -36,6 +37,7 @@ The crate coordinates local PTY and SSH-backed instances, exposes a structured t
 - Monotonic event identifiers: event stream IDs strictly increase and preserve append-only ordering.
 - Bounded execution: step and global scenario budgets cap execution time and fail with diagnostics on timeout.
 - Secure SSH defaults: strict host key checking stays enabled and fingerprint policy is enforced when required.
+- Primary-lane policy: the default harness lane targets the real Aura runtime and real TUI/web surfaces; simulator-backed execution is an alternate deterministic lane, not the primary correctness oracle.
 
 ### Detailed Specifications
 
@@ -61,4 +63,3 @@ Contract alignment:
 - It does not define Aura effect traits, domain semantics, or protocol safety rules.
 - It drives instances through process, PTY, and tool API surfaces rather than direct protocol mutation.
 - It may use direct OS operations for orchestration, capture, and preflight checks by design.
-

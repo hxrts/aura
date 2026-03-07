@@ -21,6 +21,7 @@ pub struct StartupSummary {
     pub tool_api_version: String,
     pub schema_version: u32,
     pub run_name: String,
+    pub artifact_dir: Option<String>,
     pub instance_count: u64,
     pub instances: Vec<StartupInstanceSummary>,
 }
@@ -32,6 +33,7 @@ pub struct StartupInstanceSummary {
     pub mode: String,
     pub bind_address: String,
     pub data_dir: String,
+    pub browser_artifact_dir: Option<String>,
 }
 
 impl StartupSummary {
@@ -44,6 +46,10 @@ impl StartupSummary {
                 mode: format!("{:?}", instance.mode).to_lowercase(),
                 bind_address: instance.bind_address.clone(),
                 data_dir: instance.data_dir.display().to_string(),
+                browser_artifact_dir: instance.env.iter().find_map(|entry| {
+                    let (key, value) = entry.split_once('=')?;
+                    (key == "AURA_HARNESS_BROWSER_ARTIFACT_DIR").then(|| value.to_string())
+                }),
             })
             .collect();
 
@@ -51,6 +57,11 @@ impl StartupSummary {
             tool_api_version: TOOL_API_DEFAULT_VERSION.to_string(),
             schema_version: config.schema_version,
             run_name: config.run.name.clone(),
+            artifact_dir: config
+                .run
+                .artifact_dir
+                .as_ref()
+                .map(|path| path.display().to_string()),
             instance_count: config.instances.len() as u64,
             instances,
         }

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
@@ -520,6 +520,28 @@ impl InstanceBackend for LocalPtyBackend {
 
     fn health_check(&self) -> Result<bool> {
         Ok(self.state == BackendState::Running && self.session.is_some())
+    }
+
+    fn wait_until_ready(&self, timeout: Duration) -> Result<()> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if self.ui_snapshot().is_ok() {
+                return Ok(());
+            }
+            if let Ok(screen) = self.snapshot() {
+                if !screen.trim().is_empty() {
+                    return Ok(());
+                }
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!(
+                    "local PTY instance {} did not reach readiness within {:?}",
+                    self.config.id,
+                    timeout
+                );
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
     }
 
     fn is_healthy(&self) -> bool {

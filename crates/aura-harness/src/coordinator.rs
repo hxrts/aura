@@ -6,6 +6,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
+use std::net::TcpListener;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -19,9 +20,16 @@ use crate::events::EventStream;
 use crate::screen_normalization::normalize_screen;
 use crate::tool_api::ToolKey;
 
+const BACKEND_HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
+const BACKEND_READY_TIMEOUT: Duration = Duration::from_secs(120);
+const BACKEND_TEARDOWN_TIMEOUT: Duration = Duration::from_secs(15);
+const BACKEND_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
 pub struct HarnessCoordinator {
     backends: HashMap<String, BackendHandle>,
+    instance_order: Vec<String>,
     instance_modes: HashMap<String, InstanceMode>,
+    instance_bind_addresses: HashMap<String, String>,
     instance_data_dirs: HashMap<String, PathBuf>,
     events: EventStream,
 }
@@ -30,21 +38,27 @@ pub struct HarnessCoordinator {
 impl HarnessCoordinator {
     pub fn from_run_config(config: &RunConfig) -> Result<Self> {
         let mut backends = HashMap::new();
+        let mut instance_order = Vec::new();
         let mut instance_modes = HashMap::new();
+        let mut instance_bind_addresses = HashMap::new();
         let mut instance_data_dirs = HashMap::new();
         let pty_rows = config.run.pty_rows;
         let pty_cols = config.run.pty_cols;
         for instance in &config.instances {
             let id = instance.id.clone();
             let backend = BackendHandle::from_config(instance.clone(), pty_rows, pty_cols)?;
+            instance_order.push(id.clone());
             instance_modes.insert(id.clone(), instance.mode.clone());
+            instance_bind_addresses.insert(id.clone(), instance.bind_address.clone());
             instance_data_dirs.insert(id.clone(), absolutize_path(instance.data_dir.clone()));
             backends.insert(id, backend);
         }
 
         Ok(Self {
             backends,
+            instance_order,
             instance_modes,
+            instance_bind_addresses,
             instance_data_dirs,
             events: EventStream::new(),
         })
@@ -52,20 +66,70 @@ impl HarnessCoordinator {
 
     pub fn start_all(&mut self) -> Result<()> {
         self.clear_stale_local_state()?;
-        for (id, backend) in &mut self.backends {
+        for id in self.instance_order.clone() {
+            let backend_kind = {
+                let backend = self
+                    .backends
+                    .get_mut(&id)
+                    .ok_or_else(|| anyhow!("unknown instance_id: {id}"))?;
+                let backend_kind = backend.as_trait().backend_kind();
+                backend.as_trait_mut().start()?;
+                backend_kind
+            };
             self.events.push(
                 "lifecycle",
                 "start",
                 Some(id.clone()),
-                serde_json::json!({ "backend": backend.as_trait().backend_kind() }),
+                serde_json::json!({ "backend": backend_kind }),
             );
-            backend.as_trait_mut().start()?;
+            self.wait_for_backend_health(&id, BACKEND_HEALTH_TIMEOUT)?;
+            self.events.push(
+                "lifecycle",
+                "health_ok",
+                Some(id.clone()),
+                serde_json::json!({ "timeout_ms": BACKEND_HEALTH_TIMEOUT.as_millis() }),
+            );
+            self.backends
+                .get(&id)
+                .ok_or_else(|| anyhow!("unknown instance_id: {id}"))?
+                .as_trait()
+                .wait_until_ready(BACKEND_READY_TIMEOUT)?;
+            self.events.push(
+                "lifecycle",
+                "ready_ok",
+                Some(id.clone()),
+                serde_json::json!({ "timeout_ms": BACKEND_READY_TIMEOUT.as_millis() }),
+            );
         }
         Ok(())
     }
 
+    fn wait_for_backend_health(&self, instance_id: &str, timeout: Duration) -> Result<()> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let backend = self
+                .backends
+                .get(instance_id)
+                .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+            if backend.as_trait().health_check()? {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                bail!(
+                    "instance {instance_id} failed startup health gate within {:?}",
+                    timeout
+                );
+            }
+            std::thread::sleep(BACKEND_POLL_INTERVAL);
+        }
+    }
+
     fn clear_stale_local_state(&mut self) -> Result<()> {
-        for (instance_id, mode) in &self.instance_modes {
+        for instance_id in &self.instance_order {
+            let mode = self
+                .instance_modes
+                .get(instance_id)
+                .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
             if !matches!(mode, InstanceMode::Local | InstanceMode::Browser) {
                 continue;
             }
@@ -85,16 +149,81 @@ impl HarnessCoordinator {
     }
 
     pub fn stop_all(&mut self) -> Result<()> {
-        for (id, backend) in &mut self.backends {
+        for id in self.instance_order.iter().rev() {
+            let backend_kind = {
+                let backend = self
+                    .backends
+                    .get_mut(id)
+                    .ok_or_else(|| anyhow!("unknown instance_id: {id}"))?;
+                let backend_kind = backend.as_trait().backend_kind();
+                backend.as_trait_mut().stop()?;
+                backend_kind
+            };
             self.events.push(
                 "lifecycle",
                 "stop",
                 Some(id.clone()),
-                serde_json::json!({ "backend": backend.as_trait().backend_kind() }),
+                serde_json::json!({ "backend": backend_kind }),
             );
-            backend.as_trait_mut().stop()?;
+            self.wait_for_backend_stopped(id, BACKEND_TEARDOWN_TIMEOUT)?;
+            self.verify_bind_address_released(id)?;
+            self.events.push(
+                "lifecycle",
+                "cleanup_ok",
+                Some(id.clone()),
+                serde_json::json!({ "timeout_ms": BACKEND_TEARDOWN_TIMEOUT.as_millis() }),
+            );
         }
         Ok(())
+    }
+
+    fn wait_for_backend_stopped(&self, instance_id: &str, timeout: Duration) -> Result<()> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let backend = self
+                .backends
+                .get(instance_id)
+                .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+            if !backend.as_trait().health_check()? {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                bail!(
+                    "instance {instance_id} failed teardown health gate within {:?}",
+                    timeout
+                );
+            }
+            std::thread::sleep(BACKEND_POLL_INTERVAL);
+        }
+    }
+
+    fn verify_bind_address_released(&self, instance_id: &str) -> Result<()> {
+        let mode = self
+            .instance_modes
+            .get(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        if matches!(mode, InstanceMode::Ssh) {
+            return Ok(());
+        }
+
+        let bind_address = self.lookup_bind_address(instance_id)?;
+        if bind_address.ends_with(":0") {
+            return Ok(());
+        }
+        let listener = TcpListener::bind(&bind_address).map_err(|error| {
+            anyhow!(
+                "instance {instance_id} did not release bind address {bind_address}: {error}"
+            )
+        })?;
+        drop(listener);
+        Ok(())
+    }
+
+    fn lookup_bind_address(&self, instance_id: &str) -> Result<String> {
+        self.instance_bind_addresses
+            .get(instance_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("missing bind_address for instance {instance_id}"))
     }
 
     pub fn screen(&self, instance_id: &str) -> Result<String> {
@@ -636,6 +765,8 @@ mod tests {
         clear_directory_contents, normalize_key_stream, wait_pattern_matches, HarnessCoordinator,
     };
     use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, TunnelConfig};
+    use std::net::TcpListener;
+    use std::path::PathBuf;
 
     #[test]
     fn normalize_key_stream_rewrites_newline_to_carriage_return() {
@@ -755,5 +886,138 @@ mod tests {
 
         let entries = std::fs::read_dir(&root).unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(entries.count(), 0, "stale entries were not cleared");
+    }
+
+    #[test]
+    fn coordinator_preserves_instance_startup_order_from_config() {
+        let run = RunConfig {
+            schema_version: 1,
+            run: RunSection {
+                name: "startup-order-test".to_string(),
+                pty_rows: Some(10),
+                pty_cols: Some(40),
+                artifact_dir: None,
+                global_budget_ms: None,
+                step_budget_ms: None,
+                seed: Some(7),
+                max_cpu_percent: None,
+                max_memory_bytes: None,
+                max_open_files: None,
+                require_remote_artifact_sync: false,
+            },
+            instances: vec![
+                InstanceConfig {
+                    id: "alpha".to_string(),
+                    mode: InstanceMode::Ssh,
+                    data_dir: PathBuf::from("/tmp/aura-harness-alpha"),
+                    device_id: None,
+                    bind_address: "127.0.0.1:45001".to_string(),
+                    demo_mode: false,
+                    command: None,
+                    args: vec![],
+                    env: vec![],
+                    log_path: None,
+                    ssh_host: Some("example.org".to_string()),
+                    ssh_user: Some("dev".to_string()),
+                    ssh_port: Some(22),
+                    ssh_strict_host_key_checking: true,
+                    ssh_known_hosts_file: Some(PathBuf::from("/tmp/known_hosts")),
+                    ssh_fingerprint: Some("SHA256:test".to_string()),
+                    ssh_require_fingerprint: true,
+                    ssh_dry_run: true,
+                    remote_workdir: None,
+                    lan_discovery: None,
+                    tunnel: None,
+                },
+                InstanceConfig {
+                    id: "beta".to_string(),
+                    mode: InstanceMode::Ssh,
+                    data_dir: PathBuf::from("/tmp/aura-harness-beta"),
+                    device_id: None,
+                    bind_address: "127.0.0.1:45002".to_string(),
+                    demo_mode: false,
+                    command: None,
+                    args: vec![],
+                    env: vec![],
+                    log_path: None,
+                    ssh_host: Some("example.org".to_string()),
+                    ssh_user: Some("dev".to_string()),
+                    ssh_port: Some(22),
+                    ssh_strict_host_key_checking: true,
+                    ssh_known_hosts_file: Some(PathBuf::from("/tmp/known_hosts")),
+                    ssh_fingerprint: Some("SHA256:test".to_string()),
+                    ssh_require_fingerprint: true,
+                    ssh_dry_run: true,
+                    remote_workdir: None,
+                    lan_discovery: None,
+                    tunnel: None,
+                },
+            ],
+        };
+
+        let coordinator =
+            HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            coordinator.instance_order,
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
+    }
+
+    #[test]
+    fn verify_bind_address_released_detects_busy_port() {
+        let listener =
+            TcpListener::bind("127.0.0.1:0").unwrap_or_else(|error| panic!("{error}"));
+        let bind_address = listener
+            .local_addr()
+            .unwrap_or_else(|error| panic!("{error}"))
+            .to_string();
+        let run = RunConfig {
+            schema_version: 1,
+            run: RunSection {
+                name: "busy-port-test".to_string(),
+                pty_rows: Some(10),
+                pty_cols: Some(40),
+                artifact_dir: None,
+                global_budget_ms: None,
+                step_budget_ms: None,
+                seed: Some(11),
+                max_cpu_percent: None,
+                max_memory_bytes: None,
+                max_open_files: None,
+                require_remote_artifact_sync: false,
+            },
+            instances: vec![InstanceConfig {
+                id: "alice".to_string(),
+                mode: InstanceMode::Local,
+                data_dir: PathBuf::from("/tmp/aura-harness-busy-port"),
+                device_id: None,
+                bind_address: bind_address.clone(),
+                demo_mode: false,
+                command: Some("bash".to_string()),
+                args: vec!["-lc".to_string(), "cat".to_string()],
+                env: vec![],
+                log_path: None,
+                ssh_host: None,
+                ssh_user: None,
+                ssh_port: None,
+                ssh_strict_host_key_checking: true,
+                ssh_known_hosts_file: None,
+                ssh_fingerprint: None,
+                ssh_require_fingerprint: false,
+                ssh_dry_run: true,
+                remote_workdir: None,
+                lan_discovery: None,
+                tunnel: None,
+            }],
+        };
+
+        let coordinator =
+            HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}"));
+        let error = coordinator
+            .verify_bind_address_released("alice")
+            .err()
+            .unwrap_or_else(|| panic!("busy port should fail teardown verification"));
+        assert!(error.to_string().contains("did not release bind address"));
+        drop(listener);
     }
 }

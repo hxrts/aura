@@ -9,16 +9,17 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
-use aura_harness::{artifacts::ArtifactBundle, default_artifacts_dir};
+use anyhow::{anyhow, Context, Result};
 use aura_harness::build_startup_summary;
 use aura_harness::config::{require_existing_file, ScreenSource};
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::build_seed_bundle;
+use aura_harness::failure_attribution::attribute_failure;
 use aura_harness::load_and_validate_run_config;
 use aura_harness::network_lab::{resolve_backend_mode, NetworkBackendMode};
 use aura_harness::preflight::{run_preflight, PreflightReport};
 use aura_harness::replay::{parse_bundle, ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
+use aura_harness::residue_checks::check_run_residue;
 use aura_harness::resource_guards::ResourceGuard;
 use aura_harness::routing::AddressResolver;
 use aura_harness::scenario::ScenarioRunner;
@@ -26,6 +27,7 @@ use aura_harness::scenario_execution::{execute_with_run_budgets, lint_for_run};
 use aura_harness::screen_normalization::normalize_screen;
 use aura_harness::tool_api::{ToolApi, ToolRequest};
 use aura_harness::{api_version::TOOL_API_DEFAULT_VERSION, artifact_sync::sync_remote_artifacts};
+use aura_harness::{artifacts::ArtifactBundle, default_artifacts_dir};
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -118,6 +120,19 @@ fn run(args: RunArgs) -> Result<()> {
 
     let summary = build_startup_summary(&config);
     let artifact_bundle = ArtifactBundle::create(&args.artifacts_dir(), &config.run.name)?;
+    let residue_report = check_run_residue(&config);
+    let _ = artifact_bundle.write_json("residue_report.json", &residue_report);
+    if !residue_report.clean {
+        return Err(anyhow!(
+            "run residue detected before startup: {}",
+            residue_report
+                .issues
+                .iter()
+                .map(|issue| format!("{}:{}:{}", issue.instance_id, issue.kind, issue.detail))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        ));
+    }
     let preflight_report = match run_preflight(&config, scenario_config.as_ref()) {
         Ok(report) => report,
         Err(error) => {
@@ -136,8 +151,10 @@ fn run(args: RunArgs) -> Result<()> {
         scenario_config.as_ref(),
     );
     if let Err(error) = run_result {
+        let attribution = attribute_failure(&error.to_string());
         let failure_payload = serde_json::json!({ "error": error.to_string() });
         let _ = artifact_bundle.write_json("failure.json", &failure_payload);
+        let _ = artifact_bundle.write_json("failure_attribution.json", &attribution);
         return Err(error);
     }
 
@@ -187,6 +204,10 @@ fn run_with_artifacts(
                 let diagnostics =
                     collect_timeout_diagnostics(config, &mut tool_api, &error.to_string());
                 artifact_bundle.write_json("timeout_diagnostics.json", &diagnostics)?;
+                artifact_bundle.write_json(
+                    "failure_attribution.json",
+                    &attribute_failure(&error.to_string()),
+                )?;
                 return Err(error);
             }
         }
@@ -290,6 +311,7 @@ fn collect_timeout_diagnostics(
 
     serde_json::json!({
         "error": error_message,
+        "failure_attribution": attribute_failure(error_message),
         "instances": instances,
         "events": tool_api.event_snapshot()
     })

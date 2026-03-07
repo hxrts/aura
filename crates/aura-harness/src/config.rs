@@ -560,6 +560,7 @@ impl RunConfig {
         let mut instance_ids = HashSet::new();
         let mut local_data_dirs = HashSet::new();
         let mut local_demo_dirs = HashSet::new();
+        let mut reserved_bind_addresses = HashSet::new();
 
         for instance in &self.instances {
             if instance.id.trim().is_empty() {
@@ -570,6 +571,15 @@ impl RunConfig {
             }
             if instance.bind_address.trim().is_empty() {
                 bail!("instance {} has empty bind_address", instance.id);
+            }
+            if bind_address_has_explicit_port(&instance.bind_address)?
+                && !reserved_bind_addresses.insert(instance.bind_address.trim().to_string())
+            {
+                bail!(
+                    "duplicate explicit bind_address {} for instance {}",
+                    instance.bind_address,
+                    instance.id
+                );
             }
 
             match instance.mode {
@@ -678,6 +688,17 @@ impl RunConfig {
 
         Ok(())
     }
+}
+
+fn bind_address_has_explicit_port(bind_address: &str) -> Result<bool> {
+    let (_, port) = bind_address
+        .trim()
+        .rsplit_once(':')
+        .ok_or_else(|| anyhow!("bind_address must be in host:port form, got {bind_address}"))?;
+    let port = port
+        .parse::<u16>()
+        .map_err(|error| anyhow!("invalid bind_address port in {bind_address}: {error}"))?;
+    Ok(port != 0)
 }
 
 impl ScenarioConfig {
@@ -1120,6 +1141,80 @@ mod tests {
             Err(error) => error.to_string(),
         };
         assert!(error.contains("must not set ssh_host"));
+    }
+
+    #[test]
+    fn duplicate_explicit_bind_addresses_are_rejected() {
+        let config = RunConfig {
+            schema_version: RUN_SCHEMA_VERSION,
+            run: RunSection {
+                name: "duplicate-bind".to_string(),
+                pty_rows: Some(40),
+                pty_cols: Some(120),
+                artifact_dir: None,
+                global_budget_ms: None,
+                step_budget_ms: None,
+                seed: Some(1),
+                max_cpu_percent: None,
+                max_memory_bytes: None,
+                max_open_files: None,
+                require_remote_artifact_sync: false,
+            },
+            instances: vec![
+                InstanceConfig {
+                    id: "alice".to_string(),
+                    mode: InstanceMode::Local,
+                    data_dir: PathBuf::from(".tmp/alice"),
+                    device_id: None,
+                    bind_address: "127.0.0.1:41001".to_string(),
+                    demo_mode: false,
+                    command: Some("bash".to_string()),
+                    args: vec!["-lc".to_string(), "cat".to_string()],
+                    env: vec![],
+                    log_path: None,
+                    ssh_host: None,
+                    ssh_user: None,
+                    ssh_port: None,
+                    ssh_strict_host_key_checking: true,
+                    ssh_known_hosts_file: None,
+                    ssh_fingerprint: None,
+                    ssh_require_fingerprint: false,
+                    ssh_dry_run: true,
+                    remote_workdir: None,
+                    lan_discovery: None,
+                    tunnel: None,
+                },
+                InstanceConfig {
+                    id: "bob".to_string(),
+                    mode: InstanceMode::Local,
+                    data_dir: PathBuf::from(".tmp/bob"),
+                    device_id: None,
+                    bind_address: "127.0.0.1:41001".to_string(),
+                    demo_mode: false,
+                    command: Some("bash".to_string()),
+                    args: vec!["-lc".to_string(), "cat".to_string()],
+                    env: vec![],
+                    log_path: None,
+                    ssh_host: None,
+                    ssh_user: None,
+                    ssh_port: None,
+                    ssh_strict_host_key_checking: true,
+                    ssh_known_hosts_file: None,
+                    ssh_fingerprint: None,
+                    ssh_require_fingerprint: false,
+                    ssh_dry_run: true,
+                    remote_workdir: None,
+                    lan_discovery: None,
+                    tunnel: None,
+                },
+            ],
+        };
+
+        let error = config
+            .validate()
+            .err()
+            .unwrap_or_else(|| panic!("duplicate explicit bind addresses must fail"));
+        assert!(error.to_string().contains("duplicate explicit bind_address"));
     }
 
     #[test]

@@ -691,6 +691,8 @@ fn execute_step(
                 || step.control_id.is_some()
                 || step.modal_id.is_some()
                 || step.list_id.is_some()
+                || step.readiness.is_some()
+                || step.operation_id.is_some()
             {
                 wait_for_semantic_state(
                     step,

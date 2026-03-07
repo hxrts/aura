@@ -7,8 +7,15 @@ This guide covers how to use Aura's simulation infrastructure for testing distri
 Simulation suits scenarios that unit tests cannot address. Use simulation for fault injection testing. Use it for multi-participant protocol testing. Use it for time-dependent behavior validation.
 
 Do not use simulation for simple unit tests. Direct effect handler testing is faster and simpler for single-component validation.
+Do not treat simulation as the default end-to-end correctness oracle for user-facing flows. Aura's primary feedback loop remains the real-runtime harness running against the real software stack.
 
 See [Simulation Infrastructure Reference](118_simulator.md) for the complete architecture documentation.
+
+## Simulation vs Harness
+
+Simulation is a first-class alternate runtime substrate, not the primary one. Use the real-runtime harness by default when validating product behavior through the TUI or webapp. Use simulation when you need deterministic virtual time, controlled network faults, scheduler control, or MBT and trace replay under constrained distributed conditions. Promote high-value simulation findings back into real-runtime harness coverage when the flow is user-visible or integration-sensitive.
+
+This separation keeps responsibilities clean. The harness executes real frontends and gathers semantic observations. The simulator provides controlled runtime conditions when explicitly selected. Quint and related verification tooling generate traces and invariants.
 
 ## Two Simulation Systems
 
@@ -228,10 +235,7 @@ Feature crates assume the guard chain is active when running protocols:
 CapGuard → FlowGuard → LeakageTracker → JournalCoupler → Transport
 ```
 
-For simulation:
-- Capability checks rely on Biscuit tokens evaluated by `AuthorizationEffects`
-- Guard evaluators must be provided by the runtime before sync operations
-- Validation occurs before sending or applying any protocol data
+For simulation, capability checks rely on Biscuit tokens evaluated by `AuthorizationEffects`. Guard evaluators must be provided by the runtime before sync operations. Validation occurs before sending or applying any protocol data.
 
 ### Observability in Simulation
 
@@ -247,10 +251,7 @@ let metrics = MetricsCollector::new();
 
 ### Safety Requirements
 
-Feature crates must follow effect system rules:
-- No direct runtime calls (all I/O and timing through effects)
-- Validate Biscuit tokens before accepting peer data
-- Enforce flow budgets and leakage constraints at transport boundaries
+Feature crates must follow effect system rules. All I/O and timing must flow through effects with no direct runtime calls. Validate Biscuit tokens before accepting peer data. Enforce flow budgets and leakage constraints at transport boundaries.
 
 Verify compliance before simulation:
 
@@ -304,13 +305,9 @@ Slow simulations indicate inefficient fault configuration. Reduce fault rates fo
 
 ## Online Property Monitoring
 
-Aura simulator now supports per-tick property monitoring through:
+Aura simulator supports per-tick property monitoring through `aura_simulator::AuraProperty`, `aura_simulator::AuraPropertyMonitor`, and `aura_simulator::default_property_suite(...)`.
 
-- `aura_simulator::AuraProperty`
-- `aura_simulator::AuraPropertyMonitor`
-- `aura_simulator::default_property_suite(...)`
-
-The monitor checks properties on each simulation tick using `PropertyStateSnapshot` input (events, buffer sizes, local-type depths, flow budgets, and optional session/coroutine/journal snapshots).
+The monitor checks properties on each simulation tick using `PropertyStateSnapshot` input. This includes events, buffer sizes, local-type depths, flow budgets, and optional session, coroutine, and journal snapshots.
 
 ```rust
 use aura_simulator::{
@@ -384,49 +381,29 @@ Phase 0 hardening uses three simulator workflows as CI gates.
 
 ### Checkpoint Snapshot Workflow
 
-`SimulationScenarioHandler` supports portable checkpoint snapshots:
+`SimulationScenarioHandler` supports portable checkpoint snapshots. The `export_checkpoint_snapshot(label)` function exports a serializable `ScenarioCheckpointSnapshot`. The `import_checkpoint_snapshot(snapshot)` function restores a checkpoint into a fresh simulator instance.
 
-- `export_checkpoint_snapshot(label)` exports a serializable `ScenarioCheckpointSnapshot`.
-- `import_checkpoint_snapshot(snapshot)` restores a checkpoint into a fresh simulator instance.
-
-This enables:
-
-- Baseline checkpoint persistence for representative choreography suites.
-- Restore-and-continue regression tests.
-- Upgrade smoke tests that resume from pre-upgrade snapshots.
+This enables baseline checkpoint persistence for representative choreography suites. It also supports restore-and-continue regression tests. Upgrade smoke tests can resume from pre-upgrade snapshots.
 
 Use checkpoints when validating runtime upgrades or migration safety, not only end-to-end success.
 
 ### Scenario Contract Workflow
 
-Conformance CI includes scenario contracts for consensus, sync, recovery, and reconfiguration. Each bundle is validated over a seed corpus for:
+Conformance CI includes scenario contracts for consensus, sync, recovery, and reconfiguration. Each bundle is validated over a seed corpus. Validation checks terminal status (`AllDone`), required labels observed in trace, and minimum observable event count.
 
-- Terminal status (`AllDone`).
-- Required labels observed in trace.
-- Minimum observable event count.
-
-Contract results are written as JSON artifacts and CI fails on any violation with structured output.
+Contract results are written as JSON artifacts. CI fails on any violation with structured output.
 
 ### Shared Replay Workflow
 
-Replay-heavy parity lanes should use shared replay APIs:
-
-- `run_replay_shared(...)`
-- `run_concurrent_replay_shared(...)`
+Replay-heavy parity lanes should use shared replay APIs. Use `run_replay_shared(...)` and `run_concurrent_replay_shared(...)` for this purpose.
 
 These APIs reduce duplicate replay state across lanes and keep replay artifacts compatible with canonical trace fragments. Conformance lanes also emit deterministic replay metrics artifacts so regressions in replay footprint are visible during CI review.
 
-For fault-aware replays, persist `entries + faults` bundles and re-inject faults before replay:
-- `aura_testkit::ReplayTrace::load_file(...)`
-- `ReplayTrace::replay_faults(...)`
-- `aura_simulator::AsyncSimulatorHostBridge::replay_expected_with_faults(...)`
+For fault-aware replays, persist `entries + faults` bundles and re-inject faults before replay. Use `aura_testkit::ReplayTrace::load_file(...)` to load traces. Use `ReplayTrace::replay_faults(...)` and `aura_simulator::AsyncSimulatorHostBridge::replay_expected_with_faults(...)` to replay with faults.
 
 ### Differential Replay Workflow
 
-Use `aura-simulator::DifferentialTester` to compare baseline/candidate conformance artifacts with one of two profiles:
-
-- `strict`: byte-identical surfaces.
-- `envelope_bounded`: Aura law-aware comparison (`strict` + commutative/algebraic envelopes).
+Use `aura_simulator::DifferentialTester` to compare baseline and candidate conformance artifacts. Two profiles are available. The `strict` profile requires byte-identical surfaces. The `envelope_bounded` profile uses Aura law-aware comparison with commutative and algebraic envelopes.
 
 For parity debugging, run:
 
@@ -439,10 +416,12 @@ The `replay` command validates required conformance surfaces and verifies stored
 
 ## Best Practices
 
-Start with simple scenarios. Add faults incrementally. Use deterministic seeds. Capture metrics for analysis.
+Start with simple scenarios and add faults incrementally. Use deterministic seeds. Capture metrics for analysis.
 
 Prefer TOML scenarios for human-readable tests. Prefer Quint actions for specification conformance. Combine both for comprehensive coverage.
 
 ## Related Documentation
 
-See [Simulation Infrastructure Reference](118_simulator.md) for handler APIs. See [Verification and MBT Guide](806_verification_guide.md) for Quint workflows. See [Testing Guide](804_testing_guide.md) for conformance testing.
+- [Simulation Infrastructure Reference](118_simulator.md) - Handler APIs
+- [Verification and MBT Guide](806_verification_guide.md) - Quint workflows
+- [Testing Guide](804_testing_guide.md) - Conformance testing

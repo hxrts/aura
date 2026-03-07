@@ -735,6 +735,28 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         })
     }
 
+    fn wait_until_ready(&self, timeout: Duration) -> Result<()> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if self.ui_snapshot().is_ok() {
+                return Ok(());
+            }
+            if let Ok(screen) = self.snapshot_dom() {
+                if !screen.trim().is_empty() {
+                    return Ok(());
+                }
+            }
+            if Instant::now() >= deadline {
+                bail!(
+                    "browser instance {} did not reach readiness within {:?}",
+                    self.config.id,
+                    timeout
+                );
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+
     fn is_healthy(&self) -> bool {
         self.state == BackendState::Running
     }

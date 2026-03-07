@@ -4,7 +4,7 @@
 
 use iocraft::prelude::*;
 
-use crate::tui::theme::{Icons, Spacing, Theme};
+use crate::tui::theme::{spinner_frame, Icons, Spacing, Theme};
 
 /// Props for EmptyState
 #[derive(Default, Props)]
@@ -119,7 +119,7 @@ pub struct LoadingStateProps {
 #[component]
 pub fn LoadingState(props: &LoadingStateProps) -> impl Into<AnyElement<'static>> {
     let frame = props.frame % 4;
-    let spinner = Icons::SPINNER_FRAMES[frame];
+    let spinner = spinner_frame(frame);
     let message = if props.message.is_empty() {
         "Loading...".to_string()
     } else {
