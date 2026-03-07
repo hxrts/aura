@@ -6,8 +6,8 @@
 #   Pass 2 (rewrite): apply curated literal replacements constrained by allowlist + rules
 #
 # Usage:
-#   ./scripts/find-terminology.sh [--mode inventory|rewrite] [--json] [--check]
-#   ./scripts/find-terminology.sh --mode rewrite --allowlist FILE --rules FILE [--apply] [--check]
+#   ./scripts/dev/terminology.sh [--mode inventory|rewrite] [--json] [--check]
+#   ./scripts/dev/terminology.sh --mode rewrite --allowlist FILE --rules FILE [--apply] [--check]
 #
 # Rewrite rules format (TSV):
 #   term<TAB>from_literal<TAB>to_literal<TAB>path_glob
@@ -37,7 +37,7 @@ fi
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/find-terminology.sh [options]
+  scripts/dev/terminology.sh [options]
 
 Options:
   --mode <inventory|rewrite>   Select mode (default: inventory)
@@ -117,7 +117,7 @@ EXCLUDE_GLOBS=(
   "target/**"
   ".git/**"
   "work/**"
-  "scripts/find-terminology.sh"
+  "scripts/dev/terminology.sh"
 )
 
 RG_ARGS=(--line-number --with-filename --no-heading)
@@ -128,7 +128,7 @@ done
 is_excluded_path() {
   local path="$1"
   case "$path" in
-    docs/book/*|target/*|.git/*|work/*|scripts/find-terminology.sh) return 0 ;;
+    docs/book/*|target/*|.git/*|work/*|scripts/dev/terminology.sh) return 0 ;;
     *) return 1 ;;
   esac
 }

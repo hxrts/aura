@@ -5,7 +5,7 @@
 # documented metric against the actual count in the codebase.
 #
 # Usage:
-#   ./scripts/check-verification-coverage.sh
+#   ./scripts/check/verification-coverage.sh
 #
 # Exit codes:
 #   0 - All metrics match

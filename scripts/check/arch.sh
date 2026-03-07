@@ -1299,7 +1299,7 @@ check_test_seeds() {
   section "Test seed uniqueness — ensure test isolation"
 
   # Run the dedicated test seed checker script
-  if bash scripts/check/test-seeds.sh; then
+  if AURA_CHECK_ARCH_MODE=1 bash scripts/check/test-seeds.sh; then
     info "Test seed uniqueness: clean"
   else
     violation "Test seed uniqueness violations detected (see checker output above)"

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [ "$#" -lt 1 ]; then
-  echo "usage: scripts/harness_cmd.sh <subcommand> [args...]" >&2
+  echo "usage: scripts/harness/cmd.sh <subcommand> [args...]" >&2
   exit 2
 fi
 

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Check that all tests using AuraEffectSystem use unique deterministic seeds
+# Check deterministic test seed policy for AuraEffectSystem construction.
 #
-# This script ensures test isolation by verifying that each test using
-# simulation or testing mode with seeds uses a unique seed value.
+# Policy:
+# 1) Tests must use AuraEffectSystem::simulation_for_test* helpers.
+# 2) Tests must not call legacy testing/simulation constructors directly.
+# 3) Runtime infrastructure may use explicit simulation constructors with local
+#    allow attributes and rationale comments.
 
 set -euo pipefail
 
@@ -11,93 +14,115 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo "Checking for unique test seeds..."
-
-# Find all simulation() calls with seeds
-# We check all files because tests can be embedded in modules (e.g., #[cfg(test)] mod tests)
-all_seeds=$(grep -rn "AuraEffectSystem::simulation.*,[[:space:]]*[0-9]" crates --include="*.rs" || true)
-
-if [ -z "$all_seeds" ]; then
-    echo -e "${GREEN}✓ No test seeds found (tests may be using other patterns)${NC}"
-    exit 0
+QUIET_SUCCESS=false
+if [[ "${AURA_CHECK_ARCH_MODE:-0}" == "1" ]]; then
+    QUIET_SUCCESS=true
 fi
 
-# Extract seeds and check for duplicates
-seed_records=""
-duplicates_found=0
+is_test_context() {
+    local file="$1"
+    local lineno="$2"
+
+    if [[ "$file" == *"/tests/"* || "$file" == *"_test.rs" || "$file" == *"test.rs" ]]; then
+        return 0
+    fi
+
+    if grep -q "#\[cfg(test)\]" "$file" 2>/dev/null; then
+        local cfg_line
+        cfg_line=$(grep -n "#\[cfg(test)\]" "$file" 2>/dev/null | head -1 | cut -d: -f1)
+        if [[ -n "$cfg_line" && "$lineno" =~ ^[0-9]+$ && "$lineno" -gt "$cfg_line" ]]; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+if ! $QUIET_SUCCESS; then
+    echo "Checking deterministic test seed policy..."
+fi
+
+banned_pattern='AuraEffectSystem::(testing\(|testing_for_authority\(|testing_with_shared_transport\(|simulation\(|simulation_for_authority\(|simulation_with_shared_transport_for_authority\()'
+all_banned_calls=$(grep -rnE "$banned_pattern" crates --include="*.rs" || true)
+
+banned_in_tests=""
+banned_outside_tests=""
 
 while IFS= read -r line; do
-    if [[ -z "$line" ]]; then
+    [[ -z "$line" ]] && continue
+
+    file="${line%%:*}"
+    rest="${line#*:}"
+    lineno="${rest%%:*}"
+    content="${rest#*:}"
+
+    # Skip commented-only hits
+    if [[ "$content" =~ ^[[:space:]]*// ]]; then
         continue
     fi
 
-    # Extract seed - pattern: ..., SEED)
-    if [[ "$line" =~ ,\ *([0-9]+)\ *\) ]]; then
-        seed="${BASH_REMATCH[1]}"
-        location="${line%%:*}:${line#*:}"
-        location="${location%%:*}"  # file:line
-
-        seed_records+="$seed"$'\t'"$location"$'\n'
+    if is_test_context "$file" "$lineno"; then
+        banned_in_tests+="$line"$'\n'
+    else
+        banned_outside_tests+="$line"$'\n'
     fi
-done <<< "$all_seeds"
+done <<< "$all_banned_calls"
 
-if [[ -n "$seed_records" ]]; then
-    duplicate_report=$(printf '%s' "$seed_records" \
-        | sort -n -k1,1 \
-        | awk -F '\t' '
-            {
-                count[$1]++
-                lines[$1] = lines[$1] $2 "\n"
-            }
-            END {
-                for (seed in count) {
-                    if (count[seed] > 1) {
-                        printf "ERROR: Duplicate seed %s found:\n", seed
-                        n = split(lines[seed], locs, "\n")
-                        for (i = 1; i <= n; i++) {
-                            if (locs[i] != "") {
-                                printf "  - %s\n", locs[i]
-                            }
-                        }
-                    }
-                }
-            }
-        ')
-    if [[ -n "$duplicate_report" ]]; then
-        echo -e "${RED}${duplicate_report}${NC}"
-        duplicates_found=1
+helper_pattern='AuraEffectSystem::(simulation_for_test\(|simulation_for_test_with_salt\(|simulation_for_named_test\(|simulation_for_named_test_with_salt\(|simulation_for_test_for_authority\(|simulation_for_test_for_authority_with_salt\(|simulation_for_test_with_shared_transport\(|simulation_for_test_with_shared_transport_for_authority\()'
+all_helper_calls=$(grep -rnE "$helper_pattern" crates --include="*.rs" || true)
+helper_in_tests=""
+while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    file="${line%%:*}"
+    rest="${line#*:}"
+    lineno="${rest%%:*}"
+    content="${rest#*:}"
+    if [[ "$content" =~ ^[[:space:]]*// ]]; then
+        continue
     fi
-fi
+    if is_test_context "$file" "$lineno"; then
+        helper_in_tests+="$line"$'\n'
+    fi
+done <<< "$all_helper_calls"
 
-# Also check for AuraEffectSystem::testing() - these should be converted to simulation
-testing_calls=$(grep -rn "AuraEffectSystem::testing" crates --include="*.rs" | grep -E "(tests/|test\.rs|_test\.rs)" || true)
+status=0
 
-if [ -n "$testing_calls" ]; then
-    echo -e "${YELLOW}WARNING: Found tests using AuraEffectSystem::testing() without unique seeds:${NC}"
-    echo "$testing_calls" | head -10
-    if [ $(echo "$testing_calls" | wc -l) -gt 10 ]; then
-        echo "  ... and $(($(echo "$testing_calls" | wc -l) - 10)) more"
+if [[ -n "$banned_in_tests" ]]; then
+    count=$(printf '%s' "$banned_in_tests" | sed '/^$/d' | wc -l | tr -d ' ')
+    echo -e "${RED}ERROR: Found ${count} banned AuraEffectSystem constructor call(s) in test context:${NC}"
+    if $QUIET_SUCCESS; then
+        echo "  (run scripts/check/test-seeds.sh directly to see full locations)"
+    else
+        echo "$banned_in_tests" | sed '/^$/d' | head -20
+        if [[ "$count" -gt 20 ]]; then
+            echo "  ... and $((count - 20)) more"
+        fi
     fi
     echo ""
-    echo "Consider using AuraEffectSystem::simulation(&config, UNIQUE_SEED) instead"
-    echo "to ensure test isolation and avoid encryption key caching issues."
+    echo "Use AuraEffectSystem::simulation_for_test* helpers instead."
+    status=1
 fi
 
-if [ $duplicates_found -eq 1 ]; then
-    echo -e "${RED}Found duplicate seed(s)${NC}"
-    echo ""
-    echo "Each test should use a unique deterministic seed to ensure proper isolation."
-    echo "Recommended pattern:"
-    echo "  let effects = Arc::new(AuraEffectSystem::simulation(&config, UNIQUE_SEED).unwrap());"
-    echo ""
-    echo "Where UNIQUE_SEED is a number unique to that test (e.g., 10001, 10002, ...)."
-    exit 1
+if [[ -n "$banned_outside_tests" ]]; then
+    count=$(printf '%s' "$banned_outside_tests" | sed '/^$/d' | wc -l | tr -d ' ')
+    echo -e "${YELLOW}WARNING: Found ${count} banned-constructor call(s) outside test context:${NC}"
+    if $QUIET_SUCCESS; then
+        echo "  (runtime infrastructure may allow these with explicit clippy allowances)"
+    else
+        echo "$banned_outside_tests" | sed '/^$/d' | head -10
+        if [[ "$count" -gt 10 ]]; then
+            echo "  ... and $((count - 10)) more"
+        fi
+    fi
 fi
 
-unique_seed_count=0
-if [[ -n "$seed_records" ]]; then
-    unique_seed_count=$(printf '%s' "$seed_records" | cut -f1 | sort -u | wc -l | tr -d ' ')
+if [[ -z "$helper_in_tests" ]]; then
+    echo -e "${YELLOW}WARNING: No simulation_for_test* helper calls found in test contexts.${NC}"
+else
+    helper_count=$(printf '%s' "$helper_in_tests" | sed '/^$/d' | wc -l | tr -d ' ')
+    if ! $QUIET_SUCCESS; then
+        echo -e "${GREEN}✓ Found ${helper_count} simulation_for_test* helper call(s) in test context${NC}"
+    fi
 fi
 
-echo -e "${GREEN}✓ All test seeds are unique (${unique_seed_count} unique seeds found)${NC}"
-exit 0
+exit $status
