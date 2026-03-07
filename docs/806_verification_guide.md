@@ -284,7 +284,7 @@ Use this workflow for choreography and simulator-level verification that depends
 Run:
 
 ```bash
-nix develop --command scripts/check-protocol-compat.sh --self-test
+nix develop --command scripts/check/protocol-compat.sh --self-test
 nix develop --command just ci-protocol-compat
 ```
 

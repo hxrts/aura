@@ -152,7 +152,7 @@ Reviewer decision table:
 Operational notes:
 - Compatibility checks are tooling/CI gates, never runtime hot-path logic.
 - New protocol files without a baseline are not auto-classified; reviewers must explicitly approve initial versioning.
-- Baseline/current checks are implemented by `scripts/check-protocol-compat.sh` and `just ci-protocol-compat`.
+- Baseline/current checks are implemented by `scripts/check/protocol-compat.sh` and `just ci-protocol-compat`.
 
 ### Quantitative Termination Budgets
 
