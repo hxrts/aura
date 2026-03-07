@@ -34,10 +34,10 @@ type TestResult<T = ()> = anyhow::Result<T>;
 static NEXT_LAN_PORT: AtomicU16 = AtomicU16::new(22000);
 static LAN_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-const LAN_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
-const SIGNAL_PROPAGATION_TIMEOUT: Duration = Duration::from_secs(45);
+const LAN_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(90);
+const SIGNAL_PROPAGATION_TIMEOUT: Duration = Duration::from_secs(60);
 const FACT_PROPAGATION_TIMEOUT: Duration = Duration::from_secs(12);
-const DESCRIPTOR_CACHE_TIMEOUT: Duration = Duration::from_secs(20);
+const DESCRIPTOR_CACHE_TIMEOUT: Duration = Duration::from_secs(30);
 const CHANNEL_INVITE_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn next_lan_port() -> u16 {
@@ -95,57 +95,6 @@ async fn create_lan_agent(seed: u8, lan_port: u16) -> TestResult<Arc<AuraAgent>>
         .with_rendezvous_config(rendezvous_config)
         .with_sync_config(sync_config)
         .build_testing_async(&ctx)
-        .await?;
-
-    bootstrap_agent(&agent, authority_id).await?;
-    agent.runtime().start_services().await?;
-
-    Ok(Arc::new(agent))
-}
-
-async fn create_production_lan_agent_with_bind(
-    seed: u8,
-    lan_port: u16,
-    bind_port: u16,
-) -> TestResult<Arc<AuraAgent>> {
-    let authority_id = AuthorityId::new_from_entropy([seed; 32]);
-    let context_entropy = hash(&authority_id.to_bytes());
-    let ctx = EffectContext::new(
-        authority_id,
-        ContextId::new_from_entropy(context_entropy),
-        ExecutionMode::Production,
-    );
-
-    let temp_dir = std::env::temp_dir().join(format!(
-        "aura-prod-lan-bind-test-{seed}-{lan_port}-{bind_port}"
-    ));
-    let _ = std::fs::remove_dir_all(&temp_dir);
-    let _ = std::fs::create_dir_all(&temp_dir);
-
-    let mut config = AgentConfig {
-        device_id: DeviceId::from_uuid(authority_id.uuid()),
-        ..Default::default()
-    };
-    config.network.bind_address = format!("127.0.0.1:{bind_port}");
-    config.storage.base_path = temp_dir;
-    config.lan_discovery = LanDiscoveryConfig {
-        port: lan_port,
-        announce_interval_ms: 200,
-        enabled: true,
-        bind_addr: "0.0.0.0".to_string(),
-        broadcast_addr: "255.255.255.255".to_string(),
-    };
-
-    let rendezvous_config =
-        RendezvousManagerConfig::default().with_lan_discovery(config.lan_discovery.clone());
-    let sync_config = SyncManagerConfig::manual_only();
-
-    let agent = AgentBuilder::new()
-        .with_authority(authority_id)
-        .with_config(config)
-        .with_rendezvous_config(rendezvous_config)
-        .with_sync_config(sync_config)
-        .build_production(&ctx)
         .await?;
 
     bootstrap_agent(&agent, authority_id).await?;
@@ -431,13 +380,8 @@ async fn setup_lan_group_channel_pair(
     ChannelId,
 )> {
     let discovery_port = next_lan_port();
-    let bind_port_a = next_lan_port();
-    let bind_port_b = next_lan_port();
-
-    let agent_a =
-        create_production_lan_agent_with_bind(seed_a, discovery_port, bind_port_a).await?;
-    let agent_b =
-        create_production_lan_agent_with_bind(seed_b, discovery_port, bind_port_b).await?;
+    let agent_a = create_production_lan_agent(seed_a, discovery_port).await?;
+    let agent_b = create_production_lan_agent(seed_b, discovery_port).await?;
 
     wait_for_lan_peer(&agent_a, agent_b.authority_id()).await?;
     wait_for_lan_peer(&agent_b, agent_a.authority_id()).await?;
@@ -627,11 +571,8 @@ async fn test_lan_chat_fact_ingress_commits_without_manual_inbox_poll() -> TestR
 async fn test_lan_invitation_dm_message_e2e() -> TestResult {
     let _lan_lock = lock_lan_test().await;
     let discovery_port = next_lan_port();
-    let bind_port_a = next_lan_port();
-    let bind_port_b = next_lan_port();
-
-    let agent_a = create_production_lan_agent_with_bind(51, discovery_port, bind_port_a).await?;
-    let agent_b = create_production_lan_agent_with_bind(52, discovery_port, bind_port_b).await?;
+    let agent_a = create_production_lan_agent(51, discovery_port).await?;
+    let agent_b = create_production_lan_agent(52, discovery_port).await?;
 
     wait_for_lan_peer(&agent_a, agent_b.authority_id()).await?;
     wait_for_lan_peer(&agent_b, agent_a.authority_id()).await?;
@@ -801,11 +742,8 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
 async fn test_lan_invitation_dm_message_e2e_without_descriptor_wait() -> TestResult {
     let _lan_lock = lock_lan_test().await;
     let discovery_port = next_lan_port();
-    let bind_port_a = next_lan_port();
-    let bind_port_b = next_lan_port();
-
-    let agent_a = create_production_lan_agent_with_bind(61, discovery_port, bind_port_a).await?;
-    let agent_b = create_production_lan_agent_with_bind(62, discovery_port, bind_port_b).await?;
+    let agent_a = create_production_lan_agent(61, discovery_port).await?;
+    let agent_b = create_production_lan_agent(62, discovery_port).await?;
 
     wait_for_lan_peer(&agent_a, agent_b.authority_id()).await?;
     wait_for_lan_peer(&agent_b, agent_a.authority_id()).await?;

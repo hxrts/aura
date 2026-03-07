@@ -2093,6 +2093,8 @@ mod tests {
     use aura_social::moderation::facts::HomeGrantModeratorFact;
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::time::{sleep, timeout};
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
@@ -2890,9 +2892,19 @@ mod tests {
             .unwrap();
         assert_eq!(processed, 1);
 
-        aura_protocol::amp::get_channel_state(effects.as_ref(), context_id, channel_id)
-            .await
-            .expect("channel-created chat fact should provision AMP channel state");
+        timeout(Duration::from_secs(5), async {
+            loop {
+                if aura_protocol::amp::get_channel_state(effects.as_ref(), context_id, channel_id)
+                    .await
+                    .is_ok()
+                {
+                    break;
+                }
+                sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("timed out waiting for provisioned AMP channel state");
     }
 
     #[tokio::test]

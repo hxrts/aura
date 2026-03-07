@@ -312,7 +312,7 @@ ci-harness-browser:
 
 # Test suite (excludes patchbay tests which run in ci-holepunch-tier2)
 ci-test:
-    cargo test --workspace -q -- --skip patchbay
+    cargo test --workspace -- --skip patchbay
 
 # Protocol evolution compatibility gate (async_subtype)
 ci-protocol-compat:
