@@ -10,9 +10,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use aura_harness::artifacts::ArtifactBundle;
+use aura_harness::{artifacts::ArtifactBundle, default_artifacts_dir};
 use aura_harness::build_startup_summary;
-use aura_harness::config::require_existing_file;
+use aura_harness::config::{require_existing_file, ScreenSource};
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::build_seed_bundle;
 use aura_harness::load_and_validate_run_config;
@@ -54,10 +54,19 @@ struct RunArgs {
     config: PathBuf,
     #[arg(long)]
     scenario: Option<PathBuf>,
-    #[arg(long, default_value = "artifacts")]
-    artifacts_dir: PathBuf,
+    /// Directory for test artifacts. Defaults to <workspace_root>/artifacts.
+    #[arg(long)]
+    artifacts_dir: Option<PathBuf>,
     #[arg(long, default_value = "mock")]
     network_backend: String,
+}
+
+impl RunArgs {
+    fn artifacts_dir(&self) -> PathBuf {
+        self.artifacts_dir
+            .clone()
+            .unwrap_or_else(default_artifacts_dir)
+    }
 }
 
 #[derive(Debug, Parser)]
@@ -108,7 +117,7 @@ fn run(args: RunArgs) -> Result<()> {
     };
 
     let summary = build_startup_summary(&config);
-    let artifact_bundle = ArtifactBundle::create(&args.artifacts_dir, &config.run.name)?;
+    let artifact_bundle = ArtifactBundle::create(&args.artifacts_dir(), &config.run.name)?;
     let preflight_report = match run_preflight(&config, scenario_config.as_ref()) {
         Ok(report) => report,
         Err(error) => {
@@ -159,6 +168,7 @@ fn run_with_artifacts(
     for instance in &config.instances {
         let response = tool_api.handle_request(ToolRequest::Screen {
             instance_id: instance.id.clone(),
+            screen_source: ScreenSource::Default,
         });
         if let aura_harness::tool_api::ToolResponse::Ok { payload } = response {
             let screen = payload
@@ -231,6 +241,7 @@ fn collect_timeout_diagnostics(
     for instance in &config.instances {
         let screen_response = tool_api.handle_request(ToolRequest::Screen {
             instance_id: instance.id.clone(),
+            screen_source: ScreenSource::Default,
         });
         let (authoritative_screen, raw_screen) = match screen_response {
             aura_harness::tool_api::ToolResponse::Ok { payload } => {
