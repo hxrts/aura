@@ -1215,6 +1215,27 @@ fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
         }
     }
 
+    if let Some(readiness) = step.readiness {
+        if snapshot.readiness != readiness {
+            return false;
+        }
+    }
+
+    if let (Some(operation_id), Some(operation_state)) =
+        (step.operation_id.as_ref(), step.operation_state)
+    {
+        let Some(operation) = snapshot
+            .operations
+            .iter()
+            .find(|candidate| &candidate.id == operation_id)
+        else {
+            return false;
+        };
+        if operation.state != operation_state {
+            return false;
+        }
+    }
+
     if let Some(control_id) = step.control_id {
         let control_visible = match control_id {
             ControlId::Screen(screen) => snapshot.screen == screen,
@@ -1261,6 +1282,14 @@ fn semantic_wait_description(step: &ScenarioStep) -> String {
     }
     if let Some(modal_id) = step.modal_id {
         return format!("modal={}", semantic_modal_name(modal_id));
+    }
+    if let Some(readiness) = step.readiness {
+        return format!("readiness={readiness:?}");
+    }
+    if let (Some(operation_id), Some(operation_state)) =
+        (step.operation_id.as_ref(), step.operation_state)
+    {
+        return format!("operation={} state={operation_state:?}", operation_id.0);
     }
     if let Some(control_id) = step.control_id {
         return format!("control={control_id:?}");
@@ -1778,8 +1807,8 @@ fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str
 mod tests {
     use super::*;
     use aura_app::ui::contract::{
-        ConfirmationState, ListId, ListItemSnapshot, ListSnapshot, ScreenId, SelectionSnapshot,
-        UiReadiness, UiSnapshot,
+        ConfirmationState, ListId, ListItemSnapshot, ListSnapshot, OperationId,
+        OperationSnapshot, OperationState, ScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
     };
     use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, ScenarioAction};
     use crate::coordinator::HarnessCoordinator;
@@ -1925,6 +1954,54 @@ mod tests {
         };
 
         assert!(!semantic_wait_matches(&step, &snapshot));
+    }
+
+    #[test]
+    fn semantic_wait_can_require_ready_state() {
+        let step = crate::config::ScenarioStep {
+            id: "wait-ready".to_string(),
+            action: crate::config::ScenarioAction::WaitFor,
+            readiness: Some(UiReadiness::Ready),
+            ..Default::default()
+        };
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Neighborhood,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            selections: Vec::new(),
+            lists: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+        };
+
+        assert!(semantic_wait_matches(&step, &snapshot));
+    }
+
+    #[test]
+    fn semantic_wait_can_require_operation_state() {
+        let step = crate::config::ScenarioStep {
+            id: "wait-op".to_string(),
+            action: crate::config::ScenarioAction::WaitFor,
+            operation_id: Some(OperationId::invitation_accept()),
+            operation_state: Some(OperationState::Succeeded),
+            ..Default::default()
+        };
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Contacts,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            selections: Vec::new(),
+            lists: Vec::new(),
+            operations: vec![OperationSnapshot {
+                id: OperationId::invitation_accept(),
+                state: OperationState::Succeeded,
+            }],
+            toasts: Vec::new(),
+        };
+
+        assert!(semantic_wait_matches(&step, &snapshot));
     }
 
     #[test]

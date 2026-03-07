@@ -39,6 +39,13 @@ screen_id = "neighborhood"
 timeout_ms = 30000
 
 [[steps]]
+id = "alice-neighborhood-ready"
+action = "wait_for"
+instance = "alice"
+readiness = "ready"
+timeout_ms = 30000
+
+[[steps]]
 id = "alice-open-settings-via-nav-list"
 action = "click_button"
 instance = "alice"

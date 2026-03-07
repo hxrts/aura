@@ -15,7 +15,8 @@ use aura_app::scenario_contract::{
     SemanticScenarioFile, UiAction, VariableAction,
 };
 use aura_app::ui::contract::{
-    ConfirmationState, ControlId, FieldId, ListId, ModalId, ScreenId, ToastKind,
+    ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState,
+    ScreenId, ToastKind, UiReadiness,
 };
 use serde::{Deserialize, Serialize};
 
@@ -230,6 +231,12 @@ pub struct ScenarioStep {
     pub field_id: Option<FieldId>,
     /// Semantic modal reference for typed scenario expectations.
     pub modal_id: Option<ModalId>,
+    /// Semantic readiness reference for typed scenario expectations.
+    pub readiness: Option<UiReadiness>,
+    /// Semantic operation identifier for typed lifecycle expectations.
+    pub operation_id: Option<OperationId>,
+    /// Semantic operation state for typed lifecycle expectations.
+    pub operation_state: Option<OperationState>,
     /// Semantic list reference for typed scenario expectations.
     pub list_id: Option<ListId>,
     /// Stable list item identifier for typed list expectations.
@@ -466,6 +473,17 @@ fn expectation_from_step(step: &ScenarioStep) -> Result<Option<SemanticAction>> 
             modal_id,
         ))));
     }
+    if let Some(readiness) = step.readiness {
+        return Ok(Some(SemanticAction::Expect(Expectation::ReadinessIs(
+            readiness,
+        ))));
+    }
+    if let (Some(operation_id), Some(state)) = (step.operation_id.clone(), step.operation_state) {
+        return Ok(Some(SemanticAction::Expect(Expectation::OperationStateIs {
+            operation_id,
+            state,
+        })));
+    }
     if let (Some(list_id), Some(item_id)) = (step.list_id, step.item_id.clone()) {
         if let Some(confirmation) = step.confirmation {
             return Ok(Some(SemanticAction::Expect(
@@ -697,6 +715,27 @@ impl ScenarioConfig {
             }
             if step.request_id == Some(0) {
                 bail!("scenario step {} request_id must be >= 1", step.id);
+            }
+            if matches!(step.action, ScenarioAction::Noop) {
+                bail!(
+                    "scenario step {} uses noop; use a semantic wait or explicit action instead",
+                    step.id
+                );
+            }
+            if matches!(step.action, ScenarioAction::WaitFor)
+                && step.pattern.is_none()
+                && step.selector.is_none()
+                && step.screen_id.is_none()
+                && step.control_id.is_none()
+                && step.modal_id.is_none()
+                && step.readiness.is_none()
+                && step.list_id.is_none()
+                && step.operation_id.is_none()
+            {
+                bail!(
+                    "scenario step {} uses wait_for without a semantic target",
+                    step.id
+                );
             }
         }
 
@@ -1081,5 +1120,42 @@ mod tests {
             Err(error) => error.to_string(),
         };
         assert!(error.contains("must not set ssh_host"));
+    }
+
+    #[test]
+    fn scenario_noop_steps_are_rejected() {
+        let config = ScenarioConfig {
+            schema_version: SCENARIO_SCHEMA_VERSION,
+            id: "noop-invalid".to_string(),
+            goal: "reject noop".to_string(),
+            execution_mode: Some("scripted".to_string()),
+            required_capabilities: Vec::new(),
+            steps: vec![ScenarioStep {
+                id: "noop".to_string(),
+                action: ScenarioAction::Noop,
+                ..ScenarioStep::default()
+            }],
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn scenario_wait_for_requires_target() {
+        let config = ScenarioConfig {
+            schema_version: SCENARIO_SCHEMA_VERSION,
+            id: "wait-invalid".to_string(),
+            goal: "reject bare wait".to_string(),
+            execution_mode: Some("scripted".to_string()),
+            required_capabilities: Vec::new(),
+            steps: vec![ScenarioStep {
+                id: "wait".to_string(),
+                action: ScenarioAction::WaitFor,
+                timeout_ms: Some(1000),
+                ..ScenarioStep::default()
+            }],
+        };
+
+        assert!(config.validate().is_err());
     }
 }

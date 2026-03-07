@@ -255,6 +255,23 @@ pub enum ConfirmationState {
 #[serde(transparent)]
 pub struct OperationId(pub String);
 
+impl OperationId {
+    #[must_use]
+    pub fn create_home() -> Self {
+        Self("create_home".to_string())
+    }
+
+    #[must_use]
+    pub fn invitation_accept() -> Self {
+        Self("invitation_accept".to_string())
+    }
+
+    #[must_use]
+    pub fn device_enrollment() -> Self {
+        Self("device_enrollment".to_string())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToastSnapshot {
     pub id: ToastId,

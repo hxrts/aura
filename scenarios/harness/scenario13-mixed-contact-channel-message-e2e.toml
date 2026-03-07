@@ -35,7 +35,7 @@ timeout_ms = 3000
 id = "web-fill-account-name"
 action = "fill_input"
 instance = "web"
-selector = "#aura-account-name-input"
+field_id = "account_name"
 value = "WebUser"
 timeout_ms = 4000
 
@@ -43,7 +43,7 @@ timeout_ms = 4000
 id = "web-create-account"
 action = "click_button"
 instance = "web"
-selector = "#aura-onboarding-create-account-button"
+control_id = "onboarding_create_account_button"
 timeout_ms = 4000
 
 [[steps]]
@@ -71,7 +71,7 @@ timeout_ms = 2000
 id = "web-open-contacts"
 action = "click_button"
 instance = "web"
-selector = "#aura-nav-contacts"
+control_id = "nav_contacts"
 timeout_ms = 4000
 
 [[steps]]
@@ -127,7 +127,7 @@ timeout_ms = 1000
 id = "web-open-accept-modal"
 action = "click_button"
 instance = "web"
-selector = "#aura-contacts-accept-invitation"
+control_id = "contacts_accept_invitation_button"
 timeout_ms = 4000
 
 [[steps]]
@@ -148,7 +148,7 @@ timeout_ms = 12000
 id = "web-fill-invite-code"
 action = "fill_input"
 instance = "web"
-selector = "#aura-modal-input"
+field_id = "invitation_code"
 value = "${invite_code}"
 timeout_ms = 12000
 
@@ -156,8 +156,16 @@ timeout_ms = 12000
 id = "web-submit-invite"
 action = "click_button"
 instance = "web"
-selector = "#aura-modal-confirm-button"
+control_id = "modal_confirm_button"
 timeout_ms = 4000
+
+[[steps]]
+id = "web-invitation-accepted"
+action = "wait_for"
+instance = "web"
+operation_id = "invitation_accept"
+operation_state = "succeeded"
+timeout_ms = 30000
 
 [[steps]]
 id = "web-contact-added"
@@ -212,7 +220,7 @@ timeout_ms = 2000
 id = "web-open-chat"
 action = "click_button"
 instance = "web"
-selector = "#aura-nav-chat"
+control_id = "nav_chat"
 timeout_ms = 4000
 
 [[steps]]

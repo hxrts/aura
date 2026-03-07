@@ -10,7 +10,8 @@ use async_lock::RwLock as AsyncRwLock;
 use aura_app::{
     ui::contract::{
         ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot, ListSnapshot, ModalId,
-        SelectionSnapshot, ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
+        OperationId, OperationSnapshot, OperationState, SelectionSnapshot, ToastId, ToastKind,
+        ToastSnapshot, UiReadiness, UiSnapshot,
     },
     AppCore,
 };
@@ -535,6 +536,7 @@ pub struct UiModel {
     pub notifications: Vec<String>,
     pub notification_ids: Vec<NotificationSelectionId>,
     pub logs: Vec<String>,
+    pub operations: Vec<OperationSnapshot>,
     pub toast: Option<ToastState>,
     pub toast_key: u64,
     pub input_mode: bool,
@@ -586,6 +588,7 @@ impl UiModel {
             notifications: Vec::new(),
             notification_ids: Vec::new(),
             logs: vec!["Aura web shell initialized".to_string()],
+            operations: Vec::new(),
             toast: None,
             toast_key: 0,
             input_mode: false,
@@ -614,6 +617,21 @@ impl UiModel {
 
     pub fn selected_channel_name(&self) -> Option<&str> {
         self.selected_channel.as_deref()
+    }
+
+    fn set_operation_state(&mut self, operation_id: OperationId, state: OperationState) {
+        if let Some(operation) = self.operations.iter_mut().find(|op| op.id == operation_id) {
+            operation.state = state;
+            return;
+        }
+        self.operations.push(OperationSnapshot {
+            id: operation_id,
+            state,
+        });
+    }
+
+    fn clear_operation(&mut self, operation_id: &OperationId) {
+        self.operations.retain(|operation| &operation.id != operation_id);
     }
 
     pub fn set_screen(&mut self, screen: UiScreen) {
@@ -1427,7 +1445,7 @@ impl UiModel {
             },
             selections,
             lists,
-            operations: Vec::new(),
+            operations: self.operations.clone(),
             toasts,
         }
     }
@@ -1660,6 +1678,27 @@ impl UiController {
         self.request_rerender();
     }
 
+    pub fn start_runtime_operation(&self, operation_id: OperationId) {
+        let mut model = write_model(&self.model);
+        model.set_operation_state(operation_id, OperationState::Submitting);
+        drop(model);
+        self.request_rerender();
+    }
+
+    pub fn finish_runtime_operation(&self, operation_id: OperationId, state: OperationState) {
+        let mut model = write_model(&self.model);
+        model.set_operation_state(operation_id, state);
+        drop(model);
+        self.request_rerender();
+    }
+
+    pub fn clear_runtime_operation(&self, operation_id: &OperationId) {
+        let mut model = write_model(&self.model);
+        model.clear_operation(operation_id);
+        drop(model);
+        self.request_rerender();
+    }
+
     pub fn complete_runtime_invitation_import(&self) {
         let mut model = write_model(&self.model);
         set_toast(&mut model, '✓', "Invitation imported");
@@ -1709,6 +1748,7 @@ impl UiController {
         error_message: Option<String>,
     ) {
         let mut model = write_model(&self.model);
+        let mut operation_state = None;
         if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
             state.accepted_count = accepted_count;
             state.total_count = total_count;
@@ -1716,6 +1756,13 @@ impl UiController {
             state.is_complete = is_complete;
             state.has_failed = has_failed;
             state.error_message = error_message;
+            operation_state = Some(if has_failed {
+                OperationState::Failed
+            } else if is_complete {
+                OperationState::Succeeded
+            } else {
+                OperationState::Submitting
+            });
             let device_name = state.device_name.clone();
             if is_complete {
                 let should_set_name =
@@ -1725,6 +1772,9 @@ impl UiController {
                     model.secondary_device_name = Some(device_name);
                 }
             }
+        }
+        if let Some(operation_state) = operation_state {
+            model.set_operation_state(OperationId::device_enrollment(), operation_state);
         }
         drop(model);
         self.request_rerender();
@@ -1887,6 +1937,7 @@ fn write_model(model: &RwLock<UiModel>) -> RwLockWriteGuard<'_, UiModel> {
 #[cfg(test)]
 mod tests {
     use super::{NeighborhoodMode, UiModel, UiScreen};
+    use aura_app::ui::contract::{OperationId, OperationState};
 
     #[test]
     fn set_screen_clears_input_mode_and_buffer() {
@@ -1909,5 +1960,20 @@ mod tests {
         model.set_screen(UiScreen::Neighborhood);
 
         assert!(matches!(model.neighborhood_mode, NeighborhoodMode::Map));
+    }
+
+    #[test]
+    fn semantic_snapshot_includes_tracked_operation_state() {
+        let mut model = UiModel::new("authority-local".to_string());
+        model.set_operation_state(OperationId::invitation_accept(), OperationState::Submitting);
+
+        let snapshot = model.semantic_snapshot();
+        let operation = snapshot
+            .operations
+            .iter()
+            .find(|operation| operation.id == OperationId::invitation_accept())
+            .expect("invitation accept operation should be present");
+
+        assert_eq!(operation.state, OperationState::Submitting);
     }
 }

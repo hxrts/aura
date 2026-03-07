@@ -371,7 +371,7 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
                 OperationState::Submitting
             };
             vec![OperationSnapshot {
-                id: OperationId("device_enrollment".to_string()),
+                id: OperationId::device_enrollment(),
                 state: operation_state,
             }]
         }
@@ -417,9 +417,9 @@ mod tests {
     use super::semantic_ui_snapshot;
     use crate::tui::screens::Screen;
     use crate::tui::state::modal_queue::QueuedModal;
-    use crate::tui::state::views::AccountSetupModalState;
+    use crate::tui::state::views::{AccountSetupModalState, DeviceEnrollmentCeremonyModalState};
     use crate::tui::TuiState;
-    use aura_app::ui::contract::{ControlId, ListId, UiReadiness};
+    use aura_app::ui::contract::{ControlId, ListId, OperationId, OperationState, UiReadiness};
     use aura_app::ui::types::StateSnapshot;
 
     #[test]
@@ -445,5 +445,36 @@ mod tests {
             .find(|list| list.id == ListId::Navigation)
             .expect("navigation list should exist");
         assert!(nav.items.iter().any(|item| item.selected));
+    }
+
+    #[test]
+    fn device_enrollment_modal_exports_operation_state() {
+        let mut state = TuiState::new();
+        let mut modal = DeviceEnrollmentCeremonyModalState::started(
+            "ceremony-1".to_string(),
+            "Mobile".to_string(),
+            "code-123".to_string(),
+        );
+        modal.update_from_status(
+            1,
+            2,
+            2,
+            false,
+            false,
+            None,
+            None,
+            aura_core::threshold::AgreementMode::CoordinatorSoftSafe,
+            false,
+        );
+        state.show_modal(QueuedModal::SettingsDeviceEnrollment(modal));
+
+        let snapshot = semantic_ui_snapshot(&state, &StateSnapshot::default());
+        let operation = snapshot
+            .operations
+            .iter()
+            .find(|operation| operation.id == OperationId::device_enrollment())
+            .expect("device enrollment operation should be present");
+
+        assert_eq!(operation.state, OperationState::Submitting);
     }
 }

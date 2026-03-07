@@ -116,6 +116,14 @@ keys = "WebApp\n"
 timeout_ms = 2000
 
 [[steps]]
+id = "tui-device-enrollment-submitting"
+action = "wait_for"
+instance = "tui"
+operation_id = "device_enrollment"
+operation_state = "submitting"
+timeout_ms = 15000
+
+[[steps]]
 id = "tui-device-enrollment-ceremony-visible"
 action = "wait_for"
 instance = "tui"
@@ -147,7 +155,7 @@ timeout_ms = 12000
 id = "web-fill-device-code"
 action = "fill_input"
 instance = "web"
-selector = "#aura-account-import-code-input"
+field_id = "device_import_code"
 value = "${device_code}"
 timeout_ms = 12000
 
@@ -155,21 +163,29 @@ timeout_ms = 12000
 id = "web-import-device-code"
 action = "click_button"
 instance = "web"
-selector = "#aura-onboarding-import-device-button"
+control_id = "onboarding_import_device_button"
 timeout_ms = 4000
+
+[[steps]]
+id = "web-device-import-succeeded"
+action = "wait_for"
+instance = "web"
+operation_id = "device_enrollment"
+operation_state = "succeeded"
+timeout_ms = 30000
 
 [[steps]]
 id = "web-device-imported"
 action = "wait_for"
 instance = "web"
-selector = "#aura-nav-settings"
+control_id = "nav_settings"
 timeout_ms = 30000
 
 [[steps]]
 id = "web-open-settings"
 action = "click_button"
 instance = "web"
-selector = "#aura-nav-settings"
+control_id = "nav_settings"
 timeout_ms = 4000
 
 [[steps]]
@@ -190,7 +206,8 @@ timeout_ms = 20000
 id = "tui-still-waiting-for-acceptance"
 action = "wait_for"
 instance = "tui"
-pattern = "Waiting for acceptance"
+operation_id = "device_enrollment"
+operation_state = "submitting"
 timeout_ms = 10000
 
 [[steps]]
