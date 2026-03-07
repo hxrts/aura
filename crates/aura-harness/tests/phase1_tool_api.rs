@@ -71,6 +71,7 @@ fn tool_api_primitives_control_local_pty_instance() {
     match tool_api.handle_request(ToolRequest::WaitFor {
         instance_id: "alice".to_string(),
         pattern: "hello-pty".to_string(),
+        selector: None,
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
     }) {
@@ -96,6 +97,7 @@ fn tool_api_primitives_control_local_pty_instance() {
     match tool_api.handle_request(ToolRequest::WaitFor {
         instance_id: "alice".to_string(),
         pattern: "hello-key".to_string(),
+        selector: None,
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
     }) {

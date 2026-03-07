@@ -20,7 +20,7 @@ timeout_ms = 60000
 id = "alice-fill-account-name"
 action = "fill_input"
 instance = "alice"
-selector = "#aura-account-name-input"
+field_id = "account_name"
 value = "Alice"
 timeout_ms = 4000
 
@@ -28,7 +28,7 @@ timeout_ms = 4000
 id = "alice-create-account"
 action = "click_button"
 instance = "alice"
-selector = "#aura-onboarding-create-account-button"
+control_id = "onboarding_create_account_button"
 timeout_ms = 4000
 
 [[steps]]
@@ -36,4 +36,19 @@ id = "alice-neighborhood-visible"
 action = "wait_for"
 instance = "alice"
 screen_id = "neighborhood"
+timeout_ms = 120000
+
+[[steps]]
+id = "alice-open-settings-via-nav-list"
+action = "click_button"
+instance = "alice"
+list_id = "navigation"
+item_id = "settings"
+timeout_ms = 4000
+
+[[steps]]
+id = "alice-settings-visible"
+action = "wait_for"
+instance = "alice"
+screen_id = "settings"
 timeout_ms = 120000

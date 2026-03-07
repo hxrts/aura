@@ -62,6 +62,7 @@ fn replay_runner_reexecutes_recorded_actions_without_llm() {
     assert_ok(tool_api.handle_request(ToolRequest::WaitFor {
         instance_id: "alice".to_string(),
         pattern: "phase2-replay".to_string(),
+        selector: None,
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
     }));

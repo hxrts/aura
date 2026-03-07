@@ -20,6 +20,7 @@ cfg_if! {
         use aura_app::ui::workflows::settings as settings_workflows;
         use aura_app::ui::types::InvitationBridgeType;
         use aura_core::identifiers::AuthorityId;
+        use aura_app::ui::contract::{ControlId, FieldId};
         use aura_ui::{AuraUiRoot, UiController};
         use dioxus::prelude::*;
         use std::sync::Arc;
@@ -387,7 +388,9 @@ cfg_if! {
 
             rsx! {
                 main {
-                    id: "aura-onboarding-root",
+                    id: ControlId::OnboardingRoot
+                        .web_dom_id()
+                        .unwrap_or("aura-onboarding-root"),
                     class: "min-h-screen bg-background text-foreground grid place-items-center px-6",
                     div {
                         id: "aura-onboarding-card",
@@ -407,7 +410,9 @@ cfg_if! {
                                 class: "block space-y-2",
                                 span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Nickname" }
                                 input {
-                                    id: "aura-account-name-input",
+                                    id: FieldId::AccountName
+                                        .web_dom_id()
+                                        .unwrap_or("aura-account-name-input"),
                                     class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
                                     value: "{account_name()}",
                                     disabled: creating_account(),
@@ -423,7 +428,9 @@ cfg_if! {
                                 p { class: "text-sm text-destructive", "{error}" }
                             }
                             button {
-                                id: "aura-onboarding-create-account-button",
+                                id: ControlId::OnboardingCreateAccountButton
+                                    .web_dom_id()
+                                    .unwrap_or("aura-onboarding-create-account-button"),
                                 class: "inline-flex h-10 w-full items-center justify-center rounded-md bg-foreground px-4 text-sm font-medium text-background transition-colors disabled:pointer-events-none disabled:opacity-50",
                                 disabled: creating_account() || account_name().trim().is_empty(),
                                 onclick: submit_account,
@@ -442,7 +449,9 @@ cfg_if! {
                                 class: "block space-y-2",
                                 span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Device Enrollment Code" }
                                 input {
-                                    id: "aura-account-import-code-input",
+                                    id: FieldId::DeviceImportCode
+                                        .web_dom_id()
+                                        .unwrap_or("aura-account-import-code-input"),
                                     class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
                                     value: "{import_code()}",
                                     disabled: importing_code(),
@@ -456,7 +465,9 @@ cfg_if! {
                                 p { class: "text-sm text-destructive", "{error}" }
                             }
                             button {
-                                id: "aura-onboarding-import-device-button",
+                                id: ControlId::OnboardingImportDeviceButton
+                                    .web_dom_id()
+                                    .unwrap_or("aura-onboarding-import-device-button"),
                                 class: "inline-flex h-10 w-full items-center justify-center rounded-md border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors disabled:pointer-events-none disabled:opacity-50",
                                 disabled: importing_code() || import_code().trim().is_empty(),
                                 onclick: submit_import,

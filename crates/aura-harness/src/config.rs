@@ -14,7 +14,9 @@ use aura_app::scenario_contract::{
     ScenarioAction as SemanticAction, ScenarioDefinition, ScenarioStep as SemanticStep,
     SemanticScenarioFile, UiAction, VariableAction,
 };
-use aura_app::ui::contract::{ControlId, FieldId, ListId, ModalId, ScreenId, ToastKind};
+use aura_app::ui::contract::{
+    ConfirmationState, ControlId, FieldId, ListId, ModalId, ScreenId, ToastKind,
+};
 use serde::{Deserialize, Serialize};
 
 pub const RUN_SCHEMA_VERSION: u32 = 1;
@@ -232,6 +234,8 @@ pub struct ScenarioStep {
     pub list_id: Option<ListId>,
     /// Stable list item identifier for typed list expectations.
     pub item_id: Option<String>,
+    /// Expected confirmation state for typed list expectations.
+    pub confirmation: Option<ConfirmationState>,
     /// Repeat count for `send_key` actions.
     pub repeat: Option<u16>,
     /// Explicit source instance for `send_clipboard`.
@@ -310,10 +314,20 @@ impl ScenarioStep {
                 parse_input_key(self.key.as_deref().unwrap_or_default())?,
                 self.repeat.unwrap_or(1).max(1),
             ))),
-            ScenarioAction::ClickButton => match self.control_id {
-                Some(control_id) => Some(SemanticAction::Ui(UiAction::Activate(control_id))),
-                None => None,
-            },
+            ScenarioAction::ClickButton => {
+                if let Some(control_id) = self.control_id {
+                    Some(SemanticAction::Ui(UiAction::Activate(control_id)))
+                } else if let (Some(list_id), Some(item_id)) =
+                    (self.list_id, self.item_id.clone())
+                {
+                    Some(SemanticAction::Ui(UiAction::ActivateListItem {
+                        list: list_id,
+                        item_id,
+                    }))
+                } else {
+                    None
+                }
+            }
             ScenarioAction::FillInput => match self.field_id {
                 Some(field_id) => Some(SemanticAction::Ui(UiAction::Fill(
                     field_id,
@@ -453,6 +467,15 @@ fn expectation_from_step(step: &ScenarioStep) -> Result<Option<SemanticAction>> 
         ))));
     }
     if let (Some(list_id), Some(item_id)) = (step.list_id, step.item_id.clone()) {
+        if let Some(confirmation) = step.confirmation {
+            return Ok(Some(SemanticAction::Expect(
+                Expectation::ListItemConfirmation {
+                    list: list_id,
+                    item_id,
+                    confirmation,
+                },
+            )));
+        }
         return Ok(Some(SemanticAction::Expect(Expectation::ListContains {
             list: list_id,
             item_id,

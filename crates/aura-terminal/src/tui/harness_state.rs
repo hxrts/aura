@@ -6,9 +6,9 @@ use crate::tui::state::toast::ToastLevel;
 use crate::tui::types::SettingsSection;
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
-    ControlId, ListId, ListItemSnapshot, ListSnapshot, ModalId, OperationId, OperationSnapshot,
-    OperationState, ScreenId, SelectionSnapshot, ToastId, ToastKind, ToastSnapshot, UiReadiness,
-    UiSnapshot,
+    ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot, ModalId, OperationId,
+    OperationSnapshot, OperationState, ScreenId, SelectionSnapshot, ToastId, ToastKind,
+    ToastSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::types::StateSnapshot;
 use std::fs;
@@ -170,6 +170,7 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
             ListItemSnapshot {
                 id: screen_item_id(id),
                 selected: *candidate == state.screen(),
+                confirmation: ConfirmationState::Confirmed,
             }
         })
         .collect::<Vec<_>>();
@@ -194,6 +195,7 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         .map(|(idx, channel)| ListItemSnapshot {
             id: channel.id.to_string(),
             selected: idx == state.chat.selected_channel,
+            confirmation: ConfirmationState::Confirmed,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -216,6 +218,7 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         .map(|(idx, contact)| ListItemSnapshot {
             id: contact.id.to_string(),
             selected: idx == state.contacts.selected_index,
+            confirmation: ConfirmationState::Confirmed,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -240,6 +243,7 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         .map(|(idx, id)| ListItemSnapshot {
             id: id.clone(),
             selected: idx == state.notifications.selected_index,
+            confirmation: ConfirmationState::Confirmed,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -263,6 +267,7 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         .map(|(idx, id)| ListItemSnapshot {
             id: id.clone(),
             selected: idx == state.neighborhood.selected_home,
+            confirmation: ConfirmationState::Confirmed,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -289,6 +294,7 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         .map(|(idx, id)| ListItemSnapshot {
             id: id.clone(),
             selected: idx == state.neighborhood.selected_member,
+            confirmation: ConfirmationState::Confirmed,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -311,6 +317,7 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         .map(|(idx, authority)| ListItemSnapshot {
             id: authority.id.clone(),
             selected: idx == state.current_authority_index,
+            confirmation: ConfirmationState::Confirmed,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -331,6 +338,7 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         .map(|(idx, section)| ListItemSnapshot {
             id: section.title().to_ascii_lowercase().replace(' ', "_"),
             selected: idx == state.settings.selected_index,
+            confirmation: ConfirmationState::Confirmed,
         })
         .collect::<Vec<_>>();
     push_list(

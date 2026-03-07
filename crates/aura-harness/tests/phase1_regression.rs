@@ -55,12 +55,14 @@ fn two_local_instances_are_controllable() {
     assert_ok(tool_api.handle_request(ToolRequest::WaitFor {
         instance_id: "alice".to_string(),
         pattern: "alice-msg".to_string(),
+        selector: None,
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
     }));
     assert_ok(tool_api.handle_request(ToolRequest::WaitFor {
         instance_id: "bob".to_string(),
         pattern: "bob-msg".to_string(),
+        selector: None,
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
     }));

@@ -17,10 +17,18 @@ control_id = "onboarding_root"
 timeout_ms = 30000
 
 [[steps]]
-id = "alice-create-account"
-action = "send_keys"
+id = "alice-fill-account-name"
+action = "fill_input"
 instance = "alice"
-keys = "Alice\n"
+field_id = "account_name"
+value = "Alice"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-submit-account"
+action = "click_button"
+instance = "alice"
+control_id = "onboarding_create_account_button"
 timeout_ms = 3000
 
 [[steps]]
@@ -28,4 +36,19 @@ id = "alice-neighborhood-visible"
 action = "wait_for"
 instance = "alice"
 screen_id = "neighborhood"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-open-settings-via-nav-list"
+action = "click_button"
+instance = "alice"
+list_id = "navigation"
+item_id = "settings"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-settings-visible"
+action = "wait_for"
+instance = "alice"
+screen_id = "settings"
 timeout_ms = 30000

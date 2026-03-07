@@ -20,6 +20,10 @@ use aura_app::ui::signals::{
     ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL,
     RECOVERY_SIGNAL, SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
 };
+use aura_app::ui::contract::{
+    list_item_dom_id, ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot,
+    ScreenId as ContractScreenId, SelectionSnapshot, UiSnapshot,
+};
 use aura_app::ui::types::{
     all_command_help, command_help, format_network_status_with_severity, parse_chat_command,
     AccessLevel, AppError, ChatCommand, ChatState, ContactsState, HomeRole, HomesState,
@@ -121,6 +125,7 @@ struct ContactsRuntimeContact {
     is_guardian: bool,
     is_member: bool,
     is_online: bool,
+    confirmation: ConfirmationState,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -502,6 +507,7 @@ fn build_contacts_runtime_view(
             is_guardian: contact.is_guardian,
             is_member: contact.is_member,
             is_online: contact.is_online,
+            confirmation: ConfirmationState::Confirmed,
         })
         .collect();
     rows.sort_by(|left, right| left.name.cmp(&right.name));
@@ -899,6 +905,7 @@ fn effective_contacts_view(
             is_guardian: contact.is_guardian,
             is_member: false,
             is_online: false,
+            confirmation: contact.confirmation,
         });
     }
 
@@ -1177,9 +1184,8 @@ fn submit_runtime_modal_action(
                                     invitation.invitation_type,
                                     InvitationBridgeType::DeviceEnrollment { .. }
                                 ) {
-                                    controller_for_import.push_log(
-                                        "accept_invitation refresh_settings start",
-                                    );
+                                    controller_for_import
+                                        .push_log("accept_invitation refresh_settings start");
                                     harness_log("accept_invitation refresh_settings start");
                                     let _ = settings_workflows::refresh_settings_from_runtime(
                                         &app_core,
@@ -1191,9 +1197,8 @@ fn submit_runtime_modal_action(
                                     controller.complete_runtime_modal_success(
                                         "Device enrollment complete",
                                     );
-                                    controller_for_import.push_log(
-                                        "accept_invitation complete device_enrollment",
-                                    );
+                                    controller_for_import
+                                        .push_log("accept_invitation complete device_enrollment");
                                     harness_log("accept_invitation complete device_enrollment");
                                 } else {
                                     if let InvitationBridgeType::Contact { nickname } =
@@ -1208,10 +1213,9 @@ fn submit_runtime_modal_action(
                                             display_name,
                                             false,
                                         );
-                                        controller_for_import
-                                            .set_selected_contact_authority_id(
-                                                invitation.sender_id,
-                                            );
+                                        controller_for_import.set_selected_contact_authority_id(
+                                            invitation.sender_id,
+                                        );
                                         controller.complete_runtime_invitation_import();
                                         controller_for_import
                                             .push_log("accept_invitation complete generic");
@@ -1221,10 +1225,9 @@ fn submit_runtime_modal_action(
                                     controller_for_import
                                         .push_log("accept_invitation refresh_contacts start");
                                     harness_log("accept_invitation refresh_contacts start");
-                                    let _ = load_contacts_runtime_view(
-                                        controller_for_import.clone(),
-                                    )
-                                    .await;
+                                    let _ =
+                                        load_contacts_runtime_view(controller_for_import.clone())
+                                            .await;
                                     controller_for_import
                                         .push_log("accept_invitation refresh_contacts done");
                                     harness_log("accept_invitation refresh_contacts done");
@@ -1244,8 +1247,7 @@ fn submit_runtime_modal_action(
                         }
                     }
                     Err(error) => {
-                        let error_log =
-                            format!("accept_invitation import_details error={error}");
+                        let error_log = format!("accept_invitation import_details error={error}");
                         controller_for_import.push_log(&error_log);
                         harness_log(&error_log);
                         controller.runtime_error_toast(error.to_string())
@@ -2262,6 +2264,9 @@ pub fn AuraUiRoot(controller: Arc<UiController>) -> Element {
             theme: themes::neutral(),
             color_scheme: ColorScheme::Dark,
             div {
+                id: ControlId::ToastRegion
+                    .web_dom_id()
+                    .unwrap_or("aura-toast-region"),
                 style: "--normal-bg: var(--popover); --normal-text: var(--popover-foreground); --normal-border: var(--border);",
                 ToastProvider {
                     default_duration: Duration::from_secs(5),
@@ -2351,8 +2356,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut chat_for_initial = chat_runtime;
         let controller_for_chat_initial = controller_for_runtime.clone();
         spawn(async move {
-            chat_for_initial
-                .set(load_chat_runtime_view(controller_for_chat_initial.clone()).await);
+            chat_for_initial.set(load_chat_runtime_view(controller_for_chat_initial.clone()).await);
             controller_for_chat_initial.request_rerender();
         });
 
@@ -2375,8 +2379,9 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut notifications_for_initial = notifications_runtime;
         let controller_for_notifications_initial = controller_for_runtime.clone();
         spawn(async move {
-            notifications_for_initial
-                .set(load_notifications_runtime_view(controller_for_notifications_initial.clone()).await);
+            notifications_for_initial.set(
+                load_notifications_runtime_view(controller_for_notifications_initial.clone()).await,
+            );
             controller_for_notifications_initial.request_rerender();
         });
 
@@ -2641,10 +2646,20 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
     let cancel_rerender = rerender.clone();
     let dedicated_primary_rerender = rerender.clone();
     let generic_confirm_rerender = rerender.clone();
+    controller.set_ui_snapshot(runtime_semantic_snapshot(
+        &model,
+        &runtime_snapshot,
+        &chat_runtime_snapshot,
+        &contacts_runtime_snapshot,
+        &settings_runtime_snapshot,
+        &notifications_runtime_snapshot,
+    ));
 
     rsx! {
         main {
-            id: "aura-app-root",
+            id: ControlId::AppRoot
+                .web_dom_id()
+                .unwrap_or("aura-app-root"),
             "data-render-tick": "{render_tick_value}",
             class: "relative flex h-[100dvh] min-h-[100dvh] flex-col overflow-hidden bg-background text-foreground font-mono outline-none",
             tabindex: 0,
@@ -2721,7 +2736,9 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                 }
             },
             nav {
-                id: "aura-nav",
+                id: ControlId::NavRoot
+                    .web_dom_id()
+                    .unwrap_or("aura-nav-root"),
                 class: "border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80",
                 div {
                     class: "relative flex items-center px-4 py-3 sm:px-6",
@@ -2768,10 +2785,15 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                 )}
             }
 
-            if let Some(modal) = modal {
-                if let Some(add_device_state) = model.add_device_modal() {
-                    if !matches!(add_device_state.step, AddDeviceWizardStep::Name) {
-                        UiDeviceEnrollmentModal {
+            div {
+                id: ControlId::ModalRegion
+                    .web_dom_id()
+                    .unwrap_or("aura-modal-region"),
+                class: "contents",
+                if let Some(modal) = modal {
+                    if let Some(add_device_state) = model.add_device_modal() {
+                        if !matches!(add_device_state.step, AddDeviceWizardStep::Name) {
+                            UiDeviceEnrollmentModal {
                             title: if matches!(add_device_state.step, AddDeviceWizardStep::ShareCode) {
                                 "Add Device — Step 2 of 3".to_string()
                             } else {
@@ -2945,9 +2967,9 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                                 }
                             }
                         }
-                    }
-                } else if matches!(modal_state, Some(ModalState::SwitchAuthority)) {
-                    UiAuthorityPickerModal {
+                        }
+                    } else if matches!(modal_state, Some(ModalState::SwitchAuthority)) {
+                        UiAuthorityPickerModal {
                         title: active_modal_title(&model)
                             .unwrap_or_else(|| "Switch Authority".to_string()),
                         current_label: settings_runtime_snapshot
@@ -3018,9 +3040,9 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                                 }
                             }
                         }
-                    }
-                } else {
-                    UiModal {
+                        }
+                    } else {
+                        UiModal {
                         modal,
                         on_cancel: {
                             let controller = controller.clone();
@@ -3091,6 +3113,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                                 controller.set_modal_buffer(&value);
                                 render_tick.set(render_tick() + 1);
                             }
+                        }
                         }
                     }
                 }
@@ -3331,9 +3354,10 @@ fn neighborhood_screen(
                                             p { class: "m-0 text-sm text-muted-foreground", "No channels" }
                                         } else {
                                             div { class: "space-y-2",
-                                                for (channel_name, channel_topic, is_selected) in &display_channels {
+                                for (channel_name, channel_topic, is_selected) in &display_channels {
                                                     button {
                                                         r#type: "button",
+                                                        id: list_item_dom_id(ListId::Channels, channel_name),
                                                         class: "block w-full text-left",
                                                         onclick: {
                                                             let controller = controller.clone();
@@ -3367,6 +3391,10 @@ fn neighborhood_screen(
                                             for (idx, member) in display_members.iter().enumerate() {
                                                 button {
                                                     r#type: "button",
+                                                    id: list_item_dom_id(
+                                                        ListId::NeighborhoodMembers,
+                                                        &neighborhood_member_selection_key(member).0,
+                                                    ),
                                                     class: "block w-full text-left",
                                                     onclick: {
                                                         let controller = controller.clone();
@@ -3489,6 +3517,7 @@ fn neighborhood_screen(
                                     for home in &home_rows {
                                         button {
                                             r#type: "button",
+                                            id: list_item_dom_id(ListId::Homes, &home.id),
                                             class: "block w-full text-left",
                                             onclick: {
                                                 let controller = controller.clone();
@@ -3737,6 +3766,7 @@ fn chat_screen(
                         for channel in &runtime_channels {
                             button {
                                 r#type: "button",
+                                id: list_item_dom_id(ListId::Channels, &channel.id),
                                 class: "block w-full text-left",
                                 onclick: {
                                     let controller = controller.clone();
@@ -4020,7 +4050,10 @@ fn contacts_screen(
                                     for contact in contacts.iter() {
                                         button {
                                             r#type: "button",
-                                            id: format!("aura-contact-item-{}", dom_slug(&contact.name)),
+                                            id: list_item_dom_id(
+                                                ListId::Contacts,
+                                                &contact.authority_id.to_string(),
+                                            ),
                                             class: "block w-full text-left",
                                             onclick: {
                                                 let controller = controller.clone();
@@ -4035,6 +4068,11 @@ fn contacts_screen(
                                                 secondary: Some(
                                                     if contact.is_guardian {
                                                         "Guardian".to_string()
+                                                    } else if matches!(
+                                                        contact.confirmation,
+                                                        ConfirmationState::PendingLocal
+                                                    ) {
+                                                        "Pending confirmation".to_string()
                                                     } else if contact.is_member {
                                                         "Member".to_string()
                                                     } else if contact.is_online {
@@ -4054,7 +4092,12 @@ fn contacts_screen(
                 }
                 div { class: "flex gap-2 pt-1",
                     UiButton {
-                        id: Some("aura-contacts-accept-invitation".to_string()),
+                        id: Some(
+                            ControlId::ContactsAcceptInvitationButton
+                                .web_dom_id()
+                                .unwrap_or("aura-contacts-accept-invitation")
+                                .to_string(),
+                        ),
                         label: "Accept Invitation".to_string(),
                         variant: ButtonVariant::Secondary,
                         onclick: move |_| {
@@ -4214,6 +4257,7 @@ fn notifications_screen(
                             for (idx, entry) in runtime.items.iter().enumerate() {
                                 button {
                                     r#type: "button",
+                                    id: list_item_dom_id(ListId::Notifications, &entry.id),
                                     class: "block w-full text-left",
                                     onclick: {
                                         let controller = controller.clone();
@@ -4394,7 +4438,7 @@ fn settings_screen(
                 extra_class: Some("lg:col-span-4".to_string()),
                 for section in SettingsSection::ALL {
                     UiListButton {
-                        id: Some(format!("aura-settings-section-{}", section.dom_id())),
+                        id: Some(list_item_dom_id(ListId::SettingsSections, section.dom_id())),
                         label: section.title().to_string(),
                         active: section == model.settings_section,
                         onclick: {
@@ -4698,11 +4742,19 @@ fn screen_tabs(active: UiScreen) -> Vec<(UiScreen, &'static str, bool)> {
 
 fn nav_button_id(screen: UiScreen) -> &'static str {
     match screen {
-        UiScreen::Neighborhood => "aura-nav-neighborhood",
-        UiScreen::Chat => "aura-nav-chat",
-        UiScreen::Contacts => "aura-nav-contacts",
-        UiScreen::Notifications => "aura-nav-notifications",
-        UiScreen::Settings => "aura-nav-settings",
+        UiScreen::Neighborhood => ControlId::NavNeighborhood
+            .web_dom_id()
+            .unwrap_or("aura-nav-neighborhood"),
+        UiScreen::Chat => ControlId::NavChat.web_dom_id().unwrap_or("aura-nav-chat"),
+        UiScreen::Contacts => ControlId::NavContacts
+            .web_dom_id()
+            .unwrap_or("aura-nav-contacts"),
+        UiScreen::Notifications => ControlId::NavNotifications
+            .web_dom_id()
+            .unwrap_or("aura-nav-notifications"),
+        UiScreen::Settings => ControlId::NavSettings
+            .web_dom_id()
+            .unwrap_or("aura-nav-settings"),
     }
 }
 
@@ -4743,27 +4795,47 @@ fn render_screen_content(
 ) -> Element {
     match model.screen {
         UiScreen::Neighborhood => rsx! {
-            div { id: "aura-screen-neighborhood", class: "h-full min-h-0 w-full",
+            div {
+                id: ControlId::Screen(ContractScreenId::Neighborhood)
+                    .web_dom_id()
+                    .unwrap_or("aura-screen-neighborhood"),
+                class: "h-full min-h-0 w-full",
                 {neighborhood_screen(model, neighborhood_runtime, controller, render_tick)}
             }
         },
         UiScreen::Chat => rsx! {
-            div { id: "aura-screen-chat", class: "h-full min-h-0 w-full",
+            div {
+                id: ControlId::Screen(ContractScreenId::Chat)
+                    .web_dom_id()
+                    .unwrap_or("aura-screen-chat"),
+                class: "h-full min-h-0 w-full",
                 {chat_screen(model, chat_runtime, controller, render_tick)}
             }
         },
         UiScreen::Contacts => rsx! {
-            div { id: "aura-screen-contacts", class: "h-full min-h-0 w-full",
+            div {
+                id: ControlId::Screen(ContractScreenId::Contacts)
+                    .web_dom_id()
+                    .unwrap_or("aura-screen-contacts"),
+                class: "h-full min-h-0 w-full",
                 {contacts_screen(model, contacts_runtime, controller, render_tick)}
             }
         },
         UiScreen::Notifications => rsx! {
-            div { id: "aura-screen-notifications", class: "h-full min-h-0 w-full",
+            div {
+                id: ControlId::Screen(ContractScreenId::Notifications)
+                    .web_dom_id()
+                    .unwrap_or("aura-screen-notifications"),
+                class: "h-full min-h-0 w-full",
                 {notifications_screen(model, notifications_runtime, controller, render_tick)}
             }
         },
         UiScreen::Settings => rsx! {
-            div { id: "aura-screen-settings", class: "h-full min-h-0 w-full",
+            div {
+                id: ControlId::Screen(ContractScreenId::Settings)
+                    .web_dom_id()
+                    .unwrap_or("aura-screen-settings"),
+                class: "h-full min-h-0 w-full",
                 {settings_screen(
                     model,
                     settings_runtime,
@@ -4775,6 +4847,179 @@ fn render_screen_content(
             }
         },
     }
+}
+
+fn upsert_snapshot_list(
+    snapshot: &mut UiSnapshot,
+    list_id: ListId,
+    items: Vec<ListItemSnapshot>,
+    selected_item_id: Option<String>,
+) {
+    snapshot.lists.retain(|list| list.id != list_id);
+    snapshot.selections.retain(|selection| selection.list != list_id);
+    if items.is_empty() {
+        return;
+    }
+    snapshot.lists.push(ListSnapshot { id: list_id, items });
+    if let Some(item_id) = selected_item_id {
+        snapshot.selections.push(SelectionSnapshot {
+            list: list_id,
+            item_id,
+        });
+    }
+}
+
+fn runtime_semantic_snapshot(
+    model: &UiModel,
+    neighborhood_runtime: &NeighborhoodRuntimeView,
+    chat_runtime: &ChatRuntimeView,
+    contacts_runtime: &ContactsRuntimeView,
+    settings_runtime: &SettingsRuntimeView,
+    notifications_runtime: &NotificationsRuntimeView,
+) -> UiSnapshot {
+    let mut snapshot = model.semantic_snapshot();
+
+    let homes = neighborhood_runtime
+        .homes
+        .iter()
+        .map(|home| ListItemSnapshot {
+            id: home.id.clone(),
+            selected: model.selected_home_id() == Some(home.id.as_str()),
+            confirmation: ConfirmationState::Confirmed,
+        })
+        .collect::<Vec<_>>();
+    let selected_home_id = model.selected_home_id().map(str::to_string).or_else(|| {
+        neighborhood_runtime
+            .homes
+            .iter()
+            .find(|home| home.name == neighborhood_runtime.active_home_name)
+            .map(|home| home.id.clone())
+    });
+    upsert_snapshot_list(&mut snapshot, ListId::Homes, homes, selected_home_id);
+
+    let members = neighborhood_runtime
+        .members
+        .iter()
+        .map(|member| {
+            let member_key = neighborhood_member_selection_key(member);
+            ListItemSnapshot {
+                id: member_key.0.clone(),
+                selected: model.selected_neighborhood_member_key.as_ref() == Some(&member_key),
+                confirmation: ConfirmationState::Confirmed,
+            }
+        })
+        .collect::<Vec<_>>();
+    let selected_member_id = model
+        .selected_neighborhood_member_key
+        .as_ref()
+        .map(|key| key.0.clone());
+    upsert_snapshot_list(
+        &mut snapshot,
+        ListId::NeighborhoodMembers,
+        members,
+        selected_member_id,
+    );
+
+    let channels = if chat_runtime.loaded {
+        chat_runtime
+            .channels
+            .iter()
+            .map(|channel| ListItemSnapshot {
+                id: channel.id.clone(),
+                selected: channel.name.eq_ignore_ascii_case(&chat_runtime.active_channel),
+                confirmation: ConfirmationState::Confirmed,
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let selected_channel_id = if chat_runtime.loaded {
+        chat_runtime
+            .channels
+            .iter()
+            .find(|channel| channel.name.eq_ignore_ascii_case(&chat_runtime.active_channel))
+            .map(|channel| channel.id.clone())
+    } else {
+        None
+    };
+    if !channels.is_empty() {
+        upsert_snapshot_list(
+            &mut snapshot,
+            ListId::Channels,
+            channels,
+            selected_channel_id,
+        );
+    }
+
+    let contacts = if contacts_runtime.loaded {
+        effective_contacts_view(contacts_runtime, model)
+            .iter()
+            .map(|contact| ListItemSnapshot {
+                id: contact.authority_id.to_string(),
+                selected: model.selected_contact_authority_id() == Some(contact.authority_id),
+                confirmation: contact.confirmation,
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    if !contacts.is_empty() {
+        upsert_snapshot_list(
+            &mut snapshot,
+            ListId::Contacts,
+            contacts,
+            model.selected_contact_authority_id().map(|id| id.to_string()),
+        );
+    }
+
+    let devices = settings_runtime
+        .devices
+        .iter()
+        .map(|device| ListItemSnapshot {
+            id: device.id.clone(),
+            selected: device.is_current,
+            confirmation: ConfirmationState::Confirmed,
+        })
+        .collect::<Vec<_>>();
+    upsert_snapshot_list(&mut snapshot, ListId::Devices, devices, None);
+
+    let authorities = settings_runtime
+        .authorities
+        .iter()
+        .map(|authority| ListItemSnapshot {
+            id: authority.id.to_string(),
+            selected: model.selected_authority_id == Some(authority.id),
+            confirmation: ConfirmationState::Confirmed,
+        })
+        .collect::<Vec<_>>();
+    if !authorities.is_empty() {
+        upsert_snapshot_list(
+            &mut snapshot,
+            ListId::Authorities,
+            authorities,
+            model.selected_authority_id.map(|id| id.to_string()),
+        );
+    }
+
+    let notifications = notifications_runtime
+        .items
+        .iter()
+        .map(|item| ListItemSnapshot {
+            id: item.id.clone(),
+            selected: model.selected_notification_id.as_ref().map(|id| &id.0) == Some(&item.id),
+            confirmation: ConfirmationState::Confirmed,
+        })
+        .collect::<Vec<_>>();
+    if !notifications.is_empty() {
+        upsert_snapshot_list(
+            &mut snapshot,
+            ListId::Notifications,
+            notifications,
+            model.selected_notification_id.as_ref().map(|id| id.0.clone()),
+        );
+    }
+
+    snapshot
 }
 
 fn active_modal_title(model: &UiModel) -> Option<String> {
@@ -4815,6 +5060,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
     let mut details = Vec::new();
     let mut keybind_rows = Vec::new();
     let mut input_label = None;
+    let mut input_field_id = None;
 
     match modal {
         ModalState::Help => {
@@ -4837,14 +5083,17 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                 details.push("Enter the target authority id, then press Enter to generate and copy the code.".to_string());
             }
             input_label = Some("Receiver Authority ID".to_string());
+            input_field_id = model.modal_field_id();
         }
         ModalState::AcceptInvitation => {
             details.push("Paste an invitation code, then press Enter.".to_string());
             input_label = Some("Invitation Code".to_string());
+            input_field_id = model.modal_field_id();
         }
         ModalState::CreateHome => {
             details.push("Enter a new home name and press Enter.".to_string());
             input_label = Some("Home Name".to_string());
+            input_field_id = model.modal_field_id();
         }
         ModalState::CreateChannel => {
             if let Some(state) = model.create_channel_modal() {
@@ -4859,6 +5108,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                         details.push(format!("Topic: {}", state.topic));
                         details.push(format!("Active field: {active} (Tab to switch)"));
                         input_label = Some(active.to_string());
+                        input_field_id = model.modal_field_id();
                     }
                     CreateChannelWizardStep::Members => {
                         details.push("Step 2 of 3: Select members to invite.".to_string());
@@ -4885,6 +5135,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                         details.push(format!("Participants (including you): {participant_total}"));
                         details.push("Use ↑/↓ to adjust, Enter to create.".to_string());
                         input_label = Some("Threshold".to_string());
+                        input_field_id = model.modal_field_id();
                     }
                 }
             }
@@ -4892,6 +5143,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
         ModalState::SetChannelTopic => {
             details.push("Set a topic for the selected channel.".to_string());
             input_label = Some("Channel Topic".to_string());
+            input_field_id = model.modal_field_id();
         }
         ModalState::ChannelInfo => {
             let active_channel = if chat_runtime.active_channel.is_empty() {
@@ -4939,6 +5191,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
         ModalState::EditNickname => {
             details.push("Update the selected nickname and press Enter.".to_string());
             input_label = Some("Nickname".to_string());
+            input_field_id = model.modal_field_id();
         }
         ModalState::RemoveContact => {
             details.push("Remove the selected contact from this authority.".to_string());
@@ -4971,6 +5224,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                         details.push(format!("Selected guardians: {}", state.selected_count));
                         details.push("Enter k (approvals required).".to_string());
                         input_label = Some("Threshold (k)".to_string());
+                        input_field_id = model.modal_field_id();
                     }
                     ThresholdWizardStep::Ceremony => {
                         details.push("Step 3 of 3: Ready to start ceremony.".to_string());
@@ -5001,6 +5255,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                             details.push(format!("Draft name: {}", state.name_input));
                         }
                         input_label = Some("Device Name".to_string());
+                        input_field_id = model.modal_field_id();
                     }
                     AddDeviceWizardStep::ShareCode => {
                         details.push(
@@ -5041,6 +5296,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
         ModalState::ImportDeviceEnrollmentCode => {
             details.push("Import a device enrollment code and press Enter.".to_string());
             input_label = Some("Enrollment Code".to_string());
+            input_field_id = model.modal_field_id();
         }
         ModalState::SelectDeviceToRemove => {
             details.push("Select the device to remove.".to_string());
@@ -5101,6 +5357,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                         details.push(format!("Selected devices: {}", state.selected_count));
                         details.push("Enter required signatures (k).".to_string());
                         input_label = Some("Threshold (k)".to_string());
+                        input_field_id = model.modal_field_id();
                     }
                     ThresholdWizardStep::Ceremony => {
                         details.push("Step 3 of 3: Ready to start MFA ceremony.".to_string());
@@ -5176,6 +5433,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
             details.push(format!("Partial: {partial_caps}"));
             details.push(format!("Limited: {limited_caps}"));
             input_label = Some(format!("{active} Capabilities"));
+            input_field_id = model.modal_field_id();
         }
     }
 
@@ -5225,6 +5483,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
         details,
         keybind_rows,
         input_label,
+        input_field_id,
         input_value,
         enter_label,
     })

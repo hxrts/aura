@@ -6,8 +6,8 @@
 #![allow(missing_docs)] // Shared semantic contract - expanded incrementally during migration.
 
 use crate::ui_contract::{
-    ControlId, FieldId, ListId, ModalId, OperationId, OperationState, ScreenId, ToastKind,
-    UiReadiness,
+    ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState,
+    ScreenId, ToastKind, UiReadiness,
 };
 use serde::{Deserialize, Serialize};
 
@@ -44,6 +44,7 @@ pub enum ScenarioAction {
 pub enum UiAction {
     Navigate(ScreenId),
     Activate(ControlId),
+    ActivateListItem { list: ListId, item_id: String },
     Fill(FieldId, String),
     InputText(String),
     PressKey(InputKey, u16),
@@ -119,6 +120,11 @@ pub enum Expectation {
         list: ListId,
         item_id: String,
     },
+    ListItemConfirmation {
+        list: ListId,
+        item_id: String,
+        confirmation: ConfirmationState,
+    },
     SelectionIs {
         list: ListId,
         item_id: String,
@@ -159,6 +165,7 @@ pub struct SemanticScenarioFileStep {
     pub readiness: Option<UiReadiness>,
     pub operation_id: Option<OperationId>,
     pub operation_state: Option<OperationState>,
+    pub confirmation: Option<ConfirmationState>,
     pub name: Option<String>,
     pub regex: Option<String>,
     pub group: Option<usize>,
@@ -176,6 +183,7 @@ pub enum SemanticActionKind {
     FaultTunnelDrop,
     Navigate,
     Activate,
+    ActivateListItem,
     Fill,
     InputText,
     PressKey,
@@ -186,6 +194,7 @@ pub enum SemanticActionKind {
     ModalOpen,
     ToastContains,
     ListContains,
+    ListItemConfirmation,
     SelectionIs,
     ReadinessIs,
     OperationStateIs,
@@ -263,6 +272,12 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                 "control_id",
                 value.action,
             )?)),
+            SemanticActionKind::ActivateListItem => {
+                ScenarioAction::Ui(UiAction::ActivateListItem {
+                    list: required(value.list_id, "list_id", value.action)?,
+                    item_id: required(value.item_id, "item_id", value.action)?,
+                })
+            }
             SemanticActionKind::Fill => ScenarioAction::Ui(UiAction::Fill(
                 required(value.field_id, "field_id", value.action)?,
                 required(value.value, "value", value.action)?,
@@ -303,6 +318,13 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                 list: required(value.list_id, "list_id", value.action)?,
                 item_id: required(value.item_id, "item_id", value.action)?,
             }),
+            SemanticActionKind::ListItemConfirmation => {
+                ScenarioAction::Expect(Expectation::ListItemConfirmation {
+                    list: required(value.list_id, "list_id", value.action)?,
+                    item_id: required(value.item_id, "item_id", value.action)?,
+                    confirmation: required(value.confirmation, "confirmation", value.action)?,
+                })
+            }
             SemanticActionKind::SelectionIs => ScenarioAction::Expect(Expectation::SelectionIs {
                 list: required(value.list_id, "list_id", value.action)?,
                 item_id: required(value.item_id, "item_id", value.action)?,

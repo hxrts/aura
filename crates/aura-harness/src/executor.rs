@@ -604,6 +604,28 @@ fn execute_step(
         }
         ScenarioAction::ClickButton => {
             let instance_id = resolve_required_instance(step, context)?;
+            if let Some(control_id) = step.control_id {
+                dispatch(
+                    tool_api,
+                    ToolRequest::ActivateControl {
+                        instance_id,
+                        control_id,
+                    },
+                )?;
+                return Ok(());
+            }
+            if let (Some(list_id), Some(item_id)) = (step.list_id, step.item_id.as_deref()) {
+                let item_id = resolve_template(item_id, context)?;
+                dispatch(
+                    tool_api,
+                    ToolRequest::ActivateListItem {
+                        instance_id,
+                        list_id,
+                        item_id,
+                    },
+                )?;
+                return Ok(());
+            }
             let selector = match step.selector.as_deref() {
                 Some(selector) => Some(resolve_template(selector, context)?),
                 None => None,
@@ -634,22 +656,33 @@ fn execute_step(
         }
         ScenarioAction::FillInput => {
             let instance_id = resolve_required_instance(step, context)?;
-            let selector =
-                resolve_required_field(step, "selector", step.selector.as_deref(), context)?;
             let value = resolve_required_field(
                 step,
                 "value",
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            dispatch(
-                tool_api,
-                ToolRequest::FillInput {
-                    instance_id,
-                    selector,
-                    value,
-                },
-            )?;
+            if let Some(field_id) = step.field_id {
+                dispatch(
+                    tool_api,
+                    ToolRequest::FillField {
+                        instance_id,
+                        field_id,
+                        value,
+                    },
+                )?;
+            } else {
+                let selector =
+                    resolve_required_field(step, "selector", step.selector.as_deref(), context)?;
+                dispatch(
+                    tool_api,
+                    ToolRequest::FillInput {
+                        instance_id,
+                        selector,
+                        value,
+                    },
+                )?;
+            }
             Ok(())
         }
         ScenarioAction::WaitFor => {
@@ -1199,8 +1232,22 @@ fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
             return false;
         };
         if let Some(item_id) = step.item_id.as_deref() {
-            if !list.items.iter().any(|item| item.id == item_id) {
+            let Some(item) = list.items.iter().find(|item| item.id == item_id) else {
                 return false;
+            };
+            if let Some(confirmation) = step.confirmation {
+                if item.confirmation != confirmation {
+                    return false;
+                }
+            }
+            if let Some(selection) = snapshot
+                .selections
+                .iter()
+                .find(|selection| selection.list == list_id)
+            {
+                if selection.item_id != item_id {
+                    return false;
+                }
             }
         }
     }
@@ -1730,6 +1777,10 @@ fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_app::ui::contract::{
+        ConfirmationState, ListId, ListItemSnapshot, ListSnapshot, ScreenId, SelectionSnapshot,
+        UiReadiness, UiSnapshot,
+    };
     use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, ScenarioAction};
     use crate::coordinator::HarnessCoordinator;
 
@@ -1806,6 +1857,74 @@ mod tests {
             Some(ExpectedCommandStatus::Denied),
             Some("permission_denied"),
         ));
+    }
+
+    #[test]
+    fn semantic_wait_can_require_confirmed_list_items() {
+        let step = crate::config::ScenarioStep {
+            id: "wait-confirmed-contact".to_string(),
+            action: crate::config::ScenarioAction::WaitFor,
+            list_id: Some(ListId::Contacts),
+            item_id: Some("authority-1".to_string()),
+            confirmation: Some(ConfirmationState::Confirmed),
+            ..Default::default()
+        };
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Contacts,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            selections: vec![SelectionSnapshot {
+                list: ListId::Contacts,
+                item_id: "authority-1".to_string(),
+            }],
+            lists: vec![ListSnapshot {
+                id: ListId::Contacts,
+                items: vec![ListItemSnapshot {
+                    id: "authority-1".to_string(),
+                    selected: true,
+                    confirmation: ConfirmationState::Confirmed,
+                }],
+            }],
+            operations: Vec::new(),
+            toasts: Vec::new(),
+        };
+
+        assert!(semantic_wait_matches(&step, &snapshot));
+    }
+
+    #[test]
+    fn semantic_wait_rejects_pending_local_when_confirmed_is_required() {
+        let step = crate::config::ScenarioStep {
+            id: "wait-confirmed-contact".to_string(),
+            action: crate::config::ScenarioAction::WaitFor,
+            list_id: Some(ListId::Contacts),
+            item_id: Some("authority-1".to_string()),
+            confirmation: Some(ConfirmationState::Confirmed),
+            ..Default::default()
+        };
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Contacts,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            selections: vec![SelectionSnapshot {
+                list: ListId::Contacts,
+                item_id: "authority-1".to_string(),
+            }],
+            lists: vec![ListSnapshot {
+                id: ListId::Contacts,
+                items: vec![ListItemSnapshot {
+                    id: "authority-1".to_string(),
+                    selected: true,
+                    confirmation: ConfirmationState::PendingLocal,
+                }],
+            }],
+            operations: Vec::new(),
+            toasts: Vec::new(),
+        };
+
+        assert!(!semantic_wait_matches(&step, &snapshot));
     }
 
     #[test]

@@ -8,7 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
-use aura_app::ui::contract::UiSnapshot;
+use aura_app::ui::contract::{list_item_selector, ControlId, FieldId, ListId, UiSnapshot};
 use nix::poll::{poll, PollFd, PollFlags};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
@@ -575,6 +575,13 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         })
     }
 
+    fn activate_control(&mut self, control_id: ControlId) -> Result<()> {
+        let selector = control_id
+            .web_selector()
+            .ok_or_else(|| anyhow!("control {control_id:?} does not have a web selector"))?;
+        self.click_target(&selector)
+    }
+
     fn click_target(&mut self, selector: &str) -> Result<()> {
         self.with_session(|session| {
             session.rpc_call(
@@ -600,6 +607,30 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             )?;
             Ok(())
         })
+    }
+
+    fn fill_field(&mut self, field_id: FieldId, value: &str) -> Result<()> {
+        let selector = field_id
+            .web_selector()
+            .ok_or_else(|| anyhow!("field {field_id:?} does not have a web selector"))?;
+        self.fill_input(&selector, value)
+    }
+
+    fn activate_list_item(&mut self, list_id: ListId, item_id: &str) -> Result<()> {
+        if matches!(list_id, ListId::Navigation) {
+            let control_id = match item_id {
+                "neighborhood" => ControlId::NavNeighborhood,
+                "chat" => ControlId::NavChat,
+                "contacts" => ControlId::NavContacts,
+                "notifications" => ControlId::NavNotifications,
+                "settings" => ControlId::NavSettings,
+                _ => anyhow::bail!("item {item_id} not found in list {list_id:?}"),
+            };
+            return self.activate_control(control_id);
+        }
+
+        let selector = list_item_selector(list_id, item_id);
+        self.click_target(&selector)
     }
 
     fn tail_log(&self, lines: usize) -> Result<Vec<String>> {

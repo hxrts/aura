@@ -167,9 +167,9 @@ pub use crate::scenario_contract::{
     VariableAction as SemanticVariableAction,
 };
 pub use crate::ui_contract::{
-    ControlId, FieldId, ListId, ModalId, OperationId, OperationSnapshot, OperationState, ScreenId,
-    SelectionSnapshot as UiSelectionSnapshot, ToastId, ToastKind, ToastSnapshot as UiToastSnapshot,
-    UiReadiness, UiSnapshot,
+    ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationSnapshot,
+    OperationState, ScreenId, SelectionSnapshot as UiSelectionSnapshot, ToastId, ToastKind,
+    ToastSnapshot as UiToastSnapshot, UiReadiness, UiSnapshot,
 };
 pub use crate::views::{
     Channel, ChannelType, ChatState, ContactsState, HomeState, InvitationsState, Message,

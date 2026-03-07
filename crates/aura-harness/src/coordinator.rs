@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
-use aura_app::ui::contract::UiSnapshot;
+use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
 
 use crate::backend::BackendHandle;
 use crate::config::{InstanceMode, RunConfig, ScreenSource};
@@ -180,6 +180,20 @@ impl HarnessCoordinator {
         backend.as_trait_mut().click_button(label)
     }
 
+    pub fn activate_control(&mut self, instance_id: &str, control_id: ControlId) -> Result<()> {
+        let backend = self
+            .backends
+            .get_mut(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        self.events.push(
+            "action",
+            "activate_control",
+            Some(instance_id.to_string()),
+            serde_json::json!({ "control_id": control_id }),
+        );
+        backend.as_trait_mut().activate_control(control_id)
+    }
+
     pub fn click_target(&mut self, instance_id: &str, selector: &str) -> Result<()> {
         let backend = self
             .backends
@@ -209,6 +223,45 @@ impl HarnessCoordinator {
             }),
         );
         backend.as_trait_mut().fill_input(selector, value)
+    }
+
+    pub fn fill_field(&mut self, instance_id: &str, field_id: FieldId, value: &str) -> Result<()> {
+        let backend = self
+            .backends
+            .get_mut(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        self.events.push(
+            "action",
+            "fill_field",
+            Some(instance_id.to_string()),
+            serde_json::json!({
+                "field_id": field_id,
+                "bytes": value.len()
+            }),
+        );
+        backend.as_trait_mut().fill_field(field_id, value)
+    }
+
+    pub fn activate_list_item(
+        &mut self,
+        instance_id: &str,
+        list_id: ListId,
+        item_id: &str,
+    ) -> Result<()> {
+        let backend = self
+            .backends
+            .get_mut(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        self.events.push(
+            "action",
+            "activate_list_item",
+            Some(instance_id.to_string()),
+            serde_json::json!({
+                "list_id": list_id,
+                "item_id": item_id,
+            }),
+        );
+        backend.as_trait_mut().activate_list_item(list_id, item_id)
     }
 
     pub fn wait_for(

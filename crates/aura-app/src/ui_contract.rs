@@ -62,6 +62,7 @@ pub enum FieldId {
     InvitationCode,
     InvitationReceiver,
     ChatInput,
+    HomeName,
     CreateChannelName,
     CreateChannelTopic,
     ThresholdInput,
@@ -71,6 +72,45 @@ pub enum FieldId {
     CapabilityFull,
     CapabilityPartial,
     CapabilityLimited,
+}
+
+impl FieldId {
+    #[must_use]
+    pub const fn web_dom_id(self) -> Option<&'static str> {
+        match self {
+            Self::AccountName => Some("aura-account-name-input"),
+            Self::DeviceImportCode => Some("aura-account-import-code-input"),
+            Self::InvitationCode => Some("aura-field-invitation-code"),
+            Self::InvitationReceiver => Some("aura-field-invitation-receiver"),
+            Self::ChatInput => Some("aura-field-chat-input"),
+            Self::HomeName => Some("aura-field-home-name"),
+            Self::CreateChannelName => Some("aura-field-create-channel-name"),
+            Self::CreateChannelTopic => Some("aura-field-create-channel-topic"),
+            Self::ThresholdInput => Some("aura-field-threshold-input"),
+            Self::Nickname => Some("aura-field-nickname"),
+            Self::DeviceName => Some("aura-field-device-name"),
+            Self::CapabilityFull => Some("aura-field-capability-full"),
+            Self::CapabilityPartial => Some("aura-field-capability-partial"),
+            Self::CapabilityLimited => Some("aura-field-capability-limited"),
+        }
+    }
+
+    #[must_use]
+    pub fn web_selector(self) -> Option<String> {
+        self.web_dom_id().map(|id| format!("#{id}"))
+    }
+}
+
+fn sanitize_dom_segment(raw: &str) -> String {
+    raw.chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -87,16 +127,93 @@ pub enum ListId {
     SettingsSections,
 }
 
+impl ListId {
+    #[must_use]
+    pub const fn dom_segment(self) -> &'static str {
+        match self {
+            Self::Navigation => "navigation",
+            Self::Channels => "channels",
+            Self::Contacts => "contacts",
+            Self::Notifications => "notifications",
+            Self::Homes => "homes",
+            Self::NeighborhoodMembers => "neighborhood-members",
+            Self::Devices => "devices",
+            Self::Authorities => "authorities",
+            Self::SettingsSections => "settings-sections",
+        }
+    }
+}
+
+#[must_use]
+pub fn list_item_dom_id(list_id: ListId, item_id: &str) -> String {
+    format!(
+        "aura-list-{}-item-{}",
+        list_id.dom_segment(),
+        sanitize_dom_segment(item_id)
+    )
+}
+
+#[must_use]
+pub fn list_item_selector(list_id: ListId, item_id: &str) -> String {
+    format!("#{}", list_item_dom_id(list_id, item_id))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ControlId {
     AppRoot,
     OnboardingRoot,
+    ModalRegion,
+    ToastRegion,
+    OnboardingCreateAccountButton,
+    OnboardingImportDeviceButton,
     NavRoot,
+    NavNeighborhood,
+    NavChat,
+    NavContacts,
+    NavNotifications,
+    NavSettings,
     Screen(ScreenId),
     Field(FieldId),
     List(ListId),
     Modal(ModalId),
+    ModalConfirmButton,
+    ModalCancelButton,
+    ContactsAcceptInvitationButton,
+}
+
+impl ControlId {
+    #[must_use]
+    pub const fn web_dom_id(self) -> Option<&'static str> {
+        match self {
+            Self::AppRoot => Some("aura-app-root"),
+            Self::OnboardingRoot => Some("aura-onboarding-root"),
+            Self::ModalRegion => Some("aura-modal-region"),
+            Self::ToastRegion => Some("aura-toast-region"),
+            Self::OnboardingCreateAccountButton => Some("aura-onboarding-create-account-button"),
+            Self::OnboardingImportDeviceButton => Some("aura-onboarding-import-device-button"),
+            Self::NavRoot => Some("aura-nav-root"),
+            Self::NavNeighborhood => Some("aura-nav-neighborhood"),
+            Self::NavChat => Some("aura-nav-chat"),
+            Self::NavContacts => Some("aura-nav-contacts"),
+            Self::NavNotifications => Some("aura-nav-notifications"),
+            Self::NavSettings => Some("aura-nav-settings"),
+            Self::ModalConfirmButton => Some("aura-modal-confirm-button"),
+            Self::ModalCancelButton => Some("aura-modal-cancel-button"),
+            Self::ContactsAcceptInvitationButton => Some("aura-contacts-accept-invitation"),
+            Self::Screen(ScreenId::Neighborhood) => Some("aura-screen-neighborhood"),
+            Self::Screen(ScreenId::Chat) => Some("aura-screen-chat"),
+            Self::Screen(ScreenId::Contacts) => Some("aura-screen-contacts"),
+            Self::Screen(ScreenId::Notifications) => Some("aura-screen-notifications"),
+            Self::Screen(ScreenId::Settings) => Some("aura-screen-settings"),
+            Self::Field(_) | Self::List(_) | Self::Modal(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub fn web_selector(self) -> Option<String> {
+        self.web_dom_id().map(|id| format!("#{id}"))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -127,6 +244,13 @@ pub enum OperationState {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfirmationState {
+    PendingLocal,
+    Confirmed,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct OperationId(pub String);
@@ -142,6 +266,7 @@ pub struct ToastSnapshot {
 pub struct ListItemSnapshot {
     pub id: String,
     pub selected: bool,
+    pub confirmation: ConfirmationState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,7 +317,10 @@ impl UiSnapshot {
 
 #[cfg(test)]
 mod tests {
-    use super::{ControlId, ScreenId, UiReadiness, UiSnapshot};
+    use super::{
+        list_item_dom_id, list_item_selector, ConfirmationState, ControlId, FieldId, ListId,
+        ScreenId, UiReadiness, UiSnapshot,
+    };
 
     #[test]
     fn screen_ids_have_stable_help_labels() {
@@ -225,6 +353,47 @@ mod tests {
         assert_ne!(
             ControlId::Screen(ScreenId::Chat),
             ControlId::Screen(ScreenId::Contacts)
+        );
+    }
+
+    #[test]
+    fn web_dom_ids_are_stable_for_shared_controls() {
+        assert_eq!(
+            ControlId::OnboardingCreateAccountButton.web_dom_id(),
+            Some("aura-onboarding-create-account-button")
+        );
+        assert_eq!(ControlId::AppRoot.web_dom_id(), Some("aura-app-root"));
+        assert_eq!(ControlId::ModalRegion.web_dom_id(), Some("aura-modal-region"));
+        assert_eq!(ControlId::ToastRegion.web_dom_id(), Some("aura-toast-region"));
+        assert_eq!(ControlId::NavContacts.web_dom_id(), Some("aura-nav-contacts"));
+        assert_eq!(
+            ControlId::Screen(ScreenId::Settings).web_dom_id(),
+            Some("aura-screen-settings")
+        );
+        assert_eq!(
+            ControlId::ModalConfirmButton.web_selector().as_deref(),
+            Some("#aura-modal-confirm-button")
+        );
+    }
+
+    #[test]
+    fn web_dom_ids_are_stable_for_shared_fields() {
+        assert_eq!(FieldId::AccountName.web_dom_id(), Some("aura-account-name-input"));
+        assert_eq!(
+            FieldId::InvitationCode.web_selector().as_deref(),
+            Some("#aura-field-invitation-code")
+        );
+    }
+
+    #[test]
+    fn list_item_dom_ids_are_stable_and_sanitized() {
+        assert_eq!(
+            list_item_dom_id(ListId::Contacts, "authority:abc/DEF"),
+            "aura-list-contacts-item-authority-abc-def"
+        );
+        assert_eq!(
+            list_item_selector(ListId::SettingsSections, "devices"),
+            "#aura-list-settings-sections-item-devices"
         );
     }
 }

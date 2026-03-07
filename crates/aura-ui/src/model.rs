@@ -9,8 +9,8 @@ use crate::snapshot::render_canonical_snapshot;
 use async_lock::RwLock as AsyncRwLock;
 use aura_app::{
     ui::contract::{
-        ControlId, ListId, ListItemSnapshot, ListSnapshot, ModalId, SelectionSnapshot, ToastId,
-        ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
+        ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot, ListSnapshot, ModalId,
+        SelectionSnapshot, ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
     },
     AppCore,
 };
@@ -82,6 +82,7 @@ pub struct ContactRow {
     pub name: String,
     pub selected: bool,
     pub is_guardian: bool,
+    pub confirmation: ConfirmationState,
 }
 
 #[derive(Debug, Clone)]
@@ -743,6 +744,47 @@ impl UiModel {
     }
 
     #[must_use]
+    pub fn modal_field_id(&self) -> Option<FieldId> {
+        let active_modal = self.active_modal.as_ref()?;
+        match active_modal {
+            ActiveModal::CreateInvitation(_) => Some(FieldId::InvitationReceiver),
+            ActiveModal::AcceptInvitation(_) => Some(FieldId::InvitationCode),
+            ActiveModal::CreateHome(_) => Some(FieldId::HomeName),
+            ActiveModal::SetChannelTopic(_) => Some(FieldId::CreateChannelTopic),
+            ActiveModal::EditNickname(_) => Some(FieldId::Nickname),
+            ActiveModal::ImportDeviceEnrollmentCode(_) => Some(FieldId::DeviceImportCode),
+            ActiveModal::CreateChannel(state) => match state.step {
+                CreateChannelWizardStep::Details => Some(match state.active_field {
+                    CreateChannelDetailsField::Name => FieldId::CreateChannelName,
+                    CreateChannelDetailsField::Topic => FieldId::CreateChannelTopic,
+                }),
+                CreateChannelWizardStep::Threshold => Some(FieldId::ThresholdInput),
+                CreateChannelWizardStep::Members => None,
+            },
+            ActiveModal::GuardianSetup(state) | ActiveModal::MfaSetup(state) => {
+                if matches!(state.step, ThresholdWizardStep::Threshold) {
+                    Some(FieldId::ThresholdInput)
+                } else {
+                    None
+                }
+            }
+            ActiveModal::AddDevice(state) => {
+                if matches!(state.step, AddDeviceWizardStep::Name) {
+                    Some(FieldId::DeviceName)
+                } else {
+                    None
+                }
+            }
+            ActiveModal::CapabilityConfig(state) => Some(match state.active_tier {
+                CapabilityTier::Full => FieldId::CapabilityFull,
+                CapabilityTier::Partial => FieldId::CapabilityPartial,
+                CapabilityTier::Limited => FieldId::CapabilityLimited,
+            }),
+            _ => None,
+        }
+    }
+
+    #[must_use]
     pub fn modal_text_value(&self) -> Option<String> {
         let active_modal = self.active_modal.as_ref()?;
         match active_modal {
@@ -918,6 +960,7 @@ impl UiModel {
             name: name.to_string(),
             selected: self.contacts.is_empty(),
             is_guardian: false,
+            confirmation: ConfirmationState::Confirmed,
         });
         if self.contacts.len() == 1 {
             self.selected_contact_id = Some(authority_id);
@@ -937,6 +980,7 @@ impl UiModel {
         {
             existing.name = name;
             existing.is_guardian = is_guardian;
+            existing.confirmation = ConfirmationState::Confirmed;
             return;
         }
 
@@ -945,6 +989,7 @@ impl UiModel {
             name,
             selected: self.contacts.is_empty(),
             is_guardian,
+            confirmation: ConfirmationState::PendingLocal,
         });
 
         if self.selected_contact_id.is_none() {
@@ -1113,6 +1158,7 @@ impl UiModel {
                 name,
                 selected: false,
                 is_guardian,
+                confirmation: ConfirmationState::Confirmed,
             })
             .collect();
 
@@ -1224,12 +1270,36 @@ impl UiModel {
         let mut lists = Vec::new();
         let mut selections = Vec::new();
 
+        let navigation_items = [
+            UiScreen::Neighborhood,
+            UiScreen::Chat,
+            UiScreen::Contacts,
+            UiScreen::Notifications,
+            UiScreen::Settings,
+        ]
+        .into_iter()
+        .map(|screen| ListItemSnapshot {
+            id: screen.help_label().to_ascii_lowercase(),
+            selected: self.screen == screen,
+            confirmation: ConfirmationState::Confirmed,
+        })
+        .collect::<Vec<_>>();
+        lists.push(ListSnapshot {
+            id: ListId::Navigation,
+            items: navigation_items,
+        });
+        selections.push(SelectionSnapshot {
+            list: ListId::Navigation,
+            item_id: self.screen.help_label().to_ascii_lowercase(),
+        });
+
         let channel_items = self
             .channels
             .iter()
             .map(|channel| ListItemSnapshot {
                 id: channel.name.clone(),
                 selected: channel.selected,
+                confirmation: ConfirmationState::Confirmed,
             })
             .collect::<Vec<_>>();
         if !channel_items.is_empty() {
@@ -1251,6 +1321,7 @@ impl UiModel {
             .map(|contact| ListItemSnapshot {
                 id: contact.authority_id.to_string(),
                 selected: contact.selected,
+                confirmation: contact.confirmation,
             })
             .collect::<Vec<_>>();
         if !contact_items.is_empty() {
@@ -1272,6 +1343,7 @@ impl UiModel {
             .map(|authority| ListItemSnapshot {
                 id: authority.id.to_string(),
                 selected: authority.selected,
+                confirmation: ConfirmationState::Confirmed,
             })
             .collect::<Vec<_>>();
         if !authority_items.is_empty() {
@@ -1293,6 +1365,7 @@ impl UiModel {
             .map(|notification| ListItemSnapshot {
                 id: notification.0.clone(),
                 selected: self.selected_notification_id.as_ref() == Some(notification),
+                confirmation: ConfirmationState::Confirmed,
             })
             .collect::<Vec<_>>();
         if !notification_items.is_empty() {
@@ -1307,6 +1380,23 @@ impl UiModel {
                 item_id: notification_id.0.clone(),
             });
         }
+
+        let settings_items = SettingsSection::ALL
+            .into_iter()
+            .map(|section| ListItemSnapshot {
+                id: section.dom_id().to_string(),
+                selected: self.settings_section == section,
+                confirmation: ConfirmationState::Confirmed,
+            })
+            .collect::<Vec<_>>();
+        lists.push(ListSnapshot {
+            id: ListId::SettingsSections,
+            items: settings_items,
+        });
+        selections.push(SelectionSnapshot {
+            list: ListId::SettingsSections,
+            item_id: self.settings_section.dom_id().to_string(),
+        });
 
         let mut toasts = Vec::new();
         if let Some(toast) = &self.toast {
@@ -1354,6 +1444,7 @@ pub struct RenderedHarnessSnapshot {
 pub struct UiController {
     app_core: Arc<AsyncRwLock<AppCore>>,
     model: RwLock<UiModel>,
+    ui_snapshot_override: RwLock<Option<UiSnapshot>>,
     clipboard: Arc<dyn ClipboardPort>,
     authority_switcher: Option<Arc<dyn Fn(AuthorityId) + Send + Sync>>,
     rerender: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
@@ -1398,6 +1489,7 @@ impl UiController {
         Self {
             app_core,
             model: RwLock::new(UiModel::new(authority_id)),
+            ui_snapshot_override: RwLock::new(None),
             clipboard,
             authority_switcher,
             rerender: Mutex::new(None),
@@ -1709,7 +1801,17 @@ impl UiController {
     }
 
     pub fn ui_snapshot(&self) -> UiSnapshot {
-        read_model(&self.model).semantic_snapshot()
+        self.ui_snapshot_override
+            .read()
+            .ok()
+            .and_then(|snapshot| snapshot.clone())
+            .unwrap_or_else(|| read_model(&self.model).semantic_snapshot())
+    }
+
+    pub fn set_ui_snapshot(&self, snapshot: UiSnapshot) {
+        if let Ok(mut slot) = self.ui_snapshot_override.write() {
+            *slot = Some(snapshot);
+        }
     }
 
     pub fn read_clipboard(&self) -> String {

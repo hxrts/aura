@@ -31,6 +31,7 @@ fn contract_pty_control_path() {
     assert_ok(api.handle_request(ToolRequest::WaitFor {
         instance_id: "alice".to_string(),
         pattern: "contract-pty".to_string(),
+        selector: None,
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
     }));
@@ -75,6 +76,7 @@ fn contract_replay_and_artifacts_subsystems() {
     assert_ok(api.handle_request(ToolRequest::WaitFor {
         instance_id: "alice".to_string(),
         pattern: "contract-replay".to_string(),
+        selector: None,
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
     }));

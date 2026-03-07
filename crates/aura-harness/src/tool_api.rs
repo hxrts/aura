@@ -3,7 +3,7 @@
 //! Defines request/response types and dispatch logic for the harness tool API,
 //! enabling test clients to send input, capture screens, and query instance state.
 
-use aura_app::ui::contract::UiSnapshot;
+use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
 use serde::{Deserialize, Serialize};
 
 use crate::api_version::{negotiate, TOOL_API_DEFAULT_VERSION, TOOL_API_VERSIONS};
@@ -81,6 +81,15 @@ pub enum ToolRequest {
         #[serde(default)]
         repeat: u16,
     },
+    ActivateControl {
+        instance_id: String,
+        control_id: ControlId,
+    },
+    ActivateListItem {
+        instance_id: String,
+        list_id: ListId,
+        item_id: String,
+    },
     ClickButton {
         instance_id: String,
         label: String,
@@ -89,6 +98,11 @@ pub enum ToolRequest {
     FillInput {
         instance_id: String,
         selector: String,
+        value: String,
+    },
+    FillField {
+        instance_id: String,
+        field_id: FieldId,
         value: String,
     },
     WaitFor {
@@ -228,6 +242,21 @@ impl ToolApi {
                 .coordinator
                 .send_key(&instance_id, key, repeat)
                 .map(|_| serde_json::json!({ "status": "sent" })),
+            ToolRequest::ActivateControl {
+                instance_id,
+                control_id,
+            } => self
+                .coordinator
+                .activate_control(&instance_id, control_id)
+                .map(|_| serde_json::json!({ "status": "activated" })),
+            ToolRequest::ActivateListItem {
+                instance_id,
+                list_id,
+                item_id,
+            } => self
+                .coordinator
+                .activate_list_item(&instance_id, list_id, &item_id)
+                .map(|_| serde_json::json!({ "status": "activated" })),
             ToolRequest::ClickButton {
                 instance_id,
                 label,
@@ -247,6 +276,14 @@ impl ToolApi {
             } => self
                 .coordinator
                 .fill_input(&instance_id, &selector, &value)
+                .map(|_| serde_json::json!({ "status": "filled" })),
+            ToolRequest::FillField {
+                instance_id,
+                field_id,
+                value,
+            } => self
+                .coordinator
+                .fill_field(&instance_id, field_id, &value)
                 .map(|_| serde_json::json!({ "status": "filled" })),
             ToolRequest::WaitFor {
                 instance_id,
