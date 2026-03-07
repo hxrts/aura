@@ -527,8 +527,8 @@ Key files when debugging browser failures:
 `aura-ui` is the shared Dioxus UI core for web-first delivery today and future multi-target shells:
 
 1. `aura-web` (current): browser shell and harness bridge.
-2. `aura-desktop` (future): desktop shell reusing `aura-ui`.
-3. `aura-mobile` (future): mobile shell reusing `aura-ui`.
+2. aura-desktop (future): desktop shell reusing `aura-ui`.
+3. aura-mobile (future): mobile shell reusing `aura-ui`.
 
 ## Related Documentation
 

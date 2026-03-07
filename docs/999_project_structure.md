@@ -771,7 +771,7 @@ Application effects encode Aura-specific abstractions and business logic. These 
 - `AuthorityEffects`: Authority-specific operations, central to Aura's identity model
 - `FlowBudgetEffects`: Privacy budget management, unique to Aura's information flow control (aura-authorization)
 - `AuthorizationEffects`: Biscuit token evaluation, tied to Aura's capability system (aura-authorization)
-- `RelationalContextEffects`: Cross-authority relationship management
+- `RelationalEffects`: Cross-authority relationship management
 - `GuardianEffects`: Recovery protocol operations
 
 **Protocol Coordination Effects** (new category):

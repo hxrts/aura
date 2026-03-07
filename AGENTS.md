@@ -56,7 +56,7 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
 - **Effect traits defined in `aura-core` only** — all trait definitions, nowhere else
 - **Guard chain sequence**: AuthorizationEffects (Biscuit/capabilities) → FlowBudgetEffects (charge-before-send) → LeakageEffects → JournalEffects (fact commit) → TransportEffects
 - **Consensus is NOT linearizable** — use session types for operation sequencing
-- **Hybrid journal**: fact journal (join) + capability frontier (meet) combined as `JournalState`
+- **Hybrid journal**: fact journal (join) + capability frontier (meet) combined as journal state
 - **Flow budgets**: only `spent` counters are facts; limits derived at runtime from Biscuit + policy
 - **No direct impure functions** outside effect implementations — no `SystemTime::now()`, `thread_rng()`, `std::fs` in application code
 - **Unified encryption-at-rest**: `aura-effects::EncryptedStorage` wraps `StorageEffects`; no ad-hoc storage encryption
@@ -70,7 +70,7 @@ Use `cfg_if::cfg_if!` to group related conditional items when it improves readab
 ### Authority Model
 
 - Identity via opaque `AuthorityId` and relational `ContextId`
-- Commitment trees expressed as fact-based `AttestedOps` (`aura-journal/src/fact.rs`)
+- Commitment trees expressed as fact-based `AttestedOp` (`aura-journal/src/fact.rs`)
 - Relational contexts (guardian bindings, recovery grants) live in their own journals
 - Aura Consensus is the sole strong-agreement mechanism
 - **Transaction Model**: (1) Authority Scope (single vs cross-authority) × (2) Agreement Level (monotone/CRDT vs consensus). Monotone = 0 RTT, consensus = 1-3 RTT.
@@ -244,7 +244,7 @@ Four domains via effect traits (no direct `SystemTime::now()` or chrono):
 | `PhysicalTimeEffects` | `PhysicalClock(PhysicalTime)` | Wall-clock, expiration, receipts |
 | `LogicalClockEffects` | `LogicalClock(LogicalTime)` | Vector/Lamport for causality |
 | `OrderClockEffects` | `OrderClock(OrderTime)` | Privacy-preserving ordering (no timing leakage) |
-| `TimeAttestationEffects` | `Range(RangeTime)` | Validity windows, provenance proofs |
+| `TimeComparison` | `Range(RangeTime)` | Validity windows, ordering comparison |
 
 **Key principles**: Domain separation based on semantics. OrderClock leaks no timing. All time access via traits.
 
@@ -260,9 +260,3 @@ Four domains via effect traits (no direct `SystemTime::now()` or chrono):
 - Use `just check-arch` before complex refactoring
 - Use `.claude/skills/` for project-specific knowledge
 - Batch operations and parallel tool calls when possible
-
-## Legacy Notes
-
-- `aura-frost` deprecated → use `aura-core::crypto::tree_signing`
-- Graph-based `journal_ops` removed → use fact-based `AttestedOps`
-- `DeviceMetadata`/`DeviceRegistry` removed → derive from `LeafNode`

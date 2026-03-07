@@ -95,7 +95,7 @@ This split keeps domain semantics centralized. It also makes it possible to reus
 
 UI code must never read OS clocks (for example, `SystemTime::now()` or `Instant::now()`). All wall-clock needs must flow through algebraic effects (`PhysicalTimeEffects` via the handler/effect system). Demo mode and relative-time UI (e.g., “Synced Xm ago”) must be driven by runtime time so simulations remain deterministic.
 
-Aura time domains are: `PhysicalClock` (wall time), `LogicalClock` (causality), `OrderClock` (privacy-preserving ordering), and `Range` (validity windows). When attested time is required, use `ProvenancedTime`/`TimeAttestationEffects` rather than embedding OS timestamps in UI state.
+Aura time domains are: `PhysicalClock` (wall time), `LogicalClock` (causality), `OrderClock` (privacy-preserving ordering), and `Range` (validity windows). When attested time is required, use `ProvenancedTime`/`TimeComparison` rather than embedding OS timestamps in UI state.
 
 Ordering across domains must be explicit: use `TimeStamp::compare(policy)` (never compare raw ms) when you need deterministic ordering across mixed time domains.
 

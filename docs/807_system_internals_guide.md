@@ -183,7 +183,7 @@ Lifecycle order:
 | `LogicalClock` | `LogicalClockEffects` | Causal ordering: CRDT merge, happens-before |
 | `OrderClock` | `OrderClockEffects` | Deterministic ordering without timing leakage |
 | `Range` | `PhysicalTimeEffects` + policy | Validity windows with bounded skew |
-| `ProvenancedTime` | `TimeAttestationEffects` | Attested timestamps for consensus |
+| `ProvenancedTime` | `TimeComparison` | Attested timestamps for consensus |
 
 **Guidelines**:
 - Use effect traits for all time reads (no `SystemTime::now()`)
