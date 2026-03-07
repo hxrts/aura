@@ -7,12 +7,10 @@
 
 use std::sync::Arc;
 
-use async_lock::RwLock;
-use aura_app::ui::prelude::*;
-use aura_core::identifiers::AuthorityId;
-
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
+use async_lock::RwLock;
+use aura_app::ui::prelude::*;
 
 /// Handle network/peer commands
 ///
@@ -24,16 +22,8 @@ pub async fn handle_network(
 ) -> Option<OpResult> {
     match command {
         EffectCommand::AddPeer { peer_id } => {
-            let parsed_peer = match peer_id.parse::<AuthorityId>() {
-                Ok(peer) => peer,
-                Err(error) => {
-                    return Some(Err(OpError::Failed(format!(
-                        "Invalid peer authority ID '{peer_id}': {error}"
-                    ))));
-                }
-            };
             // Delegate to workflow - it manages peer state in AppCore signals
-            match aura_app::ui::workflows::network::add_peer(app_core, parsed_peer).await {
+            match aura_app::ui::workflows::network::add_peer(app_core, *peer_id).await {
                 Ok(count) => {
                     tracing::info!("Added peer: {} (total: {})", peer_id, count);
                     Some(Ok(OpResponse::Ok))
@@ -46,16 +36,8 @@ pub async fn handle_network(
         }
 
         EffectCommand::RemovePeer { peer_id } => {
-            let parsed_peer = match peer_id.parse::<AuthorityId>() {
-                Ok(peer) => peer,
-                Err(error) => {
-                    return Some(Err(OpError::Failed(format!(
-                        "Invalid peer authority ID '{peer_id}': {error}"
-                    ))));
-                }
-            };
             // Delegate to workflow - it manages peer state in AppCore signals
-            match aura_app::ui::workflows::network::remove_peer(app_core, &parsed_peer).await {
+            match aura_app::ui::workflows::network::remove_peer(app_core, peer_id).await {
                 Ok(count) => {
                     tracing::info!("Removed peer: {} (remaining: {})", peer_id, count);
                     Some(Ok(OpResponse::Ok))
@@ -72,7 +54,7 @@ pub async fn handle_network(
             match aura_app::ui::workflows::network::list_peers(app_core, now_ms).await {
                 Ok(peer_list) => {
                     tracing::info!("Listed {} peers", peer_list.len());
-                    Some(Ok(OpResponse::List(peer_list)))
+                    Some(Ok(OpResponse::PeersListed { peers: peer_list }))
                 }
                 Err(e) => Some(Err(OpError::Failed(e.to_string()))),
             }
@@ -83,9 +65,9 @@ pub async fn handle_network(
             match aura_app::ui::workflows::network::discover_peers(app_core, now_ms).await {
                 Ok(discovered) => {
                     tracing::info!("Peer discovery triggered");
-                    Some(Ok(OpResponse::Data(format!(
-                        "Discovery active, {discovered} peers known"
-                    ))))
+                    Some(Ok(OpResponse::PeerDiscoveryTriggered {
+                        known_peers: discovered,
+                    }))
                 }
                 Err(e) => Some(Err(OpError::Failed(e.to_string()))),
             }
@@ -96,7 +78,7 @@ pub async fn handle_network(
             match aura_app::ui::workflows::network::list_lan_peers(app_core, now_ms).await {
                 Ok(peer_list) => {
                     tracing::info!("Found {} LAN peers", peer_list.len());
-                    Some(Ok(OpResponse::List(peer_list)))
+                    Some(Ok(OpResponse::LanPeersListed { peers: peer_list }))
                 }
                 Err(e) => Some(Err(OpError::Failed(e.to_string()))),
             }
@@ -119,17 +101,24 @@ pub async fn handle_network(
             let app_core_guard = app_core.read().await;
 
             // Generate invitation ID from authority
-            let invitation_id =
-                format!("lan-invite-{}", &authority_id[..8.min(authority_id.len())]);
+            let authority_id_str = authority_id.to_string();
+            let invitation_id = format!(
+                "lan-invite-{}",
+                &authority_id_str[..8.min(authority_id_str.len())]
+            );
 
             // Export the invitation code
             let code = match app_core_guard.export_invitation(&invitation_id).await {
                 Ok(code) => code,
                 Err(e) => {
                     tracing::debug!("Could not export invitation (no runtime): {}", e);
-                    return Some(Ok(OpResponse::Data(format!(
-                        "LAN invitation queued for {authority_id} at {address} (requires runtime)"
-                    ))));
+                    return Some(Ok(OpResponse::LanInvitationStatus {
+                        authority_id: authority_id.to_string(),
+                        address: address.clone(),
+                        message: format!(
+                            "LAN invitation queued for {authority_id} at {address} (requires runtime)"
+                        ),
+                    }));
                 }
             };
 
@@ -137,9 +126,7 @@ pub async fn handle_network(
             if let Some(runtime) = app_core_guard.runtime() {
                 // Create LanPeerInfo for the bridge call (type from ui::prelude)
                 let peer_info = LanPeerInfo {
-                    authority_id: authority_id
-                        .parse()
-                        .unwrap_or_else(|_| AuthorityId::new_from_entropy([0u8; 32])),
+                    authority_id: *authority_id,
                     address: address.clone(),
                     discovered_at_ms: 0,
                     nickname_suggestion: None,
@@ -148,26 +135,36 @@ pub async fn handle_network(
                 match runtime.send_lan_invitation(&peer_info, &code).await {
                     Ok(()) => {
                         tracing::info!("Sent LAN invitation to {}", address);
-                        Some(Ok(OpResponse::Data(format!(
-                            "Invitation sent to {address} via LAN",
-                        ))))
+                        Some(Ok(OpResponse::LanInvitationStatus {
+                            authority_id: authority_id.to_string(),
+                            address: address.clone(),
+                            message: format!("Invitation sent to {address} via LAN"),
+                        }))
                     }
                     Err(e) => {
                         tracing::warn!("Failed to send LAN invitation: {}", e);
                         // Fall back to showing the code for manual sharing
-                        Some(Ok(OpResponse::Data(format!(
-                            "LAN send failed ({}), share code manually: {}",
-                            e,
-                            &code[..50.min(code.len())]
-                        ))))
+                        Some(Ok(OpResponse::LanInvitationStatus {
+                            authority_id: authority_id.to_string(),
+                            address: address.clone(),
+                            message: format!(
+                                "LAN send failed ({}), share code manually: {}",
+                                e,
+                                &code[..50.min(code.len())]
+                            ),
+                        }))
                     }
                 }
             } else {
                 // No runtime - show code for manual sharing
-                Some(Ok(OpResponse::Data(format!(
-                    "No runtime available. Share invitation code manually: {}",
-                    &code[..50.min(code.len())]
-                ))))
+                Some(Ok(OpResponse::LanInvitationStatus {
+                    authority_id: authority_id.to_string(),
+                    address: address.clone(),
+                    message: format!(
+                        "No runtime available. Share invitation code manually: {}",
+                        &code[..50.min(code.len())]
+                    ),
+                }))
             }
         }
 

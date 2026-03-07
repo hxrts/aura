@@ -502,7 +502,14 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
     // Authority picker modal
     let (authority_picker_visible, authority_picker_contacts, authority_picker_selected) =
         match state.modal_queue.current() {
-            Some(QueuedModal::AuthorityPicker(s)) => (true, s.contacts.clone(), s.selected_index),
+            Some(QueuedModal::AuthorityPicker(s)) => (
+                true,
+                s.contacts
+                    .iter()
+                    .map(|(id, name)| (id.to_string(), name.clone()))
+                    .collect(),
+                s.selected_index,
+            ),
             _ => (false, vec![], 0),
         };
 
@@ -582,7 +589,7 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
     ) = match state.modal_queue.current() {
         Some(QueuedModal::SettingsRemoveDevice(s)) => (
             true,
-            s.device_id.clone(),
+            s.device_id.to_string(),
             s.display_name.clone(),
             s.confirm_focused,
         ),

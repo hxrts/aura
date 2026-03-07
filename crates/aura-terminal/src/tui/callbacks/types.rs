@@ -4,6 +4,9 @@
 
 use std::sync::Arc;
 
+use crate::tui::state::DeviceId;
+use aura_core::AuthorityId;
+
 // =============================================================================
 // Base Callback Types
 // =============================================================================
@@ -38,7 +41,7 @@ pub type ThresholdCallback = Arc<dyn Fn(u8, u8) + Send + Sync>;
 /// - optional message
 /// - optional TTL (seconds)
 pub type CreateInvitationCallbackType =
-    Arc<dyn Fn(String, String, Option<String>, Option<u64>) + Send + Sync>;
+    Arc<dyn Fn(AuthorityId, String, Option<String>, Option<u64>) + Send + Sync>;
 
 // =============================================================================
 // Semantic Type Aliases
@@ -64,8 +67,8 @@ pub type ApprovalCallback = IdCallback;
 // --- Settings Screen ---
 pub type UpdateNicknameSuggestionCallback = IdCallback;
 /// Callback for adding a device: (nickname, optional_invitee_authority_id)
-pub type AddDeviceCallback = StringOptStringCallback;
-pub type RemoveDeviceCallback = IdCallback;
+pub type AddDeviceCallback = Arc<dyn Fn(String, Option<AuthorityId>) + Send + Sync>;
+pub type RemoveDeviceCallback = Arc<dyn Fn(DeviceId) + Send + Sync>;
 pub type UpdateThresholdCallback = ThresholdCallback;
 pub type ImportDeviceEnrollmentCallback = IdCallback;
 

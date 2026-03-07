@@ -5,12 +5,13 @@
 
 use crate::clipboard::ClipboardPort;
 use crate::model::{
-    AccessDepth, AddDeviceWizardStep, ChannelRow, CreateChannelDetailsField,
-    CreateChannelWizardStep, ModalState, ThresholdWizardStep, ToastState, UiModel, UiScreen,
+    AccessDepth, AccessOverrideModalState, ActiveModal, AddDeviceModalState, AddDeviceWizardStep,
+    CapabilityConfigModalState, CapabilityTier, ChannelRow, CreateChannelDetailsField,
+    CreateChannelModalState, CreateChannelWizardStep, CreateInvitationModalState, ModalState,
+    SelectDeviceModalState, SelectedHome, SettingsSection, TextModalState,
+    ThresholdWizardModalState, ThresholdWizardStep, ToastState, UiModel, UiScreen,
 };
 use aura_app::ui::types::parse_chat_command;
-
-const SETTINGS_ROWS: usize = 6;
 
 fn set_toast(model: &mut UiModel, icon: char, message: impl Into<String>) {
     model.toast_key = model.toast_key.saturating_add(1);
@@ -71,7 +72,7 @@ fn apply_char(model: &mut UiModel, ch: char, clipboard: &dyn ClipboardPort) {
         return;
     }
 
-    if let Some(modal) = model.modal {
+    if let Some(modal) = model.modal_state() {
         if handle_modal_char(model, modal, ch, clipboard) {
             return;
         }
@@ -82,16 +83,16 @@ fn apply_char(model: &mut UiModel, ch: char, clipboard: &dyn ClipboardPort) {
                 return;
             }
         }
-        if modal_accepts_text(model, modal) {
-            model.modal_buffer.push(ch);
+        if model.modal_accepts_text() {
+            model.append_modal_text_char(ch);
         }
         return;
     }
 
     match ch {
         '?' => {
-            model.modal = Some(ModalState::Help);
             model.modal_hint = format!("Help - {}", model.screen.help_label());
+            model.active_modal = Some(ActiveModal::Help);
             return;
         }
         '1' => {
@@ -159,14 +160,15 @@ fn handle_chat_char(model: &mut UiModel, ch: char) {
             open_create_channel_wizard(model);
         }
         't' => {
-            model.modal = Some(ModalState::SetChannelTopic);
-            model.modal_buffer = model.selected_channel_topic().to_string();
             model.modal_hint = "Set Channel Topic".to_string();
+            model.active_modal = Some(ActiveModal::SetChannelTopic(TextModalState {
+                value: model.selected_channel_topic().to_string(),
+            }));
         }
         'o' => {
-            model.modal = Some(ModalState::ChannelInfo);
             let channel = model.selected_channel_name().unwrap_or("general");
             model.modal_hint = format!("Channel: #{channel}");
+            model.active_modal = Some(ActiveModal::ChannelInfo);
         }
         'r' => {
             model.toast = Some(ToastState {
@@ -181,27 +183,27 @@ fn handle_chat_char(model: &mut UiModel, ch: char) {
 fn handle_contacts_char(model: &mut UiModel, ch: char) {
     match ch {
         'n' => {
-            model.modal = Some(ModalState::CreateInvitation);
-            model.modal_buffer = model
-                .selected_contact_authority_id()
-                .unwrap_or_default()
-                .to_string();
             model.modal_hint = "Invite Contacts".to_string();
-            model.create_invitation_receiver_label =
-                model.selected_contact_name().map(str::to_string);
+            model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
+                receiver_id: model
+                    .selected_contact_authority_id()
+                    .map(|authority_id| authority_id.to_string())
+                    .unwrap_or_default(),
+                receiver_label: model.selected_contact_name().map(str::to_string),
+            }));
         }
         'a' => {
-            model.modal = Some(ModalState::AcceptInvitation);
-            model.modal_buffer.clear();
             model.modal_hint = "Accept Invitation".to_string();
+            model.active_modal = Some(ActiveModal::AcceptInvitation(TextModalState::default()));
         }
         'e' => {
-            model.modal = Some(ModalState::EditNickname);
-            model.modal_buffer = model
-                .selected_contact_name()
-                .unwrap_or_default()
-                .to_string();
             model.modal_hint = "Edit Nickname".to_string();
+            model.active_modal = Some(ActiveModal::EditNickname(TextModalState {
+                value: model
+                    .selected_contact_name()
+                    .unwrap_or_default()
+                    .to_string(),
+            }));
         }
         'g' => {
             open_guardian_setup_wizard(model);
@@ -212,13 +214,11 @@ fn handle_contacts_char(model: &mut UiModel, ch: char) {
                 model.select_channel_by_name(&format!("DM: {contact}"));
             }
         }
-        'd' => {
-        }
-        'p' => {
-        }
+        'd' => {}
+        'p' => {}
         'r' => {
-            model.modal = Some(ModalState::RemoveContact);
             model.modal_hint = "Remove Contact".to_string();
+            model.active_modal = Some(ActiveModal::RemoveContact);
         }
         _ => {}
     }
@@ -227,14 +227,12 @@ fn handle_contacts_char(model: &mut UiModel, ch: char) {
 fn handle_neighborhood_char(model: &mut UiModel, ch: char) {
     match ch {
         'n' => {
-            model.modal = Some(ModalState::CreateHome);
-            model.modal_buffer.clear();
             model.modal_hint = "Create New Home".to_string();
+            model.active_modal = Some(ActiveModal::CreateHome(TextModalState::default()));
         }
         'a' => {
-            model.modal = Some(ModalState::AcceptInvitation);
-            model.modal_buffer.clear();
             model.modal_hint = "Accept Invitation".to_string();
+            model.active_modal = Some(ActiveModal::AcceptInvitation(TextModalState::default()));
         }
         'd' => {
             model.access_depth = model.access_depth.next();
@@ -243,15 +241,15 @@ fn handle_neighborhood_char(model: &mut UiModel, ch: char) {
                 message: model.access_depth.compact().to_string(),
             });
         }
-        'm' => {
-        }
-        'v' => {
-        }
-        'L' => {
-        }
+        'm' => {}
+        'v' => {}
+        'L' => {}
         'g' | 'H' => {
             if model.selected_home.is_none() {
-                model.selected_home = Some("Neighborhood".to_string());
+                model.selected_home = Some(SelectedHome {
+                    id: "Neighborhood".to_string(),
+                    name: "Neighborhood".to_string(),
+                });
             }
             model.toast = Some(ToastState {
                 icon: 'ℹ',
@@ -271,27 +269,28 @@ fn handle_neighborhood_char(model: &mut UiModel, ch: char) {
             crate::model::NeighborhoodMode::Detail
         ) =>
         {
-            model.modal = Some(ModalState::AssignModerator);
             model.modal_hint = "Assign Moderator".to_string();
+            model.active_modal = Some(ActiveModal::AssignModerator);
         }
         'x' if matches!(
             model.neighborhood_mode,
             crate::model::NeighborhoodMode::Detail
         ) =>
         {
-            model.modal = Some(ModalState::AccessOverride);
-            model.reset_access_override_editor();
             model.modal_hint = "Access Override".to_string();
+            model.active_modal = Some(ActiveModal::AccessOverride(
+                AccessOverrideModalState::default(),
+            ));
         }
         'p' if matches!(
             model.neighborhood_mode,
             crate::model::NeighborhoodMode::Detail
         ) =>
         {
-            model.modal = Some(ModalState::CapabilityConfig);
-            model.reset_capability_config_editor();
-            model.modal_buffer = model.capability_full_caps.clone();
             model.modal_hint = "Home Capability Configuration".to_string();
+            model.active_modal = Some(ActiveModal::CapabilityConfig(
+                CapabilityConfigModalState::default(),
+            ));
         }
         'i' if matches!(
             model.neighborhood_mode,
@@ -307,43 +306,46 @@ fn handle_neighborhood_char(model: &mut UiModel, ch: char) {
 
 fn handle_settings_char(model: &mut UiModel, ch: char) {
     match ch {
-        'e' if model.settings_index == 0 => {
-            model.modal = Some(ModalState::EditNickname);
-            model.modal_buffer = model.profile_nickname.clone();
+        'e' if matches!(model.settings_section, SettingsSection::Profile) => {
             model.modal_hint = "Edit Nickname".to_string();
+            model.active_modal = Some(ActiveModal::EditNickname(TextModalState {
+                value: model.profile_nickname.clone(),
+            }));
         }
-        't' if model.settings_index == 1 => {
+        't' if matches!(model.settings_section, SettingsSection::GuardianThreshold) => {
             if can_open_guardian_setup_wizard(model) {
                 open_guardian_setup_wizard(model);
             }
         }
-        'a' if model.settings_index == 3 => {
+        'a' if matches!(model.settings_section, SettingsSection::Devices) => {
             open_add_device_wizard(model);
         }
-        'i' if model.settings_index == 3 => {
-            model.modal = Some(ModalState::ImportDeviceEnrollmentCode);
+        'i' if matches!(model.settings_section, SettingsSection::Devices) => {
             model.modal_hint = "Import Device Enrollment Code".to_string();
+            model.active_modal = Some(ActiveModal::ImportDeviceEnrollmentCode(
+                TextModalState::default(),
+            ));
         }
-        'r' if model.settings_index == 3 => {
+        'r' if matches!(model.settings_section, SettingsSection::Devices) => {
             if model.has_secondary_device {
                 open_remove_device_selection(model);
             } else {
                 set_toast(model, 'ℹ', "Cannot remove the current device");
             }
         }
-        's' if model.settings_index == 2 => {
-            model.modal = Some(ModalState::RequestRecovery);
+        's' if matches!(model.settings_section, SettingsSection::RequestRecovery) => {
             model.modal_hint = "Request Recovery".to_string();
+            model.active_modal = Some(ActiveModal::RequestRecovery);
         }
-        's' if model.settings_index == 4 => {
+        's' if matches!(model.settings_section, SettingsSection::Authority) => {
             if model.authorities.len() <= 1 {
                 set_toast(model, 'ℹ', "Only one authority available");
             } else {
-                model.modal = Some(ModalState::SwitchAuthority);
                 model.modal_hint = "Switch Authority".to_string();
+                model.active_modal = Some(ActiveModal::SwitchAuthority);
             }
         }
-        'm' if model.settings_index == 4 => {
+        'm' if matches!(model.settings_section, SettingsSection::Authority) => {
             if can_open_mfa_setup_wizard(model) {
                 open_mfa_setup_wizard(model);
             }
@@ -362,7 +364,7 @@ fn handle_enter(model: &mut UiModel, clipboard: &dyn ClipboardPort) {
         return;
     }
 
-    if let Some(modal) = model.modal {
+    if let Some(modal) = model.modal_state() {
         handle_modal_enter(model, modal, clipboard);
         return;
     }
@@ -378,33 +380,34 @@ fn handle_enter(model: &mut UiModel, clipboard: &dyn ClipboardPort) {
         UiScreen::Contacts => {
             model.contact_details = true;
         }
-        UiScreen::Settings => match model.settings_index {
-            0 => {
-                model.modal = Some(ModalState::EditNickname);
-                model.modal_buffer = model.profile_nickname.clone();
+        UiScreen::Settings => match model.settings_section {
+            SettingsSection::Profile => {
                 model.modal_hint = "Edit Nickname".to_string();
+                model.active_modal = Some(ActiveModal::EditNickname(TextModalState {
+                    value: model.profile_nickname.clone(),
+                }));
             }
-            1 => {
+            SettingsSection::GuardianThreshold => {
                 if can_open_guardian_setup_wizard(model) {
                     open_guardian_setup_wizard(model);
                 }
             }
-            2 => {
-                model.modal = Some(ModalState::RequestRecovery);
+            SettingsSection::RequestRecovery => {
                 model.modal_hint = "Request Recovery".to_string();
+                model.active_modal = Some(ActiveModal::RequestRecovery);
             }
-            3 => {
+            SettingsSection::Devices => {
                 open_add_device_wizard(model);
             }
-            4 => {
+            SettingsSection::Authority => {
                 if model.authorities.len() <= 1 {
                     set_toast(model, 'ℹ', "Only one authority available");
                 } else {
-                    model.modal = Some(ModalState::SwitchAuthority);
                     model.modal_hint = "Switch Authority".to_string();
+                    model.active_modal = Some(ActiveModal::SwitchAuthority);
                 }
             }
-            _ => {}
+            SettingsSection::Appearance => {}
         },
         UiScreen::Chat | UiScreen::Notifications => {}
     }
@@ -421,14 +424,17 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             model.last_invite_code = Some(code.clone());
             clipboard.write(&code);
             model.ensure_contact("Bob");
-            model.modal_hint = format!("Invitation Created {code}");
             model.toast = Some(ToastState {
                 icon: '✓',
                 message: format!("Invitation Created {code}"),
             });
+            dismiss_modal(model);
         }
         ModalState::AcceptInvitation => {
-            let value = model.modal_buffer.trim();
+            let value = match model.active_modal.as_ref() {
+                Some(ActiveModal::AcceptInvitation(state)) => state.value.trim(),
+                _ => "",
+            };
             if !value.is_empty() {
                 let contact_name = match value {
                     "1" => "Alice",
@@ -444,9 +450,15 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             dismiss_modal(model);
         }
         ModalState::CreateHome => {
-            let name = model.modal_buffer.trim().to_string();
+            let name = match model.active_modal.as_ref() {
+                Some(ActiveModal::CreateHome(state)) => state.value.trim().to_string(),
+                _ => String::new(),
+            };
             if !name.is_empty() {
-                model.selected_home = Some(name.clone());
+                model.select_home(
+                    format!("home-{}", name.to_lowercase().replace(' ', "-")),
+                    name.clone(),
+                );
                 model.toast = Some(ToastState {
                     icon: '✓',
                     message: format!("Home '{name}' created"),
@@ -454,54 +466,50 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             }
             dismiss_modal(model);
         }
-        ModalState::CreateChannel => match model.create_channel_step {
-            CreateChannelWizardStep::Details => {
-                save_create_channel_details_buffer(model);
-                let channel = model
-                    .create_channel_name
-                    .trim()
-                    .trim_start_matches('#')
-                    .to_string();
-                if channel.is_empty() {
-                    set_toast(model, '✗', "Channel name is required");
-                    return;
+        ModalState::CreateChannel => match model.active_modal.as_mut() {
+            Some(ActiveModal::CreateChannel(state)) => match state.step {
+                CreateChannelWizardStep::Details => {
+                    let channel = state.name.trim().trim_start_matches('#').to_string();
+                    if channel.is_empty() {
+                        set_toast(model, '✗', "Channel name is required");
+                        return;
+                    }
+                    state.name = channel;
+                    state.step = CreateChannelWizardStep::Members;
+                    state.member_focus = 0;
+                    model.modal_hint = "New Chat Group — Step 2 of 3".to_string();
                 }
-                model.create_channel_name = channel;
-                model.create_channel_step = CreateChannelWizardStep::Members;
-                model.create_channel_member_focus = 0;
-                model.modal_buffer.clear();
-                model.modal_hint = "New Chat Group — Step 2 of 3".to_string();
-            }
-            CreateChannelWizardStep::Members => {
-                let selected_count = model.create_channel_selected_members.len();
-                let participants = selected_count.saturating_add(1);
-                model.create_channel_threshold = participants.max(1) as u8;
-                model.create_channel_step = CreateChannelWizardStep::Threshold;
-                model.modal_buffer = model.create_channel_threshold.to_string();
-                model.modal_hint = "New Chat Group — Step 3 of 3".to_string();
-            }
-            CreateChannelWizardStep::Threshold => {
-                if let Ok(value) = model.modal_buffer.trim().parse::<u8>() {
-                    let max_threshold = (model
-                        .create_channel_selected_members
-                        .len()
-                        .saturating_add(1)) as u8;
-                    model.create_channel_threshold = value.clamp(1, max_threshold.max(1));
+                CreateChannelWizardStep::Members => {
+                    let selected_count = state.selected_members.len();
+                    let participants = selected_count.saturating_add(1);
+                    state.threshold = participants.max(1) as u8;
+                    state.step = CreateChannelWizardStep::Threshold;
+                    model.modal_hint = "New Chat Group — Step 3 of 3".to_string();
                 }
-                let channel = model.create_channel_name.trim().to_string();
-                model.select_channel_by_name(&channel);
-                if !model.create_channel_topic.trim().is_empty() {
-                    model.set_selected_channel_topic(model.create_channel_topic.clone());
+                CreateChannelWizardStep::Threshold => {
+                    let max_threshold = (state.selected_members.len().saturating_add(1)) as u8;
+                    state.threshold = state.threshold.clamp(1, max_threshold.max(1));
+                    let channel = state.name.trim().to_string();
+                    let topic = state.topic.clone();
+                    model.select_channel_by_name(&channel);
+                    if !topic.trim().is_empty() {
+                        model.set_selected_channel_topic(topic);
+                    }
+                    model.toast = Some(ToastState {
+                        icon: '✓',
+                        message: format!("Created '{channel}'."),
+                    });
+                    dismiss_modal(model);
                 }
-                model.toast = Some(ToastState {
-                    icon: '✓',
-                    message: format!("Created '{channel}'."),
-                });
-                dismiss_modal(model);
-            }
+            },
+            _ => {}
         },
         ModalState::SetChannelTopic => {
-            model.set_selected_channel_topic(model.modal_buffer.trim().to_string());
+            let value = match model.active_modal.as_ref() {
+                Some(ActiveModal::SetChannelTopic(state)) => state.value.trim().to_string(),
+                _ => String::new(),
+            };
+            model.set_selected_channel_topic(value);
             model.toast = Some(ToastState {
                 icon: '✓',
                 message: "Topic updated".to_string(),
@@ -509,7 +517,10 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             dismiss_modal(model);
         }
         ModalState::EditNickname => {
-            let value = model.modal_buffer.trim().to_string();
+            let value = match model.active_modal.as_ref() {
+                Some(ActiveModal::EditNickname(state)) => state.value.trim().to_string(),
+                _ => String::new(),
+            };
             if model.screen == UiScreen::Settings {
                 if !value.is_empty() {
                     model.profile_nickname = value;
@@ -521,10 +532,13 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
         }
         ModalState::RemoveContact => {
             if !model.contacts.is_empty() {
-                model.contacts.remove(model.selected_contact_index);
-                model.selected_contact_index = model.selected_contact_index.saturating_sub(1);
-                for (idx, contact) in model.contacts.iter_mut().enumerate() {
-                    contact.selected = idx == model.selected_contact_index;
+                if let Some(selected_index) = model.selected_contact_index() {
+                    model.contacts.remove(selected_index);
+                    if model.contacts.is_empty() {
+                        model.selected_contact_id = None;
+                    } else {
+                        model.set_selected_contact_index(selected_index.saturating_sub(1));
+                    }
                 }
             }
             model.toast = Some(ToastState {
@@ -533,52 +547,58 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             });
             dismiss_modal(model);
         }
-        ModalState::GuardianSetup => match model.guardian_wizard_step {
-            ThresholdWizardStep::Selection => {
-                let available = model.contacts.len();
-                if available < 2 {
-                    set_toast(
+        ModalState::GuardianSetup => match model.active_modal.as_mut() {
+            Some(ActiveModal::GuardianSetup(state)) => match state.step {
+                ThresholdWizardStep::Selection => {
+                    let available = model.contacts.len();
+                    if available < 2 {
+                        set_toast(
                         model,
                         '✗',
                         format!(
                             "Need at least 2 contacts for this threshold, but only {available} available"
                         ),
                     );
-                    return;
+                        return;
+                    }
+                    if state.selected_indices.len() < 2 {
+                        set_toast(model, '✗', "Select at least 2 guardians");
+                        return;
+                    }
+                    let selected = state.selected_indices.len() as u8;
+                    state.selected_count = selected;
+                    state.threshold_k = state.threshold_k.clamp(1, selected.max(1));
+                    state.threshold_input = state.threshold_k.to_string();
+                    state.step = ThresholdWizardStep::Threshold;
                 }
-                if model.guardian_selected_indices.len() < 2 {
-                    set_toast(model, '✗', "Select at least 2 guardians");
-                    return;
+                ThresholdWizardStep::Threshold => {
+                    let k = parse_wizard_value(&state.threshold_input, state.threshold_k)
+                        .clamp(1, state.selected_count);
+                    state.threshold_k = k;
+                    state.threshold_input.clear();
+                    state.step = ThresholdWizardStep::Ceremony;
                 }
-                let selected = model.guardian_selected_indices.len() as u8;
-                model.guardian_selected_count = selected;
-                model.guardian_threshold_k = model.guardian_threshold_k.clamp(1, selected.max(1));
-                model.guardian_wizard_step = ThresholdWizardStep::Threshold;
-                model.modal_buffer = model.guardian_threshold_k.to_string();
-                model.modal_hint = "Guardian Setup — Step 2 of 3".to_string();
-            }
-            ThresholdWizardStep::Threshold => {
-                let k = parse_wizard_value(&model.modal_buffer, model.guardian_threshold_k)
-                    .clamp(1, model.guardian_selected_count);
-                model.guardian_threshold_k = k;
-                model.guardian_wizard_step = ThresholdWizardStep::Ceremony;
-                model.modal_buffer.clear();
-                model.modal_hint = "Guardian Setup — Step 3 of 3".to_string();
-            }
-            ThresholdWizardStep::Ceremony => {
-                set_toast(
-                    model,
-                    'ℹ',
-                    format!(
-                        "Guardian ceremony started! Waiting for {}-of-{} guardians to respond",
-                        model.guardian_threshold_k, model.guardian_selected_count
-                    ),
-                );
-                dismiss_modal(model);
-            }
+                ThresholdWizardStep::Ceremony => {
+                    let threshold_k = state.threshold_k;
+                    let selected_count = state.selected_count;
+                    set_toast(
+                        model,
+                        'ℹ',
+                        format!(
+                            "Guardian ceremony started! Waiting for {}-of-{} guardians to respond",
+                            threshold_k, selected_count
+                        ),
+                    );
+                    dismiss_modal(model);
+                }
+            },
+            _ => {}
         },
         ModalState::RequestRecovery => {
-            let required = model.guardian_threshold_k.max(1) as usize;
+            let required = match model.active_modal.as_ref() {
+                Some(ActiveModal::GuardianSetup(state)) => state.threshold_k.max(1) as usize,
+                _ => 1,
+            };
             let available = model.contacts.len();
             if available == 0 {
                 set_toast(
@@ -603,42 +623,51 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             set_toast(model, 'ℹ', "Recovery process started");
             dismiss_modal(model);
         }
-        ModalState::AddDeviceStep1 => match model.add_device_step {
-            AddDeviceWizardStep::Name => {
-                let name = model.modal_buffer.trim().to_string();
-                if name.is_empty() {
-                    set_toast(model, '✗', "Device name is required");
-                    return;
-                }
+        ModalState::AddDeviceStep1 => match model.active_modal.as_mut() {
+            Some(ActiveModal::AddDevice(state)) => match state.step {
+                AddDeviceWizardStep::Name => {
+                    let name = state.name_input.trim().to_string();
+                    if name.is_empty() {
+                        set_toast(model, '✗', "Device name is required");
+                        return;
+                    }
 
-                model.add_device_name = name;
-                model.device_enrollment_counter = model.device_enrollment_counter.saturating_add(1);
-                model.add_device_enrollment_code =
-                    format!("DEVICE-ENROLL-{}", model.device_enrollment_counter);
-                model.add_device_step = AddDeviceWizardStep::ShareCode;
-                model.modal_buffer.clear();
-                model.modal_hint = "Add Device — Step 2 of 3".to_string();
-            }
-            AddDeviceWizardStep::ShareCode => {
-                model.add_device_step = AddDeviceWizardStep::Confirm;
-                model.modal_hint = "Add Device — Step 3 of 3".to_string();
-            }
-            AddDeviceWizardStep::Confirm => {
-                set_toast(model, 'ℹ', "Device enrollment started");
-                dismiss_modal(model);
-            }
+                    state.device_name = name;
+                    model.device_enrollment_counter =
+                        model.device_enrollment_counter.saturating_add(1);
+                    state.enrollment_code =
+                        format!("DEVICE-ENROLL-{}", model.device_enrollment_counter);
+                    state.name_input.clear();
+                    state.step = AddDeviceWizardStep::ShareCode;
+                    model.modal_hint = "Add Device — Step 2 of 3".to_string();
+                }
+                AddDeviceWizardStep::ShareCode => {
+                    state.step = AddDeviceWizardStep::Confirm;
+                    model.modal_hint = "Add Device — Step 3 of 3".to_string();
+                }
+                AddDeviceWizardStep::Confirm => {
+                    set_toast(model, 'ℹ', "Device enrollment started");
+                    dismiss_modal(model);
+                }
+            },
+            _ => {}
         },
         ModalState::ImportDeviceEnrollmentCode => {
-            if model.modal_buffer.trim().is_empty() {
+            let code = match model.active_modal.as_ref() {
+                Some(ActiveModal::ImportDeviceEnrollmentCode(state)) => state.value.trim(),
+                _ => "",
+            };
+            if code.is_empty() {
                 set_toast(model, '✗', "Enrollment code is required");
                 return;
             }
             model.has_secondary_device = true;
             if model.secondary_device_name().is_none() {
-                let fallback = if model.add_device_name.trim().is_empty() {
-                    "Mobile".to_string()
-                } else {
-                    model.add_device_name.clone()
+                let fallback = match model.active_modal.as_ref() {
+                    Some(ActiveModal::AddDevice(state)) if !state.device_name.trim().is_empty() => {
+                        state.device_name.clone()
+                    }
+                    _ => "Mobile".to_string(),
                 };
                 model.set_secondary_device_name(Some(fallback));
             }
@@ -646,8 +675,14 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             dismiss_modal(model);
         }
         ModalState::SelectDeviceToRemove => {
-            model.modal = Some(ModalState::ConfirmRemoveDevice);
+            let candidate_name = match model.active_modal.as_ref() {
+                Some(ActiveModal::SelectDeviceToRemove(state)) => state.candidate_name.clone(),
+                _ => model.secondary_device_name().unwrap_or("Secondary device").to_string(),
+            };
             model.modal_hint = "Confirm Device Removal".to_string();
+            model.active_modal = Some(ActiveModal::ConfirmRemoveDevice(SelectDeviceModalState {
+                candidate_name,
+            }));
         }
         ModalState::ConfirmRemoveDevice => {
             if model.has_secondary_device {
@@ -659,38 +694,41 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             }
             dismiss_modal(model);
         }
-        ModalState::MfaSetup => match model.mfa_wizard_step {
-            ThresholdWizardStep::Selection => {
-                if model.mfa_selected_indices.is_empty() {
-                    set_toast(model, '✗', "Select at least 1 device");
-                    return;
+        ModalState::MfaSetup => match model.active_modal.as_mut() {
+            Some(ActiveModal::MfaSetup(state)) => match state.step {
+                ThresholdWizardStep::Selection => {
+                    if state.selected_indices.is_empty() {
+                        set_toast(model, '✗', "Select at least 1 device");
+                        return;
+                    }
+                    let selected = state.selected_indices.len() as u8;
+                    state.selected_count = selected;
+                    state.threshold_k = state.threshold_k.clamp(1, state.selected_count);
+                    state.threshold_input = state.threshold_k.to_string();
+                    state.step = ThresholdWizardStep::Threshold;
                 }
-                let selected = model.mfa_selected_indices.len() as u8;
-                model.mfa_selected_count = selected;
-                model.mfa_threshold_k = model.mfa_threshold_k.clamp(1, model.mfa_selected_count);
-                model.mfa_wizard_step = ThresholdWizardStep::Threshold;
-                model.modal_buffer = model.mfa_threshold_k.to_string();
-                model.modal_hint = "Multifactor Setup — Step 2 of 3".to_string();
-            }
-            ThresholdWizardStep::Threshold => {
-                let k = parse_wizard_value(&model.modal_buffer, model.mfa_threshold_k)
-                    .clamp(1, model.mfa_selected_count);
-                model.mfa_threshold_k = k;
-                model.mfa_wizard_step = ThresholdWizardStep::Ceremony;
-                model.modal_buffer.clear();
-                model.modal_hint = "Multifactor Setup — Step 3 of 3".to_string();
-            }
-            ThresholdWizardStep::Ceremony => {
-                set_toast(
-                    model,
-                    'ℹ',
-                    format!(
-                        "Multifactor ceremony started ({}-of-{})",
-                        model.mfa_threshold_k, model.mfa_selected_count
-                    ),
-                );
-                dismiss_modal(model);
-            }
+                ThresholdWizardStep::Threshold => {
+                    let k = parse_wizard_value(&state.threshold_input, state.threshold_k)
+                        .clamp(1, state.selected_count);
+                    state.threshold_k = k;
+                    state.threshold_input.clear();
+                    state.step = ThresholdWizardStep::Ceremony;
+                }
+                ThresholdWizardStep::Ceremony => {
+                    let threshold_k = state.threshold_k;
+                    let selected_count = state.selected_count;
+                    set_toast(
+                        model,
+                        'ℹ',
+                        format!(
+                            "Multifactor ceremony started ({}-of-{})",
+                            threshold_k, selected_count
+                        ),
+                    );
+                    dismiss_modal(model);
+                }
+            },
+            _ => {}
         },
         ModalState::AssignModerator => {
             if model.contacts.is_empty() {
@@ -721,7 +759,6 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             dismiss_modal(model);
         }
         ModalState::CapabilityConfig => {
-            save_capability_config_buffer(model);
             model.toast = Some(ToastState {
                 icon: '✓',
                 message: "Capability config saved".to_string(),
@@ -758,11 +795,12 @@ fn submit_chat_input(model: &mut UiModel, text: &str) {
                                     selected: true,
                                     topic: String::new(),
                                 });
-                                model.selected_channel_index = 0;
+                                model.selected_channel = Some("general".to_string());
                             } else {
-                                model.selected_channel_index = 0;
-                                for (idx, row) in model.channels.iter_mut().enumerate() {
-                                    row.selected = idx == 0;
+                                let selected_name = model.channels[0].name.clone();
+                                model.selected_channel = Some(selected_name.clone());
+                                for row in &mut model.channels {
+                                    row.selected = row.name == selected_name;
                                 }
                             }
                         }
@@ -938,7 +976,7 @@ fn handle_escape(model: &mut UiModel) {
         model.input_buffer.clear();
         return;
     }
-    if let Some(modal) = model.modal {
+    if let Some(modal) = model.modal_state() {
         if handle_modal_escape(model, modal) {
             return;
         }
@@ -986,55 +1024,48 @@ fn parse_reason_code_for_command_error(message: &str) -> &'static str {
 }
 
 fn dismiss_modal(model: &mut UiModel) {
-    model.modal = None;
-    model.modal_buffer.clear();
-    model.modal_hint.clear();
-    model.reset_create_channel_wizard();
-    model.reset_add_device_wizard();
-    model.reset_guardian_wizard();
-    model.reset_mfa_wizard();
-    model.reset_remove_device_flow();
-    model.reset_capability_config_editor();
-    model.reset_access_override_editor();
+    model.dismiss_modal();
 }
 
 fn handle_modal_tab(model: &mut UiModel, reverse: bool) -> bool {
-    if matches!(model.modal, Some(ModalState::CreateChannel))
-        && matches!(model.create_channel_step, CreateChannelWizardStep::Details)
-    {
+    let channel_details_mode = matches!(
+        model.active_modal,
+        Some(ActiveModal::CreateChannel(CreateChannelModalState {
+            step: CreateChannelWizardStep::Details,
+            ..
+        }))
+    );
+    if channel_details_mode {
         save_create_channel_details_buffer(model);
-        if reverse {
-            model.create_channel_active_field = CreateChannelDetailsField::Name;
-        } else {
-            model.create_channel_active_field = match model.create_channel_active_field {
-                CreateChannelDetailsField::Name => CreateChannelDetailsField::Topic,
-                CreateChannelDetailsField::Topic => CreateChannelDetailsField::Name,
+        if let Some(ActiveModal::CreateChannel(state)) = model.active_modal.as_mut() {
+            state.active_field = if reverse {
+                CreateChannelDetailsField::Name
+            } else {
+                match state.active_field {
+                    CreateChannelDetailsField::Name => CreateChannelDetailsField::Topic,
+                    CreateChannelDetailsField::Topic => CreateChannelDetailsField::Name,
+                }
             };
         }
-        model.modal_buffer = match model.create_channel_active_field {
-            CreateChannelDetailsField::Name => model.create_channel_name.clone(),
-            CreateChannelDetailsField::Topic => model.create_channel_topic.clone(),
-        };
         return true;
     }
 
-    if matches!(model.modal, Some(ModalState::CapabilityConfig)) {
+    if matches!(model.modal_state(), Some(ModalState::CapabilityConfig)) {
         save_capability_config_buffer(model);
-        if reverse {
-            model.capability_active_field = model.capability_active_field.saturating_sub(1);
-        } else {
-            model.capability_active_field = (model.capability_active_field + 1) % 3;
+        if let Some(ActiveModal::CapabilityConfig(state)) = model.active_modal.as_mut() {
+            state.active_tier = if reverse {
+                state.active_tier.prev()
+            } else {
+                state.active_tier.next()
+            };
         }
-        model.modal_buffer = match model.capability_active_field {
-            0 => model.capability_full_caps.clone(),
-            1 => model.capability_partial_caps.clone(),
-            _ => model.capability_limited_caps.clone(),
-        };
         return true;
     }
 
-    if matches!(model.modal, Some(ModalState::AccessOverride)) {
-        model.access_override_partial = !model.access_override_partial;
+    if matches!(model.modal_state(), Some(ModalState::AccessOverride)) {
+        if let Some(ActiveModal::AccessOverride(state)) = model.active_modal.as_mut() {
+            state.level = state.level.toggle();
+        }
         return true;
     }
 
@@ -1042,41 +1073,16 @@ fn handle_modal_tab(model: &mut UiModel, reverse: bool) -> bool {
 }
 
 fn modal_accepts_text(model: &UiModel, modal: ModalState) -> bool {
-    if matches!(modal, ModalState::AddDeviceStep1) {
-        return matches!(model.add_device_step, AddDeviceWizardStep::Name);
-    }
-    if matches!(modal, ModalState::GuardianSetup) {
-        return matches!(model.guardian_wizard_step, ThresholdWizardStep::Threshold);
-    }
-    if matches!(modal, ModalState::MfaSetup) {
-        return matches!(model.mfa_wizard_step, ThresholdWizardStep::Threshold);
-    }
-    if matches!(modal, ModalState::CreateChannel) {
-        return matches!(
-            model.create_channel_step,
-            CreateChannelWizardStep::Details | CreateChannelWizardStep::Threshold
-        );
-    }
-    if matches!(modal, ModalState::CapabilityConfig) {
-        return true;
-    }
-    matches!(
-        modal,
-        ModalState::CreateInvitation
-            | ModalState::AcceptInvitation
-            | ModalState::CreateHome
-            | ModalState::SetChannelTopic
-            | ModalState::EditNickname
-            | ModalState::ImportDeviceEnrollmentCode
-    )
+    let _ = modal;
+    model.modal_accepts_text()
 }
 
 fn backspace(model: &mut UiModel) {
     if model.input_mode {
         model.input_buffer.pop();
-    } else if let Some(modal) = model.modal {
+    } else if let Some(modal) = model.modal_state() {
         if modal_accepts_text(model, modal) {
-            model.modal_buffer.pop();
+            model.pop_modal_text_char();
         }
     }
 }
@@ -1092,32 +1098,38 @@ fn handle_modal_char(
             handle_add_device_modal_char(model, ch, clipboard);
             true
         }
-        ModalState::CreateChannel => match model.create_channel_step {
-            CreateChannelWizardStep::Members => {
-                if matches!(ch, ' ') {
-                    toggle_create_channel_member(model);
-                    true
-                } else if matches!(ch, 'j' | 'k') {
-                    if model.contacts.is_empty() {
-                        return true;
-                    }
-                    let max = model.contacts.len().saturating_sub(1);
-                    if ch == 'k' {
-                        model.create_channel_member_focus =
-                            model.create_channel_member_focus.saturating_sub(1);
+        ModalState::CreateChannel => match model.active_modal.as_mut() {
+            Some(ActiveModal::CreateChannel(state))
+                if matches!(state.step, CreateChannelWizardStep::Members) =>
+            {
+                    if matches!(ch, ' ') {
+                        toggle_create_channel_member(model);
+                        true
+                    } else if matches!(ch, 'j' | 'k') {
+                        if model.contacts.is_empty() {
+                            return true;
+                        }
+                        let max = model.contacts.len().saturating_sub(1);
+                        if ch == 'k' {
+                            state.member_focus = state.member_focus.saturating_sub(1);
+                        } else {
+                            state.member_focus = (state.member_focus + 1).min(max);
+                        }
+                        true
                     } else {
-                        model.create_channel_member_focus =
-                            (model.create_channel_member_focus + 1).min(max);
+                        false
                     }
-                    true
-                } else {
-                    false
-                }
             }
             _ => false,
         },
         ModalState::GuardianSetup => {
-            if matches!(model.guardian_wizard_step, ThresholdWizardStep::Selection) {
+            if matches!(
+                model.active_modal,
+                Some(ActiveModal::GuardianSetup(ThresholdWizardModalState {
+                    step: ThresholdWizardStep::Selection,
+                    ..
+                }))
+            ) {
                 if matches!(ch, ' ') {
                     toggle_guardian_selection(model);
                     true
@@ -1126,10 +1138,12 @@ fn handle_modal_char(
                         return true;
                     }
                     let max = model.contacts.len().saturating_sub(1);
-                    if ch == 'k' {
-                        model.guardian_focus_index = model.guardian_focus_index.saturating_sub(1);
-                    } else {
-                        model.guardian_focus_index = (model.guardian_focus_index + 1).min(max);
+                    if let Some(ActiveModal::GuardianSetup(state)) = model.active_modal.as_mut() {
+                        if ch == 'k' {
+                            state.focus_index = state.focus_index.saturating_sub(1);
+                        } else {
+                            state.focus_index = (state.focus_index + 1).min(max);
+                        }
                     }
                     true
                 } else {
@@ -1140,16 +1154,24 @@ fn handle_modal_char(
             }
         }
         ModalState::MfaSetup => {
-            if matches!(model.mfa_wizard_step, ThresholdWizardStep::Selection) {
+            if matches!(
+                model.active_modal,
+                Some(ActiveModal::MfaSetup(ThresholdWizardModalState {
+                    step: ThresholdWizardStep::Selection,
+                    ..
+                }))
+            ) {
                 if matches!(ch, ' ') {
                     toggle_mfa_selection(model);
                     true
                 } else if matches!(ch, 'j' | 'k') {
                     let max = available_device_count(model).saturating_sub(1) as usize;
-                    if ch == 'k' {
-                        model.mfa_focus_index = model.mfa_focus_index.saturating_sub(1);
-                    } else {
-                        model.mfa_focus_index = (model.mfa_focus_index + 1).min(max);
+                    if let Some(ActiveModal::MfaSetup(state)) = model.active_modal.as_mut() {
+                        if ch == 'k' {
+                            state.focus_index = state.focus_index.saturating_sub(1);
+                        } else {
+                            state.focus_index = (state.focus_index + 1).min(max);
+                        }
                     }
                     true
                 } else {
@@ -1173,60 +1195,64 @@ fn handle_modal_char(
 
 fn handle_modal_escape(model: &mut UiModel, modal: ModalState) -> bool {
     match modal {
-        ModalState::CreateChannel => match model.create_channel_step {
-            CreateChannelWizardStep::Details => false,
-            CreateChannelWizardStep::Members => {
-                model.create_channel_step = CreateChannelWizardStep::Details;
-                model.create_channel_active_field = CreateChannelDetailsField::Name;
-                model.modal_buffer = model.create_channel_name.clone();
-                model.modal_hint = "New Chat Group — Step 1 of 3".to_string();
-                true
-            }
-            CreateChannelWizardStep::Threshold => {
-                model.create_channel_step = CreateChannelWizardStep::Members;
-                model.modal_buffer.clear();
-                model.modal_hint = "New Chat Group — Step 2 of 3".to_string();
-                true
-            }
+        ModalState::CreateChannel => match model.active_modal.as_mut() {
+            Some(ActiveModal::CreateChannel(state)) => match state.step {
+                CreateChannelWizardStep::Details => false,
+                CreateChannelWizardStep::Members => {
+                    state.step = CreateChannelWizardStep::Details;
+                    state.active_field = CreateChannelDetailsField::Name;
+                    model.modal_hint = "New Chat Group — Step 1 of 3".to_string();
+                    true
+                }
+                CreateChannelWizardStep::Threshold => {
+                    state.step = CreateChannelWizardStep::Members;
+                    model.modal_hint = "New Chat Group — Step 2 of 3".to_string();
+                    true
+                }
+            },
+            _ => false,
         },
-        ModalState::GuardianSetup => match model.guardian_wizard_step {
-            ThresholdWizardStep::Selection => false,
-            ThresholdWizardStep::Threshold => {
-                model.guardian_wizard_step = ThresholdWizardStep::Selection;
-                model.modal_buffer.clear();
-                model.modal_hint = "Guardian Setup — Step 1 of 3".to_string();
-                true
-            }
-            ThresholdWizardStep::Ceremony => false,
+        ModalState::GuardianSetup => match model.active_modal.as_mut() {
+            Some(ActiveModal::GuardianSetup(state)) => match state.step {
+                ThresholdWizardStep::Selection => false,
+                ThresholdWizardStep::Threshold => {
+                    state.step = ThresholdWizardStep::Selection;
+                    state.threshold_input.clear();
+                    model.modal_hint = "Guardian Setup — Step 1 of 3".to_string();
+                    true
+                }
+                ThresholdWizardStep::Ceremony => false,
+            },
+            _ => false,
         },
-        ModalState::MfaSetup => match model.mfa_wizard_step {
-            ThresholdWizardStep::Selection => false,
-            ThresholdWizardStep::Threshold => {
-                model.mfa_wizard_step = ThresholdWizardStep::Selection;
-                model.modal_buffer.clear();
-                model.modal_hint = "Multifactor Setup — Step 1 of 3".to_string();
-                true
-            }
-            ThresholdWizardStep::Ceremony => false,
+        ModalState::MfaSetup => match model.active_modal.as_mut() {
+            Some(ActiveModal::MfaSetup(state)) => match state.step {
+                ThresholdWizardStep::Selection => false,
+                ThresholdWizardStep::Threshold => {
+                    state.step = ThresholdWizardStep::Selection;
+                    state.threshold_input.clear();
+                    model.modal_hint = "Multifactor Setup — Step 1 of 3".to_string();
+                    true
+                }
+                ThresholdWizardStep::Ceremony => false,
+            },
+            _ => false,
         },
         _ => false,
     }
 }
 
 fn open_create_channel_wizard(model: &mut UiModel) {
-    model.modal = Some(ModalState::CreateChannel);
-    model.reset_create_channel_wizard();
-    model.modal_buffer = model.create_channel_name.clone();
     model.modal_hint = "New Chat Group — Step 1 of 3".to_string();
+    model.active_modal = Some(ActiveModal::CreateChannel(CreateChannelModalState::default()));
 }
 
 fn save_create_channel_details_buffer(model: &mut UiModel) {
-    match model.create_channel_active_field {
-        CreateChannelDetailsField::Name => {
-            model.create_channel_name = model.modal_buffer.clone();
-        }
-        CreateChannelDetailsField::Topic => {
-            model.create_channel_topic = model.modal_buffer.clone();
+    let value = model.modal_text_value().unwrap_or_default();
+    if let Some(ActiveModal::CreateChannel(state)) = model.active_modal.as_mut() {
+        match state.active_field {
+            CreateChannelDetailsField::Name => state.name = value,
+            CreateChannelDetailsField::Topic => state.topic = value,
         }
     }
 }
@@ -1235,47 +1261,40 @@ fn toggle_create_channel_member(model: &mut UiModel) {
     if model.contacts.is_empty() {
         return;
     }
-    let idx = model
-        .create_channel_member_focus
-        .min(model.contacts.len().saturating_sub(1));
-    if let Some(position) = model
-        .create_channel_selected_members
-        .iter()
-        .position(|selected| *selected == idx)
-    {
-        model.create_channel_selected_members.remove(position);
-    } else {
-        model.create_channel_selected_members.push(idx);
-        model.create_channel_selected_members.sort_unstable();
+    if let Some(ActiveModal::CreateChannel(state)) = model.active_modal.as_mut() {
+        let idx = state.member_focus.min(model.contacts.len().saturating_sub(1));
+        if let Some(position) = state.selected_members.iter().position(|selected| *selected == idx) {
+            state.selected_members.remove(position);
+        } else {
+            state.selected_members.push(idx);
+            state.selected_members.sort_unstable();
+        }
     }
 }
 
 fn open_add_device_wizard(model: &mut UiModel) {
-    model.modal = Some(ModalState::AddDeviceStep1);
-    model.reset_add_device_wizard();
-    model.modal_buffer.clear();
     model.modal_hint = "Add Device — Step 1 of 3".to_string();
+    model.active_modal = Some(ActiveModal::AddDevice(AddDeviceModalState::default()));
 }
 
 fn open_guardian_setup_wizard(model: &mut UiModel) {
-    model.modal = Some(ModalState::GuardianSetup);
-    model.reset_guardian_wizard();
-    model.guardian_selected_indices = model
+    let mut selected_indices: Vec<usize> = model
         .contacts
         .iter()
         .enumerate()
         .filter(|(_, contact)| contact.is_guardian)
         .map(|(idx, _)| idx)
         .collect();
-    if model.guardian_selected_indices.is_empty() {
+    if selected_indices.is_empty() {
         let selected = model.contacts.len().min(2);
-        model.guardian_selected_indices = (0..selected).collect();
+        selected_indices = (0..selected).collect();
     }
-    let selected = model.guardian_selected_indices.len();
-    model.guardian_selected_count = selected.max(1) as u8;
-    model.guardian_threshold_k = model.guardian_selected_count.clamp(1, 2);
-    model.modal_buffer.clear();
+    let selected_count = selected_indices.len().max(1) as u8;
+    let threshold_k = selected_count.clamp(1, 2);
     model.modal_hint = "Guardian Setup — Step 1 of 3".to_string();
+    let mut state = ThresholdWizardModalState::with_defaults(selected_count, threshold_k);
+    state.selected_indices = selected_indices;
+    model.active_modal = Some(ActiveModal::GuardianSetup(state));
 }
 
 fn can_open_guardian_setup_wizard(model: &mut UiModel) -> bool {
@@ -1287,29 +1306,34 @@ fn can_open_guardian_setup_wizard(model: &mut UiModel) -> bool {
 }
 
 fn open_remove_device_selection(model: &mut UiModel) {
-    model.modal = Some(ModalState::SelectDeviceToRemove);
-    model.remove_device_candidate_name = model
+    let candidate_name = model
         .secondary_device_name()
         .unwrap_or("Secondary device")
         .to_string();
     model.modal_hint = "Select Device to Remove".to_string();
+    model.active_modal = Some(ActiveModal::SelectDeviceToRemove(SelectDeviceModalState {
+        candidate_name,
+    }));
 }
 
 fn open_mfa_setup_wizard(model: &mut UiModel) {
-    model.modal = Some(ModalState::MfaSetup);
-    model.reset_mfa_wizard();
-    model.mfa_selected_indices = (0..available_device_count(model) as usize).collect();
-    model.mfa_selected_count = model.mfa_selected_indices.len().max(1) as u8;
-    model.mfa_threshold_k = model.mfa_selected_count.min(2).max(1);
-    model.modal_buffer.clear();
+    let selected_indices = (0..available_device_count(model) as usize).collect::<Vec<_>>();
+    let selected_count = selected_indices.len().max(1) as u8;
+    let threshold_k = selected_count.min(2).max(1);
     model.modal_hint = "Multifactor Setup — Step 1 of 3".to_string();
+    let mut state = ThresholdWizardModalState::with_defaults(selected_count, threshold_k);
+    state.selected_indices = selected_indices;
+    model.active_modal = Some(ActiveModal::MfaSetup(state));
 }
 
 fn save_capability_config_buffer(model: &mut UiModel) {
-    match model.capability_active_field {
-        0 => model.capability_full_caps = model.modal_buffer.clone(),
-        1 => model.capability_partial_caps = model.modal_buffer.clone(),
-        _ => model.capability_limited_caps = model.modal_buffer.clone(),
+    let value = model.modal_text_value().unwrap_or_default();
+    if let Some(ActiveModal::CapabilityConfig(state)) = model.active_modal.as_mut() {
+        match state.active_tier {
+            CapabilityTier::Full => state.full_caps = value,
+            CapabilityTier::Partial => state.partial_caps = value,
+            CapabilityTier::Limited => state.limited_caps = value,
+        }
     }
 }
 
@@ -1327,98 +1351,106 @@ fn can_open_mfa_setup_wizard(model: &mut UiModel) -> bool {
 }
 
 fn handle_add_device_modal_char(model: &mut UiModel, ch: char, clipboard: &dyn ClipboardPort) {
-    match model.add_device_step {
-        AddDeviceWizardStep::Name => {
-            model.modal_buffer.push(ch);
+    match model.active_modal.as_mut() {
+        Some(ActiveModal::AddDevice(state)) if matches!(state.step, AddDeviceWizardStep::Name) => {
+            state.name_input.push(ch);
         }
-        AddDeviceWizardStep::ShareCode | AddDeviceWizardStep::Confirm => {
-            if matches!(ch, 'c' | 'y') && !model.add_device_enrollment_code.is_empty() {
-                clipboard.write(&model.add_device_enrollment_code);
-                model.add_device_code_copied = true;
+        Some(ActiveModal::AddDevice(state))
+            if matches!(state.step, AddDeviceWizardStep::ShareCode | AddDeviceWizardStep::Confirm) =>
+        {
+            if matches!(ch, 'c' | 'y') && !state.enrollment_code.is_empty() {
+                clipboard.write(&state.enrollment_code);
+                state.code_copied = true;
                 set_toast(model, '✓', "Copied to clipboard");
             }
         }
+        _ => {}
     }
 }
 
 fn handle_wizard_named_key(model: &mut UiModel, key_name: &str) -> bool {
-    match model.modal {
+    match model.modal_state() {
         Some(ModalState::CreateChannel) => {
             if matches!(key_name, "up" | "down") {
-                match model.create_channel_step {
-                    CreateChannelWizardStep::Members => {
+                match model.active_modal.as_mut() {
+                    Some(ActiveModal::CreateChannel(state))
+                        if matches!(state.step, CreateChannelWizardStep::Members) =>
+                    {
                         if model.contacts.is_empty() {
                             return true;
                         }
                         let max = model.contacts.len().saturating_sub(1);
                         if key_name == "up" {
-                            model.create_channel_member_focus =
-                                model.create_channel_member_focus.saturating_sub(1);
+                            state.member_focus = state.member_focus.saturating_sub(1);
                         } else {
-                            model.create_channel_member_focus =
-                                (model.create_channel_member_focus + 1).min(max);
+                            state.member_focus = (state.member_focus + 1).min(max);
                         }
                         return true;
                     }
-                    CreateChannelWizardStep::Threshold => {
-                        let current =
-                            parse_wizard_value(&model.modal_buffer, model.create_channel_threshold);
-                        let max = (model
-                            .create_channel_selected_members
-                            .len()
-                            .saturating_add(1)) as u8;
+                    Some(ActiveModal::CreateChannel(state))
+                        if matches!(state.step, CreateChannelWizardStep::Threshold) =>
+                    {
+                        let current = parse_wizard_value(&state.threshold.to_string(), state.threshold);
+                        let max = (state.selected_members.len().saturating_add(1)) as u8;
                         let adjusted = if key_name == "up" {
                             current.saturating_add(1).min(max.max(1))
                         } else {
                             current.saturating_sub(1).max(1)
                         };
-                        model.modal_buffer = adjusted.to_string();
+                        state.threshold = adjusted;
                         return true;
                     }
-                    CreateChannelWizardStep::Details => {}
+                    _ => {}
                 }
             }
         }
         Some(ModalState::GuardianSetup) => {
             if matches!(key_name, "up" | "down") {
-                match model.guardian_wizard_step {
-                    ThresholdWizardStep::Selection => {
+                match model.active_modal.as_mut() {
+                    Some(ActiveModal::GuardianSetup(state))
+                        if matches!(state.step, ThresholdWizardStep::Selection) =>
+                    {
                         if model.contacts.is_empty() {
                             return true;
                         }
                         let max = model.contacts.len().saturating_sub(1);
                         if key_name == "up" {
-                            model.guardian_focus_index =
-                                model.guardian_focus_index.saturating_sub(1);
+                            state.focus_index = state.focus_index.saturating_sub(1);
                         } else {
-                            model.guardian_focus_index = (model.guardian_focus_index + 1).min(max);
+                            state.focus_index = (state.focus_index + 1).min(max);
                         }
                     }
-                    ThresholdWizardStep::Threshold => {
+                    Some(ActiveModal::GuardianSetup(state))
+                        if matches!(state.step, ThresholdWizardStep::Threshold) =>
+                    {
                         let delta = if key_name == "up" { 1 } else { -1 };
                         adjust_threshold_wizard_input(model, true, delta);
                     }
-                    ThresholdWizardStep::Ceremony => {}
+                    _ => {}
                 }
                 return true;
             }
         }
         Some(ModalState::MfaSetup) => {
             if matches!(key_name, "up" | "down") {
-                match model.mfa_wizard_step {
-                    ThresholdWizardStep::Selection => {
-                        let max = available_device_count(model).saturating_sub(1) as usize;
+                let max = available_device_count(model).saturating_sub(1) as usize;
+                match model.active_modal.as_mut() {
+                    Some(ActiveModal::MfaSetup(state))
+                        if matches!(state.step, ThresholdWizardStep::Selection) =>
+                    {
                         if key_name == "up" {
-                            model.mfa_focus_index = model.mfa_focus_index.saturating_sub(1);
+                            state.focus_index = state.focus_index.saturating_sub(1);
                         } else {
-                            model.mfa_focus_index = (model.mfa_focus_index + 1).min(max);
+                            state.focus_index = (state.focus_index + 1).min(max);
                         }
                     }
-                    ThresholdWizardStep::Threshold => {
+                    Some(ActiveModal::MfaSetup(state))
+                        if matches!(state.step, ThresholdWizardStep::Threshold) =>
+                    {
                         let delta = if key_name == "up" { 1 } else { -1 };
                         adjust_threshold_wizard_input(model, false, delta);
                     }
-                    ThresholdWizardStep::Ceremony => {}
+                    _ => {}
                 }
                 return true;
             }
@@ -1434,14 +1466,11 @@ fn handle_wizard_named_key(model: &mut UiModel, key_name: &str) -> bool {
                     return true;
                 }
                 let max = model.authorities.len().saturating_sub(1);
+                let selected_index = model.selected_authority_index().unwrap_or_default();
                 if key_name == "up" {
-                    model.set_selected_authority_index(
-                        model.selected_authority_index.saturating_sub(1),
-                    );
+                    model.set_selected_authority_index(selected_index.saturating_sub(1));
                 } else {
-                    model.set_selected_authority_index(
-                        (model.selected_authority_index + 1).min(max),
-                    );
+                    model.set_selected_authority_index((selected_index + 1).min(max));
                 }
                 return true;
             }
@@ -1452,11 +1481,11 @@ fn handle_wizard_named_key(model: &mut UiModel, key_name: &str) -> bool {
                     return true;
                 }
                 let max = model.contacts.len().saturating_sub(1);
+                let selected_index = model.selected_contact_index().unwrap_or_default();
                 if key_name == "up" {
-                    model
-                        .set_selected_contact_index(model.selected_contact_index.saturating_sub(1));
+                    model.set_selected_contact_index(selected_index.saturating_sub(1));
                 } else {
-                    model.set_selected_contact_index((model.selected_contact_index + 1).min(max));
+                    model.set_selected_contact_index((selected_index + 1).min(max));
                 }
                 return true;
             }
@@ -1467,20 +1496,19 @@ fn handle_wizard_named_key(model: &mut UiModel, key_name: &str) -> bool {
 }
 
 fn adjust_threshold_wizard_input(model: &mut UiModel, guardian: bool, delta: i8) {
-    let (current, max) = if guardian {
-        (
-            parse_wizard_value(&model.modal_buffer, model.guardian_threshold_k),
-            model.guardian_selected_count.max(1),
-        )
-    } else {
-        (
-            parse_wizard_value(&model.modal_buffer, model.mfa_threshold_k),
-            model.mfa_selected_count.max(1),
-        )
-    };
-
-    let adjusted = (current as i16 + delta as i16).clamp(1, max as i16) as u8;
-    model.modal_buffer = adjusted.to_string();
+    match model.active_modal.as_mut() {
+        Some(ActiveModal::GuardianSetup(state)) if guardian => {
+            let current = parse_wizard_value(&state.threshold_input, state.threshold_k);
+            let adjusted = (current as i16 + delta as i16).clamp(1, state.selected_count.max(1) as i16) as u8;
+            state.threshold_input = adjusted.to_string();
+        }
+        Some(ActiveModal::MfaSetup(state)) if !guardian => {
+            let current = parse_wizard_value(&state.threshold_input, state.threshold_k);
+            let adjusted = (current as i16 + delta as i16).clamp(1, state.selected_count.max(1) as i16) as u8;
+            state.threshold_input = adjusted.to_string();
+        }
+        _ => {}
+    }
 }
 
 fn parse_wizard_value(value: &str, fallback: u8) -> u8 {
@@ -1499,18 +1527,14 @@ fn toggle_guardian_selection(model: &mut UiModel) {
     if model.contacts.is_empty() {
         return;
     }
-    let idx = model
-        .guardian_focus_index
-        .min(model.contacts.len().saturating_sub(1));
-    if let Some(position) = model
-        .guardian_selected_indices
-        .iter()
-        .position(|selected| *selected == idx)
-    {
-        model.guardian_selected_indices.remove(position);
-    } else {
-        model.guardian_selected_indices.push(idx);
-        model.guardian_selected_indices.sort_unstable();
+    if let Some(ActiveModal::GuardianSetup(state)) = model.active_modal.as_mut() {
+        let idx = state.focus_index.min(model.contacts.len().saturating_sub(1));
+        if let Some(position) = state.selected_indices.iter().position(|selected| *selected == idx) {
+            state.selected_indices.remove(position);
+        } else {
+            state.selected_indices.push(idx);
+            state.selected_indices.sort_unstable();
+        }
     }
 }
 
@@ -1519,16 +1543,14 @@ fn toggle_mfa_selection(model: &mut UiModel) {
     if available == 0 {
         return;
     }
-    let idx = model.mfa_focus_index.min(available.saturating_sub(1));
-    if let Some(position) = model
-        .mfa_selected_indices
-        .iter()
-        .position(|selected| *selected == idx)
-    {
-        model.mfa_selected_indices.remove(position);
-    } else {
-        model.mfa_selected_indices.push(idx);
-        model.mfa_selected_indices.sort_unstable();
+    if let Some(ActiveModal::MfaSetup(state)) = model.active_modal.as_mut() {
+        let idx = state.focus_index.min(available.saturating_sub(1));
+        if let Some(position) = state.selected_indices.iter().position(|selected| *selected == idx) {
+            state.selected_indices.remove(position);
+        } else {
+            state.selected_indices.push(idx);
+            state.selected_indices.sort_unstable();
+        }
     }
 }
 
@@ -1557,50 +1579,47 @@ fn cycle_screen_prev(model: &mut UiModel) {
 fn move_selection(model: &mut UiModel, delta: i32) {
     match model.screen {
         UiScreen::Settings => {
-            let current = model.settings_index as i32;
+            let current = model.settings_section.index() as i32;
             let mut next = current + delta;
             if next < 0 {
                 next = 0;
             }
-            if next >= SETTINGS_ROWS as i32 {
-                next = SETTINGS_ROWS as i32 - 1;
+            if next >= SettingsSection::ALL.len() as i32 {
+                next = SettingsSection::ALL.len() as i32 - 1;
             }
-            model.settings_index = next as usize;
+            model.settings_section = SettingsSection::from_index(next as usize);
         }
         UiScreen::Contacts => {
             if model.contacts.is_empty() {
                 return;
             }
             let max = model.contacts.len() as i32 - 1;
-            let mut next = model.selected_contact_index as i32 + delta;
+            let mut next = model.selected_contact_index().unwrap_or_default() as i32 + delta;
             if next < 0 {
                 next = 0;
             }
             if next > max {
                 next = max;
             }
-            model.selected_contact_index = next as usize;
-            for (idx, row) in model.contacts.iter_mut().enumerate() {
-                row.selected = idx == model.selected_contact_index;
-            }
+            model.set_selected_contact_index(next as usize);
         }
         UiScreen::Chat => {
             model.move_channel_selection(delta);
         }
         UiScreen::Notifications => {
             if model.notifications.is_empty() {
-                model.selected_notification_index = 0;
+                model.selected_notification_id = None;
                 return;
             }
             let max = model.notifications.len() as i32 - 1;
-            let mut next = model.selected_notification_index as i32 + delta;
+            let mut next = model.selected_notification_index().unwrap_or_default() as i32 + delta;
             if next < 0 {
                 next = 0;
             }
             if next > max {
                 next = max;
             }
-            model.selected_notification_index = next as usize;
+            model.set_selected_notification_index(next as usize, model.notifications.len());
         }
         UiScreen::Neighborhood => {}
     }
@@ -1630,9 +1649,42 @@ mod tests {
     use super::{apply_named_key, apply_text_keys};
     use crate::clipboard::{ClipboardPort, MemoryClipboard};
     use crate::model::{
-        AddDeviceWizardStep, CreateChannelWizardStep, ModalState, ThresholdWizardStep, UiModel,
-        UiScreen,
+        ActiveModal, AddDeviceModalState, AddDeviceWizardStep, CreateChannelModalState,
+        CreateChannelWizardStep, CreateInvitationModalState, ModalState, SettingsSection,
+        TextModalState, ThresholdWizardModalState, ThresholdWizardStep, UiModel, UiScreen,
     };
+
+    fn modal_state(model: &UiModel) -> Option<ModalState> {
+        model.modal_state()
+    }
+
+    fn create_channel_state(model: &UiModel) -> &CreateChannelModalState {
+        match model.active_modal.as_ref() {
+            Some(ActiveModal::CreateChannel(state)) => state,
+            _ => panic!("expected create channel modal"),
+        }
+    }
+
+    fn guardian_state(model: &UiModel) -> &ThresholdWizardModalState {
+        match model.active_modal.as_ref() {
+            Some(ActiveModal::GuardianSetup(state)) => state,
+            _ => panic!("expected guardian setup modal"),
+        }
+    }
+
+    fn mfa_state(model: &UiModel) -> &ThresholdWizardModalState {
+        match model.active_modal.as_ref() {
+            Some(ActiveModal::MfaSetup(state)) => state,
+            _ => panic!("expected mfa setup modal"),
+        }
+    }
+
+    fn add_device_state(model: &UiModel) -> &AddDeviceModalState {
+        match model.active_modal.as_ref() {
+            Some(ActiveModal::AddDevice(state)) => state,
+            _ => panic!("expected add device modal"),
+        }
+    }
 
     #[test]
     fn contacts_invite_shortcut_opens_invite_modal() {
@@ -1642,14 +1694,17 @@ mod tests {
         model.set_screen(UiScreen::Contacts);
         apply_text_keys(&mut model, "n", &clipboard);
 
-        assert!(matches!(model.modal, Some(ModalState::CreateInvitation)));
+        assert!(matches!(modal_state(&model), Some(ModalState::CreateInvitation)));
     }
 
     #[test]
     fn create_invitation_modal_copy_shortcut_writes_clipboard() {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
-        model.modal = Some(ModalState::CreateInvitation);
+        model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
+            receiver_id: String::new(),
+            receiver_label: None,
+        }));
         model.last_invite_code = Some("INVITE-9".to_string());
 
         apply_text_keys(&mut model, "c", &clipboard);
@@ -1666,13 +1721,15 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
 
-        model.modal = Some(ModalState::AcceptInvitation);
-        model.modal_buffer = "1".to_string();
+        model.active_modal = Some(ActiveModal::AcceptInvitation(TextModalState {
+            value: "1".to_string(),
+        }));
         apply_named_key(&mut model, "enter", 1, &clipboard);
         assert!(model.contacts.iter().any(|row| row.name == "Alice"));
 
-        model.modal = Some(ModalState::AcceptInvitation);
-        model.modal_buffer = "2".to_string();
+        model.active_modal = Some(ActiveModal::AcceptInvitation(TextModalState {
+            value: "2".to_string(),
+        }));
         apply_named_key(&mut model, "enter", 1, &clipboard);
         assert!(model.contacts.iter().any(|row| row.name == "Carol"));
     }
@@ -1685,7 +1742,7 @@ mod tests {
         model.set_screen(UiScreen::Neighborhood);
         apply_text_keys(&mut model, "n", &clipboard);
 
-        assert!(matches!(model.modal, Some(ModalState::CreateHome)));
+        assert!(matches!(modal_state(&model), Some(ModalState::CreateHome)));
     }
 
     #[test]
@@ -1696,10 +1753,9 @@ mod tests {
         model.set_screen(UiScreen::Chat);
 
         apply_text_keys(&mut model, "n", &clipboard);
-        assert!(matches!(model.modal, Some(ModalState::CreateChannel)));
+        assert!(matches!(modal_state(&model), Some(ModalState::CreateChannel)));
 
-        // Close modal and ensure typing shortcut enters input mode.
-        model.modal = None;
+        model.dismiss_modal();
         apply_text_keys(&mut model, "i", &clipboard);
         assert!(model.input_mode);
     }
@@ -1713,30 +1769,30 @@ mod tests {
         model.ensure_contact("Carol");
 
         apply_text_keys(&mut model, "n", &clipboard);
-        assert!(matches!(model.modal, Some(ModalState::CreateChannel)));
+        assert!(matches!(modal_state(&model), Some(ModalState::CreateChannel)));
         assert_eq!(model.modal_hint, "New Chat Group — Step 1 of 3");
-        assert_eq!(model.create_channel_step, CreateChannelWizardStep::Details);
+        assert_eq!(create_channel_state(&model).step, CreateChannelWizardStep::Details);
 
         apply_text_keys(&mut model, "team-room", &clipboard);
         apply_named_key(&mut model, "tab", 1, &clipboard);
-        assert_eq!(model.create_channel_step, CreateChannelWizardStep::Details);
+        assert_eq!(create_channel_state(&model).step, CreateChannelWizardStep::Details);
 
         apply_text_keys(&mut model, "bootstrap-topic", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert_eq!(model.create_channel_step, CreateChannelWizardStep::Members);
+        assert_eq!(create_channel_state(&model).step, CreateChannelWizardStep::Members);
         assert_eq!(model.modal_hint, "New Chat Group — Step 2 of 3");
 
         apply_named_key(&mut model, "down", 1, &clipboard);
         apply_text_keys(&mut model, " ", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);
         assert_eq!(
-            model.create_channel_step,
+            create_channel_state(&model).step,
             CreateChannelWizardStep::Threshold
         );
         assert_eq!(model.modal_hint, "New Chat Group — Step 3 of 3");
 
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert!(model.modal.is_none());
+        assert!(model.modal_state().is_none());
         assert!(model.channels.iter().any(|row| row.name == "team-room"));
         assert_eq!(model.selected_channel_topic(), "bootstrap-topic");
     }
@@ -1751,7 +1807,7 @@ mod tests {
         apply_text_keys(&mut model, "demo-trio-room", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);
 
-        assert_eq!(model.create_channel_step, CreateChannelWizardStep::Members);
+        assert_eq!(create_channel_state(&model).step, CreateChannelWizardStep::Members);
         assert_eq!(model.modal_hint, "New Chat Group — Step 2 of 3");
     }
 
@@ -1859,48 +1915,48 @@ mod tests {
 
         model.set_screen(UiScreen::Settings);
 
-        model.settings_index = 0;
+        model.settings_section = SettingsSection::Profile;
         apply_text_keys(&mut model, "e", &clipboard);
-        assert!(matches!(model.modal, Some(ModalState::EditNickname)));
-        model.modal = None;
+        assert!(matches!(modal_state(&model), Some(ModalState::EditNickname)));
+        model.dismiss_modal();
 
-        model.settings_index = 1;
+        model.settings_section = SettingsSection::GuardianThreshold;
         apply_text_keys(&mut model, "t", &clipboard);
-        assert!(model.modal.is_none());
+        assert!(model.modal_state().is_none());
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
             Some("Add contacts first before setting up guardians")
         );
 
-        model.settings_index = 2;
+        model.settings_section = SettingsSection::RequestRecovery;
         apply_text_keys(&mut model, "s", &clipboard);
-        assert!(matches!(model.modal, Some(ModalState::RequestRecovery)));
-        model.modal = None;
+        assert!(matches!(modal_state(&model), Some(ModalState::RequestRecovery)));
+        model.dismiss_modal();
 
-        model.settings_index = 3;
+        model.settings_section = SettingsSection::Devices;
         apply_text_keys(&mut model, "a", &clipboard);
-        assert!(matches!(model.modal, Some(ModalState::AddDeviceStep1)));
-        model.modal = None;
+        assert!(matches!(modal_state(&model), Some(ModalState::AddDeviceStep1)));
+        model.dismiss_modal();
         apply_text_keys(&mut model, "i", &clipboard);
         assert!(matches!(
-            model.modal,
+            modal_state(&model),
             Some(ModalState::ImportDeviceEnrollmentCode)
         ));
-        model.modal = None;
+        model.dismiss_modal();
         apply_text_keys(&mut model, "r", &clipboard);
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
             Some("Cannot remove the current device")
         );
 
-        model.settings_index = 4;
+        model.settings_section = SettingsSection::Authority;
         apply_text_keys(&mut model, "s", &clipboard);
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
             Some("Only one authority available")
         );
         apply_text_keys(&mut model, "m", &clipboard);
-        assert!(model.modal.is_none());
+        assert!(model.modal_state().is_none());
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
             Some("MFA requires at least 2 devices, but only 1 available")
@@ -1913,7 +1969,7 @@ mod tests {
         let clipboard = MemoryClipboard::default();
 
         model.set_screen(UiScreen::Settings);
-        model.settings_index = 3;
+        model.settings_section = SettingsSection::Devices;
 
         apply_text_keys(&mut model, "r", &clipboard);
         let first_key = model.toast_key;
@@ -1942,17 +1998,17 @@ mod tests {
         let clipboard = MemoryClipboard::default();
 
         model.set_screen(UiScreen::Settings);
-        model.settings_index = 3;
+        model.settings_section = SettingsSection::Devices;
         model.has_secondary_device = true;
         model.set_secondary_device_name(Some("Laptop".to_string()));
 
         apply_text_keys(&mut model, "r", &clipboard);
         assert!(matches!(
-            model.modal,
+            modal_state(&model),
             Some(ModalState::SelectDeviceToRemove)
         ));
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert!(matches!(model.modal, Some(ModalState::ConfirmRemoveDevice)));
+        assert!(matches!(modal_state(&model), Some(ModalState::ConfirmRemoveDevice)));
         apply_named_key(&mut model, "enter", 1, &clipboard);
 
         assert!(!model.has_secondary_device);
@@ -1967,25 +2023,25 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
         model.set_screen(UiScreen::Settings);
-        model.settings_index = 1;
+        model.settings_section = SettingsSection::GuardianThreshold;
         model.ensure_contact("Alice");
         model.ensure_contact("Bob");
         model.ensure_contact("Carol");
 
         apply_text_keys(&mut model, "t", &clipboard);
-        assert!(matches!(model.modal, Some(ModalState::GuardianSetup)));
-        assert_eq!(model.guardian_wizard_step, ThresholdWizardStep::Selection);
+        assert!(matches!(modal_state(&model), Some(ModalState::GuardianSetup)));
+        assert_eq!(guardian_state(&model).step, ThresholdWizardStep::Selection);
 
         apply_named_key(&mut model, "down", 2, &clipboard);
         apply_text_keys(&mut model, " ", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert_eq!(model.guardian_wizard_step, ThresholdWizardStep::Threshold);
+        assert_eq!(guardian_state(&model).step, ThresholdWizardStep::Threshold);
 
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert_eq!(model.guardian_wizard_step, ThresholdWizardStep::Ceremony);
+        assert_eq!(guardian_state(&model).step, ThresholdWizardStep::Ceremony);
 
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert!(model.modal.is_none());
+        assert!(model.modal_state().is_none());
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
             Some("Guardian ceremony started! Waiting for 2-of-3 guardians to respond")
@@ -1997,21 +2053,21 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
         model.set_screen(UiScreen::Settings);
-        model.settings_index = 4;
+        model.settings_section = SettingsSection::Authority;
         model.has_secondary_device = true;
 
         apply_text_keys(&mut model, "m", &clipboard);
-        assert!(matches!(model.modal, Some(ModalState::MfaSetup)));
-        assert_eq!(model.mfa_wizard_step, ThresholdWizardStep::Selection);
+        assert!(matches!(modal_state(&model), Some(ModalState::MfaSetup)));
+        assert_eq!(mfa_state(&model).step, ThresholdWizardStep::Selection);
 
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert_eq!(model.mfa_wizard_step, ThresholdWizardStep::Threshold);
+        assert_eq!(mfa_state(&model).step, ThresholdWizardStep::Threshold);
 
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert_eq!(model.mfa_wizard_step, ThresholdWizardStep::Ceremony);
+        assert_eq!(mfa_state(&model).step, ThresholdWizardStep::Ceremony);
 
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert!(model.modal.is_none());
+        assert!(model.modal_state().is_none());
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
             Some("Multifactor ceremony started (2-of-2)")
@@ -2023,15 +2079,15 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
         model.set_screen(UiScreen::Settings);
-        model.settings_index = 3;
+        model.settings_section = SettingsSection::Devices;
 
         apply_text_keys(&mut model, "a", &clipboard);
-        assert!(matches!(model.modal, Some(ModalState::AddDeviceStep1)));
+        assert!(matches!(modal_state(&model), Some(ModalState::AddDeviceStep1)));
         assert_eq!(model.modal_hint, "Add Device — Step 1 of 3");
 
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert!(matches!(model.modal, Some(ModalState::AddDeviceStep1)));
-        assert_eq!(model.add_device_step, AddDeviceWizardStep::Name);
+        assert!(matches!(modal_state(&model), Some(ModalState::AddDeviceStep1)));
+        assert_eq!(add_device_state(&model).step, AddDeviceWizardStep::Name);
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
             Some("Device name is required")
@@ -2039,10 +2095,10 @@ mod tests {
 
         apply_text_keys(&mut model, "Laptop", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert!(matches!(model.modal, Some(ModalState::AddDeviceStep1)));
-        assert_eq!(model.add_device_step, AddDeviceWizardStep::ShareCode);
+        assert!(matches!(modal_state(&model), Some(ModalState::AddDeviceStep1)));
+        assert_eq!(add_device_state(&model).step, AddDeviceWizardStep::ShareCode);
         assert_eq!(model.modal_hint, "Add Device — Step 2 of 3");
-        assert!(!model.add_device_enrollment_code.is_empty());
+        assert!(!add_device_state(&model).enrollment_code.is_empty());
     }
 
     #[test]
@@ -2050,13 +2106,13 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
         model.set_screen(UiScreen::Settings);
-        model.settings_index = 3;
+        model.settings_section = SettingsSection::Devices;
 
         apply_text_keys(&mut model, "aPhone\n", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);
         apply_text_keys(&mut model, "c", &clipboard);
 
-        assert_eq!(clipboard.read(), model.add_device_enrollment_code);
+        assert_eq!(clipboard.read(), add_device_state(&model).enrollment_code);
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
             Some("Copied to clipboard")
@@ -2068,13 +2124,13 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
         model.set_screen(UiScreen::Settings);
-        model.settings_index = 2;
+        model.settings_section = SettingsSection::RequestRecovery;
 
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert!(matches!(model.modal, Some(ModalState::RequestRecovery)));
+        assert!(matches!(modal_state(&model), Some(ModalState::RequestRecovery)));
         apply_named_key(&mut model, "enter", 1, &clipboard);
 
-        assert!(model.modal.is_none());
+        assert!(model.modal_state().is_none());
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
             Some("Set up guardians first before requesting recovery")
@@ -2086,15 +2142,13 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
         model.set_screen(UiScreen::Settings);
-        model.settings_index = 2;
+        model.settings_section = SettingsSection::RequestRecovery;
         model.ensure_contact("Alice");
         model.ensure_contact("Bob");
-        model.guardian_threshold_k = 2;
-
         apply_named_key(&mut model, "enter", 1, &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);
 
-        assert!(model.modal.is_none());
+        assert!(model.modal_state().is_none());
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
             Some("Recovery process started")
@@ -2111,14 +2165,14 @@ mod tests {
         apply_text_keys(&mut model, "nroom\n", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);
         assert_eq!(
-            model.create_channel_step,
+            create_channel_state(&model).step,
             CreateChannelWizardStep::Threshold
         );
 
         apply_named_key(&mut model, "esc", 1, &clipboard);
-        assert_eq!(model.create_channel_step, CreateChannelWizardStep::Members);
+        assert_eq!(create_channel_state(&model).step, CreateChannelWizardStep::Members);
         apply_named_key(&mut model, "esc", 1, &clipboard);
-        assert_eq!(model.create_channel_step, CreateChannelWizardStep::Details);
+        assert_eq!(create_channel_state(&model).step, CreateChannelWizardStep::Details);
     }
 
     #[test]
@@ -2126,16 +2180,16 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
         model.set_screen(UiScreen::Settings);
-        model.settings_index = 1;
+        model.settings_section = SettingsSection::GuardianThreshold;
         model.ensure_contact("Alice");
         model.ensure_contact("Bob");
 
         apply_text_keys(&mut model, "t", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert_eq!(model.guardian_wizard_step, ThresholdWizardStep::Threshold);
+        assert_eq!(guardian_state(&model).step, ThresholdWizardStep::Threshold);
 
         apply_named_key(&mut model, "esc", 1, &clipboard);
-        assert_eq!(model.guardian_wizard_step, ThresholdWizardStep::Selection);
+        assert_eq!(guardian_state(&model).step, ThresholdWizardStep::Selection);
     }
 
     #[test]
@@ -2143,14 +2197,14 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
         model.set_screen(UiScreen::Settings);
-        model.settings_index = 4;
+        model.settings_section = SettingsSection::Authority;
         model.has_secondary_device = true;
 
         apply_text_keys(&mut model, "m", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert_eq!(model.mfa_wizard_step, ThresholdWizardStep::Threshold);
+        assert_eq!(mfa_state(&model).step, ThresholdWizardStep::Threshold);
 
         apply_named_key(&mut model, "esc", 1, &clipboard);
-        assert_eq!(model.mfa_wizard_step, ThresholdWizardStep::Selection);
+        assert_eq!(mfa_state(&model).step, ThresholdWizardStep::Selection);
     }
 }

@@ -20,6 +20,7 @@ mod operational;
 // Re-export types from submodules
 pub use command_parser::{
     AuraEvent, CommandAuthorizationLevel, EffectCommand, EventFilter, EventSubscription,
+    ThresholdConfig,
 };
 pub use dispatcher::{CapabilityPolicy, CommandDispatcher, DispatchError};
 pub use operational::{OpError, OpResponse, OpResult, OperationalHandler};

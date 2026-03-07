@@ -9,6 +9,7 @@
 #![allow(clippy::needless_pass_by_value)]
 
 use aura_core::effects::terminal::{KeyCode, KeyEvent};
+use aura_core::AuthorityId;
 
 use crate::tui::components::copy_to_clipboard;
 use crate::tui::navigation::{navigate_list, NavKey};
@@ -28,6 +29,16 @@ use super::super::views::{
     NicknameSuggestionModalState, TopicModalState,
 };
 use super::super::TuiState;
+
+fn parse_authority_id(state: &mut TuiState, raw: &str, action: &str) -> Option<AuthorityId> {
+    match raw.parse::<AuthorityId>() {
+        Ok(id) => Some(id),
+        Err(_) => {
+            state.toast_error(format!("Invalid authority ID for {action}"));
+            None
+        }
+    }
+}
 
 fn dismiss_on_escape(state: &mut TuiState, code: &KeyCode) -> bool {
     if matches!(code, KeyCode::Esc) {
@@ -77,7 +88,9 @@ fn handle_ceremony_escape(
 ) {
     if let Some(ceremony_id) = ceremony_id {
         commands.push(TuiCommand::Dispatch(
-            DispatchCommand::CancelKeyRotationCeremony { ceremony_id },
+            DispatchCommand::CancelKeyRotationCeremony {
+                ceremony_id: ceremony_id.into(),
+            },
         ));
         state.modal_queue.dismiss();
     } else {
@@ -377,9 +390,13 @@ fn handle_neighborhood_moderator_modal_key_queue(
         }
         KeyCode::Enter => {
             if let Some(target_id) = modal_state.selected_contact_id() {
+                let Some(target_id) = parse_authority_id(state, target_id, "moderator assignment")
+                else {
+                    return;
+                };
                 commands.push(TuiCommand::Dispatch(
                     DispatchCommand::SubmitModeratorAssignment {
-                        target_id: target_id.to_string(),
+                        target_id,
                         assign: modal_state.assign,
                     },
                 ));
@@ -420,9 +437,13 @@ fn handle_neighborhood_access_override_modal_key_queue(
         }
         KeyCode::Enter => {
             if let Some(target_id) = modal_state.selected_contact_id() {
+                let Some(target_id) = parse_authority_id(state, target_id, "access override")
+                else {
+                    return;
+                };
                 commands.push(TuiCommand::Dispatch(
                     DispatchCommand::SubmitAccessOverride {
-                        target_id: target_id.to_string(),
+                        target_id,
                         access_level: modal_state.access_level,
                     },
                 ));
@@ -453,12 +474,19 @@ fn handle_neighborhood_capability_config_modal_key_queue(
         }
         KeyCode::Enter => {
             if modal_state.can_submit() {
+                let config = match super::super::commands::HomeCapabilityConfig::parse(
+                    &modal_state.full_caps,
+                    &modal_state.partial_caps,
+                    &modal_state.limited_caps,
+                ) {
+                    Ok(config) => config,
+                    Err(error) => {
+                        state.toast_error(error);
+                        return;
+                    }
+                };
                 commands.push(TuiCommand::Dispatch(
-                    DispatchCommand::SubmitHomeCapabilityConfig {
-                        full_caps: modal_state.full_caps,
-                        partial_caps: modal_state.partial_caps,
-                        limited_caps: modal_state.limited_caps,
-                    },
+                    DispatchCommand::SubmitHomeCapabilityConfig { config },
                 ));
             } else {
                 state.toast_warning("All capability fields must be non-empty");
@@ -549,7 +577,7 @@ fn handle_guardian_select_key_queue(
         KeyCode::Enter => {
             if let Some((contact_id, _)) = modal_state.contacts.get(modal_state.selected_index) {
                 commands.push(TuiCommand::Dispatch(DispatchCommand::AddGuardian {
-                    contact_id: contact_id.clone(),
+                    contact_id: contact_id.to_string().into(),
                 }));
                 state.modal_queue.dismiss();
             }
@@ -727,13 +755,29 @@ fn handle_chat_create_key_queue(
                         Some(modal_state.topic.clone())
                     };
                     let members = modal_state.selected_member_ids();
+                    let mut parsed_members = Vec::with_capacity(members.len());
+                    for member in members {
+                        let Some(parsed) = parse_authority_id(state, &member, "channel creation")
+                        else {
+                            return;
+                        };
+                        parsed_members.push(parsed);
+                    }
                     let channel_name = modal_state.name.clone();
 
                     commands.push(TuiCommand::Dispatch(DispatchCommand::CreateChannel {
                         name: channel_name,
                         topic,
-                        members,
-                        threshold_k: modal_state.threshold_k,
+                        members: parsed_members,
+                        threshold_k: match super::super::commands::ThresholdK::try_from(
+                            modal_state.threshold_k,
+                        ) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                state.toast_error(error);
+                                return;
+                            }
+                        },
                     }));
 
                     // Dismiss modal; success/error toasts are emitted from async callbacks.
@@ -787,7 +831,12 @@ fn handle_chat_member_select_key_queue(
         }
         KeyCode::Enter => {
             let mut draft = modal_state.draft;
-            draft.member_ids = modal_state.picker.selected_ids;
+            draft.member_ids = modal_state
+                .picker
+                .selected_ids
+                .into_iter()
+                .map(|id| id.to_string())
+                .collect();
             state.modal_queue.update_active(|modal| {
                 *modal = QueuedModal::ChatCreate(draft);
             });
@@ -809,7 +858,7 @@ fn handle_chat_topic_key_queue(
         }
         KeyCode::Enter => {
             commands.push(TuiCommand::Dispatch(DispatchCommand::SetChannelTopic {
-                channel_id: modal_state.channel_id.clone(),
+                channel_id: modal_state.channel_id.clone().into(),
                 topic: modal_state.value,
             }));
             state.modal_queue.dismiss();
@@ -847,7 +896,7 @@ fn handle_nickname_key_queue(
             if modal_state.can_submit() {
                 let nickname = modal_state.value.trim().to_string();
                 commands.push(TuiCommand::Dispatch(DispatchCommand::UpdateNickname {
-                    contact_id: modal_state.contact_id,
+                    contact_id: modal_state.contact_id.into(),
                     nickname,
                 }));
                 state.modal_queue.dismiss();
@@ -1070,13 +1119,20 @@ fn handle_create_invitation_key_queue(
 
             // Convert type_index to stable invitation type string
             let invitation_type = match modal_state.type_index {
-                0 => "guardian".to_string(),
-                1 => "contact".to_string(),
-                _ => "channel".to_string(),
+                0 => super::super::commands::InvitationKind::Guardian,
+                1 => super::super::commands::InvitationKind::Contact,
+                _ => super::super::commands::InvitationKind::Channel,
             };
 
             commands.push(TuiCommand::Dispatch(DispatchCommand::CreateInvitation {
-                receiver_id: modal_state.receiver_id.clone(),
+                receiver_id: match parse_authority_id(
+                    state,
+                    &modal_state.receiver_id,
+                    "invitation creation",
+                ) {
+                    Some(id) => id,
+                    None => return,
+                },
                 invitation_type,
                 message: (!modal_state.message.trim().is_empty())
                     .then(|| modal_state.message.clone()),
@@ -1241,11 +1297,29 @@ fn handle_guardian_setup_key_queue(
                 }
                 KeyCode::Enter => {
                     if modal_state.can_start_ceremony() {
+                        let selected_ids = modal_state.selected_contact_ids();
+                        let mut contact_ids = Vec::with_capacity(selected_ids.len());
+                        for contact in selected_ids {
+                            let Some(parsed) =
+                                parse_authority_id(state, &contact, "guardian ceremony")
+                            else {
+                                return;
+                            };
+                            contact_ids.push(parsed);
+                        }
                         // Dispatch command to start guardian setup ceremony
                         commands.push(TuiCommand::Dispatch(
                             DispatchCommand::StartGuardianCeremony {
-                                contact_ids: modal_state.selected_contact_ids(),
-                                threshold_k: modal_state.threshold_k(),
+                                contact_ids,
+                                threshold_k: match super::super::commands::ThresholdK::try_from(
+                                    modal_state.threshold_k(),
+                                ) {
+                                    Ok(value) => value,
+                                    Err(error) => {
+                                        state.toast_error(error);
+                                        return;
+                                    }
+                                },
                             },
                         ));
 
@@ -1373,8 +1447,20 @@ fn handle_mfa_setup_key_queue(
             KeyCode::Enter => {
                 if modal_state.can_start_ceremony() {
                     commands.push(TuiCommand::Dispatch(DispatchCommand::StartMfaCeremony {
-                        device_ids: modal_state.selected_contact_ids(),
-                        threshold_k: modal_state.threshold_k(),
+                        device_ids: modal_state
+                            .selected_contact_ids()
+                            .into_iter()
+                            .map(Into::into)
+                            .collect(),
+                        threshold_k: match super::super::commands::ThresholdK::try_from(
+                            modal_state.threshold_k(),
+                        ) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                state.toast_error(error);
+                                return;
+                            }
+                        },
                     }));
 
                     // Dismiss modal after sending invitation (mirrors guardian invitation flow)
@@ -1464,7 +1550,14 @@ fn handle_settings_add_device_key_queue(
         }
         KeyCode::Enter => {
             if modal_state.can_submit() {
-                let invitee_authority_id = modal_state.invitee_authority().map(|s| s.to_string());
+                let invitee_authority_id = if let Some(raw) = modal_state.invitee_authority() {
+                    match parse_authority_id(state, raw, "device enrollment invitee") {
+                        Some(id) => Some(id),
+                        None => return,
+                    }
+                } else {
+                    None
+                };
                 commands.push(TuiCommand::Dispatch(DispatchCommand::AddDevice {
                     name: modal_state.name,
                     invitee_authority_id,
@@ -1565,8 +1658,13 @@ fn handle_authority_picker_key_queue(
                 if let Some((authority_id, _)) =
                     modal_state.contacts.get(modal_state.selected_index)
                 {
+                    let Some(authority_id) =
+                        parse_authority_id(state, authority_id.as_str(), "authority switch")
+                    else {
+                        return;
+                    };
                     commands.push(TuiCommand::Dispatch(DispatchCommand::SwitchAuthority {
-                        authority_id: authority_id.clone(),
+                        authority_id,
                     }));
                 }
             }
@@ -1638,7 +1736,9 @@ fn handle_device_enrollment_key_queue(
             if !modal_state.ceremony.is_complete && !modal_state.ceremony.has_failed {
                 if let Some(ceremony_id) = modal_state.ceremony.ceremony_id {
                     commands.push(TuiCommand::Dispatch(
-                        DispatchCommand::CancelKeyRotationCeremony { ceremony_id },
+                        DispatchCommand::CancelKeyRotationCeremony {
+                            ceremony_id: ceremony_id.into(),
+                        },
                     ));
                 }
             }

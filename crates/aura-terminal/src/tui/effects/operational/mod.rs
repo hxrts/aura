@@ -327,7 +327,7 @@ mod tests {
 
         let result = handler.execute(&EffectCommand::ListPeers).await;
         match result {
-            Some(Ok(OpResponse::List(_))) => {}
+            Some(Ok(OpResponse::PeersListed { .. })) => {}
             Some(Err(OpError::Failed(msg))) => {
                 assert!(
                     msg.contains("Runtime bridge not available") || msg.contains("Failed to query"),
@@ -375,7 +375,7 @@ mod tests {
             })
             .await;
         assert!(
-            matches!(result, Some(Ok(OpResponse::Data(_)))),
+            matches!(result, Some(Ok(OpResponse::ChannelMessageSent { .. }))),
             "SendMessage should succeed in LocalOnly mode, got: {result:?}"
         );
 
@@ -389,7 +389,7 @@ mod tests {
             })
             .await;
         assert!(
-            matches!(result, Some(Ok(OpResponse::Data(_)))),
+            matches!(result, Some(Ok(OpResponse::ChannelCreated { .. }))),
             "CreateChannel should succeed in LocalOnly mode, got: {result:?}"
         );
     }

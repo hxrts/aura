@@ -84,9 +84,9 @@ pub async fn handle_messaging(
             )
             .await
             {
-                Ok(channel_id) => Some(Ok(OpResponse::Data(format!(
-                    "Channel created: {channel_id}"
-                )))),
+                Ok(channel_id) => Some(Ok(OpResponse::ChannelCreated {
+                    channel_id: channel_id.to_string(),
+                })),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to create channel: {e}"
                 )))),
@@ -101,7 +101,7 @@ pub async fn handle_messaging(
                 send_message_by_name(app_core, channel, content, timestamp).await
             };
             match result {
-                Ok(message_id) => Some(Ok(OpResponse::Data(format!("Message sent: {message_id}")))),
+                Ok(message_id) => Some(Ok(OpResponse::ChannelMessageSent { message_id })),
                 Err(e) => {
                     let compact = compact_send_error(&e);
                     error!(
@@ -120,9 +120,9 @@ pub async fn handle_messaging(
             // Use workflow for business logic
             let timestamp = super::time::current_time_ms(app_core).await;
             match send_direct_message(app_core, target, content, timestamp).await {
-                Ok(dm_channel_id) => Some(Ok(OpResponse::Data(format!(
-                    "Message sent to DM channel: {dm_channel_id}"
-                )))),
+                Ok(dm_channel_id) => Some(Ok(OpResponse::DirectMessageSent {
+                    channel_id: dm_channel_id,
+                })),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to send message: {e}"
                 )))),
@@ -133,9 +133,9 @@ pub async fn handle_messaging(
             // Use workflow for business logic
             let timestamp = super::time::current_time_ms(app_core).await;
             match start_direct_chat(app_core, contact_id, timestamp).await {
-                Ok(dm_channel_id) => Some(Ok(OpResponse::Data(format!(
-                    "Started DM chat: {dm_channel_id}"
-                )))),
+                Ok(dm_channel_id) => Some(Ok(OpResponse::DirectMessageSent {
+                    channel_id: dm_channel_id,
+                })),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to start chat: {e}"
                 )))),
@@ -164,7 +164,7 @@ pub async fn handle_messaging(
             let timestamp = super::time::current_time_ms(app_core).await;
             // Use send_action_by_name for string-based channel input from TUI
             match send_action_by_name(app_core, channel, action, timestamp).await {
-                Ok(message_id) => Some(Ok(OpResponse::Data(format!("Action sent: {message_id}")))),
+                Ok(message_id) => Some(Ok(OpResponse::ActionSent { message_id })),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to send action: {e}"
                 )))),
@@ -174,9 +174,9 @@ pub async fn handle_messaging(
         EffectCommand::InviteUser { target, channel } => {
             // Invite user to channel - use workflow
             match invite_user_to_channel(app_core, target, channel, None, None).await {
-                Ok(invitation_id) => Some(Ok(OpResponse::Data(format!(
-                    "Invitation sent: {invitation_id}"
-                )))),
+                Ok(invitation_id) => Some(Ok(OpResponse::ChannelInvitationSent {
+                    invitation_id: invitation_id.to_string(),
+                })),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to invite user: {e}"
                 )))),
@@ -186,7 +186,9 @@ pub async fn handle_messaging(
         EffectCommand::JoinChannel { channel } => {
             // Use join_channel_by_name for string-based channel input from TUI
             match join_channel_by_name(app_core, channel).await {
-                Ok(()) => Some(Ok(OpResponse::Data(format!("Joined channel: {channel}")))),
+                Ok(()) => Some(Ok(OpResponse::ChannelJoined {
+                    channel_id: channel.clone(),
+                })),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to join channel: {e}"
                 )))),
@@ -231,9 +233,7 @@ pub async fn handle_messaging(
                 send_message_by_name(app_core, channel, content, timestamp).await
             };
             match result {
-                Ok(message_id) => Some(Ok(OpResponse::Data(format!(
-                    "Message retried: {message_id}"
-                )))),
+                Ok(message_id) => Some(Ok(OpResponse::RetrySent { message_id })),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to retry message: {e}"
                 )))),

@@ -25,7 +25,7 @@ pub async fn handle_query(
         EffectCommand::ListParticipants { channel } => {
             // Delegate to workflow
             match list_participants(app_core, channel).await {
-                Ok(participants) => Some(Ok(OpResponse::List(participants))),
+                Ok(participants) => Some(Ok(OpResponse::ParticipantsListed { participants })),
                 Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
             }
         }
@@ -53,11 +53,13 @@ pub async fn handle_query(
                         if contact.is_member { "Yes" } else { "No" }
                     );
 
-                    Some(Ok(OpResponse::Data(info)))
+                    Some(Ok(OpResponse::UserInfo { info }))
                 }
                 Err(e) => {
                     // Workflow already returns user-friendly error messages
-                    Some(Ok(OpResponse::Data(e.to_string())))
+                    Some(Ok(OpResponse::UserInfo {
+                        info: e.to_string(),
+                    }))
                 }
             }
         }

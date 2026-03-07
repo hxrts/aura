@@ -13,10 +13,47 @@
 //! classified by the authorization level required to execute them.
 
 use aura_app::ui::types::chat::Channel;
+use aura_core::identifiers::AuthorityId;
 use tokio::sync::broadcast;
 
 // Re-export portable authorization types from aura-app
 pub use aura_app::ui::authorization::CommandAuthorizationLevel;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThresholdConfig {
+    threshold_k: u8,
+    threshold_n: u8,
+}
+
+impl ThresholdConfig {
+    pub fn new(threshold_k: u8, threshold_n: u8) -> Result<Self, String> {
+        if threshold_n == 0 {
+            return Err("threshold_n must be at least 1".to_string());
+        }
+        if threshold_k == 0 {
+            return Err("threshold_k must be at least 1".to_string());
+        }
+        if threshold_k > threshold_n {
+            return Err(format!(
+                "threshold_k ({threshold_k}) cannot exceed threshold_n ({threshold_n})"
+            ));
+        }
+        Ok(Self {
+            threshold_k,
+            threshold_n,
+        })
+    }
+
+    #[must_use]
+    pub const fn threshold_k(self) -> u8 {
+        self.threshold_k
+    }
+
+    #[must_use]
+    pub const fn threshold_n(self) -> u8 {
+        self.threshold_n
+    }
+}
 
 /// Commands that can be dispatched to the effect system
 #[derive(Debug, Clone)]
@@ -46,10 +83,8 @@ pub enum EffectCommand {
     // === Settings Commands ===
     /// Update threshold configuration (requires guardian setup)
     UpdateThreshold {
-        /// Required signatures (K)
-        threshold_k: u8,
-        /// Total guardians (N)
-        threshold_n: u8,
+        /// Validated threshold configuration.
+        config: ThresholdConfig,
     },
     /// Add a device to the account
     AddDevice {
@@ -58,7 +93,7 @@ pub enum EffectCommand {
         /// Invitee's authority ID for two-step exchange (optional).
         /// If Some, creates an addressed invitation enabling DeviceEnrollment choreography.
         /// If None, falls back to legacy bearer token mode.
-        invitee_authority_id: Option<String>,
+        invitee_authority_id: Option<AuthorityId>,
     },
     /// Remove a device from the account
     RemoveDevice {
@@ -272,7 +307,7 @@ pub enum EffectCommand {
     /// Invite a LAN-discovered peer as a contact
     InviteLanPeer {
         /// Authority ID of the peer
-        authority_id: String,
+        authority_id: AuthorityId,
         /// Address of the peer (IP:port)
         address: String,
     },
@@ -281,7 +316,7 @@ pub enum EffectCommand {
     /// Create a new invitation
     CreateInvitation {
         /// Receiver authority ID
-        receiver_id: String,
+        receiver_id: AuthorityId,
         /// Type of invitation (Contact, Guardian, Channel)
         invitation_type: String,
         /// Optional message to include
@@ -368,12 +403,12 @@ pub enum EffectCommand {
     /// Add a peer to the known peers list
     AddPeer {
         /// Peer ID (UUID string)
-        peer_id: String,
+        peer_id: AuthorityId,
     },
     /// Remove a peer from the known peers list
     RemovePeer {
         /// Peer ID (UUID string)
-        peer_id: String,
+        peer_id: AuthorityId,
     },
     /// List known peers
     ListPeers,

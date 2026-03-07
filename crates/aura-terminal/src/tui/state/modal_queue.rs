@@ -4,6 +4,7 @@
 
 use std::collections::VecDeque;
 
+use super::ids::{AuthorityRef, ChannelId, ContactId, DeviceId, InvitationId};
 use crate::tui::screens::Screen;
 
 use super::views::{
@@ -136,13 +137,13 @@ pub enum QueuedModal {
 #[derive(Clone, Debug)]
 pub enum ConfirmAction {
     /// Remove a device
-    RemoveDevice { device_id: String },
+    RemoveDevice { device_id: DeviceId },
     /// Delete a channel
-    DeleteChannel { channel_id: String },
+    DeleteChannel { channel_id: ChannelId },
     /// Remove a contact
-    RemoveContact { contact_id: String },
+    RemoveContact { contact_id: ContactId },
     /// Revoke an invitation
-    RevokeInvitation { invitation_id: String },
+    RevokeInvitation { invitation_id: InvitationId },
 }
 
 /// State for generic contact selection modal
@@ -151,18 +152,18 @@ pub struct ContactSelectModalState {
     /// Title for the modal
     pub title: String,
     /// Available contacts (id, name)
-    pub contacts: Vec<(String, String)>,
+    pub contacts: Vec<(AuthorityRef, String)>,
     /// Currently focused index
     pub selected_index: usize,
     /// Selected contact IDs (for multi-select)
-    pub selected_ids: Vec<String>,
+    pub selected_ids: Vec<AuthorityRef>,
     /// Whether multi-select is enabled
     pub multi_select: bool,
 }
 
 impl ContactSelectModalState {
     /// Create a single-select contact picker
-    pub fn single(title: impl Into<String>, contacts: Vec<(String, String)>) -> Self {
+    pub fn single(title: impl Into<String>, contacts: Vec<(AuthorityRef, String)>) -> Self {
         Self {
             title: title.into(),
             contacts,
@@ -173,7 +174,7 @@ impl ContactSelectModalState {
     }
 
     /// Create a multi-select contact picker
-    pub fn multi(title: impl Into<String>, contacts: Vec<(String, String)>) -> Self {
+    pub fn multi(title: impl Into<String>, contacts: Vec<(AuthorityRef, String)>) -> Self {
         Self {
             title: title.into(),
             contacts,
@@ -196,10 +197,8 @@ impl ContactSelectModalState {
 
     /// Get the currently focused contact ID
     #[must_use]
-    pub fn focused_contact_id(&self) -> Option<&str> {
-        self.contacts
-            .get(self.selected_index)
-            .map(|(id, _)| id.as_str())
+    pub fn focused_contact_id(&self) -> Option<&AuthorityRef> {
+        self.contacts.get(self.selected_index).map(|(id, _)| id)
     }
 
     /// Get total number of contacts

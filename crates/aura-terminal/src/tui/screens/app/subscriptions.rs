@@ -16,6 +16,7 @@ use aura_app::ui::signals::{
     SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
 };
 use aura_app::ui::types::ChatState;
+use aura_core::AuthorityId;
 
 use crate::tui::chat_scope::{active_home_scope_id, is_dm_like_channel, scoped_channels};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
@@ -24,19 +25,23 @@ use crate::tui::updates::{UiUpdate, UiUpdateSender};
 
 /// Shared authority id state for UI dispatch handlers.
 #[derive(Clone, Default)]
-pub struct SharedAuthorityId(Arc<RwLock<String>>);
+pub struct SharedAuthorityId(Arc<RwLock<Option<AuthorityId>>>);
 
 impl SharedAuthorityId {
     #[must_use]
     pub fn new() -> Self {
-        Self(Arc::new(RwLock::new(String::new())))
+        Self(Arc::new(RwLock::new(None)))
     }
 
-    pub fn read(&self) -> std::sync::LockResult<std::sync::RwLockReadGuard<'_, String>> {
+    pub fn read(
+        &self,
+    ) -> std::sync::LockResult<std::sync::RwLockReadGuard<'_, Option<AuthorityId>>> {
         self.0.read()
     }
 
-    pub fn write(&self) -> std::sync::LockResult<std::sync::RwLockWriteGuard<'_, String>> {
+    pub fn write(
+        &self,
+    ) -> std::sync::LockResult<std::sync::RwLockWriteGuard<'_, Option<AuthorityId>>> {
         self.0.write()
     }
 }
@@ -55,7 +60,7 @@ pub fn use_authority_id_subscription(
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
                 if let Ok(mut guard) = authority_id.write() {
-                    *guard = settings_state.authority_id;
+                    *guard = settings_state.authority_id.parse::<AuthorityId>().ok();
                 }
             })
             .await;

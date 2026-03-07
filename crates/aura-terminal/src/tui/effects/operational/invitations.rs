@@ -59,10 +59,7 @@ pub async fn handle_invitations(
             message,
             ttl_secs,
         } => {
-            let receiver = match resolve_contact_authority_id(app_core, receiver_id).await {
-                Ok(id) => id,
-                Err(error) => return Some(Err(error)),
-            };
+            let receiver = *receiver_id;
 
             let ttl_ms = ttl_secs.map(|s| s.saturating_mul(1000));
             let invitation_type_lc = invitation_type.to_lowercase();
@@ -216,10 +213,9 @@ pub async fn handle_invitations(
             match create_channel_invitation(app_core, receiver, home_id, None, None, None, None)
                 .await
             {
-                Ok(info) => Some(Ok(OpResponse::Data(format!(
-                    "Home invitation sent: {}",
-                    info.invitation_id.as_str()
-                )))),
+                Ok(info) => Some(Ok(OpResponse::ChannelInvitationSent {
+                    invitation_id: info.invitation_id.as_str().to_string(),
+                })),
                 Err(e) => Some(Err(OpError::Failed(format!(
                     "Failed to send home invitation: {e}"
                 )))),

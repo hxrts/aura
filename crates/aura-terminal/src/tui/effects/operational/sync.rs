@@ -44,9 +44,9 @@ pub async fn handle_sync(
             let result = request_state_by_str(app_core, peer_id).await;
 
             match result {
-                Ok(_) => Some(Ok(OpResponse::Data(format!(
-                    "Sync requested from peer: {peer_id}"
-                )))),
+                Ok(_) => Some(Ok(OpResponse::PeerStateRequested {
+                    peer_id: peer_id.clone(),
+                })),
                 Err(e) => Some(Err(OpError::Failed(format!(
                     "Failed to sync from peer {peer_id}: {e}"
                 )))),

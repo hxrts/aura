@@ -38,8 +38,9 @@ use aura_app::ui::types::InvitationBridgeType;
 use aura_app::ui::workflows::invitation::{accept_invitation, import_invitation_details};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::Epoch;
+use aura_core::AuthorityId;
 
-use crate::error::TerminalError;
+use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::tui::{resolve_storage_path, TuiMode};
 use crate::tui::context::{
     AccountFilesHelper, DispatchHelper, InitializedAppCore, SnapshotHelper, ToastHelper,
@@ -283,7 +284,7 @@ pub struct IoContext {
     demo_mobile_device_id: Option<String>,
     #[cfg(feature = "development")]
     demo_mobile_authority_id: Option<String>,
-    invited_lan_peers: Arc<RwLock<HashSet<String>>>,
+    invited_lan_peers: Arc<RwLock<HashSet<AuthorityId>>>,
     current_context: Arc<RwLock<Option<String>>>,
     channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
     tasks: Arc<UiTaskRegistry>,
@@ -534,22 +535,22 @@ impl IoContext {
             }
 
             /// Import an invitation code on the demo Mobile device and accept it.
-            pub async fn import_invitation_on_mobile(&self, code: &str) -> Result<(), String> {
+            pub async fn import_invitation_on_mobile(&self, code: &str) -> TerminalResult<()> {
                 let agent = self
                     .demo_mobile_agent
                     .as_ref()
-                    .ok_or_else(|| "Demo Mobile agent unavailable".to_string())?;
+                    .ok_or_else(|| TerminalError::NotFound("Demo Mobile agent unavailable".to_string()))?;
                 let invitations = agent
                     .invitations()
-                    .map_err(|e| format!("Invitation service unavailable: {e}"))?;
+                    .map_err(|e| TerminalError::Operation(format!("Invitation service unavailable: {e}")))?;
                 let invitation = invitations
                     .import_and_cache(code)
                     .await
-                    .map_err(|e| format!("Failed to import invitation: {e}"))?;
+                    .map_err(|e| TerminalError::Operation(format!("Failed to import invitation: {e}")))?;
                 invitations
                     .accept(&invitation.invitation_id)
                     .await
-                    .map_err(|e| format!("Failed to accept invitation: {e}"))?;
+                    .map_err(|e| TerminalError::Operation(format!("Failed to accept invitation: {e}")))?;
                 Ok(())
             }
 
@@ -557,16 +558,20 @@ impl IoContext {
             ///
             /// This is used by demo-mode harness flows to ensure device-threshold
             /// ceremony packages are consumed by the simulated secondary device.
-            pub async fn process_demo_mobile_ceremony_acceptances(&self) -> Result<(), String> {
+            pub async fn process_demo_mobile_ceremony_acceptances(&self) -> TerminalResult<()> {
                 let agent = self
                     .demo_mobile_agent
                     .as_ref()
-                    .ok_or_else(|| "Demo Mobile agent unavailable".to_string())?;
+                    .ok_or_else(|| TerminalError::NotFound("Demo Mobile agent unavailable".to_string()))?;
                 agent
                     .process_ceremony_acceptances()
                     .await
                     .map(|_| ())
-                    .map_err(|e| format!("Failed to process demo Mobile ceremonies: {e}"))
+                    .map_err(|e| {
+                        TerminalError::Operation(format!(
+                            "Failed to process demo Mobile ceremonies: {e}"
+                        ))
+                    })
             }
         } else {
             #[must_use]
@@ -599,7 +604,7 @@ impl IoContext {
     // Account file operations (isolated, async)
     // =========================================================================
 
-    pub async fn create_account(&self, nickname_suggestion: &str) -> Result<(), String> {
+    pub async fn create_account(&self, nickname_suggestion: &str) -> TerminalResult<()> {
         let (authority_id, _context_id) = self
             .account_files
             .create_account(nickname_suggestion)
@@ -613,9 +618,9 @@ impl IoContext {
         {
             let core = self.app_core_raw().read().await;
             if core.has_runtime() {
-                core.bootstrap_signing_keys()
-                    .await
-                    .map_err(|e| format!("Failed to bootstrap signing keys: {e}"))?;
+                core.bootstrap_signing_keys().await.map_err(|e| {
+                    TerminalError::Operation(format!("Failed to bootstrap signing keys: {e}"))
+                })?;
             }
         }
 
@@ -626,17 +631,17 @@ impl IoContext {
         &self,
         recovered_authority_id: aura_core::identifiers::AuthorityId,
         recovered_context_id: Option<aura_core::identifiers::ContextId>,
-    ) -> Result<(), String> {
+    ) -> TerminalResult<()> {
         self.account_files
             .restore_recovered_account(recovered_authority_id, recovered_context_id)
             .await
     }
 
-    pub async fn export_account_backup(&self) -> Result<String, String> {
+    pub async fn export_account_backup(&self) -> TerminalResult<String> {
         self.account_files.export_account_backup().await
     }
 
-    pub async fn import_account_backup(&self, backup_code: &str) -> Result<(), String> {
+    pub async fn import_account_backup(&self, backup_code: &str) -> TerminalResult<()> {
         self.account_files.import_account_backup(backup_code).await
     }
 
@@ -688,7 +693,7 @@ impl IoContext {
     // Command dispatch
     // =========================================================================
 
-    pub async fn dispatch(&self, command: EffectCommand) -> Result<(), String> {
+    pub async fn dispatch(&self, command: EffectCommand) -> TerminalResult<()> {
         // In demo mode, also route commands through the SimulatedBridge
         // so that simulated agents (Alice/Carol) can respond to them
         cfg_if! {
@@ -702,7 +707,7 @@ impl IoContext {
         self.dispatch.dispatch(command).await
     }
 
-    pub async fn dispatch_and_wait(&self, command: EffectCommand) -> Result<(), String> {
+    pub async fn dispatch_and_wait(&self, command: EffectCommand) -> TerminalResult<()> {
         // In demo mode, also route commands through the SimulatedBridge
         cfg_if! {
             if #[cfg(feature = "development")] {
@@ -715,7 +720,7 @@ impl IoContext {
         self.dispatch.dispatch_and_wait(command).await
     }
 
-    pub async fn export_invitation_code(&self, invitation_id: &str) -> Result<String, String> {
+    pub async fn export_invitation_code(&self, invitation_id: &str) -> TerminalResult<String> {
         match self
             .operational
             .execute(&EffectCommand::ExportInvitation {
@@ -724,27 +729,31 @@ impl IoContext {
             .await
         {
             Some(Ok(OpResponse::InvitationCode { code, .. })) => Ok(code),
-            Some(Ok(other)) => Err(format!("Unexpected response: {other:?}")),
+            Some(Ok(other)) => Err(TerminalError::Operation(format!(
+                "Unexpected response: {other:?}"
+            ))),
             Some(Err(err)) => {
                 let terr: TerminalError = err.clone().into();
                 self.operational.emit_error(terr).await;
-                Err(err.to_string())
+                Err(err.into())
             }
-            None => Err("ExportInvitation not handled".to_string()),
+            None => Err(TerminalError::NotImplemented(
+                "ExportInvitation not handled".to_string(),
+            )),
         }
     }
 
     pub async fn create_invitation_code(
         &self,
-        receiver_id: &str,
+        receiver_id: AuthorityId,
         invitation_type: &str,
         message: Option<String>,
         ttl_secs: Option<u64>,
-    ) -> Result<String, String> {
+    ) -> TerminalResult<String> {
         match self
             .operational
             .execute(&EffectCommand::CreateInvitation {
-                receiver_id: receiver_id.to_string(),
+                receiver_id,
                 invitation_type: invitation_type.to_string(),
                 message,
                 ttl_secs,
@@ -752,26 +761,30 @@ impl IoContext {
             .await
         {
             Some(Ok(OpResponse::InvitationCode { code, .. })) => Ok(code),
-            Some(Ok(other)) => Err(format!("Unexpected response: {other:?}")),
+            Some(Ok(other)) => Err(TerminalError::Operation(format!(
+                "Unexpected response: {other:?}"
+            ))),
             Some(Err(err)) => {
                 let terr: TerminalError = err.clone().into();
                 self.operational.emit_error(terr).await;
-                Err(err.to_string())
+                Err(err.into())
             }
-            None => Err("CreateInvitation not handled".to_string()),
+            None => Err(TerminalError::NotImplemented(
+                "CreateInvitation not handled".to_string(),
+            )),
         }
     }
 
     pub async fn start_device_enrollment(
         &self,
         nickname_suggestion: &str,
-        invitee_authority_id: Option<&str>,
-    ) -> Result<DeviceEnrollmentStartInfo, String> {
+        invitee_authority_id: Option<AuthorityId>,
+    ) -> TerminalResult<DeviceEnrollmentStartInfo> {
         match self
             .operational
             .execute(&EffectCommand::AddDevice {
                 nickname_suggestion: nickname_suggestion.to_string(),
-                invitee_authority_id: invitee_authority_id.map(|s| s.to_string()),
+                invitee_authority_id,
             })
             .await
         {
@@ -786,17 +799,21 @@ impl IoContext {
                 pending_epoch,
                 device_id,
             }),
-            Some(Ok(other)) => Err(format!("Unexpected response: {other:?}")),
+            Some(Ok(other)) => Err(TerminalError::Operation(format!(
+                "Unexpected response: {other:?}"
+            ))),
             Some(Err(err)) => {
                 let terr: TerminalError = err.clone().into();
                 self.operational.emit_error(terr).await;
-                Err(err.to_string())
+                Err(err.into())
             }
-            None => Err("AddDevice not handled".to_string()),
+            None => Err(TerminalError::NotImplemented(
+                "AddDevice not handled".to_string(),
+            )),
         }
     }
 
-    pub async fn start_device_removal(&self, device_id: &str) -> Result<String, String> {
+    pub async fn start_device_removal(&self, device_id: &str) -> TerminalResult<String> {
         match self
             .operational
             .execute(&EffectCommand::RemoveDevice {
@@ -805,17 +822,21 @@ impl IoContext {
             .await
         {
             Some(Ok(OpResponse::DeviceRemovalStarted { ceremony_id })) => Ok(ceremony_id),
-            Some(Ok(other)) => Err(format!("Unexpected response: {other:?}")),
+            Some(Ok(other)) => Err(TerminalError::Operation(format!(
+                "Unexpected response: {other:?}"
+            ))),
             Some(Err(err)) => {
                 let terr: TerminalError = err.clone().into();
                 self.operational.emit_error(terr).await;
-                Err(err.to_string())
+                Err(err.into())
             }
-            None => Err("RemoveDevice not handled".to_string()),
+            None => Err(TerminalError::NotImplemented(
+                "RemoveDevice not handled".to_string(),
+            )),
         }
     }
 
-    pub async fn import_device_enrollment_code(&self, code: &str) -> Result<(), String> {
+    pub async fn import_device_enrollment_code(&self, code: &str) -> TerminalResult<()> {
         cfg_if! {
             if #[cfg(feature = "development")] {
                 if self.demo_mobile_agent.is_some() {
@@ -827,25 +848,31 @@ impl IoContext {
         let app_core = self.app_core_raw();
         let invitation = import_invitation_details(app_core, code)
             .await
-            .map_err(|e| format!("Failed to import invitation: {e}"))?;
+            .map_err(|e| TerminalError::Operation(format!("Failed to import invitation: {e}")))?;
 
         if !matches!(
             invitation.invitation_type,
             InvitationBridgeType::DeviceEnrollment { .. }
         ) {
-            return Err("Code is not a device enrollment invitation".to_string());
+            return Err(TerminalError::Input(
+                "Code is not a device enrollment invitation".to_string(),
+            ));
         }
 
         accept_invitation(app_core, &invitation.invitation_id)
             .await
-            .map_err(|e| format!("Failed to accept device enrollment invitation: {e}"))
+            .map_err(|e| {
+                TerminalError::Operation(format!(
+                    "Failed to accept device enrollment invitation: {e}"
+                ))
+            })
     }
 
     pub async fn dispatch_send_message(
         &self,
         channel_id: &str,
         content: &str,
-    ) -> Result<(), String> {
+    ) -> TerminalResult<()> {
         self.dispatch(EffectCommand::SendMessage {
             channel: channel_id.to_string(),
             content: content.to_string(),
@@ -853,25 +880,25 @@ impl IoContext {
         .await
     }
 
-    pub async fn dispatch_join_channel(&self, channel_id: &str) -> Result<(), String> {
+    pub async fn dispatch_join_channel(&self, channel_id: &str) -> TerminalResult<()> {
         self.dispatch(EffectCommand::JoinChannel {
             channel: channel_id.to_string(),
         })
         .await
     }
 
-    pub async fn dispatch_leave_channel(&self, channel_id: &str) -> Result<(), String> {
+    pub async fn dispatch_leave_channel(&self, channel_id: &str) -> TerminalResult<()> {
         self.dispatch(EffectCommand::LeaveChannel {
             channel: channel_id.to_string(),
         })
         .await
     }
 
-    pub async fn dispatch_start_recovery(&self) -> Result<(), String> {
+    pub async fn dispatch_start_recovery(&self) -> TerminalResult<()> {
         self.dispatch(EffectCommand::StartRecovery).await
     }
 
-    pub async fn dispatch_submit_guardian_approval(&self, guardian_id: &str) -> Result<(), String> {
+    pub async fn dispatch_submit_guardian_approval(&self, guardian_id: &str) -> TerminalResult<()> {
         self.dispatch(EffectCommand::SubmitGuardianApproval {
             guardian_id: guardian_id.to_string(),
         })
@@ -991,18 +1018,34 @@ impl IoContext {
     // =========================================================================
 
     pub async fn mark_peer_invited(&self, authority_id: &str) {
-        self.invited_lan_peers
-            .write()
-            .await
-            .insert(authority_id.to_string());
+        match authority_id.parse::<AuthorityId>() {
+            Ok(parsed) => {
+                self.invited_lan_peers.write().await.insert(parsed);
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "Ignoring non-AuthorityId LAN invitation marker '{}': {}",
+                    authority_id,
+                    error
+                );
+            }
+        }
     }
 
     pub async fn is_peer_invited(&self, authority_id: &str) -> bool {
-        self.invited_lan_peers.read().await.contains(authority_id)
+        let Ok(parsed) = authority_id.parse::<AuthorityId>() else {
+            return false;
+        };
+        self.invited_lan_peers.read().await.contains(&parsed)
     }
 
     pub async fn get_invited_peer_ids(&self) -> HashSet<String> {
-        self.invited_lan_peers.read().await.clone()
+        self.invited_lan_peers
+            .read()
+            .await
+            .iter()
+            .map(ToString::to_string)
+            .collect()
     }
     // =========================================================================
     // Settings helpers (via SETTINGS_SIGNAL)
@@ -1114,7 +1157,7 @@ impl IoContext {
     ///
     /// This is a best-effort, UX-focused pre-check. Biscuit/guard-chain enforcement
     /// remains the source of truth.
-    pub fn check_authorization(&self, command: &EffectCommand) -> Result<(), String> {
+    pub fn check_authorization(&self, command: &EffectCommand) -> TerminalResult<()> {
         // Delegate to portable authorization logic in aura-app
         let level = command.authorization_level();
         if matches!(level, crate::tui::effects::CommandAuthorizationLevel::Admin)
@@ -1127,6 +1170,7 @@ impl IoContext {
             self.get_current_role(),
             command_name(command),
         )
+        .map_err(TerminalError::Capability)
     }
 }
 

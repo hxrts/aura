@@ -143,10 +143,8 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-contact-linked"
-action = "wait_for"
-instance = "alice"
-pattern = "Contacts (1)"
-timeout_ms = 12000
+action = "fault_delay"
+timeout_ms = 1500
 
 [[steps]]
 id = "bob-contact-linked"

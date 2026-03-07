@@ -282,7 +282,7 @@ mod tests {
         let toast = state
             .toast_queue
             .current()
-            .expect("help should enqueue a toast");
+            .unwrap_or_else(|| panic!("help should enqueue a toast"));
         assert!(toast.message.contains("Use ? for TUI help"));
     }
 
@@ -301,7 +301,7 @@ mod tests {
         let toast = state
             .toast_queue
             .current()
-            .expect("help should enqueue a toast");
+            .unwrap_or_else(|| panic!("help should enqueue a toast"));
         assert!(toast.message.contains("/kick <user> [reason]"));
     }
 
@@ -316,7 +316,11 @@ mod tests {
         let mut commands = Vec::new();
         handle_insert_mode_key(&mut state, &mut commands, KeyEvent::press(KeyCode::Enter));
 
-        assert_eq!(commands.len(), 1, "whois should dispatch through chat pipeline");
+        assert_eq!(
+            commands.len(),
+            1,
+            "whois should dispatch through chat pipeline"
+        );
         assert!(
             matches!(
                 &commands[0],

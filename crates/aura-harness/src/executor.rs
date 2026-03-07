@@ -438,6 +438,16 @@ fn execute_step(
                     timeout_ms: step.timeout_ms.unwrap_or(step_budget_ms).min(1500),
                 },
             );
+            // First Esc can be consumed by mode normalization; send a second Esc
+            // to reliably clear any stale toast before command entry.
+            dispatch(
+                tool_api,
+                ToolRequest::SendKey {
+                    instance_id: instance_id.clone(),
+                    key: ToolKey::Esc,
+                    repeat: 1,
+                },
+            )?;
             dispatch(
                 tool_api,
                 ToolRequest::SendKeys {
@@ -1758,7 +1768,7 @@ mod tests {
         }
 
         let action_log = api.action_log();
-        assert!(action_log.len() >= 5, "expected at least five tool actions");
+        assert!(action_log.len() >= 6, "expected at least six tool actions");
 
         match &action_log[0].request {
             ToolRequest::SendKey {
@@ -1793,19 +1803,31 @@ mod tests {
         }
 
         match &action_log[3].request {
-            ToolRequest::SendKeys { instance_id, keys } => {
+            ToolRequest::SendKey {
+                instance_id,
+                key: ToolKey::Esc,
+                repeat,
+            } => {
                 assert_eq!(instance_id, "alice");
-                assert_eq!(keys, "i");
+                assert_eq!(*repeat, 1);
             }
-            other => panic!("expected SendKeys fourth (insert mode), got {other:?}"),
+            other => panic!("expected SendKey(Esc) fourth, got {other:?}"),
         }
 
         match &action_log[4].request {
             ToolRequest::SendKeys { instance_id, keys } => {
                 assert_eq!(instance_id, "alice");
+                assert_eq!(keys, "i");
+            }
+            other => panic!("expected SendKeys fifth (insert mode), got {other:?}"),
+        }
+
+        match &action_log[5].request {
+            ToolRequest::SendKeys { instance_id, keys } => {
+                assert_eq!(instance_id, "alice");
                 assert_eq!(keys, "/join slash-lab\n");
             }
-            other => panic!("expected SendKeys fifth (slash command), got {other:?}"),
+            other => panic!("expected SendKeys sixth (slash command), got {other:?}"),
         }
     }
 

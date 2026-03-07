@@ -162,9 +162,9 @@ pub async fn handle_context(
         EffectCommand::AcceptPendingHomeInvitation => {
             // Accept a pending home invitation via workflow
             match accept_pending_home_invitation(app_core).await {
-                Ok(invitation_id) => Some(Ok(OpResponse::Data(format!(
-                    "Accepted home invitation: {invitation_id}"
-                )))),
+                Ok(invitation_id) => Some(Ok(OpResponse::HomeInvitationAccepted {
+                    invitation_id: invitation_id.to_string(),
+                })),
                 Err(e) => {
                     let message = format!("Failed to accept home invitation: {e}");
                     let lowered = message.to_lowercase();
@@ -182,7 +182,9 @@ pub async fn handle_context(
 
         EffectCommand::CreateHome { name } => match create_home(app_core, name.clone(), None).await
         {
-            Ok(home_id) => Some(Ok(OpResponse::Data(format!("Home created: {home_id}")))),
+            Ok(home_id) => Some(Ok(OpResponse::HomeCreated {
+                home_id: home_id.to_string(),
+            })),
             Err(e) => Some(Err(super::types::OpError::Failed(format!(
                 "Failed to create home: {e}"
             )))),
@@ -190,9 +192,9 @@ pub async fn handle_context(
 
         EffectCommand::CreateNeighborhood { name } => {
             match create_neighborhood(app_core, name.clone()).await {
-                Ok(neighborhood_id) => Some(Ok(OpResponse::Data(format!(
-                    "Neighborhood created: {neighborhood_id}"
-                )))),
+                Ok(neighborhood_id) => {
+                    Some(Ok(OpResponse::NeighborhoodCreated { neighborhood_id }))
+                }
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to create neighborhood: {e}"
                 )))),
@@ -202,8 +204,14 @@ pub async fn handle_context(
         EffectCommand::AddHomeToNeighborhood { home_id } => {
             match add_home_to_neighborhood(app_core, home_id).await {
                 Ok(()) => match maybe_auto_accept_demo_neighborhood_join(app_core, home_id).await {
-                    Ok(Some(message)) => Some(Ok(OpResponse::Data(message))),
-                    Ok(None) => Some(Ok(OpResponse::Ok)),
+                    Ok(Some(message)) => Some(Ok(OpResponse::HomeAddedToNeighborhood {
+                        target_home_id: home_id.clone(),
+                        message: Some(message),
+                    })),
+                    Ok(None) => Some(Ok(OpResponse::HomeAddedToNeighborhood {
+                        target_home_id: home_id.clone(),
+                        message: None,
+                    })),
                     Err(e) => Some(Err(super::types::OpError::Failed(format!(
                         "Failed to auto-accept demo neighborhood join: {e}"
                     )))),
@@ -216,7 +224,9 @@ pub async fn handle_context(
 
         EffectCommand::LinkHomeOneHopLink { home_id } => {
             match link_home_one_hop_link(app_core, home_id).await {
-                Ok(()) => Some(Ok(OpResponse::Ok)),
+                Ok(()) => Some(Ok(OpResponse::HomeOneHopLinkSet {
+                    target_home_id: home_id.clone(),
+                })),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to link home one_hop_link: {e}"
                 )))),

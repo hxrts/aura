@@ -75,7 +75,7 @@ async fn moderation_commands_are_handled() {
     for cmd in commands {
         if let Err(msg) = ctx.dispatch(cmd).await {
             assert!(
-                !msg.contains("Unknown command"),
+                !msg.to_string().contains("Unknown command"),
                 "unexpected unknown command error: {msg}"
             );
         }

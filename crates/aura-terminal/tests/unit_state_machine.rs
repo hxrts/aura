@@ -1022,9 +1022,11 @@ fn test_chat_create_select_members_dispatches_create_channel_with_members() {
         other => panic!("Expected ChatCreate modal, got {other:?}"),
     };
 
+    let alice_id = aura_terminal::ids::authority_id("chat-create-alice").to_string();
+    let carol_id = aura_terminal::ids::authority_id("chat-create-carol").to_string();
     let contacts = vec![
-        ("alice".to_string(), "Alice".to_string()),
-        ("carol".to_string(), "Carol".to_string()),
+        (alice_id.clone().into(), "Alice".to_string()),
+        (carol_id.clone().into(), "Carol".to_string()),
     ];
     let picker = ContactSelectModalState::multi("Select chat members", contacts);
 
@@ -1042,8 +1044,8 @@ fn test_chat_create_select_members_dispatches_create_channel_with_members() {
     match tui.current_modal() {
         Some(QueuedModal::ChatCreate(s)) => {
             assert_eq!(s.member_ids.len(), 2);
-            assert!(s.member_ids.contains(&"alice".to_string()));
-            assert!(s.member_ids.contains(&"carol".to_string()));
+            assert!(s.member_ids.contains(&alice_id));
+            assert!(s.member_ids.contains(&carol_id));
         }
         other => panic!("Expected ChatCreate modal, got {other:?}"),
     }
@@ -1055,11 +1057,11 @@ fn test_chat_create_select_members_dispatches_create_channel_with_members() {
             s.step = CreateChannelStep::Threshold;
             s.contacts = vec![
                 ChatMemberCandidate {
-                    id: "alice".to_string(),
+                    id: alice_id.clone(),
                     name: "Alice".to_string(),
                 },
                 ChatMemberCandidate {
-                    id: "carol".to_string(),
+                    id: carol_id.clone(),
                     name: "Carol".to_string(),
                 },
             ];
@@ -1077,8 +1079,8 @@ fn test_chat_create_select_members_dispatches_create_channel_with_members() {
                 if name == "group"
                     && topic.as_deref() == Some("topic")
                     && members.len() == 2
-                    && members.contains(&"alice".to_string())
-                    && members.contains(&"carol".to_string())
+                    && members.iter().any(|member| member.to_string() == alice_id)
+                    && members.iter().any(|member| member.to_string() == carol_id)
         )
     }));
 }

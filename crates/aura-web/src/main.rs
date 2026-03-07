@@ -31,14 +31,14 @@ cfg_if! {
             raw.parse::<AuthorityId>().ok()
         }
 
-        fn persist_selected_authority(authority_id: &str) -> Result<(), String> {
+        fn persist_selected_authority(authority_id: &AuthorityId) -> Result<(), String> {
             let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
             let storage = window
                 .local_storage()
                 .map_err(|error| format!("localStorage unavailable: {:?}", error))?
                 .ok_or_else(|| "localStorage unavailable".to_string())?;
             storage
-                .set_item(SELECTED_AUTHORITY_KEY, authority_id)
+                .set_item(SELECTED_AUTHORITY_KEY, &authority_id.to_string())
                 .map_err(|error| format!("failed to persist selected authority: {:?}", error))
         }
 
@@ -66,7 +66,7 @@ cfg_if! {
                     .map_err(|error| format!("failed to build web runtime: {error}"))?,
             );
 
-            let current_authority = agent.authority_id().to_string();
+            let current_authority = agent.authority_id().clone();
             if let Err(error) = persist_selected_authority(&current_authority) {
                 web_sys::console::warn_1(
                     &format!("failed to persist selected authority: {error}").into(),
@@ -86,7 +86,7 @@ cfg_if! {
             let controller = Arc::new(UiController::with_authority_switcher(
                 app_core,
                 clipboard,
-                Some(Arc::new(|authority_id: String| {
+                Some(Arc::new(|authority_id: AuthorityId| {
                     if let Err(error) = persist_selected_authority(&authority_id) {
                         web_sys::console::error_1(
                             &format!("failed to persist authority switch: {error}").into(),

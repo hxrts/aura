@@ -5,6 +5,7 @@
 
 #![allow(clippy::incompatible_msrv)]
 
+use aura_core::identifiers::AuthorityId;
 use dioxus::prelude::*;
 use dioxus_shadcn::components::badge::{Badge as LbBadge, BadgeVariant as LbBadgeVariant};
 use dioxus_shadcn::components::button::{
@@ -46,7 +47,7 @@ pub struct ModalView {
 
 #[derive(Clone, PartialEq)]
 pub struct AuthorityPickerItem {
-    pub id: String,
+    pub id: AuthorityId,
     pub label: String,
     pub is_current: bool,
     pub is_selected: bool,
@@ -460,9 +461,7 @@ pub fn UiAuthorityPickerModal(
     let selected_label = selected_authority
         .map(|authority| authority.label.clone())
         .unwrap_or_else(|| "No authority selected".to_string());
-    let selected_id = selected_authority
-        .map(|authority| authority.id.clone())
-        .unwrap_or_default();
+    let selected_id = selected_authority.map(|authority| authority.id.to_string());
 
     rsx! {
         LbDialogRoot {
@@ -514,7 +513,7 @@ pub fn UiAuthorityPickerModal(
                             class: "rounded-lg border border-border bg-background/70 px-3 py-2",
                             p { class: "m-0 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground", "Selected" }
                             p { class: "m-0 mt-1 text-sm text-foreground", "{selected_label}" }
-                            if !selected_id.is_empty() {
+                            if let Some(selected_id) = selected_id.as_ref() {
                                 p {
                                     class: "m-0 mt-1 break-all font-mono text-[0.72rem] text-muted-foreground",
                                     "{selected_id}"

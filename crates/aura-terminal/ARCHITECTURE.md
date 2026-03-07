@@ -21,6 +21,9 @@ platform-agnostic.
 - Must NOT be imported by Layer 1-6 crates.
 - Uses dependency inversion: imports from both aura-app and aura-agent.
 - Terminal-specific rendering must stay in this layer.
+- Parse/validation failures for identifiers and thresholds are handled at UI/input boundaries.
+- Internal command and modal contracts should prefer typed IDs/domain values over raw `String`.
+- Operational responses for core flows should use structured variants instead of free-form strings.
 
 ### Detailed Specifications
 
@@ -45,4 +48,3 @@ Contract alignment:
 - Business logic lives in aura-app.
 - Effect implementations live in aura-effects.
 - Runtime composition lives in aura-agent.
-

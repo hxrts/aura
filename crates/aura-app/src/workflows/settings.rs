@@ -53,7 +53,7 @@ async fn refresh_settings_signal_from_runtime(
     state.authorities = authorities
         .into_iter()
         .map(|authority| AuthorityInfo {
-            id: authority.id.to_string(),
+            id: authority.id,
             nickname_suggestion: authority.nickname_suggestion.unwrap_or_default(),
             is_current: authority.is_current,
         })

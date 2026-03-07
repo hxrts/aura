@@ -28,14 +28,18 @@
 pub mod commands;
 pub mod form;
 mod handlers;
+pub mod ids;
 pub mod modal_queue;
 pub mod toast;
 mod transition;
 pub mod views;
 
 // Re-export all public types for backwards compatibility
-pub use commands::{DispatchCommand, TuiCommand};
+pub use commands::{
+    DispatchCommand, HomeCapabilityConfig, HomeTarget, InvitationKind, ThresholdK, TuiCommand,
+};
 pub use form::{FormDraft, FormPhase, Validatable, ValidationError};
+pub use ids::{AuthorityRef, CeremonyId, ChannelId, ContactId, DeviceId, HomeId, InvitationId};
 pub use modal_queue::{
     ChatMemberSelectModalState, ConfirmAction, ContactSelectModalState, ModalQueue, ModalType,
     QueuedModal,

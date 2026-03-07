@@ -4,8 +4,126 @@
 
 use crate::tui::screens::Screen;
 use crate::tui::types::{AccessLevel, MfaPolicy};
+use aura_core::AuthorityId;
 
 use super::toast::ToastLevel;
+use super::{CeremonyId, ChannelId, ContactId, DeviceId, HomeId, InvitationId};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InvitationKind {
+    Guardian,
+    Contact,
+    Channel,
+}
+
+impl InvitationKind {
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Guardian => "guardian",
+            Self::Contact => "contact",
+            Self::Channel => "channel",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HomeTarget {
+    Current,
+    Home,
+    Explicit(HomeId),
+}
+
+impl HomeTarget {
+    #[must_use]
+    pub fn from_input(value: impl Into<String>) -> Self {
+        let value = value.into();
+        match value.trim().to_ascii_lowercase().as_str() {
+            "current" => Self::Current,
+            "home" => Self::Home,
+            _ => Self::Explicit(value.into()),
+        }
+    }
+
+    #[must_use]
+    pub fn as_command_arg(&self) -> String {
+        match self {
+            Self::Current => "current".to_string(),
+            Self::Home => "home".to_string(),
+            Self::Explicit(home_id) => home_id.to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ThresholdK(u8);
+
+impl ThresholdK {
+    pub fn new(value: u8) -> Result<Self, String> {
+        if value == 0 {
+            return Err("Threshold must be at least 1".to_string());
+        }
+        Ok(Self(value))
+    }
+
+    #[must_use]
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+}
+
+impl TryFrom<u8> for ThresholdK {
+    type Error = String;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HomeCapabilityConfig {
+    full: Vec<String>,
+    partial: Vec<String>,
+    limited: Vec<String>,
+}
+
+impl HomeCapabilityConfig {
+    pub fn parse(full_caps: &str, partial_caps: &str, limited_caps: &str) -> Result<Self, String> {
+        let parse_caps = |raw: &str, label: &str| -> Result<Vec<String>, String> {
+            let parsed: Vec<String> = raw
+                .split(',')
+                .map(str::trim)
+                .filter(|cap| !cap.is_empty())
+                .map(ToString::to_string)
+                .collect();
+            if parsed.is_empty() {
+                return Err(format!("{label} capability set cannot be empty"));
+            }
+            Ok(parsed)
+        };
+
+        Ok(Self {
+            full: parse_caps(full_caps, "Full")?,
+            partial: parse_caps(partial_caps, "Partial")?,
+            limited: parse_caps(limited_caps, "Limited")?,
+        })
+    }
+
+    #[must_use]
+    pub fn full_csv(&self) -> String {
+        self.full.join(",")
+    }
+
+    #[must_use]
+    pub fn partial_csv(&self) -> String {
+        self.partial.join(",")
+    }
+
+    #[must_use]
+    pub fn limited_csv(&self) -> String {
+        self.limited.join(",")
+    }
+}
 
 /// Command representing a side effect
 ///
@@ -40,7 +158,7 @@ pub enum DispatchCommand {
 
     // Chat screen
     SelectChannel {
-        channel_id: String,
+        channel_id: ChannelId,
     },
     SendChatMessage {
         content: String,
@@ -52,20 +170,20 @@ pub enum DispatchCommand {
     CreateChannel {
         name: String,
         topic: Option<String>,
-        members: Vec<String>,
-        threshold_k: u8,
+        members: Vec<AuthorityId>,
+        threshold_k: ThresholdK,
     },
     SetChannelTopic {
-        channel_id: String,
+        channel_id: ChannelId,
         topic: String,
     },
     DeleteChannel {
-        channel_id: String,
+        channel_id: ChannelId,
     },
 
     // Contacts screen
     UpdateNickname {
-        contact_id: String,
+        contact_id: ContactId,
         nickname: String,
     },
     /// Open the “edit nickname” modal for the currently-selected contact.
@@ -84,7 +202,7 @@ pub enum DispatchCommand {
     RefreshLanPeers,
     StartChat,
     RemoveContact {
-        contact_id: String,
+        contact_id: ContactId,
     },
     /// Open remove contact confirmation modal (shell populates selected contact)
     OpenRemoveContactModal,
@@ -100,29 +218,29 @@ pub enum DispatchCommand {
     OpenMfaSetup,
     /// Start a guardian ceremony with selected contacts and threshold
     StartGuardianCeremony {
-        contact_ids: Vec<String>,
-        threshold_k: u8,
+        contact_ids: Vec<AuthorityId>,
+        threshold_k: ThresholdK,
     },
     /// Start an MFA ceremony with selected devices and threshold
     StartMfaCeremony {
-        device_ids: Vec<String>,
-        threshold_k: u8,
+        device_ids: Vec<DeviceId>,
+        threshold_k: ThresholdK,
     },
     /// Cancel an in-progress guardian ceremony
     CancelGuardianCeremony {
-        ceremony_id: String,
+        ceremony_id: CeremonyId,
     },
     /// Cancel an in-progress key rotation ceremony (device enrollment, guardian rotation, etc.).
     CancelKeyRotationCeremony {
-        ceremony_id: String,
+        ceremony_id: CeremonyId,
     },
 
     // Invitations screen
     AcceptInvitation,
     DeclineInvitation,
     CreateInvitation {
-        receiver_id: String,
-        invitation_type: String,
+        receiver_id: AuthorityId,
+        invitation_type: InvitationKind,
         message: Option<String>,
         ttl_secs: Option<u64>,
     },
@@ -131,13 +249,13 @@ pub enum DispatchCommand {
     },
     ExportInvitation,
     RevokeInvitation {
-        invitation_id: String,
+        invitation_id: InvitationId,
     },
 
     // Recovery screen
     StartRecovery,
     AddGuardian {
-        contact_id: String,
+        contact_id: ContactId,
     },
     ApproveRecovery,
 
@@ -153,10 +271,10 @@ pub enum DispatchCommand {
         /// Invitee's authority ID for two-step exchange (optional).
         /// If Some, creates an addressed invitation enabling DeviceEnrollment choreography.
         /// If None, falls back to legacy bearer token mode.
-        invitee_authority_id: Option<String>,
+        invitee_authority_id: Option<AuthorityId>,
     },
     RemoveDevice {
-        device_id: String,
+        device_id: DeviceId,
     },
     /// Open device selection modal (for device removal)
     OpenDeviceSelectModal,
@@ -169,7 +287,7 @@ pub enum DispatchCommand {
     OpenAuthorityPicker,
     /// Switch to a different authority
     SwitchAuthority {
-        authority_id: String,
+        authority_id: AuthorityId,
     },
 
     // Neighborhood screen
@@ -182,23 +300,21 @@ pub enum DispatchCommand {
     OpenModeratorAssignmentModal,
     /// Submit moderator assignment/revocation for the selected member
     SubmitModeratorAssignment {
-        target_id: String,
+        target_id: AuthorityId,
         assign: bool,
     },
     /// Open per-user access override modal
     OpenAccessOverrideModal,
     /// Submit per-user access override
     SubmitAccessOverride {
-        target_id: String,
+        target_id: AuthorityId,
         access_level: AccessLevel,
     },
     /// Open home capability configuration modal
     OpenHomeCapabilityConfigModal,
     /// Submit home capability configuration
     SubmitHomeCapabilityConfig {
-        full_caps: String,
-        partial_caps: String,
-        limited_caps: String,
+        config: HomeCapabilityConfig,
     },
     /// Create a new home
     CreateHome {
@@ -213,13 +329,13 @@ pub enum DispatchCommand {
     AddSelectedHomeToNeighborhood,
     /// Add an explicit home ID as member of active neighborhood
     AddHomeToNeighborhood {
-        home_id: String,
+        target: HomeTarget,
     },
     /// Link selected home one_hop_link as direct
     LinkSelectedHomeOneHopLink,
     /// Link explicit home one_hop_link as direct
     LinkHomeOneHopLink {
-        home_id: String,
+        target: HomeTarget,
     },
 
     // Account setup

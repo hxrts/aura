@@ -3,6 +3,7 @@
 use super::KeyRotationCeremonyUiState;
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::state::form::{Validatable, ValidationError};
+use crate::tui::state::DeviceId;
 use crate::tui::types::{Device, MfaPolicy, SettingsSection};
 use aura_core::types::Epoch;
 
@@ -204,7 +205,7 @@ impl DeviceEnrollmentCeremonyModalState {
 #[derive(Clone, Debug, Default)]
 pub struct ConfirmRemoveModalState {
     /// Device ID to remove
-    pub device_id: String,
+    pub device_id: DeviceId,
     /// Device display name (effective name for UI)
     pub display_name: String,
     /// Whether confirm button is focused (vs cancel)
@@ -215,7 +216,7 @@ impl ConfirmRemoveModalState {
     /// Create initialized state for device removal confirmation
     pub fn for_device(device_id: &str, display_name: &str) -> Self {
         Self {
-            device_id: device_id.to_string(),
+            device_id: device_id.into(),
             display_name: display_name.to_string(),
             confirm_focused: false,
         }
@@ -223,7 +224,7 @@ impl ConfirmRemoveModalState {
 
     /// Reset state (called when dismissed)
     pub fn reset(&mut self) {
-        self.device_id.clear();
+        self.device_id = DeviceId::default();
         self.display_name.clear();
         self.confirm_focused = false;
     }

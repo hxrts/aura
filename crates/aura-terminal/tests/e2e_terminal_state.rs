@@ -1317,8 +1317,8 @@ async fn test_threshold_configuration_flow() {
     // bootstrapped authorities.
     let update_result = ctx
         .dispatch(EffectCommand::UpdateThreshold {
-            threshold_k: 3,
-            threshold_n: 5,
+            config: aura_terminal::tui::effects::ThresholdConfig::new(3, 5)
+                .expect("valid threshold"),
         })
         .await;
 

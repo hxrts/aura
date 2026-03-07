@@ -47,7 +47,7 @@ pub struct ChatMemberCandidate {
     pub name: String,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct CreateChannelModalState {
     /// Wizard step
     pub step: CreateChannelStep,
@@ -73,6 +73,25 @@ pub struct CreateChannelModalState {
     pub status: Option<String>,
     /// Error message if any
     pub error: Option<String>,
+}
+
+impl Default for CreateChannelModalState {
+    fn default() -> Self {
+        Self {
+            step: CreateChannelStep::Details,
+            name: String::new(),
+            topic: String::new(),
+            member_ids: Vec::new(),
+            active_field: 0,
+            contacts: Vec::new(),
+            selected_indices: Vec::new(),
+            focused_index: 0,
+            threshold_k: 1,
+            threshold_custom: false,
+            status: None,
+            error: None,
+        }
+    }
 }
 
 impl CreateChannelModalState {

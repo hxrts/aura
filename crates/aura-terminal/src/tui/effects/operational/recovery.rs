@@ -27,9 +27,9 @@ pub async fn handle_recovery(
 ) -> Option<OpResult> {
     match command {
         EffectCommand::StartRecovery => match start_recovery_from_state(app_core).await {
-            Ok(ceremony_id) => Some(Ok(OpResponse::Data(format!(
-                "Recovery started: {ceremony_id}"
-            )))),
+            Ok(ceremony_id) => Some(Ok(OpResponse::RecoveryStarted {
+                ceremony_id: ceremony_id.to_string(),
+            })),
             Err(e) => Some(Err(OpError::Failed(format!(
                 "Failed to start recovery: {e}"
             )))),
@@ -63,9 +63,7 @@ pub async fn handle_recovery(
                             Some(recovery) => {
                                 if recovery.approvals_received >= recovery.approvals_required {
                                     // Ready to complete - would call RuntimeBridge to finalize
-                                    Some(Ok(OpResponse::Data(
-                                        "Recovery ceremony ready to complete".to_string(),
-                                    )))
+                                    Some(Ok(OpResponse::RecoveryCompleted))
                                 } else {
                                     Some(Err(OpError::Failed(format!(
                                         "Need {} more approvals",
@@ -99,7 +97,7 @@ pub async fn handle_recovery(
                         Ok(state) => match state.active_recovery() {
                             Some(_recovery) => {
                                 // Would call RuntimeBridge to cancel the ceremony
-                                Some(Ok(OpResponse::Data("Recovery cancelled".to_string())))
+                                Some(Ok(OpResponse::RecoveryCancelled))
                             }
                             None => Some(Err(OpError::Failed(
                                 "No active recovery to cancel".to_string(),
@@ -154,10 +152,11 @@ pub async fn handle_recovery(
                                 .create_guardian_invitation(receiver, subject, None, None)
                                 .await
                             {
-                                Ok(invitation_info) => Some(Ok(OpResponse::Data(format!(
-                                    "Guardian invitation created: {}",
-                                    invitation_info.invitation_id
-                                )))),
+                                Ok(invitation_info) => {
+                                    Some(Ok(OpResponse::RecoveryGuardianInvited {
+                                        invitation_id: invitation_info.invitation_id.to_string(),
+                                    }))
+                                }
                                 Err(e) => Some(Err(OpError::Failed(format!(
                                     "Failed to create guardian invitation: {e}"
                                 )))),

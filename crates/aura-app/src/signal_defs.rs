@@ -299,10 +299,10 @@ pub struct DeviceInfo {
 }
 
 /// Authority information for settings and authority switching.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthorityInfo {
-    /// Authority identifier (hex string).
-    pub id: String,
+    /// Authority identifier.
+    pub id: AuthorityId,
     /// Best-effort display label.
     pub nickname_suggestion: String,
     /// Whether this is the active authority.
@@ -328,7 +328,7 @@ pub struct SettingsState {
     pub authority_id: String,
     /// Authority nickname suggestion
     pub authority_nickname: String,
-    /// Known authorities for this device/runtime.
+    /// Known authorities for this device/runtime
     pub authorities: Vec<AuthorityInfo>,
 }
 

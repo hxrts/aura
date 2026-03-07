@@ -8,19 +8,21 @@ use crate::components::{
     UiCard, UiDeviceEnrollmentModal, UiFooter, UiListButton, UiListItem, UiModal, UiPill,
 };
 use crate::model::{
-    AccessDepth, AddDeviceWizardStep, CreateChannelDetailsField, CreateChannelWizardStep,
-    ModalState, NeighborhoodMode, ThresholdWizardStep, UiController, UiModel, UiScreen,
+    AccessDepth, AccessOverrideLevel, ActiveModal, AddDeviceWizardStep, CapabilityTier,
+    CreateChannelDetailsField, CreateChannelWizardStep, ModalState,
+    NeighborhoodMemberSelectionKey, NeighborhoodMode, NotificationSelectionId, SettingsSection,
+    ThresholdWizardStep, UiController, UiModel, UiScreen, DEFAULT_CAPABILITY_FULL,
+    DEFAULT_CAPABILITY_LIMITED, DEFAULT_CAPABILITY_PARTIAL,
 };
 use aura_app::signal_defs::{DiscoveredPeersState, SettingsState};
 use aura_app::ui::signals::{
     DiscoveredPeerMethod, NetworkStatus, CHAT_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL,
     ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL,
-    RECOVERY_SIGNAL, SETTINGS_SIGNAL,
-    TRANSPORT_PEERS_SIGNAL,
+    RECOVERY_SIGNAL, SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
 };
 use aura_app::ui::types::{
     all_command_help, command_help, format_network_status_with_severity, parse_chat_command,
-    AccessLevel, AppError, ChatState, ChatCommand, ContactsState, HomeRole, HomesState,
+    AccessLevel, AppError, ChatCommand, ChatState, ContactsState, HomeRole, HomesState,
     InvitationBridgeType, InvitationsState, NeighborhoodState, RecoveryState,
 };
 use aura_app::ui::workflows::ceremonies as ceremony_workflows;
@@ -29,8 +31,8 @@ use aura_app::ui::workflows::moderator as moderator_workflows;
 use aura_app::ui::workflows::{
     access as access_workflows, contacts as contacts_workflows, context as context_workflows,
     invitation as invitation_workflows, messaging as messaging_workflows,
-    network as network_workflows, recovery as recovery_workflows,
-    query as query_workflows, settings as settings_workflows, time as time_workflows,
+    network as network_workflows, query as query_workflows, recovery as recovery_workflows,
+    settings as settings_workflows, time as time_workflows,
 };
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, CeremonyId};
@@ -43,15 +45,6 @@ use dioxus_shadcn::components::toast::{use_toast, ToastOptions, ToastPosition, T
 use dioxus_shadcn::theme::{themes, use_theme, ColorScheme, ThemeProvider};
 use std::sync::Arc;
 use std::time::Duration;
-
-const SETTINGS_ROWS: [&str; 6] = [
-    "Profile",
-    "Guardian Threshold",
-    "Request Recovery",
-    "Devices",
-    "Authority",
-    "Appearance",
-];
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct NeighborhoodRuntimeHome {
@@ -118,9 +111,9 @@ struct ChatRuntimeView {
     messages: Vec<ChatRuntimeMessage>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ContactsRuntimeContact {
-    authority_id: String,
+    authority_id: AuthorityId,
     name: String,
     nickname_hint: Option<String>,
     is_guardian: bool,
@@ -128,9 +121,9 @@ struct ContactsRuntimeContact {
     is_online: bool,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ContactsRuntimePeer {
-    authority_id: String,
+    authority_id: AuthorityId,
     address: String,
     invited: bool,
 }
@@ -149,9 +142,9 @@ struct SettingsRuntimeDevice {
     is_current: bool,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct SettingsRuntimeAuthority {
-    id: String,
+    id: AuthorityId,
     label: String,
     is_current: bool,
 }
@@ -496,7 +489,7 @@ fn build_contacts_runtime_view(
     let mut rows: Vec<_> = contacts
         .all_contacts()
         .map(|contact| ContactsRuntimeContact {
-            authority_id: contact.id.to_string(),
+            authority_id: contact.id,
             name: display_contact_name(contact),
             nickname_hint: contact
                 .nickname_suggestion
@@ -514,12 +507,16 @@ fn build_contacts_runtime_view(
         .into_iter()
         .filter(|peer| peer.method == DiscoveredPeerMethod::Lan)
         .map(|peer| ContactsRuntimePeer {
-            authority_id: peer.authority_id.to_string(),
+            authority_id: peer.authority_id,
             address: peer.address,
             invited: peer.invited,
         })
         .collect();
-    lan_peers.sort_by(|left, right| left.authority_id.cmp(&right.authority_id));
+    lan_peers.sort_by(|left, right| {
+        left.authority_id
+            .to_string()
+            .cmp(&right.authority_id.to_string())
+    });
 
     ContactsRuntimeView {
         loaded: true,
@@ -535,7 +532,9 @@ async fn load_contacts_runtime_view(controller: Arc<UiController>) -> ContactsRu
     };
     let discovered_peers = {
         let core = controller.app_core().read().await;
-        core.read(&*DISCOVERED_PEERS_SIGNAL).await.unwrap_or_default()
+        core.read(&*DISCOVERED_PEERS_SIGNAL)
+            .await
+            .unwrap_or_default()
     };
     let runtime = build_contacts_runtime_view(contacts, discovered_peers);
     controller.sync_runtime_contacts(
@@ -544,7 +543,7 @@ async fn load_contacts_runtime_view(controller: Arc<UiController>) -> ContactsRu
             .iter()
             .map(|contact| {
                 (
-                    contact.authority_id.clone(),
+                    contact.authority_id,
                     contact.name.clone(),
                     contact.is_guardian,
                 )
@@ -576,12 +575,12 @@ fn build_settings_runtime_view(
         .authorities
         .iter()
         .map(|authority| SettingsRuntimeAuthority {
-            id: authority.id.clone(),
             label: if authority.nickname_suggestion.trim().is_empty() {
-                authority.id.clone()
+                authority.id.to_string()
             } else {
                 authority.nickname_suggestion.clone()
             },
+            id: authority.id,
             is_current: authority.is_current,
         })
         .collect();
@@ -722,15 +721,12 @@ fn build_notifications_runtime_view(
                         .message
                         .clone()
                         .unwrap_or_else(|| "Waiting for recipient".to_string()),
-                    invitation
-                        .home_name
-                        .clone()
-                        .unwrap_or_else(|| {
-                            invitation
-                                .to_id
-                                .map(|id| id.to_string())
-                                .unwrap_or_else(|| "unknown recipient".to_string())
-                        }),
+                    invitation.home_name.clone().unwrap_or_else(|| {
+                        invitation
+                            .to_id
+                            .map(|id| id.to_string())
+                            .unwrap_or_else(|| "unknown recipient".to_string())
+                    }),
                     NotificationRuntimeAction::SentInvitation,
                 ),
                 (
@@ -749,15 +745,12 @@ fn build_notifications_runtime_view(
                         .message
                         .clone()
                         .unwrap_or_else(|| "Waiting for recipient".to_string()),
-                    invitation
-                        .home_name
-                        .clone()
-                        .unwrap_or_else(|| {
-                            invitation
-                                .to_id
-                                .map(|id| id.to_string())
-                                .unwrap_or_else(|| "unknown recipient".to_string())
-                        }),
+                    invitation.home_name.clone().unwrap_or_else(|| {
+                        invitation
+                            .to_id
+                            .map(|id| id.to_string())
+                            .unwrap_or_else(|| "unknown recipient".to_string())
+                    }),
                     NotificationRuntimeAction::SentInvitation,
                 ),
                 (
@@ -776,15 +769,12 @@ fn build_notifications_runtime_view(
                         .message
                         .clone()
                         .unwrap_or_else(|| "Waiting for recipient".to_string()),
-                    invitation
-                        .home_name
-                        .clone()
-                        .unwrap_or_else(|| {
-                            invitation
-                                .to_id
-                                .map(|id| id.to_string())
-                                .unwrap_or_else(|| "unknown recipient".to_string())
-                        }),
+                    invitation.home_name.clone().unwrap_or_else(|| {
+                        invitation
+                            .to_id
+                            .map(|id| id.to_string())
+                            .unwrap_or_else(|| "unknown recipient".to_string())
+                    }),
                     NotificationRuntimeAction::SentInvitation,
                 ),
             };
@@ -848,34 +838,44 @@ async fn load_notifications_runtime_view(
         let core = controller.app_core().read().await;
         core.read(&*ERROR_SIGNAL).await.unwrap_or_default()
     };
-    build_notifications_runtime_view(invitations, recovery, error)
+    let runtime = build_notifications_runtime_view(invitations, recovery, error);
+    controller.sync_runtime_notifications(
+        runtime
+            .items
+            .iter()
+            .map(|item| (NotificationSelectionId(item.id.clone()), item.title.clone()))
+            .collect(),
+    );
+    runtime
 }
 
 fn selected_home_id_for_modal(
     runtime: &NeighborhoodRuntimeView,
     model: &UiModel,
 ) -> Option<String> {
-    let selected_home = model.selected_home.as_deref();
-    runtime
-        .homes
-        .iter()
-        .find(|home| Some(home.name.as_str()) == selected_home)
-        .map(|home| home.id.clone())
+    model
+        .selected_home_id()
+        .map(ToString::to_string)
         .filter(|id| !id.is_empty())
         .or_else(|| {
-            if !runtime.active_home_id.is_empty() {
-                Some(runtime.active_home_id.clone())
-            } else {
-                None
-            }
+            runtime
+                .homes
+                .iter()
+                .find(|home| Some(home.name.as_str()) == model.selected_home_name())
+                .map(|home| home.id.clone())
+                .filter(|id| !id.is_empty())
         })
+        .or_else(|| (!runtime.active_home_id.is_empty()).then(|| runtime.active_home_id.clone()))
 }
 
 fn selected_contact_for_modal(
     runtime: &ContactsRuntimeView,
     model: &UiModel,
 ) -> Option<ContactsRuntimeContact> {
-    runtime.contacts.get(model.selected_contact_index).cloned()
+    model
+        .selected_contact_index()
+        .and_then(|index| runtime.contacts.get(index))
+        .cloned()
 }
 
 fn removable_device_for_modal(
@@ -890,7 +890,8 @@ fn removable_device_for_modal(
                 && device.name
                     == model
                         .secondary_device_name()
-                        .unwrap_or(model.remove_device_candidate_name.as_str())
+                        .or_else(|| model.selected_device_modal().map(|state| state.candidate_name.as_str()))
+                        .unwrap_or("")
         })
         .cloned()
         .or_else(|| {
@@ -906,7 +907,7 @@ fn submit_runtime_modal_action(
     controller: Arc<UiController>,
     modal_state: Option<ModalState>,
     add_device_step: AddDeviceWizardStep,
-    add_device_ceremony_id: Option<String>,
+    add_device_ceremony_id: Option<CeremonyId>,
     add_device_is_complete: bool,
     add_device_has_failed: bool,
     modal_buffer: String,
@@ -915,12 +916,42 @@ fn submit_runtime_modal_action(
     contacts_runtime: ContactsRuntimeView,
     settings_runtime: SettingsRuntimeView,
     selected_home_id: Option<String>,
-    selected_member_index: usize,
+    selected_member_key: Option<NeighborhoodMemberSelectionKey>,
     rerender: Arc<dyn Fn() + Send + Sync>,
 ) -> bool {
     let current_model = controller.ui_model();
+    let modal_text_value = current_model
+        .as_ref()
+        .and_then(|model| model.modal_text_value())
+        .unwrap_or_else(|| modal_buffer.clone());
     match modal_state {
-        Some(ModalState::AddDeviceStep1) => match add_device_step {
+        Some(ModalState::AddDeviceStep1) => {
+            let (
+                add_device_step,
+                add_device_ceremony_id,
+                add_device_is_complete,
+                add_device_has_failed,
+                modal_buffer,
+            ) = current_model
+                .as_ref()
+                .and_then(|model| match model.active_modal.as_ref() {
+                    Some(ActiveModal::AddDevice(state)) => Some((
+                        state.step,
+                        state.ceremony_id.clone(),
+                        state.is_complete,
+                        state.has_failed,
+                        state.name_input.clone(),
+                    )),
+                    _ => None,
+                })
+                .unwrap_or((
+                    add_device_step,
+                    add_device_ceremony_id,
+                    add_device_is_complete,
+                    add_device_has_failed,
+                    modal_buffer,
+                ));
+            match add_device_step {
             AddDeviceWizardStep::Name => {
                 let name = modal_buffer.trim().to_string();
                 if name.is_empty() {
@@ -941,7 +972,7 @@ fn submit_runtime_modal_action(
                     {
                         Ok(start) => {
                             controller.set_runtime_device_enrollment_ceremony_id(
-                                &start.ceremony_id.to_string(),
+                                start.ceremony_id.clone(),
                             );
                             controller.complete_runtime_device_enrollment_started(
                                 &name,
@@ -951,7 +982,7 @@ fn submit_runtime_modal_action(
                             let controller_for_status = controller.clone();
                             let app_core_for_status = app_core.clone();
                             let rerender_for_status = rerender_for_start.clone();
-                            let ceremony_id = CeremonyId::new(start.ceremony_id.to_string());
+                            let ceremony_id = start.ceremony_id;
                             spawn(async move {
                                 loop {
                                     let _ =
@@ -1011,7 +1042,7 @@ fn submit_runtime_modal_action(
                 spawn(async move {
                     match ceremony_workflows::get_key_rotation_ceremony_status(
                         &app_core,
-                        &CeremonyId::new(ceremony_id),
+                        &ceremony_id,
                     )
                     .await
                     {
@@ -1029,9 +1060,10 @@ fn submit_runtime_modal_action(
                 });
                 true
             }
-        },
+        }
+        }
         Some(ModalState::CreateHome) => {
-            let name = modal_buffer.trim().to_string();
+            let name = modal_text_value.trim().to_string();
             if name.is_empty() {
                 controller.runtime_error_toast("Home name is required");
                 rerender();
@@ -1050,7 +1082,7 @@ fn submit_runtime_modal_action(
             true
         }
         Some(ModalState::AcceptInvitation) => {
-            let code = modal_buffer.trim().to_string();
+            let code = modal_text_value.trim().to_string();
             if code.is_empty() {
                 controller.runtime_error_toast("Invitation code is required");
                 rerender();
@@ -1085,9 +1117,10 @@ fn submit_runtime_modal_action(
                                     invitation.invitation_type,
                                     InvitationBridgeType::DeviceEnrollment { .. }
                                 ) {
-                                    let _ =
-                                        settings_workflows::refresh_settings_from_runtime(&app_core)
-                                            .await;
+                                    let _ = settings_workflows::refresh_settings_from_runtime(
+                                        &app_core,
+                                    )
+                                    .await;
                                     controller.complete_runtime_modal_success(
                                         "Device enrollment complete",
                                     );
@@ -1105,7 +1138,7 @@ fn submit_runtime_modal_action(
             true
         }
         Some(ModalState::ImportDeviceEnrollmentCode) => {
-            let code = modal_buffer.trim().to_string();
+            let code = modal_text_value.trim().to_string();
             if code.is_empty() {
                 controller.runtime_error_toast("Enrollment code is required");
                 rerender();
@@ -1150,7 +1183,7 @@ fn submit_runtime_modal_action(
             true
         }
         Some(ModalState::CreateInvitation) => {
-            let receiver = modal_buffer.trim().to_string();
+            let receiver = modal_text_value.trim().to_string();
             if receiver.is_empty() {
                 controller.runtime_error_toast("Receiver authority id is required");
                 rerender();
@@ -1200,13 +1233,25 @@ fn submit_runtime_modal_action(
         }
         Some(ModalState::CreateChannel)
             if matches!(
-                current_model.as_ref().map(|m| m.create_channel_step),
+                current_model
+                    .as_ref()
+                    .and_then(|m| m.create_channel_modal().map(|state| state.step)),
                 Some(CreateChannelWizardStep::Threshold)
             ) =>
         {
             let Some(model) = current_model.clone() else {
                 return false;
             };
+            let (selected_members, channel_name, channel_topic, channel_threshold) =
+                match model.active_modal.as_ref() {
+                    Some(ActiveModal::CreateChannel(state)) => (
+                        state.selected_members.clone(),
+                        state.name.clone(),
+                        state.topic.clone(),
+                        state.threshold,
+                    ),
+                    _ => (Vec::new(), String::new(), String::new(), 1),
+                };
             let app_core = controller.app_core().clone();
             let rerender_for_create = rerender.clone();
             spawn(async move {
@@ -1219,26 +1264,36 @@ fn submit_runtime_modal_action(
                     }
                 };
                 let members: Vec<String> = model
-                    .create_channel_selected_members
-                    .iter()
-                    .filter_map(|idx| contacts_runtime.contacts.get(*idx))
-                    .map(|contact| contact.authority_id.clone())
-                    .collect();
+                    .selected_contact_index()
+                    .map(|_| ())
+                    .map(|_| {
+                        selected_members
+                            .iter()
+                            .filter_map(|idx| contacts_runtime.contacts.get(*idx))
+                            .map(|contact| contact.authority_id.to_string())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_else(|| {
+                        selected_members
+                            .iter()
+                            .filter_map(|idx| contacts_runtime.contacts.get(*idx))
+                            .map(|contact| contact.authority_id.to_string())
+                            .collect::<Vec<_>>()
+                    });
 
                 match messaging_workflows::create_channel(
                     &app_core,
-                    model.create_channel_name.trim(),
-                    (!model.create_channel_topic.trim().is_empty())
-                        .then(|| model.create_channel_topic.trim().to_string()),
+                    channel_name.trim(),
+                    (!channel_topic.trim().is_empty()).then(|| channel_topic.trim().to_string()),
                     &members,
-                    model.create_channel_threshold,
+                    channel_threshold,
                     timestamp_ms,
                 )
                 .await
                 {
                     Ok(_) => controller.complete_runtime_modal_success(format!(
                         "Created '{}'",
-                        model.create_channel_name.trim()
+                        channel_name.trim()
                     )),
                     Err(error) => controller.runtime_error_toast(error.to_string()),
                 }
@@ -1248,7 +1303,7 @@ fn submit_runtime_modal_action(
         }
         Some(ModalState::SetChannelTopic) => {
             let channel_name = chat_runtime.active_channel.trim().to_string();
-            let topic = modal_buffer.trim().to_string();
+            let topic = modal_text_value.trim().to_string();
             if channel_name.is_empty() {
                 controller.runtime_error_toast("Select a channel first");
                 rerender();
@@ -1282,7 +1337,7 @@ fn submit_runtime_modal_action(
             true
         }
         Some(ModalState::EditNickname) => {
-            let value = modal_buffer.trim().to_string();
+            let value = modal_text_value.trim().to_string();
             if value.is_empty() {
                 controller.runtime_error_toast("Nickname is required");
                 rerender();
@@ -1310,9 +1365,10 @@ fn submit_runtime_modal_action(
                 let result = if is_settings_screen {
                     settings_workflows::update_nickname(&app_core, value.clone()).await
                 } else if let Some(contact) = selected_contact {
+                    let authority_id = contact.authority_id.to_string();
                     contacts_workflows::update_contact_nickname(
                         &app_core,
-                        &contact.authority_id,
+                        &authority_id,
                         &value,
                         timestamp_ms,
                     )
@@ -1341,6 +1397,7 @@ fn submit_runtime_modal_action(
             let app_core = controller.app_core().clone();
             let rerender_for_remove = rerender.clone();
             spawn(async move {
+                let authority_id = contact.authority_id.to_string();
                 let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
                     Ok(value) => value,
                     Err(error) => {
@@ -1349,12 +1406,8 @@ fn submit_runtime_modal_action(
                         return;
                     }
                 };
-                match contacts_workflows::remove_contact(
-                    &app_core,
-                    &contact.authority_id,
-                    timestamp_ms,
-                )
-                .await
+                match contacts_workflows::remove_contact(&app_core, &authority_id, timestamp_ms)
+                    .await
                 {
                     Ok(()) => controller.complete_runtime_modal_success("Contact removed"),
                     Err(error) => controller.runtime_error_toast(error.to_string()),
@@ -1377,32 +1430,32 @@ fn submit_runtime_modal_action(
         }
         Some(ModalState::GuardianSetup)
             if matches!(
-                current_model.as_ref().map(|m| m.guardian_wizard_step),
+                current_model
+                    .as_ref()
+                    .and_then(|m| m.guardian_setup_modal().map(|state| state.step)),
                 Some(ThresholdWizardStep::Ceremony)
             ) =>
         {
             let Some(model) = current_model.clone() else {
                 return false;
             };
+            let (selected_indices, threshold_k) = match model.active_modal.as_ref() {
+                Some(ActiveModal::GuardianSetup(state)) => {
+                    (state.selected_indices.clone(), state.threshold_k)
+                }
+                _ => (Vec::new(), 1),
+            };
             let app_core = controller.app_core().clone();
             let rerender_for_guardians = rerender.clone();
             spawn(async move {
-                let ids = model
-                    .guardian_selected_indices
+                let ids: Vec<AuthorityId> = selected_indices
                     .iter()
                     .filter_map(|idx| contacts_runtime.contacts.get(*idx))
-                    .map(|contact| contact.authority_id.parse::<AuthorityId>())
-                    .collect::<Result<Vec<_>, _>>();
-                let guardian_ids = match ids {
-                    Ok(value) => value,
-                    Err(error) => {
-                        controller.runtime_error_toast(format!("Invalid guardian id: {error}"));
-                        rerender_for_guardians();
-                        return;
-                    }
-                };
+                    .map(|contact| contact.authority_id)
+                    .collect();
+                let guardian_ids = ids;
                 let threshold = match aura_core::types::FrostThreshold::new(u16::from(
-                    model.guardian_threshold_k,
+                    threshold_k,
                 )) {
                     Ok(value) => value,
                     Err(error) => {
@@ -1472,7 +1525,9 @@ fn submit_runtime_modal_action(
         }
         Some(ModalState::MfaSetup)
             if matches!(
-                current_model.as_ref().map(|m| m.mfa_wizard_step),
+                current_model
+                    .as_ref()
+                    .and_then(|m| m.mfa_setup_modal().map(|state| state.step)),
                 Some(ThresholdWizardStep::Ceremony)
             ) =>
         {
@@ -1482,21 +1537,26 @@ fn submit_runtime_modal_action(
             let app_core = controller.app_core().clone();
             let rerender_for_mfa = rerender.clone();
             spawn(async move {
-                let device_ids: Vec<String> = model
-                    .mfa_selected_indices
+                let Some(mfa_state) = model.mfa_setup_modal() else {
+                    rerender_for_mfa();
+                    return;
+                };
+                let device_ids: Vec<String> = mfa_state
+                    .selected_indices
                     .iter()
                     .filter_map(|idx| settings_runtime.devices.get(*idx))
                     .map(|device| device.id.clone())
                     .collect();
-                let threshold =
-                    match aura_core::types::FrostThreshold::new(u16::from(model.mfa_threshold_k)) {
-                        Ok(value) => value,
-                        Err(error) => {
-                            controller.runtime_error_toast(format!("Invalid threshold: {error}"));
-                            rerender_for_mfa();
-                            return;
-                        }
-                    };
+                let threshold = match aura_core::types::FrostThreshold::new(u16::from(
+                    mfa_state.threshold_k,
+                )) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        controller.runtime_error_toast(format!("Invalid threshold: {error}"));
+                        rerender_for_mfa();
+                        return;
+                    }
+                };
 
                 match ceremony_workflows::start_device_threshold_ceremony(
                     &app_core,
@@ -1521,9 +1581,14 @@ fn submit_runtime_modal_action(
                 rerender();
                 return true;
             };
-            let Some(member) = neighborhood_runtime
-                .members
-                .get(selected_member_index)
+            let Some(member) = selected_member_key
+                .as_ref()
+                .and_then(|selected_key| {
+                    neighborhood_runtime
+                        .members
+                        .iter()
+                        .find(|member| neighborhood_member_selection_key(member) == *selected_key)
+                })
                 .cloned()
             else {
                 controller.runtime_error_toast("Select a member first");
@@ -1573,7 +1638,7 @@ fn submit_runtime_modal_action(
             };
             let Some(authority) = settings_runtime
                 .authorities
-                .get(model.selected_authority_index)
+                .get(model.selected_authority_index().unwrap_or_default())
                 .cloned()
             else {
                 controller.runtime_error_toast("Select an authority first");
@@ -1587,7 +1652,7 @@ fn submit_runtime_modal_action(
                 return true;
             }
 
-            if !controller.request_authority_switch(&authority.id) {
+            if !controller.request_authority_switch(authority.id.clone()) {
                 controller.runtime_error_toast("Authority switching is not available");
                 rerender();
                 return true;
@@ -1606,28 +1671,21 @@ fn submit_runtime_modal_action(
             };
             let Some(contact) = contacts_runtime
                 .contacts
-                .get(model.selected_contact_index)
+                .get(model.selected_contact_index().unwrap_or_default())
                 .cloned()
             else {
                 controller.runtime_error_toast("Select a contact first");
                 rerender();
                 return true;
             };
-            let authority_id = match contact.authority_id.parse::<AuthorityId>() {
-                Ok(authority_id) => authority_id,
-                Err(error) => {
-                    controller.runtime_error_toast(format!(
-                        "Invalid authority id for {}: {error}",
-                        contact.name
-                    ));
-                    rerender();
-                    return true;
-                }
+            let authority_id = contact.authority_id;
+            let selected_level = match model.active_modal.as_ref() {
+                Some(ActiveModal::AccessOverride(state)) => state.level,
+                _ => AccessOverrideLevel::Limited,
             };
-            let access_level = if model.access_override_partial {
-                AccessLevel::Partial
-            } else {
-                AccessLevel::Limited
+            let access_level = match selected_level {
+                AccessOverrideLevel::Partial => AccessLevel::Partial,
+                AccessOverrideLevel::Limited => AccessLevel::Limited,
             };
 
             let app_core = controller.app_core().clone();
@@ -1666,21 +1724,16 @@ fn submit_runtime_modal_action(
                 return true;
             };
 
-            let (full_caps, partial_caps, limited_caps) = match model.capability_active_field {
-                0 => (
-                    modal_buffer.clone(),
-                    model.capability_partial_caps.clone(),
-                    model.capability_limited_caps.clone(),
-                ),
-                1 => (
-                    model.capability_full_caps.clone(),
-                    modal_buffer.clone(),
-                    model.capability_limited_caps.clone(),
+            let (full_caps, partial_caps, limited_caps) = match model.active_modal.as_ref() {
+                Some(ActiveModal::CapabilityConfig(state)) => (
+                    state.full_caps.clone(),
+                    state.partial_caps.clone(),
+                    state.limited_caps.clone(),
                 ),
                 _ => (
-                    model.capability_full_caps.clone(),
-                    model.capability_partial_caps.clone(),
-                    modal_buffer.clone(),
+                    DEFAULT_CAPABILITY_FULL.to_string(),
+                    DEFAULT_CAPABILITY_PARTIAL.to_string(),
+                    DEFAULT_CAPABILITY_LIMITED.to_string(),
                 ),
             };
 
@@ -1711,7 +1764,7 @@ fn cancel_runtime_modal_action(
     controller: Arc<UiController>,
     modal_state: Option<ModalState>,
     add_device_step: AddDeviceWizardStep,
-    add_device_ceremony_id: Option<String>,
+    add_device_ceremony_id: Option<CeremonyId>,
     add_device_is_complete: bool,
     add_device_has_failed: bool,
     rerender: Arc<dyn Fn() + Send + Sync>,
@@ -1733,12 +1786,7 @@ fn cancel_runtime_modal_action(
     let app_core = controller.app_core().clone();
     let rerender_for_cancel = rerender.clone();
     spawn(async move {
-        match ceremony_workflows::cancel_key_rotation_ceremony(
-            &app_core,
-            &CeremonyId::new(ceremony_id),
-        )
-        .await
-        {
+        match ceremony_workflows::cancel_key_rotation_ceremony(&app_core, &ceremony_id).await {
             Ok(()) => controller.complete_runtime_modal_success("Device enrollment canceled"),
             Err(error) => controller.runtime_error_toast(error.to_string()),
         }
@@ -1770,8 +1818,9 @@ fn submit_runtime_chat_input(
             }
         };
 
-        let result: Result<Option<String>, aura_core::AuraError> =
-            if let Some(command_input) = trimmed.strip_prefix('/') {
+        let result: Result<Option<String>, aura_core::AuraError> = if let Some(command_input) =
+            trimmed.strip_prefix('/')
+        {
             let raw = format!("/{command_input}");
             match parse_chat_command(&raw) {
                 Ok(ChatCommand::Join { channel }) => {
@@ -1784,53 +1833,44 @@ fn submit_runtime_chat_input(
                         .await
                         .map(|_| Some("left channel".to_string()))
                 }
-                Ok(ChatCommand::Topic { text }) => {
-                    messaging_workflows::set_topic_by_name(
-                        &app_core,
-                        &channel_name,
-                        &text,
-                        timestamp_ms,
-                    )
-                    .await
-                    .map(|_| Some("topic updated".to_string()))
-                }
-                Ok(ChatCommand::Me { action }) => {
-                    messaging_workflows::send_action_by_name(
-                        &app_core,
-                        &channel_name,
-                        &action,
-                        timestamp_ms,
-                    )
-                    .await
-                    .map(|_| Some("action sent".to_string()))
-                }
-                Ok(ChatCommand::Msg { target, text }) => {
-                    messaging_workflows::send_direct_message(
-                        &app_core,
-                        &target,
-                        &text,
-                        timestamp_ms,
-                    )
-                    .await
-                    .map(|_| Some("direct message sent".to_string()))
-                }
-                Ok(ChatCommand::Nick { name }) => settings_workflows::update_nickname(
+                Ok(ChatCommand::Topic { text }) => messaging_workflows::set_topic_by_name(
                     &app_core,
-                    name,
+                    &channel_name,
+                    &text,
+                    timestamp_ms,
                 )
                 .await
-                .map(|_| Some("nickname updated".to_string())),
-                Ok(ChatCommand::Invite { target }) => {
-                    messaging_workflows::invite_user_to_channel(
-                        &app_core,
-                        &target,
-                        &channel_name,
-                        None,
-                        None,
-                    )
-                    .await
-                    .map(|_| Some("invitation sent".to_string()))
+                .map(|_| Some("topic updated".to_string())),
+                Ok(ChatCommand::Me { action }) => messaging_workflows::send_action_by_name(
+                    &app_core,
+                    &channel_name,
+                    &action,
+                    timestamp_ms,
+                )
+                .await
+                .map(|_| Some("action sent".to_string())),
+                Ok(ChatCommand::Msg { target, text }) => messaging_workflows::send_direct_message(
+                    &app_core,
+                    &target,
+                    &text,
+                    timestamp_ms,
+                )
+                .await
+                .map(|_| Some("direct message sent".to_string())),
+                Ok(ChatCommand::Nick { name }) => {
+                    settings_workflows::update_nickname(&app_core, name)
+                        .await
+                        .map(|_| Some("nickname updated".to_string()))
                 }
+                Ok(ChatCommand::Invite { target }) => messaging_workflows::invite_user_to_channel(
+                    &app_core,
+                    &target,
+                    &channel_name,
+                    None,
+                    None,
+                )
+                .await
+                .map(|_| Some("invitation sent".to_string())),
                 Ok(ChatCommand::Who) => {
                     query_workflows::list_participants(&app_core, &channel_name)
                         .await
@@ -1860,10 +1900,12 @@ fn submit_runtime_chat_input(
                 Ok(ChatCommand::Help { command }) => Ok(Some(match command {
                     Some(command_name) => {
                         if let Some(help) = command_help(&command_name) {
-                            format!("/{name} {syntax} — {description}",
+                            format!(
+                                "/{name} {syntax} — {description}",
                                 name = help.name,
                                 syntax = help.syntax,
-                                description = help.description)
+                                description = help.description
+                            )
                         } else {
                             format!("Unknown command: {command_name}")
                         }
@@ -1894,31 +1936,29 @@ fn submit_runtime_chat_input(
                         .map(|_| Some("home one-hop link linked".to_string()))
                 }
                 Ok(ChatCommand::HomeInvite { target }) => {
-                    let home_id = match context_workflows::current_home_id_or_fallback(&app_core)
-                        .await
-                    {
-                        Ok(home_id) => home_id.to_string(),
-                        Err(error) => {
-                            controller_for_task.runtime_error_toast(error.to_string());
-                            rerender();
-                            return;
-                        }
-                    };
-                    let target_authority = match query_workflows::resolve_contact(&app_core, &target)
-                        .await
-                    {
-                        Ok(contact) => contact.id,
-                        Err(_) => match target.parse::<AuthorityId>() {
-                            Ok(authority_id) => authority_id,
+                    let home_id =
+                        match context_workflows::current_home_id_or_fallback(&app_core).await {
+                            Ok(home_id) => home_id.to_string(),
                             Err(error) => {
-                                controller_for_task.runtime_error_toast(format!(
-                                    "Invalid authority id: {error}"
-                                ));
+                                controller_for_task.runtime_error_toast(error.to_string());
                                 rerender();
                                 return;
                             }
-                        },
-                    };
+                        };
+                    let target_authority =
+                        match query_workflows::resolve_contact(&app_core, &target).await {
+                            Ok(contact) => contact.id,
+                            Err(_) => match target.parse::<AuthorityId>() {
+                                Ok(authority_id) => authority_id,
+                                Err(error) => {
+                                    controller_for_task.runtime_error_toast(format!(
+                                        "Invalid authority id: {error}"
+                                    ));
+                                    rerender();
+                                    return;
+                                }
+                            },
+                        };
                     invitation_workflows::create_channel_invitation(
                         &app_core,
                         target_authority,
@@ -1936,44 +1976,38 @@ fn submit_runtime_chat_input(
                         .await
                         .map(|_| Some("home invitation accepted".to_string()))
                 }
-                Ok(ChatCommand::Kick { target, reason }) => {
-                    moderation_workflows::kick_user(
-                        &app_core,
-                        &channel_name,
-                        &target,
-                        reason.as_deref(),
-                        timestamp_ms,
-                    )
-                    .await
-                    .map(|_| Some("kick applied".to_string()))
-                }
-                Ok(ChatCommand::Ban { target, reason }) => {
-                    moderation_workflows::ban_user(
-                        &app_core,
-                        Some(&channel_name),
-                        &target,
-                        reason.as_deref(),
-                        timestamp_ms,
-                    )
-                    .await
-                    .map(|_| Some("ban applied".to_string()))
-                }
+                Ok(ChatCommand::Kick { target, reason }) => moderation_workflows::kick_user(
+                    &app_core,
+                    &channel_name,
+                    &target,
+                    reason.as_deref(),
+                    timestamp_ms,
+                )
+                .await
+                .map(|_| Some("kick applied".to_string())),
+                Ok(ChatCommand::Ban { target, reason }) => moderation_workflows::ban_user(
+                    &app_core,
+                    Some(&channel_name),
+                    &target,
+                    reason.as_deref(),
+                    timestamp_ms,
+                )
+                .await
+                .map(|_| Some("ban applied".to_string())),
                 Ok(ChatCommand::Unban { target }) => {
                     moderation_workflows::unban_user(&app_core, Some(&channel_name), &target)
                         .await
                         .map(|_| Some("unban applied".to_string()))
                 }
-                Ok(ChatCommand::Mute { target, duration }) => {
-                    moderation_workflows::mute_user(
-                        &app_core,
-                        Some(&channel_name),
-                        &target,
-                        duration.map(|value| value.as_secs()),
-                        timestamp_ms,
-                    )
-                    .await
-                    .map(|_| Some("mute applied".to_string()))
-                }
+                Ok(ChatCommand::Mute { target, duration }) => moderation_workflows::mute_user(
+                    &app_core,
+                    Some(&channel_name),
+                    &target,
+                    duration.map(|value| value.as_secs()),
+                    timestamp_ms,
+                )
+                .await
+                .map(|_| Some("mute applied".to_string())),
                 Ok(ChatCommand::Unmute { target }) => {
                     moderation_workflows::unmute_user(&app_core, Some(&channel_name), &target)
                         .await
@@ -2040,7 +2074,7 @@ fn handle_runtime_character_shortcut(
     key: &str,
     rerender: Arc<dyn Fn() + Send + Sync>,
 ) -> bool {
-    if model.input_mode || model.modal.is_some() {
+    if model.input_mode || model.modal_state().is_some() {
         return false;
     }
 
@@ -2290,9 +2324,8 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
             };
 
             while stream.recv().await.is_ok() {
-                contacts_for_discovered_peers.set(
-                    load_contacts_runtime_view(controller_for_discovered_peers.clone()).await,
-                );
+                contacts_for_discovered_peers
+                    .set(load_contacts_runtime_view(controller_for_discovered_peers.clone()).await);
             }
         });
 
@@ -2459,8 +2492,14 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
     let modal_contacts_runtime = contacts_runtime_snapshot.clone();
     let modal_settings_runtime = settings_runtime_snapshot.clone();
     let modal_model = model.clone();
+    let keydown_selected_member_key = model.selected_neighborhood_member_key.clone();
+    let modal_selected_member_key = model.selected_neighborhood_member_key.clone();
     let modal = modal_view(&model, &chat_runtime_snapshot);
-    let cancel_add_device_ceremony_id = model.add_device_ceremony_id.clone();
+    let modal_state = model.modal_state();
+    let add_device_modal_state = model.add_device_modal().cloned();
+    let cancel_add_device_ceremony_id = add_device_modal_state
+        .as_ref()
+        .and_then(|state| state.ceremony_id.clone());
     let rerender = schedule_update();
     let keydown_rerender = rerender.clone();
     let cancel_rerender = rerender.clone();
@@ -2509,18 +2548,29 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                 if matches!(event.data().key(), Key::Enter)
                     && submit_runtime_modal_action(
                                 controller.clone(),
-                                model.modal,
-                                model.add_device_step,
-                                keydown_model.add_device_ceremony_id.clone(),
-                                model.add_device_is_complete,
-                                model.add_device_has_failed,
-                                model.modal_buffer.clone(),
+                                modal_state,
+                                add_device_modal_state
+                                    .as_ref()
+                                    .map(|state| state.step)
+                                    .unwrap_or(AddDeviceWizardStep::Name),
+                                add_device_modal_state
+                                    .as_ref()
+                                    .and_then(|state| state.ceremony_id.clone()),
+                                add_device_modal_state
+                                    .as_ref()
+                                    .map(|state| state.is_complete)
+                                    .unwrap_or(false),
+                                add_device_modal_state
+                                    .as_ref()
+                                    .map(|state| state.has_failed)
+                                    .unwrap_or(false),
+                                model.modal_text_value().unwrap_or_default(),
                         keydown_runtime_snapshot.clone(),
                         keydown_chat_runtime.clone(),
                         keydown_contacts_runtime.clone(),
                         keydown_settings_runtime.clone(),
                         selected_home_id_for_modal(&keydown_runtime_snapshot, &keydown_model),
-                        model.selected_neighborhood_member_index,
+                        keydown_selected_member_key.clone(),
                         keydown_rerender.clone(),
                     )
                 {
@@ -2579,42 +2629,54 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
             }
 
             if let Some(modal) = modal {
-                if matches!(model.modal, Some(ModalState::AddDeviceStep1))
-                    && !matches!(model.add_device_step, AddDeviceWizardStep::Name)
-                {
+                if let Some(add_device_state) = model.add_device_modal() {
+                    if !matches!(add_device_state.step, AddDeviceWizardStep::Name) {
                     UiDeviceEnrollmentModal {
-                        title: if matches!(model.add_device_step, AddDeviceWizardStep::ShareCode) {
+                        title: if matches!(add_device_state.step, AddDeviceWizardStep::ShareCode) {
                             "Add Device — Step 2 of 3".to_string()
                         } else {
                             "Add Device — Step 3 of 3".to_string()
                         },
-                        enrollment_code: model.add_device_enrollment_code.clone(),
-                        ceremony_id: model.add_device_ceremony_id.clone(),
-                        device_name: model.add_device_name.clone(),
-                        accepted_count: model.add_device_accepted_count,
-                        total_count: model.add_device_total_count,
-                        threshold: model.add_device_threshold,
-                        is_complete: model.add_device_is_complete,
-                        has_failed: model.add_device_has_failed,
-                        error_message: model.add_device_error_message.clone(),
-                        copied: model.add_device_code_copied,
-                        primary_label: if matches!(model.add_device_step, AddDeviceWizardStep::ShareCode) {
+                        enrollment_code: add_device_state.enrollment_code.clone(),
+                        ceremony_id: add_device_state
+                            .ceremony_id
+                            .as_ref()
+                            .map(ToString::to_string),
+                        device_name: add_device_state.device_name.clone(),
+                        accepted_count: add_device_state.accepted_count,
+                        total_count: add_device_state.total_count,
+                        threshold: add_device_state.threshold,
+                        is_complete: add_device_state.is_complete,
+                        has_failed: add_device_state.has_failed,
+                        error_message: add_device_state.error_message.clone(),
+                        copied: add_device_state.code_copied,
+                        primary_label: if matches!(add_device_state.step, AddDeviceWizardStep::ShareCode) {
                             "Next".to_string()
-                        } else if model.add_device_is_complete || model.add_device_has_failed {
+                        } else if add_device_state.is_complete || add_device_state.has_failed {
                             "Close".to_string()
                         } else {
                             "Refresh".to_string()
                         },
                         on_cancel: {
                             let controller = controller.clone();
+                            let add_device_modal_state = add_device_modal_state.clone();
                             move |_| {
                                 if !cancel_runtime_modal_action(
                                     controller.clone(),
-                                    model.modal,
-                                    model.add_device_step,
+                                    modal_state,
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .map(|state| state.step)
+                                        .unwrap_or(AddDeviceWizardStep::Name),
                                     cancel_add_device_ceremony_id.clone(),
-                                    model.add_device_is_complete,
-                                    model.add_device_has_failed,
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .map(|state| state.is_complete)
+                                        .unwrap_or(false),
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .map(|state| state.has_failed)
+                                        .unwrap_or(false),
                                     cancel_rerender.clone(),
                                 ) {
                                     controller.send_key_named("esc", 1);
@@ -2624,7 +2686,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                         },
                         on_copy: {
                             let controller = controller.clone();
-                            let enrollment_code = model.add_device_enrollment_code.clone();
+                            let enrollment_code = add_device_state.enrollment_code.clone();
                             move |_| {
                                 controller.write_clipboard(&enrollment_code);
                                 controller.mark_add_device_code_copied();
@@ -2634,23 +2696,33 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                         },
                         on_primary: {
                             let controller = controller.clone();
-                            let modal_state = model.modal;
-                            let modal_buffer = model.modal_buffer.clone();
+                            let add_device_modal_state = add_device_modal_state.clone();
                             move |_| {
                                 if !submit_runtime_modal_action(
                                     controller.clone(),
                                     modal_state,
-                                    model.add_device_step,
-                                    modal_model.add_device_ceremony_id.clone(),
-                                    model.add_device_is_complete,
-                                    model.add_device_has_failed,
-                                    modal_buffer.clone(),
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .map(|state| state.step)
+                                        .unwrap_or(AddDeviceWizardStep::Name),
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .and_then(|state| state.ceremony_id.clone()),
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .map(|state| state.is_complete)
+                                        .unwrap_or(false),
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .map(|state| state.has_failed)
+                                        .unwrap_or(false),
+                                    modal_model.modal_text_value().unwrap_or_default(),
                                     modal_runtime_snapshot.clone(),
                                     modal_chat_runtime.clone(),
                                     modal_contacts_runtime.clone(),
                                     modal_settings_runtime.clone(),
                                     selected_home_id_for_modal(&modal_runtime_snapshot, &modal_model),
-                                    model.selected_neighborhood_member_index,
+                                    modal_selected_member_key.clone(),
                                     dedicated_primary_rerender.clone(),
                                 ) {
                                     controller.send_key_named("enter", 1);
@@ -2659,7 +2731,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                             }
                         }
                     }
-                } else if matches!(model.modal, Some(ModalState::SwitchAuthority)) {
+                    } else if matches!(modal_state, Some(ModalState::SwitchAuthority)) {
                     UiAuthorityPickerModal {
                         title: active_modal_title(&model)
                             .unwrap_or_else(|| "Switch Authority".to_string()),
@@ -2697,23 +2769,33 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                         },
                         on_confirm: {
                             let controller = controller.clone();
-                            let modal_state = model.modal;
-                            let modal_buffer = model.modal_buffer.clone();
+                            let add_device_modal_state = add_device_modal_state.clone();
                             move |_| {
                                 if !submit_runtime_modal_action(
                                     controller.clone(),
                                     modal_state,
-                                    model.add_device_step,
-                                    modal_model.add_device_ceremony_id.clone(),
-                                    model.add_device_is_complete,
-                                    model.add_device_has_failed,
-                                    modal_buffer.clone(),
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .map(|state| state.step)
+                                        .unwrap_or(AddDeviceWizardStep::Name),
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .and_then(|state| state.ceremony_id.clone()),
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .map(|state| state.is_complete)
+                                        .unwrap_or(false),
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .map(|state| state.has_failed)
+                                        .unwrap_or(false),
+                                    modal_model.modal_text_value().unwrap_or_default(),
                                     modal_runtime_snapshot.clone(),
                                     modal_chat_runtime.clone(),
                                     modal_contacts_runtime.clone(),
                                     modal_settings_runtime.clone(),
                                     selected_home_id_for_modal(&modal_runtime_snapshot, &modal_model),
-                                    model.selected_neighborhood_member_index,
+                                    modal_selected_member_key.clone(),
                                     dedicated_primary_rerender.clone(),
                                 ) {
                                     controller.send_key_named("enter", 1);
@@ -2727,14 +2809,24 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                         modal,
                         on_cancel: {
                             let controller = controller.clone();
+                            let add_device_modal_state = add_device_modal_state.clone();
                             move |_| {
                                 if !cancel_runtime_modal_action(
                                     controller.clone(),
-                                    model.modal,
-                                    model.add_device_step,
+                                    modal_state,
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .map(|state| state.step)
+                                        .unwrap_or(AddDeviceWizardStep::Name),
                                     cancel_add_device_ceremony_id.clone(),
-                                    model.add_device_is_complete,
-                                    model.add_device_has_failed,
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .map(|state| state.is_complete)
+                                        .unwrap_or(false),
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .map(|state| state.has_failed)
+                                        .unwrap_or(false),
                                     cancel_rerender.clone(),
                                 ) {
                                     controller.send_key_named("esc", 1);
@@ -2744,23 +2836,33 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                         },
                         on_confirm: {
                             let controller = controller.clone();
-                            let modal_state = model.modal;
-                            let modal_buffer = model.modal_buffer.clone();
+                            let add_device_modal_state = add_device_modal_state.clone();
                             move |_| {
                                 if !submit_runtime_modal_action(
                                     controller.clone(),
                                     modal_state,
-                                    model.add_device_step,
-                                    modal_model.add_device_ceremony_id.clone(),
-                                    model.add_device_is_complete,
-                                    model.add_device_has_failed,
-                                    modal_buffer.clone(),
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .map(|state| state.step)
+                                        .unwrap_or(AddDeviceWizardStep::Name),
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .and_then(|state| state.ceremony_id.clone()),
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .map(|state| state.is_complete)
+                                        .unwrap_or(false),
+                                    add_device_modal_state
+                                        .as_ref()
+                                        .map(|state| state.has_failed)
+                                        .unwrap_or(false),
+                                    modal_model.modal_text_value().unwrap_or_default(),
                                     modal_runtime_snapshot.clone(),
                                     modal_chat_runtime.clone(),
                                     modal_contacts_runtime.clone(),
                                     modal_settings_runtime.clone(),
                                     selected_home_id_for_modal(&modal_runtime_snapshot, &modal_model),
-                                    model.selected_neighborhood_member_index,
+                                    modal_selected_member_key.clone(),
                                     generic_confirm_rerender.clone(),
                                 ) {
                                     controller.send_key_named("enter", 1);
@@ -2776,6 +2878,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                             }
                         }
                     }
+                }
                 }
             }
 
@@ -2797,8 +2900,8 @@ fn neighborhood_screen(
 ) -> Element {
     let is_detail = matches!(model.neighborhood_mode, NeighborhoodMode::Detail);
     let selected_home = model
-        .selected_home
-        .clone()
+        .selected_home_name()
+        .map(str::to_string)
         .or_else(|| {
             if !runtime.active_home_name.is_empty() {
                 Some(runtime.active_home_name.clone())
@@ -2819,10 +2922,10 @@ fn neighborhood_screen(
     let show_detail_lists = is_detail && matches!(model.access_depth, AccessDepth::Full);
     let mut home_rows = runtime.homes.clone();
     if home_rows.is_empty() {
-        if let Some(home) = model.selected_home.clone() {
+        if let Some(home) = model.selected_home.as_ref() {
             home_rows.push(NeighborhoodRuntimeHome {
-                id: format!("home-{}", home.to_lowercase().replace(' ', "-")),
-                name: home,
+                id: home.id.clone(),
+                name: home.name.clone(),
                 member_count: None,
                 can_enter: true,
                 is_local: false,
@@ -2834,11 +2937,16 @@ fn neighborhood_screen(
     if should_materialize_selected_home && !home_rows.iter().any(|home| home.name == selected_home)
     {
         home_rows.push(NeighborhoodRuntimeHome {
-            id: if selected_home == "Neighborhood" {
-                model.authority_id.clone()
-            } else {
-                format!("home-{}", selected_home.to_lowercase().replace(' ', "-"))
-            },
+            id: model
+                .selected_home_id()
+                .map(str::to_string)
+                .unwrap_or_else(|| {
+                    if selected_home == "Neighborhood" {
+                        model.authority_id.clone()
+                    } else {
+                        format!("home-{}", selected_home.to_lowercase().replace(' ', "-"))
+                    }
+                }),
             name: selected_home.clone(),
             member_count: None,
             can_enter: true,
@@ -2881,7 +2989,14 @@ fn neighborhood_screen(
     };
     let member_count = display_members.len();
     let selected_member_index = model
-        .selected_neighborhood_member_index
+        .selected_neighborhood_member_key
+        .as_ref()
+        .and_then(|selected| {
+            display_members
+                .iter()
+                .position(|member| neighborhood_member_selection_key(member) == *selected)
+        })
+        .unwrap_or(0)
         .min(display_members.len().saturating_sub(1));
     let selected_runtime_member = display_members.get(selected_member_index).cloned();
 
@@ -3041,8 +3156,9 @@ fn neighborhood_screen(
                                                     class: "block w-full text-left",
                                                     onclick: {
                                                         let controller = controller.clone();
+                                                        let member_key = neighborhood_member_selection_key(member);
                                                         move |_| {
-                                                            controller.set_selected_neighborhood_member_index(idx);
+                                                            controller.set_selected_neighborhood_member_key(Some(member_key.clone()));
                                                             render_tick.set(render_tick() + 1);
                                                         }
                                                     },
@@ -3162,9 +3278,10 @@ fn neighborhood_screen(
                                             class: "block w-full text-left",
                                             onclick: {
                                                 let controller = controller.clone();
+                                                let home_id = home.id.clone();
                                                 let home_name = home.name.clone();
                                                 move |_| {
-                                                    controller.select_home_by_name(&home_name);
+                                                    controller.select_home(home_id.clone(), home_name.clone());
                                                     render_tick.set(render_tick() + 1);
                                                 }
                                             },
@@ -3566,7 +3683,10 @@ fn contacts_screen(
     controller: Arc<UiController>,
     mut render_tick: Signal<u64>,
 ) -> Element {
-    let selected_contact = runtime.contacts.get(model.selected_contact_index).cloned();
+    let selected_contact = model
+        .selected_contact_index()
+        .and_then(|index| runtime.contacts.get(index))
+        .cloned();
     let selected_name = selected_contact
         .as_ref()
         .map(|contact| contact.name.clone())
@@ -3617,7 +3737,7 @@ fn contacts_screen(
                                         class: "flex items-center gap-2",
                                         div { class: "min-w-0 flex-1",
                                             UiListItem {
-                                                label: peer.authority_id.clone(),
+                                                label: peer.authority_id.to_string(),
                                                 secondary: Some(if peer.invited {
                                                     format!("{} • invitation pending", peer.address)
                                                 } else {
@@ -3640,7 +3760,7 @@ fn contacts_screen(
                                             on_click: {
                                                 let controller = controller.clone();
                                                 let authority_id = peer.authority_id.clone();
-                                                let label = peer.authority_id.clone();
+                                                let label = peer.authority_id.to_string();
                                                 move |_| {
                                                     controller.open_create_invitation_modal(
                                                         Some(&authority_id),
@@ -3694,7 +3814,7 @@ fn contacts_screen(
                                                         "\u{00A0}".to_string()
                                                     }
                                                 ),
-                                                active: model.selected_contact_index == idx,
+                                                active: model.selected_contact_index() == Some(idx),
                                             }
                                         }
                                     }
@@ -3777,7 +3897,7 @@ fn contacts_screen(
                                             };
                                             match messaging_workflows::start_direct_chat(
                                                 &app_core,
-                                                &authority_id,
+                                                &authority_id.to_string(),
                                                 timestamp_ms,
                                             ).await {
                                                 Ok(_) => {
@@ -3831,11 +3951,7 @@ fn notifications_screen(
 ) -> Element {
     let selected = runtime
         .items
-        .get(
-            model
-                .selected_notification_index
-                .min(runtime.items.len().saturating_sub(1)),
-        )
+        .get(model.selected_notification_index().unwrap_or_default())
         .cloned();
     rsx! {
         div {
@@ -3872,7 +3988,7 @@ fn notifications_screen(
                                     UiListItem {
                                         label: entry.title.clone(),
                                         secondary: Some(entry.kind_label.clone()),
-                                        active: idx == model.selected_notification_index,
+                                        active: model.selected_notification_index() == Some(idx),
                                     }
                                 }
                             }
@@ -4014,6 +4130,16 @@ fn notifications_screen(
     }
 }
 
+fn neighborhood_member_selection_key(
+    member: &NeighborhoodRuntimeMember,
+) -> NeighborhoodMemberSelectionKey {
+    if !member.authority_id.is_empty() {
+        NeighborhoodMemberSelectionKey(format!("authority:{}", member.authority_id))
+    } else {
+        NeighborhoodMemberSelectionKey(format!("name:{}", member.name))
+    }
+}
+
 fn settings_screen(
     model: &UiModel,
     runtime: &SettingsRuntimeView,
@@ -4029,14 +4155,14 @@ fn settings_screen(
                 title: "Settings".to_string(),
                 subtitle: Some("Storage: IndexedDB".to_string()),
                 extra_class: Some("lg:col-span-4".to_string()),
-                for (idx, section) in SETTINGS_ROWS.iter().enumerate() {
+                for section in SettingsSection::ALL {
                     UiListButton {
-                        label: section.to_string(),
-                        active: idx == model.settings_index,
+                        label: section.title().to_string(),
+                        active: section == model.settings_section,
                         on_click: {
                             let controller = controller.clone();
                             move |_| {
-                                controller.set_settings_index(idx);
+                                controller.set_settings_section(section);
                                 render_tick.set(render_tick() + 1);
                             }
                         }
@@ -4045,10 +4171,10 @@ fn settings_screen(
             }
 
             UiCard {
-                title: settings_panel_title(model.settings_index),
-                subtitle: Some(settings_panel_subtitle(model.settings_index)),
+                title: model.settings_section.title().to_string(),
+                subtitle: Some(model.settings_section.subtitle().to_string()),
                 extra_class: Some("lg:col-span-8".to_string()),
-                if model.settings_index == 0 {
+                if matches!(model.settings_section, SettingsSection::Profile) {
                     div {
                         class: "flex flex-1 min-h-0 flex-col gap-2",
                         UiListItem {
@@ -4069,7 +4195,7 @@ fn settings_screen(
                                 on_click: {
                                     let controller = controller.clone();
                                     move |_| {
-                                        controller.set_settings_index(0);
+                                        controller.set_settings_section(SettingsSection::Profile);
                                         controller.send_action_keys("e");
                                         render_tick.set(render_tick() + 1);
                                     }
@@ -4078,7 +4204,7 @@ fn settings_screen(
                         }
                     }
                 }
-                if model.settings_index == 1 {
+                if matches!(model.settings_section, SettingsSection::GuardianThreshold) {
                     div {
                         class: "flex flex-1 min-h-0 flex-col gap-2",
                         UiListItem {
@@ -4099,7 +4225,7 @@ fn settings_screen(
                                 on_click: {
                                     let controller = controller.clone();
                                     move |_| {
-                                        controller.set_settings_index(1);
+                                        controller.set_settings_section(SettingsSection::GuardianThreshold);
                                         controller.send_action_keys("t");
                                         render_tick.set(render_tick() + 1);
                                     }
@@ -4108,7 +4234,7 @@ fn settings_screen(
                         }
                     }
                 }
-                if model.settings_index == 2 {
+                if matches!(model.settings_section, SettingsSection::RequestRecovery) {
                     div {
                         class: "flex flex-1 min-h-0 flex-col gap-2",
                         UiListItem {
@@ -4129,7 +4255,7 @@ fn settings_screen(
                                 on_click: {
                                     let controller = controller.clone();
                                     move |_| {
-                                        controller.set_settings_index(2);
+                                        controller.set_settings_section(SettingsSection::RequestRecovery);
                                         controller.send_action_keys("s");
                                         render_tick.set(render_tick() + 1);
                                     }
@@ -4138,7 +4264,7 @@ fn settings_screen(
                         }
                     }
                 }
-                if model.settings_index == 3 {
+                if matches!(model.settings_section, SettingsSection::Devices) {
                     div {
                         class: "flex flex-1 min-h-0 flex-col gap-2",
                         UiListItem {
@@ -4169,7 +4295,7 @@ fn settings_screen(
                                 on_click: {
                                     let controller = controller.clone();
                                     move |_| {
-                                        controller.set_settings_index(3);
+                                        controller.set_settings_section(SettingsSection::Devices);
                                         controller.send_action_keys("a");
                                         render_tick.set(render_tick() + 1);
                                     }
@@ -4181,7 +4307,7 @@ fn settings_screen(
                                 on_click: {
                                     let controller = controller.clone();
                                     move |_| {
-                                        controller.set_settings_index(3);
+                                        controller.set_settings_section(SettingsSection::Devices);
                                         controller.send_action_keys("i");
                                         render_tick.set(render_tick() + 1);
                                     }
@@ -4193,7 +4319,7 @@ fn settings_screen(
                                 on_click: {
                                     let controller = controller.clone();
                                     move |_| {
-                                        controller.set_settings_index(3);
+                                        controller.set_settings_section(SettingsSection::Devices);
                                         controller.send_action_keys("r");
                                         render_tick.set(render_tick() + 1);
                                     }
@@ -4202,7 +4328,7 @@ fn settings_screen(
                         }
                     }
                 }
-                if model.settings_index == 4 {
+                if matches!(model.settings_section, SettingsSection::Authority) {
                     div {
                         class: "flex flex-1 min-h-0 flex-col gap-2",
                         UiListItem {
@@ -4225,7 +4351,7 @@ fn settings_screen(
                                         if authority.is_current {
                                             return;
                                         }
-                                        let _ = controller.request_authority_switch(&authority_id);
+                                        let _ = controller.request_authority_switch(authority_id);
                                     }
                                 }
                             }
@@ -4243,7 +4369,7 @@ fn settings_screen(
                                 on_click: {
                                     let controller = controller.clone();
                                     move |_| {
-                                        controller.set_settings_index(4);
+                                        controller.set_settings_section(SettingsSection::Authority);
                                         controller.send_action_keys("s");
                                         render_tick.set(render_tick() + 1);
                                     }
@@ -4255,7 +4381,7 @@ fn settings_screen(
                                 on_click: {
                                     let controller = controller.clone();
                                     move |_| {
-                                        controller.set_settings_index(4);
+                                        controller.set_settings_section(SettingsSection::Authority);
                                         controller.send_action_keys("m");
                                         render_tick.set(render_tick() + 1);
                                     }
@@ -4264,7 +4390,7 @@ fn settings_screen(
                         }
                     }
                 }
-                if model.settings_index == 5 {
+                if matches!(model.settings_section, SettingsSection::Appearance) {
                     div {
                         class: "flex flex-1 min-h-0 flex-col gap-2",
                         UiListItem {
@@ -4301,26 +4427,6 @@ fn settings_screen(
                 }
             }
         }
-    }
-}
-
-fn settings_panel_title(index: usize) -> String {
-    SETTINGS_ROWS
-        .get(index)
-        .copied()
-        .unwrap_or("Settings")
-        .to_string()
-}
-
-fn settings_panel_subtitle(index: usize) -> String {
-    match index {
-        0 => "Configure nickname".to_string(),
-        1 => "Configure guardian policy".to_string(),
-        2 => "Configure recovery operations".to_string(),
-        3 => "Configure devices".to_string(),
-        4 => "Authority scope".to_string(),
-        5 => "Theme and display".to_string(),
-        _ => "Settings details".to_string(),
     }
 }
 
@@ -4384,7 +4490,7 @@ fn render_screen_content(
 }
 
 fn active_modal_title(model: &UiModel) -> Option<String> {
-    let modal = model.modal?;
+    let modal = model.modal_state()?;
     if !model.modal_hint.trim().is_empty() {
         return Some(model.modal_hint.trim().to_string());
     }
@@ -4416,7 +4522,7 @@ fn active_modal_title(model: &UiModel) -> Option<String> {
 }
 
 fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalView> {
-    let modal = model.modal?;
+    let modal = model.modal_state()?;
     let title = active_modal_title(model).unwrap_or_else(|| "Modal".to_string());
     let mut details = Vec::new();
     let mut keybind_rows = Vec::new();
@@ -4429,7 +4535,9 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
             keybind_rows = help_keybind_rows;
         }
         ModalState::CreateInvitation => {
-            if let Some(receiver_label) = &model.create_invitation_receiver_label {
+            if let Some(receiver_label) =
+                model.create_invitation_modal().and_then(|state| state.receiver_label.as_ref())
+            {
                 details.push(format!("Create an invitation code for {receiver_label}."));
                 details.push(
                     "Review or adjust the authority id, then press Enter to generate and copy the code."
@@ -4449,57 +4557,59 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
             details.push("Enter a new home name and press Enter.".to_string());
             input_label = Some("Home Name".to_string());
         }
-        ModalState::CreateChannel => match model.create_channel_step {
-            CreateChannelWizardStep::Details => {
-                let active = match model.create_channel_active_field {
-                    CreateChannelDetailsField::Name => "Group Name",
-                    CreateChannelDetailsField::Topic => "Topic",
-                };
-                details.push("Step 1 of 3: Configure group details.".to_string());
-                details.push(format!("Group name: {}", model.create_channel_name));
-                details.push(format!("Topic: {}", model.create_channel_topic));
-                details.push(format!("Active field: {active} (Tab to switch)"));
-                input_label = Some(active.to_string());
-            }
-            CreateChannelWizardStep::Members => {
-                details.push("Step 2 of 3: Select members to invite.".to_string());
-                if model.contacts.is_empty() {
-                    details.push("No contacts available.".to_string());
-                } else {
-                    for (idx, contact) in model.contacts.iter().enumerate() {
-                        let focused = if idx == model.create_channel_member_focus {
-                            ">"
-                        } else {
-                            " "
+        ModalState::CreateChannel => {
+            if let Some(state) = model.create_channel_modal() {
+                match state.step {
+                    CreateChannelWizardStep::Details => {
+                        let active = match state.active_field {
+                            CreateChannelDetailsField::Name => "Group Name",
+                            CreateChannelDetailsField::Topic => "Topic",
                         };
-                        let selected = if model.create_channel_selected_members.contains(&idx) {
-                            "[x]"
+                        details.push("Step 1 of 3: Configure group details.".to_string());
+                        details.push(format!("Group name: {}", state.name));
+                        details.push(format!("Topic: {}", state.topic));
+                        details.push(format!("Active field: {active} (Tab to switch)"));
+                        input_label = Some(active.to_string());
+                    }
+                    CreateChannelWizardStep::Members => {
+                        details.push("Step 2 of 3: Select members to invite.".to_string());
+                        if model.contacts.is_empty() {
+                            details.push("No contacts available.".to_string());
                         } else {
-                            "[ ]"
-                        };
-                        details.push(format!("{focused} {selected} {}", contact.name));
+                            for (idx, contact) in model.contacts.iter().enumerate() {
+                                let focused = if idx == state.member_focus { ">" } else { " " };
+                                let selected = if state.selected_members.contains(&idx) {
+                                    "[x]"
+                                } else {
+                                    "[ ]"
+                                };
+                                details.push(format!("{focused} {selected} {}", contact.name));
+                            }
+                        }
+                        details.push(
+                            "Use ↑/↓ to move, Space to toggle, Enter to continue.".to_string(),
+                        );
+                    }
+                    CreateChannelWizardStep::Threshold => {
+                        let participant_total = state.selected_members.len().saturating_add(1);
+                        details.push("Step 3 of 3: Set threshold.".to_string());
+                        details.push(format!("Participants (including you): {participant_total}"));
+                        details.push("Use ↑/↓ to adjust, Enter to create.".to_string());
+                        input_label = Some("Threshold".to_string());
                     }
                 }
-                details.push("Use ↑/↓ to move, Space to toggle, Enter to continue.".to_string());
             }
-            CreateChannelWizardStep::Threshold => {
-                let participant_total = model
-                    .create_channel_selected_members
-                    .len()
-                    .saturating_add(1);
-                details.push("Step 3 of 3: Set threshold.".to_string());
-                details.push(format!("Participants (including you): {participant_total}"));
-                details.push("Use ↑/↓ to adjust, Enter to create.".to_string());
-                input_label = Some("Threshold".to_string());
-            }
-        },
+        }
         ModalState::SetChannelTopic => {
             details.push("Set a topic for the selected channel.".to_string());
             input_label = Some("Channel Topic".to_string());
         }
         ModalState::ChannelInfo => {
             let active_channel = if chat_runtime.active_channel.is_empty() {
-                model.selected_channel_name().unwrap_or("general").to_string()
+                model
+                    .selected_channel_name()
+                    .unwrap_or("general")
+                    .to_string()
             } else {
                 chat_runtime.active_channel.clone()
             };
@@ -4526,10 +4636,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                     }
                 ));
                 details.push(format!("Unread messages: {}", channel.unread_count));
-                details.push(format!(
-                    "Visible messages: {}",
-                    chat_runtime.messages.len()
-                ));
+                details.push(format!("Visible messages: {}", chat_runtime.messages.len()));
                 if channel.member_count > 0 {
                     details.push(format!("Known members: {}", channel.member_count));
                 }
@@ -4548,91 +4655,99 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
             details.push("Remove the selected contact from this authority.".to_string());
             details.push("Press Enter to confirm.".to_string());
         }
-        ModalState::GuardianSetup => match model.guardian_wizard_step {
-            ThresholdWizardStep::Selection => {
-                details.push("Step 1 of 3: Select guardians.".to_string());
-                if model.contacts.is_empty() {
-                    details.push("No contacts available.".to_string());
-                } else {
-                    for (idx, contact) in model.contacts.iter().enumerate() {
-                        let focused = if idx == model.guardian_focus_index {
-                            ">"
+        ModalState::GuardianSetup => {
+            if let Some(state) = model.guardian_setup_modal() {
+                match state.step {
+                    ThresholdWizardStep::Selection => {
+                        details.push("Step 1 of 3: Select guardians.".to_string());
+                        if model.contacts.is_empty() {
+                            details.push("No contacts available.".to_string());
                         } else {
-                            " "
-                        };
-                        let selected = if model.guardian_selected_indices.contains(&idx) {
-                            "[x]"
-                        } else {
-                            "[ ]"
-                        };
-                        details.push(format!("{focused} {selected} {}", contact.name));
+                            for (idx, contact) in model.contacts.iter().enumerate() {
+                                let focused = if idx == state.focus_index { ">" } else { " " };
+                                let selected = if state.selected_indices.contains(&idx) {
+                                    "[x]"
+                                } else {
+                                    "[ ]"
+                                };
+                                details.push(format!("{focused} {selected} {}", contact.name));
+                            }
+                        }
+                        details.push(
+                            "Use ↑/↓ to move, Space to toggle, Enter to continue.".to_string(),
+                        );
+                    }
+                    ThresholdWizardStep::Threshold => {
+                        details.push("Step 2 of 3: Choose threshold.".to_string());
+                        details.push(format!("Selected guardians: {}", state.selected_count));
+                        details.push("Enter k (approvals required).".to_string());
+                        input_label = Some("Threshold (k)".to_string());
+                    }
+                    ThresholdWizardStep::Ceremony => {
+                        details.push("Step 3 of 3: Ready to start ceremony.".to_string());
+                        details.push(format!(
+                            "Will start guardian setup with {} of {} approvals.",
+                            state.threshold_k, state.selected_count
+                        ));
+                        details.push("Press Enter to start.".to_string());
                     }
                 }
-                details.push("Use ↑/↓ to move, Space to toggle, Enter to continue.".to_string());
             }
-            ThresholdWizardStep::Threshold => {
-                details.push("Step 2 of 3: Choose threshold.".to_string());
-                details.push(format!(
-                    "Selected guardians: {}",
-                    model.guardian_selected_count
-                ));
-                details.push("Enter k (approvals required).".to_string());
-                input_label = Some("Threshold (k)".to_string());
-            }
-            ThresholdWizardStep::Ceremony => {
-                details.push("Step 3 of 3: Ready to start ceremony.".to_string());
-                details.push(format!(
-                    "Will start guardian setup with {} of {} approvals.",
-                    model.guardian_threshold_k, model.guardian_selected_count
-                ));
-                details.push("Press Enter to start.".to_string());
-            }
-        },
+        }
         ModalState::RequestRecovery => {
             details.push("Request guardian-assisted recovery for this authority.".to_string());
             details.push("Press Enter to notify your configured guardians.".to_string());
         }
-        ModalState::AddDeviceStep1 => match model.add_device_step {
-            AddDeviceWizardStep::Name => {
-                details.push("Step 1 of 3: Name the device you want to invite.".to_string());
-                details.push("This is the new device, not the current one.".to_string());
-                details.push("Press Enter to generate an out-of-band enrollment code.".to_string());
-                input_label = Some("Device Name".to_string());
-            }
-            AddDeviceWizardStep::ShareCode => {
-                details
-                    .push("Step 2 of 3: Share this code out-of-band with that device.".to_string());
-                details.push(format!(
-                    "Enrollment Code: {}",
-                    model.add_device_enrollment_code
-                ));
-                details.push("Press c to copy, then press Enter when shared.".to_string());
-                if let Some(ceremony_id) = &model.add_device_ceremony_id {
-                    details.push(format!("Ceremony: {ceremony_id}"));
+        ModalState::AddDeviceStep1 => {
+            if let Some(state) = model.add_device_modal() {
+                match state.step {
+                    AddDeviceWizardStep::Name => {
+                        details.push("Step 1 of 3: Name the device you want to invite.".to_string());
+                        details.push("This is the new device, not the current one.".to_string());
+                        details.push(
+                            "Press Enter to generate an out-of-band enrollment code.".to_string(),
+                        );
+                        if !state.name_input.trim().is_empty() {
+                            details.push(format!("Draft name: {}", state.name_input));
+                        }
+                        input_label = Some("Device Name".to_string());
+                    }
+                    AddDeviceWizardStep::ShareCode => {
+                        details.push(
+                            "Step 2 of 3: Share this code out-of-band with that device."
+                                .to_string(),
+                        );
+                        details.push(format!("Enrollment Code: {}", state.enrollment_code));
+                        details.push("Press c to copy, then press Enter when shared.".to_string());
+                        if let Some(ceremony_id) = state.ceremony_id.as_ref() {
+                            details.push(format!("Ceremony: {ceremony_id}"));
+                        }
+                    }
+                    AddDeviceWizardStep::Confirm => {
+                        details.push(
+                            "Step 3 of 3: Waiting for the new device to import the code."
+                                .to_string(),
+                        );
+                        details.push(format!(
+                            "Device '{}': {} of {} confirmations ({})",
+                            state.device_name,
+                            state.accepted_count,
+                            state.total_count.max(1),
+                            state.threshold.max(1)
+                        ));
+                        if let Some(error) = &state.error_message {
+                            details.push(format!("Error: {error}"));
+                        } else if state.has_failed {
+                            details.push("The enrollment ceremony failed.".to_string());
+                        } else if state.is_complete {
+                            details.push("Enrollment ceremony complete. The new device is now part of this authority.".to_string());
+                        } else {
+                            details.push("Leave this dialog open to monitor progress, or press Esc to cancel the ceremony.".to_string());
+                        }
+                    }
                 }
             }
-            AddDeviceWizardStep::Confirm => {
-                details.push(
-                    "Step 3 of 3: Waiting for the new device to import the code.".to_string(),
-                );
-                details.push(format!(
-                    "Device '{}': {} of {} confirmations ({})",
-                    model.add_device_name,
-                    model.add_device_accepted_count,
-                    model.add_device_total_count.max(1),
-                    model.add_device_threshold.max(1)
-                ));
-                if let Some(error) = &model.add_device_error_message {
-                    details.push(format!("Error: {error}"));
-                } else if model.add_device_has_failed {
-                    details.push("The enrollment ceremony failed.".to_string());
-                } else if model.add_device_is_complete {
-                    details.push("Enrollment ceremony complete. The new device is now part of this authority.".to_string());
-                } else {
-                    details.push("Leave this dialog open to monitor progress, or press Esc to cancel the ceremony.".to_string());
-                }
-            }
-        },
+        }
         ModalState::ImportDeviceEnrollmentCode => {
             details.push("Import a device enrollment code and press Enter.".to_string());
             input_label = Some("Enrollment Code".to_string());
@@ -4643,7 +4758,8 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                 "Selected: {}",
                 model
                     .secondary_device_name()
-                    .unwrap_or(model.remove_device_candidate_name.as_str())
+                    .or_else(|| model.selected_device_modal().map(|state| state.candidate_name.as_str()))
+                    .unwrap_or("Secondary device")
             ));
             details.push("Press Enter to continue.".to_string());
         }
@@ -4652,54 +4768,54 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                 "Remove \"{}\" from this authority?",
                 model
                     .secondary_device_name()
-                    .unwrap_or(model.remove_device_candidate_name.as_str())
+                    .or_else(|| model.selected_device_modal().map(|state| state.candidate_name.as_str()))
+                    .unwrap_or("Secondary device")
             ));
             details.push("Press Enter to confirm removal.".to_string());
         }
-        ModalState::MfaSetup => match model.mfa_wizard_step {
-            ThresholdWizardStep::Selection => {
-                details.push("Step 1 of 3: Select devices for MFA signing.".to_string());
-                let devices = if model.has_secondary_device {
-                    vec![
-                        "This Device".to_string(),
-                        model
-                            .secondary_device_name()
-                            .unwrap_or("Secondary Device")
-                            .to_string(),
-                    ]
-                } else {
-                    vec!["This Device".to_string()]
-                };
-                for (idx, device) in devices.iter().enumerate() {
-                    let focused = if idx == model.mfa_focus_index {
-                        ">"
-                    } else {
-                        " "
-                    };
-                    let selected = if model.mfa_selected_indices.contains(&idx) {
-                        "[x]"
-                    } else {
-                        "[ ]"
-                    };
-                    details.push(format!("{focused} {selected} {device}"));
+        ModalState::MfaSetup => {
+            if let Some(state) = model.mfa_setup_modal() {
+                match state.step {
+                    ThresholdWizardStep::Selection => {
+                        details.push("Step 1 of 3: Select devices for MFA signing.".to_string());
+                        let devices = if model.has_secondary_device {
+                            vec![
+                                "This Device".to_string(),
+                                model.secondary_device_name().unwrap_or("Secondary Device").to_string(),
+                            ]
+                        } else {
+                            vec!["This Device".to_string()]
+                        };
+                        for (idx, device) in devices.iter().enumerate() {
+                            let focused = if idx == state.focus_index { ">" } else { " " };
+                            let selected = if state.selected_indices.contains(&idx) {
+                                "[x]"
+                            } else {
+                                "[ ]"
+                            };
+                            details.push(format!("{focused} {selected} {device}"));
+                        }
+                        details.push(
+                            "Use ↑/↓ to move, Space to toggle, Enter to continue.".to_string(),
+                        );
+                    }
+                    ThresholdWizardStep::Threshold => {
+                        details.push("Step 2 of 3: Configure signing threshold.".to_string());
+                        details.push(format!("Selected devices: {}", state.selected_count));
+                        details.push("Enter required signatures (k).".to_string());
+                        input_label = Some("Threshold (k)".to_string());
+                    }
+                    ThresholdWizardStep::Ceremony => {
+                        details.push("Step 3 of 3: Ready to start MFA ceremony.".to_string());
+                        details.push(format!(
+                            "Will start MFA with {} of {} signatures.",
+                            state.threshold_k, state.selected_count
+                        ));
+                        details.push("Press Enter to start.".to_string());
+                    }
                 }
-                details.push("Use ↑/↓ to move, Space to toggle, Enter to continue.".to_string());
             }
-            ThresholdWizardStep::Threshold => {
-                details.push("Step 2 of 3: Configure signing threshold.".to_string());
-                details.push(format!("Selected devices: {}", model.mfa_selected_count));
-                details.push("Enter required signatures (k).".to_string());
-                input_label = Some("Threshold (k)".to_string());
-            }
-            ThresholdWizardStep::Ceremony => {
-                details.push("Step 3 of 3: Ready to start MFA ceremony.".to_string());
-                details.push(format!(
-                    "Will start MFA with {} of {} signatures.",
-                    model.mfa_threshold_k, model.mfa_selected_count
-                ));
-                details.push("Press Enter to start.".to_string());
-            }
-        },
+        }
         ModalState::AssignModerator => {
             details.push("Apply moderator role changes in the currently entered home.".to_string());
             details.push("Select a member in the Home panel first. Only members can be designated as moderators.".to_string());
@@ -4711,7 +4827,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                 details.push("No authorities available.".to_string());
             } else {
                 for (idx, authority) in model.authorities.iter().enumerate() {
-                    let focused = if idx == model.selected_authority_index {
+                    let focused = if model.selected_authority_index() == Some(idx) {
                         ">"
                     } else {
                         " "
@@ -4729,10 +4845,9 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
             let selected_contact = model
                 .selected_contact_name()
                 .unwrap_or("No contact selected");
-            let level = if model.access_override_partial {
-                "Partial"
-            } else {
-                "Limited"
+            let level = match model.active_modal.as_ref() {
+                Some(ActiveModal::AccessOverride(state)) => state.level.label(),
+                _ => AccessOverrideLevel::Limited.label(),
             };
             details.push("Apply a per-home access override for the selected contact.".to_string());
             details.push(format!("Selected contact: {selected_contact}"));
@@ -4741,53 +4856,66 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
             details.push("Press Enter to apply the override to the current home.".to_string());
         }
         ModalState::CapabilityConfig => {
-            let active = match model.capability_active_field {
-                0 => "Full",
-                1 => "Partial",
-                _ => "Limited",
-            };
+            let (active, full_caps, partial_caps, limited_caps) = model
+                .capability_config_modal()
+                .map(|state| {
+                    (
+                        state.active_tier.label(),
+                        state.full_caps.as_str(),
+                        state.partial_caps.as_str(),
+                        state.limited_caps.as_str(),
+                    )
+                })
+                .unwrap_or((
+                    CapabilityTier::Full.label(),
+                    DEFAULT_CAPABILITY_FULL,
+                    DEFAULT_CAPABILITY_PARTIAL,
+                    DEFAULT_CAPABILITY_LIMITED,
+                ));
             details.push("Configure per-home capabilities for each access level.".to_string());
             details.push("Tab switches fields. Enter saves to the current home.".to_string());
             details.push(format!("Editing: {active}"));
-            details.push(format!("Full: {}", model.capability_full_caps));
-            details.push(format!("Partial: {}", model.capability_partial_caps));
-            details.push(format!("Limited: {}", model.capability_limited_caps));
+            details.push(format!("Full: {full_caps}"));
+            details.push(format!("Partial: {partial_caps}"));
+            details.push(format!("Limited: {limited_caps}"));
             input_label = Some(format!("{active} Capabilities"));
         }
     }
 
-    let input_value = if modal_accepts_text(model, modal) {
-        Some(model.modal_buffer.clone())
+    let input_value = if model.modal_accepts_text() {
+        model.modal_text_value()
     } else {
         None
     };
 
     let enter_label = match modal {
         ModalState::Help | ModalState::ChannelInfo => "Close".to_string(),
-        ModalState::CreateChannel => match model.create_channel_step {
-            CreateChannelWizardStep::Threshold => "Create".to_string(),
+        ModalState::CreateChannel => match model.create_channel_modal().map(|state| state.step) {
+            Some(CreateChannelWizardStep::Threshold) => "Create".to_string(),
             _ => "Next".to_string(),
         },
-        ModalState::AddDeviceStep1 => match model.add_device_step {
-            AddDeviceWizardStep::Name => "Generate Code".to_string(),
-            AddDeviceWizardStep::ShareCode => "Next".to_string(),
-            AddDeviceWizardStep::Confirm => {
-                if model.add_device_is_complete || model.add_device_has_failed {
+        ModalState::AddDeviceStep1 => match model.add_device_modal().map(|state| state.step) {
+            Some(AddDeviceWizardStep::ShareCode) => "Next".to_string(),
+            Some(AddDeviceWizardStep::Confirm) => {
+                if model
+                    .add_device_modal()
+                    .map(|state| state.is_complete || state.has_failed)
+                    .unwrap_or(false)
+                {
                     "Close".to_string()
                 } else {
                     "Refresh".to_string()
                 }
             }
+            _ => "Generate Code".to_string(),
         },
-        ModalState::GuardianSetup => match model.guardian_wizard_step {
-            ThresholdWizardStep::Selection => "Next".to_string(),
-            ThresholdWizardStep::Threshold => "Next".to_string(),
-            ThresholdWizardStep::Ceremony => "Start".to_string(),
+        ModalState::GuardianSetup => match model.guardian_setup_modal().map(|state| state.step) {
+            Some(ThresholdWizardStep::Ceremony) => "Start".to_string(),
+            _ => "Next".to_string(),
         },
-        ModalState::MfaSetup => match model.mfa_wizard_step {
-            ThresholdWizardStep::Selection => "Next".to_string(),
-            ThresholdWizardStep::Threshold => "Next".to_string(),
-            ThresholdWizardStep::Ceremony => "Start".to_string(),
+        ModalState::MfaSetup => match model.mfa_setup_modal().map(|state| state.step) {
+            Some(ThresholdWizardStep::Ceremony) => "Start".to_string(),
+            _ => "Next".to_string(),
         },
         ModalState::SwitchAuthority => "Switch".to_string(),
         ModalState::AccessOverride => "Apply".to_string(),
@@ -4906,30 +5034,8 @@ fn help_modal_content(screen: UiScreen) -> (Vec<String>, Vec<(String, String)>) 
 }
 
 fn modal_accepts_text(model: &UiModel, modal: ModalState) -> bool {
-    if matches!(modal, ModalState::CreateChannel) {
-        return matches!(
-            model.create_channel_step,
-            CreateChannelWizardStep::Details | CreateChannelWizardStep::Threshold
-        );
-    }
-    if matches!(modal, ModalState::AddDeviceStep1) {
-        return matches!(model.add_device_step, AddDeviceWizardStep::Name);
-    }
-    if matches!(modal, ModalState::GuardianSetup) {
-        return matches!(model.guardian_wizard_step, ThresholdWizardStep::Threshold);
-    }
-    if matches!(modal, ModalState::MfaSetup) {
-        return matches!(model.mfa_wizard_step, ThresholdWizardStep::Threshold);
-    }
-    matches!(
-        modal,
-        ModalState::CreateInvitation
-            | ModalState::AcceptInvitation
-            | ModalState::CreateHome
-            | ModalState::SetChannelTopic
-            | ModalState::EditNickname
-            | ModalState::ImportDeviceEnrollmentCode
-    )
+    let _ = modal;
+    model.modal_accepts_text()
 }
 
 fn handle_keydown(controller: &UiController, event: &KeyboardData) -> bool {
@@ -4985,7 +5091,7 @@ fn should_skip_global_key(controller: &UiController, event: &KeyboardData) -> bo
     let Some(model) = controller.ui_model() else {
         return false;
     };
-    let Some(modal) = model.modal else {
+    let Some(modal) = model.modal_state() else {
         return false;
     };
     if !modal_accepts_text(&model, modal) {

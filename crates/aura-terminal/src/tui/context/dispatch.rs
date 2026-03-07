@@ -14,7 +14,7 @@ use std::sync::Arc;
 use async_lock::RwLock;
 
 use super::{SnapshotHelper, ToastHelper};
-use crate::error::TerminalError;
+use crate::error::{TerminalError, TerminalResult};
 use crate::tui::effects::{EffectCommand, OpResponse, OperationalHandler};
 use crate::tui::types::ChannelMode;
 
@@ -59,7 +59,7 @@ impl AccountFilesHelper {
     pub async fn create_account(
         &self,
         nickname_suggestion: &str,
-    ) -> Result<(AuthorityId, ContextId), String> {
+    ) -> TerminalResult<(AuthorityId, ContextId)> {
         match crate::handlers::tui::create_account(
             &self.base_path,
             &self.device_id_str,
@@ -73,7 +73,9 @@ impl AccountFilesHelper {
             }
             Err(e) => {
                 tracing::error!("Failed to create account: {}", e);
-                Err(format!("Failed to create account: {e}"))
+                Err(TerminalError::Operation(format!(
+                    "Failed to create account: {e}"
+                )))
             }
         }
     }
@@ -82,7 +84,7 @@ impl AccountFilesHelper {
         &self,
         recovered_authority_id: aura_core::identifiers::AuthorityId,
         recovered_context_id: Option<aura_core::identifiers::ContextId>,
-    ) -> Result<(), String> {
+    ) -> TerminalResult<()> {
         match crate::handlers::tui::restore_recovered_account(
             &self.base_path,
             recovered_authority_id,
@@ -96,22 +98,26 @@ impl AccountFilesHelper {
             }
             Err(e) => {
                 tracing::error!("Failed to restore recovered account: {}", e);
-                Err(format!("Failed to restore recovered account: {e}"))
+                Err(TerminalError::Operation(format!(
+                    "Failed to restore recovered account: {e}"
+                )))
             }
         }
     }
 
-    pub async fn export_account_backup(&self) -> Result<String, String> {
+    pub async fn export_account_backup(&self) -> TerminalResult<String> {
         if !self.has_account() {
-            return Err("No account exists to backup".to_string());
+            return Err(TerminalError::NotFound(
+                "No account exists to backup".to_string(),
+            ));
         }
 
         crate::handlers::tui::export_account_backup(&self.base_path, Some(&self.device_id_str))
             .await
-            .map_err(|e| format!("Failed to export backup: {e}"))
+            .map_err(|e| TerminalError::Operation(format!("Failed to export backup: {e}")))
     }
 
-    pub async fn import_account_backup(&self, backup_code: &str) -> Result<(), String> {
+    pub async fn import_account_backup(&self, backup_code: &str) -> TerminalResult<()> {
         match crate::handlers::tui::import_account_backup(&self.base_path, backup_code, true).await
         {
             Ok((_authority_id, _context_id)) => {
@@ -120,7 +126,9 @@ impl AccountFilesHelper {
             }
             Err(e) => {
                 tracing::error!("Failed to import backup: {}", e);
-                Err(format!("Failed to import backup: {e}"))
+                Err(TerminalError::Operation(format!(
+                    "Failed to import backup: {e}"
+                )))
             }
         }
     }
@@ -137,7 +145,7 @@ pub struct DispatchHelper {
     // Local, UI-only state updates driven by OpResponse.
     current_context: Arc<RwLock<Option<String>>>,
     channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
-    invited_lan_peers: Arc<RwLock<HashSet<String>>>,
+    invited_lan_peers: Arc<RwLock<HashSet<AuthorityId>>>,
 }
 
 impl DispatchHelper {
@@ -147,7 +155,7 @@ impl DispatchHelper {
         snapshots: SnapshotHelper,
         toasts: ToastHelper,
         account_files: AccountFilesHelper,
-        invited_lan_peers: Arc<RwLock<HashSet<String>>>,
+        invited_lan_peers: Arc<RwLock<HashSet<AuthorityId>>>,
         current_context: Arc<RwLock<Option<String>>>,
         channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
     ) -> Self {
@@ -163,12 +171,10 @@ impl DispatchHelper {
     }
 
     /// Dispatch a command (fire-and-forget semantics; emits `ERROR_SIGNAL` on failure).
-    pub async fn dispatch(&self, command: EffectCommand) -> Result<(), String> {
-        if let Err(msg) = self.check_authorization(&command) {
-            self.operational
-                .emit_error(TerminalError::Capability(msg.clone()))
-                .await;
-            return Err(msg);
+    pub async fn dispatch(&self, command: EffectCommand) -> TerminalResult<()> {
+        if let Err(error) = self.check_authorization(&command) {
+            self.operational.emit_error(error.clone()).await;
+            return Err(error);
         }
 
         // Backup commands need filesystem access; handle here.
@@ -182,11 +188,9 @@ impl DispatchHelper {
                             .await;
                         return Ok(());
                     }
-                    Err(msg) => {
-                        self.operational
-                            .emit_error(TerminalError::Operation(msg.clone()))
-                            .await;
-                        return Err(msg);
+                    Err(error) => {
+                        self.operational.emit_error(error.clone()).await;
+                        return Err(error);
                     }
                 }
             }
@@ -198,11 +202,9 @@ impl DispatchHelper {
                             .await;
                         return Ok(());
                     }
-                    Err(msg) => {
-                        self.operational
-                            .emit_error(TerminalError::Operation(msg.clone()))
-                            .await;
-                        return Err(msg);
+                    Err(error) => {
+                        self.operational.emit_error(error.clone()).await;
+                        return Err(error);
                     }
                 }
             }
@@ -216,28 +218,26 @@ impl DispatchHelper {
                 Ok(response) => self.handle_op_response(response).await,
                 Err(e) => {
                     tracing::error!("dispatch operation error: {e}");
-                    Err(e.to_string())
+                    Err(TerminalError::Operation(e.to_string()))
                 }
             }
         } else {
             // Unknown command.
             tracing::warn!("Unknown command not handled by Operational: {:?}", command);
-            let msg = format!("Unknown command: {command:?}");
-            self.operational
-                .emit_error(TerminalError::Operation(msg.clone()))
-                .await;
-            Err(msg)
+            let error = TerminalError::NotImplemented(format!("Unknown command: {command:?}"));
+            self.operational.emit_error(error.clone()).await;
+            Err(error)
         }
     }
 
     /// Dispatch a command and wait for completion.
     ///
     /// This is an alias for `dispatch()` with more explicit semantics.
-    pub async fn dispatch_and_wait(&self, command: EffectCommand) -> Result<(), String> {
+    pub async fn dispatch_and_wait(&self, command: EffectCommand) -> TerminalResult<()> {
         self.dispatch(command).await
     }
 
-    async fn handle_op_response(&self, response: OpResponse) -> Result<(), String> {
+    async fn handle_op_response(&self, response: OpResponse) -> TerminalResult<()> {
         match response {
             OpResponse::ContextChanged { context_id } => {
                 *self.current_context.write().await = context_id;
@@ -289,7 +289,33 @@ impl DispatchHelper {
                 Ok(())
             }
 
-            OpResponse::Ok | OpResponse::Data(_) | OpResponse::List(_) => Ok(()),
+            OpResponse::Ok
+            | OpResponse::Data(_)
+            | OpResponse::List(_)
+            | OpResponse::PeersListed { .. }
+            | OpResponse::LanPeersListed { .. }
+            | OpResponse::PeerDiscoveryTriggered { .. }
+            | OpResponse::LanInvitationStatus { .. }
+            | OpResponse::ParticipantsListed { .. }
+            | OpResponse::UserInfo { .. }
+            | OpResponse::RecoveryStarted { .. }
+            | OpResponse::RecoveryCancelled
+            | OpResponse::RecoveryCompleted
+            | OpResponse::RecoveryGuardianInvited { .. }
+            | OpResponse::HomeInvitationAccepted { .. }
+            | OpResponse::HomeCreated { .. }
+            | OpResponse::NeighborhoodCreated { .. }
+            | OpResponse::HomeAddedToNeighborhood { .. }
+            | OpResponse::HomeOneHopLinkSet { .. }
+            | OpResponse::ChannelMessageSent { .. }
+            | OpResponse::ChannelCreated { .. }
+            | OpResponse::DirectMessageSent { .. }
+            | OpResponse::ActionSent { .. }
+            | OpResponse::ChannelInvitationSent { .. }
+            | OpResponse::ChannelJoined { .. }
+            | OpResponse::RetrySent { .. }
+            | OpResponse::PeerStateRequested { .. }
+            | OpResponse::ContactGuardianToggled { .. } => Ok(()),
         }
     }
 
@@ -297,7 +323,7 @@ impl DispatchHelper {
     ///
     /// This does not replace Biscuit enforcement (guard chain); it provides
     /// immediate UX feedback and avoids attempting admin ops outside a home.
-    fn check_authorization(&self, command: &EffectCommand) -> Result<(), String> {
+    fn check_authorization(&self, command: &EffectCommand) -> TerminalResult<()> {
         use crate::tui::effects::CommandAuthorizationLevel;
 
         let level = command.authorization_level();
@@ -311,23 +337,20 @@ impl DispatchHelper {
                 }
                 let snapshot = self.snapshots.try_state_snapshot();
                 aura_app::ui::authorization::require_admin(snapshot.as_ref(), command_name(command))
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| TerminalError::Capability(e.to_string()))
             }
         }
     }
 
-    pub async fn mark_peer_invited(&self, authority_id: &str) {
-        self.invited_lan_peers
-            .write()
-            .await
-            .insert(authority_id.to_string());
+    pub async fn mark_peer_invited(&self, authority_id: &AuthorityId) {
+        self.invited_lan_peers.write().await.insert(*authority_id);
     }
 
-    pub async fn is_peer_invited(&self, authority_id: &str) -> bool {
+    pub async fn is_peer_invited(&self, authority_id: &AuthorityId) -> bool {
         self.invited_lan_peers.read().await.contains(authority_id)
     }
 
-    pub async fn invited_peer_ids(&self) -> HashSet<String> {
+    pub async fn invited_peer_ids(&self) -> HashSet<AuthorityId> {
         self.invited_lan_peers.read().await.clone()
     }
 }
@@ -378,6 +401,7 @@ mod tests {
     use crate::handlers::tui::TuiMode;
     use crate::tui::context::{InitializedAppCore, IoContext};
     use crate::tui::effects::EffectCommand;
+    use crate::TerminalError;
 
     async fn wait_for_error(app_core: &Arc<RwLock<AppCore>>) -> AppError {
         tokio::time::timeout(std::time::Duration::from_millis(500), async {
@@ -450,10 +474,10 @@ mod tests {
 
         // The command may succeed or fail for domain reasons, but it must NOT
         // fail with "Unknown command" — that means no handler recognized it.
-        if let Err(ref msg) = result {
+        if let Err(TerminalError::NotImplemented(message)) = result {
             assert!(
-                !msg.contains("Unknown command"),
-                "CreateAccount must be handled, not rejected as unknown. Got: {msg}"
+                !message.contains("Unknown command"),
+                "CreateAccount must be handled, not rejected as unknown. Got: {message}"
             );
         }
     }

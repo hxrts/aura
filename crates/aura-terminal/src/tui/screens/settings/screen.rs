@@ -140,7 +140,7 @@ pub fn SettingsScreen(
                     .iter()
                     .map(|authority| {
                         let info = AuthorityInfo::new(
-                            authority.id.clone(),
+                            authority.id.to_string(),
                             authority.nickname_suggestion.clone(),
                         );
                         if authority.is_current {

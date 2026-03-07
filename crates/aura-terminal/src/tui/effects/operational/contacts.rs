@@ -45,12 +45,14 @@ pub async fn handle_contacts(
         EffectCommand::ToggleContactGuardian { contact_id } => {
             let now = super::time::current_time_ms(app_core).await;
             match toggle_guardian_contact(app_core, contact_id, now).await {
-                Ok(true) => Some(Ok(OpResponse::Data(format!(
-                    "Guardian invitation sent to {contact_id}"
-                )))),
-                Ok(false) => Some(Ok(OpResponse::Data(format!(
-                    "Guardian status revoked for {contact_id}"
-                )))),
+                Ok(true) => Some(Ok(OpResponse::ContactGuardianToggled {
+                    contact_id: contact_id.clone(),
+                    is_guardian: true,
+                })),
+                Ok(false) => Some(Ok(OpResponse::ContactGuardianToggled {
+                    contact_id: contact_id.clone(),
+                    is_guardian: false,
+                })),
                 Err(e) => Some(Err(OpError::Failed(format!(
                     "Failed to toggle guardian status: {e}"
                 )))),

@@ -13,6 +13,7 @@ use crate::tui::effects::EffectCommand;
 use crate::tui::types::{AccessLevel, MfaPolicy};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
 use aura_core::identifiers::CeremonyId;
+use aura_core::AuthorityId;
 
 use super::types::*;
 
@@ -443,7 +444,10 @@ impl ChatCallbacks {
                         });
                     }
                     Err(e) => {
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error("send", e)));
+                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                            "send",
+                            e.to_string(),
+                        )));
                     }
                 }
             });
@@ -539,7 +543,7 @@ impl ChatCallbacks {
                         Err(e) => {
                             let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
                                 "create-channel",
-                                e,
+                                e.to_string(),
                             )));
                         }
                     }
@@ -704,8 +708,18 @@ impl ContactsCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let authority_id_clone = authority_id.clone();
+            let parsed_authority_id = match authority_id.parse::<AuthorityId>() {
+                Ok(id) => id,
+                Err(error) => {
+                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                        "lan",
+                        format!("Invalid authority id '{authority_id}': {error}"),
+                    )));
+                    return;
+                }
+            };
             let cmd = EffectCommand::InviteLanPeer {
-                authority_id,
+                authority_id: parsed_authority_id,
                 address,
             };
             spawn_ctx(ctx.clone(), async move {
@@ -818,7 +832,7 @@ impl InvitationsCallbacks {
 
     fn make_create(ctx: Arc<IoContext>, tx: UiUpdateSender) -> CreateInvitationCallback {
         Arc::new(
-            move |receiver_id: String,
+            move |receiver_id: AuthorityId,
                   invitation_type: String,
                   message: Option<String>,
                   ttl_secs: Option<u64>| {
@@ -826,7 +840,7 @@ impl InvitationsCallbacks {
                 let tx = tx.clone();
                 spawn_ctx(ctx.clone(), async move {
                     match ctx
-                        .create_invitation_code(&receiver_id, &invitation_type, message, ttl_secs)
+                        .create_invitation_code(receiver_id, &invitation_type, message, ttl_secs)
                         .await
                     {
                         Ok(code) => {
@@ -1067,10 +1081,17 @@ impl SettingsCallbacks {
         Arc::new(move |threshold_k: u8, threshold_n: u8| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            let cmd = EffectCommand::UpdateThreshold {
-                threshold_k,
-                threshold_n,
+            let config = match crate::tui::effects::ThresholdConfig::new(threshold_k, threshold_n) {
+                Ok(config) => config,
+                Err(error) => {
+                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                        "threshold",
+                        error,
+                    )));
+                    return;
+                }
             };
+            let cmd = EffectCommand::UpdateThreshold { config };
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
@@ -1089,15 +1110,12 @@ impl SettingsCallbacks {
 
     fn make_add_device(ctx: Arc<IoContext>, tx: UiUpdateSender) -> AddDeviceCallback {
         Arc::new(
-            move |nickname_suggestion: String, invitee_authority_id: Option<String>| {
+            move |nickname_suggestion: String, invitee_authority_id: Option<AuthorityId>| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
                 spawn_ctx(ctx.clone(), async move {
                     let start = match ctx
-                        .start_device_enrollment(
-                            &nickname_suggestion,
-                            invitee_authority_id.as_deref(),
-                        )
+                        .start_device_enrollment(&nickname_suggestion, invitee_authority_id)
                         .await
                     {
                         Ok(start) => start,
@@ -1174,10 +1192,10 @@ impl SettingsCallbacks {
     }
 
     fn make_remove_device(ctx: Arc<IoContext>, tx: UiUpdateSender) -> RemoveDeviceCallback {
-        Arc::new(move |device_id: String| {
+        Arc::new(move |device_id| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            let device_id_clone = device_id;
+            let device_id_clone = device_id.to_string();
 
             spawn_ctx(ctx.clone(), async move {
                 let ceremony_id = match ctx.start_device_removal(&device_id_clone).await {
@@ -1263,8 +1281,10 @@ impl SettingsCallbacks {
                         )));
                     }
                     Err(e) => {
-                        let _ =
-                            tx.try_send(UiUpdate::ToastAdded(ToastMessage::error("devices", e)));
+                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                            "devices",
+                            e.to_string(),
+                        )));
                     }
                 }
             });
@@ -1589,7 +1609,7 @@ impl AppCallbacks {
                     Err(e) => {
                         let _ = tx.try_send(UiUpdate::OperationFailed {
                             operation: "CreateAccount".to_string(),
-                            error: e,
+                            error: e.to_string(),
                         });
                     }
                 }

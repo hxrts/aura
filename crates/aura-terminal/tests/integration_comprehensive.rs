@@ -937,12 +937,12 @@ mod modals {
         tui.state.modal_queue.dismiss();
         let contacts = vec![
             aura_terminal::tui::state_machine::GuardianCandidate {
-                id: "id1".to_string(),
+                id: aura_terminal::ids::authority_id("guardian-contact-1").to_string(),
                 name: "Contact 1".to_string(),
                 is_current_guardian: false,
             },
             aura_terminal::tui::state_machine::GuardianCandidate {
-                id: "id2".to_string(),
+                id: aura_terminal::ids::authority_id("guardian-contact-2").to_string(),
                 name: "Contact 2".to_string(),
                 is_current_guardian: false,
             },
@@ -1414,12 +1414,12 @@ mod integration {
         tui.state.modal_queue.dismiss();
         let contacts = vec![
             aura_terminal::tui::state_machine::GuardianCandidate {
-                id: "id1".to_string(),
+                id: aura_terminal::ids::authority_id("guardian-contact-1").to_string(),
                 name: "Contact 1".to_string(),
                 is_current_guardian: false,
             },
             aura_terminal::tui::state_machine::GuardianCandidate {
-                id: "id2".to_string(),
+                id: aura_terminal::ids::authority_id("guardian-contact-2").to_string(),
                 name: "Contact 2".to_string(),
                 is_current_guardian: false,
             },

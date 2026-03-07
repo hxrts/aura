@@ -7,12 +7,10 @@
 
 use std::sync::Arc;
 
-use async_lock::RwLock;
-use aura_app::ui::prelude::*;
-use aura_core::identifiers::AuthorityId;
-
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
+use async_lock::RwLock;
+use aura_app::ui::prelude::*;
 
 // Re-export workflows for convenience
 use aura_app::ui::workflows::ceremonies::{
@@ -31,22 +29,10 @@ pub async fn handle_settings(
             nickname_suggestion,
             invitee_authority_id,
         } => {
-            let invitee_authority_id = match invitee_authority_id
-                .as_ref()
-                .map(|id| id.parse::<AuthorityId>())
-                .transpose()
-            {
-                Ok(value) => value,
-                Err(e) => {
-                    return Some(Err(super::types::OpError::Failed(format!(
-                        "Invalid authority id: {e}"
-                    ))))
-                }
-            };
             match start_device_enrollment_ceremony(
                 app_core,
                 nickname_suggestion.clone(),
-                invitee_authority_id,
+                *invitee_authority_id,
             )
             .await
             {
@@ -98,15 +84,14 @@ pub async fn handle_settings(
             }
         }
 
-        EffectCommand::UpdateThreshold {
-            threshold_k,
-            threshold_n,
-        } => match update_threshold(app_core, *threshold_k, *threshold_n).await {
-            Ok(()) => Some(Ok(OpResponse::Ok)),
-            Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                "Failed to update threshold: {e}"
-            )))),
-        },
+        EffectCommand::UpdateThreshold { config } => {
+            match update_threshold(app_core, config.threshold_k(), config.threshold_n()).await {
+                Ok(()) => Some(Ok(OpResponse::Ok)),
+                Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                    "Failed to update threshold: {e}"
+                )))),
+            }
+        }
 
         _ => None,
     }

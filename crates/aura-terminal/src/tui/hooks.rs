@@ -63,6 +63,7 @@ use std::time::Duration;
 use aura_app::ui::prelude::*;
 use aura_core::effects::reactive::{ReactiveEffects, ReactiveError, Signal};
 
+use crate::error::TerminalResult;
 use crate::tui::context::{InitializedAppCore, IoContext};
 use crate::tui::tasks::UiTaskRegistry;
 
@@ -142,18 +143,18 @@ impl AppCoreContext {
     }
 
     /// Dispatch an effect command through IoContext
-    pub async fn dispatch(&self, cmd: crate::tui::effects::EffectCommand) -> Result<(), String> {
+    pub async fn dispatch(&self, cmd: crate::tui::effects::EffectCommand) -> TerminalResult<()> {
         self.io_context.dispatch(cmd).await
     }
 
     pub async fn dispatch_and_wait(
         &self,
         cmd: crate::tui::effects::EffectCommand,
-    ) -> Result<(), String> {
+    ) -> TerminalResult<()> {
         self.io_context.dispatch_and_wait(cmd).await
     }
 
-    pub async fn export_invitation_code(&self, invitation_id: &str) -> Result<String, String> {
+    pub async fn export_invitation_code(&self, invitation_id: &str) -> TerminalResult<String> {
         self.io_context.export_invitation_code(invitation_id).await
     }
 

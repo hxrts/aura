@@ -23,10 +23,11 @@ pub(super) fn build_global_modals(
                 global_modals.guardian_modal_contacts = state
                     .contacts
                     .iter()
-                    .map(|(id, name)| Contact::new(id.clone(), name.clone()))
+                    .map(|(id, name)| Contact::new(id.to_string(), name.clone()))
                     .collect();
                 global_modals.guardian_modal_selected = state.selected_index;
-                global_modals.guardian_modal_selected_ids = state.selected_ids.clone();
+                global_modals.guardian_modal_selected_ids =
+                    state.selected_ids.iter().map(ToString::to_string).collect();
                 global_modals.guardian_modal_multi_select = state.multi_select;
             }
             QueuedModal::ContactSelect(state) => {
@@ -35,10 +36,11 @@ pub(super) fn build_global_modals(
                 global_modals.contact_modal_contacts = state
                     .contacts
                     .iter()
-                    .map(|(id, name)| Contact::new(id.clone(), name.clone()))
+                    .map(|(id, name)| Contact::new(id.to_string(), name.clone()))
                     .collect();
                 global_modals.contact_modal_selected = state.selected_index;
-                global_modals.contact_modal_selected_ids = state.selected_ids.clone();
+                global_modals.contact_modal_selected_ids =
+                    state.selected_ids.iter().map(ToString::to_string).collect();
                 global_modals.contact_modal_multi_select = state.multi_select;
             }
             QueuedModal::ChatMemberSelect(state) => {
@@ -48,10 +50,15 @@ pub(super) fn build_global_modals(
                     .picker
                     .contacts
                     .iter()
-                    .map(|(id, name)| Contact::new(id.clone(), name.clone()))
+                    .map(|(id, name)| Contact::new(id.to_string(), name.clone()))
                     .collect();
                 global_modals.contact_modal_selected = state.picker.selected_index;
-                global_modals.contact_modal_selected_ids = state.picker.selected_ids.clone();
+                global_modals.contact_modal_selected_ids = state
+                    .picker
+                    .selected_ids
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect();
                 global_modals.contact_modal_multi_select = state.picker.multi_select;
             }
             QueuedModal::Confirm {

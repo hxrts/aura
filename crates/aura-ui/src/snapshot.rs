@@ -4,19 +4,13 @@
 //! snapshot testing and harness assertions across different rendering backends.
 
 use crate::model::{
-    AddDeviceWizardStep, ModalState, NeighborhoodMode, ThresholdWizardStep, UiModel, UiScreen,
+    AccessOverrideLevel, ActiveModal, AddDeviceWizardStep, CapabilityTier,
+    CreateChannelDetailsField, CreateChannelWizardStep, ModalState, NeighborhoodMode,
+    SettingsSection, ThresholdWizardStep, UiModel, UiScreen,
 };
 
 const PANEL_WIDTH: usize = 38;
 const CONTENT_ROWS: usize = 20;
-const SETTINGS_ROWS: [&str; 5] = [
-    "Profile",
-    "Guardian Threshold",
-    "Request Recovery",
-    "Devices",
-    "Authority",
-];
-
 pub fn render_canonical_snapshot(model: &UiModel) -> String {
     let mut lines = Vec::with_capacity(CONTENT_ROWS + 4);
     let authority_label = format!("Authority: {} (local)", model.authority_id);
@@ -76,7 +70,7 @@ fn neighborhood_row(model: &UiModel, row_idx: usize) -> (String, String, String)
                     model
                         .selected_home
                         .as_ref()
-                        .map(|home| format!("Selected home: {home}"))
+                        .map(|home| format!("Selected home: {}", home.name))
                         .unwrap_or_else(|| "Selected home: none".to_string()),
                 );
             }
@@ -135,7 +129,7 @@ fn neighborhood_row(model: &UiModel, row_idx: usize) -> (String, String, String)
                     model
                         .selected_home
                         .as_ref()
-                        .map(|home| format!("Selected home: {home}"))
+                        .map(|home| format!("Selected home: {}", home.name))
                         .unwrap_or_else(|| "Selected home: none".to_string()),
                 );
             }
@@ -223,7 +217,9 @@ fn contacts_row(model: &UiModel, row_idx: usize) -> (String, String, String) {
         return (
             format!("{prefix}○ {}", contact.name),
             String::new(),
-            if model.contact_details && model.selected_contact_index == row_idx.saturating_sub(1) {
+            if model.contact_details
+                && model.selected_contact_index() == Some(row_idx.saturating_sub(1))
+            {
                 format!("Nickname: {}", contact.name)
             } else {
                 String::new()
@@ -272,28 +268,25 @@ fn settings_row(model: &UiModel, row_idx: usize) -> (String, String, String) {
         );
     }
 
-    if row_idx > 0 && row_idx <= SETTINGS_ROWS.len() {
+    if row_idx > 0 && row_idx <= SettingsSection::ALL.len() {
         let idx = row_idx - 1;
-        let prefix = if idx == model.settings_index {
+        let section = SettingsSection::from_index(idx);
+        let prefix = if section == model.settings_section {
             "➤ "
         } else {
             ""
         };
-        let right = if idx == 0 {
+        let right = if matches!(section, SettingsSection::Profile) {
             format!("Nickname: {}", model.profile_nickname)
-        } else if SETTINGS_ROWS[idx] == "Devices" {
+        } else if matches!(section, SettingsSection::Devices) {
             let device_count = if model.has_secondary_device { 2 } else { 1 };
             format!("Devices: {device_count}")
-        } else if SETTINGS_ROWS[idx] == "Authority" {
+        } else if matches!(section, SettingsSection::Authority) {
             format!("Authority: {} (local)", model.authority_id)
         } else {
             String::new()
         };
-        return (
-            format!("{prefix}{}", SETTINGS_ROWS[idx]),
-            String::new(),
-            right,
-        );
+        return (format!("{prefix}{}", section.title()), String::new(), right);
     }
 
     (String::new(), String::new(), String::new())
@@ -306,7 +299,7 @@ fn apply_modal_overlay(
     center: &mut String,
     right: &mut String,
 ) {
-    let Some(modal) = model.modal else {
+    let Some(modal) = model.modal_state() else {
         return;
     };
 
@@ -333,32 +326,43 @@ fn apply_modal_overlay(
             if row_idx == 0 {
                 *center = model.modal_hint.clone();
             } else if row_idx == 1 {
-                *center = model.modal_buffer.clone();
+                *center = model.modal_text_value().unwrap_or_default();
             }
         }
         ModalState::CreateHome => {
             if row_idx == 0 {
                 *center = "Create New Home".to_string();
             } else if row_idx == 1 {
-                *center = model.modal_buffer.clone();
+                *center = model.modal_text_value().unwrap_or_default();
             }
         }
         ModalState::CreateChannel => {
-            if row_idx == 0 {
-                *center = if model.modal_hint.is_empty() {
-                    "New Chat Group".to_string()
-                } else {
-                    model.modal_hint.clone()
-                };
-            } else if row_idx == 1 {
-                *center = model.modal_buffer.clone();
+            if let Some(state) = model.create_channel_modal() {
+                if row_idx == 0 {
+                    *center = if model.modal_hint.is_empty() {
+                        "New Chat Group".to_string()
+                    } else {
+                        model.modal_hint.clone()
+                    };
+                } else if row_idx == 1 {
+                    *center = match state.step {
+                        CreateChannelWizardStep::Details => match state.active_field {
+                            CreateChannelDetailsField::Name => state.name.clone(),
+                            CreateChannelDetailsField::Topic => state.topic.clone(),
+                        },
+                        CreateChannelWizardStep::Members => {
+                            format!("selected: {}", state.selected_members.len())
+                        }
+                        CreateChannelWizardStep::Threshold => state.threshold.to_string(),
+                    };
+                }
             }
         }
         ModalState::SetChannelTopic => {
             if row_idx == 0 {
                 *center = "Set Channel Topic".to_string();
             } else if row_idx == 1 {
-                *center = model.modal_buffer.clone();
+                *center = model.modal_text_value().unwrap_or_default();
             }
         }
         ModalState::ChannelInfo => {
@@ -370,7 +374,7 @@ fn apply_modal_overlay(
             if row_idx == 0 {
                 *center = "Edit Nickname".to_string();
             } else if row_idx == 1 {
-                *center = model.modal_buffer.clone();
+                *center = model.modal_text_value().unwrap_or_default();
             }
         }
         ModalState::RemoveContact => {
@@ -378,32 +382,34 @@ fn apply_modal_overlay(
                 *center = "Remove Contact".to_string();
             }
         }
-        ModalState::GuardianSetup => match model.guardian_wizard_step {
-            ThresholdWizardStep::Selection => {
-                if row_idx == 0 {
-                    *center = "Guardian Setup — Step 1 of 3".to_string();
-                } else if row_idx == 1 {
-                    *center = format!("selected: {}", model.guardian_selected_indices.len());
+        ModalState::GuardianSetup => {
+            if let Some(state) = model.guardian_setup_modal() {
+                match state.step {
+                    ThresholdWizardStep::Selection => {
+                        if row_idx == 0 {
+                            *center = "Guardian Setup — Step 1 of 3".to_string();
+                        } else if row_idx == 1 {
+                            *center = format!("selected: {}", state.selected_indices.len());
+                        }
+                    }
+                    ThresholdWizardStep::Threshold => {
+                        if row_idx == 0 {
+                            *center = "Guardian Setup — Step 2 of 3".to_string();
+                        } else if row_idx == 1 {
+                            *center = state.threshold_input.clone();
+                        }
+                    }
+                    ThresholdWizardStep::Ceremony => {
+                        if row_idx == 0 {
+                            *center = "Guardian Setup — Step 3 of 3".to_string();
+                        } else if row_idx == 1 {
+                            *center =
+                                format!("{} of {} approvals", state.threshold_k, state.selected_count);
+                        }
+                    }
                 }
             }
-            ThresholdWizardStep::Threshold => {
-                if row_idx == 0 {
-                    *center = "Guardian Setup — Step 2 of 3".to_string();
-                } else if row_idx == 1 {
-                    *center = model.modal_buffer.clone();
-                }
-            }
-            ThresholdWizardStep::Ceremony => {
-                if row_idx == 0 {
-                    *center = "Guardian Setup — Step 3 of 3".to_string();
-                } else if row_idx == 1 {
-                    *center = format!(
-                        "{} of {} approvals",
-                        model.guardian_threshold_k, model.guardian_selected_count
-                    );
-                }
-            }
-        },
+        }
         ModalState::RequestRecovery => {
             if row_idx == 0 {
                 *center = "Request Recovery".to_string();
@@ -411,34 +417,39 @@ fn apply_modal_overlay(
                 *center = "Notify guardians to begin recovery".to_string();
             }
         }
-        ModalState::AddDeviceStep1 => match model.add_device_step {
-            AddDeviceWizardStep::Name => {
-                if row_idx == 0 {
-                    *center = "Add Device — Step 1 of 3".to_string();
-                } else if row_idx == 1 {
-                    *center = model.modal_buffer.clone();
+        ModalState::AddDeviceStep1 => {
+            if let Some(state) = model.add_device_modal() {
+                match state.step {
+                    AddDeviceWizardStep::Name => {
+                        if row_idx == 0 {
+                            *center = "Add Device — Step 1 of 3".to_string();
+                        } else if row_idx == 1 {
+                            *center = state.name_input.clone();
+                        }
+                    }
+                    AddDeviceWizardStep::ShareCode => {
+                        if row_idx == 0 {
+                            *center = "Add Device — Step 2 of 3".to_string();
+                        } else if row_idx == 1 {
+                            *center = format!("Code: {}", state.enrollment_code);
+                        }
+                    }
+                    AddDeviceWizardStep::Confirm => {
+                        if row_idx == 0 {
+                            *center = "Add Device — Step 3 of 3".to_string();
+                        } else if row_idx == 1 {
+                            *center = format!("Invite '{}'", state.device_name);
+                        }
+                    }
                 }
             }
-            AddDeviceWizardStep::ShareCode => {
-                if row_idx == 0 {
-                    *center = "Add Device — Step 2 of 3".to_string();
-                } else if row_idx == 1 {
-                    *center = format!("Code: {}", model.add_device_enrollment_code);
-                }
-            }
-            AddDeviceWizardStep::Confirm => {
-                if row_idx == 0 {
-                    *center = "Add Device — Step 3 of 3".to_string();
-                } else if row_idx == 1 {
-                    *center = format!("Invite '{}'", model.add_device_name);
-                }
-            }
-        },
+        }
         ModalState::ImportDeviceEnrollmentCode => {
+            let code = model.modal_text_value().unwrap_or_default();
             if row_idx == 0 {
                 *center = "Import Device Enrollment Code".to_string();
             } else if row_idx == 1 {
-                *center = model.modal_buffer.clone();
+                *center = code;
             }
         }
         ModalState::SelectDeviceToRemove => {
@@ -447,7 +458,8 @@ fn apply_modal_overlay(
             } else if row_idx == 1 {
                 *center = model
                     .secondary_device_name()
-                    .unwrap_or(model.remove_device_candidate_name.as_str())
+                    .or_else(|| model.selected_device_modal().map(|state| state.candidate_name.as_str()))
+                    .unwrap_or("Secondary device")
                     .to_string();
             }
         }
@@ -457,36 +469,41 @@ fn apply_modal_overlay(
             } else if row_idx == 1 {
                 *center = model
                     .secondary_device_name()
-                    .unwrap_or(model.remove_device_candidate_name.as_str())
+                    .or_else(|| model.selected_device_modal().map(|state| state.candidate_name.as_str()))
+                    .unwrap_or("Secondary device")
                     .to_string();
             }
         }
-        ModalState::MfaSetup => match model.mfa_wizard_step {
-            ThresholdWizardStep::Selection => {
-                if row_idx == 0 {
-                    *center = "Multifactor Setup — Step 1 of 3".to_string();
-                } else if row_idx == 1 {
-                    *center = format!("selected: {}", model.mfa_selected_indices.len());
+        ModalState::MfaSetup => {
+            if let Some(state) = model.mfa_setup_modal() {
+                match state.step {
+                    ThresholdWizardStep::Selection => {
+                        if row_idx == 0 {
+                            *center = "Multifactor Setup — Step 1 of 3".to_string();
+                        } else if row_idx == 1 {
+                            *center = format!("selected: {}", state.selected_indices.len());
+                        }
+                    }
+                    ThresholdWizardStep::Threshold => {
+                        if row_idx == 0 {
+                            *center = "Multifactor Setup — Step 2 of 3".to_string();
+                        } else if row_idx == 1 {
+                            *center = state.threshold_input.clone();
+                        }
+                    }
+                    ThresholdWizardStep::Ceremony => {
+                        if row_idx == 0 {
+                            *center = "Multifactor Setup — Step 3 of 3".to_string();
+                        } else if row_idx == 1 {
+                            *center = format!(
+                                "{} of {} signatures",
+                                state.threshold_k, state.selected_count
+                            );
+                        }
+                    }
                 }
             }
-            ThresholdWizardStep::Threshold => {
-                if row_idx == 0 {
-                    *center = "Multifactor Setup — Step 2 of 3".to_string();
-                } else if row_idx == 1 {
-                    *center = model.modal_buffer.clone();
-                }
-            }
-            ThresholdWizardStep::Ceremony => {
-                if row_idx == 0 {
-                    *center = "Multifactor Setup — Step 3 of 3".to_string();
-                } else if row_idx == 1 {
-                    *center = format!(
-                        "{} of {} signatures",
-                        model.mfa_threshold_k, model.mfa_selected_count
-                    );
-                }
-            }
-        },
+        }
         ModalState::AssignModerator => {
             if row_idx == 0 {
                 *center = "Assign Moderator".to_string();
@@ -500,7 +517,7 @@ fn apply_modal_overlay(
             } else if row_idx > 0 {
                 let authority_idx = row_idx - 1;
                 if let Some(authority) = model.authorities.get(authority_idx) {
-                    let prefix = if authority_idx == model.selected_authority_index {
+                    let prefix = if model.selected_authority_index() == Some(authority_idx) {
                         ">"
                     } else {
                         " "
@@ -515,21 +532,29 @@ fn apply_modal_overlay(
             }
         }
         ModalState::AccessOverride => {
+            let access_level = match model.active_modal.as_ref() {
+                Some(ActiveModal::AccessOverride(state)) => state.level.label(),
+                _ => AccessOverrideLevel::Limited.label(),
+            };
             if row_idx == 0 {
                 *center = "Access Override".to_string();
             } else if row_idx == 1 {
-                *right = "Access: Partial".to_string();
+                *right = format!("Access: {access_level}");
             } else if row_idx == 2 {
-                *right = "Access: Full".to_string();
+                *right = "Use Tab to toggle".to_string();
             }
         }
         ModalState::CapabilityConfig => {
+            let active = match model.active_modal.as_ref() {
+                Some(ActiveModal::CapabilityConfig(state)) => state.active_tier.label(),
+                _ => CapabilityTier::Full.label(),
+            };
             if row_idx == 0 {
                 *center = "Home Capability Configuration".to_string();
             } else if row_idx == 1 {
-                *right = "Access: Partial".to_string();
+                *right = format!("Editing: {active}");
             } else if row_idx == 2 {
-                *right = "Access: Full".to_string();
+                *right = "Use Tab to switch".to_string();
             }
         }
     }

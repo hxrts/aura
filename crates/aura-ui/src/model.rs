@@ -8,6 +8,7 @@ use crate::keyboard::{apply_named_key, apply_text_keys};
 use crate::snapshot::render_canonical_snapshot;
 use async_lock::RwLock as AsyncRwLock;
 use aura_app::AppCore;
+use aura_core::identifiers::{AuthorityId, CeremonyId};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,6 +75,14 @@ impl AccessDepth {
     }
 }
 
+fn demo_authority_id(seed: &str) -> AuthorityId {
+    let mut entropy = [0_u8; 32];
+    for (idx, byte) in seed.as_bytes().iter().copied().enumerate() {
+        entropy[idx % entropy.len()] ^= byte;
+    }
+    AuthorityId::new_from_entropy(entropy)
+}
+
 #[derive(Debug, Clone)]
 pub struct ChannelRow {
     pub name: String,
@@ -83,7 +92,7 @@ pub struct ChannelRow {
 
 #[derive(Debug, Clone)]
 pub struct ContactRow {
-    pub authority_id: String,
+    pub authority_id: AuthorityId,
     pub name: String,
     pub selected: bool,
     pub is_guardian: bool,
@@ -91,7 +100,7 @@ pub struct ContactRow {
 
 #[derive(Debug, Clone)]
 pub struct AuthorityRow {
-    pub id: String,
+    pub id: AuthorityId,
     pub label: String,
     pub selected: bool,
     pub is_current: bool,
@@ -102,6 +111,18 @@ pub struct ToastState {
     pub icon: char,
     pub message: String,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectedHome {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NotificationSelectionId(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NeighborhoodMemberSelectionKey(pub String);
 
 #[derive(Debug, Clone, Copy)]
 pub enum ModalState {
@@ -125,6 +146,190 @@ pub enum ModalState {
     SwitchAuthority,
     AccessOverride,
     CapabilityConfig,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TextModalState {
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CreateInvitationModalState {
+    pub receiver_id: String,
+    pub receiver_label: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateChannelModalState {
+    pub step: CreateChannelWizardStep,
+    pub active_field: CreateChannelDetailsField,
+    pub member_focus: usize,
+    pub selected_members: Vec<usize>,
+    pub name: String,
+    pub topic: String,
+    pub threshold: u8,
+}
+
+impl Default for CreateChannelModalState {
+    fn default() -> Self {
+        Self {
+            step: CreateChannelWizardStep::Details,
+            active_field: CreateChannelDetailsField::Name,
+            member_focus: 0,
+            selected_members: Vec::new(),
+            name: String::new(),
+            topic: String::new(),
+            threshold: 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AddDeviceModalState {
+    pub step: AddDeviceWizardStep,
+    pub device_name: String,
+    pub enrollment_code: String,
+    pub code_copied: bool,
+    pub ceremony_id: Option<CeremonyId>,
+    pub accepted_count: u16,
+    pub total_count: u16,
+    pub threshold: u16,
+    pub is_complete: bool,
+    pub has_failed: bool,
+    pub error_message: Option<String>,
+    pub name_input: String,
+}
+
+impl Default for AddDeviceModalState {
+    fn default() -> Self {
+        Self {
+            step: AddDeviceWizardStep::Name,
+            device_name: String::new(),
+            enrollment_code: String::new(),
+            code_copied: false,
+            ceremony_id: None,
+            accepted_count: 0,
+            total_count: 0,
+            threshold: 0,
+            is_complete: false,
+            has_failed: false,
+            error_message: None,
+            name_input: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ThresholdWizardModalState {
+    pub step: ThresholdWizardStep,
+    pub focus_index: usize,
+    pub selected_indices: Vec<usize>,
+    pub selected_count: u8,
+    pub threshold_k: u8,
+    pub threshold_input: String,
+}
+
+impl ThresholdWizardModalState {
+    #[must_use]
+    pub fn with_defaults(selected_count: u8, threshold_k: u8) -> Self {
+        Self {
+            step: ThresholdWizardStep::Selection,
+            focus_index: 0,
+            selected_indices: Vec::new(),
+            selected_count,
+            threshold_k,
+            threshold_input: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SelectDeviceModalState {
+    pub candidate_name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct CapabilityConfigModalState {
+    pub full_caps: String,
+    pub partial_caps: String,
+    pub limited_caps: String,
+    pub active_tier: CapabilityTier,
+}
+
+impl Default for CapabilityConfigModalState {
+    fn default() -> Self {
+        Self {
+            full_caps: DEFAULT_CAPABILITY_FULL.to_string(),
+            partial_caps: DEFAULT_CAPABILITY_PARTIAL.to_string(),
+            limited_caps: DEFAULT_CAPABILITY_LIMITED.to_string(),
+            active_tier: CapabilityTier::Full,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AccessOverrideModalState {
+    pub level: AccessOverrideLevel,
+}
+
+impl Default for AccessOverrideModalState {
+    fn default() -> Self {
+        Self {
+            level: AccessOverrideLevel::Limited,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ActiveModal {
+    Help,
+    CreateInvitation(CreateInvitationModalState),
+    AcceptInvitation(TextModalState),
+    CreateHome(TextModalState),
+    CreateChannel(CreateChannelModalState),
+    SetChannelTopic(TextModalState),
+    ChannelInfo,
+    EditNickname(TextModalState),
+    RemoveContact,
+    GuardianSetup(ThresholdWizardModalState),
+    RequestRecovery,
+    AddDevice(AddDeviceModalState),
+    ImportDeviceEnrollmentCode(TextModalState),
+    SelectDeviceToRemove(SelectDeviceModalState),
+    ConfirmRemoveDevice(SelectDeviceModalState),
+    MfaSetup(ThresholdWizardModalState),
+    AssignModerator,
+    SwitchAuthority,
+    AccessOverride(AccessOverrideModalState),
+    CapabilityConfig(CapabilityConfigModalState),
+}
+
+impl ActiveModal {
+    #[must_use]
+    pub const fn state(&self) -> ModalState {
+        match self {
+            Self::Help => ModalState::Help,
+            Self::CreateInvitation(_) => ModalState::CreateInvitation,
+            Self::AcceptInvitation(_) => ModalState::AcceptInvitation,
+            Self::CreateHome(_) => ModalState::CreateHome,
+            Self::CreateChannel(_) => ModalState::CreateChannel,
+            Self::SetChannelTopic(_) => ModalState::SetChannelTopic,
+            Self::ChannelInfo => ModalState::ChannelInfo,
+            Self::EditNickname(_) => ModalState::EditNickname,
+            Self::RemoveContact => ModalState::RemoveContact,
+            Self::GuardianSetup(_) => ModalState::GuardianSetup,
+            Self::RequestRecovery => ModalState::RequestRecovery,
+            Self::AddDevice(_) => ModalState::AddDeviceStep1,
+            Self::ImportDeviceEnrollmentCode(_) => ModalState::ImportDeviceEnrollmentCode,
+            Self::SelectDeviceToRemove(_) => ModalState::SelectDeviceToRemove,
+            Self::ConfirmRemoveDevice(_) => ModalState::ConfirmRemoveDevice,
+            Self::MfaSetup(_) => ModalState::MfaSetup,
+            Self::AssignModerator => ModalState::AssignModerator,
+            Self::SwitchAuthority => ModalState::SwitchAuthority,
+            Self::AccessOverride(_) => ModalState::AccessOverride,
+            Self::CapabilityConfig(_) => ModalState::CapabilityConfig,
+        }
+    }
 }
 
 pub const DEFAULT_CAPABILITY_FULL: &str =
@@ -160,60 +365,154 @@ pub enum ThresholdWizardStep {
     Ceremony,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsSection {
+    Profile,
+    GuardianThreshold,
+    RequestRecovery,
+    Devices,
+    Authority,
+    Appearance,
+}
+
+impl SettingsSection {
+    pub const ALL: [Self; 6] = [
+        Self::Profile,
+        Self::GuardianThreshold,
+        Self::RequestRecovery,
+        Self::Devices,
+        Self::Authority,
+        Self::Appearance,
+    ];
+
+    #[must_use]
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Profile => "Profile",
+            Self::GuardianThreshold => "Guardian Threshold",
+            Self::RequestRecovery => "Request Recovery",
+            Self::Devices => "Devices",
+            Self::Authority => "Authority",
+            Self::Appearance => "Appearance",
+        }
+    }
+
+    #[must_use]
+    pub const fn subtitle(self) -> &'static str {
+        match self {
+            Self::Profile => "Configure nickname",
+            Self::GuardianThreshold => "Configure guardian policy",
+            Self::RequestRecovery => "Configure recovery operations",
+            Self::Devices => "Configure devices",
+            Self::Authority => "Authority scope",
+            Self::Appearance => "Theme and display",
+        }
+    }
+
+    #[must_use]
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Profile => 0,
+            Self::GuardianThreshold => 1,
+            Self::RequestRecovery => 2,
+            Self::Devices => 3,
+            Self::Authority => 4,
+            Self::Appearance => 5,
+        }
+    }
+
+    #[must_use]
+    pub const fn from_index(index: usize) -> Self {
+        match index {
+            0 => Self::Profile,
+            1 => Self::GuardianThreshold,
+            2 => Self::RequestRecovery,
+            3 => Self::Devices,
+            4 => Self::Authority,
+            _ => Self::Appearance,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapabilityTier {
+    Full,
+    Partial,
+    Limited,
+}
+
+impl CapabilityTier {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Full => "Full",
+            Self::Partial => "Partial",
+            Self::Limited => "Limited",
+        }
+    }
+
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Full => Self::Partial,
+            Self::Partial => Self::Limited,
+            Self::Limited => Self::Full,
+        }
+    }
+
+    #[must_use]
+    pub const fn prev(self) -> Self {
+        match self {
+            Self::Full => Self::Limited,
+            Self::Partial => Self::Full,
+            Self::Limited => Self::Partial,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessOverrideLevel {
+    Limited,
+    Partial,
+}
+
+impl AccessOverrideLevel {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Limited => "Limited",
+            Self::Partial => "Partial",
+        }
+    }
+
+    #[must_use]
+    pub const fn toggle(self) -> Self {
+        match self {
+            Self::Limited => Self::Partial,
+            Self::Partial => Self::Limited,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct UiModel {
     pub screen: UiScreen,
-    pub settings_index: usize,
+    pub settings_section: SettingsSection,
     pub channels: Vec<ChannelRow>,
     pub contacts: Vec<ContactRow>,
     pub authorities: Vec<AuthorityRow>,
     pub messages: Vec<String>,
     pub notifications: Vec<String>,
+    pub notification_ids: Vec<NotificationSelectionId>,
     pub logs: Vec<String>,
     pub toast: Option<ToastState>,
     pub toast_key: u64,
     pub input_mode: bool,
     pub input_buffer: String,
-    pub modal: Option<ModalState>,
-    pub modal_buffer: String,
     pub modal_hint: String,
-    pub create_invitation_receiver_label: Option<String>,
-    pub create_channel_step: CreateChannelWizardStep,
-    pub add_device_step: AddDeviceWizardStep,
-    pub add_device_name: String,
-    pub add_device_enrollment_code: String,
-    pub add_device_code_copied: bool,
-    pub add_device_ceremony_id: Option<String>,
-    pub add_device_accepted_count: u16,
-    pub add_device_total_count: u16,
-    pub add_device_threshold: u16,
-    pub add_device_is_complete: bool,
-    pub add_device_has_failed: bool,
-    pub add_device_error_message: Option<String>,
+    pub active_modal: Option<ActiveModal>,
     pub device_enrollment_counter: u64,
-    pub guardian_wizard_step: ThresholdWizardStep,
-    pub guardian_focus_index: usize,
-    pub guardian_selected_indices: Vec<usize>,
-    pub guardian_selected_count: u8,
-    pub guardian_threshold_k: u8,
-    pub mfa_wizard_step: ThresholdWizardStep,
-    pub mfa_focus_index: usize,
-    pub mfa_selected_indices: Vec<usize>,
-    pub mfa_selected_count: u8,
-    pub mfa_threshold_k: u8,
-    pub remove_device_candidate_name: String,
-    pub create_channel_active_field: CreateChannelDetailsField,
-    pub create_channel_member_focus: usize,
-    pub create_channel_selected_members: Vec<usize>,
-    pub create_channel_name: String,
-    pub create_channel_topic: String,
-    pub create_channel_threshold: u8,
-    pub capability_full_caps: String,
-    pub capability_partial_caps: String,
-    pub capability_limited_caps: String,
-    pub capability_active_field: usize,
-    pub access_override_partial: bool,
-    pub selected_home: Option<String>,
+    pub selected_home: Option<SelectedHome>,
     pub neighborhood_mode: NeighborhoodMode,
     pub access_depth: AccessDepth,
     pub authority_id: String,
@@ -223,11 +522,11 @@ pub struct UiModel {
     pub last_scan: String,
     pub has_secondary_device: bool,
     pub secondary_device_name: Option<String>,
-    pub selected_contact_index: usize,
-    pub selected_authority_index: usize,
-    pub selected_channel_index: usize,
-    pub selected_neighborhood_member_index: usize,
-    pub selected_notification_index: usize,
+    pub selected_contact_id: Option<AuthorityId>,
+    pub selected_authority_id: Option<AuthorityId>,
+    pub selected_channel: Option<String>,
+    pub selected_neighborhood_member_key: Option<NeighborhoodMemberSelectionKey>,
+    pub selected_notification_id: Option<NotificationSelectionId>,
     pub contact_details: bool,
 }
 
@@ -235,7 +534,7 @@ impl UiModel {
     pub fn new(authority_id: String) -> Self {
         Self {
             screen: UiScreen::Neighborhood,
-            settings_index: 0,
+            settings_section: SettingsSection::Profile,
             channels: vec![
                 ChannelRow {
                     name: "general".to_string(),
@@ -252,50 +551,15 @@ impl UiModel {
             authorities: Vec::new(),
             messages: Vec::new(),
             notifications: Vec::new(),
+            notification_ids: Vec::new(),
             logs: vec!["Aura web shell initialized".to_string()],
             toast: None,
             toast_key: 0,
             input_mode: false,
             input_buffer: String::new(),
-            modal: None,
-            modal_buffer: String::new(),
             modal_hint: String::new(),
-            create_invitation_receiver_label: None,
-            create_channel_step: CreateChannelWizardStep::Details,
-            add_device_step: AddDeviceWizardStep::Name,
-            add_device_name: String::new(),
-            add_device_enrollment_code: String::new(),
-            add_device_code_copied: false,
-            add_device_ceremony_id: None,
-            add_device_accepted_count: 0,
-            add_device_total_count: 0,
-            add_device_threshold: 0,
-            add_device_is_complete: false,
-            add_device_has_failed: false,
-            add_device_error_message: None,
+            active_modal: None,
             device_enrollment_counter: 0,
-            guardian_wizard_step: ThresholdWizardStep::Selection,
-            guardian_focus_index: 0,
-            guardian_selected_indices: Vec::new(),
-            guardian_selected_count: 2,
-            guardian_threshold_k: 2,
-            mfa_wizard_step: ThresholdWizardStep::Selection,
-            mfa_focus_index: 0,
-            mfa_selected_indices: Vec::new(),
-            mfa_selected_count: 1,
-            mfa_threshold_k: 1,
-            remove_device_candidate_name: String::new(),
-            create_channel_active_field: CreateChannelDetailsField::Name,
-            create_channel_member_focus: 0,
-            create_channel_selected_members: Vec::new(),
-            create_channel_name: String::new(),
-            create_channel_topic: String::new(),
-            create_channel_threshold: 1,
-            capability_full_caps: DEFAULT_CAPABILITY_FULL.to_string(),
-            capability_partial_caps: DEFAULT_CAPABILITY_PARTIAL.to_string(),
-            capability_limited_caps: DEFAULT_CAPABILITY_LIMITED.to_string(),
-            capability_active_field: 0,
-            access_override_partial: false,
             selected_home: None,
             neighborhood_mode: NeighborhoodMode::Map,
             access_depth: AccessDepth::Limited,
@@ -306,20 +570,17 @@ impl UiModel {
             last_scan: "never".to_string(),
             has_secondary_device: false,
             secondary_device_name: None,
-            selected_contact_index: 0,
-            selected_authority_index: 0,
-            selected_channel_index: 0,
-            selected_neighborhood_member_index: 0,
-            selected_notification_index: 0,
+            selected_contact_id: None,
+            selected_authority_id: None,
+            selected_channel: Some("general".to_string()),
+            selected_neighborhood_member_key: None,
+            selected_notification_id: None,
             contact_details: false,
         }
     }
 
     pub fn selected_channel_name(&self) -> Option<&str> {
-        self.channels
-            .iter()
-            .find(|row| row.selected)
-            .map(|row| row.name.as_str())
+        self.selected_channel.as_deref()
     }
 
     pub fn set_screen(&mut self, screen: UiScreen) {
@@ -331,19 +592,261 @@ impl UiModel {
         if matches!(screen, UiScreen::Neighborhood) {
             self.neighborhood_mode = NeighborhoodMode::Map;
         }
-        if matches!(self.modal, Some(ModalState::Help)) {
+        if matches!(self.modal_state(), Some(ModalState::Help)) {
             self.modal_hint = format!("Help - {}", screen.help_label());
         }
     }
 
+    #[must_use]
+    pub fn modal_state(&self) -> Option<ModalState> {
+        self.active_modal.as_ref().map(ActiveModal::state)
+    }
+
+    #[must_use]
+    pub fn create_invitation_modal(&self) -> Option<&CreateInvitationModalState> {
+        match self.active_modal.as_ref() {
+            Some(ActiveModal::CreateInvitation(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn create_channel_modal(&self) -> Option<&CreateChannelModalState> {
+        match self.active_modal.as_ref() {
+            Some(ActiveModal::CreateChannel(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub fn create_channel_modal_mut(&mut self) -> Option<&mut CreateChannelModalState> {
+        match self.active_modal.as_mut() {
+            Some(ActiveModal::CreateChannel(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn add_device_modal(&self) -> Option<&AddDeviceModalState> {
+        match self.active_modal.as_ref() {
+            Some(ActiveModal::AddDevice(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub fn add_device_modal_mut(&mut self) -> Option<&mut AddDeviceModalState> {
+        match self.active_modal.as_mut() {
+            Some(ActiveModal::AddDevice(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn guardian_setup_modal(&self) -> Option<&ThresholdWizardModalState> {
+        match self.active_modal.as_ref() {
+            Some(ActiveModal::GuardianSetup(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub fn guardian_setup_modal_mut(&mut self) -> Option<&mut ThresholdWizardModalState> {
+        match self.active_modal.as_mut() {
+            Some(ActiveModal::GuardianSetup(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn mfa_setup_modal(&self) -> Option<&ThresholdWizardModalState> {
+        match self.active_modal.as_ref() {
+            Some(ActiveModal::MfaSetup(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub fn mfa_setup_modal_mut(&mut self) -> Option<&mut ThresholdWizardModalState> {
+        match self.active_modal.as_mut() {
+            Some(ActiveModal::MfaSetup(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn capability_config_modal(&self) -> Option<&CapabilityConfigModalState> {
+        match self.active_modal.as_ref() {
+            Some(ActiveModal::CapabilityConfig(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub fn capability_config_modal_mut(&mut self) -> Option<&mut CapabilityConfigModalState> {
+        match self.active_modal.as_mut() {
+            Some(ActiveModal::CapabilityConfig(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn access_override_modal(&self) -> Option<&AccessOverrideModalState> {
+        match self.active_modal.as_ref() {
+            Some(ActiveModal::AccessOverride(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub fn access_override_modal_mut(&mut self) -> Option<&mut AccessOverrideModalState> {
+        match self.active_modal.as_mut() {
+            Some(ActiveModal::AccessOverride(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn selected_device_modal(&self) -> Option<&SelectDeviceModalState> {
+        match self.active_modal.as_ref() {
+            Some(ActiveModal::SelectDeviceToRemove(state) | ActiveModal::ConfirmRemoveDevice(state)) => Some(state),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn modal_text_value(&self) -> Option<String> {
+        let active_modal = self.active_modal.as_ref()?;
+        match active_modal {
+            ActiveModal::CreateInvitation(state) => Some(state.receiver_id.clone()),
+            ActiveModal::AcceptInvitation(state)
+            | ActiveModal::CreateHome(state)
+            | ActiveModal::SetChannelTopic(state)
+            | ActiveModal::EditNickname(state)
+            | ActiveModal::ImportDeviceEnrollmentCode(state) => Some(state.value.clone()),
+            ActiveModal::CreateChannel(state) => match state.step {
+                CreateChannelWizardStep::Details => match state.active_field {
+                    CreateChannelDetailsField::Name => Some(state.name.clone()),
+                    CreateChannelDetailsField::Topic => Some(state.topic.clone()),
+                },
+                CreateChannelWizardStep::Threshold => Some(state.threshold.to_string()),
+                CreateChannelWizardStep::Members => None,
+            },
+            ActiveModal::GuardianSetup(state) | ActiveModal::MfaSetup(state) => {
+                if matches!(state.step, ThresholdWizardStep::Threshold) {
+                    Some(state.threshold_input.clone())
+                } else {
+                    None
+                }
+            }
+            ActiveModal::AddDevice(state) => {
+                if matches!(state.step, AddDeviceWizardStep::Name) {
+                    Some(state.name_input.clone())
+                } else {
+                    None
+                }
+            }
+            ActiveModal::CapabilityConfig(state) => Some(match state.active_tier {
+                CapabilityTier::Full => state.full_caps.clone(),
+                CapabilityTier::Partial => state.partial_caps.clone(),
+                CapabilityTier::Limited => state.limited_caps.clone(),
+            }),
+            _ => None,
+        }
+    }
+
+    pub fn set_modal_text_value(&mut self, value: impl Into<String>) {
+        let value = value.into();
+        let Some(active_modal) = self.active_modal.as_mut() else {
+            return;
+        };
+        match active_modal {
+            ActiveModal::CreateInvitation(state) => state.receiver_id = value,
+            ActiveModal::AcceptInvitation(state)
+            | ActiveModal::CreateHome(state)
+            | ActiveModal::SetChannelTopic(state)
+            | ActiveModal::EditNickname(state)
+            | ActiveModal::ImportDeviceEnrollmentCode(state) => state.value = value,
+            ActiveModal::CreateChannel(state) => match state.step {
+                CreateChannelWizardStep::Details => match state.active_field {
+                    CreateChannelDetailsField::Name => state.name = value,
+                    CreateChannelDetailsField::Topic => state.topic = value,
+                },
+                CreateChannelWizardStep::Threshold => {
+                    state.threshold = value.trim().parse::<u8>().unwrap_or(state.threshold.max(1));
+                }
+                CreateChannelWizardStep::Members => {}
+            },
+            ActiveModal::GuardianSetup(state) | ActiveModal::MfaSetup(state) => {
+                if matches!(state.step, ThresholdWizardStep::Threshold) {
+                    state.threshold_input = value;
+                }
+            }
+            ActiveModal::AddDevice(state) => {
+                if matches!(state.step, AddDeviceWizardStep::Name) {
+                    state.name_input = value;
+                }
+            }
+            ActiveModal::CapabilityConfig(state) => match state.active_tier {
+                CapabilityTier::Full => state.full_caps = value,
+                CapabilityTier::Partial => state.partial_caps = value,
+                CapabilityTier::Limited => state.limited_caps = value,
+            },
+            _ => {}
+        }
+    }
+
+    pub fn append_modal_text_char(&mut self, ch: char) {
+        let mut value = self.modal_text_value().unwrap_or_default().to_string();
+        value.push(ch);
+        self.set_modal_text_value(value);
+    }
+
+    pub fn pop_modal_text_char(&mut self) {
+        let mut value = self.modal_text_value().unwrap_or_default().to_string();
+        value.pop();
+        self.set_modal_text_value(value);
+    }
+
+    #[must_use]
+    pub fn modal_accepts_text(&self) -> bool {
+        matches!(
+            self.active_modal,
+            Some(
+                ActiveModal::CreateInvitation(_)
+                    | ActiveModal::AcceptInvitation(_)
+                    | ActiveModal::CreateHome(_)
+                    | ActiveModal::SetChannelTopic(_)
+                    | ActiveModal::EditNickname(_)
+                    | ActiveModal::ImportDeviceEnrollmentCode(_)
+                    | ActiveModal::CapabilityConfig(_)
+            )
+        ) || matches!(
+            self.active_modal,
+            Some(
+                ActiveModal::CreateChannel(CreateChannelModalState {
+                    step: CreateChannelWizardStep::Details | CreateChannelWizardStep::Threshold,
+                    ..
+                }) | ActiveModal::GuardianSetup(ThresholdWizardModalState {
+                    step: ThresholdWizardStep::Threshold,
+                    ..
+                }) | ActiveModal::MfaSetup(ThresholdWizardModalState {
+                    step: ThresholdWizardStep::Threshold,
+                    ..
+                }) | ActiveModal::AddDevice(AddDeviceModalState {
+                    step: AddDeviceWizardStep::Name,
+                    ..
+                })
+            )
+        )
+    }
+
+    pub fn dismiss_modal(&mut self) {
+        self.modal_hint.clear();
+        self.active_modal = None;
+    }
+
     pub fn select_channel_by_name(&mut self, name: &str) {
         let mut found = false;
-        for (idx, row) in self.channels.iter_mut().enumerate() {
+        for row in &mut self.channels {
             let matches = row.name.eq_ignore_ascii_case(name);
             row.selected = matches;
             if matches {
                 found = true;
-                self.selected_channel_index = idx;
             }
         }
         if !found {
@@ -355,91 +858,148 @@ impl UiModel {
                 selected: true,
                 topic: String::new(),
             });
-            self.selected_channel_index = self.channels.len().saturating_sub(1);
         }
+        self.selected_channel = Some(name.to_string());
     }
 
-    pub fn select_home_by_name(&mut self, name: &str) {
-        self.selected_home = Some(name.to_string());
-        self.selected_neighborhood_member_index = 0;
+    pub fn select_home(&mut self, id: impl Into<String>, name: impl Into<String>) {
+        self.selected_home = Some(SelectedHome {
+            id: id.into(),
+            name: name.into(),
+        });
+        self.selected_neighborhood_member_key = None;
     }
 
     pub fn ensure_contact(&mut self, name: &str) {
+        let authority_id = demo_authority_id(name);
         if self
             .contacts
             .iter()
-            .any(|row| row.name.eq_ignore_ascii_case(name))
+            .any(|row| row.authority_id == authority_id || row.name.eq_ignore_ascii_case(name))
         {
             return;
         }
         self.contacts.push(ContactRow {
-            authority_id: name.to_string(),
+            authority_id,
             name: name.to_string(),
             selected: self.contacts.is_empty(),
             is_guardian: false,
         });
         if self.contacts.len() == 1 {
-            self.selected_contact_index = 0;
+            self.selected_contact_id = Some(authority_id);
         }
     }
 
     pub fn selected_contact_name(&self) -> Option<&str> {
-        self.contacts
-            .get(self.selected_contact_index)
+        self.selected_contact_index()
+            .and_then(|index| self.contacts.get(index))
             .map(|row| row.name.as_str())
     }
 
-    pub fn selected_contact_authority_id(&self) -> Option<&str> {
-        self.contacts
-            .get(self.selected_contact_index)
-            .map(|row| row.authority_id.as_str())
+    pub fn selected_home_name(&self) -> Option<&str> {
+        self.selected_home.as_ref().map(|home| home.name.as_str())
+    }
+
+    pub fn selected_home_id(&self) -> Option<&str> {
+        self.selected_home.as_ref().map(|home| home.id.as_str())
+    }
+
+    pub fn selected_contact_authority_id(&self) -> Option<AuthorityId> {
+        self.selected_contact_id
     }
 
     pub fn set_selected_contact_name(&mut self, value: String) {
-        if let Some(contact) = self.contacts.get_mut(self.selected_contact_index) {
+        if let Some(contact) = self
+            .selected_contact_index()
+            .and_then(|index| self.contacts.get_mut(index))
+        {
             contact.name = value;
         }
     }
 
+    pub fn selected_contact_index(&self) -> Option<usize> {
+        let selected = self.selected_contact_id?;
+        self.contacts
+            .iter()
+            .position(|contact| contact.authority_id == selected)
+    }
+
+    pub fn selected_authority_index(&self) -> Option<usize> {
+        let selected = self.selected_authority_id?;
+        self.authorities
+            .iter()
+            .position(|authority| authority.id == selected)
+    }
+
     pub fn set_selected_contact_index(&mut self, index: usize) {
         if self.contacts.is_empty() {
-            self.selected_contact_index = 0;
+            self.selected_contact_id = None;
             return;
         }
 
-        self.selected_contact_index = index.min(self.contacts.len().saturating_sub(1));
+        let selected_index = index.min(self.contacts.len().saturating_sub(1));
+        let selected_contact_id = self.contacts[selected_index].authority_id;
+        self.selected_contact_id = Some(selected_contact_id);
         for (idx, contact) in self.contacts.iter_mut().enumerate() {
-            contact.selected = idx == self.selected_contact_index;
+            contact.selected = idx == selected_index;
         }
     }
 
     pub fn set_selected_authority_index(&mut self, index: usize) {
         if self.authorities.is_empty() {
-            self.selected_authority_index = 0;
+            self.selected_authority_id = None;
             return;
         }
 
-        self.selected_authority_index = index.min(self.authorities.len().saturating_sub(1));
+        let selected_index = index.min(self.authorities.len().saturating_sub(1));
+        let selected_authority_id = self.authorities[selected_index].id;
+        self.selected_authority_id = Some(selected_authority_id);
         for (idx, authority) in self.authorities.iter_mut().enumerate() {
-            authority.selected = idx == self.selected_authority_index;
+            authority.selected = idx == selected_index;
         }
     }
 
-    pub fn set_selected_neighborhood_member_index(&mut self, index: usize) {
-        self.selected_neighborhood_member_index = index;
+    pub fn set_selected_neighborhood_member_key(
+        &mut self,
+        key: Option<NeighborhoodMemberSelectionKey>,
+    ) {
+        self.selected_neighborhood_member_key = key;
+    }
+
+    pub fn selected_notification_index(&self) -> Option<usize> {
+        let selected = self.selected_notification_id.as_ref()?;
+        self.notification_ids.iter().position(|id| id == selected)
     }
 
     pub fn set_selected_notification_index(&mut self, index: usize, count: usize) {
-        if count == 0 {
-            self.selected_notification_index = 0;
+        if count == 0 || self.notification_ids.is_empty() {
+            self.selected_notification_id = None;
             return;
         }
 
-        self.selected_notification_index = index.min(count.saturating_sub(1));
+        let selected_index = index.min(count.saturating_sub(1));
+        self.selected_notification_id = self.notification_ids.get(selected_index).cloned();
+    }
+
+    pub fn sync_runtime_notifications(
+        &mut self,
+        notifications: Vec<(NotificationSelectionId, String)>,
+    ) {
+        let previous = self.selected_notification_id.clone();
+        self.notification_ids = notifications.iter().map(|(id, _)| id.clone()).collect();
+        self.notifications = notifications.into_iter().map(|(_, title)| title).collect();
+        self.selected_notification_id = previous
+            .and_then(|id| {
+                self.notification_ids
+                    .iter()
+                    .find(|item| **item == id)
+                    .cloned()
+            })
+            .or_else(|| self.notification_ids.first().cloned());
     }
 
     pub fn replace_channels(&mut self, channels: Vec<(String, String)>) {
-        let previous = self.selected_channel_name().map(str::to_string);
+        let previous = self.selected_channel.clone();
         self.channels = channels
             .into_iter()
             .map(|(name, topic)| ChannelRow {
@@ -450,26 +1010,26 @@ impl UiModel {
             .collect();
 
         if self.channels.is_empty() {
-            self.selected_channel_index = 0;
+            self.selected_channel = None;
             return;
         }
 
-        let selected_index = previous
-            .as_deref()
+        let selected_name = previous
             .and_then(|name| {
                 self.channels
                     .iter()
-                    .position(|row| row.name.eq_ignore_ascii_case(name))
+                    .find(|row| row.name.eq_ignore_ascii_case(&name))
+                    .map(|row| row.name.clone())
             })
-            .unwrap_or(0);
-        self.selected_channel_index = selected_index;
-        for (idx, row) in self.channels.iter_mut().enumerate() {
-            row.selected = idx == selected_index;
+            .unwrap_or_else(|| self.channels[0].name.clone());
+        self.selected_channel = Some(selected_name.clone());
+        for row in &mut self.channels {
+            row.selected = row.name == selected_name;
         }
     }
 
-    pub fn replace_contacts(&mut self, contacts: Vec<(String, String, bool)>) {
-        let previous = self.selected_contact_name().map(str::to_string);
+    pub fn replace_contacts(&mut self, contacts: Vec<(AuthorityId, String, bool)>) {
+        let previous = self.selected_contact_id;
         self.contacts = contacts
             .into_iter()
             .map(|(authority_id, name, is_guardian)| ContactRow {
@@ -481,26 +1041,22 @@ impl UiModel {
             .collect();
 
         if self.contacts.is_empty() {
-            self.selected_contact_index = 0;
+            self.selected_contact_id = None;
             return;
         }
 
         let selected_index = previous
-            .as_deref()
-            .and_then(|name| {
+            .and_then(|authority_id| {
                 self.contacts
                     .iter()
-                    .position(|row| row.name.eq_ignore_ascii_case(name))
+                    .position(|row| row.authority_id == authority_id)
             })
             .unwrap_or(0);
         self.set_selected_contact_index(selected_index);
     }
 
-    pub fn replace_authorities(&mut self, authorities: Vec<(String, String, bool)>) {
-        let previous = self
-            .authorities
-            .get(self.selected_authority_index)
-            .map(|row| row.id.clone());
+    pub fn replace_authorities(&mut self, authorities: Vec<(AuthorityId, String, bool)>) {
+        let previous = self.selected_authority_id;
         self.authorities = authorities
             .into_iter()
             .map(|(id, label, is_current)| AuthorityRow {
@@ -512,12 +1068,11 @@ impl UiModel {
             .collect();
 
         if self.authorities.is_empty() {
-            self.selected_authority_index = 0;
+            self.selected_authority_id = None;
             return;
         }
 
         let selected_index = previous
-            .as_deref()
             .and_then(|id| self.authorities.iter().position(|row| row.id == id))
             .or_else(|| self.authorities.iter().position(|row| row.is_current))
             .unwrap_or(0);
@@ -541,13 +1096,18 @@ impl UiModel {
 
     pub fn selected_channel_topic(&self) -> &str {
         self.channels
-            .get(self.selected_channel_index)
+            .iter()
+            .find(|row| Some(row.name.as_str()) == self.selected_channel_name())
             .map(|row| row.topic.as_str())
             .unwrap_or("")
     }
 
     pub fn set_selected_channel_topic(&mut self, value: String) {
-        if let Some(channel) = self.channels.get_mut(self.selected_channel_index) {
+        let selected_name = self.selected_channel.clone();
+        if let Some(channel) = selected_name
+            .as_deref()
+            .and_then(|name| self.channels.iter_mut().find(|row| row.name == name))
+        {
             channel.topic = value;
         }
     }
@@ -557,72 +1117,22 @@ impl UiModel {
             return;
         }
         let max = self.channels.len() as i32 - 1;
-        let mut next = self.selected_channel_index as i32 + delta;
+        let current_index = self
+            .selected_channel_name()
+            .and_then(|name| self.channels.iter().position(|row| row.name == name))
+            .unwrap_or_default();
+        let mut next = current_index as i32 + delta;
         if next < 0 {
             next = max;
         }
         if next > max {
             next = 0;
         }
-        self.selected_channel_index = next as usize;
-        for (idx, row) in self.channels.iter_mut().enumerate() {
-            row.selected = idx == self.selected_channel_index;
+        let selected_name = self.channels[next as usize].name.clone();
+        self.selected_channel = Some(selected_name.clone());
+        for row in &mut self.channels {
+            row.selected = row.name == selected_name;
         }
-    }
-
-    pub fn reset_create_channel_wizard(&mut self) {
-        self.create_channel_step = CreateChannelWizardStep::Details;
-        self.create_channel_active_field = CreateChannelDetailsField::Name;
-        self.create_channel_member_focus = 0;
-        self.create_channel_selected_members.clear();
-        self.create_channel_name.clear();
-        self.create_channel_topic.clear();
-        self.create_channel_threshold = 1;
-    }
-
-    pub fn reset_add_device_wizard(&mut self) {
-        self.add_device_step = AddDeviceWizardStep::Name;
-        self.add_device_name.clear();
-        self.add_device_enrollment_code.clear();
-        self.add_device_code_copied = false;
-        self.add_device_ceremony_id = None;
-        self.add_device_accepted_count = 0;
-        self.add_device_total_count = 0;
-        self.add_device_threshold = 0;
-        self.add_device_is_complete = false;
-        self.add_device_has_failed = false;
-        self.add_device_error_message = None;
-    }
-
-    pub fn reset_guardian_wizard(&mut self) {
-        self.guardian_wizard_step = ThresholdWizardStep::Selection;
-        self.guardian_focus_index = 0;
-        self.guardian_selected_indices.clear();
-        self.guardian_selected_count = 2;
-        self.guardian_threshold_k = 2;
-    }
-
-    pub fn reset_mfa_wizard(&mut self) {
-        self.mfa_wizard_step = ThresholdWizardStep::Selection;
-        self.mfa_focus_index = 0;
-        self.mfa_selected_indices.clear();
-        self.mfa_selected_count = 1;
-        self.mfa_threshold_k = 1;
-    }
-
-    pub fn reset_remove_device_flow(&mut self) {
-        self.remove_device_candidate_name.clear();
-    }
-
-    pub fn reset_capability_config_editor(&mut self) {
-        self.capability_full_caps = DEFAULT_CAPABILITY_FULL.to_string();
-        self.capability_partial_caps = DEFAULT_CAPABILITY_PARTIAL.to_string();
-        self.capability_limited_caps = DEFAULT_CAPABILITY_LIMITED.to_string();
-        self.capability_active_field = 0;
-    }
-
-    pub fn reset_access_override_editor(&mut self) {
-        self.access_override_partial = false;
     }
 
     pub fn secondary_device_name(&self) -> Option<&str> {
@@ -646,7 +1156,7 @@ pub struct UiController {
     app_core: Arc<AsyncRwLock<AppCore>>,
     model: AsyncRwLock<UiModel>,
     clipboard: Arc<dyn ClipboardPort>,
-    authority_switcher: Option<Arc<dyn Fn(String) + Send + Sync>>,
+    authority_switcher: Option<Arc<dyn Fn(AuthorityId) + Send + Sync>>,
 }
 
 impl PartialEq for UiController {
@@ -666,17 +1176,7 @@ fn set_toast(model: &mut UiModel, icon: char, message: impl Into<String>) {
 }
 
 fn dismiss_modal(model: &mut UiModel) {
-    model.modal = None;
-    model.modal_buffer.clear();
-    model.modal_hint.clear();
-    model.create_invitation_receiver_label = None;
-    model.reset_create_channel_wizard();
-    model.reset_add_device_wizard();
-    model.reset_guardian_wizard();
-    model.reset_mfa_wizard();
-    model.reset_remove_device_flow();
-    model.reset_capability_config_editor();
-    model.reset_access_override_editor();
+    model.dismiss_modal();
 }
 
 impl UiController {
@@ -687,7 +1187,7 @@ impl UiController {
     pub fn with_authority_switcher(
         app_core: Arc<AsyncRwLock<AppCore>>,
         clipboard: Arc<dyn ClipboardPort>,
-        authority_switcher: Option<Arc<dyn Fn(String) + Send + Sync>>,
+        authority_switcher: Option<Arc<dyn Fn(AuthorityId) + Send + Sync>>,
     ) -> Self {
         let authority_id = app_core
             .try_read()
@@ -728,12 +1228,12 @@ impl UiController {
         write_model(&self.model).select_channel_by_name(name);
     }
 
-    pub fn select_home_by_name(&self, name: &str) {
-        write_model(&self.model).select_home_by_name(name);
+    pub fn select_home(&self, id: impl Into<String>, name: impl Into<String>) {
+        write_model(&self.model).select_home(id, name);
     }
 
     pub fn set_modal_buffer(&self, value: &str) {
-        write_model(&self.model).modal_buffer = value.to_string();
+        write_model(&self.model).set_modal_text_value(value);
     }
 
     pub fn clear_input_buffer(&self) {
@@ -748,35 +1248,45 @@ impl UiController {
         write_model(&self.model).set_selected_authority_index(index);
     }
 
-    pub fn set_selected_neighborhood_member_index(&self, index: usize) {
-        write_model(&self.model).set_selected_neighborhood_member_index(index);
+    pub fn set_selected_neighborhood_member_key(
+        &self,
+        key: Option<NeighborhoodMemberSelectionKey>,
+    ) {
+        write_model(&self.model).set_selected_neighborhood_member_key(key);
     }
 
     pub fn set_selected_notification_index(&self, index: usize, count: usize) {
         write_model(&self.model).set_selected_notification_index(index, count);
     }
 
+    pub fn sync_runtime_notifications(
+        &self,
+        notifications: Vec<(NotificationSelectionId, String)>,
+    ) {
+        write_model(&self.model).sync_runtime_notifications(notifications);
+    }
+
     pub fn sync_runtime_channels(&self, channels: Vec<(String, String)>) {
         write_model(&self.model).replace_channels(channels);
     }
 
-    pub fn sync_runtime_contacts(&self, contacts: Vec<(String, String, bool)>) {
+    pub fn sync_runtime_contacts(&self, contacts: Vec<(AuthorityId, String, bool)>) {
         write_model(&self.model).replace_contacts(contacts);
     }
 
     pub fn open_create_invitation_modal(
         &self,
-        receiver_id: Option<&str>,
+        receiver_id: Option<&AuthorityId>,
         receiver_label: Option<&str>,
     ) {
         let mut model = write_model(&self.model);
-        model.modal = Some(ModalState::CreateInvitation);
-        model.modal_buffer = receiver_id.unwrap_or_default().to_string();
-        model.modal_hint = "Invite Contacts".to_string();
-        model.create_invitation_receiver_label = receiver_label.map(str::to_string);
+        model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
+            receiver_id: receiver_id.map(ToString::to_string).unwrap_or_default(),
+            receiver_label: receiver_label.map(str::to_string),
+        }));
     }
 
-    pub fn sync_runtime_authorities(&self, authorities: Vec<(String, String, bool)>) {
+    pub fn sync_runtime_authorities(&self, authorities: Vec<(AuthorityId, String, bool)>) {
         write_model(&self.model).replace_authorities(authorities);
     }
 
@@ -788,9 +1298,9 @@ impl UiController {
         write_model(&self.model).sync_devices(devices);
     }
 
-    pub fn request_authority_switch(&self, authority_id: &str) -> bool {
+    pub fn request_authority_switch(&self, authority_id: AuthorityId) -> bool {
         if let Some(switcher) = &self.authority_switcher {
-            switcher(authority_id.to_string());
+            switcher(authority_id);
             true
         } else {
             false
@@ -799,7 +1309,10 @@ impl UiController {
 
     pub fn complete_runtime_home_created(&self, name: &str) {
         let mut model = write_model(&self.model);
-        model.selected_home = Some(name.to_string());
+        model.select_home(
+            format!("home-{}", name.to_lowercase().replace(' ', "-")),
+            name.to_string(),
+        );
         model.access_depth = AccessDepth::Full;
         model.neighborhood_mode = NeighborhoodMode::Map;
         set_toast(&mut model, '✓', format!("Home '{name}' created"));
@@ -820,18 +1333,21 @@ impl UiController {
 
     pub fn complete_runtime_device_enrollment_started(&self, name: &str, enrollment_code: &str) {
         let mut model = write_model(&self.model);
-        model.add_device_name = name.to_string();
-        model.add_device_enrollment_code = enrollment_code.to_string();
-        model.add_device_code_copied = false;
-        model.add_device_step = AddDeviceWizardStep::ShareCode;
-        model.modal = Some(ModalState::AddDeviceStep1);
-        model.modal_buffer.clear();
         model.modal_hint = "Add Device — Step 2 of 3".to_string();
+        model.active_modal = Some(ActiveModal::AddDevice(AddDeviceModalState {
+            step: AddDeviceWizardStep::ShareCode,
+            device_name: name.to_string(),
+            enrollment_code: enrollment_code.to_string(),
+            code_copied: false,
+            ..AddDeviceModalState::default()
+        }));
     }
 
-    pub fn set_runtime_device_enrollment_ceremony_id(&self, ceremony_id: &str) {
+    pub fn set_runtime_device_enrollment_ceremony_id(&self, ceremony_id: CeremonyId) {
         let mut model = write_model(&self.model);
-        model.add_device_ceremony_id = Some(ceremony_id.to_string());
+        if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
+            state.ceremony_id = Some(ceremony_id);
+        }
     }
 
     pub fn update_runtime_device_enrollment_status(
@@ -844,30 +1360,38 @@ impl UiController {
         error_message: Option<String>,
     ) {
         let mut model = write_model(&self.model);
-        model.add_device_accepted_count = accepted_count;
-        model.add_device_total_count = total_count;
-        model.add_device_threshold = threshold;
-        model.add_device_is_complete = is_complete;
-        model.add_device_has_failed = has_failed;
-        model.add_device_error_message = error_message;
-        if is_complete {
-            model.has_secondary_device = true;
-            if model.secondary_device_name.is_none() && !model.add_device_name.trim().is_empty() {
-                model.secondary_device_name = Some(model.add_device_name.clone());
+        if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
+            state.accepted_count = accepted_count;
+            state.total_count = total_count;
+            state.threshold = threshold;
+            state.is_complete = is_complete;
+            state.has_failed = has_failed;
+            state.error_message = error_message;
+            let device_name = state.device_name.clone();
+            if is_complete {
+                let should_set_name =
+                    model.secondary_device_name.is_none() && !device_name.trim().is_empty();
+                model.has_secondary_device = true;
+                if should_set_name {
+                    model.secondary_device_name = Some(device_name);
+                }
             }
         }
     }
 
     pub fn mark_add_device_code_copied(&self) {
-        write_model(&self.model).add_device_code_copied = true;
+        let mut model = write_model(&self.model);
+        if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
+            state.code_copied = true;
+        }
     }
 
     pub fn advance_runtime_device_enrollment_share(&self) {
         let mut model = write_model(&self.model);
-        model.add_device_step = AddDeviceWizardStep::Confirm;
-        model.modal = Some(ModalState::AddDeviceStep1);
-        model.modal_buffer.clear();
         model.modal_hint = "Add Device — Step 3 of 3".to_string();
+        if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
+            state.step = AddDeviceWizardStep::Confirm;
+        }
     }
 
     pub fn complete_runtime_device_enrollment_ready(&self) {
@@ -877,10 +1401,13 @@ impl UiController {
 
     pub fn complete_runtime_enter_home(&self, name: &str, depth: AccessDepth) {
         let mut model = write_model(&self.model);
-        model.selected_home = Some(name.to_string());
+        model.select_home(
+            format!("home-{}", name.to_lowercase().replace(' ', "-")),
+            name.to_string(),
+        );
         model.access_depth = depth;
         model.neighborhood_mode = NeighborhoodMode::Detail;
-        model.selected_neighborhood_member_index = 0;
+        model.selected_neighborhood_member_key = None;
     }
 
     pub fn runtime_error_toast(&self, message: impl Into<String>) {
@@ -939,8 +1466,8 @@ impl UiController {
         write_model(&self.model).authority_id = authority_id.to_string();
     }
 
-    pub fn set_settings_index(&self, index: usize) {
-        write_model(&self.model).settings_index = index;
+    pub fn set_settings_section(&self, section: SettingsSection) {
+        write_model(&self.model).settings_section = section;
     }
 
     pub fn authority_id(&self) -> String {

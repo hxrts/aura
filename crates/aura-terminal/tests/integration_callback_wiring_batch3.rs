@@ -660,7 +660,7 @@ async fn test_update_contact_nickname() {
     println!("Phase 1: Setup - create invitation and import");
     let export_result = ctx
         .dispatch(EffectCommand::CreateInvitation {
-            receiver_id: AuthorityId::new_from_entropy([1u8; 32]).to_string(),
+            receiver_id: AuthorityId::new_from_entropy([1u8; 32]),
             invitation_type: "contact".to_string(),
             message: Some("Test invitation".to_string()),
             ttl_secs: None,
@@ -878,7 +878,7 @@ async fn test_invitation_accept_decline() {
     println!("Phase 1: Create invitation");
     let create_result = ctx
         .dispatch(EffectCommand::CreateInvitation {
-            receiver_id: AuthorityId::new_from_entropy([1u8; 32]).to_string(),
+            receiver_id: AuthorityId::new_from_entropy([1u8; 32]),
             invitation_type: "contact".to_string(),
             message: Some("Join me!".to_string()),
             ttl_secs: Some(3600),
@@ -1202,7 +1202,7 @@ async fn test_lan_discovery() {
     println!("\nPhase 2: Invite LAN peer");
     let result = ctx
         .dispatch(EffectCommand::InviteLanPeer {
-            authority_id: "lan-peer-authority-123".to_string(),
+            authority_id: AuthorityId::new_from_entropy([3u8; 32]),
             address: "192.168.1.100:8080".to_string(),
         })
         .await;
@@ -1262,7 +1262,7 @@ async fn test_complete_contact_to_guardian_flow() {
     println!("Phase 1: Create invitation for new contact");
     let _ = ctx
         .dispatch(EffectCommand::CreateInvitation {
-            receiver_id: AuthorityId::new_from_entropy([1u8; 32]).to_string(),
+            receiver_id: AuthorityId::new_from_entropy([1u8; 32]),
             invitation_type: "contact".to_string(),
             message: Some("Let's connect!".to_string()),
             ttl_secs: None,

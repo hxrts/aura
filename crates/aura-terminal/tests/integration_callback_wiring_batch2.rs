@@ -46,8 +46,8 @@ fn dm_channel_id(target: &str) -> ChannelId {
     ChannelId::from_bytes(hash(descriptor.as_bytes()))
 }
 
-fn peer_authority_id(seed: u8) -> String {
-    AuthorityId::new_from_entropy([seed; 32]).to_string()
+fn peer_authority_id(seed: u8) -> AuthorityId {
+    AuthorityId::new_from_entropy([seed; 32])
 }
 
 // ============================================================================
@@ -422,11 +422,11 @@ async fn test_set_channel_mode_requires_admin() {
     match &result {
         Ok(()) => println!("  (Admin access granted)"),
         Err(e)
-            if e.contains("Permission denied")
-                || e.contains("administrator")
-                || e.contains("Capability required")
-                || e.contains("requires a home context")
-                || e.contains("Unknown channel") =>
+            if e.to_string().contains("Permission denied")
+                || e.to_string().contains("administrator")
+                || e.to_string().contains("Capability required")
+                || e.to_string().contains("requires a home context")
+                || e.to_string().contains("Unknown channel") =>
         {
             println!("  Correctly denied - requires admin privileges");
         }
@@ -465,7 +465,7 @@ async fn test_peer_management_operations() {
     let peer_id = peer_authority_id(0x31);
     let result = ctx
         .dispatch(EffectCommand::AddPeer {
-            peer_id: peer_id.clone(),
+            peer_id,
         })
         .await;
     assert!(result.is_ok(), "AddPeer should succeed: {result:?}");
@@ -572,7 +572,7 @@ async fn test_request_state_dispatch() {
     let peer_id = peer_authority_id(0x41);
     let result = ctx
         .dispatch(EffectCommand::RequestState {
-            peer_id: peer_id.clone(),
+            peer_id: peer_id.to_string(),
         })
         .await;
 
@@ -581,7 +581,11 @@ async fn test_request_state_dispatch() {
     println!("  RequestState result: {result:?}");
     match &result {
         Ok(()) => println!("  Request succeeded (runtime available)"),
-        Err(e) if e.contains("runtime") || e.contains("agent") || e.contains("sync") => {
+        Err(e)
+            if e.to_string().contains("runtime")
+                || e.to_string().contains("agent")
+                || e.to_string().contains("sync") =>
+        {
             println!("  Expected error in offline mode: requires runtime");
         }
         Err(e) => {

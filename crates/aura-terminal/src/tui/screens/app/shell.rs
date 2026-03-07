@@ -38,7 +38,7 @@ use aura_app::ui::workflows::ceremonies::{
 };
 use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::identifiers::{AuthorityId, CeremonyId};
+use aura_core::identifiers::CeremonyId;
 use aura_core::types::FrostThreshold;
 
 use crate::tui::callbacks::CallbackRegistry;
@@ -1492,15 +1492,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         (cb.app.on_create_account)(name);
                                     }
                                     DispatchCommand::AddGuardian { contact_id } => {
-                                        (cb.recovery.on_select_guardian)(contact_id);
+                                        (cb.recovery.on_select_guardian)(contact_id.to_string());
                                     }
 
                                     // === Chat Screen Commands ===
                                     DispatchCommand::SelectChannel { channel_id } => {
                                         if let Ok(mut selected_id) = selected_channel_id_for_dispatch.write() {
-                                            *selected_id = Some(channel_id.clone());
+                                            *selected_id = Some(channel_id.to_string());
                                         }
-                                        (cb.chat.on_channel_select)(channel_id);
+                                        (cb.chat.on_channel_select)(channel_id.to_string());
                                     }
                                     DispatchCommand::SendChatMessage { content } => {
                                         // Get channel_id from TUI's selected_channel to avoid
@@ -1783,7 +1783,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             ];
                                             for expected_id in expected_demo_ids {
                                                 if contacts.iter().any(|contact| contact.id == expected_id) {
-                                                    demo_members.push(expected_id);
+                                                    if let Ok(parsed_id) =
+                                                        expected_id.parse::<aura_core::AuthorityId>()
+                                                    {
+                                                        demo_members.push(parsed_id);
+                                                    }
                                                 }
                                             }
                                             // Fallback if deterministic IDs are unavailable in the contact list.
@@ -1808,7 +1812,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                         }
                                                     })
                                                 {
-                                                    demo_members.push(contact_id);
+                                                    if let Ok(parsed_id) =
+                                                        contact_id.parse::<aura_core::AuthorityId>()
+                                                    {
+                                                        demo_members.push(parsed_id);
+                                                    }
                                                 }
                                             }
                                             if !demo_members.is_empty() {
@@ -1826,15 +1834,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         (cb.chat.on_create_channel)(
                                             name,
                                             topic,
-                                            members,
-                                            threshold_k,
+                                            members.into_iter().map(|id| id.to_string()).collect(),
+                                            threshold_k.get(),
                                         );
                                     }
                                     DispatchCommand::SetChannelTopic { channel_id, topic } => {
-                                        (cb.chat.on_set_topic)(channel_id, topic);
+                                        (cb.chat.on_set_topic)(channel_id.to_string(), topic);
                                     }
                                     DispatchCommand::DeleteChannel { channel_id } => {
-                                        (cb.chat.on_close_channel)(channel_id);
+                                        (cb.chat.on_close_channel)(channel_id.to_string());
                                     }
 
                                     // === Contacts Screen Commands ===
@@ -1842,7 +1850,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         contact_id,
                                         nickname,
                                     } => {
-                                        (cb.contacts.on_update_nickname)(contact_id, nickname);
+                                        (cb.contacts.on_update_nickname)(
+                                            contact_id.to_string(),
+                                            nickname,
+                                        );
                                     }
                                     DispatchCommand::OpenContactNicknameModal => {
                                         let idx = new_state.contacts.selected_index;
@@ -1869,7 +1880,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let self_authority_id = shared_authority_id_for_dispatch
                                             .read()
                                             .map(|guard| guard.clone())
-                                            .unwrap_or_default();
+                                            .ok()
+                                            .flatten();
                                         let idx = new_state.contacts.selected_index;
                                         if let Ok(guard) = shared_contacts_for_dispatch.read() {
                                             if let Some(contact) = guard.get(idx) {
@@ -1899,13 +1911,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                         modal_state,
                                                     ));
                                             } else {
-                                                if self_authority_id.is_empty() {
+                                                if self_authority_id.is_none() {
                                                     new_state.toast_error("No active authority");
                                                     continue;
                                                 }
                                                 let mut modal_state =
                                                     crate::tui::state_machine::CreateInvitationModalState::for_receiver(
-                                                        self_authority_id,
+                                                        self_authority_id
+                                                            .as_ref()
+                                                            .map(|id| id.to_string())
+                                                            .unwrap_or_default(),
                                                         "New contact".to_string(),
                                                     );
                                                 modal_state.type_index = 1;
@@ -1962,7 +1977,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         }
                                     }
                                     DispatchCommand::RemoveContact { contact_id } => {
-                                        (cb.contacts.on_remove_contact)(contact_id);
+                                        (cb.contacts.on_remove_contact)(contact_id.to_string());
                                     }
                                     DispatchCommand::OpenRemoveContactModal => {
                                         let idx = new_state.contacts.selected_index;
@@ -1987,7 +2002,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                         ),
                                                         on_confirm: Some(
                                                             crate::tui::state_machine::ConfirmAction::RemoveContact {
-                                                                contact_id: contact.id.clone(),
+                                                                contact_id: contact.id.clone().into(),
                                                             },
                                                         ),
                                                     },
@@ -2050,7 +2065,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     } => {
                                         (cb.invitations.on_create)(
                                             receiver_id,
-                                            invitation_type,
+                                            invitation_type.as_str().to_owned(),
                                             message,
                                             ttl_secs,
                                         );
@@ -2076,7 +2091,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         }
                                     }
                                     DispatchCommand::RevokeInvitation { invitation_id } => {
-                                        (cb.invitations.on_revoke)(invitation_id);
+                                        (cb.invitations.on_revoke)(invitation_id.to_string());
                                     }
 
                                     // === Recovery Commands ===
@@ -2232,12 +2247,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         tracing::info!(
                                             "Starting guardian ceremony with {} contacts, threshold {}",
                                             contact_ids.len(),
-                                            threshold_k
+                                            threshold_k.get()
                                         );
 
                                         let ids = contact_ids.clone();
                                         let n = contact_ids.len() as u16;
-                                        let k_raw = threshold_k as u16;
+                                        let k_raw = threshold_k.get() as u16;
 
                                         // Create FrostThreshold with validation (FROST requires k >= 2)
                                         let threshold = match FrostThreshold::new(k_raw) {
@@ -2261,25 +2276,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let tasks_handle = tasks.clone();
                                         tasks_handle.spawn(async move {
                                             let app = app_core.raw();
-
-                                            let guardian_ids = ids
-                                                .iter()
-                                                .map(|id| id.parse::<AuthorityId>())
-                                                .collect::<Result<Vec<_>, _>>();
-                                            let guardian_ids = match guardian_ids {
-                                                Ok(value) => value,
-                                                Err(e) => {
-                                                    if let Some(tx) = update_tx.clone() {
-                                                        let _ = tx.try_send(UiUpdate::operation_failed(
-                                                            "Guardian ceremony",
-                                                            format!("Invalid guardian authority id: {e}"),
-                                                        ));
-                                                    }
-                                                    return;
-                                                }
-                                            };
-
-                                            match start_guardian_ceremony(app, threshold, n, guardian_ids).await {
+                                            match start_guardian_ceremony(app, threshold, n, ids).await {
                                                 Ok(ceremony_id) => {
                                                     let k = threshold.value();
                                                     tracing::info!(
@@ -2372,12 +2369,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         tracing::info!(
                                             "Starting multifactor ceremony with {} devices, threshold {}",
                                             device_ids.len(),
-                                            threshold_k
+                                            threshold_k.get()
                                         );
 
                                         let ids = device_ids.clone();
                                         let n = device_ids.len() as u16;
-                                        let k_raw = threshold_k as u16;
+                                        let k_raw = threshold_k.get() as u16;
 
                                         let threshold = match FrostThreshold::new(k_raw) {
                                             Ok(t) => t,
@@ -2405,7 +2402,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 app,
                                                 threshold,
                                                 n,
-                                                ids.clone(),
+                                                ids.iter().map(|id| id.to_string()).collect(),
                                             )
                                             .await
                                             {
@@ -2618,9 +2615,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             new_state.toast_info("Only one authority available");
                                         } else {
                                             // Convert authorities to contact-like format for picker
-                                            let contacts: Vec<(String, String)> = authorities
+                                            let contacts: Vec<(crate::tui::state_machine::AuthorityRef, String)> = authorities
                                                 .iter()
-                                                .map(|a| (a.id.clone(), format!("{} ({})", a.nickname_suggestion, a.short_id)))
+                                                .map(|a| (a.id.clone().into(), format!("{} ({})", a.nickname_suggestion, a.short_id)))
                                                 .collect();
 
                                             let modal_state = crate::tui::state_machine::ContactSelectModalState::single(
@@ -2633,9 +2630,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         }
                                     }
                                     DispatchCommand::SwitchAuthority { authority_id } => {
+                                        let authority_id_str = authority_id.to_string();
                                         if let Some(idx) = new_state.authorities
                                             .iter()
-                                            .position(|a| a.id == authority_id)
+                                            .position(|a| a.id == authority_id_str)
                                         {
                                             let nickname = new_state
                                                 .authorities
@@ -2648,20 +2646,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     }
                                                 });
                                             new_state.current_authority_index = idx;
-                                            match authority_id.parse::<AuthorityId>() {
-                                                Ok(parsed_authority) => {
-                                                    app_ctx_for_dispatch.request_authority_switch(
-                                                        parsed_authority,
-                                                        nickname.clone(),
-                                                    );
-                                                    new_state.modal_queue.dismiss();
-                                                    new_state.toast_info("Reloading selected authority");
-                                                    new_state.should_exit = true;
-                                                }
-                                                Err(_) => {
-                                                    new_state.toast_error("Invalid authority ID");
-                                                }
-                                            }
+                                            app_ctx_for_dispatch.request_authority_switch(
+                                                authority_id,
+                                                nickname.clone(),
+                                            );
+                                            new_state.modal_queue.dismiss();
+                                            new_state.toast_info("Reloading selected authority");
+                                            new_state.should_exit = true;
                                         } else {
                                             new_state.toast_error("Authority not found");
                                         }
@@ -2719,7 +2710,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::SubmitModeratorAssignment { target_id, assign } => {
                                         (cb.neighborhood.on_set_moderator)(
                                             new_state.neighborhood.entered_home_id.clone(),
-                                            target_id.clone(),
+                                            target_id.to_string(),
                                             assign,
                                         );
                                         new_state.modal_queue.dismiss();
@@ -2748,25 +2739,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let target_for_toast = target_id.clone();
                                         let tasks = tasks_for_events.clone();
                                         tasks.spawn(async move {
-                                            let parsed_target = match target_id.parse::<AuthorityId>() {
-                                                Ok(target) => target,
-                                                Err(_) => {
-                                                    if let Some(tx) = update_tx {
-                                                        let _ = tx.try_send(UiUpdate::ToastAdded(
-                                                            ToastMessage::error(
-                                                                "access-override",
-                                                                "Invalid authority selected",
-                                                            ),
-                                                        ));
-                                                    }
-                                                    return;
-                                                }
-                                            };
-
                                             match access_workflows::set_access_override(
                                                 app_core.raw(),
                                                 home_id.as_deref(),
-                                                parsed_target,
+                                                target_id,
                                                 access_level.into(),
                                             )
                                             .await
@@ -2791,8 +2767,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                             ToastMessage::error(
                                                                 "access-override",
                                                                 format!(
-                                                                    "Failed to set access override: {}",
-                                                                    error
+                                                                    "Failed to set access override: {error}"
                                                                 ),
                                                             ),
                                                         ));
@@ -2808,11 +2783,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             ),
                                         );
                                     }
-                                    DispatchCommand::SubmitHomeCapabilityConfig {
-                                        full_caps,
-                                        partial_caps,
-                                        limited_caps,
-                                    } => {
+                                    DispatchCommand::SubmitHomeCapabilityConfig { config } => {
                                         new_state.modal_queue.dismiss();
                                         let app_core = app_core_for_ceremony.clone();
                                         let update_tx = update_tx_for_ceremony.clone();
@@ -2822,9 +2793,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             match access_workflows::configure_home_capabilities(
                                                 app_core.raw(),
                                                 home_id.as_deref(),
-                                                &full_caps,
-                                                &partial_caps,
-                                                &limited_caps,
+                                                &config.full_csv(),
+                                                &config.partial_csv(),
+                                                &config.limited_csv(),
                                             )
                                             .await
                                             {
@@ -2844,8 +2815,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                             ToastMessage::error(
                                                                 "capability-config",
                                                                 format!(
-                                                                    "Failed to save capability config: {}",
-                                                                    error
+                                                                    "Failed to save capability config: {error}"
                                                                 ),
                                                             ),
                                                         ));
@@ -2875,8 +2845,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             new_state.toast_error("Failed to read neighborhood homes");
                                         }
                                     }
-                                    DispatchCommand::AddHomeToNeighborhood { home_id } => {
-                                        (cb.neighborhood.on_add_home_to_neighborhood)(home_id);
+                                    DispatchCommand::AddHomeToNeighborhood { target } => {
+                                        (cb.neighborhood.on_add_home_to_neighborhood)(
+                                            target.as_command_arg(),
+                                        );
                                     }
                                     DispatchCommand::LinkSelectedHomeOneHopLink => {
                                         let idx = new_state.neighborhood.grid.current();
@@ -2892,8 +2864,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             new_state.toast_error("Failed to read neighborhood homes");
                                         }
                                     }
-                                    DispatchCommand::LinkHomeOneHopLink { home_id } => {
-                                        (cb.neighborhood.on_link_home_one_hop_link)(home_id);
+                                    DispatchCommand::LinkHomeOneHopLink { target } => {
+                                        (cb.neighborhood.on_link_home_one_hop_link)(
+                                            target.as_command_arg(),
+                                        );
                                     }
 
                                     // === Navigation Commands ===

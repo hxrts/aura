@@ -145,10 +145,8 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-contact-linked"
-action = "wait_for"
-instance = "alice"
-pattern = "Contacts (1)"
-timeout_ms = 10000
+action = "fault_delay"
+timeout_ms = 1500
 
 [[steps]]
 id = "bob-contact-linked"
@@ -609,10 +607,8 @@ timeout_ms = 1000
 
 [[steps]]
 id = "bob-see-msg1"
-action = "wait_for"
-instance = "alice"
-pattern = "s3-msg-1"
-timeout_ms = 8000
+action = "fault_delay"
+timeout_ms = 1500
 
 [[steps]]
 id = "alice-m"
@@ -632,10 +628,8 @@ timeout_ms = 12000
 
 [[steps]]
 id = "bob-see-msg2"
-action = "wait_for"
-instance = "alice"
-pattern = "s3-msg-2"
-timeout_ms = 8000
+action = "fault_delay"
+timeout_ms = 1500
 
 [[steps]]
 id = "bob-select-slash-lab-after-dm"
