@@ -22,23 +22,66 @@ cfg_if! {
         use web_clipboard::WebClipboardAdapter;
 
         const WEB_STORAGE_PREFIX: &str = "aura_";
-        const SELECTED_AUTHORITY_KEY: &str = "aura:selected_authority";
+        const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
 
-        fn load_selected_authority() -> Option<AuthorityId> {
+        fn selected_authority_key(storage_prefix: &str) -> String {
+            format!("{storage_prefix}selected_authority")
+        }
+
+        fn sanitize_storage_segment(raw: &str) -> String {
+            raw.chars()
+                .map(|ch| {
+                    if ch.is_ascii_alphanumeric() {
+                        ch.to_ascii_lowercase()
+                    } else {
+                        '_'
+                    }
+                })
+                .collect()
+        }
+
+        fn harness_instance_id() -> Option<String> {
+            let window = web_sys::window()?;
+            let search = window.location().search().ok()?;
+            let query = search.strip_prefix('?').unwrap_or(&search);
+            for pair in query.split('&') {
+                if let Some((key, value)) = pair.split_once('=') {
+                    if key == HARNESS_INSTANCE_QUERY_KEY && !value.is_empty() {
+                        return Some(value.to_string());
+                    }
+                }
+            }
+            None
+        }
+
+        fn active_storage_prefix() -> String {
+            if let Some(instance_id) = harness_instance_id() {
+                let sanitized = sanitize_storage_segment(&instance_id);
+                if !sanitized.is_empty() {
+                    return format!("{WEB_STORAGE_PREFIX}{sanitized}_");
+                }
+            }
+            WEB_STORAGE_PREFIX.to_string()
+        }
+
+        fn load_selected_authority(storage_key: &str) -> Option<AuthorityId> {
             let window = web_sys::window()?;
             let storage = window.local_storage().ok().flatten()?;
-            let raw = storage.get_item(SELECTED_AUTHORITY_KEY).ok().flatten()?;
+            let raw = storage.get_item(storage_key).ok().flatten()?;
             raw.parse::<AuthorityId>().ok()
         }
 
-        fn persist_selected_authority(authority_id: &AuthorityId) -> Result<(), String> {
+        fn persist_selected_authority(
+            storage_key: &str,
+            authority_id: &AuthorityId,
+        ) -> Result<(), String> {
             let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
             let storage = window
                 .local_storage()
                 .map_err(|error| format!("localStorage unavailable: {:?}", error))?
                 .ok_or_else(|| "localStorage unavailable".to_string())?;
             storage
-                .set_item(SELECTED_AUTHORITY_KEY, &authority_id.to_string())
+                .set_item(storage_key, &authority_id.to_string())
                 .map_err(|error| format!("failed to persist selected authority: {:?}", error))
         }
 
@@ -51,8 +94,10 @@ cfg_if! {
         }
 
         async fn bootstrap_controller() -> Result<Arc<UiController>, String> {
-            let selected_authority = load_selected_authority();
-            let builder = AgentBuilder::web().storage_prefix(WEB_STORAGE_PREFIX);
+            let storage_prefix = active_storage_prefix();
+            let authority_storage_key = selected_authority_key(&storage_prefix);
+            let selected_authority = load_selected_authority(&authority_storage_key);
+            let builder = AgentBuilder::web().storage_prefix(&storage_prefix);
             let builder = if let Some(authority_id) = selected_authority {
                 builder.authority(authority_id)
             } else {
@@ -67,7 +112,8 @@ cfg_if! {
             );
 
             let current_authority = agent.authority_id().clone();
-            if let Err(error) = persist_selected_authority(&current_authority) {
+            if let Err(error) = persist_selected_authority(&authority_storage_key, &current_authority)
+            {
                 web_sys::console::warn_1(
                     &format!("failed to persist selected authority: {error}").into(),
                 );
@@ -87,7 +133,11 @@ cfg_if! {
                 app_core,
                 clipboard,
                 Some(Arc::new(|authority_id: AuthorityId| {
-                    if let Err(error) = persist_selected_authority(&authority_id) {
+                    let storage_prefix = active_storage_prefix();
+                    let authority_storage_key = selected_authority_key(&storage_prefix);
+                    if let Err(error) =
+                        persist_selected_authority(&authority_storage_key, &authority_id)
+                    {
                         web_sys::console::error_1(
                             &format!("failed to persist authority switch: {error}").into(),
                         );

@@ -135,6 +135,12 @@ function parseStartOptions(params) {
   };
 }
 
+function withHarnessInstanceQuery(appUrl, instanceId) {
+  const url = new URL(appUrl);
+  url.searchParams.set('__aura_harness_instance', instanceId);
+  return url.toString();
+}
+
 function delay(ms) {
   if (ms <= 0) {
     return Promise.resolve();
@@ -155,6 +161,7 @@ async function startPage(params) {
     startMaxAttempts,
     startRetryBackoffMs
   } = options;
+  const targetUrl = withHarnessInstanceQuery(appUrl, instanceId);
 
   if (sessions.has(instanceId)) {
     await stop({ instance_id: instanceId });
@@ -184,14 +191,14 @@ async function startPage(params) {
         await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
       }
 
-      await page.goto(appUrl, { waitUntil: 'domcontentloaded', timeout: pageGotoTimeoutMs });
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: pageGotoTimeoutMs });
       await ensureHarnessWithTimeout(page, harnessReadyTimeoutMs);
 
       sessions.set(instanceId, {
         context,
         page,
         headless,
-        appUrl,
+        appUrl: targetUrl,
         dataDir,
         artifactDir,
         consoleLog,
@@ -200,7 +207,7 @@ async function startPage(params) {
 
       return {
         instance_id: instanceId,
-        app_url: appUrl,
+        app_url: targetUrl,
         data_dir: dataDir,
         headless
       };
@@ -246,9 +253,14 @@ function extractSubmittedMessage(keys) {
     return null;
   }
 
-  const beforeEnter = value.slice(0, newlineIndex);
-  const insertIndex = beforeEnter.lastIndexOf('i');
-  const candidate = (insertIndex >= 0 ? beforeEnter.slice(insertIndex + 1) : beforeEnter)
+  const beforeEnter = value.slice(0, newlineIndex).trimStart();
+  // Mirror only explicit insert-mode chat sends, e.g. `ihello world\n`.
+  // This avoids false positives from modal/account inputs that also end with Enter.
+  if (!beforeEnter.startsWith('i')) {
+    return null;
+  }
+  const candidate = beforeEnter
+    .slice(1)
     .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
     .replace(/\u001b/g, '')
     .trim();
