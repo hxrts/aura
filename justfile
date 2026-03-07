@@ -26,21 +26,10 @@ _nix-nightly *ARGS:
     nix develop .#nightly --command {{ARGS}}
 
 _harness action *ARGS:
-    scripts/harness_cmd.sh {{action}} {{ARGS}}
-
-_holepunch-prepare artifact_dir:
-    mkdir -p {{artifact_dir}}
-    mkdir -p artifacts/patchbay/work target/patchbay-vm
-
-_holepunch-test artifact_dir *TEST_ARGS:
-    AURA_HOLEPUNCH_ARTIFACT_DIR="${PWD}/{{artifact_dir}}" \
-      QEMU_VM_WORK_DIR="${PWD}/artifacts/patchbay/work" \
-      CARGO_TARGET_DIR="${PWD}/target/patchbay-vm" \
-      NETSIM_TARGET_DIR="${PWD}/target/patchbay-vm" \
-      cargo test -p aura-harness {{TEST_ARGS}} -q
+    scripts/harness/cmd.sh {{action}} {{ARGS}}
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# User-Facing Commands
+# USER-FACING COMMANDS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -115,7 +104,7 @@ web-serve port="4173":
         stty sane 2>/dev/null || true
     }
     trap cleanup EXIT INT TERM
-    NO_COLOR=true ../../scripts/run-dx.sh serve --web --package aura-web --bin aura-web --features web --addr 0.0.0.0 --port "$selected_port" --open false
+    NO_COLOR=true ../../scripts/web/dx.sh serve --web --package aura-web --bin aura-web --features web --addr 0.0.0.0 --port "$selected_port" --open false
     # Extra safety: restore terminal after dx exits
     stty sane 2>/dev/null || true
 
@@ -124,7 +113,7 @@ web-dev port="4173":
     just web-serve {{port}}
 
 web-static port="4173":
-    ./scripts/serve-web-static.sh "{{port}}"
+    ./scripts/web/serve-static.sh "{{port}}"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Browser Harness Shortcuts
@@ -213,11 +202,11 @@ audit:
 
 # Check architectural layer compliance (all checks)
 check-arch *FLAGS:
-    scripts/check-arch.sh {{FLAGS}}
+    scripts/check/arch.sh {{FLAGS}}
 
 # Check invariant-focused lanes (docs + runtime property monitor)
 check-invariants:
-    scripts/check-arch.sh --invariants
+    scripts/check/arch.sh --invariants
     just ci-property-monitor
 
 # Quick architecture checks by lane
@@ -227,7 +216,7 @@ check-arch-lane lane:
     set -euo pipefail
     case "{{lane}}" in
       layers|effects|deps|completeness|todos|concurrency|invariants|workflows)
-        scripts/check-arch.sh --{{lane}} || true
+        scripts/check/arch.sh --{{lane}} || true
         ;;
       *)
         echo "Unknown lane: {{lane}}"
@@ -283,55 +272,7 @@ ci-harness-replay:
 
 # Browser harness lane (WASM build + Playwright smoke + browser scenarios)
 ci-harness-browser:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    mkdir -p artifacts/harness/browser
-    just web-check
-    (
-      cd crates/aura-harness/playwright-driver
-      npm ci
-      npm run install-browsers
-      npm test
-    )
-    (
-      ./scripts/serve-web-static.sh 4173 \
-        > artifacts/harness/browser/web-serve.log 2>&1 &
-      echo $! > artifacts/harness/browser/web-serve.pid
-    )
-    cleanup() {
-      if [ -f artifacts/harness/browser/web-serve.pid ]; then
-        kill "$(cat artifacts/harness/browser/web-serve.pid)" 2>/dev/null || true
-      fi
-    }
-    trap cleanup EXIT
-    web_ready=0
-    for _ in $(seq 1 300); do
-      if [ -f artifacts/harness/browser/web-serve.pid ]; then
-        if ! kill -0 "$(cat artifacts/harness/browser/web-serve.pid)" 2>/dev/null; then
-          echo "static web server exited before becoming reachable"
-          tail -n 200 artifacts/harness/browser/web-serve.log || true
-          exit 1
-        fi
-      fi
-      if curl -fsS "http://127.0.0.1:4173/" >/dev/null 2>&1; then
-        web_ready=1
-        break
-      fi
-      sleep 1
-    done
-    if [ "$web_ready" -ne 1 ]; then
-      echo "timed out waiting for static web server at http://127.0.0.1:4173/"
-      tail -n 200 artifacts/harness/browser/web-serve.log || true
-      exit 1
-    fi
-    cargo run -p aura-harness --bin aura-harness -- run \
-      --config configs/harness/browser-loopback.toml \
-      --scenario scenarios/harness/local-discovery-smoke.toml \
-      --artifacts-dir artifacts/harness/browser
-    cargo run -p aura-harness --bin aura-harness -- run \
-      --config configs/harness/browser-loopback.toml \
-      --scenario scenarios/harness/scenario1-invitation-chat-e2e.toml \
-      --artifacts-dir artifacts/harness/browser
+    ./scripts/ci/harness-browser.sh
 
 # Test suite (excludes patchbay tests which run in ci-holepunch-tier2)
 ci-test:
@@ -339,8 +280,8 @@ ci-test:
 
 # Protocol evolution compatibility gate (async_subtype)
 ci-protocol-compat:
-    scripts/check-protocol-compat.sh --self-test
-    scripts/check-protocol-compat.sh
+    scripts/check/protocol-compat.sh --self-test
+    scripts/check/protocol-compat.sh
 
 # Tier 1 deterministic/property tests for holepunch decision logic
 ci-holepunch-tier1:
@@ -350,78 +291,27 @@ ci-holepunch-tier1:
 # Requires: Linux with unprivileged user namespaces enabled, tc, nft in PATH
 # CI enables userns via: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 ci-holepunch-tier2:
-    just _holepunch-prepare artifacts/holepunch/tier2
-    just _holepunch-test artifacts/holepunch/tier2 --test holepunch_tier2_patchbay --test holepunch_e2e_runtime_patchbay
+    ./scripts/ci/holepunch.sh tier2
 
 # Daily smoke for hole-punch paths with flake tracking output
 ci-holepunch-daily-smoke:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    just _holepunch-prepare artifacts/holepunch/daily
-    RUNS=5
-    FAILURES=0
-    for run in $(seq 1 "$RUNS"); do
-      echo "daily-smoke run $run/$RUNS"
-      if ! just _holepunch-test "artifacts/holepunch/daily/run-${run}" --test holepunch_tier2_patchbay; then
-        FAILURES=$((FAILURES + 1))
-      fi
-    done
-    FLAKE_RATE=$(awk -v f="$FAILURES" -v r="$RUNS" 'BEGIN { if (r == 0) { print 0 } else { printf "%.4f", (f / r) } }')
-    cat > artifacts/holepunch/daily/flake-rate.json <<JSON
-    {
-      "runs": $RUNS,
-      "failures": $FAILURES,
-      "flake_rate": $FLAKE_RATE
-    }
-    JSON
+    ./scripts/ci/holepunch.sh daily
 
 # Tier 3 nightly stress suite
 ci-holepunch-nightly-stress:
-    just _holepunch-prepare artifacts/holepunch/nightly
-    just _holepunch-test artifacts/holepunch/nightly --test holepunch_tier3_stress
+    ./scripts/ci/holepunch.sh nightly
 
 # Verify artifact capture and retention outputs exist
 ci-holepunch-verify-artifacts:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    test -d artifacts/holepunch/nightly
-    test -n "$(find artifacts/holepunch/nightly -type f | head -n 1)"
+    ./scripts/ci/holepunch.sh verify-artifacts
 
 # Weekly flaky triage report generation
 ci-holepunch-flaky-triage:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    just _holepunch-prepare artifacts/holepunch/weekly
-    RUNS=10
-    FAILURES=0
-    for run in $(seq 1 "$RUNS"); do
-      if ! just _holepunch-test "artifacts/holepunch/weekly/triage-run-${run}" --test holepunch_tier2_patchbay; then
-        FAILURES=$((FAILURES + 1))
-      fi
-    done
-    cat > artifacts/holepunch/weekly/flaky-triage.md <<EOF
-    # Holepunch Flaky Test Triage
-    - total_runs: $RUNS
-    - failed_runs: $FAILURES
-    - action: quarantine unstable cases when failed_runs > 0 and open stabilization issues
-    EOF
+    ./scripts/ci/holepunch.sh triage
 
 # Weekly patchbay toolchain audit against pinned fork
 ci-holepunch-toolchain-audit:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    mkdir -p artifacts/holepunch/weekly
-    rg -n -F 'name = "patchbay"' Cargo.lock
-    rg -n -F 'source = "git+https://github.com/hxrts/patchbay?branch=hxrts/aura#' Cargo.lock
-    {
-      echo "# Holepunch Toolchain Audit"
-      echo "cargo-lock-pin: ok"
-      if command -v patchbay-vm >/dev/null 2>&1; then
-        echo "patchbay-vm: $(patchbay-vm --version 2>/dev/null || echo installed)"
-      else
-        echo "patchbay-vm: not installed in runner"
-      fi
-    } > artifacts/holepunch/weekly/toolchain-audit.md
+    ./scripts/ci/holepunch.sh audit
 
 # Property-monitored simulator lane (online property checks + regression helpers)
 ci-property-monitor:
@@ -464,7 +354,7 @@ ci-agent-wasm:
 ci-workspace-wasm-test:
     #!/usr/bin/env bash
     set -euo pipefail
-    : "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER:=scripts/wasm-bindgen-test-runner.sh}"
+    : "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER:=scripts/verify/wasm-bindgen-runner.sh}"
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER" \
       cargo test --workspace --target wasm32-unknown-unknown \
         --exclude aura-terminal \
@@ -496,19 +386,23 @@ ci-effects:
 
 # Verify docs links referenced from crates/ resolve to existing files in docs/
 ci-crates-doc-links:
-    scripts/check-doc-links.sh
+    scripts/check/docs-links.sh
+
+# Detect semantic drift in documentation (stale type/trait/command references)
+ci-docs-semantic-drift:
+    scripts/check/docs-semantic-drift.sh
 
 # Verify docs/998_verification_coverage.md metrics match actual codebase
 ci-verification-coverage:
-    scripts/check-verification-coverage.sh
+    scripts/check/verification-coverage.sh
 
 # Verify UX flow coverage mapping remains aligned with changed flow surfaces
 ci-ux-flow-coverage:
-    scripts/check-ux-flow-coverage.sh
+    scripts/check/ux-flow-coverage.sh
 
 # Choreography wiring lint
 ci-choreo:
-    scripts/check-choreo-wiring.sh
+    scripts/check/choreo-wiring.sh
 
 # Quint typecheck
 ci-quint-typecheck:
@@ -569,7 +463,7 @@ ci-conformance-strict:
     cargo test -p aura-agent --features choreo-backend-telltale-vm --test telltale_vm_parity -- --nocapture
 
     echo "Running strict native/wasm parity lane..."
-    : "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER:=scripts/wasm-bindgen-test-runner.sh}"
+    : "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER:=scripts/verify/wasm-bindgen-runner.sh}"
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER" \
       cargo test -p aura-agent --target wasm32-unknown-unknown \
       --features web,choreo-backend-telltale-vm \
@@ -585,7 +479,7 @@ ci-conformance-contracts:
 
 # Policy check: protected-branch CI must keep conformance gate job wired
 ci-conformance-policy:
-    scripts/check-conformance-gate.sh
+    scripts/check/conformance-gate.sh
 
 # Full conformance gate used by CI protected-branch workflows
 ci-conformance: ci-conformance-policy
@@ -683,7 +577,7 @@ ci-dry-run:
 
     # Architecture check (warning only)
     printf "[15/15] Architecture... "
-    if ./scripts/check-arch.sh --quick >/dev/null 2>&1; then
+    if ./scripts/check/arch.sh --quick >/dev/null 2>&1; then
         echo -e "${GREEN}OK${NC}"
     else
         echo -e "${YELLOW}WARN${NC} (run 'just check-arch' for details)"
@@ -824,56 +718,7 @@ docs:
 #   just quickstart status
 #   just quickstart smoke
 quickstart action="init":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    case "{{action}}" in
-      init)
-        cargo run --bin aura -- init -n 3 -t 2 -o .aura
-        ;;
-      status)
-        cargo run --bin aura -- status -c .aura/configs/device_1.toml
-        ;;
-      smoke)
-        echo "Running quickstart smoke checks"
-        echo "============================="
-        rm -rf .aura-test
-
-        echo "1. Initializing 2-of-3 threshold account..."
-        init_log="$(mktemp)"
-        cargo run --bin aura -- init -n 3 -t 2 -o .aura-test | tee "$init_log"
-        echo "OK Account initialized"
-
-        echo "2. Verifying effect_api and config entries..."
-        grep -q "Created effect API metadata" "$init_log" && echo "OK Effect API metadata created" || { echo "ERROR: Effect API metadata missing"; exit 1; }
-        grep -q "Created device_1.toml" "$init_log" && echo "OK Config entry created" || { echo "ERROR: Config entry missing"; exit 1; }
-        rm -f "$init_log"
-
-        echo "3. Checking account status..."
-        status_out="$(cargo run --bin aura -- status -c .aura-test/configs/device_1.toml)"
-        echo "$status_out"
-        echo "$status_out" | grep -q "Configuration loaded successfully" || { echo "ERROR: Config not found in storage"; exit 1; }
-        echo "OK Status retrieved"
-
-        echo "4. Testing multi-device configs..."
-        for i in 1 2 3; do
-            device_out="$(cargo run --bin aura -- status -c .aura-test/configs/device_${i}.toml)"
-            echo "$device_out" | grep -q "Configuration loaded successfully" && echo "   [OK] Device ${i} config found" || { echo "ERROR"; exit 1; }
-        done
-
-        echo "5. Testing threshold signature operation..."
-        cargo run --bin aura -- threshold \
-            --configs .aura-test/configs/device_1.toml,.aura-test/configs/device_2.toml \
-            --threshold 2 --mode sign > /dev/null 2>&1 && echo "OK Threshold signature passed" || { echo "FAIL"; exit 1; }
-
-        echo ""
-        echo "Quickstart smoke checks passed!"
-        ;;
-      *)
-        echo "Unknown quickstart action: {{action}}"
-        echo "Valid actions: init, status, smoke"
-        exit 2
-        ;;
-    esac
+    ./scripts/dev/quickstart.sh "{{action}}"
 
 # Run macOS Keychain integration tests
 test-macos-keychain:
@@ -895,71 +740,7 @@ test-macos-keychain:
 #   just quint check
 #   just quint models
 quint mode="check":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    case "{{mode}}" in
-      setup)
-        echo "Verifying Quint setup"
-        echo "====================="
-        just _nix-dev -- quint --version
-        just _nix-dev -- node --version
-        just _nix-dev -- java -version
-        echo 'module simple { val x = 1 }' > /tmp/simple.qnt
-        just _nix-dev -- quint parse /tmp/simple.qnt > /dev/null && echo "[OK] Basic parsing works"
-        echo "Quint setup verification completed!"
-        ;;
-      check)
-        GREEN='\033[0;32m' RED='\033[0;31m' NC='\033[0m'
-        echo "Typechecking all Quint specs"
-        echo "============================"
-        passed=0; failed=0
-
-        for dir in "verification/quint" "verification/quint/consensus" "verification/quint/journal" \
-                   "verification/quint/keys" "verification/quint/sessions" "crates/aura-simulator/tests/quint_specs"; do
-            [ -d "$dir" ] || continue
-            for spec in "$dir"/*.qnt; do
-                [ -f "$spec" ] || continue
-                if quint typecheck "$spec" > /dev/null 2>&1; then
-                    echo -e "  ${GREEN}✓${NC} $(basename "$spec")"; ((passed++))
-                else
-                    echo -e "  ${RED}✗${NC} $(basename "$spec")"; ((failed++))
-                fi
-            done
-        done
-
-        echo ""
-        echo "Passed: $passed, Failed: $failed"
-        [ "$failed" -gt 0 ] && exit 1 || echo -e "${GREEN}All specs passed!${NC}"
-        ;;
-      models)
-        GREEN='\033[0;32m' RED='\033[0;31m' NC='\033[0m'
-        echo "Quint model checking"
-        echo "===================="
-        cd verification/quint
-
-        echo "[1/2] Typechecking all Quint specifications..."
-        for spec in *.qnt; do
-            echo "  Checking $spec..."
-            quint typecheck "$spec" || { echo -e "${RED}[FAIL]${NC} $spec"; exit 1; }
-        done
-        echo -e "${GREEN}[OK]${NC} All specs typecheck"
-
-        echo "[2/2] Running Quint invariant verification..."
-        quint verify --invariant=AllInvariants consensus/core.qnt --max-steps=10 || \
-            { echo -e "${RED}[FAIL]${NC} consensus/core.qnt"; exit 1; }
-        quint verify --invariant=InvariantByzantineThreshold consensus/adversary.qnt --max-steps=10 || \
-            { echo -e "${RED}[FAIL]${NC} consensus/adversary.qnt"; exit 1; }
-        quint verify --invariant=InvariantProgressUnderSynchrony consensus/liveness.qnt --max-steps=10 || \
-            { echo -e "${RED}[FAIL]${NC} consensus/liveness.qnt"; exit 1; }
-
-        echo -e "${GREEN}[OK]${NC} All invariants pass"
-        ;;
-      *)
-        echo "Unknown quint mode: {{mode}}"
-        echo "Valid modes: setup, check, models"
-        exit 2
-        ;;
-    esac
+    ./scripts/verify/quint-workflow.sh "{{mode}}"
 
 # Parse Quint file to JSON
 quint-parse input output:
@@ -1007,11 +788,11 @@ quint-generate-traces:
 
 # Check Quint-Rust type correspondence
 quint-check-types verbose="":
-    ./scripts/verify.sh quint-types {{verbose}}
+    ./scripts/verify/workflow.sh quint-types {{verbose}}
 
 # Generate verification coverage report
 verification-coverage format="--md":
-    ./scripts/verify.sh coverage {{format}}
+    ./scripts/verify/workflow.sh coverage {{format}}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TUI ITF Traces
@@ -1019,11 +800,11 @@ verification-coverage format="--md":
 
 # Regenerate deterministic ITF trace for TUI replay tests
 tui-itf-trace out="verification/quint/traces/tui_trace.itf.json" seed="424242" max_steps="50":
-    TUI_ITF_SEED={{seed}} TUI_ITF_MAX_STEPS={{max_steps}} just _nix-dev -- ./scripts/tui-itf-trace.sh generate {{out}}
+    TUI_ITF_SEED={{seed}} TUI_ITF_MAX_STEPS={{max_steps}} just _nix-dev -- ./scripts/harness/tui-itf-trace.sh generate {{out}}
 
 # Check that the checked-in ITF trace matches regeneration
 tui-itf-trace-check seed="424242" max_steps="50":
-    TUI_ITF_SEED={{seed}} TUI_ITF_MAX_STEPS={{max_steps}} just _nix-dev -- ./scripts/tui-itf-trace.sh check
+    TUI_ITF_SEED={{seed}} TUI_ITF_MAX_STEPS={{max_steps}} just _nix-dev -- ./scripts/harness/tui-itf-trace.sh check
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Lean Formal Verification
@@ -1148,7 +929,7 @@ kani-setup:
 
 # Run full Kani verification suite
 kani-suite:
-    @./scripts/verify.sh kani
+    @./scripts/verify/workflow.sh kani
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Combined Verification

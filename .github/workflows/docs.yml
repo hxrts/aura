@@ -66,9 +66,25 @@ jobs:
           name: docs
           replay-command: ./scripts/check-text-formatting.sh
 
+  semantic-drift:
+    name: Semantic Drift Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: semantic-drift
+      - run: nix develop --command just ci-docs-semantic-drift
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: docs
+          replay-command: nix develop --command just ci-docs-semantic-drift
+
   build:
     name: Docs Build
-    needs: [links, crate-links, text-formatting]
+    needs: [links, crate-links, text-formatting, semantic-drift]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
