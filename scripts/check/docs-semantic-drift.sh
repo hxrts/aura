@@ -539,7 +539,7 @@ check_type_references() {
 
         # Skip if it's clearly from a Lean/Quint skill file (external concepts)
         case "$location" in
-            .claude/skills/lean/*|.claude/skills/quint/*|.claude/*lean*|.claude/*quint*)
+            .claude/skills/verification/lean/*|.claude/skills/verification/quint/*|.claude/*lean*|.claude/*quint*)
                 # Only check Aura-specific types in these files
                 case "$typename" in
                     Aura*|Authority*|Context*|Channel*|Journal*|Fact*|Guard*|Flow*|Biscuit*|Consensus*|Session*|Protocol*)
