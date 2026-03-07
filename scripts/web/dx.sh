@@ -53,4 +53,7 @@ fi
 
 export PATH="$dx_root/bin:$wasm_root/bin:$PATH"
 
+# Ensure cargo uses the workspace root target directory
+export CARGO_TARGET_DIR="$repo_root/target"
+
 exec "$dx_bin" "$@"

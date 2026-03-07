@@ -255,7 +255,7 @@
 
           shellHook = ''
             export AURA_SUPPRESS_NIX_WELCOME=1
-            export CARGO_TARGET_DIR="target"
+            export CARGO_TARGET_DIR="$PWD/target"
             export AURA_WORKSPACE_ROOT="$PWD"
             if [ -z "$AURA_SUPPRESS_NIX_WELCOME" ]; then
               echo "Aura Development Environment"
@@ -345,7 +345,7 @@
             export RUST_BACKTRACE=1
             export RUST_LOG=info
             export MACOSX_DEPLOYMENT_TARGET=11.0
-            export CARGO_TARGET_DIR="target"
+            export CARGO_TARGET_DIR="$PWD/target"
             export AURA_WORKSPACE_ROOT="$PWD"
           '';
         };
@@ -381,7 +381,7 @@
           ];
 
           shellHook = ''
-            export CARGO_TARGET_DIR="target"
+            export CARGO_TARGET_DIR="$PWD/target"
             export AURA_WORKSPACE_ROOT="$PWD"
             echo "Aura Nightly Development Environment"
             echo "====================================="
@@ -404,7 +404,7 @@
             export RUST_BACKTRACE=1
             export RUST_LOG=info
             export MACOSX_DEPLOYMENT_TARGET=11.0
-            export CARGO_TARGET_DIR="target"
+            export CARGO_TARGET_DIR="$PWD/target"
 
             # Custom PS1 prompt (nightly variant)
             # Colors: darkgrey=user@host, purple=path, greenish-yellow=branch, orange=[nix-nightly] >

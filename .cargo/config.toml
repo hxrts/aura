@@ -1,12 +1,11 @@
 # Cargo configuration for Aura workspace
 #
-# This ensures all crates use the shared target directory at the workspace root,
-# even when running cargo commands from within individual crate directories.
-
-[build]
-# Use the workspace root's target directory for all builds
-target-dir = "target"
-
-[env]
-# Ensure CARGO_TARGET_DIR is set for any subprocess that might run cargo
-CARGO_TARGET_DIR = { value = "target", relative = true }
+# Cargo automatically uses the workspace root's target directory when running
+# from any subdirectory within the workspace. No explicit configuration needed.
+#
+# IMPORTANT: Do not set CARGO_TARGET_DIR in the environment, as a relative
+# value will resolve incorrectly when running from subdirectories.
+#
+# External tools (like dx/dioxus-cli) that invoke cargo may not respect
+# workspace resolution. Those tools should explicitly set CARGO_TARGET_DIR
+# to an absolute path (see scripts/web/dx.sh).
