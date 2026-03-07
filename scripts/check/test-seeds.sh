@@ -38,6 +38,27 @@ is_test_context() {
     return 1
 }
 
+# Check if a line has an #[allow(clippy::disallowed_methods)] annotation
+# within the preceding 15 lines (to account for if-else blocks with allow on let)
+has_allow_annotation() {
+    local file="$1"
+    local lineno="$2"
+
+    # Check the 15 lines before this line for the allow attribute
+    local start=$((lineno - 15))
+    if [[ $start -lt 1 ]]; then
+        start=1
+    fi
+
+    local context
+    context=$(sed -n "${start},${lineno}p" "$file" 2>/dev/null || true)
+    if [[ "$context" == *"#[allow(clippy::disallowed_methods)]"* ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
 if ! $QUIET_SUCCESS; then
     echo "Checking deterministic test seed policy..."
 fi
@@ -63,6 +84,9 @@ while IFS= read -r line; do
 
     if is_test_context "$file" "$lineno"; then
         banned_in_tests+="$line"$'\n'
+    elif has_allow_annotation "$file" "$lineno"; then
+        # Skip: explicitly allowed via #[allow(clippy::disallowed_methods)]
+        continue
     else
         banned_outside_tests+="$line"$'\n'
     fi
