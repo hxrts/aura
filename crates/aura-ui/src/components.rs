@@ -305,20 +305,14 @@ pub fn UiDeviceEnrollmentModal(
     } else {
         LbBadgeVariant::Secondary
     };
-    let status_text = if let Some(error_message) = error_message.clone() {
+    let status_text = if let Some(error_message) = error_message {
         error_message
     } else if has_failed {
         "The enrollment ceremony failed.".to_string()
     } else if is_complete {
-        format!(
-            "Enrollment complete. '{}' is now part of this authority.",
-            device_name
-        )
+        format!("Enrollment complete. '{device_name}' is now part of this authority.")
     } else {
-        format!(
-            "Waiting for '{}' to import the enrollment code on the new device.",
-            device_name
-        )
+        format!("Waiting for '{device_name}' to import the enrollment code on the new device.")
     };
 
     rsx! {
@@ -433,7 +427,7 @@ pub fn UiDeviceEnrollmentModal(
                             on_click: move |_| on_copy.call(()),
                         }
                         UiButton {
-                            label: primary_label.clone(),
+                            label: primary_label,
                             variant: ButtonVariant::Primary,
                             on_click: move |_| on_primary.call(()),
                         }

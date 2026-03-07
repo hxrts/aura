@@ -9,10 +9,10 @@ use crate::components::{
 };
 use crate::model::{
     AccessDepth, AccessOverrideLevel, ActiveModal, AddDeviceWizardStep, CapabilityTier,
-    CreateChannelDetailsField, CreateChannelWizardStep, ModalState,
-    NeighborhoodMemberSelectionKey, NeighborhoodMode, NotificationSelectionId, SettingsSection,
-    ThresholdWizardStep, UiController, UiModel, UiScreen, DEFAULT_CAPABILITY_FULL,
-    DEFAULT_CAPABILITY_LIMITED, DEFAULT_CAPABILITY_PARTIAL,
+    CreateChannelDetailsField, CreateChannelWizardStep, ModalState, NeighborhoodMemberSelectionKey,
+    NeighborhoodMode, NotificationSelectionId, SettingsSection, ThresholdWizardStep, UiController,
+    UiModel, UiScreen, DEFAULT_CAPABILITY_FULL, DEFAULT_CAPABILITY_LIMITED,
+    DEFAULT_CAPABILITY_PARTIAL,
 };
 use aura_app::signal_defs::{DiscoveredPeersState, SettingsState};
 use aura_app::ui::signals::{
@@ -36,6 +36,7 @@ use aura_app::ui::workflows::{
 };
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, CeremonyId};
+use aura_core::ChannelId;
 use dioxus::dioxus_core::schedule_update;
 use dioxus::events::KeyboardData;
 use dioxus::prelude::*;
@@ -176,18 +177,13 @@ struct NotificationRuntimeItem {
     action: NotificationRuntimeAction,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 enum NotificationRuntimeAction {
+    #[default]
     None,
     ReceivedInvitation,
     SentInvitation,
     RecoveryApproval,
-}
-
-impl Default for NotificationRuntimeAction {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -292,7 +288,7 @@ fn build_neighborhood_runtime_view(
     let current_home = homes.current_home().cloned();
 
     let mut runtime_homes = Vec::new();
-    if neighborhood.home_home_id != Default::default() || !neighborhood.home_name.is_empty() {
+    if neighborhood.home_home_id != ChannelId::default() || !neighborhood.home_name.is_empty() {
         runtime_homes.push(NeighborhoodRuntimeHome {
             id: neighborhood.home_home_id.to_string(),
             name: neighborhood.home_name.clone(),
@@ -628,13 +624,7 @@ async fn load_settings_runtime_view(controller: Arc<UiController>) -> SettingsRu
         runtime
             .authorities
             .iter()
-            .map(|authority| {
-                (
-                    authority.id.clone(),
-                    authority.label.clone(),
-                    authority.is_current,
-                )
-            })
+            .map(|authority| (authority.id, authority.label.clone(), authority.is_current))
             .collect(),
     );
     runtime
@@ -890,7 +880,11 @@ fn removable_device_for_modal(
                 && device.name
                     == model
                         .secondary_device_name()
-                        .or_else(|| model.selected_device_modal().map(|state| state.candidate_name.as_str()))
+                        .or_else(|| {
+                            model
+                                .selected_device_modal()
+                                .map(|state| state.candidate_name.as_str())
+                        })
                         .unwrap_or("")
         })
         .cloned()
@@ -952,115 +946,116 @@ fn submit_runtime_modal_action(
                     modal_buffer,
                 ));
             match add_device_step {
-            AddDeviceWizardStep::Name => {
-                let name = modal_buffer.trim().to_string();
-                if name.is_empty() {
-                    controller.runtime_error_toast("Device name is required");
-                    rerender();
-                    return true;
-                }
+                AddDeviceWizardStep::Name => {
+                    let name = modal_buffer.trim().to_string();
+                    if name.is_empty() {
+                        controller.runtime_error_toast("Device name is required");
+                        rerender();
+                        return true;
+                    }
 
-                let app_core = controller.app_core().clone();
-                let rerender_for_start = rerender.clone();
-                spawn(async move {
-                    match ceremony_workflows::start_device_enrollment_ceremony(
-                        &app_core,
-                        name.clone(),
-                        None,
-                    )
-                    .await
-                    {
-                        Ok(start) => {
-                            controller.set_runtime_device_enrollment_ceremony_id(
-                                start.ceremony_id.clone(),
-                            );
-                            controller.complete_runtime_device_enrollment_started(
-                                &name,
-                                &start.enrollment_code,
-                            );
+                    let app_core = controller.app_core().clone();
+                    let rerender_for_start = rerender.clone();
+                    spawn(async move {
+                        match ceremony_workflows::start_device_enrollment_ceremony(
+                            &app_core,
+                            name.clone(),
+                            None,
+                        )
+                        .await
+                        {
+                            Ok(start) => {
+                                controller.set_runtime_device_enrollment_ceremony_id(
+                                    start.ceremony_id.clone(),
+                                );
+                                controller.complete_runtime_device_enrollment_started(
+                                    &name,
+                                    &start.enrollment_code,
+                                );
 
-                            let controller_for_status = controller.clone();
-                            let app_core_for_status = app_core.clone();
-                            let rerender_for_status = rerender_for_start.clone();
-                            let ceremony_id = start.ceremony_id;
-                            spawn(async move {
-                                loop {
-                                    let _ =
-                                        time_workflows::sleep_ms(&app_core_for_status, 1_000).await;
-                                    match ceremony_workflows::get_key_rotation_ceremony_status(
-                                        &app_core_for_status,
-                                        &ceremony_id,
-                                    )
-                                    .await
-                                    {
-                                        Ok(status) => {
-                                            controller_for_status
-                                                .update_runtime_device_enrollment_status(
-                                                    status.accepted_count,
-                                                    status.total_count,
-                                                    status.threshold,
-                                                    status.is_complete,
-                                                    status.has_failed,
-                                                    status.error_message.clone(),
-                                                );
-                                            rerender_for_status();
-                                            if status.is_complete || status.has_failed {
-                                                break;
+                                let controller_for_status = controller.clone();
+                                let app_core_for_status = app_core.clone();
+                                let rerender_for_status = rerender_for_start.clone();
+                                let ceremony_id = start.ceremony_id;
+                                spawn(async move {
+                                    loop {
+                                        let _ =
+                                            time_workflows::sleep_ms(&app_core_for_status, 1_000)
+                                                .await;
+                                        match ceremony_workflows::get_key_rotation_ceremony_status(
+                                            &app_core_for_status,
+                                            &ceremony_id,
+                                        )
+                                        .await
+                                        {
+                                            Ok(status) => {
+                                                controller_for_status
+                                                    .update_runtime_device_enrollment_status(
+                                                        status.accepted_count,
+                                                        status.total_count,
+                                                        status.threshold,
+                                                        status.is_complete,
+                                                        status.has_failed,
+                                                        status.error_message.clone(),
+                                                    );
+                                                rerender_for_status();
+                                                if status.is_complete || status.has_failed {
+                                                    break;
+                                                }
                                             }
+                                            Err(_) => break,
                                         }
-                                        Err(_) => break,
                                     }
-                                }
-                            });
+                                });
+                            }
+                            Err(error) => controller.runtime_error_toast(error.to_string()),
                         }
-                        Err(error) => controller.runtime_error_toast(error.to_string()),
-                    }
-                    rerender_for_start();
-                });
-                true
-            }
-            AddDeviceWizardStep::ShareCode => {
-                controller.advance_runtime_device_enrollment_share();
-                rerender();
-                true
-            }
-            AddDeviceWizardStep::Confirm => {
-                if add_device_is_complete || add_device_has_failed {
-                    controller.complete_runtime_device_enrollment_ready();
-                    rerender();
-                    return true;
+                        rerender_for_start();
+                    });
+                    true
                 }
-
-                let Some(ceremony_id) = add_device_ceremony_id else {
-                    controller.runtime_error_toast("No active enrollment ceremony");
+                AddDeviceWizardStep::ShareCode => {
+                    controller.advance_runtime_device_enrollment_share();
                     rerender();
-                    return true;
-                };
-
-                let app_core = controller.app_core().clone();
-                let rerender_for_status = rerender.clone();
-                spawn(async move {
-                    match ceremony_workflows::get_key_rotation_ceremony_status(
-                        &app_core,
-                        &ceremony_id,
-                    )
-                    .await
-                    {
-                        Ok(status) => controller.update_runtime_device_enrollment_status(
-                            status.accepted_count,
-                            status.total_count,
-                            status.threshold,
-                            status.is_complete,
-                            status.has_failed,
-                            status.error_message.clone(),
-                        ),
-                        Err(error) => controller.runtime_error_toast(error.to_string()),
+                    true
+                }
+                AddDeviceWizardStep::Confirm => {
+                    if add_device_is_complete || add_device_has_failed {
+                        controller.complete_runtime_device_enrollment_ready();
+                        rerender();
+                        return true;
                     }
-                    rerender_for_status();
-                });
-                true
+
+                    let Some(ceremony_id) = add_device_ceremony_id else {
+                        controller.runtime_error_toast("No active enrollment ceremony");
+                        rerender();
+                        return true;
+                    };
+
+                    let app_core = controller.app_core().clone();
+                    let rerender_for_status = rerender.clone();
+                    spawn(async move {
+                        match ceremony_workflows::get_key_rotation_ceremony_status(
+                            &app_core,
+                            &ceremony_id,
+                        )
+                        .await
+                        {
+                            Ok(status) => controller.update_runtime_device_enrollment_status(
+                                status.accepted_count,
+                                status.total_count,
+                                status.threshold,
+                                status.is_complete,
+                                status.has_failed,
+                                status.error_message,
+                            ),
+                            Err(error) => controller.runtime_error_toast(error.to_string()),
+                        }
+                        rerender_for_status();
+                    });
+                    true
+                }
             }
-        }
         }
         Some(ModalState::CreateHome) => {
             let name = modal_text_value.trim().to_string();
@@ -1454,9 +1449,8 @@ fn submit_runtime_modal_action(
                     .map(|contact| contact.authority_id)
                     .collect();
                 let guardian_ids = ids;
-                let threshold = match aura_core::types::FrostThreshold::new(u16::from(
-                    threshold_k,
-                )) {
+                let threshold = match aura_core::types::FrostThreshold::new(u16::from(threshold_k))
+                {
                     Ok(value) => value,
                     Err(error) => {
                         controller.runtime_error_toast(format!("Invalid threshold: {error}"));
@@ -1547,16 +1541,15 @@ fn submit_runtime_modal_action(
                     .filter_map(|idx| settings_runtime.devices.get(*idx))
                     .map(|device| device.id.clone())
                     .collect();
-                let threshold = match aura_core::types::FrostThreshold::new(u16::from(
-                    mfa_state.threshold_k,
-                )) {
-                    Ok(value) => value,
-                    Err(error) => {
-                        controller.runtime_error_toast(format!("Invalid threshold: {error}"));
-                        rerender_for_mfa();
-                        return;
-                    }
-                };
+                let threshold =
+                    match aura_core::types::FrostThreshold::new(u16::from(mfa_state.threshold_k)) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            controller.runtime_error_toast(format!("Invalid threshold: {error}"));
+                            rerender_for_mfa();
+                            return;
+                        }
+                    };
 
                 match ceremony_workflows::start_device_threshold_ceremony(
                     &app_core,
@@ -1567,7 +1560,7 @@ fn submit_runtime_modal_action(
                 .await
                 {
                     Ok(_) => {
-                        controller.complete_runtime_modal_success("Multifactor ceremony started")
+                        controller.complete_runtime_modal_success("Multifactor ceremony started");
                     }
                     Err(error) => controller.runtime_error_toast(error.to_string()),
                 }
@@ -1652,7 +1645,7 @@ fn submit_runtime_modal_action(
                 return true;
             }
 
-            if !controller.request_authority_switch(authority.id.clone()) {
+            if !controller.request_authority_switch(authority.id) {
                 controller.runtime_error_toast("Authority switching is not available");
                 rerender();
                 return true;
@@ -2623,7 +2616,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                     &notifications_runtime_snapshot,
                     controller.clone(),
                     render_tick,
-                    theme.clone(),
+                    theme,
                     resolved_scheme,
                 )}
             }
@@ -2747,7 +2740,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                             .authorities
                             .iter()
                             .map(|authority| AuthorityPickerItem {
-                                id: authority.id.clone(),
+                                id: authority.id,
                                 label: authority.label.clone(),
                                 is_current: authority.is_current,
                                 is_selected: authority.selected,
@@ -3088,9 +3081,9 @@ fn neighborhood_screen(
             UiCard {
                 title: if is_detail { "Home".to_string() } else { "Map".to_string() },
                 subtitle: Some(if is_detail {
-                    format!("Access: {} ({hop_hint})", access_label)
+                    format!("Access: {access_label} ({hop_hint})")
                 } else {
-                    format!("Enter as: {} ({hop_hint})", access_label)
+                    format!("Enter as: {access_label} ({hop_hint})")
                 }),
                 extra_class: Some("lg:col-span-4".to_string()),
                 if is_detail {
@@ -3325,10 +3318,10 @@ fn neighborhood_screen(
                                     label: "Enter Home".to_string(),
                                     variant: ButtonVariant::Primary,
                                     on_click: {
-                                        let controller = map_enter_controller.clone();
+                                        let controller = map_enter_controller;
                                         let home_name = selected_home.clone();
                                         let depth = model.access_depth;
-                                        let target_home_id = enter_target_home_id.clone();
+                                        let target_home_id = enter_target_home_id;
                                         move |_| {
                                             let Some(target_home_id) = target_home_id.clone() else {
                                                 controller.runtime_error_toast("No runtime home selected");
@@ -3759,7 +3752,7 @@ fn contacts_screen(
                                             },
                                             on_click: {
                                                 let controller = controller.clone();
-                                                let authority_id = peer.authority_id.clone();
+                                                let authority_id = peer.authority_id;
                                                 let label = peer.authority_id.to_string();
                                                 move |_| {
                                                     controller.open_create_invitation_modal(
@@ -3828,7 +3821,7 @@ fn contacts_screen(
                         label: "Invite".to_string(),
                         variant: ButtonVariant::Primary,
                         on_click: {
-                            let controller = invite_controller.clone();
+                            let controller = invite_controller;
                             let selected_contact = selected_contact.clone();
                             move |_| {
                                 if let Some(contact) = &selected_contact {
@@ -3880,12 +3873,11 @@ fn contacts_screen(
                                 label: "Start Chat".to_string(),
                                 variant: ButtonVariant::Primary,
                                 on_click: {
-                                    let authority_id = contact.authority_id.clone();
-                                    let name = contact.name.clone();
+                                    let authority_id = contact.authority_id;
+                                    let name = contact.name;
                                     move |_| {
                                         let controller = start_chat_controller.clone();
                                         let app_core = controller.app_core().clone();
-                                        let authority_id = authority_id.clone();
                                         let name = name.clone();
                                         spawn(async move {
                                             let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
@@ -4016,18 +4008,20 @@ fn notifications_screen(
                         div {
                             class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
                             match item.action {
-                                NotificationRuntimeAction::ReceivedInvitation => rsx! {
+                                NotificationRuntimeAction::ReceivedInvitation => {
+                                    let accept_controller = controller.clone();
+                                    let accept_invitation_id = item.id.clone();
+                                    let decline_invitation_id = item.id;
+                                    rsx! {
                                     UiButton {
                                         label: "Accept".to_string(),
                                         variant: ButtonVariant::Primary,
                                         on_click: {
-                                            let controller = controller.clone();
-                                            let invitation_id = item.id.clone();
                                             move |_| {
-                                                let controller = controller.clone();
+                                                let controller = accept_controller.clone();
                                                 let app_core = controller.app_core().clone();
                                                 let mut tick = render_tick;
-                                                let invitation_id = invitation_id.clone();
+                                                let invitation_id = accept_invitation_id.clone();
                                                 spawn(async move {
                                                     match invitation_workflows::accept_invitation_by_str(&app_core, &invitation_id).await {
                                                         Ok(()) => controller.complete_runtime_modal_success("Invitation accepted"),
@@ -4042,13 +4036,11 @@ fn notifications_screen(
                                         label: "Decline".to_string(),
                                         variant: ButtonVariant::Secondary,
                                         on_click: {
-                                            let controller = controller.clone();
-                                            let invitation_id = item.id.clone();
                                             move |_| {
                                                 let controller = controller.clone();
                                                 let app_core = controller.app_core().clone();
                                                 let mut tick = render_tick;
-                                                let invitation_id = invitation_id.clone();
+                                                let invitation_id = decline_invitation_id.clone();
                                                 spawn(async move {
                                                     match invitation_workflows::decline_invitation_by_str(&app_core, &invitation_id).await {
                                                         Ok(()) => controller.complete_runtime_modal_success("Invitation declined"),
@@ -4059,14 +4051,14 @@ fn notifications_screen(
                                             }
                                         }
                                     }
+                                }
                                 },
                                 NotificationRuntimeAction::SentInvitation => rsx! {
                                     UiButton {
                                         label: "Copy Code".to_string(),
                                         variant: ButtonVariant::Primary,
                                         on_click: {
-                                            let controller = controller.clone();
-                                            let invitation_id = item.id.clone();
+                                            let invitation_id = item.id;
                                             move |_| {
                                                 let controller = controller.clone();
                                                 let app_core = controller.app_core().clone();
@@ -4091,8 +4083,7 @@ fn notifications_screen(
                                         label: "Approve Recovery".to_string(),
                                         variant: ButtonVariant::Primary,
                                         on_click: {
-                                            let controller = controller.clone();
-                                            let ceremony_id = item.id.clone();
+                                            let ceremony_id = item.id;
                                             move |_| {
                                                 let controller = controller.clone();
                                                 let app_core = controller.app_core().clone();
@@ -4346,7 +4337,7 @@ fn settings_screen(
                                 active: authority.is_current,
                                 on_click: {
                                     let controller = controller.clone();
-                                    let authority_id = authority.id.clone();
+                                    let authority_id = authority.id;
                                     move |_| {
                                         if authority.is_current {
                                             return;
@@ -4379,7 +4370,7 @@ fn settings_screen(
                                 label: "Configure MFA".to_string(),
                                 variant: ButtonVariant::Secondary,
                                 on_click: {
-                                    let controller = controller.clone();
+                                    let controller = controller;
                                     move |_| {
                                         controller.set_settings_section(SettingsSection::Authority);
                                         controller.send_action_keys("m");
@@ -4535,8 +4526,9 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
             keybind_rows = help_keybind_rows;
         }
         ModalState::CreateInvitation => {
-            if let Some(receiver_label) =
-                model.create_invitation_modal().and_then(|state| state.receiver_label.as_ref())
+            if let Some(receiver_label) = model
+                .create_invitation_modal()
+                .and_then(|state| state.receiver_label.as_ref())
             {
                 details.push(format!("Create an invitation code for {receiver_label}."));
                 details.push(
@@ -4702,7 +4694,8 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
             if let Some(state) = model.add_device_modal() {
                 match state.step {
                     AddDeviceWizardStep::Name => {
-                        details.push("Step 1 of 3: Name the device you want to invite.".to_string());
+                        details
+                            .push("Step 1 of 3: Name the device you want to invite.".to_string());
                         details.push("This is the new device, not the current one.".to_string());
                         details.push(
                             "Press Enter to generate an out-of-band enrollment code.".to_string(),
@@ -4758,7 +4751,9 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                 "Selected: {}",
                 model
                     .secondary_device_name()
-                    .or_else(|| model.selected_device_modal().map(|state| state.candidate_name.as_str()))
+                    .or_else(|| model
+                        .selected_device_modal()
+                        .map(|state| state.candidate_name.as_str()))
                     .unwrap_or("Secondary device")
             ));
             details.push("Press Enter to continue.".to_string());
@@ -4768,7 +4763,9 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                 "Remove \"{}\" from this authority?",
                 model
                     .secondary_device_name()
-                    .or_else(|| model.selected_device_modal().map(|state| state.candidate_name.as_str()))
+                    .or_else(|| model
+                        .selected_device_modal()
+                        .map(|state| state.candidate_name.as_str()))
                     .unwrap_or("Secondary device")
             ));
             details.push("Press Enter to confirm removal.".to_string());
@@ -4781,7 +4778,10 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                         let devices = if model.has_secondary_device {
                             vec![
                                 "This Device".to_string(),
-                                model.secondary_device_name().unwrap_or("Secondary Device").to_string(),
+                                model
+                                    .secondary_device_name()
+                                    .unwrap_or("Secondary Device")
+                                    .to_string(),
                             ]
                         } else {
                             vec!["This Device".to_string()]

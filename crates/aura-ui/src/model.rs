@@ -703,7 +703,9 @@ impl UiModel {
     #[must_use]
     pub fn selected_device_modal(&self) -> Option<&SelectDeviceModalState> {
         match self.active_modal.as_ref() {
-            Some(ActiveModal::SelectDeviceToRemove(state) | ActiveModal::ConfirmRemoveDevice(state)) => Some(state),
+            Some(
+                ActiveModal::SelectDeviceToRemove(state) | ActiveModal::ConfirmRemoveDevice(state),
+            ) => Some(state),
             _ => None,
         }
     }
@@ -791,13 +793,13 @@ impl UiModel {
     }
 
     pub fn append_modal_text_char(&mut self, ch: char) {
-        let mut value = self.modal_text_value().unwrap_or_default().to_string();
+        let mut value = self.modal_text_value().unwrap_or_default();
         value.push(ch);
         self.set_modal_text_value(value);
     }
 
     pub fn pop_modal_text_char(&mut self) {
-        let mut value = self.modal_text_value().unwrap_or_default().to_string();
+        let mut value = self.modal_text_value().unwrap_or_default();
         value.pop();
         self.set_modal_text_value(value);
     }

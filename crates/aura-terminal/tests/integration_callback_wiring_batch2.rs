@@ -463,11 +463,7 @@ async fn test_peer_management_operations() {
     // Phase 1: Add a peer
     println!("Phase 1: Add peer");
     let peer_id = peer_authority_id(0x31);
-    let result = ctx
-        .dispatch(EffectCommand::AddPeer {
-            peer_id,
-        })
-        .await;
+    let result = ctx.dispatch(EffectCommand::AddPeer { peer_id }).await;
     assert!(result.is_ok(), "AddPeer should succeed: {result:?}");
     println!("  AddPeer dispatched");
 

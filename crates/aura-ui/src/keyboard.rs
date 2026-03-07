@@ -466,44 +466,45 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             }
             dismiss_modal(model);
         }
-        ModalState::CreateChannel => match model.active_modal.as_mut() {
-            Some(ActiveModal::CreateChannel(state)) => match state.step {
-                CreateChannelWizardStep::Details => {
-                    let channel = state.name.trim().trim_start_matches('#').to_string();
-                    if channel.is_empty() {
-                        set_toast(model, '✗', "Channel name is required");
-                        return;
+        ModalState::CreateChannel => {
+            if let Some(ActiveModal::CreateChannel(state)) = model.active_modal.as_mut() {
+                match state.step {
+                    CreateChannelWizardStep::Details => {
+                        let channel = state.name.trim().trim_start_matches('#').to_string();
+                        if channel.is_empty() {
+                            set_toast(model, '✗', "Channel name is required");
+                            return;
+                        }
+                        state.name = channel;
+                        state.step = CreateChannelWizardStep::Members;
+                        state.member_focus = 0;
+                        model.modal_hint = "New Chat Group — Step 2 of 3".to_string();
                     }
-                    state.name = channel;
-                    state.step = CreateChannelWizardStep::Members;
-                    state.member_focus = 0;
-                    model.modal_hint = "New Chat Group — Step 2 of 3".to_string();
-                }
-                CreateChannelWizardStep::Members => {
-                    let selected_count = state.selected_members.len();
-                    let participants = selected_count.saturating_add(1);
-                    state.threshold = participants.max(1) as u8;
-                    state.step = CreateChannelWizardStep::Threshold;
-                    model.modal_hint = "New Chat Group — Step 3 of 3".to_string();
-                }
-                CreateChannelWizardStep::Threshold => {
-                    let max_threshold = (state.selected_members.len().saturating_add(1)) as u8;
-                    state.threshold = state.threshold.clamp(1, max_threshold.max(1));
-                    let channel = state.name.trim().to_string();
-                    let topic = state.topic.clone();
-                    model.select_channel_by_name(&channel);
-                    if !topic.trim().is_empty() {
-                        model.set_selected_channel_topic(topic);
+                    CreateChannelWizardStep::Members => {
+                        let selected_count = state.selected_members.len();
+                        let participants = selected_count.saturating_add(1);
+                        state.threshold = participants.max(1) as u8;
+                        state.step = CreateChannelWizardStep::Threshold;
+                        model.modal_hint = "New Chat Group — Step 3 of 3".to_string();
                     }
-                    model.toast = Some(ToastState {
-                        icon: '✓',
-                        message: format!("Created '{channel}'."),
-                    });
-                    dismiss_modal(model);
+                    CreateChannelWizardStep::Threshold => {
+                        let max_threshold = (state.selected_members.len().saturating_add(1)) as u8;
+                        state.threshold = state.threshold.clamp(1, max_threshold.max(1));
+                        let channel = state.name.trim().to_string();
+                        let topic = state.topic.clone();
+                        model.select_channel_by_name(&channel);
+                        if !topic.trim().is_empty() {
+                            model.set_selected_channel_topic(topic);
+                        }
+                        model.toast = Some(ToastState {
+                            icon: '✓',
+                            message: format!("Created '{channel}'."),
+                        });
+                        dismiss_modal(model);
+                    }
                 }
-            },
-            _ => {}
-        },
+            }
+        }
         ModalState::SetChannelTopic => {
             let value = match model.active_modal.as_ref() {
                 Some(ActiveModal::SetChannelTopic(state)) => state.value.trim().to_string(),
@@ -547,53 +548,53 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             });
             dismiss_modal(model);
         }
-        ModalState::GuardianSetup => match model.active_modal.as_mut() {
-            Some(ActiveModal::GuardianSetup(state)) => match state.step {
-                ThresholdWizardStep::Selection => {
-                    let available = model.contacts.len();
-                    if available < 2 {
+        ModalState::GuardianSetup => {
+            if let Some(ActiveModal::GuardianSetup(state)) = model.active_modal.as_mut() {
+                match state.step {
+                    ThresholdWizardStep::Selection => {
+                        let available = model.contacts.len();
+                        if available < 2 {
+                            set_toast(
+                                model,
+                                '✗',
+                                format!(
+                                    "Need at least 2 contacts for this threshold, but only {available} available"
+                                ),
+                            );
+                            return;
+                        }
+                        if state.selected_indices.len() < 2 {
+                            set_toast(model, '✗', "Select at least 2 guardians");
+                            return;
+                        }
+                        let selected = state.selected_indices.len() as u8;
+                        state.selected_count = selected;
+                        state.threshold_k = state.threshold_k.clamp(1, selected.max(1));
+                        state.threshold_input = state.threshold_k.to_string();
+                        state.step = ThresholdWizardStep::Threshold;
+                    }
+                    ThresholdWizardStep::Threshold => {
+                        let k = parse_wizard_value(&state.threshold_input, state.threshold_k)
+                            .clamp(1, state.selected_count);
+                        state.threshold_k = k;
+                        state.threshold_input.clear();
+                        state.step = ThresholdWizardStep::Ceremony;
+                    }
+                    ThresholdWizardStep::Ceremony => {
+                        let threshold_k = state.threshold_k;
+                        let selected_count = state.selected_count;
                         set_toast(
-                        model,
-                        '✗',
-                        format!(
-                            "Need at least 2 contacts for this threshold, but only {available} available"
-                        ),
-                    );
-                        return;
+                            model,
+                            'ℹ',
+                            format!(
+                                "Guardian ceremony started! Waiting for {threshold_k}-of-{selected_count} guardians to respond"
+                            ),
+                        );
+                        dismiss_modal(model);
                     }
-                    if state.selected_indices.len() < 2 {
-                        set_toast(model, '✗', "Select at least 2 guardians");
-                        return;
-                    }
-                    let selected = state.selected_indices.len() as u8;
-                    state.selected_count = selected;
-                    state.threshold_k = state.threshold_k.clamp(1, selected.max(1));
-                    state.threshold_input = state.threshold_k.to_string();
-                    state.step = ThresholdWizardStep::Threshold;
                 }
-                ThresholdWizardStep::Threshold => {
-                    let k = parse_wizard_value(&state.threshold_input, state.threshold_k)
-                        .clamp(1, state.selected_count);
-                    state.threshold_k = k;
-                    state.threshold_input.clear();
-                    state.step = ThresholdWizardStep::Ceremony;
-                }
-                ThresholdWizardStep::Ceremony => {
-                    let threshold_k = state.threshold_k;
-                    let selected_count = state.selected_count;
-                    set_toast(
-                        model,
-                        'ℹ',
-                        format!(
-                            "Guardian ceremony started! Waiting for {}-of-{} guardians to respond",
-                            threshold_k, selected_count
-                        ),
-                    );
-                    dismiss_modal(model);
-                }
-            },
-            _ => {}
-        },
+            }
+        }
         ModalState::RequestRecovery => {
             let required = match model.active_modal.as_ref() {
                 Some(ActiveModal::GuardianSetup(state)) => state.threshold_k.max(1) as usize,
@@ -623,35 +624,36 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             set_toast(model, 'ℹ', "Recovery process started");
             dismiss_modal(model);
         }
-        ModalState::AddDeviceStep1 => match model.active_modal.as_mut() {
-            Some(ActiveModal::AddDevice(state)) => match state.step {
-                AddDeviceWizardStep::Name => {
-                    let name = state.name_input.trim().to_string();
-                    if name.is_empty() {
-                        set_toast(model, '✗', "Device name is required");
-                        return;
-                    }
+        ModalState::AddDeviceStep1 => {
+            if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
+                match state.step {
+                    AddDeviceWizardStep::Name => {
+                        let name = state.name_input.trim().to_string();
+                        if name.is_empty() {
+                            set_toast(model, '✗', "Device name is required");
+                            return;
+                        }
 
-                    state.device_name = name;
-                    model.device_enrollment_counter =
-                        model.device_enrollment_counter.saturating_add(1);
-                    state.enrollment_code =
-                        format!("DEVICE-ENROLL-{}", model.device_enrollment_counter);
-                    state.name_input.clear();
-                    state.step = AddDeviceWizardStep::ShareCode;
-                    model.modal_hint = "Add Device — Step 2 of 3".to_string();
+                        state.device_name = name;
+                        model.device_enrollment_counter =
+                            model.device_enrollment_counter.saturating_add(1);
+                        state.enrollment_code =
+                            format!("DEVICE-ENROLL-{}", model.device_enrollment_counter);
+                        state.name_input.clear();
+                        state.step = AddDeviceWizardStep::ShareCode;
+                        model.modal_hint = "Add Device — Step 2 of 3".to_string();
+                    }
+                    AddDeviceWizardStep::ShareCode => {
+                        state.step = AddDeviceWizardStep::Confirm;
+                        model.modal_hint = "Add Device — Step 3 of 3".to_string();
+                    }
+                    AddDeviceWizardStep::Confirm => {
+                        set_toast(model, 'ℹ', "Device enrollment started");
+                        dismiss_modal(model);
+                    }
                 }
-                AddDeviceWizardStep::ShareCode => {
-                    state.step = AddDeviceWizardStep::Confirm;
-                    model.modal_hint = "Add Device — Step 3 of 3".to_string();
-                }
-                AddDeviceWizardStep::Confirm => {
-                    set_toast(model, 'ℹ', "Device enrollment started");
-                    dismiss_modal(model);
-                }
-            },
-            _ => {}
-        },
+            }
+        }
         ModalState::ImportDeviceEnrollmentCode => {
             let code = match model.active_modal.as_ref() {
                 Some(ActiveModal::ImportDeviceEnrollmentCode(state)) => state.value.trim(),
@@ -677,7 +679,10 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
         ModalState::SelectDeviceToRemove => {
             let candidate_name = match model.active_modal.as_ref() {
                 Some(ActiveModal::SelectDeviceToRemove(state)) => state.candidate_name.clone(),
-                _ => model.secondary_device_name().unwrap_or("Secondary device").to_string(),
+                _ => model
+                    .secondary_device_name()
+                    .unwrap_or("Secondary device")
+                    .to_string(),
             };
             model.modal_hint = "Confirm Device Removal".to_string();
             model.active_modal = Some(ActiveModal::ConfirmRemoveDevice(SelectDeviceModalState {
@@ -694,42 +699,42 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
             }
             dismiss_modal(model);
         }
-        ModalState::MfaSetup => match model.active_modal.as_mut() {
-            Some(ActiveModal::MfaSetup(state)) => match state.step {
-                ThresholdWizardStep::Selection => {
-                    if state.selected_indices.is_empty() {
-                        set_toast(model, '✗', "Select at least 1 device");
-                        return;
+        ModalState::MfaSetup => {
+            if let Some(ActiveModal::MfaSetup(state)) = model.active_modal.as_mut() {
+                match state.step {
+                    ThresholdWizardStep::Selection => {
+                        if state.selected_indices.is_empty() {
+                            set_toast(model, '✗', "Select at least 1 device");
+                            return;
+                        }
+                        let selected = state.selected_indices.len() as u8;
+                        state.selected_count = selected;
+                        state.threshold_k = state.threshold_k.clamp(1, state.selected_count);
+                        state.threshold_input = state.threshold_k.to_string();
+                        state.step = ThresholdWizardStep::Threshold;
                     }
-                    let selected = state.selected_indices.len() as u8;
-                    state.selected_count = selected;
-                    state.threshold_k = state.threshold_k.clamp(1, state.selected_count);
-                    state.threshold_input = state.threshold_k.to_string();
-                    state.step = ThresholdWizardStep::Threshold;
+                    ThresholdWizardStep::Threshold => {
+                        let k = parse_wizard_value(&state.threshold_input, state.threshold_k)
+                            .clamp(1, state.selected_count);
+                        state.threshold_k = k;
+                        state.threshold_input.clear();
+                        state.step = ThresholdWizardStep::Ceremony;
+                    }
+                    ThresholdWizardStep::Ceremony => {
+                        let threshold_k = state.threshold_k;
+                        let selected_count = state.selected_count;
+                        set_toast(
+                            model,
+                            'ℹ',
+                            format!(
+                                "Multifactor ceremony started ({threshold_k}-of-{selected_count})"
+                            ),
+                        );
+                        dismiss_modal(model);
+                    }
                 }
-                ThresholdWizardStep::Threshold => {
-                    let k = parse_wizard_value(&state.threshold_input, state.threshold_k)
-                        .clamp(1, state.selected_count);
-                    state.threshold_k = k;
-                    state.threshold_input.clear();
-                    state.step = ThresholdWizardStep::Ceremony;
-                }
-                ThresholdWizardStep::Ceremony => {
-                    let threshold_k = state.threshold_k;
-                    let selected_count = state.selected_count;
-                    set_toast(
-                        model,
-                        'ℹ',
-                        format!(
-                            "Multifactor ceremony started ({}-of-{})",
-                            threshold_k, selected_count
-                        ),
-                    );
-                    dismiss_modal(model);
-                }
-            },
-            _ => {}
-        },
+            }
+        }
         ModalState::AssignModerator => {
             if model.contacts.is_empty() {
                 model.toast = Some(ToastState {
@@ -1102,23 +1107,23 @@ fn handle_modal_char(
             Some(ActiveModal::CreateChannel(state))
                 if matches!(state.step, CreateChannelWizardStep::Members) =>
             {
-                    if matches!(ch, ' ') {
-                        toggle_create_channel_member(model);
-                        true
-                    } else if matches!(ch, 'j' | 'k') {
-                        if model.contacts.is_empty() {
-                            return true;
-                        }
-                        let max = model.contacts.len().saturating_sub(1);
-                        if ch == 'k' {
-                            state.member_focus = state.member_focus.saturating_sub(1);
-                        } else {
-                            state.member_focus = (state.member_focus + 1).min(max);
-                        }
-                        true
-                    } else {
-                        false
+                if matches!(ch, ' ') {
+                    toggle_create_channel_member(model);
+                    true
+                } else if matches!(ch, 'j' | 'k') {
+                    if model.contacts.is_empty() {
+                        return true;
                     }
+                    let max = model.contacts.len().saturating_sub(1);
+                    if ch == 'k' {
+                        state.member_focus = state.member_focus.saturating_sub(1);
+                    } else {
+                        state.member_focus = (state.member_focus + 1).min(max);
+                    }
+                    true
+                } else {
+                    false
+                }
             }
             _ => false,
         },
@@ -1244,7 +1249,9 @@ fn handle_modal_escape(model: &mut UiModel, modal: ModalState) -> bool {
 
 fn open_create_channel_wizard(model: &mut UiModel) {
     model.modal_hint = "New Chat Group — Step 1 of 3".to_string();
-    model.active_modal = Some(ActiveModal::CreateChannel(CreateChannelModalState::default()));
+    model.active_modal = Some(ActiveModal::CreateChannel(
+        CreateChannelModalState::default(),
+    ));
 }
 
 fn save_create_channel_details_buffer(model: &mut UiModel) {
@@ -1262,8 +1269,14 @@ fn toggle_create_channel_member(model: &mut UiModel) {
         return;
     }
     if let Some(ActiveModal::CreateChannel(state)) = model.active_modal.as_mut() {
-        let idx = state.member_focus.min(model.contacts.len().saturating_sub(1));
-        if let Some(position) = state.selected_members.iter().position(|selected| *selected == idx) {
+        let idx = state
+            .member_focus
+            .min(model.contacts.len().saturating_sub(1));
+        if let Some(position) = state
+            .selected_members
+            .iter()
+            .position(|selected| *selected == idx)
+        {
             state.selected_members.remove(position);
         } else {
             state.selected_members.push(idx);
@@ -1319,7 +1332,7 @@ fn open_remove_device_selection(model: &mut UiModel) {
 fn open_mfa_setup_wizard(model: &mut UiModel) {
     let selected_indices = (0..available_device_count(model) as usize).collect::<Vec<_>>();
     let selected_count = selected_indices.len().max(1) as u8;
-    let threshold_k = selected_count.min(2).max(1);
+    let threshold_k = selected_count.clamp(1, 2);
     model.modal_hint = "Multifactor Setup — Step 1 of 3".to_string();
     let mut state = ThresholdWizardModalState::with_defaults(selected_count, threshold_k);
     state.selected_indices = selected_indices;
@@ -1356,7 +1369,10 @@ fn handle_add_device_modal_char(model: &mut UiModel, ch: char, clipboard: &dyn C
             state.name_input.push(ch);
         }
         Some(ActiveModal::AddDevice(state))
-            if matches!(state.step, AddDeviceWizardStep::ShareCode | AddDeviceWizardStep::Confirm) =>
+            if matches!(
+                state.step,
+                AddDeviceWizardStep::ShareCode | AddDeviceWizardStep::Confirm
+            ) =>
         {
             if matches!(ch, 'c' | 'y') && !state.enrollment_code.is_empty() {
                 clipboard.write(&state.enrollment_code);
@@ -1390,7 +1406,8 @@ fn handle_wizard_named_key(model: &mut UiModel, key_name: &str) -> bool {
                     Some(ActiveModal::CreateChannel(state))
                         if matches!(state.step, CreateChannelWizardStep::Threshold) =>
                     {
-                        let current = parse_wizard_value(&state.threshold.to_string(), state.threshold);
+                        let current =
+                            parse_wizard_value(&state.threshold.to_string(), state.threshold);
                         let max = (state.selected_members.len().saturating_add(1)) as u8;
                         let adjusted = if key_name == "up" {
                             current.saturating_add(1).min(max.max(1))
@@ -1499,12 +1516,14 @@ fn adjust_threshold_wizard_input(model: &mut UiModel, guardian: bool, delta: i8)
     match model.active_modal.as_mut() {
         Some(ActiveModal::GuardianSetup(state)) if guardian => {
             let current = parse_wizard_value(&state.threshold_input, state.threshold_k);
-            let adjusted = (current as i16 + delta as i16).clamp(1, state.selected_count.max(1) as i16) as u8;
+            let adjusted =
+                (current as i16 + delta as i16).clamp(1, state.selected_count.max(1) as i16) as u8;
             state.threshold_input = adjusted.to_string();
         }
         Some(ActiveModal::MfaSetup(state)) if !guardian => {
             let current = parse_wizard_value(&state.threshold_input, state.threshold_k);
-            let adjusted = (current as i16 + delta as i16).clamp(1, state.selected_count.max(1) as i16) as u8;
+            let adjusted =
+                (current as i16 + delta as i16).clamp(1, state.selected_count.max(1) as i16) as u8;
             state.threshold_input = adjusted.to_string();
         }
         _ => {}
@@ -1528,8 +1547,14 @@ fn toggle_guardian_selection(model: &mut UiModel) {
         return;
     }
     if let Some(ActiveModal::GuardianSetup(state)) = model.active_modal.as_mut() {
-        let idx = state.focus_index.min(model.contacts.len().saturating_sub(1));
-        if let Some(position) = state.selected_indices.iter().position(|selected| *selected == idx) {
+        let idx = state
+            .focus_index
+            .min(model.contacts.len().saturating_sub(1));
+        if let Some(position) = state
+            .selected_indices
+            .iter()
+            .position(|selected| *selected == idx)
+        {
             state.selected_indices.remove(position);
         } else {
             state.selected_indices.push(idx);
@@ -1545,7 +1570,11 @@ fn toggle_mfa_selection(model: &mut UiModel) {
     }
     if let Some(ActiveModal::MfaSetup(state)) = model.active_modal.as_mut() {
         let idx = state.focus_index.min(available.saturating_sub(1));
-        if let Some(position) = state.selected_indices.iter().position(|selected| *selected == idx) {
+        if let Some(position) = state
+            .selected_indices
+            .iter()
+            .position(|selected| *selected == idx)
+        {
             state.selected_indices.remove(position);
         } else {
             state.selected_indices.push(idx);
@@ -1694,7 +1723,10 @@ mod tests {
         model.set_screen(UiScreen::Contacts);
         apply_text_keys(&mut model, "n", &clipboard);
 
-        assert!(matches!(modal_state(&model), Some(ModalState::CreateInvitation)));
+        assert!(matches!(
+            modal_state(&model),
+            Some(ModalState::CreateInvitation)
+        ));
     }
 
     #[test]
@@ -1753,7 +1785,10 @@ mod tests {
         model.set_screen(UiScreen::Chat);
 
         apply_text_keys(&mut model, "n", &clipboard);
-        assert!(matches!(modal_state(&model), Some(ModalState::CreateChannel)));
+        assert!(matches!(
+            modal_state(&model),
+            Some(ModalState::CreateChannel)
+        ));
 
         model.dismiss_modal();
         apply_text_keys(&mut model, "i", &clipboard);
@@ -1769,17 +1804,29 @@ mod tests {
         model.ensure_contact("Carol");
 
         apply_text_keys(&mut model, "n", &clipboard);
-        assert!(matches!(modal_state(&model), Some(ModalState::CreateChannel)));
+        assert!(matches!(
+            modal_state(&model),
+            Some(ModalState::CreateChannel)
+        ));
         assert_eq!(model.modal_hint, "New Chat Group — Step 1 of 3");
-        assert_eq!(create_channel_state(&model).step, CreateChannelWizardStep::Details);
+        assert_eq!(
+            create_channel_state(&model).step,
+            CreateChannelWizardStep::Details
+        );
 
         apply_text_keys(&mut model, "team-room", &clipboard);
         apply_named_key(&mut model, "tab", 1, &clipboard);
-        assert_eq!(create_channel_state(&model).step, CreateChannelWizardStep::Details);
+        assert_eq!(
+            create_channel_state(&model).step,
+            CreateChannelWizardStep::Details
+        );
 
         apply_text_keys(&mut model, "bootstrap-topic", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert_eq!(create_channel_state(&model).step, CreateChannelWizardStep::Members);
+        assert_eq!(
+            create_channel_state(&model).step,
+            CreateChannelWizardStep::Members
+        );
         assert_eq!(model.modal_hint, "New Chat Group — Step 2 of 3");
 
         apply_named_key(&mut model, "down", 1, &clipboard);
@@ -1807,7 +1854,10 @@ mod tests {
         apply_text_keys(&mut model, "demo-trio-room", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);
 
-        assert_eq!(create_channel_state(&model).step, CreateChannelWizardStep::Members);
+        assert_eq!(
+            create_channel_state(&model).step,
+            CreateChannelWizardStep::Members
+        );
         assert_eq!(model.modal_hint, "New Chat Group — Step 2 of 3");
     }
 
@@ -1838,7 +1888,9 @@ mod tests {
 
         apply_text_keys(&mut model, "\n", &clipboard);
 
-        let toast = model.toast.expect("nhlink should emit a toast");
+        let Some(toast) = model.toast else {
+            panic!("nhlink should emit a toast");
+        };
         assert!(toast.message.contains("status=denied"));
         assert!(toast.message.contains("reason=permission_denied"));
         assert!(toast.message.contains("consistency=accepted"));
@@ -1855,7 +1907,9 @@ mod tests {
 
         apply_text_keys(&mut model, "\n", &clipboard);
 
-        let toast = model.toast.expect("pin should emit a toast");
+        let Some(toast) = model.toast else {
+            panic!("pin should emit a toast");
+        };
         assert!(toast.message.contains("status=denied"));
         assert!(toast.message.contains("reason=permission_denied"));
     }
@@ -1871,7 +1925,9 @@ mod tests {
 
         apply_text_keys(&mut model, "\n", &clipboard);
 
-        let toast = model.toast.expect("mode -m should emit a toast");
+        let Some(toast) = model.toast else {
+            panic!("mode -m should emit a toast");
+        };
         assert!(toast.message.contains("status=ok"));
         assert!(toast.message.contains("consistency=enforced"));
     }
@@ -1903,7 +1959,9 @@ mod tests {
 
         apply_text_keys(&mut model, "\n", &clipboard);
 
-        let toast = model.toast.expect("unknown command should emit a toast");
+        let Some(toast) = model.toast else {
+            panic!("unknown command should emit a toast");
+        };
         assert!(toast.message.contains("status=invalid"));
         assert!(toast.message.contains("reason=not_found"));
     }
@@ -1917,7 +1975,10 @@ mod tests {
 
         model.settings_section = SettingsSection::Profile;
         apply_text_keys(&mut model, "e", &clipboard);
-        assert!(matches!(modal_state(&model), Some(ModalState::EditNickname)));
+        assert!(matches!(
+            modal_state(&model),
+            Some(ModalState::EditNickname)
+        ));
         model.dismiss_modal();
 
         model.settings_section = SettingsSection::GuardianThreshold;
@@ -1930,12 +1991,18 @@ mod tests {
 
         model.settings_section = SettingsSection::RequestRecovery;
         apply_text_keys(&mut model, "s", &clipboard);
-        assert!(matches!(modal_state(&model), Some(ModalState::RequestRecovery)));
+        assert!(matches!(
+            modal_state(&model),
+            Some(ModalState::RequestRecovery)
+        ));
         model.dismiss_modal();
 
         model.settings_section = SettingsSection::Devices;
         apply_text_keys(&mut model, "a", &clipboard);
-        assert!(matches!(modal_state(&model), Some(ModalState::AddDeviceStep1)));
+        assert!(matches!(
+            modal_state(&model),
+            Some(ModalState::AddDeviceStep1)
+        ));
         model.dismiss_modal();
         apply_text_keys(&mut model, "i", &clipboard);
         assert!(matches!(
@@ -2008,7 +2075,10 @@ mod tests {
             Some(ModalState::SelectDeviceToRemove)
         ));
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert!(matches!(modal_state(&model), Some(ModalState::ConfirmRemoveDevice)));
+        assert!(matches!(
+            modal_state(&model),
+            Some(ModalState::ConfirmRemoveDevice)
+        ));
         apply_named_key(&mut model, "enter", 1, &clipboard);
 
         assert!(!model.has_secondary_device);
@@ -2029,7 +2099,10 @@ mod tests {
         model.ensure_contact("Carol");
 
         apply_text_keys(&mut model, "t", &clipboard);
-        assert!(matches!(modal_state(&model), Some(ModalState::GuardianSetup)));
+        assert!(matches!(
+            modal_state(&model),
+            Some(ModalState::GuardianSetup)
+        ));
         assert_eq!(guardian_state(&model).step, ThresholdWizardStep::Selection);
 
         apply_named_key(&mut model, "down", 2, &clipboard);
@@ -2082,11 +2155,17 @@ mod tests {
         model.settings_section = SettingsSection::Devices;
 
         apply_text_keys(&mut model, "a", &clipboard);
-        assert!(matches!(modal_state(&model), Some(ModalState::AddDeviceStep1)));
+        assert!(matches!(
+            modal_state(&model),
+            Some(ModalState::AddDeviceStep1)
+        ));
         assert_eq!(model.modal_hint, "Add Device — Step 1 of 3");
 
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert!(matches!(modal_state(&model), Some(ModalState::AddDeviceStep1)));
+        assert!(matches!(
+            modal_state(&model),
+            Some(ModalState::AddDeviceStep1)
+        ));
         assert_eq!(add_device_state(&model).step, AddDeviceWizardStep::Name);
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
@@ -2095,8 +2174,14 @@ mod tests {
 
         apply_text_keys(&mut model, "Laptop", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert!(matches!(modal_state(&model), Some(ModalState::AddDeviceStep1)));
-        assert_eq!(add_device_state(&model).step, AddDeviceWizardStep::ShareCode);
+        assert!(matches!(
+            modal_state(&model),
+            Some(ModalState::AddDeviceStep1)
+        ));
+        assert_eq!(
+            add_device_state(&model).step,
+            AddDeviceWizardStep::ShareCode
+        );
         assert_eq!(model.modal_hint, "Add Device — Step 2 of 3");
         assert!(!add_device_state(&model).enrollment_code.is_empty());
     }
@@ -2127,7 +2212,10 @@ mod tests {
         model.settings_section = SettingsSection::RequestRecovery;
 
         apply_named_key(&mut model, "enter", 1, &clipboard);
-        assert!(matches!(modal_state(&model), Some(ModalState::RequestRecovery)));
+        assert!(matches!(
+            modal_state(&model),
+            Some(ModalState::RequestRecovery)
+        ));
         apply_named_key(&mut model, "enter", 1, &clipboard);
 
         assert!(model.modal_state().is_none());
@@ -2170,9 +2258,15 @@ mod tests {
         );
 
         apply_named_key(&mut model, "esc", 1, &clipboard);
-        assert_eq!(create_channel_state(&model).step, CreateChannelWizardStep::Members);
+        assert_eq!(
+            create_channel_state(&model).step,
+            CreateChannelWizardStep::Members
+        );
         apply_named_key(&mut model, "esc", 1, &clipboard);
-        assert_eq!(create_channel_state(&model).step, CreateChannelWizardStep::Details);
+        assert_eq!(
+            create_channel_state(&model).step,
+            CreateChannelWizardStep::Details
+        );
     }
 
     #[test]

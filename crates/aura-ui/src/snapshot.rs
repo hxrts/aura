@@ -403,8 +403,10 @@ fn apply_modal_overlay(
                         if row_idx == 0 {
                             *center = "Guardian Setup — Step 3 of 3".to_string();
                         } else if row_idx == 1 {
-                            *center =
-                                format!("{} of {} approvals", state.threshold_k, state.selected_count);
+                            *center = format!(
+                                "{} of {} approvals",
+                                state.threshold_k, state.selected_count
+                            );
                         }
                     }
                 }
@@ -458,7 +460,11 @@ fn apply_modal_overlay(
             } else if row_idx == 1 {
                 *center = model
                     .secondary_device_name()
-                    .or_else(|| model.selected_device_modal().map(|state| state.candidate_name.as_str()))
+                    .or_else(|| {
+                        model
+                            .selected_device_modal()
+                            .map(|state| state.candidate_name.as_str())
+                    })
                     .unwrap_or("Secondary device")
                     .to_string();
             }
@@ -469,7 +475,11 @@ fn apply_modal_overlay(
             } else if row_idx == 1 {
                 *center = model
                     .secondary_device_name()
-                    .or_else(|| model.selected_device_modal().map(|state| state.candidate_name.as_str()))
+                    .or_else(|| {
+                        model
+                            .selected_device_modal()
+                            .map(|state| state.candidate_name.as_str())
+                    })
                     .unwrap_or("Secondary device")
                     .to_string();
             }
