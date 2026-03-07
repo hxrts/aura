@@ -134,6 +134,7 @@ pub mod runtime_bridge;
 pub mod signal_defs;
 pub mod thresholds;
 pub mod ui;
+pub mod ui_contract;
 pub mod views;
 pub(crate) mod workflows;
 
@@ -156,6 +157,11 @@ pub use crate::queries::Query;
 pub use crate::runtime_bridge::{
     BoxedRuntimeBridge, LanPeerInfo, OfflineRuntimeBridge, RendezvousStatus, RuntimeBridge,
     RuntimeStatus, SyncStatus,
+};
+pub use crate::ui_contract::{
+    ControlId, FieldId, ListId, ModalId, OperationSnapshot, OperationState, ScreenId,
+    SelectionSnapshot as UiSelectionSnapshot, ToastKind, ToastSnapshot as UiToastSnapshot,
+    UiReadiness, UiSnapshot,
 };
 pub use crate::views::{
     Channel, ChannelType, ChatState, ContactsState, HomeState, InvitationsState, Message,

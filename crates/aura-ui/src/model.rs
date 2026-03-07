@@ -7,31 +7,17 @@ use crate::clipboard::ClipboardPort;
 use crate::keyboard::{apply_named_key, apply_text_keys};
 use crate::snapshot::render_canonical_snapshot;
 use async_lock::RwLock as AsyncRwLock;
-use aura_app::AppCore;
+use aura_app::{
+    ui::contract::{
+        ControlId, ListId, ListItemSnapshot, ListSnapshot, ModalId, SelectionSnapshot, ToastKind,
+        ToastSnapshot, UiReadiness, UiSnapshot,
+    },
+    AppCore,
+};
 use aura_core::identifiers::{AuthorityId, CeremonyId};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UiScreen {
-    Neighborhood,
-    Chat,
-    Contacts,
-    Notifications,
-    Settings,
-}
-
-impl UiScreen {
-    #[must_use]
-    pub const fn help_label(self) -> &'static str {
-        match self {
-            Self::Neighborhood => "Neighborhood",
-            Self::Chat => "Chat",
-            Self::Contacts => "Contacts",
-            Self::Notifications => "Notifications",
-            Self::Settings => "Settings",
-        }
-    }
-}
+pub use aura_app::ui::contract::ScreenId as UiScreen;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NeighborhoodMode {
@@ -146,6 +132,34 @@ pub enum ModalState {
     SwitchAuthority,
     AccessOverride,
     CapabilityConfig,
+}
+
+impl ModalState {
+    #[must_use]
+    pub const fn contract_id(self) -> ModalId {
+        match self {
+            Self::Help => ModalId::Help,
+            Self::CreateInvitation => ModalId::CreateInvitation,
+            Self::AcceptInvitation => ModalId::AcceptInvitation,
+            Self::CreateHome => ModalId::CreateHome,
+            Self::CreateChannel => ModalId::CreateChannel,
+            Self::SetChannelTopic => ModalId::SetChannelTopic,
+            Self::ChannelInfo => ModalId::ChannelInfo,
+            Self::EditNickname => ModalId::EditNickname,
+            Self::RemoveContact => ModalId::RemoveContact,
+            Self::GuardianSetup => ModalId::GuardianSetup,
+            Self::RequestRecovery => ModalId::RequestRecovery,
+            Self::AddDeviceStep1 => ModalId::AddDevice,
+            Self::ImportDeviceEnrollmentCode => ModalId::ImportDeviceEnrollmentCode,
+            Self::SelectDeviceToRemove => ModalId::SelectDeviceToRemove,
+            Self::ConfirmRemoveDevice => ModalId::ConfirmRemoveDevice,
+            Self::MfaSetup => ModalId::MfaSetup,
+            Self::AssignModerator => ModalId::AssignModerator,
+            Self::SwitchAuthority => ModalId::SwitchAuthority,
+            Self::AccessOverride => ModalId::AccessOverride,
+            Self::CapabilityConfig => ModalId::CapabilityConfig,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1203,6 +1217,124 @@ impl UiModel {
 
     pub fn set_secondary_device_name(&mut self, value: Option<String>) {
         self.secondary_device_name = value;
+    }
+
+    #[must_use]
+    pub fn semantic_snapshot(&self) -> UiSnapshot {
+        let mut lists = Vec::new();
+        let mut selections = Vec::new();
+
+        let channel_items = self
+            .channels
+            .iter()
+            .map(|channel| ListItemSnapshot {
+                id: channel.name.clone(),
+                selected: channel.selected,
+            })
+            .collect::<Vec<_>>();
+        if !channel_items.is_empty() {
+            lists.push(ListSnapshot {
+                id: ListId::Channels,
+                items: channel_items,
+            });
+        }
+        if let Some(channel) = self.selected_channel_name() {
+            selections.push(SelectionSnapshot {
+                list: ListId::Channels,
+                item_id: channel.to_string(),
+            });
+        }
+
+        let contact_items = self
+            .contacts
+            .iter()
+            .map(|contact| ListItemSnapshot {
+                id: contact.authority_id.to_string(),
+                selected: contact.selected,
+            })
+            .collect::<Vec<_>>();
+        if !contact_items.is_empty() {
+            lists.push(ListSnapshot {
+                id: ListId::Contacts,
+                items: contact_items,
+            });
+        }
+        if let Some(contact_id) = self.selected_contact_authority_id() {
+            selections.push(SelectionSnapshot {
+                list: ListId::Contacts,
+                item_id: contact_id.to_string(),
+            });
+        }
+
+        let authority_items = self
+            .authorities
+            .iter()
+            .map(|authority| ListItemSnapshot {
+                id: authority.id.to_string(),
+                selected: authority.selected,
+            })
+            .collect::<Vec<_>>();
+        if !authority_items.is_empty() {
+            lists.push(ListSnapshot {
+                id: ListId::Authorities,
+                items: authority_items,
+            });
+        }
+        if let Some(authority_id) = self.selected_authority_id {
+            selections.push(SelectionSnapshot {
+                list: ListId::Authorities,
+                item_id: authority_id.to_string(),
+            });
+        }
+
+        let notification_items = self
+            .notification_ids
+            .iter()
+            .map(|notification| ListItemSnapshot {
+                id: notification.0.clone(),
+                selected: self.selected_notification_id.as_ref() == Some(notification),
+            })
+            .collect::<Vec<_>>();
+        if !notification_items.is_empty() {
+            lists.push(ListSnapshot {
+                id: ListId::Notifications,
+                items: notification_items,
+            });
+        }
+        if let Some(notification_id) = &self.selected_notification_id {
+            selections.push(SelectionSnapshot {
+                list: ListId::Notifications,
+                item_id: notification_id.0.clone(),
+            });
+        }
+
+        let mut toasts = Vec::new();
+        if let Some(toast) = &self.toast {
+            let kind = match toast.icon {
+                '✓' => ToastKind::Success,
+                'ℹ' => ToastKind::Info,
+                _ => ToastKind::Error,
+            };
+            toasts.push(ToastSnapshot {
+                kind,
+                message: toast.message.clone(),
+            });
+        }
+
+        UiSnapshot {
+            screen: self.screen,
+            focused_control: Some(ControlId::Screen(self.screen)),
+            open_modal: self.modal_state().map(ModalState::contract_id),
+            readiness: if self.account_ready {
+                UiReadiness::Ready
+            } else {
+                UiReadiness::Loading
+            },
+            selections,
+            lists,
+            operations: Vec::new(),
+            toasts,
+        }
     }
 }
 
