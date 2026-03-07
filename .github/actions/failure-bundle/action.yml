@@ -1,0 +1,52 @@
+name: Failure Bundle
+
+description: Collect deterministic failure diagnostics and upload as a single artifact.
+
+inputs:
+  name:
+    description: Artifact name prefix.
+    required: false
+    default: ci-failure
+  artifact-root:
+    description: Root directory containing job artifacts/logs.
+    required: false
+    default: artifacts
+  replay-command:
+    description: Optional one-command local replay instruction.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Collect bundle
+      shell: bash
+      run: |
+        set -euo pipefail
+        DEST="${RUNNER_TEMP}/ci-failure/${GITHUB_JOB}"
+        bash scripts/ci/failure-bundle.sh "$DEST" "${{ inputs.artifact-root }}" "${{ inputs.replay-command }}"
+
+    - name: Upload bundle
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.name }}-${{ github.run_id }}-${{ github.job }}
+        path: ${{ runner.temp }}/ci-failure/${{ github.job }}
+        if-no-files-found: warn
+
+    - name: Write job summary
+      shell: bash
+      run: |
+        set -euo pipefail
+        ARTIFACT_NAME="${{ inputs.name }}-${{ github.run_id }}-${{ github.job }}"
+        {
+          echo "## Failure Bundle"
+          echo "- Artifact: \`${ARTIFACT_NAME}\`"
+          if [[ -n "${{ inputs.replay-command }}" ]]; then
+            echo "- Replay:"
+            echo ""
+            echo '```bash'
+            echo "${{ inputs.replay-command }}"
+            echo '```'
+          fi
+          echo "- Bundle path in runner: \`${RUNNER_TEMP}/ci-failure/${GITHUB_JOB}\`"
+        } >> "$GITHUB_STEP_SUMMARY"

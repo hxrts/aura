@@ -6,8 +6,8 @@ on:
   push:
     branches: [main, develop]
     paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
+      - "docs/**"
+      - "**/*.md"
   schedule:
     - cron: "0 7 * * *"
 
