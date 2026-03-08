@@ -1,10 +1,26 @@
 module invitation_device_enrollment exposing (DeviceEnrollment)
 
+-- Device enrollment protocol with link annotations for typed composition.
+-- Links enable safe protocol migration and dynamic reconfiguration.
+
 protocol DeviceEnrollment =
   roles Initiator, Invitee
 
-  Initiator[guard_capability = "invitation:device:enroll", flow_cost = 2, journal_facts = "InvitationFact::DeviceEnrollmentRequested"] -> Invitee : DeviceEnrollmentRequest(crate::DeviceEnrollmentRequest)
+  -- Phase 1: Enrollment request
+  -- Link: exports request/accept endpoints for device migration bundle
+  Initiator[ guard_capability = "invitation:device:enroll"
+           , flow_cost = 2
+           , journal_facts = "InvitationFact::DeviceEnrollmentRequested"
+           , link = "bundle=device_migration|exports=device_migration.request,device_migration.accept|imports=device_migration.accept" ] -> Invitee : DeviceEnrollmentRequest(crate::DeviceEnrollmentRequest)
 
-  Invitee[guard_capability = "invitation:device:accept", flow_cost = 2, journal_facts = "InvitationFact::DeviceEnrollmentAccepted"] -> Initiator : DeviceEnrollmentAccept(crate::DeviceEnrollmentAccept)
+  -- Phase 2: Enrollment acceptance
+  -- Link: imports request endpoint, exports accept endpoint
+  Invitee[ guard_capability = "invitation:device:accept"
+         , flow_cost = 2
+         , journal_facts = "InvitationFact::DeviceEnrollmentAccepted"
+         , link = "bundle=device_migration|exports=device_migration.request,device_migration.accept|imports=device_migration.request" ] -> Initiator : DeviceEnrollmentAccept(crate::DeviceEnrollmentAccept)
 
-  Initiator[guard_capability = "invitation:device:enroll", flow_cost = 1, journal_facts = "InvitationFact::DeviceEnrollmentConfirmed"] -> Invitee : DeviceEnrollmentConfirm(crate::DeviceEnrollmentConfirm)
+  -- Phase 3: Enrollment confirmation
+  Initiator[ guard_capability = "invitation:device:enroll"
+           , flow_cost = 1
+           , journal_facts = "InvitationFact::DeviceEnrollmentConfirmed" ] -> Invitee : DeviceEnrollmentConfirm(crate::DeviceEnrollmentConfirm)

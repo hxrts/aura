@@ -3,17 +3,29 @@ module aura_consensus exposing (AuraConsensus)
 protocol AuraConsensus =
   roles Coordinator, Witness[N]
 
+  -- Phase 1: Execute consensus round
   @parallel
-  Coordinator[guard_capability = "initiate_consensus", flow_cost = 100] -> Witness[*] : Execute(crate::ConsensusMessage)
+  Coordinator[ guard_capability = "initiate_consensus"
+             , flow_cost = 100 ] -> Witness[*] : Execute(crate::ConsensusMessage)
 
+  -- Phase 2: Nonce commitment
   @parallel
-  Witness[*][guard_capability = "witness_nonce", flow_cost = 50] -> Coordinator : NonceCommit(crate::ConsensusMessage)
+  Witness[*][ guard_capability = "witness_nonce"
+            , flow_cost = 50 ] -> Coordinator : NonceCommit(crate::ConsensusMessage)
 
+  -- Phase 3: Request signatures
   @parallel
-  Coordinator[guard_capability = "aggregate_nonces", flow_cost = 75] -> Witness[*] : SignRequest(crate::ConsensusMessage)
+  Coordinator[ guard_capability = "aggregate_nonces"
+             , flow_cost = 75 ] -> Witness[*] : SignRequest(crate::ConsensusMessage)
 
+  -- Phase 4: Collect signature shares
   @parallel
-  Witness[*][guard_capability = "witness_sign", flow_cost = 50, leak = "pipelined_commitment"] -> Coordinator : SignShare(crate::ConsensusMessage)
+  Witness[*][ guard_capability = "witness_sign"
+            , flow_cost = 50
+            , leak = "pipelined_commitment" ] -> Coordinator : SignShare(crate::ConsensusMessage)
 
+  -- Phase 5: Finalize and broadcast result
   @parallel
-  Coordinator[guard_capability = "finalize_consensus", flow_cost = 100, journal_facts = "consensus_complete"] -> Witness[*] : ConsensusResult(crate::ConsensusMessage)
+  Coordinator[ guard_capability = "finalize_consensus"
+             , flow_cost = 100
+             , journal_facts = "consensus_complete" ] -> Witness[*] : ConsensusResult(crate::ConsensusMessage)

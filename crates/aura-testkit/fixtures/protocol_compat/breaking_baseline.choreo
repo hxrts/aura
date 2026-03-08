@@ -2,5 +2,6 @@ module break_baseline exposing (BreakBaseline)
 
 protocol BreakBaseline =
   roles A, B
+
   A -> B : Ping
   B -> A : Pong

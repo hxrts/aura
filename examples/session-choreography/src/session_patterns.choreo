@@ -3,30 +3,51 @@ module session_patterns exposing (SimpleSessionChoreography)
 protocol SimpleSessionChoreography =
   roles Coordinator, Participants[*]
 
+  -- Phase 1: Coordinator invites participants
   @parallel
-  Coordinator[guard_capability = "create_session", flow_cost = 100, journal_facts = "session_created"] -> Participants[*] : SessionInvitation(crate::SessionInvitation)
+  Coordinator[ guard_capability = "create_session"
+             , flow_cost = 100
+             , journal_facts = "session_created" ] -> Participants[*] : SessionInvitation(crate::SessionInvitation)
 
+  -- Phase 2: Participants decide to accept or decline
   case choose Participants[*] of
     accept ->
       @parallel
-      Participants[*][guard_capability = "join_session", flow_cost = 50, journal_facts = "session_joined"] -> Coordinator : SessionAccepted(crate::SessionAccepted)
+      Participants[*][ guard_capability = "join_session"
+                     , flow_cost = 50
+                     , journal_facts = "session_joined" ] -> Coordinator : SessionAccepted(crate::SessionAccepted)
+
     decline ->
       @parallel
-      Participants[*][guard_capability = "decline_session", flow_cost = 25, journal_facts = "session_declined"] -> Coordinator : SessionDeclined(crate::SessionDeclined)
+      Participants[*][ guard_capability = "decline_session"
+                     , flow_cost = 25
+                     , journal_facts = "session_declined" ] -> Coordinator : SessionDeclined(crate::SessionDeclined)
 
+  -- Phase 3: Activate session
   @parallel
-  Coordinator[guard_capability = "activate_session", flow_cost = 75, journal_facts = "session_activated"] -> Participants[*] : SessionActivated(crate::SessionActivated)
+  Coordinator[ guard_capability = "activate_session"
+             , flow_cost = 75
+             , journal_facts = "session_activated" ] -> Participants[*] : SessionActivated(crate::SessionActivated)
 
+  -- Phase 4: Session loop
   loop decide by Coordinator
     case choose Coordinator of
       broadcast ->
         @parallel
-        Coordinator[guard_capability = "broadcast_message", flow_cost = 25] -> Participants[*] : BroadcastMessage(crate::BroadcastMessage)
+        Coordinator[ guard_capability = "broadcast_message"
+                   , flow_cost = 25 ] -> Participants[*] : BroadcastMessage(crate::BroadcastMessage)
+
       status_check ->
         @parallel
-        Coordinator[guard_capability = "check_status", flow_cost = 10] -> Participants[*] : StatusCheck(crate::StatusCheck)
+        Coordinator[ guard_capability = "check_status"
+                   , flow_cost = 10 ] -> Participants[*] : StatusCheck(crate::StatusCheck)
+
         @parallel
-        Participants[*][guard_capability = "report_status", flow_cost = 15] -> Coordinator : StatusReport(crate::StatusReport)
+        Participants[*][ guard_capability = "report_status"
+                       , flow_cost = 15 ] -> Coordinator : StatusReport(crate::StatusReport)
+
       end_session ->
         @parallel
-        Coordinator[guard_capability = "end_session", flow_cost = 100, journal_facts = "session_ended"] -> Participants[*] : SessionEnded(crate::SessionEnded)
+        Coordinator[ guard_capability = "end_session"
+                   , flow_cost = 100
+                   , journal_facts = "session_ended" ] -> Participants[*] : SessionEnded(crate::SessionEnded)

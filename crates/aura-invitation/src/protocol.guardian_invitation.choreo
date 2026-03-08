@@ -3,8 +3,17 @@ module invitation_guardian exposing (GuardianInvitation)
 protocol GuardianInvitation =
   roles Principal, Guardian
 
-  Principal[guard_capability = "invitation:guardian", flow_cost = 2, journal_facts = "InvitationFact::GuardianRequested"] -> Guardian : GuardianRequest(crate::GuardianRequest)
+  -- Phase 1: Principal requests guardian relationship
+  Principal[ guard_capability = "invitation:guardian"
+           , flow_cost = 2
+           , journal_facts = "InvitationFact::GuardianRequested" ] -> Guardian : GuardianRequest(crate::GuardianRequest)
 
-  Guardian[guard_capability = "invitation:guardian:accept", flow_cost = 2, journal_facts = "InvitationFact::GuardianAccepted"] -> Principal : GuardianAccept(crate::GuardianAccept)
+  -- Phase 2: Guardian accepts
+  Guardian[ guard_capability = "invitation:guardian:accept"
+          , flow_cost = 2
+          , journal_facts = "InvitationFact::GuardianAccepted" ] -> Principal : GuardianAccept(crate::GuardianAccept)
 
-  Principal[guard_capability = "invitation:guardian", flow_cost = 1, journal_facts = "InvitationFact::GuardianConfirmed"] -> Guardian : GuardianConfirm(crate::GuardianConfirm)
+  -- Phase 3: Principal confirms
+  Principal[ guard_capability = "invitation:guardian"
+           , flow_cost = 1
+           , journal_facts = "InvitationFact::GuardianConfirmed" ] -> Guardian : GuardianConfirm(crate::GuardianConfirm)

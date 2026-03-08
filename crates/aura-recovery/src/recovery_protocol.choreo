@@ -3,10 +3,18 @@ module recovery_protocol exposing (RecoveryProtocol)
 protocol RecoveryProtocol =
   roles Account, Guardian, Coordinator
 
-  Account[guard_capability = "initiate_recovery", flow_cost = 100] -> Coordinator : InitiateRecovery(crate::RecoveryRequest)
+  -- Phase 1: Account initiates recovery
+  Account[ guard_capability = "initiate_recovery"
+         , flow_cost = 100 ] -> Coordinator : InitiateRecovery(crate::RecoveryRequest)
 
-  Coordinator[guard_capability = "coordinate_recovery", flow_cost = 50] -> Guardian : DistributeRecoveryRequest(crate::RecoveryRequest)
+  -- Phase 2: Coordinator distributes to guardian
+  Coordinator[ guard_capability = "coordinate_recovery"
+             , flow_cost = 50 ] -> Guardian : DistributeRecoveryRequest(crate::RecoveryRequest)
 
-  Guardian[guard_capability = "approve_recovery", flow_cost = 50] -> Coordinator : SubmitApproval(crate::recovery_protocol::GuardianApproval)
+  -- Phase 3: Guardian submits approval
+  Guardian[ guard_capability = "approve_recovery"
+          , flow_cost = 50 ] -> Coordinator : SubmitApproval(crate::recovery_protocol::GuardianApproval)
 
-  Coordinator[guard_capability = "finalize_recovery", flow_cost = 100] -> Account : RecoveryComplete(crate::RecoveryOutcome)
+  -- Phase 4: Recovery complete
+  Coordinator[ guard_capability = "finalize_recovery"
+             , flow_cost = 100 ] -> Account : RecoveryComplete(crate::RecoveryOutcome)

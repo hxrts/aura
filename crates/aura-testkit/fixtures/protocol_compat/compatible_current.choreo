@@ -2,5 +2,6 @@ module compat_current exposing (CompatCurrent)
 
 protocol CompatCurrent =
   roles A, B
+
   A -> B : Ping
   B -> A : Pong
