@@ -46,29 +46,6 @@ pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
         &JsValue::from_str("__AURA_UI_STATE_JSON__"),
         &JsValue::from_str(&json),
     );
-    let mut pushed_to_driver = false;
-    let mut driver_binding_state = "missing";
-    if let Ok(binding) = Reflect::get(
-        window.as_ref(),
-        &JsValue::from_str("__AURA_DRIVER_PUSH_UI_STATE"),
-    ) {
-        if binding.is_function() {
-            driver_binding_state = "present";
-            if let Ok(function) = binding.dyn_into::<js_sys::Function>() {
-                if function
-                    .call1(window.as_ref(), &JsValue::from_str(&json))
-                    .is_ok()
-                {
-                    pushed_to_driver = true;
-                    driver_binding_state = "ok";
-                } else {
-                    driver_binding_state = "call_failed";
-                }
-            }
-        } else {
-            driver_binding_state = "not_function";
-        }
-    }
     let should_log = LAST_PUBLISHED_UI_STATE_JSON.with(|slot| {
         let mut last = slot.borrow_mut();
         if last.as_deref() == Some(json.as_str()) {
@@ -78,20 +55,22 @@ pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
             true
         }
     });
-    if should_log && !pushed_to_driver {
+    if should_log {
         web_sys::console::log_1(&JsValue::from_str(&format!(
-            "[aura-ui-publish]binding={driver_binding_state};screen={:?};modal={:?};ops={}",
+            "[aura-ui-publish]binding=console_only;screen={:?};modal={:?};ops={}",
             snapshot.screen,
             snapshot.open_modal,
             snapshot.operations.len()
         )));
         web_sys::console::log_1(&JsValue::from_str(&format!(
-            "[aura-ui-state]screen={:?};modal={:?};ops={};binding={}",
+            "[aura-ui-state]screen={:?};modal={:?};ops={};binding=console_only",
             snapshot.screen,
             snapshot.open_modal,
             snapshot.operations.len(),
-            driver_binding_state
         )));
+    }
+    if should_log {
+        web_sys::console::log_1(&JsValue::from_str(&format!("[aura-ui-json]{json}")));
     }
 }
 

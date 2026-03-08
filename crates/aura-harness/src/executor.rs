@@ -478,13 +478,16 @@ fn execute_step(
 
             let backend_kind = tool_api.backend_kind(&instance_id).unwrap_or("unknown");
             if backend_kind == "playwright_browser" {
-                dispatch(
-                    tool_api,
-                    ToolRequest::SendKeys {
-                        instance_id: instance_id.clone(),
-                        keys: "2".to_string(),
-                    },
-                )?;
+                let snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
+                if snapshot.screen != ScreenId::Chat {
+                    dispatch(
+                        tool_api,
+                        ToolRequest::SendKeys {
+                            instance_id: instance_id.clone(),
+                            keys: "2".to_string(),
+                        },
+                    )?;
+                }
                 let chat_enter_timeout = step.timeout_ms.unwrap_or(step_budget_ms).min(2_000);
                 let mut wait_step = step.clone();
                 wait_step.action = ScenarioAction::WaitFor;
@@ -495,6 +498,24 @@ fn execute_step(
                 wait_step.operation_id = None;
                 wait_step.operation_state = None;
                 wait_for_semantic_state(&wait_step, tool_api, &instance_id, chat_enter_timeout)?;
+
+                dispatch(
+                    tool_api,
+                    ToolRequest::WaitFor {
+                        instance_id: instance_id.clone(),
+                        pattern: String::new(),
+                        timeout_ms: step.timeout_ms.unwrap_or(step_budget_ms).min(8_000),
+                        screen_source: ScreenSource::Default,
+                        selector: Some(
+                            format!(
+                                "#{}",
+                                FieldId::ChatInput
+                                    .web_dom_id()
+                                    .unwrap_or("aura-field-chat-input")
+                            ),
+                        ),
+                    },
+                )?;
 
                 dispatch(
                     tool_api,

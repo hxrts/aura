@@ -1290,9 +1290,7 @@ fn submit_runtime_modal_action(
                                         controller_for_import.set_selected_contact_authority_id(
                                             invitation.sender_id,
                                         );
-                                        controller.complete_runtime_invitation_import();
-                                        controller_for_import.finish_runtime_operation(
-                                            OperationId::invitation_accept(),
+                                        controller_for_import.complete_runtime_invitation_operation(
                                             OperationState::Succeeded,
                                         );
                                         controller_for_import
@@ -1319,15 +1317,16 @@ fn submit_runtime_modal_action(
                                                 "accept_invitation refresh_contacts done",
                                             );
                                         }
-                                        InvitationBridgeType::Channel { .. } => {}
+                                        InvitationBridgeType::Channel { .. } => {
+                                            controller_for_import.set_screen(UiScreen::Chat);
+                                        }
                                         InvitationBridgeType::DeviceEnrollment { .. }
                                         | InvitationBridgeType::Contact { .. } => {}
                                     }
-                                    controller.complete_runtime_invitation_import();
-                                    controller_for_import.finish_runtime_operation(
-                                        OperationId::invitation_accept(),
-                                        OperationState::Succeeded,
-                                    );
+                                    controller_for_import
+                                        .complete_runtime_invitation_operation(
+                                            OperationState::Succeeded,
+                                        );
                                     controller_for_import
                                         .push_log("accept_invitation complete generic");
                                     harness_log("accept_invitation complete generic");

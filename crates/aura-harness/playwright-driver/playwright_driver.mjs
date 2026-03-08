@@ -9,6 +9,7 @@ import { chromium } from 'playwright';
 const sessions = new Map();
 let requestChain = Promise.resolve();
 const UI_STATE_LOG_PREFIX = '[aura-ui-state]';
+const UI_STATE_JSON_LOG_PREFIX = '[aura-ui-json]';
 const PLAYWRIGHT_TRACE_ENABLED =
   process.env.AURA_HARNESS_PLAYWRIGHT_TRACE === '1' ||
   process.env.AURA_HARNESS_PLAYWRIGHT_TRACE === 'true';
@@ -716,6 +717,20 @@ async function startPage(params) {
       );
       page.on('console', (message) => {
         const text = message.text();
+        if (text.startsWith(UI_STATE_JSON_LOG_PREFIX) && sessions.has(instanceId)) {
+          const payload = text.slice(UI_STATE_JSON_LOG_PREFIX.length);
+          const session = sessions.get(instanceId);
+          if (session) {
+            session.uiStateCacheJson = payload;
+            try {
+              session.uiStateCache = JSON.parse(payload);
+            } catch {
+              session.uiStateCache = null;
+            }
+          }
+          consoleLog.push(`[${nowIso()}] ${message.type()}: ${UI_STATE_JSON_LOG_PREFIX}<json>`);
+          return;
+        }
         if (text.startsWith(UI_STATE_LOG_PREFIX) && sessions.has(instanceId)) {
           consoleLog.push(`[${nowIso()}] ${message.type()}: ${text}`);
           return;
@@ -734,6 +749,14 @@ async function startPage(params) {
       }
 
       console.error(
+        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installUiStateObserver start`
+      );
+      await installUiStateObserver(page, sessions.get(instanceId));
+      console.error(
+        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installUiStateObserver done`
+      );
+
+      console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} goto start url=${targetUrl}`
       );
       await page.goto(targetUrl, { waitUntil: 'commit', timeout: pageGotoTimeoutMs });
@@ -747,13 +770,20 @@ async function startPage(params) {
       console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensurePageInteractive done`
       );
-      console.error(
-        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installUiStateObserver start`
-      );
-      await installUiStateObserver(page, sessions.get(instanceId));
-      console.error(
-        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installUiStateObserver done`
-      );
+      try {
+        const bindingType = await page.evaluate(
+          () => typeof window.__AURA_DRIVER_PUSH_UI_STATE
+        );
+        console.error(
+          `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} uiStateBinding type=${bindingType}`
+        );
+      } catch (error) {
+        console.error(
+          `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} uiStateBinding probe failed: ${
+            error?.message ?? String(error)
+          }`
+        );
+      }
       try {
         console.error(
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensureHarnessWithTimeout start`
@@ -1069,6 +1099,23 @@ async function clickButton(params) {
 
   if (selector) {
     try {
+      const locator = session.page.locator(selector).first();
+      await withOperationTimeout(
+        `click_button_wait:${selector}`,
+        locator.waitFor({ state: 'visible', timeout: 3000 }),
+        4000
+      );
+      await locator.scrollIntoViewIfNeeded().catch(() => {});
+      await withOperationTimeout(
+        `click_button_force:${selector}`,
+        locator.click({
+          timeout: 3000,
+          force: true,
+          noWaitAfter: true
+        }),
+        4000
+      );
+    } catch (locatorError) {
       await withOperationTimeout(
         `click_button_dom:${selector}`,
         session.page.evaluate((targetSelector) => {
@@ -1083,12 +1130,10 @@ async function clickButton(params) {
           return true;
         }, selector),
         5000
-      );
-    } catch (domError) {
-      await clickLocator(session.page.locator(selector).first(), selector).catch((locatorError) => {
+      ).catch((domError) => {
         throw new Error(
-          `dom_click_error=${domError?.message ?? String(domError)} locator_click_error=${
-            locatorError?.message ?? String(locatorError)
+          `locator_click_error=${locatorError?.message ?? String(locatorError)} dom_click_error=${
+            domError?.message ?? String(domError)
           }`
         );
       });

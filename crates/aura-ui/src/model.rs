@@ -1731,6 +1731,14 @@ impl UiController {
         self.request_rerender();
     }
 
+    pub fn complete_runtime_invitation_operation(&self, state: OperationState) {
+        let mut model = write_model(&self.model);
+        dismiss_modal(&mut model);
+        model.set_operation_state(OperationId::invitation_accept(), state);
+        drop(model);
+        self.request_rerender();
+    }
+
     pub fn complete_runtime_modal_success(&self, message: impl Into<String>) {
         let mut model = write_model(&self.model);
         set_toast(&mut model, '✓', message);

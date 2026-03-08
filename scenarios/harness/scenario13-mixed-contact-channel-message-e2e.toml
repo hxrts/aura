@@ -232,6 +232,13 @@ count = 1
 timeout_ms = 12000
 
 [[steps]]
+id = "tui-dismiss-home-created-toast"
+action = "press_key"
+actor = "tui"
+key = "esc"
+timeout_ms = 3000
+
+[[steps]]
 id = "tui-open-chat"
 action = "navigate"
 actor = "tui"
