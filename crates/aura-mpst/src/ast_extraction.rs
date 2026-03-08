@@ -416,18 +416,14 @@ fn detect_annotations_in_text(
                     Some(AnnotationValue::Str(value)) => {
                         parse_leakage_budget_string(&value)?;
                     }
-                    Some(_) => {
-                        return Err(AuraExtractionError::InvalidAnnotationValue(
-                            "leakage_budget expects a list of integers or a quoted integer sequence"
-                                .to_string(),
-                        ))
-                    }
-                    None => {
-                        return Err(AuraExtractionError::InvalidAnnotationValue(
-                            "leakage_budget requires a list of integers or a quoted integer sequence"
-                                .to_string(),
-                        ))
-                    }
+                    Some(_) => return Err(AuraExtractionError::InvalidAnnotationValue(
+                        "leakage_budget expects a list of integers or a quoted integer sequence"
+                            .to_string(),
+                    )),
+                    None => return Err(AuraExtractionError::InvalidAnnotationValue(
+                        "leakage_budget requires a list of integers or a quoted integer sequence"
+                            .to_string(),
+                    )),
                 },
                 "link" => {
                     let raw = match item.value {
@@ -542,8 +538,7 @@ fn extract_role_before_delimiter(line: &str, delimiter: char) -> Option<RoleId> 
 
 /// Extract role from a line - simple implementation
 fn extract_role_from_line(line: &str) -> Option<RoleId> {
-    extract_role_before_delimiter(line, '[')
-        .or_else(|| extract_role_before_delimiter(line, '{'))
+    extract_role_before_delimiter(line, '[').or_else(|| extract_role_before_delimiter(line, '{'))
 }
 
 fn parse_link_directive(raw: &str) -> Result<LinkDirective, AuraExtractionError> {
@@ -696,7 +691,8 @@ mod tests {
 
     #[test]
     fn test_extract_role_from_record_line() {
-        let line = r#"Alice { guard_capability = "send_message" } -> Bob : Message of crate.demo.Payload"#;
+        let line =
+            r#"Alice { guard_capability = "send_message" } -> Bob : Message of crate.demo.Payload"#;
         let role = extract_role_from_line(line);
         assert_eq!(
             role.map(|role| role.as_str().to_string()),
@@ -900,7 +896,10 @@ mod tests {
                 && directive.imports.contains(&"journal.commit".to_string())
                 && role.as_str() == "Coordinator")
         });
-        assert!(has_link, "Should parse record-style link annotation directive");
+        assert!(
+            has_link,
+            "Should parse record-style link annotation directive"
+        );
     }
 
     #[test]

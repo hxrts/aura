@@ -1479,7 +1479,10 @@ mod tests {
         let config = AgentConfig::default();
         let effect_system = AuraEffectSystem::simulation_for_test(&config).unwrap();
 
-        assert_ne!(effect_system.config().storage.base_path, default_storage_path());
+        assert_ne!(
+            effect_system.config().storage.base_path,
+            default_storage_path()
+        );
     }
 
     #[tokio::test]

@@ -175,43 +175,6 @@ pub fn assert_orphan_free_for_all_roles(source: &str) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::normalize_legacy_parser_surface;
-
-    #[test]
-    fn normalizes_legacy_choice_and_message_syntax() {
-        let source = r#"
-protocol Demo =
-  roles A, B
-
-  case choose A of
-    accept ->
-      A -> B : Msg(crate::demo::Payload)
-"#;
-
-        let normalized = normalize_legacy_parser_surface(source);
-        assert!(normalized.contains("choice at A"));
-        assert!(normalized.contains("| accept ->"));
-        assert!(normalized.contains("Msg of crate.demo.Payload"));
-    }
-
-    #[test]
-    fn drops_parallel_marker_for_parser_surface() {
-        let source = r#"
-protocol Demo =
-  roles A, B
-
-  @parallel
-  A -> B : Msg(crate::demo::Payload)
-"#;
-
-        let normalized = normalize_legacy_parser_surface(source);
-        assert!(!normalized.contains("@parallel"));
-        assert!(normalized.contains("Msg of crate.demo.Payload"));
-    }
-}
-
 /// Compute orphan-free status for each projected role in a choreography.
 pub fn orphan_free_status_for_all_roles(source: &str) -> BTreeMap<String, bool> {
     let locals = project_locals_by_role(source, "orphan-free");
@@ -248,4 +211,41 @@ pub fn check_async_subtype_for_shared_roles(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_legacy_parser_surface;
+
+    #[test]
+    fn normalizes_legacy_choice_and_message_syntax() {
+        let source = r#"
+protocol Demo =
+  roles A, B
+
+  case choose A of
+    accept ->
+      A -> B : Msg(crate::demo::Payload)
+"#;
+
+        let normalized = normalize_legacy_parser_surface(source);
+        assert!(normalized.contains("choice at A"));
+        assert!(normalized.contains("| accept ->"));
+        assert!(normalized.contains("Msg of crate.demo.Payload"));
+    }
+
+    #[test]
+    fn drops_parallel_marker_for_parser_surface() {
+        let source = r#"
+protocol Demo =
+  roles A, B
+
+  @parallel
+  A -> B : Msg(crate::demo::Payload)
+"#;
+
+        let normalized = normalize_legacy_parser_surface(source);
+        assert!(!normalized.contains("@parallel"));
+        assert!(normalized.contains("Msg of crate.demo.Payload"));
+    }
 }
