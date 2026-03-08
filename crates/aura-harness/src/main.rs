@@ -24,7 +24,6 @@ use aura_harness::resource_guards::ResourceGuard;
 use aura_harness::routing::AddressResolver;
 use aura_harness::scenario::ScenarioRunner;
 use aura_harness::scenario_execution::{execute_with_run_budgets, lint_for_run};
-use aura_harness::screen_normalization::normalize_screen;
 use aura_harness::tool_api::{ToolApi, ToolRequest};
 use aura_harness::{api_version::TOOL_API_DEFAULT_VERSION, artifact_sync::sync_remote_artifacts};
 use aura_harness::{artifacts::ArtifactBundle, default_artifacts_dir};
@@ -277,13 +276,14 @@ fn collect_timeout_diagnostics(
     tool_api: &mut ToolApi,
     error_message: &str,
 ) -> serde_json::Value {
+    let failing_step = parse_failing_step(error_message);
     let mut instances = BTreeMap::new();
     for instance in &config.instances {
         let screen_response = tool_api.handle_request(ToolRequest::Screen {
             instance_id: instance.id.clone(),
             screen_source: ScreenSource::Default,
         });
-        let (authoritative_screen, raw_screen) = match screen_response {
+        let (authoritative_screen, raw_screen, normalized_screen) = match screen_response {
             aura_harness::tool_api::ToolResponse::Ok { payload } => {
                 let authoritative = payload
                     .get("screen")
@@ -295,12 +295,60 @@ fn collect_timeout_diagnostics(
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or(authoritative.as_str())
                     .to_string();
-                (authoritative, raw)
+                let normalized = payload
+                    .get("normalized_screen")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(authoritative.as_str())
+                    .to_string();
+                (authoritative, raw, normalized)
             }
             aura_harness::tool_api::ToolResponse::Error { message } => {
                 let error = format!("screen_capture_error: {message}");
-                (error.clone(), error)
+                (error.clone(), error.clone(), error)
             }
+        };
+
+        let dom_screen_response = tool_api.handle_request(ToolRequest::Screen {
+            instance_id: instance.id.clone(),
+            screen_source: ScreenSource::Dom,
+        });
+        let dom_capture = match dom_screen_response {
+            aura_harness::tool_api::ToolResponse::Ok { payload } => payload,
+            aura_harness::tool_api::ToolResponse::Error { message } => serde_json::json!({
+                "error": format!("dom_screen_capture_error: {message}")
+            }),
+        };
+
+        let ui_state_response = tool_api.handle_request(ToolRequest::UiState {
+            instance_id: instance.id.clone(),
+        });
+        let (ui_state, ui_state_error) = match ui_state_response {
+            aura_harness::tool_api::ToolResponse::Ok { payload } => (Some(payload), None),
+            aura_harness::tool_api::ToolResponse::Error { message } => (None, Some(message)),
+        };
+
+        let render_convergence = match &ui_state {
+            Some(ui_state) => {
+                let semantic_screen = ui_state
+                    .get("screen")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                let semantic_modal = ui_state
+                    .get("open_modal")
+                    .and_then(serde_json::Value::as_str);
+                let dom_authoritative = dom_capture
+                    .get("authoritative_screen")
+                    .and_then(serde_json::Value::as_str);
+                serde_json::json!({
+                    "semantic_screen": semantic_screen,
+                    "semantic_modal": semantic_modal,
+                    "dom_authoritative_screen": dom_authoritative,
+                    "screen_matches_dom": dom_authoritative == Some(semantic_screen),
+                })
+            }
+            None => serde_json::json!({
+                "error": ui_state_error.clone().unwrap_or_else(|| "ui_state_unavailable".to_string())
+            }),
         };
 
         let log_response = tool_api.handle_request(ToolRequest::TailLog {
@@ -322,18 +370,66 @@ fn collect_timeout_diagnostics(
             serde_json::json!({
                 "screen": authoritative_screen,
                 "raw_screen": raw_screen,
-                "normalized_screen": normalize_screen(&raw_screen),
+                "normalized_screen": normalized_screen,
+                "dom_capture": dom_capture,
+                "ui_state": ui_state,
+                "ui_state_error": ui_state_error,
+                "render_convergence": render_convergence,
                 "log_tail": log_tail
             }),
         );
     }
 
+    let action_log = tool_api.action_log();
+    let action_log_tail: Vec<_> = action_log
+        .into_iter()
+        .rev()
+        .take(50)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+
     serde_json::json!({
         "error": error_message,
+        "failing_step": failing_step,
         "failure_attribution": attribute_failure(error_message),
         "instances": instances,
-        "events": tool_api.event_snapshot()
+        "events": tool_api.event_snapshot(),
+        "action_log_tail": action_log_tail
     })
+}
+
+fn parse_failing_step(error_message: &str) -> Option<String> {
+    let marker = "step ";
+    let start = error_message.find(marker)? + marker.len();
+    let remainder = &error_message[start..];
+    let end = remainder
+        .find(" failed")
+        .or_else(|| remainder.find(' '))
+        .unwrap_or(remainder.len());
+    let candidate = remainder[..end].trim();
+    (!candidate.is_empty()).then(|| candidate.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_failing_step;
+
+    #[test]
+    fn parse_failing_step_extracts_step_id_from_executor_error() {
+        let error =
+            "scenario execution failed: step web-join-channel failed (action=send_chat_command actor=web): timeout";
+        assert_eq!(
+            parse_failing_step(error).as_deref(),
+            Some("web-join-channel")
+        );
+    }
+
+    #[test]
+    fn parse_failing_step_returns_none_without_step_marker() {
+        assert_eq!(parse_failing_step("plain failure"), None);
+    }
 }
 
 fn lint(args: LintArgs) -> Result<()> {

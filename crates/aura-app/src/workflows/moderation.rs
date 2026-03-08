@@ -7,7 +7,7 @@
 //! UI state is updated by reactive views driven from the journal.
 
 use crate::workflows::parse::parse_authority_id;
-use crate::workflows::runtime::{cooperative_yield, require_runtime};
+use crate::workflows::runtime::{converge_runtime, cooperative_yield, require_runtime};
 use crate::workflows::{channel_ref::ChannelSelector, snapshot_policy::chat_snapshot};
 use crate::AppCore;
 use async_lock::RwLock;
@@ -295,8 +295,7 @@ async fn send_moderation_fact_with_retry(
         }
 
         if attempt + 1 < MODERATION_FACT_SEND_MAX_ATTEMPTS {
-            let _ = runtime.trigger_discovery().await;
-            let _ = runtime.trigger_sync().await;
+            converge_runtime(runtime).await;
             for _ in 0..MODERATION_FACT_SEND_YIELDS_PER_RETRY {
                 cooperative_yield().await;
             }

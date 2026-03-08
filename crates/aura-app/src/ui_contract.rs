@@ -56,6 +56,40 @@ pub enum ModalId {
     CapabilityConfig,
 }
 
+impl ModalId {
+    #[must_use]
+    pub const fn web_dom_id(self) -> &'static str {
+        match self {
+            Self::Help => "aura-modal-help",
+            Self::CreateInvitation => "aura-modal-create-invitation",
+            Self::InvitationCode => "aura-modal-invitation-code",
+            Self::AcceptInvitation => "aura-modal-accept-invitation",
+            Self::CreateHome => "aura-modal-create-home",
+            Self::CreateChannel => "aura-modal-create-channel",
+            Self::SetChannelTopic => "aura-modal-set-channel-topic",
+            Self::ChannelInfo => "aura-modal-channel-info",
+            Self::EditNickname => "aura-modal-edit-nickname",
+            Self::RemoveContact => "aura-modal-remove-contact",
+            Self::GuardianSetup => "aura-modal-guardian-setup",
+            Self::RequestRecovery => "aura-modal-request-recovery",
+            Self::AddDevice => "aura-modal-add-device",
+            Self::ImportDeviceEnrollmentCode => "aura-modal-import-device-enrollment-code",
+            Self::SelectDeviceToRemove => "aura-modal-select-device-to-remove",
+            Self::ConfirmRemoveDevice => "aura-modal-confirm-remove-device",
+            Self::MfaSetup => "aura-modal-mfa-setup",
+            Self::AssignModerator => "aura-modal-assign-moderator",
+            Self::SwitchAuthority => "aura-modal-switch-authority",
+            Self::AccessOverride => "aura-modal-access-override",
+            Self::CapabilityConfig => "aura-modal-capability-config",
+        }
+    }
+
+    #[must_use]
+    pub fn web_selector(self) -> String {
+        format!("#{}", self.web_dom_id())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FieldId {
@@ -276,6 +310,10 @@ pub enum ConfirmationState {
 #[serde(transparent)]
 pub struct OperationId(pub String);
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct OperationInstanceId(pub String);
+
 impl OperationId {
     #[must_use]
     pub fn create_home() -> Self {
@@ -327,6 +365,7 @@ pub struct SelectionSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationSnapshot {
     pub id: OperationId,
+    pub instance_id: OperationInstanceId,
     pub state: OperationState,
 }
 
@@ -334,6 +373,13 @@ pub struct OperationSnapshot {
 pub struct MessageSnapshot {
     pub id: String,
     pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenderHeartbeat {
+    pub screen: ScreenId,
+    pub open_modal: Option<ModalId>,
+    pub render_seq: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -369,8 +415,8 @@ impl UiSnapshot {
 #[cfg(test)]
 mod tests {
     use super::{
-        list_item_dom_id, list_item_selector, ControlId, FieldId, ListId, ScreenId, UiReadiness,
-        UiSnapshot,
+        list_item_dom_id, list_item_selector, ConfirmationState, ControlId, FieldId, ListId,
+        ModalId, RenderHeartbeat, ScreenId, UiReadiness, UiSnapshot,
     };
 
     #[test]
@@ -447,6 +493,19 @@ mod tests {
             FieldId::InvitationCode.web_selector().as_deref(),
             Some("#aura-field-invitation-code")
         );
+    }
+
+    #[test]
+    fn render_heartbeat_is_typed_and_serializable() {
+        let heartbeat = RenderHeartbeat {
+            screen: ScreenId::Chat,
+            open_modal: Some(ModalId::AcceptInvitation),
+            render_seq: 7,
+        };
+        let json = serde_json::to_string(&heartbeat).expect("heartbeat should serialize");
+        assert!(json.contains("\"screen\":\"chat\""));
+        assert!(json.contains("\"open_modal\":\"accept_invitation\""));
+        assert!(json.contains("\"render_seq\":7"));
     }
 
     #[test]

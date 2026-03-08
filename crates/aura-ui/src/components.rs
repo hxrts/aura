@@ -5,7 +5,7 @@
 
 #![allow(clippy::incompatible_msrv)]
 
-use aura_app::ui::contract::{list_item_dom_id, ControlId, FieldId, ListId};
+use aura_app::ui::contract::{list_item_dom_id, ControlId, FieldId, ListId, ModalId};
 use aura_core::identifiers::AuthorityId;
 use dioxus::prelude::*;
 use dioxus_shadcn::components::badge::{Badge as LbBadge, BadgeVariant as LbBadgeVariant};
@@ -35,6 +35,7 @@ pub enum PillTone {
 
 #[derive(Clone, PartialEq)]
 pub struct ModalView {
+    pub modal_id: ModalId,
     pub title: String,
     pub details: Vec<String>,
     pub keybind_rows: Vec<(String, String)>,
@@ -194,7 +195,7 @@ pub fn UiModal(
 
     rsx! {
         LbDialogRoot {
-            id: Some("aura-modal-root".to_string()),
+            id: Some(modal.modal_id.web_dom_id().to_string()),
             open,
             on_open_change: move |is_open| {
                 open.set(Some(is_open));
@@ -295,6 +296,7 @@ pub fn UiModal(
 
 #[component]
 pub fn UiDeviceEnrollmentModal(
+    modal_id: ModalId,
     title: String,
     enrollment_code: String,
     ceremony_id: Option<String>,
@@ -338,7 +340,7 @@ pub fn UiDeviceEnrollmentModal(
 
     rsx! {
         LbDialogRoot {
-            id: Some("aura-device-enrollment-modal-root".to_string()),
+            id: Some(modal_id.web_dom_id().to_string()),
             open,
             on_open_change: move |is_open| {
                 open.set(Some(is_open));
@@ -469,6 +471,7 @@ pub fn UiDeviceEnrollmentModal(
 
 #[component]
 pub fn UiAuthorityPickerModal(
+    modal_id: ModalId,
     title: String,
     current_label: String,
     current_id: String,
@@ -488,7 +491,7 @@ pub fn UiAuthorityPickerModal(
 
     rsx! {
         LbDialogRoot {
-            id: Some("aura-authority-picker-modal-root".to_string()),
+            id: Some(modal_id.web_dom_id().to_string()),
             open,
             on_open_change: move |is_open| {
                 open.set(Some(is_open));

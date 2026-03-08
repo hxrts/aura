@@ -8,9 +8,9 @@ use crate::tui::types::Contact as TuiContact;
 use crate::tui::types::SettingsSection;
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
-    ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId,
-    OperationId, OperationSnapshot, OperationState, ScreenId, SelectionSnapshot, ToastId,
-    ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
+    ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot,
+    ModalId, OperationId, OperationInstanceId, OperationSnapshot, OperationState, ScreenId,
+    SelectionSnapshot, ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::types::StateSnapshot;
 use std::fs;
@@ -506,6 +506,7 @@ pub fn semantic_ui_snapshot(
         operations.retain(|operation| operation.id != OperationId::device_enrollment());
         operations.push(OperationSnapshot {
             id: OperationId::device_enrollment(),
+            instance_id: OperationInstanceId("tui-device-enrollment".to_string()),
             state: operation_state,
         });
     }

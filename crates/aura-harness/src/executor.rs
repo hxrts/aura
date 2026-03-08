@@ -255,7 +255,15 @@ impl ScenarioExecutor {
                 &mut scenario_rng,
                 &mut fault_rng,
                 &mut context,
-            )?;
+            )
+            .map_err(|error| {
+                anyhow!(
+                    "step {} failed (action={} actor={}): {error}",
+                    state.id,
+                    state.step.action,
+                    state.step.instance.as_deref().unwrap_or("-")
+                )
+            })?;
 
             let next = match self.mode {
                 ExecutionMode::Scripted => state.next_state.clone(),
@@ -604,15 +612,11 @@ fn execute_step(
                         key: ToolKey::Enter,
                         repeat: 1,
                     },
-                )?;
+                    )?;
             } else {
-                dispatch(
-                    tool_api,
-                    ToolRequest::SendKeys {
-                        instance_id,
-                        keys: format!("i{message}\n"),
-                    },
-                )?;
+                for request in plan_tui_send_chat_message_request(&instance_id, &message) {
+                    dispatch(tool_api, request)?;
+                }
             }
             Ok(())
         }
@@ -726,14 +730,7 @@ fn execute_step(
         }
         ScenarioAction::DismissTransient => {
             let instance_id = resolve_required_instance(step, context)?;
-            dispatch(
-                tool_api,
-                ToolRequest::SendKey {
-                    instance_id,
-                    key: ToolKey::Esc,
-                    repeat: 1,
-                },
-            )?;
+            dispatch(tool_api, plan_dismiss_transient_request(&instance_id))?;
             Ok(())
         }
         ScenarioAction::ClickButton => {
@@ -741,10 +738,7 @@ fn execute_step(
             if let Some(control_id) = step.control_id {
                 dispatch(
                     tool_api,
-                    ToolRequest::ActivateControl {
-                        instance_id,
-                        control_id,
-                    },
+                    plan_activate_control_request(&instance_id, control_id),
                 )?;
                 return Ok(());
             }
@@ -797,14 +791,7 @@ fn execute_step(
                 context,
             )?;
             if let Some(field_id) = step.field_id {
-                dispatch(
-                    tool_api,
-                    ToolRequest::FillField {
-                        instance_id,
-                        field_id,
-                        value,
-                    },
-                )?;
+                dispatch(tool_api, plan_fill_field_request(&instance_id, field_id, value))?;
             } else {
                 let selector =
                     resolve_required_field(step, "selector", step.selector.as_deref(), context)?;
@@ -1301,6 +1288,36 @@ fn ensure_chat_screen_without_ui_snapshot(
         },
     );
     Ok(())
+}
+
+fn plan_activate_control_request(instance_id: &str, control_id: ControlId) -> ToolRequest {
+    ToolRequest::ActivateControl {
+        instance_id: instance_id.to_string(),
+        control_id,
+    }
+}
+
+fn plan_fill_field_request(instance_id: &str, field_id: FieldId, value: String) -> ToolRequest {
+    ToolRequest::FillField {
+        instance_id: instance_id.to_string(),
+        field_id,
+        value,
+    }
+}
+
+fn plan_dismiss_transient_request(instance_id: &str) -> ToolRequest {
+    ToolRequest::SendKey {
+        instance_id: instance_id.to_string(),
+        key: ToolKey::Esc,
+        repeat: 1,
+    }
+}
+
+fn plan_tui_send_chat_message_request(instance_id: &str, message: &str) -> Vec<ToolRequest> {
+    vec![ToolRequest::SendKeys {
+        instance_id: instance_id.to_string(),
+        keys: format!("i{message}\n"),
+    }]
 }
 
 fn enforce_request_order(step: &ScenarioStep, context: &mut ScenarioContext) -> Result<()> {
@@ -2097,12 +2114,13 @@ fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_app::ui::contract::{
+        ConfirmationState, ListId, ListItemSnapshot, ListSnapshot, OperationId,
+        OperationInstanceId,
+        OperationSnapshot, OperationState, ScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
+    };
     use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, ScenarioAction};
     use crate::coordinator::HarnessCoordinator;
-    use aura_app::ui::contract::{
-        ConfirmationState, ListId, ListItemSnapshot, ListSnapshot, OperationId, OperationSnapshot,
-        OperationState, ScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
-    };
 
     #[test]
     fn expected_consistency_accepts_stronger_observed_levels() {
@@ -2291,6 +2309,7 @@ mod tests {
             messages: Vec::new(),
             operations: vec![OperationSnapshot {
                 id: OperationId::invitation_accept(),
+                instance_id: OperationInstanceId("test-operation-instance".to_string()),
                 state: OperationState::Succeeded,
             }],
             toasts: Vec::new(),
@@ -2581,6 +2600,44 @@ mod tests {
             }
             other => panic!("expected SendKeys sixth (slash command), got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tui_semantic_actions_emit_expected_tool_requests() {
+        assert!(matches!(
+            plan_activate_control_request("alice", ControlId::NavChat),
+            ToolRequest::ActivateControl {
+                instance_id,
+                control_id: ControlId::NavChat,
+            } if instance_id == "alice"
+        ));
+        assert!(matches!(
+            plan_fill_field_request("alice", FieldId::ChatInput, "typed-value".to_string()),
+            ToolRequest::FillField {
+                instance_id,
+                field_id: FieldId::ChatInput,
+                value,
+            } if instance_id == "alice" && value == "typed-value"
+        ));
+        assert!(matches!(
+            plan_dismiss_transient_request("alice"),
+            ToolRequest::SendKey {
+                instance_id,
+                key: ToolKey::Esc,
+                repeat: 1,
+            } if instance_id == "alice"
+        ));
+    }
+
+    #[test]
+    fn send_chat_message_uses_tui_insert_sequence() {
+        let requests = plan_tui_send_chat_message_request("alice", "hello-semantic");
+        assert_eq!(requests.len(), 1);
+        assert!(matches!(
+            &requests[0],
+            ToolRequest::SendKeys { instance_id, keys }
+            if instance_id == "alice" && keys == "ihello-semantic\n"
+        ));
     }
 
     #[test]

@@ -125,6 +125,201 @@ function domStateIdList(session) {
   return Array.from(domStateIdSet(session));
 }
 
+function normalizeRenderHeartbeat(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+  const screen = contractEnumKey(payload.screen);
+  const openModal = contractEnumKey(payload.open_modal);
+  const renderSeq = Number(payload.render_seq ?? 0);
+  if (!screen || !Number.isFinite(renderSeq)) {
+    return null;
+  }
+  return {
+    screen,
+    open_modal: openModal,
+    render_seq: renderSeq
+  };
+}
+
+const SCREEN_DOM_IDS = Object.freeze({
+  neighborhood: 'aura-screen-neighborhood',
+  chat: 'aura-screen-chat',
+  contacts: 'aura-screen-contacts',
+  notifications: 'aura-screen-notifications',
+  settings: 'aura-screen-settings'
+});
+
+const MODAL_DOM_IDS = Object.freeze({
+  help: 'aura-modal-help',
+  create_invitation: 'aura-modal-create-invitation',
+  invitation_code: 'aura-modal-invitation-code',
+  accept_invitation: 'aura-modal-accept-invitation',
+  create_home: 'aura-modal-create-home',
+  create_channel: 'aura-modal-create-channel',
+  set_channel_topic: 'aura-modal-set-channel-topic',
+  channel_info: 'aura-modal-channel-info',
+  edit_nickname: 'aura-modal-edit-nickname',
+  remove_contact: 'aura-modal-remove-contact',
+  guardian_setup: 'aura-modal-guardian-setup',
+  request_recovery: 'aura-modal-request-recovery',
+  add_device: 'aura-modal-add-device',
+  import_device_enrollment_code: 'aura-modal-import-device-enrollment-code',
+  select_device_to_remove: 'aura-modal-select-device-to-remove',
+  confirm_remove_device: 'aura-modal-confirm-remove-device',
+  mfa_setup: 'aura-modal-mfa-setup',
+  assign_moderator: 'aura-modal-assign-moderator',
+  switch_authority: 'aura-modal-switch-authority',
+  access_override: 'aura-modal-access-override',
+  capability_config: 'aura-modal-capability-config'
+});
+
+function contractEnumKey(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed.toLowerCase() : null;
+}
+
+function expectedScreenDomId(state) {
+  return SCREEN_DOM_IDS[contractEnumKey(state?.screen)] ?? null;
+}
+
+function expectedModalDomId(state) {
+  return MODAL_DOM_IDS[contractEnumKey(state?.open_modal)] ?? null;
+}
+
+async function ensureUiStateRenderConvergence(session, state, reason, timeoutMs = 1500) {
+  const heartbeat = session.renderHeartbeat;
+  if (
+    heartbeat &&
+    contractEnumKey(state?.screen) === heartbeat.screen &&
+    contractEnumKey(state?.open_modal) === heartbeat.open_modal
+  ) {
+    return;
+  }
+
+  const screenDomId = expectedScreenDomId(state);
+  if (screenDomId) {
+    try {
+      await withOperationTimeout(
+        `ui_state_converge_screen_${reason}`,
+        session.page.locator(`#${screenDomId}`).first().waitFor({ state: 'attached' }),
+        timeoutMs
+      );
+    } catch (error) {
+      throw new Error(
+        `semantic screen '${state?.screen ?? 'unknown'}' did not converge to DOM id #${screenDomId}: ${
+          error?.message ?? String(error)
+        } current_ids=${JSON.stringify(domStateIdList(session))} text_snippet=${JSON.stringify(
+          session?.domState?.text ?? ''
+        )}`
+      );
+    }
+  }
+
+  const modalDomId = expectedModalDomId(state);
+  if (modalDomId) {
+    try {
+      await withOperationTimeout(
+        `ui_state_converge_modal_${reason}`,
+        session.page.locator(`#${modalDomId}`).first().waitFor({ state: 'attached' }),
+        timeoutMs
+      );
+    } catch (error) {
+      throw new Error(
+        `semantic modal '${state?.open_modal ?? 'unknown'}' did not converge to DOM id #${modalDomId}: ${
+          error?.message ?? String(error)
+        } current_ids=${JSON.stringify(domStateIdList(session))} text_snippet=${JSON.stringify(
+          session?.domState?.text ?? ''
+        )}`
+      );
+    }
+  }
+}
+
+function cachedUiStateConverged(session, state) {
+  const heartbeat = session.renderHeartbeat;
+  if (
+    heartbeat &&
+    contractEnumKey(state?.screen) === heartbeat.screen &&
+    contractEnumKey(state?.open_modal) === heartbeat.open_modal
+  ) {
+    return true;
+  }
+  const screenDomId = expectedScreenDomId(state);
+  if (screenDomId && !domStateHasId(session, screenDomId)) {
+    return false;
+  }
+  const modalDomId = expectedModalDomId(state);
+  if (modalDomId && !domStateHasId(session, modalDomId)) {
+    return false;
+  }
+  return true;
+}
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+function runSelfTest() {
+  const chatState = { screen: 'chat', open_modal: null };
+  const modalState = { screen: 'neighborhood', open_modal: 'accept_invitation' };
+  const convergedChatSession = {
+    domState: normalizeDomState({ text: '', ids: ['aura-screen-chat'] })
+  };
+  const divergedChatSession = {
+    domState: normalizeDomState({ text: '', ids: ['aura-screen-neighborhood'] })
+  };
+  const convergedModalSession = {
+    domState: normalizeDomState({
+      text: '',
+      ids: ['aura-screen-neighborhood', 'aura-modal-accept-invitation']
+    })
+  };
+  const divergedModalSession = {
+    domState: normalizeDomState({ text: '', ids: ['aura-screen-neighborhood'] })
+  };
+  const heartbeatSession = {
+    domState: normalizeDomState({ text: '', ids: [] }),
+    renderHeartbeat: normalizeRenderHeartbeat({
+      screen: 'chat',
+      open_modal: null,
+      render_seq: 4
+    })
+  };
+
+  assert(expectedScreenDomId(chatState) === 'aura-screen-chat', 'chat screen id mapping failed');
+  assert(
+    expectedModalDomId(modalState) === 'aura-modal-accept-invitation',
+    'accept invitation modal id mapping failed'
+  );
+  assert(
+    cachedUiStateConverged(convergedChatSession, chatState),
+    'converged chat state should be accepted'
+  );
+  assert(
+    !cachedUiStateConverged(divergedChatSession, chatState),
+    'diverged chat state should be rejected'
+  );
+  assert(
+    cachedUiStateConverged(convergedModalSession, modalState),
+    'converged modal state should be accepted'
+  );
+  assert(
+    !cachedUiStateConverged(divergedModalSession, modalState),
+    'diverged modal state should be rejected'
+  );
+  assert(
+    cachedUiStateConverged(heartbeatSession, chatState),
+    'heartbeat-aligned state should be accepted without DOM ids'
+  );
+  console.error('[driver] selftest ok');
+}
+
 function consoleTailText(session, lines = 40) {
   const tail = session.consoleLog.slice(-lines);
   return tail.length > 0 ? tail.join('\n') : 'none';
@@ -223,6 +418,49 @@ async function installUiStateObserver(page, session) {
       }
     }
   });
+  await page.exposeFunction('__AURA_DRIVER_PUSH_RENDER_HEARTBEAT', (payload) => {
+    if (typeof payload === 'string') {
+      try {
+        session.renderHeartbeat = normalizeRenderHeartbeat(JSON.parse(payload));
+      } catch {
+        session.renderHeartbeat = null;
+      }
+      return;
+    }
+    session.renderHeartbeat = normalizeRenderHeartbeat(payload);
+  });
+}
+
+async function assertRootStructure(session, reason) {
+  const structure = await withOperationTimeout(
+    `root_structure_${reason}`,
+    session.page.evaluate(() => {
+      if (typeof window.__AURA_HARNESS__?.root_structure === 'function') {
+        return window.__AURA_HARNESS__.root_structure();
+      }
+      return null;
+    }),
+    2000
+  );
+
+  if (!structure || typeof structure !== 'object') {
+    throw new Error(`root structure export unavailable during ${reason}`);
+  }
+
+  const appRootCount = Number(structure.app_root_count ?? 0);
+  const modalRegionCount = Number(structure.modal_region_count ?? 0);
+  const toastRegionCount = Number(structure.toast_region_count ?? 0);
+  const activeScreenRootCount = Number(structure.active_screen_root_count ?? 0);
+  if (
+    appRootCount !== 1 ||
+    modalRegionCount !== 1 ||
+    toastRegionCount !== 1 ||
+    activeScreenRootCount !== 1
+  ) {
+    throw new Error(
+      `invalid root structure during ${reason}: ${JSON.stringify(structure)}`
+    );
+  }
 }
 
 async function focusAuraPage(page) {
@@ -818,6 +1056,7 @@ async function startPage(params) {
         console.error(
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensureHarnessWithTimeout done`
         );
+        await assertRootStructure({ page }, 'startup');
       } catch (error) {
         consoleLog.push(
           `[${nowIso()}] harness bridge not ready after startup: ${error?.message ?? String(error)}`
@@ -845,7 +1084,8 @@ async function startPage(params) {
             : null,
         domState: normalizeDomState({ text: '', ids: [] }),
         uiStateCache: null,
-        uiStateCacheJson: null
+        uiStateCacheJson: null,
+        renderHeartbeat: null
       };
       await installDomObserver(page, session);
       console.error(
@@ -979,7 +1219,7 @@ async function uiState(params) {
   console.error(
     `[driver] ui_state start instance=${instanceId} cache_type=${typeof session.uiStateCache} cache_json=${
       typeof session.uiStateCacheJson
-    } console_tail=${recentConsole}`
+    } heartbeat_seq=${session.renderHeartbeat?.render_seq ?? 'none'} console_tail=${recentConsole}`
   );
 
   const tryParseUiState = (value) => {
@@ -993,40 +1233,18 @@ async function uiState(params) {
     return value && typeof value === 'object' ? value : null;
   };
 
-  const shouldRefreshUiState = (state) => {
-    if (!state || typeof state !== 'object') {
-      return false;
-    }
-
-    if (state.open_modal != null) {
-      return true;
-    }
-
-    if (Array.isArray(state.operations)) {
-      return state.operations.some((operation) => operation?.state === 'submitting');
-    }
-
-    return false;
-  };
-
-  const readLiveUiState = async (reason, timeoutMs = 1000) => {
+  const readStructuredUiState = async (reason, timeoutMs = 1000) => {
     console.error(
-      `[driver] ui_state live_refresh start instance=${instanceId} reason=${reason} timeout_ms=${timeoutMs}`
+      `[driver] ui_state structured_read start instance=${instanceId} reason=${reason} timeout_ms=${timeoutMs}`
     );
     const payload = await withOperationTimeout(
-      `ui_state_live_${reason}`,
+      `ui_state_structured_${reason}`,
       session.page.evaluate(() => {
-        if (typeof window.__AURA_HARNESS__?.ui_state === 'function') {
-          return window.__AURA_HARNESS__.ui_state();
-        }
         if (typeof window.__AURA_UI_STATE__ === 'function') {
           return window.__AURA_UI_STATE__();
         }
-        if (typeof window.__AURA_UI_STATE_JSON__ === 'string') {
-          return window.__AURA_UI_STATE_JSON__;
-        }
-        if (window.__AURA_UI_STATE_CACHE__ && typeof window.__AURA_UI_STATE_CACHE__ === 'object') {
-          return JSON.stringify(window.__AURA_UI_STATE_CACHE__);
+        if (typeof window.__AURA_HARNESS__?.ui_state === 'function') {
+          return window.__AURA_HARNESS__.ui_state();
         }
         return null;
       }),
@@ -1034,109 +1252,63 @@ async function uiState(params) {
     );
     const parsed = tryParseUiState(payload);
     if (parsed && typeof parsed === 'object') {
+      await ensureUiStateRenderConvergence(session, parsed, reason);
       session.uiStateCache = parsed;
       try {
         session.uiStateCacheJson = JSON.stringify(parsed);
       } catch {
         session.uiStateCacheJson = null;
       }
-      console.error(`[driver] ui_state live_refresh done instance=${instanceId} reason=${reason}`);
+      console.error(
+        `[driver] ui_state structured_read done instance=${instanceId} reason=${reason}`
+      );
       return parsed;
     }
     console.error(
-      `[driver] ui_state live_refresh unavailable instance=${instanceId} reason=${reason}`
+      `[driver] ui_state structured_read unavailable instance=${instanceId} reason=${reason}`
     );
     return null;
   };
 
-  try {
-    const live = await readLiveUiState('preferred_live');
-    if (live) {
-      return live;
-    }
-  } catch (error) {
-    console.error(
-      `[driver] ui_state live_refresh_failed instance=${instanceId} reason=preferred_live error=${
-        error?.message ?? String(error)
-      }`
-    );
-  }
-
+  await assertRootStructure(session, 'ui_state');
   if (session.uiStateCache && typeof session.uiStateCache === 'object') {
     console.error(`[driver] ui_state cache_hit instance=${instanceId}`);
     const cached =
       typeof session.uiStateCacheJson === 'string'
         ? tryParseUiState(session.uiStateCacheJson)
         : session.uiStateCache;
-    if (cached && shouldRefreshUiState(cached)) {
-      try {
-        const refreshed = await readLiveUiState('transient_cache');
-        if (refreshed) {
-          return refreshed;
-        }
-      } catch (error) {
-        console.error(
-          `[driver] ui_state live_refresh_failed instance=${instanceId} reason=transient_cache error=${
-            error?.message ?? String(error)
-          }`
-        );
-      }
+    if (cached && !cachedUiStateConverged(session, cached)) {
+      throw new Error(
+        `ui_state cache diverged from committed render instance=${instanceId} screen=${cached?.screen ?? 'unknown'} modal=${
+          cached?.open_modal ?? 'none'
+        } heartbeat=${JSON.stringify(session.renderHeartbeat)} current_ids=${JSON.stringify(domStateIdList(session))} text_snippet=${JSON.stringify(
+          session?.domState?.text ?? ''
+        )}`
+      );
     }
-    if (typeof session.uiStateCacheJson === 'string') {
-      console.error(`[driver] ui_state cache_json_hit instance=${instanceId}`);
-      return cached ?? JSON.parse(session.uiStateCacheJson);
+    if (cached) {
+      console.error(`[driver] ui_state authoritative_cache_hit instance=${instanceId}`);
+      return cached;
     }
-    console.error(`[driver] ui_state cache_object_hit instance=${instanceId}`);
-    return session.uiStateCache;
   }
 
   console.error(`[driver] ui_state cache_miss instance=${instanceId}`);
-  let payload;
   try {
-    console.error(`[driver] ui_state evaluate start instance=${instanceId}`);
-    payload = await withOperationTimeout(
-      'ui_state',
-      session.page.evaluate(() => {
-        if (typeof window.__AURA_UI_STATE_JSON__ === 'string') {
-          return window.__AURA_UI_STATE_JSON__;
-        }
-        if (window.__AURA_UI_STATE_CACHE__ && typeof window.__AURA_UI_STATE_CACHE__ === 'object') {
-          return JSON.stringify(window.__AURA_UI_STATE_CACHE__);
-        }
-        if (typeof window.__AURA_UI_STATE__ === 'function') {
-          return window.__AURA_UI_STATE__();
-        }
-        if (typeof window.__AURA_HARNESS__?.ui_state === 'function') {
-          return window.__AURA_HARNESS__.ui_state();
-        }
-        return null;
-      }),
-      UI_STATE_TIMEOUT_MS
-    );
-    console.error(`[driver] ui_state evaluate done instance=${instanceId}`);
+    const recovered = await readStructuredUiState('recovery', UI_STATE_TIMEOUT_MS);
+    if (recovered) {
+      return recovered;
+    }
   } catch (error) {
     throw new Error(
-      `${error}\nBrowser console tail:\n${consoleTailText(session)}`
+      `structured ui_state recovery failed for instance ${instanceId}: ${error}\nBrowser console tail:\n${consoleTailText(session)}`
     );
   }
 
-  if (typeof payload === 'string') {
-    try {
-      payload = JSON.parse(payload);
-    } catch (error) {
-      throw new Error(
-        `browser UI state JSON parse failed: ${error}\nBrowser console tail:\n${consoleTailText(session)}`
-      );
-    }
-  }
-
-  if (!payload || typeof payload !== 'object') {
-    throw new Error(
-      `browser UI state export is unavailable for instance ${instanceId}\nBrowser console tail:\n${consoleTailText(session)}`
-    );
-  }
-
-  return payload;
+  throw new Error(
+    `browser UI state unavailable for instance ${instanceId}; primary_observation=driver_push_cache fallback=structured_ui_state heartbeat=${JSON.stringify(
+      session.renderHeartbeat
+    )}\nBrowser console tail:\n${consoleTailText(session)}`
+  );
 }
 
 async function domSnapshot(params) {
@@ -1474,6 +1646,16 @@ async function dispatch(method, params) {
       return stop(params);
     default:
       throw new Error(`unsupported method: ${method}`);
+  }
+}
+
+if (process.argv.includes('--selftest')) {
+  try {
+    runSelfTest();
+    process.exit(0);
+  } catch (error) {
+    console.error(`[driver] selftest failed: ${error?.stack ?? error?.message ?? String(error)}`);
+    process.exit(1);
   }
 }
 

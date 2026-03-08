@@ -589,9 +589,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 
     fn activate_control(&mut self, control_id: ControlId) -> Result<()> {
-        let selector = control_id
-            .web_selector()
-            .ok_or_else(|| anyhow!("control {control_id:?} does not have a web selector"))?;
+        let selector = control_selector(control_id)?;
         self.click_target(&selector)
     }
 
@@ -623,22 +621,13 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 
     fn fill_field(&mut self, field_id: FieldId, value: &str) -> Result<()> {
-        let selector = field_id
-            .web_selector()
-            .ok_or_else(|| anyhow!("field {field_id:?} does not have a web selector"))?;
+        let selector = field_selector(field_id)?;
         self.fill_input(&selector, value)
     }
 
     fn activate_list_item(&mut self, list_id: ListId, item_id: &str) -> Result<()> {
         if matches!(list_id, ListId::Navigation) {
-            let control_id = match item_id {
-                "neighborhood" => ControlId::NavNeighborhood,
-                "chat" => ControlId::NavChat,
-                "contacts" => ControlId::NavContacts,
-                "notifications" => ControlId::NavNotifications,
-                "settings" => ControlId::NavSettings,
-                _ => anyhow::bail!("item {item_id} not found in list {list_id:?}"),
-            };
+            let control_id = navigation_control_id(item_id)?;
             return self.activate_control(control_id);
         }
 
@@ -900,6 +889,29 @@ fn default_driver_script_path() -> Result<PathBuf> {
     Ok(candidate)
 }
 
+fn control_selector(control_id: ControlId) -> Result<String> {
+    control_id
+        .web_selector()
+        .ok_or_else(|| anyhow!("control {control_id:?} does not have a web selector"))
+}
+
+fn field_selector(field_id: FieldId) -> Result<String> {
+    field_id
+        .web_selector()
+        .ok_or_else(|| anyhow!("field {field_id:?} does not have a web selector"))
+}
+
+fn navigation_control_id(item_id: &str) -> Result<ControlId> {
+    match item_id {
+        "neighborhood" => Ok(ControlId::NavNeighborhood),
+        "chat" => Ok(ControlId::NavChat),
+        "contacts" => Ok(ControlId::NavContacts),
+        "notifications" => Ok(ControlId::NavNotifications),
+        "settings" => Ok(ControlId::NavSettings),
+        _ => anyhow::bail!("item {item_id} not found in list {:?}", ListId::Navigation),
+    }
+}
+
 fn tool_key_name(key: ToolKey) -> &'static str {
     match key {
         ToolKey::Enter => "enter",
@@ -932,8 +944,11 @@ fn require_existing_path(path: &Path, label: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        browser_app_url, parse_bool_setting, parse_u64_setting, DEFAULT_PAGE_GOTO_TIMEOUT_MS,
+        browser_app_url, control_selector, field_selector, navigation_control_id,
+        parse_bool_setting, parse_u64_setting, tool_key_name, DEFAULT_PAGE_GOTO_TIMEOUT_MS,
     };
+    use aura_app::ui::contract::{ControlId, FieldId};
+    use crate::tool_api::ToolKey;
 
     #[test]
     fn browser_app_url_prefers_instance_env_override() {
@@ -977,5 +992,40 @@ mod tests {
                     .contains("AURA_HARNESS_BROWSER_U64_TEST must be in range"));
             }
         }
+    }
+
+    #[test]
+    fn browser_driver_maps_shared_controls_to_selectors() {
+        assert_eq!(
+            control_selector(ControlId::NavChat).unwrap_or_else(|error| panic!("{error}")),
+            "#aura-nav-chat"
+        );
+        assert_eq!(
+            control_selector(ControlId::ModalConfirmButton)
+                .unwrap_or_else(|error| panic!("{error}")),
+            "#aura-modal-confirm-button"
+        );
+    }
+
+    #[test]
+    fn browser_driver_maps_shared_fields_to_selectors() {
+        assert_eq!(
+            field_selector(FieldId::ChatInput).unwrap_or_else(|error| panic!("{error}")),
+            "#aura-field-chat-input"
+        );
+    }
+
+    #[test]
+    fn browser_driver_maps_navigation_items_to_controls() {
+        assert_eq!(
+            navigation_control_id("chat").unwrap_or_else(|error| panic!("{error}")),
+            ControlId::NavChat
+        );
+        assert!(navigation_control_id("unknown").is_err());
+    }
+
+    #[test]
+    fn browser_driver_maps_dismiss_key_name() {
+        assert_eq!(tool_key_name(ToolKey::Esc), "esc");
     }
 }

@@ -7,7 +7,7 @@ use crate::workflows::channel_ref::ChannelRef;
 use crate::workflows::chat_commands::normalize_channel_name;
 use crate::workflows::context::current_home_context_or_fallback;
 use crate::workflows::parse::parse_authority_id;
-use crate::workflows::runtime::{cooperative_yield, require_runtime};
+use crate::workflows::runtime::{converge_runtime, cooperative_yield, require_runtime};
 use crate::workflows::signals::{emit_signal, read_signal};
 use crate::workflows::snapshot_policy::{chat_snapshot, contacts_snapshot};
 use crate::workflows::state_helpers::with_chat_state;
@@ -160,8 +160,7 @@ async fn send_chat_fact_with_retry(
         }
 
         if attempt + 1 < CHAT_FACT_SEND_MAX_ATTEMPTS {
-            let _ = runtime.trigger_discovery().await;
-            let _ = runtime.trigger_sync().await;
+            converge_runtime(&runtime).await;
             for _ in 0..CHAT_FACT_SEND_YIELDS_PER_RETRY {
                 cooperative_yield().await;
             }
@@ -235,8 +234,7 @@ async fn try_join_via_pending_channel_invitation(
         }
     }
 
-    let _ = runtime.trigger_discovery().await;
-    let _ = runtime.trigger_sync().await;
+    converge_runtime(&runtime).await;
 
     // Joining by invited channel id is best-effort; some runtimes auto-join on accept.
     let _ = join_channel(app_core, invited_channel_id).await;
@@ -1024,8 +1022,7 @@ pub async fn join_channel_by_name(
             )
             .await?;
             let runtime = require_runtime(app_core).await?;
-            let _ = runtime.trigger_discovery().await;
-            let _ = runtime.trigger_sync().await;
+            converge_runtime(&runtime).await;
             Ok(())
         }
         Err(join_error) => {
@@ -1396,7 +1393,7 @@ pub async fn send_message_ref(
                     failed_fanout.join("; ")
                 );
             }
-            let _ = runtime.trigger_sync().await;
+            converge_runtime(&runtime).await;
         }
 
         (sender_id, message_id)

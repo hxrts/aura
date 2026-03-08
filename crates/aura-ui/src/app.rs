@@ -17,7 +17,7 @@ use crate::model::{
 use aura_app::signal_defs::{DiscoveredPeersState, SettingsState};
 use aura_app::ui::contract::{
     list_item_dom_id, ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot,
-    ListSnapshot, MessageSnapshot, OperationId, OperationSnapshot, OperationState,
+    ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot, OperationState,
     ScreenId as ContractScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::signals::{
@@ -2980,6 +2980,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                     if let Some(add_device_state) = model.add_device_modal() {
                         if !matches!(add_device_state.step, AddDeviceWizardStep::Name) {
                             UiDeviceEnrollmentModal {
+                            modal_id: ModalId::AddDevice,
                             title: if matches!(add_device_state.step, AddDeviceWizardStep::ShareCode) {
                                 "Add Device — Step 2 of 3".to_string()
                             } else {
@@ -3156,6 +3157,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                         }
                     } else if matches!(modal_state, Some(ModalState::SwitchAuthority)) {
                         UiAuthorityPickerModal {
+                        modal_id: ModalId::SwitchAuthority,
                         title: active_modal_title(&model)
                             .unwrap_or_else(|| "Switch Authority".to_string()),
                         current_label: settings_runtime_snapshot
@@ -5121,6 +5123,7 @@ fn upsert_snapshot_operation(
         .retain(|operation| operation.id != operation_id);
     snapshot.operations.push(OperationSnapshot {
         id: operation_id,
+        instance_id: OperationInstanceId("synthetic-operation".to_string()),
         state,
     });
 }
@@ -5807,6 +5810,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
     };
 
     Some(ModalView {
+        modal_id: modal.contract_id(),
         title,
         details,
         keybind_rows,

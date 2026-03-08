@@ -51,7 +51,7 @@ pub use views::{ChatMemberCandidate, CreateChannelModalState, CreateChannelStep}
 
 use crate::tui::screens::{Router, Screen};
 use crate::tui::types::AuthorityInfo;
-use aura_app::ui::contract::{OperationId, OperationSnapshot, OperationState};
+use aura_app::ui::contract::{OperationId, OperationInstanceId, OperationSnapshot, OperationState};
 use std::collections::HashMap;
 
 /// Complete TUI state
@@ -245,6 +245,7 @@ impl TuiState {
             .iter()
             .map(|(id, state)| OperationSnapshot {
                 id: id.clone(),
+                instance_id: OperationInstanceId(format!("tui-op-{}", id.0)),
                 state: state.clone(),
             })
             .collect()

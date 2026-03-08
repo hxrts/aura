@@ -12,7 +12,7 @@ use async_lock::RwLock as AsyncRwLock;
 use aura_app::{
     ui::contract::{
         ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot, ListSnapshot,
-        MessageSnapshot, ModalId, OperationId, OperationSnapshot, OperationState,
+        MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot, OperationState,
         SelectionSnapshot, ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
     },
     AppCore,
@@ -541,6 +541,7 @@ pub struct UiModel {
     pub operations: Vec<OperationSnapshot>,
     pub toast: Option<ToastState>,
     pub toast_key: u64,
+    pub operation_instance_key: u64,
     pub input_mode: bool,
     pub input_buffer: String,
     pub modal_hint: String,
@@ -593,6 +594,7 @@ impl UiModel {
             operations: Vec::new(),
             toast: None,
             toast_key: 0,
+            operation_instance_key: 0,
             input_mode: false,
             input_buffer: String::new(),
             modal_hint: String::new(),
@@ -623,11 +625,18 @@ impl UiModel {
 
     fn set_operation_state(&mut self, operation_id: OperationId, state: OperationState) {
         if let Some(operation) = self.operations.iter_mut().find(|op| op.id == operation_id) {
+            if state == OperationState::Submitting {
+                self.operation_instance_key = self.operation_instance_key.saturating_add(1);
+                operation.instance_id =
+                    OperationInstanceId(format!("op-{}", self.operation_instance_key));
+            }
             operation.state = state;
             return;
         }
+        self.operation_instance_key = self.operation_instance_key.saturating_add(1);
         self.operations.push(OperationSnapshot {
             id: operation_id,
+            instance_id: OperationInstanceId(format!("op-{}", self.operation_instance_key)),
             state,
         });
     }
@@ -2076,5 +2085,30 @@ mod tests {
             .map(|operation| operation.state);
 
         assert_eq!(operation_state, Some(OperationState::Submitting));
+    }
+
+    #[test]
+    fn restarting_operation_generates_new_operation_instance_id() {
+        let mut model = UiModel::new("authority-local".to_string());
+        model.set_operation_state(OperationId::invitation_accept(), OperationState::Submitting);
+        let first_instance = model
+            .semantic_snapshot()
+            .operations
+            .into_iter()
+            .find(|operation| operation.id == OperationId::invitation_accept())
+            .expect("first operation should exist")
+            .instance_id;
+
+        model.set_operation_state(OperationId::invitation_accept(), OperationState::Succeeded);
+        model.set_operation_state(OperationId::invitation_accept(), OperationState::Submitting);
+        let second_instance = model
+            .semantic_snapshot()
+            .operations
+            .into_iter()
+            .find(|operation| operation.id == OperationId::invitation_accept())
+            .expect("second operation should exist")
+            .instance_id;
+
+        assert_ne!(first_instance, second_instance);
     }
 }

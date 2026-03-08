@@ -41,3 +41,10 @@ pub async fn cooperative_yield() {
 
     YieldOnce(false).await;
 }
+
+/// Ask the runtime to perform a bounded convergence pass suitable for harness-mode real-runtime
+/// execution. The runtime bridge owns the actual harness profile policy.
+pub async fn converge_runtime(runtime: &Arc<dyn RuntimeBridge>) {
+    let _ = runtime.trigger_sync().await;
+    cooperative_yield().await;
+}

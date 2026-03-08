@@ -3,7 +3,7 @@
 //! Exposes the UiController to JavaScript via window.harness, enabling the test
 //! harness to send keys, capture screenshots, and query UI state from Playwright.
 
-use aura_app::ui::contract::UiSnapshot;
+use aura_app::ui::contract::{RenderHeartbeat, UiSnapshot};
 use aura_ui::UiController;
 use js_sys::{Array, Function, Object, Reflect, JSON};
 use serde_wasm_bindgen::to_value;
@@ -15,6 +15,7 @@ use wasm_bindgen::{JsCast, JsValue};
 thread_local! {
     static CONTROLLER: RefCell<Option<Arc<UiController>>> = const { RefCell::new(None) };
     static LAST_PUBLISHED_UI_STATE_JSON: RefCell<Option<String>> = const { RefCell::new(None) };
+    static RENDER_SEQ: RefCell<u64> = const { RefCell::new(0) };
 }
 
 fn publish_ui_snapshot_now(
@@ -68,6 +69,38 @@ fn publish_ui_snapshot_now(
     }
 }
 
+fn publish_render_heartbeat(window: &web_sys::Window, heartbeat: &RenderHeartbeat) {
+    let Ok(value) = to_value(heartbeat) else {
+        return;
+    };
+    let Ok(json) = JSON::stringify(&value) else {
+        return;
+    };
+    let Some(json) = json.as_string() else {
+        return;
+    };
+
+    let _ = Reflect::set(
+        window.as_ref(),
+        &JsValue::from_str("__AURA_RENDER_HEARTBEAT__"),
+        &value,
+    );
+    let _ = Reflect::set(
+        window.as_ref(),
+        &JsValue::from_str("__AURA_RENDER_HEARTBEAT_JSON__"),
+        &JsValue::from_str(&json),
+    );
+
+    if let Ok(function) = Reflect::get(
+        window.as_ref(),
+        &JsValue::from_str("__AURA_DRIVER_PUSH_RENDER_HEARTBEAT"),
+    )
+    .and_then(|candidate| candidate.dyn_into::<Function>())
+    {
+        let _ = function.call1(window.as_ref(), &JsValue::from_str(&json));
+    }
+}
+
 pub fn set_controller(controller: Arc<UiController>) {
     CONTROLLER.with(|slot| {
         *slot.borrow_mut() = Some(controller);
@@ -104,6 +137,19 @@ pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
 
     let raf_window = window.clone();
     let raf_callback = Closure::once_into_js(move || {
+        let render_seq = RENDER_SEQ.with(|slot| {
+            let mut seq = slot.borrow_mut();
+            *seq = seq.saturating_add(1);
+            *seq
+        });
+        publish_render_heartbeat(
+            &raf_window,
+            &RenderHeartbeat {
+                screen,
+                open_modal: modal,
+                render_seq,
+            },
+        );
         publish_ui_snapshot_now(&raf_window, value, json, screen, modal, operation_count);
     });
     let raf_function: &Function = raf_callback.unchecked_ref();
@@ -250,6 +296,92 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
     )?;
     tail_log.forget();
 
+    let root_structure_controller = controller.clone();
+    let root_structure = Closure::wrap(Box::new(move || -> JsValue {
+        let snapshot = root_structure_controller.ui_snapshot();
+        let Some(window) = web_sys::window() else {
+            return JsValue::NULL;
+        };
+        let Some(document) = window.document() else {
+            return JsValue::NULL;
+        };
+
+        let payload = Object::new();
+        let app_root_selector = format!(
+            "#{}",
+            aura_app::ui::contract::ControlId::AppRoot
+                .web_dom_id()
+                .unwrap_or("aura-app-root")
+        );
+        let modal_region_selector = format!(
+            "#{}",
+            aura_app::ui::contract::ControlId::ModalRegion
+                .web_dom_id()
+                .unwrap_or("aura-modal-region")
+        );
+        let toast_region_selector = format!(
+            "#{}",
+            aura_app::ui::contract::ControlId::ToastRegion
+                .web_dom_id()
+                .unwrap_or("aura-toast-region")
+        );
+        let screen_selector = format!("#{}", aura_app::ui::contract::ControlId::Screen(snapshot.screen).web_dom_id().unwrap_or("missing-screen-id"));
+
+        let app_root_count = document
+            .query_selector_all(&app_root_selector)
+            .ok()
+            .map(|nodes| nodes.length())
+            .unwrap_or(0);
+        let modal_region_count = document
+            .query_selector_all(&modal_region_selector)
+            .ok()
+            .map(|nodes| nodes.length())
+            .unwrap_or(0);
+        let toast_region_count = document
+            .query_selector_all(&toast_region_selector)
+            .ok()
+            .map(|nodes| nodes.length())
+            .unwrap_or(0);
+        let active_screen_root_count = document
+            .query_selector_all(&screen_selector)
+            .ok()
+            .map(|nodes| nodes.length())
+            .unwrap_or(0);
+
+        let _ = Reflect::set(
+            &payload,
+            &JsValue::from_str("screen"),
+            &JsValue::from_str(&format!("{:?}", snapshot.screen).to_ascii_lowercase()),
+        );
+        let _ = Reflect::set(
+            &payload,
+            &JsValue::from_str("app_root_count"),
+            &JsValue::from_f64(f64::from(app_root_count)),
+        );
+        let _ = Reflect::set(
+            &payload,
+            &JsValue::from_str("modal_region_count"),
+            &JsValue::from_f64(f64::from(modal_region_count)),
+        );
+        let _ = Reflect::set(
+            &payload,
+            &JsValue::from_str("toast_region_count"),
+            &JsValue::from_f64(f64::from(toast_region_count)),
+        );
+        let _ = Reflect::set(
+            &payload,
+            &JsValue::from_str("active_screen_root_count"),
+            &JsValue::from_f64(f64::from(active_screen_root_count)),
+        );
+        payload.into()
+    }) as Box<dyn FnMut() -> JsValue>);
+    Reflect::set(
+        &harness,
+        &JsValue::from_str("root_structure"),
+        root_structure.as_ref().unchecked_ref(),
+    )?;
+    root_structure.forget();
+
     let inject_controller = controller.clone();
     let inject_message = Closure::wrap(Box::new(move |message: JsValue| -> JsValue {
         if let Some(text) = message.as_string() {
@@ -280,6 +412,21 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
         read_only_ui_state.as_ref().unchecked_ref(),
     )?;
     read_only_ui_state.forget();
+
+    let render_heartbeat = Closure::wrap(Box::new(move || -> JsValue {
+        let window = match web_sys::window() {
+            Some(window) => window,
+            None => return JsValue::NULL,
+        };
+        Reflect::get(window.as_ref(), &JsValue::from_str("__AURA_RENDER_HEARTBEAT__"))
+            .unwrap_or(JsValue::NULL)
+    }) as Box<dyn FnMut() -> JsValue>);
+    Reflect::set(
+        window.as_ref(),
+        &JsValue::from_str("__AURA_RENDER_HEARTBEAT_STATE__"),
+        render_heartbeat.as_ref().unchecked_ref(),
+    )?;
+    render_heartbeat.forget();
 
     Ok(())
 }

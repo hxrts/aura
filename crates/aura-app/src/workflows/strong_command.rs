@@ -15,7 +15,7 @@ use crate::workflows::chat_commands::{
 };
 use crate::workflows::parse::parse_authority_id;
 #[cfg(feature = "signals")]
-use crate::workflows::runtime::{cooperative_yield, require_runtime};
+use crate::workflows::runtime::{converge_runtime, cooperative_yield, require_runtime};
 #[cfg(feature = "signals")]
 use crate::workflows::{context, invitation, messaging, moderation, moderator, query, settings};
 use crate::AppCore;
@@ -1176,8 +1176,7 @@ async fn wait_for_consistency(
         }
 
         if let Ok(runtime) = require_runtime(app_core).await {
-            let _ = runtime.trigger_sync().await;
-            let _ = runtime.trigger_discovery().await;
+            converge_runtime(&runtime).await;
         }
         cooperative_yield().await;
     }

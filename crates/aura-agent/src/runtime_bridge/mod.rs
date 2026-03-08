@@ -51,17 +51,18 @@ use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
 use aura_social::moderation::{
     HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
 };
+use std::collections::BTreeSet;
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::time::Duration;
+#[cfg(target_arch = "wasm32")]
+use gloo_net::websocket::{futures::WebSocket, Message};
 #[cfg(target_arch = "wasm32")]
 use futures::channel::oneshot;
 #[cfg(target_arch = "wasm32")]
 use futures::{SinkExt, StreamExt};
 #[cfg(target_arch = "wasm32")]
-use gloo_net::websocket::{futures::WebSocket, Message};
-use std::collections::BTreeSet;
-use std::collections::HashSet;
-#[cfg(target_arch = "wasm32")]
 use std::future::Future;
-use std::sync::Arc;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local;
 
@@ -87,6 +88,8 @@ const CHAT_FACT_CONTENT_TYPE: &str = "application/aura-chat-fact";
 const FACT_SYNC_REQUEST_CONTENT_TYPE: &str = "application/aura-fact-sync-request";
 #[cfg(target_arch = "wasm32")]
 const FACT_SYNC_RESPONSE_CONTENT_TYPE: &str = "application/aura-fact-sync-response";
+const DEFAULT_HARNESS_SYNC_ROUNDS: usize = 3;
+const DEFAULT_HARNESS_SYNC_BACKOFF_MS: u64 = 75;
 
 fn service_error_to_intent(err: ServiceError) -> IntentError {
     IntentError::service_error(err.to_string())
@@ -101,6 +104,35 @@ fn service_unavailable_with_detail(
     detail: impl std::fmt::Display,
 ) -> IntentError {
     service_error_to_intent(ServiceError::unavailable(service, format!("{detail}")))
+}
+
+fn harness_mode_enabled() -> bool {
+    std::env::var_os("AURA_HARNESS_MODE").is_some()
+}
+
+fn harness_sync_rounds() -> usize {
+    std::env::var("AURA_HARNESS_SYNC_ROUNDS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|rounds| *rounds > 0)
+        .unwrap_or(DEFAULT_HARNESS_SYNC_ROUNDS)
+}
+
+fn harness_sync_backoff_ms() -> u64 {
+    std::env::var("AURA_HARNESS_SYNC_BACKOFF_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_HARNESS_SYNC_BACKOFF_MS)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn harness_sync_backoff_sleep(ms: u64) {
+    tokio::time::sleep(Duration::from_millis(ms)).await;
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn harness_sync_backoff_sleep(ms: u64) {
+    gloo_timers::future::sleep(Duration::from_millis(ms)).await;
 }
 
 /// Wrapper to implement RuntimeBridge for AuraAgent
@@ -976,52 +1008,82 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn trigger_sync(&self) -> Result<(), IntentError> {
         if let Some(sync) = self.agent.runtime().sync() {
             let effects = self.agent.runtime().effects();
-            #[cfg(target_arch = "wasm32")]
-            let authority_peers: Vec<AuthorityId> =
-                if let Some(rendezvous) = self.agent.runtime().rendezvous() {
-                    let mut peers = rendezvous.list_cached_peers().await;
-                    if peers.is_empty() {
-                        peers = rendezvous
-                            .list_lan_discovered_peers()
-                            .await
-                            .into_iter()
-                            .map(|peer| peer.authority_id)
-                            .collect();
-                    }
-                    peers.sort();
-                    peers.dedup();
-                    peers
-                } else {
-                    Vec::new()
-                };
-            let peers = sync.peers().await;
-
-            let sync_result = if peers.is_empty() {
-                Ok(())
+            let rounds = if harness_mode_enabled() {
+                harness_sync_rounds()
             } else {
-                sync.sync_with_peers(&effects, peers)
-                    .await
-                    .map_err(|e| IntentError::internal_error(format!("Sync failed: {e}")))
+                1
             };
+            let backoff_ms = harness_sync_backoff_ms();
+            let mut last_sync_error: Option<IntentError> = None;
 
-            #[cfg(target_arch = "wasm32")]
-            {
-                let mut pull_error: Option<IntentError> = None;
-                for peer in authority_peers {
-                    if let Err(error) = self.pull_remote_relational_facts(peer).await {
-                        tracing::warn!(peer = %peer, error = %error, "web fact sync pull failed");
-                        if pull_error.is_none() {
-                            pull_error = Some(error);
+            for round in 0..rounds {
+                if harness_mode_enabled() {
+                    let _ = rendezvous::trigger_discovery(self).await;
+                }
+
+                #[cfg(target_arch = "wasm32")]
+                let authority_peers: Vec<AuthorityId> =
+                    if let Some(rendezvous) = self.agent.runtime().rendezvous() {
+                        let mut peers = rendezvous.list_cached_peers().await;
+                        if peers.is_empty() {
+                            peers = rendezvous
+                                .list_lan_discovered_peers()
+                                .await
+                                .into_iter()
+                                .map(|peer| peer.authority_id)
+                                .collect();
                         }
+                        peers.sort();
+                        peers.dedup();
+                        peers
+                    } else {
+                        Vec::new()
+                    };
+                let peers = sync.peers().await;
+
+                let sync_result = if peers.is_empty() {
+                    Ok(())
+                } else {
+                    sync.sync_with_peers(&effects, peers)
+                        .await
+                        .map_err(|e| IntentError::internal_error(format!("Sync failed: {e}")))
+                };
+
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let mut pull_error: Option<IntentError> = None;
+                    for peer in authority_peers {
+                        if let Err(error) = self.pull_remote_relational_facts(peer).await {
+                            tracing::warn!(peer = %peer, error = %error, "web fact sync pull failed");
+                            if pull_error.is_none() {
+                                pull_error = Some(error);
+                            }
+                        }
+                    }
+
+                    if let Some(error) = pull_error {
+                        last_sync_error = Some(error);
                     }
                 }
 
-                if let Some(error) = pull_error {
-                    return Err(error);
+                match sync_result {
+                    Ok(()) => {
+                        if last_sync_error.is_none() {
+                            return Ok(());
+                        }
+                    }
+                    Err(error) => last_sync_error = Some(error),
+                }
+
+                if round + 1 < rounds {
+                    harness_sync_backoff_sleep(backoff_ms).await;
                 }
             }
 
-            sync_result
+            match last_sync_error {
+                Some(error) => Err(error),
+                None => Ok(()),
+            }
         } else {
             Err(service_unavailable("sync_service"))
         }
@@ -3250,6 +3312,12 @@ impl AuraAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     // Note: Full tests would require mock infrastructure which is in aura-testkit
     // These are placeholder tests showing the API usage
@@ -3266,5 +3334,33 @@ mod tests {
         let status = RendezvousStatus::default();
         assert!(!status.is_running);
         assert_eq!(status.cached_peers, 0);
+    }
+
+    #[test]
+    fn harness_sync_policy_defaults_when_env_missing() {
+        let _guard = env_lock().lock().unwrap();
+        std::env::remove_var("AURA_HARNESS_MODE");
+        std::env::remove_var("AURA_HARNESS_SYNC_ROUNDS");
+        std::env::remove_var("AURA_HARNESS_SYNC_BACKOFF_MS");
+
+        assert!(!harness_mode_enabled());
+        assert_eq!(harness_sync_rounds(), DEFAULT_HARNESS_SYNC_ROUNDS);
+        assert_eq!(harness_sync_backoff_ms(), DEFAULT_HARNESS_SYNC_BACKOFF_MS);
+    }
+
+    #[test]
+    fn harness_sync_policy_honors_explicit_env_values() {
+        let _guard = env_lock().lock().unwrap();
+        std::env::set_var("AURA_HARNESS_MODE", "1");
+        std::env::set_var("AURA_HARNESS_SYNC_ROUNDS", "5");
+        std::env::set_var("AURA_HARNESS_SYNC_BACKOFF_MS", "125");
+
+        assert!(harness_mode_enabled());
+        assert_eq!(harness_sync_rounds(), 5);
+        assert_eq!(harness_sync_backoff_ms(), 125);
+
+        std::env::remove_var("AURA_HARNESS_MODE");
+        std::env::remove_var("AURA_HARNESS_SYNC_ROUNDS");
+        std::env::remove_var("AURA_HARNESS_SYNC_BACKOFF_MS");
     }
 }
