@@ -278,7 +278,7 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 
 ### Choreography Specification
 
-**`aura-mpst`**: Aura-facing compatibility crate over Telltale. Re-exports choreography/runtime surfaces and Aura extension traits used by generated protocols and adapters.
+**`aura-mpst`**: Aura-facing compatibility crate over Telltale. Re-exports choreography/runtime surfaces and Aura extension traits used by generated protocols, VM artifacts, and testing utilities.
 
 **`aura-macros`**: Compile-time choreography frontend. Parses Aura annotations (`guard_capability`, `flow_cost`, `journal_facts`, `leak`) and emits Telltale-backed generated modules plus Aura effect-bridge helpers.
 

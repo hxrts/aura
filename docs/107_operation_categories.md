@@ -149,7 +149,7 @@ Category C operations do NOT proceed until a ceremony completes. Partial state w
 | Device enrollment | Key shares distributed atomically | Partial enrollment unusable |
 | Guardian rotation | Key shares distributed atomically | Partial rotation unusable |
 | Recovery execution | Account state replacement | Partial recovery corruption |
-| OTA hard fork | Breaking protocol change | Network split |
+| OTA hard fork | Scope-bound breaking protocol change | Explicit partition or rejected incompatible sessions outside the cutover scope |
 | Device revocation | Security-critical removal | Attacker acts first |
 
 ### 4.2 Implementation Pattern
