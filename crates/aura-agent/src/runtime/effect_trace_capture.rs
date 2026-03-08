@@ -445,6 +445,9 @@ mod tests {
                 Some(AuraVmDeterminismProfileV1 {
                     policy_ref: "aura.vm.recovery_grant.prod".to_string(),
                     protocol_class: "aura.recovery.grant".to_string(),
+                    runtime_mode: "cooperative".to_string(),
+                    scheduler_envelope_class: "exact".to_string(),
+                    declared_wave_width_bound: Some(1),
                     determinism_mode: "full".to_string(),
                     effect_determinism_tier: "strict_deterministic".to_string(),
                     communication_replay_mode: "off".to_string(),

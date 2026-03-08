@@ -1,7 +1,8 @@
 use super::*;
 use crate::runtime::vm_host_bridge::{
-    close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
-    open_manifest_vm_session_admitted, receive_blocked_vm_message,
+    advance_host_bridged_vm_round, advance_host_bridged_vm_round_until_receive,
+    close_and_reap_vm_session, inject_vm_receive, open_manifest_vm_session_admitted,
+    AuraVmHostWaitStatus,
 };
 use std::collections::BTreeMap;
 
@@ -61,6 +62,7 @@ impl<'a> InvitationGuardianHandler<'a> {
 
         let result = async {
             let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                effects.as_ref(),
                 &manifest,
                 "Principal",
                 &global_type,
@@ -77,39 +79,41 @@ impl<'a> InvitationGuardianHandler<'a> {
             })?);
 
             let loop_result = loop {
-                let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!("guardian principal VM step failed: {error}"))
-                })?;
-                flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles)
-                    .await
-                    .map_err(AgentError::internal)?;
-
-                match receive_blocked_vm_message(
+                let round = advance_host_bridged_vm_round_until_receive(
                     effects.as_ref(),
-                    engine.vm(),
+                    &mut engine,
+                    handler.as_ref(),
                     vm_sid,
                     "Principal",
                     &peer_roles,
+                    InvitationHandler::is_transport_no_message,
                 )
                 .await
-                {
-                    Ok(Some(blocked)) => {
-                        inject_vm_receive(&mut engine, vm_sid, &blocked)
-                            .map_err(AgentError::internal)?;
-                        continue;
-                    }
-                    Ok(None) => {}
-                    Err(error) if InvitationHandler::is_transport_no_message(&error) => {
-                        break Ok(());
-                    }
-                    Err(error) => {
-                        break Err(AgentError::internal(format!(
-                            "guardian principal receive failed: {error}"
-                        )));
-                    }
+                .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = round.blocked_receive {
+                    inject_vm_receive(&mut engine, vm_sid, &blocked)
+                        .map_err(AgentError::internal)?;
+                    continue;
                 }
 
-                match step {
+                match round.host_wait_status {
+                    AuraVmHostWaitStatus::Deferred => break Ok(()),
+                    AuraVmHostWaitStatus::Idle => {}
+                    AuraVmHostWaitStatus::TimedOut => {
+                        break Err(AgentError::internal(
+                            "guardian principal VM timed out while waiting for receive".to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Cancelled => {
+                        break Err(AgentError::internal(
+                            "guardian principal VM cancelled while waiting for receive".to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Delivered => {}
+                }
+
+                match round.step {
                     StepResult::AllDone => break Ok(()),
                     StepResult::Continue => {}
                     StepResult::Stuck => {
@@ -158,6 +162,7 @@ impl<'a> InvitationGuardianHandler<'a> {
 
         let result = async {
             let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                effects.as_ref(),
                 &manifest,
                 "Guardian",
                 &global_type,
@@ -171,30 +176,39 @@ impl<'a> InvitationGuardianHandler<'a> {
             })?);
 
             let loop_result = loop {
-                let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!("guardian VM step failed: {error}"))
-                })?;
-                flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles)
-                    .await
-                    .map_err(AgentError::internal)?;
-
-                if let Some(blocked) = receive_blocked_vm_message(
+                let round = advance_host_bridged_vm_round(
                     effects.as_ref(),
-                    engine.vm(),
+                    &mut engine,
+                    handler.as_ref(),
                     vm_sid,
                     "Guardian",
                     &peer_roles,
                 )
                 .await
-                .map_err(|error| {
-                    AgentError::internal(format!("guardian receive failed: {error}"))
-                })? {
+                .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = round.blocked_receive {
                     inject_vm_receive(&mut engine, vm_sid, &blocked)
                         .map_err(AgentError::internal)?;
                     continue;
                 }
 
-                match step {
+                match round.host_wait_status {
+                    AuraVmHostWaitStatus::Idle => {}
+                    AuraVmHostWaitStatus::TimedOut => {
+                        break Err(AgentError::internal(
+                            "guardian VM timed out while waiting for receive".to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Cancelled => {
+                        break Err(AgentError::internal(
+                            "guardian VM cancelled while waiting for receive".to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
+                }
+
+                match round.step {
                     StepResult::AllDone => break Ok(()),
                     StepResult::Continue => {}
                     StepResult::Stuck => {

@@ -11,9 +11,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use telltale_vm::effect::{AcquireDecision, EffectHandler, TopologyPerturbation};
 use telltale_vm::{OutputConditionHint, SessionId, Value};
 
-use aura_core::effects::guard::EffectCommand;
+use aura_core::effects::{guard::EffectCommand, VmBridgeEffects};
 use aura_core::types::scope::ResourceScope;
 
+use super::subsystems::VmBridgeState;
 use super::vm_hardening::{
     AuraVmSchedulerSignals, AuraVmSchedulerSignalsProvider, AURA_OUTPUT_PREDICATE_CHOICE,
     AURA_OUTPUT_PREDICATE_GUARD_ACQUIRE, AURA_OUTPUT_PREDICATE_GUARD_RELEASE,
@@ -117,8 +118,7 @@ pub struct AuraVmTelemetry {
 /// - `handle_acquire`: grants by default unless the layer is explicitly denied.
 pub struct AuraVmEffectHandler {
     identity: String,
-    outbound: Mutex<VecDeque<Value>>,
-    branch_choices: Mutex<VecDeque<String>>,
+    bridge_effects: Arc<dyn VmBridgeEffects>,
     denied_layers: Mutex<HashSet<String>>,
     layer_scope_map: Mutex<HashMap<String, ResourceScope>>,
     active_leases: Mutex<HashMap<(SessionId, String, String), AuraVmCapabilityLease>>,
@@ -128,7 +128,6 @@ pub struct AuraVmEffectHandler {
     envelopes: Mutex<VecDeque<AuraVmEffectEnvelope>>,
     topology_schedule: Mutex<BTreeMap<u64, Vec<TopologyPerturbation>>>,
     envelope_sink: Mutex<Option<EnvelopeSink>>,
-    scheduler_signals: Mutex<AuraVmSchedulerSignals>,
 }
 
 fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -141,11 +140,7 @@ impl std::fmt::Debug for AuraVmEffectHandler {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuraVmEffectHandler")
             .field("identity", &self.identity)
-            .field("outbound_len", &lock_unpoisoned(&self.outbound).len())
-            .field(
-                "branch_choices_len",
-                &lock_unpoisoned(&self.branch_choices).len(),
-            )
+            .field("bridge_effects", &"session-local")
             .field(
                 "denied_layers_len",
                 &lock_unpoisoned(&self.denied_layers).len(),
@@ -171,7 +166,7 @@ impl std::fmt::Debug for AuraVmEffectHandler {
             )
             .field(
                 "scheduler_signals",
-                &*lock_unpoisoned(&self.scheduler_signals),
+                &self.bridge_effects.scheduler_signals(),
             )
             .finish()
     }
@@ -186,10 +181,17 @@ impl Default for AuraVmEffectHandler {
 impl AuraVmEffectHandler {
     /// Create a new deterministic VM effect handler with a stable identity.
     pub fn new(identity: impl Into<String>) -> Self {
+        Self::with_bridge_effects(identity, Arc::new(VmBridgeState::new()))
+    }
+
+    /// Create a new deterministic VM effect handler with an explicit bridge-effects implementation.
+    pub fn with_bridge_effects(
+        identity: impl Into<String>,
+        bridge_effects: Arc<dyn VmBridgeEffects>,
+    ) -> Self {
         Self {
             identity: identity.into(),
-            outbound: Mutex::new(VecDeque::new()),
-            branch_choices: Mutex::new(VecDeque::new()),
+            bridge_effects,
             denied_layers: Mutex::new(HashSet::new()),
             layer_scope_map: Mutex::new(HashMap::new()),
             active_leases: Mutex::new(HashMap::new()),
@@ -199,18 +201,17 @@ impl AuraVmEffectHandler {
             envelopes: Mutex::new(VecDeque::new()),
             topology_schedule: Mutex::new(BTreeMap::new()),
             envelope_sink: Mutex::new(None),
-            scheduler_signals: Mutex::new(AuraVmSchedulerSignals::default()),
         }
     }
 
-    /// Queue a payload to be used by the next VM send hook.
-    pub fn push_send_value(&self, value: Value) {
-        lock_unpoisoned(&self.outbound).push_back(value);
+    /// Queue one outbound payload to be used by the next VM send hook.
+    pub fn push_send_bytes(&self, payload: Vec<u8>) {
+        self.bridge_effects.enqueue_outbound_payload(payload);
     }
 
     /// Queue a label to be selected by the next VM choose hook.
     pub fn push_branch_choice(&self, label: impl Into<String>) {
-        lock_unpoisoned(&self.branch_choices).push_back(label.into());
+        self.bridge_effects.enqueue_branch_choice(label.into());
     }
 
     /// Mark a guard layer as denied for acquire checks.
@@ -305,7 +306,7 @@ impl AuraVmEffectHandler {
 
     /// Override host-visible scheduler signals for the next admitted run.
     pub fn set_scheduler_signals(&self, signals: AuraVmSchedulerSignals) {
-        *lock_unpoisoned(&self.scheduler_signals) = signals.normalized();
+        self.bridge_effects.set_scheduler_signals(signals);
     }
 
     fn record(&self, event: AuraVmEffectEvent) {
@@ -333,7 +334,7 @@ impl AuraVmEffectHandler {
 impl AuraVmSchedulerSignalsProvider for AuraVmEffectHandler {
     fn scheduler_signals(&self) -> AuraVmSchedulerSignals {
         let telemetry = self.telemetry();
-        let mut signals = *lock_unpoisoned(&self.scheduler_signals);
+        let mut signals = self.bridge_effects.scheduler_signals();
         signals.guard_contention_events = signals.guard_contention_events.saturating_add(
             telemetry
                 .acquire_denied
@@ -369,8 +370,8 @@ impl EffectHandler for AuraVmEffectHandler {
             format!("{role}->{partner}:{label}"),
         ))?;
 
-        if let Some(value) = lock_unpoisoned(&self.outbound).pop_front() {
-            return Ok(value);
+        if let Some(payload) = self.bridge_effects.dequeue_outbound_payload() {
+            return Ok(Value::Str(hex::encode(payload)));
         }
 
         Ok(state.last().cloned().unwrap_or(Value::Unit))
@@ -416,7 +417,7 @@ impl EffectHandler for AuraVmEffectHandler {
             return Err("no labels available".to_string());
         }
 
-        let selected = if let Some(candidate) = lock_unpoisoned(&self.branch_choices).pop_front() {
+        let selected = if let Some(candidate) = self.bridge_effects.dequeue_branch_choice() {
             if labels.iter().any(|label| label == &candidate) {
                 candidate
             } else {
@@ -579,13 +580,13 @@ mod tests {
     #[test]
     fn queued_payload_and_branch_are_used() {
         let handler = AuraVmEffectHandler::default();
-        handler.push_send_value(Value::Nat(7));
+        handler.push_send_bytes(vec![0x07]);
         handler.push_branch_choice("Commit");
 
         let send = handler
             .handle_send("A", "B", "Msg", &[])
             .expect("send should succeed");
-        assert_eq!(send, Value::Nat(7));
+        assert_eq!(send, Value::Str("07".to_string()));
 
         let choice = handler
             .handle_choose("A", "B", &["Commit".to_string(), "Abort".to_string()], &[])

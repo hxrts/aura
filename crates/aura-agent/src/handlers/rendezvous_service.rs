@@ -9,8 +9,8 @@ use crate::runtime::services::ceremony_runner::{
     CeremonyCommitMetadata, CeremonyInitRequest, CeremonyRunner,
 };
 use crate::runtime::vm_host_bridge::{
-    close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
-    open_manifest_vm_session_admitted, receive_blocked_vm_message,
+    advance_host_bridged_vm_round, close_and_reap_vm_session, handle_standard_vm_round,
+    open_manifest_vm_session_admitted, AuraVmRoundDisposition,
 };
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::time::PhysicalTimeEffects;
@@ -27,7 +27,6 @@ use aura_rendezvous::protocol::{
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use telltale_vm::vm::StepResult;
 use uuid::Uuid;
 
 /// Rendezvous service
@@ -141,6 +140,7 @@ impl RendezvousServiceApi {
 
         let result = async {
             let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                self.effects.as_ref(),
                 manifest,
                 active_role,
                 global_type,
@@ -155,41 +155,27 @@ impl RendezvousServiceApi {
             }
 
             let loop_result = loop {
-                let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!(
-                        "rendezvous {active_role} VM step failed: {error}"
-                    ))
-                })?;
-                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
-                    .await
-                    .map_err(AgentError::internal)?;
-
-                if let Some(blocked) = receive_blocked_vm_message(
+                let round = advance_host_bridged_vm_round(
                     self.effects.as_ref(),
-                    engine.vm(),
+                    &mut engine,
+                    handler.as_ref(),
                     vm_sid,
                     active_role,
                     &peer_roles,
                 )
                 .await
-                .map_err(|error| {
-                    AgentError::internal(format!(
-                        "rendezvous {active_role} VM receive failed: {error}"
-                    ))
-                })? {
-                    inject_vm_receive(&mut engine, vm_sid, &blocked)
-                        .map_err(AgentError::internal)?;
-                    continue;
-                }
+                .map_err(AgentError::internal)?;
 
-                match step {
-                    StepResult::AllDone => break Ok(()),
-                    StepResult::Continue => {}
-                    StepResult::Stuck => {
-                        break Err(AgentError::internal(format!(
-                            "rendezvous {active_role} VM became stuck without a pending receive"
-                        )));
-                    }
+                match handle_standard_vm_round(
+                    &mut engine,
+                    vm_sid,
+                    round,
+                    &format!("rendezvous {active_role} VM"),
+                )
+                .map_err(AgentError::internal)?
+                {
+                    AuraVmRoundDisposition::Continue => {}
+                    AuraVmRoundDisposition::Complete => break Ok(()),
                 }
             };
 

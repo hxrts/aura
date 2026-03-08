@@ -17,8 +17,10 @@ use crate::core::AgentConfig;
 use crate::database::IndexedJournalHandler;
 use crate::fact_registry::build_fact_registry;
 use crate::runtime::services::{LanTransportService, LogicalClockManager, RendezvousManager};
+use crate::runtime::subsystems::choreography::RuntimeChoreographySessionId;
 use crate::runtime::subsystems::{
     crypto::CryptoRng, ChoreographyState, CryptoSubsystem, JournalSubsystem, TransportSubsystem,
+    VmFragmentId, VmFragmentRegistry,
 };
 use crate::runtime::time_handler::EnhancedTimeHandler;
 use async_trait::async_trait;
@@ -42,6 +44,7 @@ use aura_journal::fact::ProtocolRelationalFact;
 use aura_journal::fact::{
     DkgTranscriptCommit, Fact as TypedFact, FactContent, FactOptions, RelationalFact,
 };
+use aura_mpst::CompositionManifest;
 use aura_protocol::handlers::{PersistentSyncHandler, PersistentTreeHandler};
 use biscuit_auth::{macros::*, Biscuit, KeyPair, PublicKey};
 use parking_lot::RwLock;
@@ -162,6 +165,9 @@ pub struct AuraEffectSystem {
     // === Choreography State ===
     /// In-memory choreography session state for runtime coordination.
     choreography_state: parking_lot::RwLock<ChoreographyState>,
+
+    /// Fragment-scoped local ownership registry for admitted VM sessions.
+    vm_fragment_registry: parking_lot::RwLock<VmFragmentRegistry>,
 
     /// LAN transport service (optional, for TCP envelope delivery)
     lan_transport: parking_lot::RwLock<Option<Arc<LanTransportService>>>,
@@ -417,6 +423,7 @@ impl AuraEffectSystem {
             leakage_handler,
             reactive_handler: ReactiveHandler::new(),
             choreography_state: parking_lot::RwLock::new(ChoreographyState::default()),
+            vm_fragment_registry: parking_lot::RwLock::new(VmFragmentRegistry::default()),
             lan_transport: parking_lot::RwLock::new(None),
             rendezvous_manager: parking_lot::RwLock::new(None),
             biscuit_cache: parking_lot::RwLock::new(initial_biscuit_cache),
@@ -501,6 +508,92 @@ impl AuraEffectSystem {
         self.journal.attach_view_update_sender(tx);
     }
 
+    /// Snapshot the runtime choreography session bound to the current task.
+    pub fn current_runtime_choreography_session_id(
+        &self,
+    ) -> Option<crate::runtime::RuntimeChoreographySessionId> {
+        self.choreography_state.read().current_session_id()
+    }
+
+    /// Claim local ownership for every fragment described by one manifest in the current session.
+    pub fn claim_vm_fragments_for_manifest(
+        &self,
+        owner_label: impl Into<String>,
+        manifest: &CompositionManifest,
+    ) -> Result<Vec<VmFragmentId>, String> {
+        let session_id = self
+            .current_runtime_choreography_session_id()
+            .ok_or_else(|| {
+                format!(
+                "cannot claim VM fragments for protocol {} without an active choreography session",
+                manifest.protocol_id
+            )
+            })?;
+        let owner_label = owner_label.into();
+        let claimed = self
+            .vm_fragment_registry
+            .write()
+            .claim_manifest(session_id, owner_label.clone(), manifest)
+            .map_err(|error| error.to_string())?;
+        tracing::debug!(
+            session_id = %session_id,
+            protocol_id = %manifest.protocol_id,
+            owner_label = %owner_label,
+            fragment_count = claimed.len(),
+            "claimed local VM fragment ownership"
+        );
+        Ok(claimed)
+    }
+
+    /// Transfer local ownership for every fragment in one runtime session.
+    pub fn transfer_vm_fragments_for_session(
+        &self,
+        session_id: crate::runtime::RuntimeChoreographySessionId,
+        from_owner: &str,
+        to_owner: &str,
+    ) -> Result<(), String> {
+        self.vm_fragment_registry
+            .write()
+            .transfer_session(session_id, from_owner, to_owner)
+            .map_err(|error| error.to_string())?;
+        tracing::info!(
+            session_id = %session_id,
+            from_owner = %from_owner,
+            to_owner = %to_owner,
+            "transferred local VM fragment ownership"
+        );
+        Ok(())
+    }
+
+    /// Release all locally owned fragments for one runtime session.
+    pub fn release_vm_fragments_for_session(
+        &self,
+        session_id: crate::runtime::RuntimeChoreographySessionId,
+    ) -> Vec<VmFragmentId> {
+        let released = self
+            .vm_fragment_registry
+            .write()
+            .release_session(session_id);
+        if !released.is_empty() {
+            tracing::debug!(
+                session_id = %session_id,
+                fragment_count = released.len(),
+                "released local VM fragment ownership"
+            );
+        }
+        released
+    }
+
+    #[cfg(test)]
+    pub fn vm_fragment_snapshot(
+        &self,
+    ) -> Vec<(
+        VmFragmentId,
+        crate::runtime::subsystems::VmFragmentOwnerRecord,
+    )> {
+        self.vm_fragment_registry.read().snapshot()
+    }
+
     /// Wait for the reactive scheduler to process the next batch of facts.
     ///
     /// This is useful after committing facts to ensure the reactive views
@@ -530,7 +623,35 @@ impl AuraEffectSystem {
     }
 
     pub fn requeue_envelope(&self, envelope: TransportEnvelope) {
+        self.queue_runtime_envelope(envelope);
+    }
+
+    pub(crate) fn queue_runtime_envelope(&self, envelope: TransportEnvelope) {
+        if let Some(session_id) = Self::choreography_session_id_from_envelope(&envelope) {
+            self.choreography_state
+                .write()
+                .queue_session_envelope(session_id, envelope);
+            return;
+        }
+
         self.transport.queue_envelope(envelope);
+    }
+
+    fn choreography_session_id_from_envelope(
+        envelope: &TransportEnvelope,
+    ) -> Option<RuntimeChoreographySessionId> {
+        let is_choreography = envelope
+            .metadata
+            .get("content-type")
+            .is_some_and(|value| value == "application/aura-choreography");
+        if !is_choreography {
+            return None;
+        }
+        let session_id = envelope.metadata.get("session-id")?;
+        let Ok(session_uuid) = uuid::Uuid::parse_str(session_id) else {
+            return None;
+        };
+        Some(RuntimeChoreographySessionId::from_uuid(session_uuid))
     }
 
     pub fn attach_lan_transport(&self, service: Arc<LanTransportService>) {

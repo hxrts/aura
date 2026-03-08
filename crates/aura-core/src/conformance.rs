@@ -67,6 +67,15 @@ pub struct AuraVmDeterminismProfileV1 {
     pub policy_ref: String,
     /// Aura protocol class bound to this run.
     pub protocol_class: String,
+    /// Aura-selected runtime execution mode for this run.
+    #[serde(default)]
+    pub runtime_mode: String,
+    /// Declared scheduler envelope class for this run.
+    #[serde(default)]
+    pub scheduler_envelope_class: String,
+    /// Declared upper bound for threaded wave width, when applicable.
+    #[serde(default)]
+    pub declared_wave_width_bound: Option<usize>,
     /// Telltale determinism mode identifier.
     pub determinism_mode: String,
     /// Telltale effect determinism tier identifier.

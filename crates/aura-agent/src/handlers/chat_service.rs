@@ -10,8 +10,8 @@ use crate::core::{AgentError, AgentResult};
 use crate::handlers::shared::context_commitment_from_journal;
 use crate::runtime::consensus::build_consensus_params;
 use crate::runtime::vm_host_bridge::{
-    close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
-    open_manifest_vm_session_admitted, receive_blocked_vm_message,
+    advance_host_bridged_vm_round, close_and_reap_vm_session, handle_standard_vm_round,
+    open_manifest_vm_session_admitted, AuraVmRoundDisposition,
 };
 use crate::runtime::AuraEffectSystem;
 use aura_chat::guards::{EffectCommand, GuardOutcome, GuardSnapshot};
@@ -40,7 +40,6 @@ use aura_protocol::amp::{
 use aura_protocol::amp::{AmpMessage, AmpReceipt};
 use aura_protocol::effects::TreeEffects;
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, RoleIndex};
-use telltale_vm::vm::StepResult;
 use uuid::Uuid;
 
 /// Chat service API for the agent layer.
@@ -119,6 +118,7 @@ impl ChatServiceApi {
             let local_types =
                 aura_protocol::amp::choreography::telltale_session_types_amp_transport::vm_artifacts::local_types();
             let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                self.effects.as_ref(),
                 &manifest,
                 active_role,
                 &global_type,
@@ -133,36 +133,27 @@ impl ChatServiceApi {
             }
 
             let loop_result = loop {
-                let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!("AMP {active_role} VM step failed: {error}"))
-                })?;
-                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
-                    .await
-                    .map_err(AgentError::internal)?;
-
-                if let Some(blocked) = receive_blocked_vm_message(
+                let round = advance_host_bridged_vm_round(
                     self.effects.as_ref(),
-                    engine.vm(),
+                    &mut engine,
+                    handler.as_ref(),
                     vm_sid,
                     active_role,
                     &peer_roles,
                 )
-                .await
-                .map_err(|error| {
-                    AgentError::internal(format!("AMP {active_role} VM receive failed: {error}"))
-                })? {
-                    inject_vm_receive(&mut engine, vm_sid, &blocked).map_err(AgentError::internal)?;
-                    continue;
-                }
+                    .await
+                    .map_err(AgentError::internal)?;
 
-                match step {
-                    StepResult::AllDone => break Ok(()),
-                    StepResult::Continue => {}
-                    StepResult::Stuck => {
-                        break Err(AgentError::internal(format!(
-                            "AMP {active_role} VM became stuck without a pending receive"
-                        )));
-                    }
+                match handle_standard_vm_round(
+                    &mut engine,
+                    vm_sid,
+                    round,
+                    &format!("AMP {active_role} VM"),
+                )
+                .map_err(AgentError::internal)?
+                {
+                    AuraVmRoundDisposition::Continue => {}
+                    AuraVmRoundDisposition::Complete => break Ok(()),
                 }
             };
 

@@ -47,7 +47,7 @@ zeroize = { workspace = true }
 
 # Choreography dependencies
 telltale = { workspace = true }
-telltale-vm = { workspace = true, optional = true }
+telltale-vm = { workspace = true, optional = true, features = ["multi-thread"] }
 
 # Serialization
 serde = { workspace = true }

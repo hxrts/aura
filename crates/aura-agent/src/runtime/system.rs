@@ -8,9 +8,7 @@ use super::services::{
     LanTransportService, ReceiptManager, ReconfigurationManager, RendezvousManager, RuntimeService,
     RuntimeTaskRegistry, ServiceError, SocialManager, SyncServiceManager, ThresholdSigningService,
 };
-use super::{
-    AuraEffectSystem, ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager,
-};
+use super::{AuraEffectSystem, EffectContext, EffectExecutor, LifecycleManager};
 use crate::core::{AgentConfig, AuthorityContext};
 use crate::handlers::{InvitationHandler, RendezvousHandler};
 use crate::reactive::{FactSource, ReactivePipeline, SchedulerConfig};
@@ -70,9 +68,6 @@ pub struct RuntimeSystem {
     /// Receipt manager
     receipt_manager: ReceiptManager,
 
-    /// Choreography adapter
-    choreography_adapter: ChoreographyAdapter,
-
     /// Lifecycle manager
     lifecycle_manager: LifecycleManager,
 
@@ -130,7 +125,6 @@ impl RuntimeSystem {
         authority_manager: AuthorityManager,
         flow_budget_manager: FlowBudgetManager,
         receipt_manager: ReceiptManager,
-        choreography_adapter: ChoreographyAdapter,
         lifecycle_manager: LifecycleManager,
         config: AgentConfig,
         authority_id: AuthorityId,
@@ -147,7 +141,6 @@ impl RuntimeSystem {
             authority_manager,
             flow_budget_manager,
             receipt_manager,
-            choreography_adapter,
             lifecycle_manager,
             sync_manager: None,
             rendezvous_manager: None,
@@ -175,7 +168,6 @@ impl RuntimeSystem {
         authority_manager: AuthorityManager,
         flow_budget_manager: FlowBudgetManager,
         receipt_manager: ReceiptManager,
-        choreography_adapter: ChoreographyAdapter,
         lifecycle_manager: LifecycleManager,
         sync_manager: SyncServiceManager,
         config: AgentConfig,
@@ -193,7 +185,6 @@ impl RuntimeSystem {
             authority_manager,
             flow_budget_manager,
             receipt_manager,
-            choreography_adapter,
             lifecycle_manager,
             sync_manager: Some(sync_manager),
             rendezvous_manager: None,
@@ -221,7 +212,6 @@ impl RuntimeSystem {
         authority_manager: AuthorityManager,
         flow_budget_manager: FlowBudgetManager,
         receipt_manager: ReceiptManager,
-        choreography_adapter: ChoreographyAdapter,
         lifecycle_manager: LifecycleManager,
         rendezvous_manager: RendezvousManager,
         config: AgentConfig,
@@ -239,7 +229,6 @@ impl RuntimeSystem {
             authority_manager,
             flow_budget_manager,
             receipt_manager,
-            choreography_adapter,
             lifecycle_manager,
             sync_manager: None,
             rendezvous_manager: Some(rendezvous_manager),
@@ -266,7 +255,6 @@ impl RuntimeSystem {
         authority_manager: AuthorityManager,
         flow_budget_manager: FlowBudgetManager,
         receipt_manager: ReceiptManager,
-        choreography_adapter: ChoreographyAdapter,
         lifecycle_manager: LifecycleManager,
         sync_manager: Option<SyncServiceManager>,
         rendezvous_manager: Option<RendezvousManager>,
@@ -288,7 +276,6 @@ impl RuntimeSystem {
             authority_manager,
             flow_budget_manager,
             receipt_manager,
-            choreography_adapter,
             lifecycle_manager,
             sync_manager,
             rendezvous_manager,
@@ -908,11 +895,6 @@ impl RuntimeSystem {
     /// Get the receipt manager
     pub fn receipts(&self) -> &ReceiptManager {
         &self.receipt_manager
-    }
-
-    /// Get the choreography adapter
-    pub fn choreography(&self) -> &ChoreographyAdapter {
-        &self.choreography_adapter
     }
 
     /// Get the lifecycle manager

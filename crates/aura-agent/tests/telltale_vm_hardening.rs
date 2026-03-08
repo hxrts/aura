@@ -10,8 +10,8 @@ use aura_agent::{
     aura_output_predicate_allow_list, build_vm_config, configured_guard_capacity,
     policy_for_protocol, scheduler_control_input_for_image, scheduler_policy_for_input,
     AuraChoreoEngine, AuraChoreoEngineError, AuraVmEffectHandler, AuraVmHardeningProfile,
-    AuraVmParityProfile, AuraVmSchedulerSignals, AURA_VM_SCHED_PRIORITY_AGING,
-    AURA_VM_SCHED_PROGRESS_AWARE,
+    AuraVmParityProfile, AuraVmRuntimeSelector, AuraVmSchedulerSignals,
+    AURA_VM_SCHED_PRIORITY_AGING, AURA_VM_SCHED_PROGRESS_AWARE,
 };
 use telltale_types::{GlobalType, Label};
 use telltale_vm::effect::EffectHandler;
@@ -187,6 +187,45 @@ async fn admission_fails_deterministically_when_byzantine_capability_missing() {
         first_ref, "byzantine_envelope",
         "error should expose redacted capability reference"
     );
+}
+
+#[tokio::test]
+async fn envelope_bounded_admission_fails_closed_when_runtime_capability_missing() {
+    let policy = policy_for_protocol("aura.sync.epoch_rotation", None).expect("policy");
+    let selector = AuraVmRuntimeSelector::for_policy(policy);
+    let mut config = build_vm_config(
+        AuraVmHardeningProfile::Ci,
+        AuraVmParityProfile::RuntimeDefault,
+    );
+    apply_protocol_execution_policy(&mut config, policy);
+    let image = simple_send_image();
+    let scheduler_input = scheduler_control_input_for_image(
+        &image,
+        policy.protocol_class,
+        configured_guard_capacity(&config),
+        AuraVmSchedulerSignals::default(),
+    );
+    let scheduler_policy = scheduler_policy_for_input(scheduler_input);
+    apply_scheduler_execution_policy(&mut config, &scheduler_policy);
+
+    let mut contracts = RuntimeContracts::full();
+    contracts.determinism_artifacts.full = false;
+    let mut engine = AuraChoreoEngine::new_with_contracts_and_selector(
+        config,
+        Arc::new(AuraVmEffectHandler::default()),
+        Some(contracts),
+        selector,
+    )
+    .expect("engine");
+
+    let err = engine
+        .open_session_admitted(&image, "aura.sync.epoch_rotation", None, &[])
+        .await
+        .expect_err("admission must fail without derived envelope capability");
+    assert!(matches!(
+        err,
+        AuraChoreoEngineError::MissingRuntimeCapability { .. }
+    ));
 }
 
 #[test]

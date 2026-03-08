@@ -877,7 +877,7 @@ where
 }
 
 /// Public API alias for the choreography adapter.
-pub type ChoreographyAdapter = AuraHandlerAdapter;
+pub use AuraHandlerAdapter as ChoreographyAdapter;
 
 fn map_runtime_role(
     result: Result<ChoreographicRole, AuraChoreographyError>,

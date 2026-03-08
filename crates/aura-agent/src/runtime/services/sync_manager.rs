@@ -8,8 +8,9 @@ use super::traits::{RuntimeService, ServiceError, ServiceHealth};
 use super::{ReconfigurationManager, RuntimeTaskRegistry};
 use crate::core::default_context_id_for_authority;
 use crate::runtime::vm_host_bridge::{
-    close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
-    open_manifest_vm_session_admitted, receive_blocked_vm_message,
+    advance_host_bridged_vm_round, close_and_reap_vm_session, handle_standard_vm_round,
+    inject_vm_receive, open_manifest_vm_session_admitted, AuraVmHostWaitStatus,
+    AuraVmRoundDisposition,
 };
 use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId};
 use async_trait::async_trait;
@@ -662,6 +663,7 @@ impl SyncServiceManager {
 
         let result = async {
             let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                effects.as_ref(),
                 &manifest,
                 "Coordinator",
                 &global_type,
@@ -677,21 +679,17 @@ impl SyncServiceManager {
             let mut commit_queued = false;
 
             loop {
-                let step = engine.step().map_err(|error| {
-                    format!("epoch rotation coordinator VM step failed: {error}")
-                })?;
-                flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles).await?;
-
-                if let Some(blocked) = receive_blocked_vm_message(
+                let round = advance_host_bridged_vm_round(
                     effects.as_ref(),
-                    engine.vm(),
+                    &mut engine,
+                    handler.as_ref(),
                     vm_sid,
                     "Coordinator",
                     &peer_roles,
                 )
-                .await
-                .map_err(|error| format!("epoch rotation coordinator receive failed: {error}"))?
-                {
+                .await?;
+
+                if let Some(blocked) = round.blocked_receive {
                     let confirmation: EpochConfirmation =
                         aura_core::util::serialization::from_slice(&blocked.payload).map_err(
                             |error| format!("epoch confirmation decode failed: {error}"),
@@ -708,7 +706,24 @@ impl SyncServiceManager {
                     continue;
                 }
 
-                match step {
+                match round.host_wait_status {
+                    AuraVmHostWaitStatus::Idle => {}
+                    AuraVmHostWaitStatus::TimedOut => {
+                        break Err(
+                            "epoch rotation coordinator VM timed out while waiting for receive"
+                                .to_string(),
+                        );
+                    }
+                    AuraVmHostWaitStatus::Cancelled => {
+                        break Err(
+                            "epoch rotation coordinator VM cancelled while waiting for receive"
+                                .to_string(),
+                        );
+                    }
+                    AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
+                }
+
+                match round.step {
                     StepResult::AllDone => break Ok(()),
                     StepResult::Continue => {}
                     StepResult::Stuck => {
@@ -776,6 +791,7 @@ impl SyncServiceManager {
 
         let result = async {
             let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                effects.as_ref(),
                 &manifest,
                 active_role_name,
                 &global_type,
@@ -789,34 +805,24 @@ impl SyncServiceManager {
             );
 
             loop {
-                let step = engine.step().map_err(|error| {
-                    format!("epoch rotation participant VM step failed: {error}")
-                })?;
-                flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles).await?;
-
-                if let Some(blocked) = receive_blocked_vm_message(
+                let round = advance_host_bridged_vm_round(
                     effects.as_ref(),
-                    engine.vm(),
+                    &mut engine,
+                    handler.as_ref(),
                     vm_sid,
                     active_role_name,
                     &peer_roles,
                 )
-                .await
-                .map_err(|error| format!("epoch rotation participant receive failed: {error}"))?
-                {
-                    inject_vm_receive(&mut engine, vm_sid, &blocked)?;
-                    continue;
-                }
+                .await?;
 
-                match step {
-                    StepResult::AllDone => break Ok(()),
-                    StepResult::Continue => {}
-                    StepResult::Stuck => {
-                        break Err(
-                            "epoch rotation participant VM became stuck without a pending receive"
-                                .to_string(),
-                        );
-                    }
+                match handle_standard_vm_round(
+                    &mut engine,
+                    vm_sid,
+                    round,
+                    "epoch rotation participant VM",
+                )? {
+                    AuraVmRoundDisposition::Continue => {}
+                    AuraVmRoundDisposition::Complete => break Ok(()),
                 }
             }
             .map(|_| {

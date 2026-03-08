@@ -102,6 +102,10 @@ let status = engine.run_to_completion(vm_sid)?;
 
 This wiring opens an admitted VM session from generated choreography metadata. The runtime source of truth is the composition manifest, not an ad hoc adapter. Register the service with the runtime and integrate it with the guard chain. Category C operations must follow the ceremony contract.
 
+Production services should treat the admitted unit as a VM fragment. If the manifest declares link bundles, each linked bundle becomes its own ownership unit. Runtime transfer must use `ReconfigurationManager`. Do not bypass fragment ownership through service-local state.
+
+The runtime also derives execution mode from admitted policy. Cooperative protocols stay on the canonical VM path. Replay-deterministic and envelope-bounded protocols select the threaded path only through the admission and hardening surface. Service code should not construct ad hoc threaded runtimes.
+
 ### Phase 4: Status and Testing
 
 Implement `CeremonyStatus` for Category C or protocol-specific status views:
@@ -117,6 +121,9 @@ pub fn ceremony_status(facts: &[InvitationFact]) -> CeremonyStatus {
 - [ ] Facts defined with reducer and schema version
 - [ ] Choreography specified with roles/messages documented
 - [ ] Runtime wiring added (role runners + registration)
+- [ ] Fragment ownership uses manifest admission and runtime ownership APIs
+- [ ] `delegate` and `link` flows use `ReconfigurationManager`
+- [ ] Threaded or envelope-bounded execution uses admitted policy only
 - [ ] Category C uses ceremony runner and emits standard facts
 - [ ] Status output implemented
 - [ ] Shared-bus integration test added

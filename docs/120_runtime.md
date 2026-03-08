@@ -259,9 +259,11 @@ The creation and lifecycle of sessions are themselves managed as choreographic p
 
 ### Telltale Integration
 
-Aura executes production choreography sessions through the Telltale VM in Layer 6. Production startup is manifest-driven: generated `CompositionManifest` metadata defines the protocol id, required capabilities, determinism profile reference, and link/delegation constraints for each choreography. `AuraChoreoEngine` runs admitted VM sessions and exposes deterministic trace and replay APIs.
+Aura executes production choreography sessions through the Telltale VM in Layer 6. Production startup is manifest-driven. Generated `CompositionManifest` metadata defines the protocol id, required capabilities, determinism profile reference, link constraints, and delegation constraints for each choreography. `AuraChoreoEngine` runs admitted VM sessions and exposes deterministic trace, replay, and envelope-validation APIs.
 
-`AuraVmEffectHandler` is the synchronous VM host boundary. `open_manifest_vm_session_admitted(...)` is the canonical runtime entrypoint for production VM sessions. Non-admitted session startup helpers are test-only. All real async side effects run through `EffectInterpreter` and `EffectCommand`. The simulator provides an async request and resume boundary for fault and scenario middleware.
+Runtime ownership is fragment-scoped. One admitted VM fragment has one local owner at a time. A choreography without link metadata is one fragment. A choreography with link metadata yields one fragment per linked bundle. Ownership claims, transfer, and release flow through `AuraEffectSystem` and `ReconfigurationManager`.
+
+The synchronous callback boundary is `VmBridgeEffects`. `AuraVmEffectHandler` and `AuraQueuedVmBridgeHandler` use it for session-local payload queues, blocked receive snapshots, branch choices, and scheduler signals. Async transport, guard-chain execution, journal coupling, and storage remain outside VM callbacks in `vm_host_bridge` and service loops.
 
 Dynamic reconfiguration follows the same rule. Runtime code must go through `ReconfigurationManager` for link and delegation so bundle evidence, capability admission, and coherence checks are enforced before any transfer occurs.
 
@@ -274,6 +276,21 @@ Telltale VM execution is configured through explicit runtime profiles. Use `buil
 `AuraVmParityProfile` controls deterministic cross-target lanes. `NativeCooperative` provides the native parity baseline. `WasmCooperative` provides the WASM parity lane. Both use cooperative scheduling and strict effect determinism.
 
 Determinism and scheduler policy are protocol-driven rather than ad hoc. Admission resolves the protocol class, applies the configured determinism tier and replay mode, validates the selected VM profile, and chooses scheduler controls from weighted measure plus guard-capacity signals. Production code should not mutate these settings directly after admission.
+
+Operational envelopes are part of admission, not a host convention. Cooperative fragments run on the canonical VM. Replay-deterministic and envelope-bounded fragments select the threaded runtime only through the policy and admission path. Envelope-bounded fragments must provide admissible envelope artifacts or admission fails closed.
+
+Mixed workloads are allowed. Cooperative and threaded fragments may coexist in the same runtime. The contract is per fragment. Envelope validation, diff capture, and fallback to canonical execution are also per fragment.
+
+### Boundary Review Checklist
+
+Use this checklist for any change to the Aura and Telltale boundary:
+
+- Confirm that VM callbacks perform only synchronous `VmBridgeEffects` operations.
+- Confirm that async transport, journal, storage, and guard work stay outside the callback path.
+- Confirm that each admitted fragment has exactly one local owner at a time.
+- Confirm that `delegate` and `link` flows use `ReconfigurationManager` and fragment ownership APIs.
+- Confirm that threaded or envelope-bounded execution is selected only through policy and admission.
+- Confirm that boundary changes add or update replay, conformance, and fault-path tests.
 
 ## Fact Registry
 

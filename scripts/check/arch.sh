@@ -408,6 +408,31 @@ check_effects() {
   vm_direct_admitted_hits=$(filter_test_modules "$vm_direct_admitted_hits")
   emit_hits "Direct admitted VM startup bypasses manifest metadata (use open_manifest_vm_session_admitted)" "$vm_direct_admitted_hits"
 
+  section "VM bridge discipline — bridge state and ownership stay centralized"
+
+  local ad_hoc_vm_bridge_hits direct_fragment_registry_hits unreviewed_envelope_mode_hits
+  ad_hoc_vm_bridge_hits=$(rg --no-heading -n "Mutex<.*VmBridgePendingSend|Mutex<.*VmBridgeBlockedEdge|Mutex<.*VmBridgeSchedulerSignals|VecDeque<.*VmBridgePendingSend|VecDeque<.*VmBridgeBlockedEdge|VecDeque<.*VmBridgeSchedulerSignals" \
+    crates/aura-agent/src crates/aura-testkit/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/runtime/subsystems/vm_bridge.rs" \
+    | grep -v "crates/aura-testkit/src/stateful_effects/vm_bridge.rs" || true)
+  ad_hoc_vm_bridge_hits=$(filter_test_modules "$ad_hoc_vm_bridge_hits")
+  emit_hits "Ad hoc VM bridge queue/state storage outside VmBridgeEffects implementations" "$ad_hoc_vm_bridge_hits"
+
+  direct_fragment_registry_hits=$(rg --no-heading -n "\bVmFragmentRegistry\b|\.claim_manifest\(|\.transfer_session\(|\.release_session\(" \
+    crates/aura-agent/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/runtime/effects.rs" \
+    | grep -v "crates/aura-agent/src/runtime/subsystems/vm_fragment.rs" \
+    | grep -v "crates/aura-agent/src/runtime/subsystems/mod.rs" || true)
+  direct_fragment_registry_hits=$(filter_test_modules "$direct_fragment_registry_hits")
+  emit_hits "Direct fragment ownership registry usage bypasses AuraEffectSystem APIs" "$direct_fragment_registry_hits"
+
+  unreviewed_envelope_mode_hits=$(rg --no-heading -n "ThreadedVM::with_workers|AuraVmRuntimeMode::ThreadedReplayDeterministic|AuraVmRuntimeMode::ThreadedEnvelopeBounded" \
+    crates/aura-agent/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/runtime/choreo_engine.rs" \
+    | grep -v "crates/aura-agent/src/runtime/vm_hardening.rs" || true)
+  unreviewed_envelope_mode_hits=$(filter_test_modules "$unreviewed_envelope_mode_hits")
+  emit_hits "Unreviewed threaded or envelope runtime selection outside hardening/engine paths" "$unreviewed_envelope_mode_hits"
+
   section "Reconfiguration discipline — delegate/link only through runtime manager"
 
   local direct_reconfig_controller_hits

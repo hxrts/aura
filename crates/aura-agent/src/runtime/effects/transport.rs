@@ -45,7 +45,7 @@ impl TransportEffects for AuraEffectSystem {
                 .get("aura-destination-device-id")
                 .is_some_and(|dst| dst == &self_device_id);
         if is_local {
-            self.transport.queue_envelope(envelope);
+            self.queue_runtime_envelope(envelope);
             self.transport.record_send(payload_len);
             return Ok(());
         }

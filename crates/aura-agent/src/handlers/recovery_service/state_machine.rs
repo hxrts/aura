@@ -1,7 +1,8 @@
 use super::*;
 use crate::runtime::vm_host_bridge::{
-    close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
-    open_manifest_vm_session_admitted, receive_blocked_vm_message,
+    advance_host_bridged_vm_round, close_and_reap_vm_session, handle_standard_vm_round,
+    inject_vm_receive, open_manifest_vm_session_admitted, AuraVmHostWaitStatus,
+    AuraVmRoundDisposition,
 };
 use aura_core::util::serialization::to_vec;
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, RoleIndex};
@@ -44,6 +45,7 @@ pub(super) async fn execute_recovery_protocol_account(
 
     let result = async {
         let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+            effects.as_ref(),
             &manifest,
             "Account",
             &global_type,
@@ -57,36 +59,22 @@ pub(super) async fn execute_recovery_protocol_account(
         })?);
 
         let loop_result = loop {
-            let step = engine.step().map_err(|error| {
-                AgentError::internal(format!("recovery account VM step failed: {error}"))
-            })?;
-            flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles)
-                .await
-                .map_err(AgentError::internal)?;
-
-            if let Some(blocked) = receive_blocked_vm_message(
+            let round = advance_host_bridged_vm_round(
                 effects.as_ref(),
-                engine.vm(),
+                &mut engine,
+                handler.as_ref(),
                 vm_sid,
                 "Account",
                 &peer_roles,
             )
             .await
-            .map_err(|error| {
-                AgentError::internal(format!("recovery account receive failed: {error}"))
-            })? {
-                inject_vm_receive(&mut engine, vm_sid, &blocked).map_err(AgentError::internal)?;
-                continue;
-            }
+            .map_err(AgentError::internal)?;
 
-            match step {
-                StepResult::AllDone => break Ok(()),
-                StepResult::Continue => {}
-                StepResult::Stuck => {
-                    break Err(AgentError::internal(
-                        "recovery account VM became stuck without a pending receive".to_string(),
-                    ));
-                }
+            match handle_standard_vm_round(&mut engine, vm_sid, round, "recovery account VM")
+                .map_err(AgentError::internal)?
+            {
+                AuraVmRoundDisposition::Continue => {}
+                AuraVmRoundDisposition::Complete => break Ok(()),
             }
         };
 
@@ -131,6 +119,7 @@ pub(super) async fn execute_recovery_protocol_coordinator(
 
     let result = async {
         let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+            effects.as_ref(),
             &manifest,
             "Coordinator",
             &global_type,
@@ -145,24 +134,18 @@ pub(super) async fn execute_recovery_protocol_coordinator(
         let mut approvals = Vec::new();
 
         let loop_result = loop {
-            let step = engine.step().map_err(|error| {
-                AgentError::internal(format!("recovery coordinator VM step failed: {error}"))
-            })?;
-            flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles)
-                .await
-                .map_err(AgentError::internal)?;
-
-            if let Some(blocked) = receive_blocked_vm_message(
+            let round = advance_host_bridged_vm_round(
                 effects.as_ref(),
-                engine.vm(),
+                &mut engine,
+                handler.as_ref(),
                 vm_sid,
                 "Coordinator",
                 &peer_roles,
             )
             .await
-            .map_err(|error| {
-                AgentError::internal(format!("recovery coordinator receive failed: {error}"))
-            })? {
+            .map_err(AgentError::internal)?;
+
+            if let Some(blocked) = round.blocked_receive {
                 let approval: ProtocolGuardianApproval =
                     from_slice(&blocked.payload).map_err(|error| {
                         AgentError::internal(format!("guardian approval decode failed: {error}"))
@@ -183,7 +166,22 @@ pub(super) async fn execute_recovery_protocol_coordinator(
                 continue;
             }
 
-            match step {
+            match round.host_wait_status {
+                AuraVmHostWaitStatus::Idle => {}
+                AuraVmHostWaitStatus::TimedOut => {
+                    break Err(AgentError::internal(
+                        "recovery coordinator VM timed out while waiting for receive".to_string(),
+                    ));
+                }
+                AuraVmHostWaitStatus::Cancelled => {
+                    break Err(AgentError::internal(
+                        "recovery coordinator VM cancelled while waiting for receive".to_string(),
+                    ));
+                }
+                AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
+            }
+
+            match round.step {
                 StepResult::AllDone => break Ok(()),
                 StepResult::Continue => {}
                 StepResult::Stuck => {

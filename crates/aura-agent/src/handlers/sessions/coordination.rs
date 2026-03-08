@@ -8,8 +8,9 @@ use crate::fact_types::{SESSION_CREATED_FACT_TYPE_ID, SESSION_INVITATION_SENT_FA
 use crate::handlers::shared::HandlerUtilities;
 use crate::runtime::services::SessionManager;
 use crate::runtime::vm_host_bridge::{
-    close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
-    open_manifest_vm_session_admitted, receive_blocked_vm_message,
+    advance_host_bridged_vm_round, close_and_reap_vm_session, handle_standard_vm_round,
+    inject_vm_receive, open_manifest_vm_session_admitted, AuraVmHostWaitStatus,
+    AuraVmRoundDisposition,
 };
 use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId};
 use aura_core::effects::transport::TransportEnvelope;
@@ -598,6 +599,7 @@ impl SessionOperations {
 
         let result = async {
             let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                self.effects.as_ref(),
                 &manifest,
                 "Initiator",
                 &global_type,
@@ -606,43 +608,32 @@ impl SessionOperations {
             )
             .await
             .map_err(AgentError::internal)?;
-            handler.push_send_bytes(
-                to_vec(&session_request)
-                    .map_err(|error| AgentError::internal(format!("session request encode failed: {error}")))?,
-            );
+            handler.push_send_bytes(to_vec(&session_request).map_err(|error| {
+                AgentError::internal(format!("session request encode failed: {error}"))
+            })?);
 
             loop {
-                let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!("session coordination initiator VM step failed: {error}"))
-                })?;
-                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
-                    .await
-                    .map_err(AgentError::internal)?;
-
-                if let Some(blocked) = receive_blocked_vm_message(
+                let round = advance_host_bridged_vm_round(
                     self.effects.as_ref(),
-                    engine.vm(),
+                    &mut engine,
+                    handler.as_ref(),
                     vm_sid,
                     "Initiator",
                     &peer_roles,
                 )
                 .await
-                .map_err(|error| {
-                    AgentError::internal(format!("session coordination initiator receive failed: {error}"))
-                })? {
-                    inject_vm_receive(&mut engine, vm_sid, &blocked).map_err(AgentError::internal)?;
-                    continue;
-                }
+                .map_err(AgentError::internal)?;
 
-                match step {
-                    StepResult::AllDone => break Ok(()),
-                    StepResult::Continue => {}
-                    StepResult::Stuck => {
-                        break Err(AgentError::internal(
-                            "session coordination initiator VM became stuck without a pending receive"
-                                .to_string(),
-                        ));
-                    }
+                match handle_standard_vm_round(
+                    &mut engine,
+                    vm_sid,
+                    round,
+                    "session coordination initiator VM",
+                )
+                .map_err(AgentError::internal)?
+                {
+                    AuraVmRoundDisposition::Continue => {}
+                    AuraVmRoundDisposition::Complete => break Ok(()),
                 }
             }
             .map(|_| {
@@ -695,6 +686,7 @@ impl SessionOperations {
 
         let result = async {
             let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                self.effects.as_ref(),
                 &manifest,
                 "Coordinator",
                 &global_type,
@@ -714,24 +706,18 @@ impl SessionOperations {
             let mut branch_queued = false;
 
             loop {
-                let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!("session coordination coordinator VM step failed: {error}"))
-                })?;
-                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
-                    .await
-                    .map_err(AgentError::internal)?;
-
-                if let Some(blocked) = receive_blocked_vm_message(
+                let round = advance_host_bridged_vm_round(
                     self.effects.as_ref(),
-                    engine.vm(),
+                    &mut engine,
+                    handler.as_ref(),
                     vm_sid,
                     "Coordinator",
                     &peer_roles,
                 )
-                .await
-                .map_err(|error| {
-                    AgentError::internal(format!("session coordination coordinator receive failed: {error}"))
-                })? {
+                    .await
+                    .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = round.blocked_receive {
                     let decision: SessionDecision = serde_json::from_slice(&blocked.payload)
                         .map_err(|error| {
                             AgentError::internal(format!("session decision decode failed: {error}"))
@@ -764,7 +750,24 @@ impl SessionOperations {
                     continue;
                 }
 
-                match step {
+                match round.host_wait_status {
+                    AuraVmHostWaitStatus::Idle => {}
+                    AuraVmHostWaitStatus::TimedOut => {
+                        break Err(AgentError::internal(
+                            "session coordination coordinator VM timed out while waiting for receive"
+                                .to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Cancelled => {
+                        break Err(AgentError::internal(
+                            "session coordination coordinator VM cancelled while waiting for receive"
+                                .to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
+                }
+
+                match round.step {
                     StepResult::AllDone => break Ok(()),
                     StepResult::Continue => {}
                     StepResult::Stuck => {
@@ -822,6 +825,7 @@ impl SessionOperations {
 
         let result = async {
             let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                self.effects.as_ref(),
                 &manifest,
                 &active_role_name,
                 &global_type,
@@ -830,43 +834,32 @@ impl SessionOperations {
             )
             .await
             .map_err(AgentError::internal)?;
-            handler.push_send_bytes(
-                to_vec(&decision)
-                    .map_err(|error| AgentError::internal(format!("session decision encode failed: {error}")))?,
-            );
+            handler.push_send_bytes(to_vec(&decision).map_err(|error| {
+                AgentError::internal(format!("session decision encode failed: {error}"))
+            })?);
 
             loop {
-                let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!("session coordination participant VM step failed: {error}"))
-                })?;
-                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
-                    .await
-                    .map_err(AgentError::internal)?;
-
-                if let Some(blocked) = receive_blocked_vm_message(
+                let round = advance_host_bridged_vm_round(
                     self.effects.as_ref(),
-                    engine.vm(),
+                    &mut engine,
+                    handler.as_ref(),
                     vm_sid,
                     &active_role_name,
                     &peer_roles,
                 )
                 .await
-                .map_err(|error| {
-                    AgentError::internal(format!("session coordination participant receive failed: {error}"))
-                })? {
-                    inject_vm_receive(&mut engine, vm_sid, &blocked).map_err(AgentError::internal)?;
-                    continue;
-                }
+                .map_err(AgentError::internal)?;
 
-                match step {
-                    StepResult::AllDone => break Ok(()),
-                    StepResult::Continue => {}
-                    StepResult::Stuck => {
-                        break Err(AgentError::internal(
-                            "session coordination participant VM became stuck without a pending receive"
-                                .to_string(),
-                        ));
-                    }
+                match handle_standard_vm_round(
+                    &mut engine,
+                    vm_sid,
+                    round,
+                    "session coordination participant VM",
+                )
+                .map_err(AgentError::internal)?
+                {
+                    AuraVmRoundDisposition::Continue => {}
+                    AuraVmRoundDisposition::Complete => break Ok(()),
                 }
             }
             .map(|_| {

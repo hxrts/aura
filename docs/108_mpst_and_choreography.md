@@ -48,6 +48,7 @@ Generated runtime artifacts also carry the data that production startup needs:
 - protocol id and determinism policy reference
 - required capability keys
 - link and delegation constraints
+- operational-envelope selection inputs
 
 These values are sourced from runtime state such as params, journal facts, UI inputs, and manifest-driven admission state.
 
@@ -55,6 +56,12 @@ Aura has one production choreography backend:
 - VM backend (`AuraChoreoEngine`) for admitted Telltale VM execution, replay, and parity checks.
 
 Direct generated-runner execution is test and migration support only.
+
+Production runtime ownership is fragment-scoped. The admitted unit is one VM fragment derived from the generated `CompositionManifest`. A manifest without `link` metadata yields one protocol fragment. A manifest with `link` metadata yields one fragment per linked bundle.
+
+`delegate` and `link` define how ownership moves. Local runtime services claim fragment ownership through `AuraEffectSystem`. Runtime transfer goes through `ReconfigurationManager`. The runtime rejects ambiguous local ownership before a transfer reaches the VM.
+
+`VmBridgeEffects` is the synchronous host boundary for one fragment. VM callbacks use it for session-local payload queues, blocked receive snapshots, and scheduler signals. Async transport, journal, and storage work stay outside the callback path in the host bridge loop.
 
 ## 4. Choreography Annotations and Effect Commands
 
@@ -89,6 +96,8 @@ A[leak: External] -> B: PublicMsg;
 
 Aura binds choreography bundles to runtime capability requirements through generated `CompositionManifest` metadata and `aura-protocol::admission`. Production startup uses `open_manifest_vm_session_admitted(...)` so protocol id, capability requirements, determinism policy reference, and link constraints come from one canonical manifest.
 
+Admission also resolves the runtime execution envelope. Cooperative protocols stay on the canonical VM path. Replay-deterministic and envelope-bounded protocols select the threaded runtime path only when the required runtime capabilities and envelope artifacts are present.
+
 Current registry mappings:
 
 - `aura.consensus` -> `byzantine_envelope`
@@ -107,6 +116,8 @@ Aura treats protocol reconfiguration as a first-class choreography concern. Stat
 - Delegation writes a `SessionDelegationFact` audit record to the relational journal.
 
 This model is used by device migration and guardian handoff flows: session ownership moves without restarting the full choreography, while invariants remain checkable from persisted facts.
+
+The runtime now treats linked composition metadata as an ownership boundary as well as a composition boundary. Fragment keys derive from protocol id or link bundle id. This keeps runtime ownership aligned with Telltale's composition model.
 
 ### Protocol Evolution Compatibility Policy
 

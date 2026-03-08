@@ -1,14 +1,17 @@
 //! Telltale VM hardening profiles and parity-lane configuration for Aura.
 
+use aura_core::effects::VmBridgeSchedulerSignals;
 use aura_core::AuraVmDeterminismProfileV1;
 use aura_mpst::termination::{compute_weighted_measure, SessionBufferSnapshot};
 use aura_protocol::termination::TerminationProtocolClass;
+use telltale_vm::envelope_diff::EnvelopeDiffArtifactV1;
 use telltale_vm::loader::CodeImage;
 use telltale_vm::vm::{FlowPolicy, FlowPredicate, GuardLayerConfig};
 use telltale_vm::{
-    CommunicationReplayMode, DeterminismMode, EffectDeterminismTier, EffectTraceCaptureMode,
-    MonitorMode, OutputConditionPolicy, PayloadValidationMode, PriorityPolicy, SchedPolicy,
-    VMConfig,
+    CanonicalReplayFragmentV1, CommunicationReplayMode, DeterminismMode, EffectDeterminismTier,
+    EffectOrderingClass, EffectTraceCaptureMode, FailureVisibleDiffClass, MonitorMode,
+    OutputConditionPolicy, PayloadValidationMode, PriorityPolicy, SchedPolicy,
+    SchedulerPermutationClass, ThreadedRoundSemantics, VMConfig,
 };
 
 /// Default output predicate when no operation-specific hint is provided.
@@ -180,6 +183,74 @@ pub enum AuraVmDeterminismProfileError {
         /// Effective guard capacity used for the decision.
         guard_capacity_slots: usize,
     },
+    /// Envelope artifact required by runtime policy is missing.
+    #[error("missing envelope artifact for policy {policy_ref}")]
+    MissingEnvelopeArtifact {
+        /// Policy requiring the artifact.
+        policy_ref: String,
+    },
+    /// Envelope diff exceeded the declared wave-width bound.
+    #[error(
+        "envelope artifact wave width exceeded for policy {policy_ref}: baseline={baseline}, candidate={candidate}, declared={declared}"
+    )]
+    EnvelopeWaveWidthExceeded {
+        /// Policy requiring the artifact.
+        policy_ref: String,
+        /// Observed baseline max wave width.
+        baseline: usize,
+        /// Observed candidate max wave width.
+        candidate: usize,
+        /// Declared admissible upper bound.
+        declared: usize,
+    },
+    /// Envelope diff scheduler class exceeded the policy envelope.
+    #[error(
+        "scheduler envelope class {actual:?} exceeds policy {policy_ref} allowance {expected:?}"
+    )]
+    EnvelopeSchedulerClassRejected {
+        /// Policy reference under validation.
+        policy_ref: String,
+        /// Minimum required/allowed class derived from policy.
+        expected: AuraVmSchedulerEnvelopeClass,
+        /// Actual class from the artifact.
+        actual: SchedulerPermutationClass,
+    },
+    /// Envelope diff effect ordering class exceeded the policy envelope.
+    #[error(
+        "effect ordering class {actual:?} exceeds policy {policy_ref} allowance for tier {expected:?}"
+    )]
+    EnvelopeEffectOrderingRejected {
+        /// Policy reference under validation.
+        policy_ref: String,
+        /// Expected determinism tier.
+        expected: EffectDeterminismTier,
+        /// Actual effect ordering class from the artifact.
+        actual: EffectOrderingClass,
+    },
+    /// Envelope diff failure-visible class exceeded the policy envelope.
+    #[error(
+        "failure-visible class {actual:?} exceeds policy {policy_ref} allowance for runtime mode {expected:?}"
+    )]
+    EnvelopeFailureVisibleRejected {
+        /// Policy reference under validation.
+        policy_ref: String,
+        /// Expected runtime mode.
+        expected: AuraVmRuntimeMode,
+        /// Actual failure-visible class from the artifact.
+        actual: FailureVisibleDiffClass,
+    },
+    /// Envelope diff effect determinism tier drifted from the policy tier.
+    #[error(
+        "envelope effect determinism tier {actual:?} does not match policy {policy_ref} tier {expected:?}"
+    )]
+    EnvelopeEffectTierMismatch {
+        /// Policy reference under validation.
+        policy_ref: String,
+        /// Expected policy tier.
+        expected: EffectDeterminismTier,
+        /// Actual artifact tier.
+        actual: EffectDeterminismTier,
+    },
 }
 
 /// Canonical VM execution policy bound to one Aura protocol class.
@@ -189,6 +260,12 @@ pub struct AuraVmProtocolExecutionPolicy {
     pub policy_ref: &'static str,
     /// Aura protocol class.
     pub protocol_class: TerminationProtocolClass,
+    /// Aura-selected runtime mode for this protocol.
+    pub runtime_mode: AuraVmRuntimeMode,
+    /// Declared scheduler envelope class for this protocol.
+    pub scheduler_envelope_class: AuraVmSchedulerEnvelopeClass,
+    /// Declared upper bound for threaded wave width when runtime mode is threaded.
+    pub declared_wave_width_bound: Option<usize>,
     /// Telltale determinism mode.
     pub determinism_mode: DeterminismMode,
     /// Telltale effect determinism tier.
@@ -197,28 +274,274 @@ pub struct AuraVmProtocolExecutionPolicy {
     pub communication_replay_mode: CommunicationReplayMode,
 }
 
-/// Runtime signals that influence scheduler selection without bypassing the VM scheduler.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct AuraVmSchedulerSignals {
-    /// Recent guard contention events observed by the host bridge.
-    pub guard_contention_events: u64,
-    /// Flow-budget pressure in basis points (`0..=10_000`).
-    pub flow_budget_pressure_bps: u16,
-    /// Leakage-budget pressure in basis points (`0..=10_000`).
-    pub leakage_budget_pressure_bps: u16,
+/// Concrete runtime-selection input for one admitted VM fragment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuraVmRuntimeSelector {
+    /// Selected runtime mode for this fragment.
+    pub runtime_mode: AuraVmRuntimeMode,
+    /// Worker count used when the threaded runtime is selected.
+    pub threaded_workers: usize,
+    /// Scheduler concurrency width used for one runtime round.
+    pub scheduler_concurrency: usize,
 }
 
-impl AuraVmSchedulerSignals {
-    /// Clamp pressure signals to the representable basis-point range.
+impl AuraVmRuntimeSelector {
+    /// Canonical selector for one protocol execution policy.
     #[must_use]
-    pub fn normalized(self) -> Self {
+    pub fn for_policy(policy: AuraVmProtocolExecutionPolicy) -> Self {
+        let width = policy.declared_wave_width_bound.unwrap_or(1).max(1);
+        match policy.runtime_mode {
+            AuraVmRuntimeMode::Cooperative => Self::cooperative(),
+            AuraVmRuntimeMode::ThreadedReplayDeterministic
+            | AuraVmRuntimeMode::ThreadedEnvelopeBounded => Self {
+                runtime_mode: policy.runtime_mode,
+                threaded_workers: width,
+                scheduler_concurrency: width,
+            },
+        }
+    }
+
+    /// Cooperative default used by the legacy runtime startup path.
+    #[must_use]
+    pub const fn cooperative() -> Self {
         Self {
-            guard_contention_events: self.guard_contention_events,
-            flow_budget_pressure_bps: self.flow_budget_pressure_bps.min(10_000),
-            leakage_budget_pressure_bps: self.leakage_budget_pressure_bps.min(10_000),
+            runtime_mode: AuraVmRuntimeMode::Cooperative,
+            threaded_workers: 1,
+            scheduler_concurrency: 1,
+        }
+    }
+
+    /// Whether the selector requires a threaded runtime.
+    #[must_use]
+    pub const fn is_threaded(self) -> bool {
+        self.runtime_mode.is_threaded()
+    }
+}
+
+/// Derived runtime capabilities required by the selected runtime mode.
+#[must_use]
+pub fn required_runtime_capabilities_for_policy(
+    policy: AuraVmProtocolExecutionPolicy,
+) -> &'static [&'static str] {
+    match policy.runtime_mode {
+        AuraVmRuntimeMode::Cooperative => &[],
+        AuraVmRuntimeMode::ThreadedReplayDeterministic => &["mixed_determinism"],
+        AuraVmRuntimeMode::ThreadedEnvelopeBounded => &["mixed_determinism", "vmEnvelopeAdherence"],
+    }
+}
+
+/// Whether the selected policy requires an envelope-diff artifact.
+#[must_use]
+pub const fn policy_requires_envelope_artifact(policy: AuraVmProtocolExecutionPolicy) -> bool {
+    matches!(
+        policy.runtime_mode,
+        AuraVmRuntimeMode::ThreadedEnvelopeBounded
+    )
+}
+
+/// Build an envelope diff artifact from cooperative and threaded replay fragments.
+#[must_use]
+pub fn build_envelope_diff_artifact_for_policy(
+    policy: AuraVmProtocolExecutionPolicy,
+    baseline_engine: impl Into<String>,
+    candidate_engine: impl Into<String>,
+    baseline: &CanonicalReplayFragmentV1,
+    candidate: &CanonicalReplayFragmentV1,
+    baseline_max_wave_width: usize,
+    candidate_max_wave_width: usize,
+) -> EnvelopeDiffArtifactV1 {
+    EnvelopeDiffArtifactV1::from_replay_fragments(
+        baseline_engine,
+        candidate_engine,
+        baseline,
+        candidate,
+        baseline_max_wave_width,
+        candidate_max_wave_width,
+        policy.declared_wave_width_bound.unwrap_or(1).max(1),
+        policy.effect_determinism_tier,
+    )
+}
+
+/// Validate that an envelope artifact stays within the policy-defined runtime envelope.
+///
+/// # Errors
+///
+/// Returns [`AuraVmDeterminismProfileError`] when the artifact is missing or exceeds policy.
+pub fn validate_envelope_artifact_for_policy(
+    policy: AuraVmProtocolExecutionPolicy,
+    artifact: Option<&EnvelopeDiffArtifactV1>,
+) -> Result<(), AuraVmDeterminismProfileError> {
+    let Some(artifact) = artifact else {
+        if policy_requires_envelope_artifact(policy) {
+            return Err(AuraVmDeterminismProfileError::MissingEnvelopeArtifact {
+                policy_ref: policy.policy_ref.to_string(),
+            });
+        }
+        return Ok(());
+    };
+
+    let diff = &artifact.envelope_diff;
+    let wave = &diff.wave_width_bound;
+    if !wave.within_declared_bound() {
+        return Err(AuraVmDeterminismProfileError::EnvelopeWaveWidthExceeded {
+            policy_ref: policy.policy_ref.to_string(),
+            baseline: wave.baseline_max_wave_width,
+            candidate: wave.candidate_max_wave_width,
+            declared: wave.declared_upper_bound,
+        });
+    }
+
+    if !scheduler_class_within_policy(
+        diff.scheduler_permutation_class,
+        policy.scheduler_envelope_class,
+    ) {
+        return Err(
+            AuraVmDeterminismProfileError::EnvelopeSchedulerClassRejected {
+                policy_ref: policy.policy_ref.to_string(),
+                expected: policy.scheduler_envelope_class,
+                actual: diff.scheduler_permutation_class,
+            },
+        );
+    }
+
+    if !effect_ordering_within_policy(diff.effect_ordering_class, policy.effect_determinism_tier) {
+        return Err(
+            AuraVmDeterminismProfileError::EnvelopeEffectOrderingRejected {
+                policy_ref: policy.policy_ref.to_string(),
+                expected: policy.effect_determinism_tier,
+                actual: diff.effect_ordering_class,
+            },
+        );
+    }
+
+    if !failure_visible_within_policy(diff.failure_visible_diff_class, policy.runtime_mode) {
+        return Err(
+            AuraVmDeterminismProfileError::EnvelopeFailureVisibleRejected {
+                policy_ref: policy.policy_ref.to_string(),
+                expected: policy.runtime_mode,
+                actual: diff.failure_visible_diff_class,
+            },
+        );
+    }
+
+    if diff.effect_determinism_tier != policy.effect_determinism_tier {
+        return Err(AuraVmDeterminismProfileError::EnvelopeEffectTierMismatch {
+            policy_ref: policy.policy_ref.to_string(),
+            expected: policy.effect_determinism_tier,
+            actual: diff.effect_determinism_tier,
+        });
+    }
+
+    Ok(())
+}
+
+fn scheduler_class_within_policy(
+    actual: SchedulerPermutationClass,
+    expected: AuraVmSchedulerEnvelopeClass,
+) -> bool {
+    match expected {
+        AuraVmSchedulerEnvelopeClass::Exact => {
+            matches!(actual, SchedulerPermutationClass::Exact)
+        }
+        AuraVmSchedulerEnvelopeClass::SessionNormalizedPermutation => matches!(
+            actual,
+            SchedulerPermutationClass::Exact
+                | SchedulerPermutationClass::SessionNormalizedPermutation
+        ),
+        AuraVmSchedulerEnvelopeClass::EnvelopeBounded => true,
+    }
+}
+
+fn effect_ordering_within_policy(actual: EffectOrderingClass, tier: EffectDeterminismTier) -> bool {
+    match tier {
+        EffectDeterminismTier::StrictDeterministic => {
+            matches!(actual, EffectOrderingClass::Exact)
+        }
+        EffectDeterminismTier::ReplayDeterministic => matches!(
+            actual,
+            EffectOrderingClass::Exact | EffectOrderingClass::ReplayDeterministic
+        ),
+        EffectDeterminismTier::EnvelopeBoundedNondeterministic => true,
+    }
+}
+
+fn failure_visible_within_policy(
+    actual: FailureVisibleDiffClass,
+    runtime_mode: AuraVmRuntimeMode,
+) -> bool {
+    match runtime_mode {
+        AuraVmRuntimeMode::Cooperative | AuraVmRuntimeMode::ThreadedReplayDeterministic => {
+            matches!(actual, FailureVisibleDiffClass::Exact)
+        }
+        AuraVmRuntimeMode::ThreadedEnvelopeBounded => true,
+    }
+}
+
+/// Host-selected runtime execution mode for one admitted protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuraVmRuntimeMode {
+    /// Canonical cooperative VM execution with exact scheduler semantics.
+    Cooperative,
+    /// Threaded execution constrained to replay-deterministic/session-normalized behavior.
+    ThreadedReplayDeterministic,
+    /// Threaded execution admitted under an explicit operational envelope.
+    ThreadedEnvelopeBounded,
+}
+
+impl AuraVmRuntimeMode {
+    /// Stable runtime-mode identifier.
+    #[must_use]
+    pub const fn as_ref(self) -> &'static str {
+        match self {
+            Self::Cooperative => "cooperative",
+            Self::ThreadedReplayDeterministic => "threaded_replay_deterministic",
+            Self::ThreadedEnvelopeBounded => "threaded_envelope_bounded",
+        }
+    }
+
+    /// Whether this mode requires threaded VM execution semantics.
+    #[must_use]
+    pub const fn is_threaded(self) -> bool {
+        !matches!(self, Self::Cooperative)
+    }
+
+    /// Canonical Telltale round semantics for this mode.
+    #[must_use]
+    pub const fn threaded_round_semantics(self) -> ThreadedRoundSemantics {
+        match self {
+            Self::Cooperative => ThreadedRoundSemantics::CanonicalOneStep,
+            Self::ThreadedReplayDeterministic | Self::ThreadedEnvelopeBounded => {
+                ThreadedRoundSemantics::WaveParallelExtension
+            }
         }
     }
 }
+
+/// Scheduler envelope class declared by Aura for one protocol runtime mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuraVmSchedulerEnvelopeClass {
+    /// No scheduler permutation beyond canonical order.
+    Exact,
+    /// Session-normalized permutation only.
+    SessionNormalizedPermutation,
+    /// Envelope-bounded scheduler divergence is admitted.
+    EnvelopeBounded,
+}
+
+impl AuraVmSchedulerEnvelopeClass {
+    /// Stable scheduler-envelope identifier.
+    #[must_use]
+    pub const fn as_ref(self) -> &'static str {
+        match self {
+            Self::Exact => "exact",
+            Self::SessionNormalizedPermutation => "session_normalized_permutation",
+            Self::EnvelopeBounded => "envelope_bounded",
+        }
+    }
+}
+
+/// Runtime signals that influence scheduler selection without bypassing the VM scheduler.
+pub type AuraVmSchedulerSignals = VmBridgeSchedulerSignals;
 
 /// Host-side scheduler selection input for one admitted VM session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -255,6 +578,9 @@ impl AuraVmProtocolExecutionPolicy {
         AuraVmDeterminismProfileV1 {
             policy_ref: self.policy_ref.to_string(),
             protocol_class: self.protocol_class.to_string(),
+            runtime_mode: self.runtime_mode.as_ref().to_string(),
+            scheduler_envelope_class: self.scheduler_envelope_class.as_ref().to_string(),
+            declared_wave_width_bound: self.declared_wave_width_bound,
             determinism_mode: determinism_mode_ref(self.determinism_mode).to_string(),
             effect_determinism_tier: effect_determinism_tier_ref(self.effect_determinism_tier)
                 .to_string(),
@@ -311,6 +637,9 @@ pub fn policy_for_ref(
         AURA_VM_POLICY_PROD_DEFAULT => Ok(AuraVmProtocolExecutionPolicy {
             policy_ref: AURA_VM_POLICY_PROD_DEFAULT,
             protocol_class: TerminationProtocolClass::RecoveryGrant,
+            runtime_mode: AuraVmRuntimeMode::Cooperative,
+            scheduler_envelope_class: AuraVmSchedulerEnvelopeClass::Exact,
+            declared_wave_width_bound: Some(1),
             determinism_mode: DeterminismMode::Full,
             effect_determinism_tier: EffectDeterminismTier::StrictDeterministic,
             communication_replay_mode: CommunicationReplayMode::Off,
@@ -318,6 +647,9 @@ pub fn policy_for_ref(
         AURA_VM_POLICY_CONSENSUS_FALLBACK => Ok(AuraVmProtocolExecutionPolicy {
             policy_ref: AURA_VM_POLICY_CONSENSUS_FALLBACK,
             protocol_class: TerminationProtocolClass::ConsensusFallback,
+            runtime_mode: AuraVmRuntimeMode::ThreadedReplayDeterministic,
+            scheduler_envelope_class: AuraVmSchedulerEnvelopeClass::SessionNormalizedPermutation,
+            declared_wave_width_bound: Some(2),
             determinism_mode: DeterminismMode::ModuloCommutativity,
             effect_determinism_tier: EffectDeterminismTier::ReplayDeterministic,
             communication_replay_mode: CommunicationReplayMode::Sequence,
@@ -325,6 +657,9 @@ pub fn policy_for_ref(
         AURA_VM_POLICY_CONSENSUS_FAST_PATH => Ok(AuraVmProtocolExecutionPolicy {
             policy_ref: AURA_VM_POLICY_CONSENSUS_FAST_PATH,
             protocol_class: TerminationProtocolClass::ConsensusFastPath,
+            runtime_mode: AuraVmRuntimeMode::Cooperative,
+            scheduler_envelope_class: AuraVmSchedulerEnvelopeClass::Exact,
+            declared_wave_width_bound: Some(1),
             determinism_mode: DeterminismMode::Full,
             effect_determinism_tier: EffectDeterminismTier::StrictDeterministic,
             communication_replay_mode: CommunicationReplayMode::Sequence,
@@ -332,6 +667,9 @@ pub fn policy_for_ref(
         AURA_VM_POLICY_DKG_CEREMONY => Ok(AuraVmProtocolExecutionPolicy {
             policy_ref: AURA_VM_POLICY_DKG_CEREMONY,
             protocol_class: TerminationProtocolClass::DkgCeremony,
+            runtime_mode: AuraVmRuntimeMode::ThreadedReplayDeterministic,
+            scheduler_envelope_class: AuraVmSchedulerEnvelopeClass::SessionNormalizedPermutation,
+            declared_wave_width_bound: Some(2),
             determinism_mode: DeterminismMode::Replay,
             effect_determinism_tier: EffectDeterminismTier::ReplayDeterministic,
             communication_replay_mode: CommunicationReplayMode::Sequence,
@@ -339,6 +677,9 @@ pub fn policy_for_ref(
         AURA_VM_POLICY_RECOVERY_GRANT => Ok(AuraVmProtocolExecutionPolicy {
             policy_ref: AURA_VM_POLICY_RECOVERY_GRANT,
             protocol_class: TerminationProtocolClass::RecoveryGrant,
+            runtime_mode: AuraVmRuntimeMode::Cooperative,
+            scheduler_envelope_class: AuraVmSchedulerEnvelopeClass::Exact,
+            declared_wave_width_bound: Some(1),
             determinism_mode: DeterminismMode::Full,
             effect_determinism_tier: EffectDeterminismTier::StrictDeterministic,
             communication_replay_mode: CommunicationReplayMode::Off,
@@ -346,6 +687,9 @@ pub fn policy_for_ref(
         AURA_VM_POLICY_SYNC_ANTI_ENTROPY => Ok(AuraVmProtocolExecutionPolicy {
             policy_ref: AURA_VM_POLICY_SYNC_ANTI_ENTROPY,
             protocol_class: TerminationProtocolClass::SyncAntiEntropy,
+            runtime_mode: AuraVmRuntimeMode::ThreadedEnvelopeBounded,
+            scheduler_envelope_class: AuraVmSchedulerEnvelopeClass::EnvelopeBounded,
+            declared_wave_width_bound: Some(4),
             determinism_mode: DeterminismMode::ModuloEffects,
             effect_determinism_tier: EffectDeterminismTier::EnvelopeBoundedNondeterministic,
             communication_replay_mode: CommunicationReplayMode::Sequence,
@@ -402,6 +746,7 @@ pub fn apply_protocol_execution_policy(
     config.determinism_mode = policy.determinism_mode;
     config.effect_determinism_tier = policy.effect_determinism_tier;
     config.communication_replay_mode = policy.communication_replay_mode;
+    config.threaded_round_semantics = policy.runtime_mode.threaded_round_semantics();
 }
 
 /// Stable textual identifier for one scheduler policy.
@@ -549,6 +894,14 @@ pub fn validate_protocol_execution_policy(
             tier: config.effect_determinism_tier,
             replay: config.communication_replay_mode,
             reason: "vm communication replay mode does not match protocol policy",
+        });
+    }
+    if config.threaded_round_semantics != policy.runtime_mode.threaded_round_semantics() {
+        return Err(AuraVmDeterminismProfileError::InvalidCombination {
+            mode: config.determinism_mode,
+            tier: config.effect_determinism_tier,
+            replay: config.communication_replay_mode,
+            reason: "vm threaded round semantics do not match runtime mode policy",
         });
     }
 
@@ -782,6 +1135,7 @@ mod tests {
     use telltale_vm::effect::EffectHandler;
     use telltale_vm::instr::Endpoint;
     use telltale_vm::loader::CodeImage;
+    use telltale_vm::threaded::ThreadedVM;
     use telltale_vm::vm::{RunStatus, VM};
     use telltale_vm::{verify_output_condition, OutputConditionMeta, Value};
 
@@ -840,6 +1194,41 @@ mod tests {
             .into_iter()
             .collect::<std::collections::BTreeMap<_, _>>();
         CodeImage::from_local_types(&locals, &global)
+    }
+
+    fn capture_envelope_artifact(
+        policy: AuraVmProtocolExecutionPolicy,
+        candidate_max_wave_width: usize,
+    ) -> EnvelopeDiffArtifactV1 {
+        let image = flow_compatibility_image();
+        let mut config = build_vm_config(
+            AuraVmHardeningProfile::Prod,
+            AuraVmParityProfile::RuntimeDefault,
+        );
+        apply_protocol_execution_policy(&mut config, policy);
+        let handler = UnitHandler;
+
+        let mut baseline = VM::new(config.clone());
+        baseline.load_choreography(&image).expect("baseline load");
+        baseline
+            .run_concurrent(&handler, 128, 1)
+            .expect("baseline run");
+
+        let mut candidate = ThreadedVM::with_workers(config, candidate_max_wave_width.max(1));
+        candidate.load_choreography(&image).expect("candidate load");
+        candidate
+            .run_concurrent(&handler, 128, candidate_max_wave_width.max(1))
+            .expect("candidate run");
+
+        build_envelope_diff_artifact_for_policy(
+            policy,
+            "native_cooperative",
+            "native_threaded",
+            &baseline.canonical_replay_fragment(),
+            &candidate.canonical_replay_fragment(),
+            1,
+            candidate_max_wave_width.max(1),
+        )
     }
 
     #[test]
@@ -1010,6 +1399,15 @@ mod tests {
         let dkg = policy_for_protocol("aura.dkg.ceremony", Some(AURA_VM_POLICY_DKG_CEREMONY))
             .expect("dkg policy must resolve");
         assert_eq!(dkg.protocol_class, TerminationProtocolClass::DkgCeremony);
+        assert_eq!(
+            dkg.runtime_mode,
+            AuraVmRuntimeMode::ThreadedReplayDeterministic
+        );
+        assert_eq!(
+            dkg.scheduler_envelope_class,
+            AuraVmSchedulerEnvelopeClass::SessionNormalizedPermutation
+        );
+        assert_eq!(dkg.declared_wave_width_bound, Some(2));
         assert_eq!(dkg.determinism_mode, DeterminismMode::Replay);
         assert_eq!(
             dkg.effect_determinism_tier,
@@ -1018,6 +1416,14 @@ mod tests {
         assert_eq!(
             dkg.communication_replay_mode,
             CommunicationReplayMode::Sequence
+        );
+        assert_eq!(
+            AuraVmRuntimeSelector::for_policy(dkg),
+            AuraVmRuntimeSelector {
+                runtime_mode: AuraVmRuntimeMode::ThreadedReplayDeterministic,
+                threaded_workers: 2,
+                scheduler_concurrency: 2,
+            }
         );
 
         let invitation = policy_for_protocol(
@@ -1029,7 +1435,42 @@ mod tests {
             invitation.protocol_class,
             TerminationProtocolClass::RecoveryGrant
         );
+        assert_eq!(invitation.runtime_mode, AuraVmRuntimeMode::Cooperative);
         assert_eq!(invitation.determinism_mode, DeterminismMode::Full);
+        assert_eq!(
+            AuraVmRuntimeSelector::for_policy(invitation),
+            AuraVmRuntimeSelector::cooperative()
+        );
+        assert_eq!(
+            required_runtime_capabilities_for_policy(invitation),
+            &[] as &[&str]
+        );
+        assert!(!policy_requires_envelope_artifact(invitation));
+
+        let sync = policy_for_protocol("aura.sync.epoch_rotation", None)
+            .expect("sync policy must resolve");
+        assert_eq!(
+            sync.runtime_mode,
+            AuraVmRuntimeMode::ThreadedEnvelopeBounded
+        );
+        assert_eq!(
+            sync.scheduler_envelope_class,
+            AuraVmSchedulerEnvelopeClass::EnvelopeBounded
+        );
+        assert_eq!(sync.declared_wave_width_bound, Some(4));
+        assert_eq!(
+            AuraVmRuntimeSelector::for_policy(sync),
+            AuraVmRuntimeSelector {
+                runtime_mode: AuraVmRuntimeMode::ThreadedEnvelopeBounded,
+                threaded_workers: 4,
+                scheduler_concurrency: 4,
+            }
+        );
+        assert_eq!(
+            required_runtime_capabilities_for_policy(sync),
+            &["mixed_determinism", "vmEnvelopeAdherence"]
+        );
+        assert!(policy_requires_envelope_artifact(sync));
     }
 
     #[test]
@@ -1042,6 +1483,72 @@ mod tests {
         assert!(matches!(
             err,
             AuraVmDeterminismProfileError::PolicyClassMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn envelope_validation_rejects_missing_required_artifact() {
+        let policy = policy_for_protocol("aura.sync.epoch_rotation", None)
+            .expect("sync policy must resolve");
+        let err = validate_envelope_artifact_for_policy(policy, None)
+            .expect_err("envelope-bounded policy must fail without artifact");
+        assert!(matches!(
+            err,
+            AuraVmDeterminismProfileError::MissingEnvelopeArtifact { .. }
+        ));
+    }
+
+    #[test]
+    fn envelope_validation_accepts_artifact_within_policy() {
+        let policy = policy_for_protocol("aura.sync.epoch_rotation", None)
+            .expect("sync policy must resolve");
+        let artifact = capture_envelope_artifact(policy, 2);
+        validate_envelope_artifact_for_policy(policy, Some(&artifact))
+            .expect("artifact should satisfy sync envelope policy");
+    }
+
+    #[test]
+    fn envelope_validation_rejects_wave_width_overflow() {
+        let policy = policy_for_protocol("aura.sync.epoch_rotation", None)
+            .expect("sync policy must resolve");
+        let artifact = capture_envelope_artifact(policy, 5);
+        let err = validate_envelope_artifact_for_policy(policy, Some(&artifact))
+            .expect_err("artifact should fail when observed width exceeds declared bound");
+        assert!(matches!(
+            err,
+            AuraVmDeterminismProfileError::EnvelopeWaveWidthExceeded { .. }
+        ));
+    }
+
+    #[test]
+    fn envelope_validation_rejects_scheduler_class_drift() {
+        let policy = policy_for_protocol("aura.dkg.ceremony", Some(AURA_VM_POLICY_DKG_CEREMONY))
+            .expect("dkg policy must resolve");
+        let mut artifact = capture_envelope_artifact(policy, 2);
+        artifact.envelope_diff.scheduler_permutation_class =
+            SchedulerPermutationClass::EnvelopeBounded;
+
+        let err = validate_envelope_artifact_for_policy(policy, Some(&artifact))
+            .expect_err("scheduler envelope drift must be rejected");
+        assert!(matches!(
+            err,
+            AuraVmDeterminismProfileError::EnvelopeSchedulerClassRejected { .. }
+        ));
+    }
+
+    #[test]
+    fn envelope_validation_rejects_failure_visible_drift() {
+        let policy = policy_for_protocol("aura.dkg.ceremony", Some(AURA_VM_POLICY_DKG_CEREMONY))
+            .expect("dkg policy must resolve");
+        let mut artifact = capture_envelope_artifact(policy, 2);
+        artifact.envelope_diff.failure_visible_diff_class =
+            FailureVisibleDiffClass::EnvelopeBounded;
+
+        let err = validate_envelope_artifact_for_policy(policy, Some(&artifact))
+            .expect_err("failure-visible drift must be rejected");
+        assert!(matches!(
+            err,
+            AuraVmDeterminismProfileError::EnvelopeFailureVisibleRejected { .. }
         ));
     }
 

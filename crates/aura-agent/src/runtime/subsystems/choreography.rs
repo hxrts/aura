@@ -2,11 +2,14 @@
 //!
 //! In-memory choreography session state for runtime coordination.
 
-use aura_core::{ContextId, DeviceId, SessionId};
+use aura_core::effects::transport::TransportEnvelope;
+use aura_core::{AuthorityId, ContextId, DeviceId, SessionId};
 use aura_protocol::effects::{ChoreographicRole, ChoreographyMetrics, RoleIndex};
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 use std::thread::ThreadId;
+use tokio::sync::Notify;
 use tokio::task::Id as TaskId;
 use uuid::Uuid;
 
@@ -93,6 +96,8 @@ impl ChoreographySessionState {
 pub struct ChoreographyState {
     sessions: HashMap<RuntimeChoreographySessionId, ChoreographySessionState>,
     task_bindings: HashMap<ExecutionBindingKey, RuntimeChoreographySessionId>,
+    session_inbox_notifiers: HashMap<RuntimeChoreographySessionId, Arc<Notify>>,
+    session_inboxes: HashMap<RuntimeChoreographySessionId, Vec<TransportEnvelope>>,
 }
 
 fn default_metrics() -> ChoreographyMetrics {
@@ -189,6 +194,9 @@ impl ChoreographyState {
                 now_ms,
             ),
         );
+        self.session_inbox_notifiers
+            .insert(session_id, Arc::new(Notify::new()));
+        self.session_inboxes.entry(session_id).or_default();
         self.task_bindings.insert(task_id, session_id);
         Ok(())
     }
@@ -210,8 +218,23 @@ impl ChoreographyState {
         if let Some(started) = session.started_at_ms {
             session.metrics.total_duration_ms = now_ms.saturating_sub(started);
         }
+        if let Some(notify) = self.session_inbox_notifiers.remove(&session_id) {
+            notify.notify_waiters();
+        }
+        self.session_inboxes.remove(&session_id);
         self.task_bindings.retain(|_, sid| *sid != session_id);
         Ok(session_id)
+    }
+
+    /// Cancel one session by explicit runtime session id and wake any blocked waiters.
+    pub fn cancel_session(&mut self, session_id: RuntimeChoreographySessionId) -> bool {
+        let removed = self.sessions.remove(&session_id).is_some();
+        if let Some(notify) = self.session_inbox_notifiers.remove(&session_id) {
+            notify.notify_waiters();
+        }
+        self.session_inboxes.remove(&session_id);
+        self.task_bindings.retain(|_, sid| *sid != session_id);
+        removed
     }
 
     /// Run a mutable update against the current task-bound session.
@@ -251,6 +274,84 @@ impl ChoreographyState {
             _ => false,
         }
     }
+
+    /// Snapshot the inbox notifier for one active session.
+    pub fn session_inbox_notify(
+        &self,
+        session_id: RuntimeChoreographySessionId,
+    ) -> Option<Arc<Notify>> {
+        self.session_inbox_notifiers.get(&session_id).cloned()
+    }
+
+    /// Wake any waiters blocked on one session-local inbox.
+    pub fn notify_session_inbox(&self, session_id: RuntimeChoreographySessionId) {
+        if let Some(notify) = self.session_inbox_notifiers.get(&session_id) {
+            notify.notify_waiters();
+        }
+    }
+
+    /// Queue one choreography envelope for one session-local inbox and wake waiters.
+    pub fn queue_session_envelope(
+        &mut self,
+        session_id: RuntimeChoreographySessionId,
+        envelope: TransportEnvelope,
+    ) {
+        self.session_inboxes
+            .entry(session_id)
+            .or_default()
+            .push(envelope);
+        self.notify_session_inbox(session_id);
+    }
+
+    /// Remove one matching choreography envelope from one session-local inbox.
+    pub fn take_matching_session_envelope(
+        &mut self,
+        session_id: RuntimeChoreographySessionId,
+        source: AuthorityId,
+        context_id: ContextId,
+        self_authority: AuthorityId,
+        self_device_id: &str,
+    ) -> Option<TransportEnvelope> {
+        let inbox = self.session_inboxes.get_mut(&session_id)?;
+        inbox
+            .iter()
+            .position(|env| {
+                let device_match = env
+                    .metadata
+                    .get("aura-destination-device-id")
+                    .is_some_and(|dst| dst == self_device_id);
+
+                if env.destination == self_authority {
+                    env.source == source
+                        && env.context == context_id
+                        && match env.metadata.get("aura-destination-device-id") {
+                            Some(dst) => dst == self_device_id,
+                            None => true,
+                        }
+                } else {
+                    env.source == source && env.context == context_id && device_match
+                }
+            })
+            .map(|pos| inbox.remove(pos))
+    }
+
+    /// Snapshot the current queued envelope count for one session-local inbox.
+    pub fn session_inbox_len(&self, session_id: RuntimeChoreographySessionId) -> usize {
+        self.session_inboxes
+            .get(&session_id)
+            .map_or(0, std::vec::Vec::len)
+    }
+
+    /// Clone the current queued envelopes for one session-local inbox.
+    pub fn session_inbox_snapshot(
+        &self,
+        session_id: RuntimeChoreographySessionId,
+    ) -> Vec<TransportEnvelope> {
+        self.session_inboxes
+            .get(&session_id)
+            .cloned()
+            .unwrap_or_default()
+    }
 }
 
 #[cfg(test)]
@@ -264,5 +365,57 @@ mod tests {
             RuntimeChoreographySessionId::from_aura_session_id(aura_session_id);
 
         assert_eq!(runtime_session_id.into_aura_session_id(), aura_session_id);
+    }
+
+    #[test]
+    fn session_notifier_tracks_session_lifecycle() {
+        let authority_id = DeviceId::from_uuid(Uuid::from_bytes([4; 16]));
+        let role = ChoreographicRole::new(authority_id, RoleIndex::new(0).expect("role index"));
+        let session_id = RuntimeChoreographySessionId::from_uuid(Uuid::from_u128(44));
+        let context_id = ContextId::new_from_entropy([7; 32]);
+        let mut state = ChoreographyState::new();
+
+        state
+            .start_session(session_id, context_id, vec![role], role, Some(1000), 0)
+            .expect("session starts");
+        assert!(
+            state.session_inbox_notify(session_id).is_some(),
+            "active session should expose an inbox notifier"
+        );
+
+        state.end_session(10).expect("session ends");
+        assert!(
+            state.session_inbox_notify(session_id).is_none(),
+            "ended session should release its inbox notifier"
+        );
+    }
+
+    #[test]
+    fn cancel_session_releases_bindings_and_inbox_state() {
+        let authority_id = DeviceId::from_uuid(Uuid::from_bytes([5; 16]));
+        let role = ChoreographicRole::new(authority_id, RoleIndex::new(0).expect("role index"));
+        let session_id = RuntimeChoreographySessionId::from_uuid(Uuid::from_u128(45));
+        let context_id = ContextId::new_from_entropy([8; 32]);
+        let mut state = ChoreographyState::new();
+
+        state
+            .start_session(session_id, context_id, vec![role], role, Some(1000), 0)
+            .expect("session starts");
+        state.queue_session_envelope(
+            session_id,
+            TransportEnvelope {
+                destination: AuthorityId::from_uuid(Uuid::from_bytes([5; 16])),
+                source: AuthorityId::from_uuid(Uuid::from_bytes([6; 16])),
+                context: context_id,
+                payload: vec![1],
+                metadata: std::collections::HashMap::new(),
+                receipt: None,
+            },
+        );
+
+        assert!(state.cancel_session(session_id));
+        assert!(state.current_session_id().is_none());
+        assert!(state.session_inbox_notify(session_id).is_none());
+        assert_eq!(state.session_inbox_len(session_id), 0);
     }
 }

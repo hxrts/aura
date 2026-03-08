@@ -17,7 +17,9 @@ use crate::runtime::AuraEffectSystem;
 use crate::runtime::AuraChoreoEngine;
 #[cfg(feature = "choreo-backend-telltale-vm")]
 use crate::runtime::vm_host_bridge::{
-    blocked_recv_edge, open_manifest_vm_session_admitted, AuraQueuedVmBridgeHandler,
+    advance_host_bridged_vm_round, advance_host_bridged_vm_round_until_receive,
+    inject_vm_receive, open_manifest_vm_session_admitted, AuraQueuedVmBridgeHandler,
+    AuraVmHostWaitStatus,
 };
 use crate::InvitationServiceApi;
 use device_enrollment::InvitationDeviceEnrollmentHandler;
@@ -75,7 +77,7 @@ use aura_protocol::effects::ChoreographyError;
 use aura_core::effects::TransportError;
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 #[cfg(test)]
 use std::str::FromStr;
 use uuid::Uuid;
@@ -1427,6 +1429,7 @@ impl InvitationHandler {
 
     #[cfg(feature = "choreo-backend-telltale-vm")]
     async fn build_invitation_exchange_vm_engine(
+        effects: &AuraEffectSystem,
         active_role: &str,
     ) -> AgentResult<(
         AuraChoreoEngine<AuraQueuedVmBridgeHandler>,
@@ -1440,6 +1443,7 @@ impl InvitationHandler {
         let local_types =
             aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::local_types();
         open_manifest_vm_session_admitted(
+            effects,
             &manifest,
             active_role,
             &global_type,
@@ -1448,26 +1452,6 @@ impl InvitationHandler {
         )
         .await
         .map_err(AgentError::internal)
-    }
-
-    #[cfg(feature = "choreo-backend-telltale-vm")]
-    async fn flush_invitation_vm_sends(
-        effects: &AuraEffectSystem,
-        handler: &AuraQueuedVmBridgeHandler,
-        peer_role: ChoreographicRole,
-    ) -> AgentResult<()> {
-        for pending in handler.drain_pending_sends() {
-            effects
-                .send_to_role_bytes(peer_role, pending.payload)
-                .await
-                .map_err(|error| {
-                    AgentError::internal(format!(
-                        "failed to bridge VM send {}->{}:{}: {error}",
-                        pending.from_role, pending.to_role, pending.label
-                    ))
-                })?;
-        }
-        Ok(())
     }
 
     #[cfg(feature = "choreo-backend-telltale-vm")]
@@ -1481,6 +1465,7 @@ impl InvitationHandler {
             Self::invitation_exchange_peer_roles(authority_id, invitation.receiver_id);
         let session_id = Self::invitation_session_id(&invitation.invitation_id);
         let offer = ExchangeInvitationOffer(Self::build_invitation_offer(invitation));
+        let peer_roles = BTreeMap::from([("Receiver".to_string(), peer_role)]);
 
         effects
             .start_session(session_id, roles)
@@ -1491,7 +1476,7 @@ impl InvitationHandler {
 
         let result = async {
             let (mut engine, handler, vm_sid) =
-                Self::build_invitation_exchange_vm_engine("Sender").await?;
+                Self::build_invitation_exchange_vm_engine(effects.as_ref(), "Sender").await?;
             handler.push_send_bytes(
                 to_vec(&offer).map_err(|error| {
                     AgentError::internal(format!("offer encode failed: {error}"))
@@ -1499,62 +1484,60 @@ impl InvitationHandler {
             );
 
             loop {
-                let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!("invitation sender VM step failed: {error}"))
-                })?;
-                Self::flush_invitation_vm_sends(effects.as_ref(), handler.as_ref(), peer_role)
-                    .await?;
+                let round = advance_host_bridged_vm_round_until_receive(
+                    effects.as_ref(),
+                    &mut engine,
+                    handler.as_ref(),
+                    vm_sid,
+                    "Sender",
+                    &peer_roles,
+                    Self::is_transport_no_message,
+                )
+                .await
+                .map_err(AgentError::internal)?;
 
-                if let Some((from_role, to_role)) = blocked_recv_edge(engine.vm(), vm_sid, "Sender")
-                {
-                    match effects.receive_from_role_bytes(peer_role).await {
-                        Ok(bytes) => {
-                            let response: ExchangeInvitationResponse =
-                                from_slice(&bytes).map_err(|error| {
-                                    AgentError::internal(format!(
-                                        "invitation response decode failed: {error}"
-                                    ))
-                                })?;
-                            let status = if response.0.accepted {
-                                aura_invitation::InvitationAckStatus::Accepted
-                            } else {
-                                aura_invitation::InvitationAckStatus::Declined
-                            };
-                            let ack = ExchangeInvitationAck(InvitationAck {
-                                invitation_id: invitation.invitation_id.clone(),
-                                success: true,
-                                status,
-                            });
-                            handler.push_send_bytes(to_vec(&ack).map_err(|error| {
-                                AgentError::internal(format!(
-                                    "invitation ack encode failed: {error}"
-                                ))
-                            })?);
-                            engine
-                                .vm_mut()
-                                .inject_message(
-                                    vm_sid,
-                                    &from_role,
-                                    &to_role,
-                                    AuraQueuedVmBridgeHandler::bytes_to_value(&bytes),
-                                )
-                                .map_err(|error| {
-                                    AgentError::internal(format!(
-                                        "failed to inject invitation response into VM: {error}"
-                                    ))
-                                })?;
-                            continue;
-                        }
-                        Err(error) if Self::is_transport_no_message(&error) => break Ok(()),
-                        Err(error) => {
-                            break Err(AgentError::internal(format!(
-                                "invitation sender receive failed: {error}"
-                            )));
-                        }
-                    }
+                if let Some(blocked) = round.blocked_receive {
+                    let response: ExchangeInvitationResponse = from_slice(&blocked.payload)
+                        .map_err(|error| {
+                            AgentError::internal(format!(
+                                "invitation response decode failed: {error}"
+                            ))
+                        })?;
+                    let status = if response.0.accepted {
+                        aura_invitation::InvitationAckStatus::Accepted
+                    } else {
+                        aura_invitation::InvitationAckStatus::Declined
+                    };
+                    let ack = ExchangeInvitationAck(InvitationAck {
+                        invitation_id: invitation.invitation_id.clone(),
+                        success: true,
+                        status,
+                    });
+                    handler.push_send_bytes(to_vec(&ack).map_err(|error| {
+                        AgentError::internal(format!("invitation ack encode failed: {error}"))
+                    })?);
+                    inject_vm_receive(&mut engine, vm_sid, &blocked)
+                        .map_err(AgentError::internal)?;
+                    continue;
                 }
 
-                match step {
+                match round.host_wait_status {
+                    AuraVmHostWaitStatus::Deferred => break Ok(()),
+                    AuraVmHostWaitStatus::Idle => {}
+                    AuraVmHostWaitStatus::TimedOut => {
+                        break Err(AgentError::internal(
+                            "invitation sender VM timed out while waiting for receive".to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Cancelled => {
+                        break Err(AgentError::internal(
+                            "invitation sender VM cancelled while waiting for receive".to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Delivered => {}
+                }
+
+                match round.step {
                     StepResult::AllDone => break Ok(()),
                     StepResult::Continue => {}
                     StepResult::Stuck => {
@@ -1590,6 +1573,7 @@ impl InvitationHandler {
             signature: Vec::new(),
         });
         let mut response_queued = false;
+        let peer_roles = BTreeMap::from([("Sender".to_string(), peer_role)]);
 
         effects
             .start_session(session_id, roles)
@@ -1600,27 +1584,21 @@ impl InvitationHandler {
 
         let result = async {
             let (mut engine, handler, vm_sid) =
-                Self::build_invitation_exchange_vm_engine("Receiver").await?;
+                Self::build_invitation_exchange_vm_engine(effects.as_ref(), "Receiver").await?;
 
             loop {
-                let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!("invitation receiver VM step failed: {error}"))
-                })?;
-                Self::flush_invitation_vm_sends(effects.as_ref(), handler.as_ref(), peer_role)
-                    .await?;
+                let round = advance_host_bridged_vm_round(
+                    effects.as_ref(),
+                    &mut engine,
+                    handler.as_ref(),
+                    vm_sid,
+                    "Receiver",
+                    &peer_roles,
+                )
+                .await
+                .map_err(AgentError::internal)?;
 
-                if let Some((from_role, to_role)) =
-                    blocked_recv_edge(engine.vm(), vm_sid, "Receiver")
-                {
-                    let bytes =
-                        effects
-                            .receive_from_role_bytes(peer_role)
-                            .await
-                            .map_err(|error| {
-                                AgentError::internal(format!(
-                                    "invitation receiver receive failed: {error}"
-                                ))
-                            })?;
+                if let Some(blocked) = round.blocked_receive {
                     if !response_queued {
                         handler.push_send_bytes(to_vec(&response).map_err(|error| {
                             AgentError::internal(format!(
@@ -1629,23 +1607,29 @@ impl InvitationHandler {
                         })?);
                         response_queued = true;
                     }
-                    engine
-                        .vm_mut()
-                        .inject_message(
-                            vm_sid,
-                            &from_role,
-                            &to_role,
-                            AuraQueuedVmBridgeHandler::bytes_to_value(&bytes),
-                        )
-                        .map_err(|error| {
-                            AgentError::internal(format!(
-                                "failed to inject invitation receiver message into VM: {error}"
-                            ))
-                        })?;
+                    inject_vm_receive(&mut engine, vm_sid, &blocked)
+                        .map_err(AgentError::internal)?;
                     continue;
                 }
 
-                match step {
+                match round.host_wait_status {
+                    AuraVmHostWaitStatus::Idle => {}
+                    AuraVmHostWaitStatus::TimedOut => {
+                        break Err(AgentError::internal(
+                            "invitation receiver VM timed out while waiting for receive"
+                                .to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Cancelled => {
+                        break Err(AgentError::internal(
+                            "invitation receiver VM cancelled while waiting for receive"
+                                .to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
+                }
+
+                match round.step {
                     StepResult::AllDone => break Ok(()),
                     StepResult::Continue => {}
                     StepResult::Stuck => {

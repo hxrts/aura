@@ -13,7 +13,7 @@ use telltale_vm::coroutine::Value;
 use telltale_vm::effect::EffectHandler;
 use telltale_vm::loader::CodeImage;
 use telltale_vm::threaded::ThreadedVM;
-use telltale_vm::vm::{ObsEvent, RunStatus, VMConfig, VM};
+use telltale_vm::vm::{ObsEvent, RunStatus, ThreadedRoundSemantics, VMConfig, VM};
 
 const MIX_SEEDS: &[u64] = &[3, 11, 29];
 const REQUIRED_LABELS: &[&str] = &[
@@ -359,4 +359,70 @@ fn reconfiguration_contracts_preserve_backend_parity_under_concurrent_load() {
     }
 
     maybe_write_artifact(&reports);
+}
+
+#[test]
+fn mixed_backend_workloads_complete_without_starvation() {
+    let handles = MIX_SEEDS
+        .iter()
+        .copied()
+        .map(|seed| {
+            std::thread::spawn(move || {
+                let cooperative = run_cooperative(seed);
+                let threaded = run_threaded(seed);
+                (seed, cooperative, threaded)
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for handle in handles {
+        let (seed, cooperative, threaded) = handle.join().expect("mixed backend thread");
+        assert_eq!(cooperative.status, format!("{:?}", RunStatus::AllDone));
+        assert_eq!(threaded.status, format!("{:?}", RunStatus::AllDone));
+        assert_required_labels_present(&cooperative);
+        assert_required_labels_present(&threaded);
+        assert!(
+            cooperative.scheduler_steps > 0 && threaded.scheduler_steps > 0,
+            "backend made no scheduling progress for seed={seed}"
+        );
+    }
+}
+
+#[test]
+fn invalid_wave_certificate_falls_back_to_canonical_progress() {
+    let mut config = build_vm_config(
+        AuraVmHardeningProfile::Ci,
+        AuraVmParityProfile::NativeThreaded,
+    );
+    config.threaded_round_semantics = ThreadedRoundSemantics::WaveParallelExtension;
+    let mut vm = ThreadedVM::with_workers(config, 2);
+    let image_a = image_for(GlobalType::send(
+        "A",
+        "B",
+        Label::new("m1"),
+        GlobalType::End,
+    ));
+    let image_b = image_for(GlobalType::send(
+        "A",
+        "B",
+        Label::new("m2"),
+        GlobalType::End,
+    ));
+
+    vm.load_choreography(&image_a).expect("load choreography A");
+    vm.load_choreography(&image_b).expect("load choreography B");
+    vm.force_invalid_wave_certificate_once();
+    vm.step_round(&NoOpHandler, 2)
+        .expect("threaded step round succeeds");
+
+    let tick = vm.clock().tick;
+    let scheduled_this_tick = vm
+        .lane_trace()
+        .iter()
+        .filter(|entry| entry.tick == tick)
+        .count();
+    assert_eq!(
+        scheduled_this_tick, 1,
+        "invalid wave certificate should degrade to canonical single-step behavior"
+    );
 }

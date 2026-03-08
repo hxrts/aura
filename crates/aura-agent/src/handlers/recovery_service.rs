@@ -13,8 +13,8 @@ use crate::runtime::services::ceremony_runner::{
 };
 use crate::runtime::services::{CeremonyTracker, ReconfigurationManager};
 use crate::runtime::vm_host_bridge::{
-    close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
-    open_manifest_vm_session_admitted, receive_blocked_vm_message,
+    advance_host_bridged_vm_round, close_and_reap_vm_session, inject_vm_receive,
+    open_manifest_vm_session_admitted, AuraVmHostWaitStatus,
 };
 use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId};
 use aura_core::crypto::Ed25519Signature;
@@ -564,6 +564,7 @@ impl RecoveryServiceApi {
 
         let result = async {
             let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                self.effects.as_ref(),
                 &manifest,
                 "Guardian",
                 &global_type,
@@ -577,30 +578,39 @@ impl RecoveryServiceApi {
             })?);
 
             let loop_result = loop {
-                let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!("recovery guardian VM step failed: {error}"))
-                })?;
-                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
-                    .await
-                    .map_err(AgentError::internal)?;
-
-                if let Some(blocked) = receive_blocked_vm_message(
+                let round = advance_host_bridged_vm_round(
                     self.effects.as_ref(),
-                    engine.vm(),
+                    &mut engine,
+                    handler.as_ref(),
                     vm_sid,
                     "Guardian",
                     &peer_roles,
                 )
                 .await
-                .map_err(|error| {
-                    AgentError::internal(format!("recovery guardian receive failed: {error}"))
-                })? {
+                .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = round.blocked_receive {
                     inject_vm_receive(&mut engine, vm_sid, &blocked)
                         .map_err(AgentError::internal)?;
                     continue;
                 }
 
-                match step {
+                match round.host_wait_status {
+                    AuraVmHostWaitStatus::Idle => {}
+                    AuraVmHostWaitStatus::TimedOut => {
+                        break Err(AgentError::internal(
+                            "recovery guardian VM timed out while waiting for receive".to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Cancelled => {
+                        break Err(AgentError::internal(
+                            "recovery guardian VM cancelled while waiting for receive".to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
+                }
+
+                match round.step {
                     StepResult::AllDone => break Ok(()),
                     StepResult::Continue => {}
                     StepResult::Stuck => {
@@ -956,6 +966,7 @@ impl RecoveryServiceApi {
             let global_type = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::global_type();
             let local_types = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::local_types();
             let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                self.effects.as_ref(),
                 &manifest,
                 "Initiator",
                 &global_type,
@@ -994,24 +1005,18 @@ impl RecoveryServiceApi {
             let mut branch_queued = false;
 
             let loop_result = loop {
-                let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!("guardian ceremony initiator VM step failed: {error}"))
-                })?;
-                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
-                    .await
-                    .map_err(AgentError::internal)?;
-
-                if let Some(blocked) = receive_blocked_vm_message(
+                let round = advance_host_bridged_vm_round(
                     self.effects.as_ref(),
-                    engine.vm(),
+                    &mut engine,
+                    handler.as_ref(),
                     vm_sid,
                     "Initiator",
                     &peer_roles,
                 )
                 .await
-                .map_err(|error| {
-                    AgentError::internal(format!("guardian ceremony receive failed: {error}"))
-                })? {
+                .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = round.blocked_receive {
                     let response: CeremonyResponseMsg =
                         from_slice(&blocked.payload).map_err(|error| {
                             AgentError::internal(format!(
@@ -1071,7 +1076,24 @@ impl RecoveryServiceApi {
                     continue;
                 }
 
-                match step {
+                match round.host_wait_status {
+                    AuraVmHostWaitStatus::Idle => {}
+                    AuraVmHostWaitStatus::TimedOut => {
+                        break Err(AgentError::internal(
+                            "guardian ceremony initiator VM timed out while waiting for receive"
+                                .to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Cancelled => {
+                        break Err(AgentError::internal(
+                            "guardian ceremony initiator VM cancelled while waiting for receive"
+                                .to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
+                }
+
+                match round.step {
                     StepResult::AllDone => {
                         let accepted = responses
                             .iter()
@@ -1165,6 +1187,7 @@ impl RecoveryServiceApi {
             let global_type = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::global_type();
             let local_types = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::local_types();
             let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                self.effects.as_ref(),
                 &manifest,
                 active_role_name,
                 &global_type,
@@ -1182,30 +1205,41 @@ impl RecoveryServiceApi {
                 BTreeMap::from([("Initiator".to_string(), Self::role(initiator_id, 0))]);
 
             let loop_result = loop {
-                let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!("guardian ceremony VM step failed: {error}"))
-                })?;
-                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
-                    .await
-                    .map_err(AgentError::internal)?;
-
-                if let Some(blocked) = receive_blocked_vm_message(
+                let round = advance_host_bridged_vm_round(
                     self.effects.as_ref(),
-                    engine.vm(),
+                    &mut engine,
+                    handler.as_ref(),
                     vm_sid,
                     active_role_name,
                     &peer_roles,
                 )
                 .await
-                .map_err(|error| {
-                    AgentError::internal(format!("guardian ceremony receive failed: {error}"))
-                })? {
+                .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = round.blocked_receive {
                     inject_vm_receive(&mut engine, vm_sid, &blocked)
                         .map_err(AgentError::internal)?;
                     continue;
                 }
 
-                match step {
+                match round.host_wait_status {
+                    AuraVmHostWaitStatus::Idle => {}
+                    AuraVmHostWaitStatus::TimedOut => {
+                        break Err(AgentError::internal(
+                            "guardian ceremony VM timed out while waiting for receive"
+                                .to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Cancelled => {
+                        break Err(AgentError::internal(
+                            "guardian ceremony VM cancelled while waiting for receive"
+                                .to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
+                }
+
+                match round.step {
                     StepResult::AllDone => break Ok(()),
                     StepResult::Continue => {}
                     StepResult::Stuck => {
@@ -1280,6 +1314,7 @@ impl RecoveryServiceApi {
 
         let result = async {
             let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                self.effects.as_ref(),
                 &manifest,
                 "SetupInitiator",
                 &global_type,
@@ -1308,26 +1343,18 @@ impl RecoveryServiceApi {
             let mut completion_queued = false;
 
             let loop_result = loop {
-                let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!(
-                        "guardian setup initiator VM step failed: {error}"
-                    ))
-                })?;
-                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
-                    .await
-                    .map_err(AgentError::internal)?;
-
-                if let Some(blocked) = receive_blocked_vm_message(
+                let round = advance_host_bridged_vm_round(
                     self.effects.as_ref(),
-                    engine.vm(),
+                    &mut engine,
+                    handler.as_ref(),
                     vm_sid,
                     "SetupInitiator",
                     &peer_roles,
                 )
                 .await
-                .map_err(|error| {
-                    AgentError::internal(format!("guardian setup receive failed: {error}"))
-                })? {
+                .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = round.blocked_receive {
                     let acceptance: GuardianAcceptance =
                         from_slice(&blocked.payload).map_err(|error| {
                             AgentError::internal(format!(
@@ -1356,7 +1383,24 @@ impl RecoveryServiceApi {
                     continue;
                 }
 
-                match step {
+                match round.host_wait_status {
+                    AuraVmHostWaitStatus::Idle => {}
+                    AuraVmHostWaitStatus::TimedOut => {
+                        break Err(AgentError::internal(
+                            "guardian setup initiator VM timed out while waiting for receive"
+                                .to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Cancelled => {
+                        break Err(AgentError::internal(
+                            "guardian setup initiator VM cancelled while waiting for receive"
+                                .to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
+                }
+
+                match round.step {
                     StepResult::AllDone => {
                         break Ok(build_guardian_setup_completion(
                             setup_id,
@@ -1456,6 +1500,7 @@ impl RecoveryServiceApi {
 
         let result = async {
             let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                self.effects.as_ref(),
                 &manifest,
                 active_role_name,
                 &global_type,
@@ -1469,30 +1514,39 @@ impl RecoveryServiceApi {
             })?);
 
             let loop_result = loop {
-                let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!("guardian setup VM step failed: {error}"))
-                })?;
-                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
-                    .await
-                    .map_err(AgentError::internal)?;
-
-                if let Some(blocked) = receive_blocked_vm_message(
+                let round = advance_host_bridged_vm_round(
                     self.effects.as_ref(),
-                    engine.vm(),
+                    &mut engine,
+                    handler.as_ref(),
                     vm_sid,
                     active_role_name,
                     &peer_roles,
                 )
                 .await
-                .map_err(|error| {
-                    AgentError::internal(format!("guardian setup receive failed: {error}"))
-                })? {
+                .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = round.blocked_receive {
                     inject_vm_receive(&mut engine, vm_sid, &blocked)
                         .map_err(AgentError::internal)?;
                     continue;
                 }
 
-                match step {
+                match round.host_wait_status {
+                    AuraVmHostWaitStatus::Idle => {}
+                    AuraVmHostWaitStatus::TimedOut => {
+                        break Err(AgentError::internal(
+                            "guardian setup VM timed out while waiting for receive".to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Cancelled => {
+                        break Err(AgentError::internal(
+                            "guardian setup VM cancelled while waiting for receive".to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
+                }
+
+                match round.step {
                     StepResult::AllDone => break Ok(()),
                     StepResult::Continue => {}
                     StepResult::Stuck => {
@@ -1611,6 +1665,7 @@ impl RecoveryServiceApi {
 
         let completion = async {
             let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                self.effects.as_ref(),
                 &manifest,
                 "ChangeInitiator",
                 &global_type,
@@ -1643,26 +1698,18 @@ impl RecoveryServiceApi {
             let mut completion_queued = false;
 
             let loop_result = loop {
-                let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!(
-                        "membership change initiator VM step failed: {error}"
-                    ))
-                })?;
-                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
-                    .await
-                    .map_err(AgentError::internal)?;
-
-                if let Some(blocked) = receive_blocked_vm_message(
+                let round = advance_host_bridged_vm_round(
                     self.effects.as_ref(),
-                    engine.vm(),
+                    &mut engine,
+                    handler.as_ref(),
                     vm_sid,
                     "ChangeInitiator",
                     &peer_roles,
                 )
                 .await
-                .map_err(|error| {
-                    AgentError::internal(format!("membership change receive failed: {error}"))
-                })? {
+                .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = round.blocked_receive {
                     let vote: GuardianVote = from_slice(&blocked.payload).map_err(|error| {
                         AgentError::internal(format!("guardian vote decode failed: {error}"))
                     })?;
@@ -1703,7 +1750,24 @@ impl RecoveryServiceApi {
                     continue;
                 }
 
-                match step {
+                match round.host_wait_status {
+                    AuraVmHostWaitStatus::Idle => {}
+                    AuraVmHostWaitStatus::TimedOut => {
+                        break Err(AgentError::internal(
+                            "membership change initiator VM timed out while waiting for receive"
+                                .to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Cancelled => {
+                        break Err(AgentError::internal(
+                            "membership change initiator VM cancelled while waiting for receive"
+                                .to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
+                }
+
+                match round.step {
                     StepResult::AllDone => {
                         let accepted_guardians: Vec<AuthorityId> = votes
                             .iter()
@@ -1831,6 +1895,7 @@ impl RecoveryServiceApi {
 
         let result = async {
             let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                self.effects.as_ref(),
                 &manifest,
                 active_role_name,
                 &global_type,
@@ -1844,30 +1909,39 @@ impl RecoveryServiceApi {
             })?);
 
             let loop_result = loop {
-                let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!("membership vote VM step failed: {error}"))
-                })?;
-                flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
-                    .await
-                    .map_err(AgentError::internal)?;
-
-                if let Some(blocked) = receive_blocked_vm_message(
+                let round = advance_host_bridged_vm_round(
                     self.effects.as_ref(),
-                    engine.vm(),
+                    &mut engine,
+                    handler.as_ref(),
                     vm_sid,
                     active_role_name,
                     &peer_roles,
                 )
                 .await
-                .map_err(|error| {
-                    AgentError::internal(format!("membership vote receive failed: {error}"))
-                })? {
+                .map_err(AgentError::internal)?;
+
+                if let Some(blocked) = round.blocked_receive {
                     inject_vm_receive(&mut engine, vm_sid, &blocked)
                         .map_err(AgentError::internal)?;
                     continue;
                 }
 
-                match step {
+                match round.host_wait_status {
+                    AuraVmHostWaitStatus::Idle => {}
+                    AuraVmHostWaitStatus::TimedOut => {
+                        break Err(AgentError::internal(
+                            "membership vote VM timed out while waiting for receive".to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Cancelled => {
+                        break Err(AgentError::internal(
+                            "membership vote VM cancelled while waiting for receive".to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
+                }
+
+                match round.step {
                     StepResult::AllDone => break Ok(()),
                     StepResult::Continue => {}
                     StepResult::Stuck => {

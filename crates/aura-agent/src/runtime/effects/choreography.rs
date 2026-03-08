@@ -31,35 +31,56 @@ fn take_session_envelope(
     context: ContextId,
 ) -> Option<TransportEnvelope> {
     let self_device_id = effects.config.device_id.to_string();
-    let session_ref = session_id.to_string();
-    let inbox = effects.transport.inbox();
-    let mut inbox = inbox.write();
+    effects
+        .choreography_state
+        .write()
+        .take_matching_session_envelope(
+            session_id,
+            source,
+            context,
+            effects.authority_id,
+            &self_device_id,
+        )
+}
 
-    inbox
-        .iter()
-        .position(|env| {
-            let session_match = env
+fn promote_shared_session_envelopes(
+    effects: &AuraEffectSystem,
+    session_id: RuntimeChoreographySessionId,
+) {
+    let Some(shared) = effects.transport.shared_transport() else {
+        return;
+    };
+    let session_ref = session_id.to_string();
+    let inbox = shared.inbox_for(effects.authority_id);
+    let mut inbox = inbox.write();
+    let mut promoted = Vec::new();
+
+    let mut index = 0usize;
+    while index < inbox.len() {
+        let matches_session = inbox[index]
+            .metadata
+            .get("content-type")
+            .is_some_and(|value| value == "application/aura-choreography")
+            && inbox[index]
                 .metadata
                 .get("session-id")
                 .is_some_and(|value| value == &session_ref);
-            let device_match = env
-                .metadata
-                .get("aura-destination-device-id")
-                .is_some_and(|dst| dst == &self_device_id);
+        if matches_session {
+            promoted.push(inbox.remove(index));
+        } else {
+            index += 1;
+        }
+    }
+    drop(inbox);
 
-            if env.destination == effects.authority_id {
-                session_match
-                    && env.source == source
-                    && env.context == context
-                    && match env.metadata.get("aura-destination-device-id") {
-                        Some(dst) => dst == &self_device_id,
-                        None => true,
-                    }
-            } else {
-                session_match && env.source == source && env.context == context && device_match
-            }
-        })
-        .map(|pos| inbox.remove(pos))
+    if promoted.is_empty() {
+        return;
+    }
+
+    let mut state = effects.choreography_state.write();
+    for envelope in promoted {
+        state.queue_session_envelope(session_id, envelope);
+    }
 }
 
 // Implementation of ChoreographicEffects
@@ -178,12 +199,19 @@ impl ChoreographicEffects for AuraEffectSystem {
         let session = current_session_snapshot(self)?;
         let context_id = session.context_id;
         let session_id = session.session_id;
+        let session_inbox_notify = self
+            .choreography_state
+            .read()
+            .session_inbox_notify(session_id);
+        let shared_inbox_notify = self
+            .transport
+            .shared_transport()
+            .map(|shared| shared.inbox_notify(self.authority_id));
 
-        // Poll for messages with timeout to allow async guardians time to respond.
-        // Default timeout of 5 seconds with 50ms polling interval.
+        // Wait on the session-local inbox notifier instead of polling the global inbox.
+        // Default timeout remains 5 seconds to allow async guardians time to respond.
         let timeout_ms = session.timeout_ms.unwrap_or(5000);
         let start = aura_effects::time::monotonic_now();
-        let poll_interval = std::time::Duration::from_millis(50);
 
         let source_authority = AuthorityId::from_uuid(role.device_id.0);
         tracing::debug!(
@@ -202,7 +230,15 @@ impl ChoreographicEffects for AuraEffectSystem {
                 break env;
             }
 
-            if start.elapsed().as_millis() as u64 > timeout_ms {
+            promote_shared_session_envelopes(self, session_id);
+            if let Some(env) = take_session_envelope(self, session_id, source_authority, context_id)
+            {
+                self.transport.record_receive();
+                break env;
+            }
+
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            if elapsed_ms >= timeout_ms {
                 let mut state = self.choreography_state.write();
                 let _ = state.with_current_session_mut(|session| {
                     session.metrics.timeout_count = session.metrics.timeout_count.saturating_add(1);
@@ -212,9 +248,34 @@ impl ChoreographicEffects for AuraEffectSystem {
                 });
             }
 
-            self.time_handler
-                .sleep_ms(poll_interval.as_millis() as u64)
-                .await;
+            let Some(session_inbox_notify) = session_inbox_notify.clone() else {
+                return Err(ChoreographyError::InternalError {
+                    message: format!(
+                        "missing choreography inbox notifier for active session {session_id}"
+                    ),
+                });
+            };
+
+            let wait_ms = timeout_ms.saturating_sub(elapsed_ms);
+            tokio::select! {
+                _ = session_inbox_notify.notified() => {}
+                _ = async {
+                    if let Some(shared_inbox_notify) = shared_inbox_notify.clone() {
+                        shared_inbox_notify.notified().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {}
+                _ = self.time_handler.sleep_ms(wait_ms) => {
+                    let mut state = self.choreography_state.write();
+                    let _ = state.with_current_session_mut(|session| {
+                        session.metrics.timeout_count = session.metrics.timeout_count.saturating_add(1);
+                    });
+                    return Err(ChoreographyError::Transport {
+                        source: Box::new(aura_core::effects::TransportError::NoMessage),
+                    });
+                }
+            }
 
             if !self.choreography_state.read().is_active() {
                 return Err(ChoreographyError::SessionNotStarted);
@@ -360,10 +421,12 @@ impl ChoreographicEffects for AuraEffectSystem {
             .unwrap_or_default();
 
         let mut state = self.choreography_state.write();
-        state
+        let ended_session_id = state
             .end_session(ended_at_ms)
-            .map(|_| ())
-            .map_err(|_| ChoreographyError::SessionNotStarted)
+            .map_err(|_| ChoreographyError::SessionNotStarted)?;
+        drop(state);
+        let _released_fragments = self.release_vm_fragments_for_session(ended_session_id);
+        Ok(())
     }
 
     async fn emit_choreo_event(&self, event: ChoreographyEvent) -> Result<(), ChoreographyError> {
@@ -511,7 +574,12 @@ mod tests {
                 .send_to_role_bytes(loopback_peer, b"alpha".to_vec())
                 .await
                 .expect("session a send succeeds");
+            let envelopes = task_a_effects
+                .choreography_state
+                .read()
+                .session_inbox_snapshot(RuntimeChoreographySessionId::from_uuid(session_a));
             task_a_effects.end_session().await.expect("session a ends");
+            envelopes
         });
 
         let task_b_effects = Arc::clone(&effects);
@@ -526,34 +594,43 @@ mod tests {
                 .send_to_role_bytes(loopback_peer, b"beta".to_vec())
                 .await
                 .expect("session b send succeeds");
+            let envelopes = task_b_effects
+                .choreography_state
+                .read()
+                .session_inbox_snapshot(RuntimeChoreographySessionId::from_uuid(session_b));
             task_b_effects.end_session().await.expect("session b ends");
+            envelopes
         });
 
         barrier.wait().await;
-        task_a.await.expect("task a");
-        task_b.await.expect("task b");
-
-        let inbox = effects.transport.inbox();
-        let inbox = inbox.read();
+        let session_a_envelopes = task_a.await.expect("task a");
+        let session_b_envelopes = task_b.await.expect("task b");
         assert_eq!(
-            inbox.len(),
-            2,
-            "both session sends should be queued locally"
+            session_a_envelopes.len(),
+            1,
+            "session a should queue one local send"
+        );
+        assert_eq!(
+            session_b_envelopes.len(),
+            1,
+            "session b should queue one local send"
         );
 
         let expected = [
             (
                 session_a.to_string(),
                 ContextId::new_from_entropy(hash(session_a.as_bytes())),
+                session_a_envelopes,
             ),
             (
                 session_b.to_string(),
                 ContextId::new_from_entropy(hash(session_b.as_bytes())),
+                session_b_envelopes,
             ),
         ];
 
-        for (session_id, context_id) in expected {
-            let envelope = inbox
+        for (session_id, context_id, envelopes) in expected {
+            let envelope = envelopes
                 .iter()
                 .find(|env| {
                     env.metadata
@@ -596,7 +673,7 @@ mod tests {
                 "application/aura-choreography".to_string(),
             );
             metadata.insert("session-id".to_string(), sid.to_string());
-            effects.transport.queue_envelope(TransportEnvelope {
+            effects.requeue_envelope(TransportEnvelope {
                 destination: authority_id,
                 source: peer_authority,
                 context: context_id,
@@ -605,14 +682,230 @@ mod tests {
                 receipt: None,
             });
         }
+        {
+            let state = effects.choreography_state.read();
+            assert_eq!(
+                state.session_inbox_len(RuntimeChoreographySessionId::from_uuid(wrong_session_id)),
+                1
+            );
+            assert_eq!(
+                state.session_inbox_len(RuntimeChoreographySessionId::from_uuid(session_id)),
+                1
+            );
+        }
 
-        let payload = effects
-            .receive_from_role_bytes(peer_role)
-            .await
-            .expect("session-scoped receive succeeds");
+        assert_eq!(
+            AuthorityId::from_uuid(peer_role.device_id.0),
+            peer_authority
+        );
+        let payload = take_session_envelope(
+            effects.as_ref(),
+            RuntimeChoreographySessionId::from_uuid(session_id),
+            peer_authority,
+            context_id,
+        )
+        .expect("session-scoped envelope should be available")
+        .payload;
         assert_eq!(payload, b"correct".to_vec());
-        assert_eq!(effects.transport.inbox_len(), 1);
+        {
+            let state = effects.choreography_state.read();
+            assert_eq!(
+                state.session_inbox_len(RuntimeChoreographySessionId::from_uuid(wrong_session_id)),
+                1
+            );
+            assert_eq!(
+                state.session_inbox_len(RuntimeChoreographySessionId::from_uuid(session_id)),
+                0
+            );
+        }
 
         effects.end_session().await.expect("session ends");
+    }
+
+    #[tokio::test]
+    async fn receive_waits_on_session_local_notify() {
+        let authority_id = AuthorityId::from_uuid(Uuid::from_bytes([11; 16]));
+        let peer_authority = AuthorityId::from_uuid(Uuid::from_bytes([12; 16]));
+        let effects = test_effects(authority_id);
+        let session_id = Uuid::from_u128(35);
+        let self_role = authority_device_role(authority_id, 0);
+        let peer_role = authority_device_role(peer_authority, 1);
+
+        effects
+            .start_session(session_id, vec![self_role, peer_role])
+            .await
+            .expect("session starts");
+
+        let context_id = ContextId::new_from_entropy(hash(session_id.as_bytes()));
+        let delayed_effects = Arc::clone(&effects);
+        tokio::spawn(async move {
+            delayed_effects.time_handler.sleep_ms(10).await;
+            let mut metadata = HashMap::new();
+            metadata.insert(
+                "content-type".to_string(),
+                "application/aura-choreography".to_string(),
+            );
+            metadata.insert("session-id".to_string(), session_id.to_string());
+            delayed_effects.requeue_envelope(TransportEnvelope {
+                destination: authority_id,
+                source: peer_authority,
+                context: context_id,
+                payload: b"notified".to_vec(),
+                metadata,
+                receipt: None,
+            });
+        });
+
+        let payload = tokio::time::timeout(
+            std::time::Duration::from_millis(40),
+            effects.receive_from_role_bytes(peer_role),
+        )
+        .await
+        .expect("session-local notify should wake receive before polling-sized timeout")
+        .expect("session-scoped receive succeeds");
+        assert_eq!(payload, b"notified".to_vec());
+
+        effects.end_session().await.expect("session ends");
+    }
+
+    #[tokio::test]
+    async fn concurrent_inbound_delivery_remains_isolated_per_active_fragment() {
+        let authority_id = AuthorityId::from_uuid(Uuid::from_bytes([19; 16]));
+        let effects = test_effects(authority_id);
+        let barrier = Arc::new(Barrier::new(3));
+
+        let session_a = Uuid::from_u128(38);
+        let session_b = Uuid::from_u128(39);
+        let peer_a_authority = AuthorityId::from_uuid(Uuid::from_bytes([20; 16]));
+        let peer_b_authority = AuthorityId::from_uuid(Uuid::from_bytes([21; 16]));
+        let self_role = authority_device_role(authority_id, 0);
+        let peer_a_role = authority_device_role(peer_a_authority, 1);
+        let peer_b_role = authority_device_role(peer_b_authority, 1);
+
+        let task_a_effects = Arc::clone(&effects);
+        let task_a_barrier = Arc::clone(&barrier);
+        let task_a = tokio::spawn(async move {
+            task_a_effects
+                .start_session(session_a, vec![self_role, peer_a_role])
+                .await
+                .expect("session a starts");
+            task_a_barrier.wait().await;
+            let payload = task_a_effects
+                .receive_from_role_bytes(peer_a_role)
+                .await
+                .expect("session a receive succeeds");
+            task_a_effects.end_session().await.expect("session a ends");
+            payload
+        });
+
+        let task_b_effects = Arc::clone(&effects);
+        let task_b_barrier = Arc::clone(&barrier);
+        let task_b = tokio::spawn(async move {
+            task_b_effects
+                .start_session(session_b, vec![self_role, peer_b_role])
+                .await
+                .expect("session b starts");
+            task_b_barrier.wait().await;
+            let payload = task_b_effects
+                .receive_from_role_bytes(peer_b_role)
+                .await
+                .expect("session b receive succeeds");
+            task_b_effects.end_session().await.expect("session b ends");
+            payload
+        });
+
+        barrier.wait().await;
+
+        for (session_id, source, payload) in [
+            (session_a, peer_a_authority, b"alpha".to_vec()),
+            (session_b, peer_b_authority, b"beta".to_vec()),
+        ] {
+            let mut metadata = HashMap::new();
+            metadata.insert(
+                "content-type".to_string(),
+                "application/aura-choreography".to_string(),
+            );
+            metadata.insert("session-id".to_string(), session_id.to_string());
+            effects.requeue_envelope(TransportEnvelope {
+                destination: authority_id,
+                source,
+                context: ContextId::new_from_entropy(hash(session_id.as_bytes())),
+                payload,
+                metadata,
+                receipt: None,
+            });
+        }
+
+        assert_eq!(task_a.await.expect("task a"), b"alpha".to_vec());
+        assert_eq!(task_b.await.expect("task b"), b"beta".to_vec());
+        assert_eq!(effects.choreography_state.read().active_session_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn receive_reports_timeout_without_polling_loop() {
+        let authority_id = AuthorityId::from_uuid(Uuid::from_bytes([17; 16]));
+        let peer_authority = AuthorityId::from_uuid(Uuid::from_bytes([18; 16]));
+        let effects = test_effects(authority_id);
+        let session_id = Uuid::from_u128(36);
+        let self_role = authority_device_role(authority_id, 0);
+        let peer_role = authority_device_role(peer_authority, 1);
+
+        effects
+            .start_session(session_id, vec![self_role, peer_role])
+            .await
+            .expect("session starts");
+        effects.set_timeout(20).await;
+
+        let error = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            effects.receive_from_role_bytes(peer_role),
+        )
+        .await
+        .expect("receive should resolve with a timeout error")
+        .expect_err("receive should time out");
+        assert!(matches!(
+            error,
+            ChoreographyError::Transport { source }
+                if source
+                    .downcast_ref::<aura_core::effects::TransportError>()
+                    .is_some_and(|inner| matches!(inner, aura_core::effects::TransportError::NoMessage))
+        ));
+        assert_eq!(effects.get_metrics().await.timeout_count, 1);
+
+        effects.end_session().await.expect("session ends");
+    }
+
+    #[tokio::test]
+    async fn receive_returns_session_not_started_when_session_is_cancelled() {
+        let authority_id = AuthorityId::from_uuid(Uuid::from_bytes([15; 16]));
+        let peer_authority = AuthorityId::from_uuid(Uuid::from_bytes([16; 16]));
+        let effects = test_effects(authority_id);
+        let session_id = Uuid::from_u128(37);
+        let runtime_session_id = RuntimeChoreographySessionId::from_uuid(session_id);
+        let self_role = authority_device_role(authority_id, 0);
+        let peer_role = authority_device_role(peer_authority, 1);
+
+        effects
+            .start_session(session_id, vec![self_role, peer_role])
+            .await
+            .expect("session starts");
+
+        let delayed_effects = Arc::clone(&effects);
+        tokio::spawn(async move {
+            delayed_effects.time_handler.sleep_ms(10).await;
+            delayed_effects
+                .choreography_state
+                .write()
+                .cancel_session(runtime_session_id);
+        });
+
+        let error = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            effects.receive_from_role_bytes(peer_role),
+        )
+        .await
+        .expect("receive should resolve when session is cancelled")
+        .expect_err("receive should fail when session is cancelled");
+        assert!(matches!(error, ChoreographyError::SessionNotStarted));
     }
 }
