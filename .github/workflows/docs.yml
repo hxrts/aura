@@ -58,13 +58,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: ./scripts/check-text-formatting.sh
+      - run: ./scripts/check/text-formatting.sh
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: docs
-          replay-command: ./scripts/check-text-formatting.sh
+          replay-command: ./scripts/check/text-formatting.sh
 
   semantic-drift:
     name: Semantic Drift Check
