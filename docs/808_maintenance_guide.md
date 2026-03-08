@@ -4,7 +4,7 @@ This guide covers practical workflows for the Maintenance and OTA (Over-the-Air)
 
 For the maintenance architecture specification, see [Distributed Maintenance Architecture](115_maintenance.md).
 
-## Core Maintenance Philosophy
+## Maintenance Philosophy
 
 The maintenance system is built on three key principles:
 

@@ -361,7 +361,7 @@ mod tests {
             engine.begin_cutover(staged, InFlightIncompatibilityAction::Abort, false);
         let (rolling_back, directive) = engine
             .begin_rollback(
-                cutting_over.clone(),
+                cutting_over,
                 AuraUpgradeFailure::new(
                     AuraUpgradeFailureClass::HealthGateFailed,
                     "post-cutover health failure",
@@ -378,7 +378,7 @@ mod tests {
                 scope: scope(),
                 from_release_id: directive.from_release_id,
                 to_release_id: directive.to_release_id,
-                failure: directive.failure.clone(),
+                failure: directive.failure,
                 rolled_back_at: ts(10),
             })
         );
