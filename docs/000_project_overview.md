@@ -98,6 +98,8 @@ The documents below cover theory, technical components, implementation guidance,
 
 ### 4. Project Meta
 
+[UX Flow Coverage](997_ux_flow_coverage.md) tracks UI and scenario coverage for user-facing flows.
+
 [Verification Coverage Report](998_verification_coverage.md) tracks formal verification status across Quint specs and Lean proofs.
 
 [Project Structure](999_project_structure.md) documents the 8-layer crate architecture and dependency relationships.

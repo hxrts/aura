@@ -515,8 +515,8 @@ When debugging browser failures, check `web-serve.log` for bundle and runtime st
 `aura-ui` is the shared Dioxus UI core. It supports web-first delivery today and future multi-target shells.
 
 1. `aura-web` (current): browser shell and harness bridge
-2. `aura-desktop` (future): desktop shell reusing `aura-ui`
-3. `aura-mobile` (future): mobile shell reusing `aura-ui`
+2. Desktop shell (future): desktop-specific shell reusing `aura-ui`
+3. Mobile shell (future): mobile-specific shell reusing `aura-ui`
 
 ## Related Documentation
 
