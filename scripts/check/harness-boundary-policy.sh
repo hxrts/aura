@@ -46,4 +46,21 @@ for scenario in "${referenced_scenarios[@]}"; do
   fi
 done
 
+mapfile -t semantic_scenarios < <(
+  find scenarios/harness -maxdepth 1 -name '*.toml' | sort | while read -r scenario; do
+    if ! rg -q '^(schema_version|execution_mode|required_capabilities)\s*=' "$scenario"; then
+      printf '%s\n' "$scenario"
+    fi
+  done
+)
+
+for scenario in "${semantic_scenarios[@]}"; do
+  if rg -q '^\s*selector\s*=' "$scenario"; then
+    fail "semantic scenario contains raw selector reference: $scenario"
+  fi
+  if rg -q 'action\s*=\s*"(wait_for|click_button|fill_input|send_keys|send_key)"' "$scenario"; then
+    fail "semantic scenario contains legacy frontend action: $scenario"
+  fi
+done
+
 echo "harness boundary policy: clean"
