@@ -26,6 +26,7 @@ fn two_local_instances_are_controllable() {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
         },
         instances: vec![
             instance("alice", root.join("alice"), "127.0.0.1:42001"),
@@ -55,16 +56,16 @@ fn two_local_instances_are_controllable() {
     assert_ok(tool_api.handle_request(ToolRequest::WaitFor {
         instance_id: "alice".to_string(),
         pattern: "alice-msg".to_string(),
+        selector: None,
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
-        selector: None,
     }));
     assert_ok(tool_api.handle_request(ToolRequest::WaitFor {
         instance_id: "bob".to_string(),
         pattern: "bob-msg".to_string(),
+        selector: None,
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
-        selector: None,
     }));
 
     if let Err(error) = tool_api.stop_all() {

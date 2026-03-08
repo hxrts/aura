@@ -131,6 +131,16 @@ harness-run-browser scenario config="configs/harness/browser-loopback.toml" arti
 harness-lint-browser scenario config="configs/harness/browser-loopback.toml":
     just harness-lint -- --config {{config}} --scenario {{scenario}}
 
+# Audit semantic migration state for harness scenarios and legacy MBT executor paths
+harness-migration-audit:
+    bash scripts/check/harness-migration-audit.sh
+
+harness-boundary-check:
+    bash scripts/check/harness-boundary-policy.sh
+
+quint-observation-scenario:
+    ./scripts/verify/quint-observation-scenario.sh
+
 # Replay latest browser harness bundle
 harness-replay-browser bundle="artifacts/harness/browser/harness/browser-loopback-smoke/replay_bundle.json":
     just harness-replay -- --bundle {{bundle}}
@@ -267,7 +277,7 @@ ci-harness-contract:
 # Harness replay regression (nightly mixed-topology lane)
 ci-harness-replay:
     cargo build -p aura-terminal --bin aura -q
-    AURA_HARNESS_AURA_BIN="$PWD/target/debug/aura" cargo run -p aura-harness --bin aura-harness -- run --config configs/harness/local-loopback.toml --scenario scenarios/harness/local-discovery-smoke.toml
+    AURA_HARNESS_AURA_BIN="$PWD/target/debug/aura" cargo run -p aura-harness --bin aura-harness -- run --config configs/harness/local-loopback.toml --scenario scenarios/harness/semantic-observation-tui-smoke.toml
     AURA_HARNESS_AURA_BIN="$PWD/target/debug/aura" cargo run -p aura-harness --bin aura-harness -- replay --bundle artifacts/harness/local-loopback-smoke/replay_bundle.json
 
 # Browser harness lane (WASM build + Playwright smoke + browser scenarios)
@@ -387,6 +397,18 @@ ci-effects:
 # Verify docs links referenced from crates/ resolve to existing files in docs/
 ci-crates-doc-links:
     scripts/check/docs-links.sh
+
+# Verify markdown links within docs/ using the same config as GitHub docs workflow
+ci-docs-links:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    while IFS= read -r -d '' file; do
+        markdown-link-check "$file" -c .github/config/markdown-link-check.json
+    done < <(find docs -type f -name '*.md' -print0)
+
+# Verify prose formatting rules used by the docs workflow
+ci-text-formatting:
+    scripts/check/text-formatting.sh
 
 # Detect semantic drift in documentation (stale type/trait/command references)
 ci-docs-semantic-drift:
@@ -512,18 +534,26 @@ ci-lean-quint-bridge:
 # CI Dry Run
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Run CI checks locally (same recipes as GitHub CI)
-ci-dry-run:
+# Run GitHub CI checks locally.
+# profile=pr  -> jobs that run on pull_request
+# profile=push -> jobs that run on push (default)
+# profile=all -> push jobs plus scheduled/manual lanes
+ci-dry-run profile="push":
     #!/usr/bin/env bash
     set -euo pipefail
     export CARGO_INCREMENTAL=0
+    mkdir -p "${PWD}/.tmp"
+    export TMPDIR="${PWD}/.tmp"
     GREEN='\033[0;32m' RED='\033[0;31m' YELLOW='\033[0;33m' BLUE='\033[0;34m' NC='\033[0m'
     exit_code=0
+    current=0
+    total=0
 
     run_step() {
-        local num="$1" name="$2" cmd="$3"
-        printf "[$num] $name... "
-        if $cmd >/dev/null 2>&1; then
+        local name="$1" cmd="$2"
+        current=$((current + 1))
+        printf "[%d/%d] %s... " "$current" "$total" "$name"
+        if bash -lc "$cmd" >/dev/null 2>&1; then
             echo -e "${GREEN}OK${NC}"
         else
             echo -e "${RED}FAIL${NC}"
@@ -531,13 +561,24 @@ ci-dry-run:
         fi
     }
 
-    echo "CI Dry Run"
-    echo "=========="
+    case "{{profile}}" in
+        pr) total=12 ;;
+        push) total=23 ;;
+        all) total=31 ;;
+        *)
+            echo "Unknown ci-dry-run profile: {{profile}}"
+            echo "Valid profiles: pr, push, all"
+            exit 2
+            ;;
+    esac
+
+    echo "CI Dry Run (profile: {{profile}})"
+    echo "==============================="
     echo ""
 
     # Environment check
     LOCAL_RUST=$(rustc --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
-    printf "[0/15] Rust version... "
+    printf "[0/%d] Rust version... " "$total"
     if [[ "$LOCAL_RUST" == "{{CI_RUST_VERSION}}" ]]; then
         echo -e "${GREEN}$LOCAL_RUST${NC} (matches CI)"
     elif [[ "$LOCAL_RUST" < "{{CI_RUST_VERSION}}" ]]; then
@@ -547,40 +588,51 @@ ci-dry-run:
     fi
     echo ""
 
-    # Run CI steps (same as GitHub workflows)
-    run_step "1/15" "Format"              "just ci-format"
-    run_step "2/15" "Clippy"              "just ci-clippy"
-    run_step "3/15" "Build"               "just ci-build"
-    run_step "4/15" "Test"                "just ci-test"
-    run_step "5/15" "Protocol Compat"     "just ci-protocol-compat"
-    run_step "6/15" "Choreo Parity"       "just ci-choreo-parity"
-    run_step "7/15" "Effects"             "just ci-effects"
-    run_step "8/15" "Choreo"              "just ci-choreo"
-    run_step "9/15" "Doc Links"           "just ci-crates-doc-links"
-    run_step "10/15" "UX Coverage"        "just ci-ux-flow-coverage"
-    run_step "11/15" "Verify Coverage"    "just ci-verification-coverage"
-    run_step "12/15" "Conformance Policy" "just ci-conformance-policy"
-    run_step "13/15" "Harness Replay"     "just ci-harness-replay"
+    # Fast CI / PR lanes
+    run_step "Format Check"          "just ci-format"
+    run_step "Clippy Check"          "just ci-clippy"
+    run_step "Build Check"           "just ci-build"
+    run_step "Architecture Check"    "scripts/check/arch.sh --quick"
+    run_step "UX Flow Coverage"      "just ci-ux-flow-coverage"
+    run_step "Tests"                 "just ci-test"
+    run_step "Protocol Compat"       "just ci-protocol-compat"
 
-    # Quint (optional - skip if not installed)
-    printf "[14/15] Quint... "
-    if command -v quint &>/dev/null; then
-        if just ci-quint-typecheck >/dev/null 2>&1; then
-            echo -e "${GREEN}OK${NC}"
-        else
-            echo -e "${RED}FAIL${NC}"
-            exit_code=1
-        fi
-    else
-        echo -e "${YELLOW}SKIP${NC} (quint not installed)"
+    # Docs workflow lanes
+    run_step "Docs Links"            "just ci-docs-links"
+    run_step "Crate Doc Links"       "just ci-crates-doc-links"
+    run_step "Text Formatting"       "just ci-text-formatting"
+    run_step "Docs Semantic Drift"   "just ci-docs-semantic-drift"
+    run_step "Docs Build"            "just ci-book"
+
+    if [[ "{{profile}}" != "pr" ]]; then
+        # Harness workflow lanes that run on push
+        run_step "Harness Build"         "just ci-harness-build"
+        run_step "Harness Contract"      "just ci-harness-contract"
+        run_step "Harness Browser"       "just ci-harness-browser"
+
+        # Deep conformance workflow lanes that run on push
+        run_step "Conformance Suite"     "just ci-conformance"
+        run_step "Choreo Parity"         "nix develop .#ci --command just ci-choreo-parity"
+        run_step "Property Monitor"      "nix develop .#ci --command just ci-property-monitor"
+        run_step "Effects Gate"          "nix develop .#ci --command just ci-effects"
+        run_step "Agent WASM Gate"       "nix develop .#ci --command just ci-agent-wasm"
+
+        # Deep verify workflow lanes that run on push
+        run_step "Lean Proofs"           "just ci-lean-build && just ci-lean-check-sorry"
+        run_step "Lean-Quint Bridge"     "just ci-lean-quint-bridge"
+        run_step "Kani Proofs"           "nix develop .#nightly --command just ci-kani"
     fi
 
-    # Architecture check (warning only)
-    printf "[15/15] Architecture... "
-    if ./scripts/check/arch.sh --quick >/dev/null 2>&1; then
-        echo -e "${GREEN}OK${NC}"
-    else
-        echo -e "${YELLOW}WARN${NC} (run 'just check-arch' for details)"
+    if [[ "{{profile}}" == "all" ]]; then
+        # Scheduled/manual-only lanes
+        run_step "Harness Replay"                    "just ci-harness-replay"
+        run_step "Quint Typecheck"                   "just ci-quint-typecheck"
+        run_step "Quint Verification"                "just ci-quint-verify"
+        run_step "Holepunch Daily Smoke"             "just ci-holepunch-daily-smoke"
+        run_step "Holepunch Nightly Stress"          "just ci-holepunch-nightly-stress"
+        run_step "Holepunch Verify Artifacts"        "just ci-holepunch-verify-artifacts"
+        run_step "Holepunch Flaky Triage"            "just ci-holepunch-flaky-triage"
+        run_step "Holepunch Toolchain Audit"         "just ci-holepunch-toolchain-audit"
     fi
 
     # Summary
@@ -795,16 +847,16 @@ verification-coverage format="--md":
     ./scripts/verify/workflow.sh coverage {{format}}
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TUI ITF Traces
+# Quint Semantic Traces
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Regenerate deterministic ITF trace for TUI replay tests
-tui-itf-trace out="verification/quint/traces/tui_trace.itf.json" seed="424242" max_steps="50":
-    TUI_ITF_SEED={{seed}} TUI_ITF_MAX_STEPS={{max_steps}} just _nix-dev -- ./scripts/harness/tui-itf-trace.sh generate {{out}}
+# Regenerate a deterministic Quint semantic trace for harness / simulator workflows
+quint-semantic-trace spec="verification/quint/harness/flows.qnt" out="verification/quint/traces/harness_flows.itf.json" seed="424242" max_steps="50":
+    QUINT_TRACE_SEED={{seed}} QUINT_TRACE_MAX_STEPS={{max_steps}} just _nix-dev -- ./scripts/verify/quint-semantic-trace.sh generate {{spec}} {{out}}
 
-# Check that the checked-in ITF trace matches regeneration
-tui-itf-trace-check seed="424242" max_steps="50":
-    TUI_ITF_SEED={{seed}} TUI_ITF_MAX_STEPS={{max_steps}} just _nix-dev -- ./scripts/harness/tui-itf-trace.sh check
+# Check that the checked-in Quint semantic trace matches regeneration
+quint-semantic-trace-check spec="verification/quint/harness/flows.qnt" expected="verification/quint/traces/harness_flows.itf.json" seed="424242" max_steps="50":
+    QUINT_TRACE_SEED={{seed}} QUINT_TRACE_MAX_STEPS={{max_steps}} just _nix-dev -- ./scripts/verify/quint-semantic-trace.sh check {{spec}} {{expected}}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Lean Formal Verification

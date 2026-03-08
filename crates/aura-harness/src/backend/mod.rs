@@ -3,7 +3,8 @@ pub mod playwright_browser;
 pub mod ssh_tunnel;
 
 use anyhow::{bail, Result};
-use aura_app::ui::contract::UiSnapshot;
+use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
+use std::time::Duration;
 
 use crate::config::{InstanceConfig, InstanceMode};
 use crate::tool_api::ToolKey;
@@ -48,6 +49,13 @@ pub trait InstanceBackend {
             self.backend_kind()
         )
     }
+    fn activate_control(&mut self, control_id: ControlId) -> Result<()> {
+        let _ = control_id;
+        bail!(
+            "semantic control activation is not supported by backend {}",
+            self.backend_kind()
+        )
+    }
     fn click_target(&mut self, selector: &str) -> Result<()> {
         let _ = selector;
         bail!(
@@ -59,6 +67,20 @@ pub trait InstanceBackend {
         let _ = (selector, value);
         bail!(
             "input filling is not supported by backend {}",
+            self.backend_kind()
+        )
+    }
+    fn fill_field(&mut self, field_id: FieldId, value: &str) -> Result<()> {
+        let _ = (field_id, value);
+        bail!(
+            "semantic field filling is not supported by backend {}",
+            self.backend_kind()
+        )
+    }
+    fn activate_list_item(&mut self, list_id: ListId, item_id: &str) -> Result<()> {
+        let _ = (list_id, item_id);
+        bail!(
+            "semantic list activation is not supported by backend {}",
             self.backend_kind()
         )
     }
@@ -77,6 +99,9 @@ pub trait InstanceBackend {
     }
     fn health_check(&self) -> Result<bool> {
         Ok(self.is_healthy())
+    }
+    fn wait_until_ready(&self, _timeout: Duration) -> Result<()> {
+        Ok(())
     }
     fn restart(&mut self) -> Result<()> {
         self.stop()?;

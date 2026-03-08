@@ -25,6 +25,7 @@ fn tool_api_primitives_control_local_pty_instance() {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
         },
         instances: vec![InstanceConfig {
             id: "alice".to_string(),
@@ -71,9 +72,9 @@ fn tool_api_primitives_control_local_pty_instance() {
     match tool_api.handle_request(ToolRequest::WaitFor {
         instance_id: "alice".to_string(),
         pattern: "hello-pty".to_string(),
+        selector: None,
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
-        selector: None,
     }) {
         ToolResponse::Ok { .. } => {}
         ToolResponse::Error { message } => panic!("wait_for failed: {message}"),
@@ -97,9 +98,9 @@ fn tool_api_primitives_control_local_pty_instance() {
     match tool_api.handle_request(ToolRequest::WaitFor {
         instance_id: "alice".to_string(),
         pattern: "hello-key".to_string(),
+        selector: None,
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
-        selector: None,
     }) {
         ToolResponse::Ok { .. } => {}
         ToolResponse::Error { message } => panic!("wait_for hello-key failed: {message}"),

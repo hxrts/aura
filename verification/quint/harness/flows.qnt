@@ -1,7 +1,8 @@
 // Flow Test Harness
 //
-// Test driver for TUI flow verification.
-// Wraps tui_flows actions for integration testing and ITF trace generation.
+// Semantic flow harness for Quint trace generation.
+// Wraps shared flow actions for harness and simulator consumption without
+// encoding any direct TUI-driving behavior.
 //
 // Provides simplified scenarios for:
 // - Guardian recovery flow

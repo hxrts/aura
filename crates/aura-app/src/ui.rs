@@ -55,9 +55,10 @@ pub mod signals {
 
 pub mod contract {
     pub use crate::ui_contract::{
-        ControlId, FieldId, ListId, ListItemSnapshot, ListSnapshot, ModalId, OperationId,
-        OperationSnapshot, OperationState, ScreenId, SelectionSnapshot, ToastId, ToastKind,
-        ToastSnapshot, UiReadiness, UiSnapshot,
+        list_item_dom_id, list_item_selector, ConfirmationState, ControlId, FieldId, ListId,
+        ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationSnapshot,
+        OperationState, ScreenId, SelectionSnapshot, ToastId, ToastKind, ToastSnapshot,
+        UiReadiness, UiSnapshot,
     };
 }
 
@@ -195,7 +196,8 @@ pub mod types {
     #[cfg(feature = "signals")]
     pub use crate::reactive_state::{ReactiveState, ReactiveVec};
     pub use crate::ui_contract::{
-        ControlId, FieldId, ListId, ModalId, OperationId, ScreenId, ToastId, UiSnapshot,
+        ControlId, FieldId, ListId, MessageSnapshot, ModalId, OperationId, ScreenId, ToastId,
+        UiSnapshot,
     };
     pub use crate::views::wizards::{
         format_wizard_progress, wizard_progress_percent, AccountSetupStep, CreateChannelStep,

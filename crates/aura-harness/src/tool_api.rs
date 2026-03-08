@@ -3,11 +3,11 @@
 //! Defines request/response types and dispatch logic for the harness tool API,
 //! enabling test clients to send input, capture screens, and query instance state.
 
-use aura_app::ui::contract::UiSnapshot;
+use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
 use serde::{Deserialize, Serialize};
 
 use crate::api_version::{negotiate, TOOL_API_DEFAULT_VERSION, TOOL_API_VERSIONS};
-use crate::config::{RunConfig, ScreenSource};
+use crate::config::{RunConfig, RuntimeSubstrate, ScreenSource};
 use crate::coordinator::HarnessCoordinator;
 use crate::introspection::{
     extract_authority_id, extract_channels, extract_contacts, extract_current_selection,
@@ -21,6 +21,8 @@ pub struct StartupSummary {
     pub tool_api_version: String,
     pub schema_version: u32,
     pub run_name: String,
+    pub runtime_substrate: RuntimeSubstrate,
+    pub artifact_dir: Option<String>,
     pub instance_count: u64,
     pub instances: Vec<StartupInstanceSummary>,
 }
@@ -32,6 +34,7 @@ pub struct StartupInstanceSummary {
     pub mode: String,
     pub bind_address: String,
     pub data_dir: String,
+    pub browser_artifact_dir: Option<String>,
 }
 
 impl StartupSummary {
@@ -44,6 +47,10 @@ impl StartupSummary {
                 mode: format!("{:?}", instance.mode).to_lowercase(),
                 bind_address: instance.bind_address.clone(),
                 data_dir: instance.data_dir.display().to_string(),
+                browser_artifact_dir: instance.env.iter().find_map(|entry| {
+                    let (key, value) = entry.split_once('=')?;
+                    (key == "AURA_HARNESS_BROWSER_ARTIFACT_DIR").then(|| value.to_string())
+                }),
             })
             .collect();
 
@@ -51,6 +58,12 @@ impl StartupSummary {
             tool_api_version: TOOL_API_DEFAULT_VERSION.to_string(),
             schema_version: config.schema_version,
             run_name: config.run.name.clone(),
+            runtime_substrate: config.run.runtime_substrate,
+            artifact_dir: config
+                .run
+                .artifact_dir
+                .as_ref()
+                .map(|path| path.display().to_string()),
             instance_count: config.instances.len() as u64,
             instances,
         }
@@ -81,6 +94,15 @@ pub enum ToolRequest {
         #[serde(default)]
         repeat: u16,
     },
+    ActivateControl {
+        instance_id: String,
+        control_id: ControlId,
+    },
+    ActivateListItem {
+        instance_id: String,
+        list_id: ListId,
+        item_id: String,
+    },
     ClickButton {
         instance_id: String,
         label: String,
@@ -89,6 +111,11 @@ pub enum ToolRequest {
     FillInput {
         instance_id: String,
         selector: String,
+        value: String,
+    },
+    FillField {
+        instance_id: String,
+        field_id: FieldId,
         value: String,
     },
     WaitFor {
@@ -182,6 +209,26 @@ impl ToolApi {
         self.coordinator.stop_all()
     }
 
+    pub fn runtime_substrate(&self) -> RuntimeSubstrate {
+        self.coordinator.runtime_substrate()
+    }
+
+    pub fn backend_kind(&self, instance_id: &str) -> anyhow::Result<&'static str> {
+        self.coordinator.backend_kind(instance_id)
+    }
+
+    pub fn apply_fault_delay(&mut self, actor: &str, delay_ms: u64) -> anyhow::Result<()> {
+        self.coordinator.apply_fault_delay(actor, delay_ms)
+    }
+
+    pub fn apply_fault_loss(&mut self, actor: &str, loss_percent: u8) -> anyhow::Result<()> {
+        self.coordinator.apply_fault_loss(actor, loss_percent)
+    }
+
+    pub fn apply_fault_tunnel_drop(&mut self, actor: &str) -> anyhow::Result<()> {
+        self.coordinator.apply_fault_tunnel_drop(actor)
+    }
+
     pub fn handle_request(&mut self, request: ToolRequest) -> ToolResponse {
         let request_for_log = request.clone();
         let outcome = match request {
@@ -230,6 +277,21 @@ impl ToolApi {
                 .coordinator
                 .send_key(&instance_id, key, repeat)
                 .map(|_| serde_json::json!({ "status": "sent" })),
+            ToolRequest::ActivateControl {
+                instance_id,
+                control_id,
+            } => self
+                .coordinator
+                .activate_control(&instance_id, control_id)
+                .map(|_| serde_json::json!({ "status": "activated" })),
+            ToolRequest::ActivateListItem {
+                instance_id,
+                list_id,
+                item_id,
+            } => self
+                .coordinator
+                .activate_list_item(&instance_id, list_id, &item_id)
+                .map(|_| serde_json::json!({ "status": "activated" })),
             ToolRequest::ClickButton {
                 instance_id,
                 label,
@@ -249,6 +311,14 @@ impl ToolApi {
             } => self
                 .coordinator
                 .fill_input(&instance_id, &selector, &value)
+                .map(|_| serde_json::json!({ "status": "filled" })),
+            ToolRequest::FillField {
+                instance_id,
+                field_id,
+                value,
+            } => self
+                .coordinator
+                .fill_field(&instance_id, field_id, &value)
                 .map(|_| serde_json::json!({ "status": "filled" })),
             ToolRequest::WaitFor {
                 instance_id,

@@ -45,6 +45,7 @@ rand_chacha = { workspace = true }
 sysinfo = { workspace = true }
 aura-core = { path = "../aura-core" }
 aura-app = { path = "../aura-app" }
+aura-simulator = { path = "../aura-simulator" }
 ctrlc = "3.4"
 patchbay = { git = "https://github.com/hxrts/patchbay", branch = "hxrts/aura", optional = true }
 

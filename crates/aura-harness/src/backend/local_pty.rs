@@ -4,10 +4,10 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use aura_app::ui::contract::UiSnapshot;
+use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use tokio::sync::Mutex;
 
@@ -345,6 +345,118 @@ impl InstanceBackend for LocalPtyBackend {
         )
     }
 
+    fn activate_control(&mut self, control_id: ControlId) -> Result<()> {
+        let sequence = match control_id {
+            ControlId::NavNeighborhood => "1",
+            ControlId::NavChat => "2",
+            ControlId::NavContacts => "3",
+            ControlId::NavNotifications => "4",
+            ControlId::NavSettings => "5",
+            ControlId::OnboardingCreateAccountButton => "\r",
+            ControlId::ModalCopyButton => "c",
+            ControlId::NeighborhoodNewHomeButton => "n",
+            ControlId::NeighborhoodAcceptInvitationButton => "a",
+            ControlId::ContactsCreateInvitationButton => "n",
+            ControlId::ContactsAcceptInvitationButton => "a",
+            ControlId::ModalConfirmButton => "\r",
+            ControlId::ModalCancelButton => "\x1b",
+            ControlId::SettingsAddDeviceButton => "a",
+            ControlId::SettingsRemoveDeviceButton => "r",
+            _ => anyhow::bail!(
+                "control {:?} does not have a PTY activation mapping",
+                control_id
+            ),
+        };
+        self.send_keys(sequence)
+    }
+
+    fn fill_field(&mut self, field_id: FieldId, value: &str) -> Result<()> {
+        if matches!(field_id, FieldId::InvitationCode) {
+            for ch in value.chars() {
+                let mut buf = [0u8; 4];
+                let s = ch.encode_utf8(&mut buf);
+                self.send_keys(s)?;
+                thread::sleep(Duration::from_millis(3));
+            }
+            thread::sleep(Duration::from_millis(50));
+            return Ok(());
+        }
+        self.send_keys(value)
+    }
+
+    fn activate_list_item(&mut self, list_id: ListId, item_id: &str) -> Result<()> {
+        let snapshot = self.ui_snapshot()?;
+        let list = snapshot
+            .lists
+            .iter()
+            .find(|candidate| candidate.id == list_id)
+            .ok_or_else(|| anyhow::anyhow!("list {list_id:?} is not visible in the current TUI snapshot"))?;
+        let target_index = list
+            .items
+            .iter()
+            .position(|item| item.id == item_id)
+            .ok_or_else(|| anyhow::anyhow!("item {item_id} not found in list {list_id:?}"))?;
+        let current_index = list
+            .items
+            .iter()
+            .position(|item| item.selected)
+            .unwrap_or(0);
+        if matches!(list_id, ListId::InvitationTypes) {
+            match snapshot.focused_control {
+                Some(ControlId::Field(FieldId::InvitationType)) => {}
+                Some(ControlId::Field(FieldId::InvitationMessage)) => self.send_keys("\u{1b}[A")?,
+                Some(ControlId::Field(FieldId::InvitationTtl)) => self.send_keys("\u{1b}[B")?,
+                Some(other) => anyhow::bail!(
+                    "invitation type selector is visible but focus is on incompatible control {:?}",
+                    other
+                ),
+                None => anyhow::bail!(
+                    "invitation type selector is visible but the TUI snapshot has no focused control"
+                ),
+            }
+
+            let len = list.items.len();
+            if len == 0 {
+                return Ok(());
+            }
+            let forward_steps = (target_index + len - current_index) % len;
+            let backward_steps = (current_index + len - target_index) % len;
+            if forward_steps <= backward_steps {
+                for _ in 0..forward_steps {
+                    self.send_keys("\u{1b}[C")?;
+                }
+            } else {
+                for _ in 0..backward_steps {
+                    self.send_keys("\u{1b}[D")?;
+                }
+            }
+            return Ok(());
+        }
+        let delta = target_index as isize - current_index as isize;
+        if matches!(list_id, ListId::Navigation) {
+            let list_len = list.items.len();
+            if list_len == 0 {
+                return Ok(());
+            }
+            // Normalize back to command/navigation mode before cycling tabs.
+            self.send_keys("\x1b")?;
+            let forward_steps = (target_index + list_len - current_index) % list_len;
+            for _ in 0..forward_steps {
+                self.send_keys("\t")?;
+            }
+            return Ok(());
+        }
+        let sequence = if delta < 0 {
+            "\u{1b}[A"
+        } else {
+            "\u{1b}[B"
+        };
+        for _ in 0..delta.unsigned_abs() {
+            self.send_keys(sequence)?;
+        }
+        Ok(())
+    }
+
     fn send_keys(&mut self, keys: &str) -> Result<()> {
         let session = self
             .session
@@ -456,6 +568,28 @@ impl InstanceBackend for LocalPtyBackend {
 
     fn health_check(&self) -> Result<bool> {
         Ok(self.state == BackendState::Running && self.session.is_some())
+    }
+
+    fn wait_until_ready(&self, timeout: Duration) -> Result<()> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if self.ui_snapshot().is_ok() {
+                return Ok(());
+            }
+            if let Ok(screen) = self.snapshot() {
+                if !screen.trim().is_empty() {
+                    return Ok(());
+                }
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!(
+                    "local PTY instance {} did not reach readiness within {:?}",
+                    self.config.id,
+                    timeout
+                );
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
     }
 
     fn is_healthy(&self) -> bool {

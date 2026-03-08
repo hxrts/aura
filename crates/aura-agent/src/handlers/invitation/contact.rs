@@ -53,9 +53,31 @@ impl<'a> InvitationContactHandler<'a> {
             invitation.invitation_id.to_string(),
         );
         metadata.insert("acceptor-id".to_string(), acceptor_id.to_string());
-        let bind_addr = effects.config().network.bind_address.trim();
-        if !bind_addr.is_empty() && bind_addr != "0.0.0.0:0" {
-            metadata.insert("acceptor-addr".to_string(), bind_addr.to_string());
+        // Only publish a browser-direct hint when we have an actual websocket
+        // listener address. Falling back to the raw bind address poisons the
+        // sender cache with the TCP envelope port, which is not a websocket
+        // endpoint.
+        let acceptor_addr = effects
+            .lan_transport()
+            .and_then(|transport| transport.websocket_addrs().first().cloned());
+        let acceptor_hint = acceptor_addr
+            .as_deref()
+            .map(|addr| {
+                if addr.starts_with("ws://") || addr.starts_with("wss://") {
+                    addr.to_string()
+                } else {
+                    format!("ws://{addr}")
+                }
+            });
+        tracing::info!(
+            invitation_id = %invitation.invitation_id,
+            acceptor_id = %acceptor_id,
+            acceptor_addr = ?acceptor_addr,
+            acceptor_hint = ?acceptor_hint,
+            "contact invitation acceptance websocket hint"
+        );
+        if let Some(acceptor_hint) = acceptor_hint {
+            metadata.insert("acceptor-addr".to_string(), acceptor_hint);
         }
 
         let envelope = TransportEnvelope {
@@ -122,7 +144,7 @@ impl<'a> InvitationContactHandler<'a> {
                 if let Some(addr) = envelope.metadata.get("acceptor-addr") {
                     let now_ms = effects.current_timestamp().await.unwrap_or(0);
                     self.handler
-                        .cache_tcp_descriptor_for_peer(
+                        .cache_direct_descriptor_for_peer(
                             effects.as_ref(),
                             acceptance.acceptor_id,
                             addr,

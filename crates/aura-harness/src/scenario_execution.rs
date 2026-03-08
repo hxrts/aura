@@ -43,7 +43,9 @@ pub fn execute_with_run_budgets(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{InstanceConfig, InstanceMode, RunSection, ScenarioAction, ScenarioStep};
+    use crate::config::{
+        InstanceConfig, InstanceMode, RunSection, RuntimeSubstrate, ScenarioAction, ScenarioStep,
+    };
     use crate::coordinator::HarnessCoordinator;
     use std::path::PathBuf;
 
@@ -62,6 +64,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
@@ -154,5 +157,36 @@ mod tests {
         if let Err(error) = tool_api.stop_all() {
             panic!("stop_all failed: {error}");
         }
+    }
+
+    #[test]
+    fn execute_with_run_budgets_supports_simulator_substrate_faults() {
+        let temp_dir = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
+        let mut run_config = test_run_config(temp_dir.path().join("alice"));
+        run_config.run.runtime_substrate = RuntimeSubstrate::Simulator;
+        let scenario = ScenarioConfig {
+            schema_version: 1,
+            id: "sim-fault".to_string(),
+            goal: "simulator substrate fault".to_string(),
+            execution_mode: Some("scripted".to_string()),
+            required_capabilities: vec![],
+            steps: vec![ScenarioStep {
+                id: "step-1".to_string(),
+                action: ScenarioAction::FaultDelay,
+                instance: Some("alice".to_string()),
+                expect: None,
+                timeout_ms: Some(10),
+                ..Default::default()
+            }],
+        };
+
+        let coordinator = HarnessCoordinator::from_run_config(&run_config)
+            .unwrap_or_else(|error| panic!("{error}"));
+        let mut tool_api = ToolApi::new(coordinator);
+
+        let report = execute_with_run_budgets(&run_config, &scenario, &mut tool_api)
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(report.completed);
+        assert_eq!(tool_api.runtime_substrate(), RuntimeSubstrate::Simulator);
     }
 }

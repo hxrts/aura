@@ -11,12 +11,12 @@ if [ ! -d node_modules ]; then
     npm ci
 fi
 npm run tailwind:build >/dev/null
-NO_COLOR=true ../../scripts/web/dx.sh build --release --platform web --package aura-web --bin aura-web --features web >/dev/null
+NO_COLOR=true ../../scripts/web/dx.sh build --release --platform web --package aura-web --bin aura-web --features web
 
-public_dir="$web_root/target/dx/aura-web/release/web/public"
+public_dir="$repo_root/target/dx/aura-web/release/web/public"
 if [[ ! -f "$public_dir/index.html" ]]; then
-    NO_COLOR=true ../../scripts/web/dx.sh build --platform web --package aura-web --bin aura-web --features web >/dev/null
-    public_dir="$web_root/target/dx/aura-web/debug/web/public"
+    NO_COLOR=true ../../scripts/web/dx.sh build --platform web --package aura-web --bin aura-web --features web
+    public_dir="$repo_root/target/dx/aura-web/debug/web/public"
 fi
 
 if [[ ! -f "$public_dir/index.html" ]]; then

@@ -31,9 +31,9 @@ fn contract_pty_control_path() {
     assert_ok(api.handle_request(ToolRequest::WaitFor {
         instance_id: "alice".to_string(),
         pattern: "contract-pty".to_string(),
+        selector: None,
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
-        selector: None,
     }));
 
     if let Err(error) = api.stop_all() {
@@ -76,9 +76,9 @@ fn contract_replay_and_artifacts_subsystems() {
     assert_ok(api.handle_request(ToolRequest::WaitFor {
         instance_id: "alice".to_string(),
         pattern: "contract-replay".to_string(),
+        selector: None,
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
-        selector: None,
     }));
 
     if let Err(error) = api.stop_all() {
@@ -188,6 +188,7 @@ fn local_run_config(name: &str, port: u16) -> RunConfig {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
         },
         instances: vec![InstanceConfig {
             id: "alice".to_string(),
@@ -230,6 +231,7 @@ fn mixed_run_config(name: &str, local_port: u16, ssh_port: u16) -> RunConfig {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
         },
         instances: vec![
             InstanceConfig {

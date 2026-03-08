@@ -63,10 +63,11 @@ impl TransportSelector {
     /// This performs a quick selection based on hint type priority.
     /// For actual connectivity testing, use `TransportProber`.
     pub fn select(&self, descriptor: &RendezvousDescriptor) -> AuraResult<SelectedTransport> {
-        // Priority: QuicDirect > QuicReflexive > TcpDirect > WebSocketRelay
+        // Priority: QuicDirect > QuicReflexive > TcpDirect > WebSocketDirect > WebSocketRelay
         let mut best_direct: Option<&TransportAddress> = None;
         let mut best_reflexive: Option<&TransportAddress> = None;
         let mut best_tcp: Option<&TransportAddress> = None;
+        let mut best_websocket: Option<&TransportAddress> = None;
         let mut relay: Option<AuthorityId> = None;
 
         for hint in &descriptor.transport_hints {
@@ -86,6 +87,11 @@ impl TransportSelector {
                         best_tcp = Some(addr);
                     }
                 }
+                TransportHint::WebSocketDirect { addr, .. } => {
+                    if best_websocket.is_none() {
+                        best_websocket = Some(addr);
+                    }
+                }
                 TransportHint::WebSocketRelay { relay_authority } => {
                     if relay.is_none() {
                         relay = Some(*relay_authority);
@@ -102,6 +108,9 @@ impl TransportSelector {
             return Ok(SelectedTransport::Direct(addr.to_string()));
         }
         if let Some(addr) = best_tcp {
+            return Ok(SelectedTransport::Direct(addr.to_string()));
+        }
+        if let Some(addr) = best_websocket {
             return Ok(SelectedTransport::Direct(addr.to_string()));
         }
         if let Some(relay_authority) = relay {
@@ -139,6 +148,11 @@ impl TransportSelector {
                     }
                 }
                 TransportHint::TcpDirect { addr, .. } => {
+                    if prober.probe_endpoint(&addr.to_string()).await.is_ok() {
+                        return Ok(SelectedTransport::Direct(addr.to_string()));
+                    }
+                }
+                TransportHint::WebSocketDirect { addr, .. } => {
                     if prober.probe_endpoint(&addr.to_string()).await.is_ok() {
                         return Ok(SelectedTransport::Direct(addr.to_string()));
                     }
@@ -331,7 +345,9 @@ impl TransportProber {
 
         for hint in &descriptor.transport_hints {
             let reachable = match hint {
-                TransportHint::QuicDirect { addr, .. } | TransportHint::TcpDirect { addr, .. } => {
+                TransportHint::QuicDirect { addr, .. }
+                | TransportHint::TcpDirect { addr, .. }
+                | TransportHint::WebSocketDirect { addr, .. } => {
                     self.probe_endpoint(&addr.to_string()).await.is_ok()
                 }
                 TransportHint::QuicReflexive {

@@ -450,6 +450,12 @@ pub enum TransportHint {
     },
     /// WebSocket relay through a relay authority
     WebSocketRelay { relay_authority: AuthorityId },
+    /// Direct WebSocket connection.
+    WebSocketDirect {
+        addr: TransportAddress,
+        #[serde(default)]
+        bound_local: Option<BoundLocalAddr>,
+    },
     /// TCP direct connection
     TcpDirect {
         addr: TransportAddress,
@@ -486,6 +492,15 @@ impl TransportHint {
         })
     }
 
+    /// Create a WebSocketDirect hint, validating the address.
+    pub fn websocket_direct(addr: &str) -> Result<Self, TransportAddressError> {
+        let addr = TransportAddress::new(addr)?;
+        Ok(TransportHint::WebSocketDirect {
+            bound_local: Some(BoundLocalAddr(addr.clone())),
+            addr,
+        })
+    }
+
     /// Create a WebSocketRelay hint.
     pub fn websocket_relay(relay_authority: AuthorityId) -> Self {
         TransportHint::WebSocketRelay { relay_authority }
@@ -496,6 +511,7 @@ impl TransportHint {
         match self {
             TransportHint::QuicDirect { addr, .. } => Some(addr),
             TransportHint::QuicReflexive { addr, .. } => Some(addr),
+            TransportHint::WebSocketDirect { addr, .. } => Some(addr),
             TransportHint::TcpDirect { addr, .. } => Some(addr),
             TransportHint::WebSocketRelay { .. } => None,
         }
@@ -515,6 +531,7 @@ impl TransportHint {
             TransportHint::WebSocketRelay { .. } => true,
             TransportHint::QuicDirect { bound_local, .. }
             | TransportHint::QuicReflexive { bound_local, .. }
+            | TransportHint::WebSocketDirect { bound_local, .. }
             | TransportHint::TcpDirect { bound_local, .. } => bound_local
                 .as_ref()
                 .is_some_and(|bound| interfaces.contains_bound(bound)),

@@ -18,8 +18,10 @@ cfg_if! {
         use aura_app::ui::workflows::account as account_workflows;
         use aura_app::ui::workflows::invitation as invitation_workflows;
         use aura_app::ui::workflows::settings as settings_workflows;
+        use aura_app::ui::workflows::time as time_workflows;
         use aura_app::ui::types::InvitationBridgeType;
         use aura_core::identifiers::AuthorityId;
+        use aura_app::ui::contract::{ControlId, FieldId};
         use aura_ui::{AuraUiRoot, UiController};
         use dioxus::prelude::*;
         use std::sync::Arc;
@@ -68,6 +70,22 @@ cfg_if! {
             WEB_STORAGE_PREFIX.to_string()
         }
 
+        fn apply_harness_mode_document_flags() {
+            if harness_instance_id().is_none() {
+                return;
+            }
+            let Some(window) = web_sys::window() else {
+                return;
+            };
+            let Some(document) = window.document() else {
+                return;
+            };
+            let Some(root) = document.document_element() else {
+                return;
+            };
+            let _ = root.set_attribute("data-aura-harness-mode", "1");
+        }
+
         fn load_selected_authority(storage_key: &str) -> Option<AuthorityId> {
             let window = web_sys::window()?;
             let storage = window.local_storage().ok().flatten()?;
@@ -109,11 +127,6 @@ cfg_if! {
             let selected_authority = load_selected_authority(&authority_storage_key);
             let harness_instance = harness_instance_id();
             let builder = AgentBuilder::web().storage_prefix(&storage_prefix);
-            let builder = if harness_instance.is_some() {
-                builder.testing_mode()
-            } else {
-                builder
-            };
             let builder = if let Some(authority_id) = selected_authority {
                 builder.authority(authority_id)
             } else {
@@ -173,6 +186,9 @@ cfg_if! {
                 })),
             ));
             controller.set_account_setup_state(account_ready, "", None);
+            controller.set_ui_snapshot_sink(Arc::new(|snapshot| {
+                harness_bridge::publish_ui_snapshot(&snapshot);
+            }));
 
             harness_bridge::set_controller(controller.clone());
             if let Err(error) = harness_bridge::install_window_harness_api(controller.clone()) {
@@ -195,6 +211,7 @@ cfg_if! {
 
         fn main() {
             aura_app::platform::wasm::initialize();
+            apply_harness_mode_document_flags();
             let mut tracing_config = tracing_wasm::WASMLayerConfigBuilder::new();
             tracing_config
                 .set_max_level(tracing::Level::INFO)
@@ -251,12 +268,28 @@ cfg_if! {
         fn BootstrappedApp(state: BootstrapState) -> Element {
             let controller = state.controller.clone();
             let account_ready = use_signal(|| state.account_ready);
+            let mut sync_loop_started = use_signal(|| false);
             let mut account_name = use_signal(String::new);
             let mut account_error = use_signal(|| Option::<String>::None);
             let creating_account = use_signal(|| false);
             let mut import_code = use_signal(String::new);
             let mut import_error = use_signal(|| Option::<String>::None);
             let importing_code = use_signal(|| false);
+
+            if account_ready() && !sync_loop_started() {
+                sync_loop_started.set(true);
+                let app_core = controller.app_core().clone();
+                spawn(async move {
+                    loop {
+                        let runtime = { app_core.read().await.runtime().cloned() };
+                        if let Some(runtime) = runtime {
+                            let _ = runtime.trigger_discovery().await;
+                            let _ = runtime.trigger_sync().await;
+                        }
+                        let _ = time_workflows::sleep_ms(&app_core, 1_500).await;
+                    }
+                });
+            }
 
             if account_ready() {
                 controller.set_account_setup_state(true, "", None);
@@ -387,7 +420,9 @@ cfg_if! {
 
             rsx! {
                 main {
-                    id: "aura-onboarding-root",
+                    id: ControlId::OnboardingRoot
+                        .web_dom_id()
+                        .unwrap_or("aura-onboarding-root"),
                     class: "min-h-screen bg-background text-foreground grid place-items-center px-6",
                     div {
                         id: "aura-onboarding-card",
@@ -407,7 +442,9 @@ cfg_if! {
                                 class: "block space-y-2",
                                 span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Nickname" }
                                 input {
-                                    id: "aura-account-name-input",
+                                    id: FieldId::AccountName
+                                        .web_dom_id()
+                                        .unwrap_or("aura-account-name-input"),
                                     class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
                                     value: "{account_name()}",
                                     disabled: creating_account(),
@@ -423,7 +460,9 @@ cfg_if! {
                                 p { class: "text-sm text-destructive", "{error}" }
                             }
                             button {
-                                id: "aura-onboarding-create-account-button",
+                                id: ControlId::OnboardingCreateAccountButton
+                                    .web_dom_id()
+                                    .unwrap_or("aura-onboarding-create-account-button"),
                                 class: "inline-flex h-10 w-full items-center justify-center rounded-md bg-foreground px-4 text-sm font-medium text-background transition-colors disabled:pointer-events-none disabled:opacity-50",
                                 disabled: creating_account() || account_name().trim().is_empty(),
                                 onclick: submit_account,
@@ -442,7 +481,9 @@ cfg_if! {
                                 class: "block space-y-2",
                                 span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Device Enrollment Code" }
                                 input {
-                                    id: "aura-account-import-code-input",
+                                    id: FieldId::DeviceImportCode
+                                        .web_dom_id()
+                                        .unwrap_or("aura-account-import-code-input"),
                                     class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
                                     value: "{import_code()}",
                                     disabled: importing_code(),
@@ -456,7 +497,9 @@ cfg_if! {
                                 p { class: "text-sm text-destructive", "{error}" }
                             }
                             button {
-                                id: "aura-onboarding-import-device-button",
+                                id: ControlId::OnboardingImportDeviceButton
+                                    .web_dom_id()
+                                    .unwrap_or("aura-onboarding-import-device-button"),
                                 class: "inline-flex h-10 w-full items-center justify-center rounded-md border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors disabled:pointer-events-none disabled:opacity-50",
                                 disabled: importing_code() || import_code().trim().is_empty(),
                                 onclick: submit_import,

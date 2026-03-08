@@ -58,13 +58,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: ./scripts/check/text-formatting.sh
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: text-formatting
+      - run: nix develop --command just ci-text-formatting
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: docs
-          replay-command: ./scripts/check/text-formatting.sh
+          replay-command: nix develop --command just ci-text-formatting
 
   semantic-drift:
     name: Semantic Drift Check

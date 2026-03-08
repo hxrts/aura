@@ -38,6 +38,7 @@ fn replay_runner_reexecutes_recorded_actions_without_llm() {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
         },
         instances: vec![local_instance(
             "alice",
@@ -62,9 +63,9 @@ fn replay_runner_reexecutes_recorded_actions_without_llm() {
     assert_ok(tool_api.handle_request(ToolRequest::WaitFor {
         instance_id: "alice".to_string(),
         pattern: "phase2-replay".to_string(),
+        selector: None,
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
-        selector: None,
     }));
     if let Err(error) = tool_api.stop_all() {
         panic!("stop_all failed: {error}");

@@ -1,4 +1,6 @@
 use super::*;
+use crate::signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME};
+use crate::workflows::signals::read_signal;
 use crate::workflows::channel_ref::ChannelSelector;
 
 pub(super) fn parse_channel_ref(channel: &str) -> Result<ChannelSelector, AuraError> {
@@ -38,10 +40,18 @@ pub(super) async fn resolve_channel_id_from_state_or_input(
         return Ok(existing.id);
     }
 
-    let homes = {
+    let mut homes = {
         let core = app_core.read().await;
         core.views().get_homes()
     };
+    if homes.iter().next().is_none() {
+        let signal_homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME)
+            .await
+            .unwrap_or_default();
+        if signal_homes.iter().next().is_some() {
+            homes = signal_homes;
+        }
+    }
     if let Some(home_id) = homes
         .iter()
         .filter_map(|(home_id, home)| {
@@ -93,10 +103,18 @@ pub(super) async fn matching_channel_ids(
         }
     }
 
-    let homes = {
+    let mut homes = {
         let core = app_core.read().await;
         core.views().get_homes()
     };
+    if homes.iter().next().is_none() {
+        let signal_homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME)
+            .await
+            .unwrap_or_default();
+        if signal_homes.iter().next().is_some() {
+            homes = signal_homes;
+        }
+    }
     for (home_id, home) in homes.iter() {
         let home_name = home.name.trim();
         let is_match = home_id.to_string().eq_ignore_ascii_case(raw)
@@ -149,8 +167,18 @@ pub(super) async fn context_id_for_channel(
         }
     }
     {
-        let core = app_core.read().await;
-        let homes = core.views().get_homes();
+        let mut homes = {
+            let core = app_core.read().await;
+            core.views().get_homes()
+        };
+        if homes.iter().next().is_none() {
+            let signal_homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME)
+                .await
+                .unwrap_or_default();
+            if signal_homes.iter().next().is_some() {
+                homes = signal_homes;
+            }
+        }
         if let Some(home_state) = homes.home_state(&channel_id) {
             if let Some(ctx_id) = home_state.context_id {
                 return Ok(ctx_id);

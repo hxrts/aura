@@ -5,67 +5,208 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::fs::File;
 use std::fs;
+use std::net::TcpListener;
+use std::net::TcpStream;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
-use aura_app::ui::contract::UiSnapshot;
+use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
 
 use crate::backend::BackendHandle;
-use crate::config::{InstanceMode, RunConfig, ScreenSource};
+use crate::config::{InstanceMode, RunConfig, RuntimeSubstrate, ScreenSource};
 use crate::events::EventStream;
+use crate::runtime_substrate::RuntimeSubstrateController;
 use crate::screen_normalization::normalize_screen;
 use crate::tool_api::ToolKey;
 
+const BACKEND_HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
+const BACKEND_READY_TIMEOUT: Duration = Duration::from_secs(120);
+const BACKEND_TEARDOWN_TIMEOUT: Duration = Duration::from_secs(15);
+const BACKEND_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const WEB_SERVER_READY_TIMEOUT: Duration = Duration::from_secs(180);
+const WEB_SERVER_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+struct OwnedWebServer {
+    child: Child,
+    url: String,
+}
+
 pub struct HarnessCoordinator {
     backends: HashMap<String, BackendHandle>,
+    instance_order: Vec<String>,
     instance_modes: HashMap<String, InstanceMode>,
+    instance_bind_addresses: HashMap<String, String>,
     instance_data_dirs: HashMap<String, PathBuf>,
+    runtime_substrate: RuntimeSubstrate,
+    runtime_substrate_controller: RuntimeSubstrateController,
+    owned_web_server: Option<OwnedWebServer>,
+    owned_web_server_log_path: Option<PathBuf>,
     events: EventStream,
 }
 
 #[allow(clippy::disallowed_methods)] // Harness timeout enforcement requires wall-clock bounds.
 impl HarnessCoordinator {
     pub fn from_run_config(config: &RunConfig) -> Result<Self> {
+        let browser_app_url = provision_browser_app_url(config)?;
         let mut backends = HashMap::new();
+        let mut instance_order = Vec::new();
         let mut instance_modes = HashMap::new();
+        let mut instance_bind_addresses = HashMap::new();
         let mut instance_data_dirs = HashMap::new();
         let pty_rows = config.run.pty_rows;
         let pty_cols = config.run.pty_cols;
         for instance in &config.instances {
             let id = instance.id.clone();
-            let backend = BackendHandle::from_config(instance.clone(), pty_rows, pty_cols)?;
-            instance_modes.insert(id.clone(), instance.mode.clone());
-            instance_data_dirs.insert(id.clone(), absolutize_path(instance.data_dir.clone()));
+            let mut instance = instance.clone();
+            if matches!(instance.mode, InstanceMode::Browser)
+                && !instance_has_browser_app_url(&instance)
+            {
+                instance.env.push(format!(
+                    "AURA_HARNESS_BROWSER_APP_URL={}",
+                    browser_app_url.url
+                ));
+            }
+            let instance_mode = instance.mode.clone();
+            let instance_bind_address = instance.bind_address.clone();
+            let instance_data_dir = absolutize_path(instance.data_dir.clone());
+            let backend = BackendHandle::from_config(instance, pty_rows, pty_cols)?;
+            instance_order.push(id.clone());
+            instance_modes.insert(id.clone(), instance_mode);
+            instance_bind_addresses.insert(id.clone(), instance_bind_address);
+            instance_data_dirs.insert(id.clone(), instance_data_dir);
             backends.insert(id, backend);
         }
+        let artifact_dir = config.run.artifact_dir.clone().map(absolutize_path);
+        let runtime_substrate_controller = RuntimeSubstrateController::new(
+            config.run.runtime_substrate,
+            config.run.seed.unwrap_or_default(),
+            instance_order.clone(),
+            artifact_dir,
+        )?;
 
         Ok(Self {
             backends,
+            instance_order,
             instance_modes,
+            instance_bind_addresses,
             instance_data_dirs,
+            runtime_substrate: config.run.runtime_substrate,
+            runtime_substrate_controller,
+            owned_web_server: browser_app_url.server,
+            owned_web_server_log_path: browser_app_url.log_path,
             events: EventStream::new(),
         })
     }
 
     pub fn start_all(&mut self) -> Result<()> {
         self.clear_stale_local_state()?;
-        for (id, backend) in &mut self.backends {
+        if let Some(server) = &mut self.owned_web_server {
+            wait_for_owned_web_server(
+                self.owned_web_server_log_path.as_deref(),
+                server,
+                WEB_SERVER_READY_TIMEOUT,
+            )?;
+            self.events.push(
+                "lifecycle",
+                "web_server_ready",
+                None,
+                serde_json::json!({ "url": server.url }),
+            );
+        }
+        self.runtime_substrate_controller.start()?;
+        for id in self.instance_order.clone() {
+            let backend_kind = {
+                let backend = self
+                    .backends
+                    .get_mut(&id)
+                    .ok_or_else(|| anyhow!("unknown instance_id: {id}"))?;
+                let backend_kind = backend.as_trait().backend_kind();
+                eprintln!(
+                    "[harness] startup phase=backend_start begin instance={} backend={}",
+                    id, backend_kind
+                );
+                backend.as_trait_mut().start()?;
+                eprintln!(
+                    "[harness] startup phase=backend_start done instance={} backend={}",
+                    id, backend_kind
+                );
+                backend_kind
+            };
             self.events.push(
                 "lifecycle",
                 "start",
                 Some(id.clone()),
-                serde_json::json!({ "backend": backend.as_trait().backend_kind() }),
+                serde_json::json!({ "backend": backend_kind }),
             );
-            backend.as_trait_mut().start()?;
+            eprintln!(
+                "[harness] startup phase=health_check begin instance={} backend={}",
+                id, backend_kind
+            );
+            self.wait_for_backend_health(&id, BACKEND_HEALTH_TIMEOUT)?;
+            eprintln!(
+                "[harness] startup phase=health_check done instance={} backend={}",
+                id, backend_kind
+            );
+            self.events.push(
+                "lifecycle",
+                "health_ok",
+                Some(id.clone()),
+                serde_json::json!({ "timeout_ms": BACKEND_HEALTH_TIMEOUT.as_millis() }),
+            );
+            eprintln!(
+                "[harness] startup phase=ready_check begin instance={} backend={}",
+                id, backend_kind
+            );
+            self.backends
+                .get(&id)
+                .ok_or_else(|| anyhow!("unknown instance_id: {id}"))?
+                .as_trait()
+                .wait_until_ready(BACKEND_READY_TIMEOUT)?;
+            eprintln!(
+                "[harness] startup phase=ready_check done instance={} backend={}",
+                id, backend_kind
+            );
+            self.events.push(
+                "lifecycle",
+                "ready_ok",
+                Some(id.clone()),
+                serde_json::json!({ "timeout_ms": BACKEND_READY_TIMEOUT.as_millis() }),
+            );
         }
         Ok(())
     }
 
+    fn wait_for_backend_health(&self, instance_id: &str, timeout: Duration) -> Result<()> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let backend = self
+                .backends
+                .get(instance_id)
+                .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+            if backend.as_trait().health_check()? {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                bail!(
+                    "instance {instance_id} failed startup health gate within {:?}",
+                    timeout
+                );
+            }
+            std::thread::sleep(BACKEND_POLL_INTERVAL);
+        }
+    }
+
     fn clear_stale_local_state(&mut self) -> Result<()> {
-        for (instance_id, mode) in &self.instance_modes {
+        for instance_id in &self.instance_order {
+            let mode = self
+                .instance_modes
+                .get(instance_id)
+                .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
             if !matches!(mode, InstanceMode::Local | InstanceMode::Browser) {
                 continue;
             }
@@ -85,16 +226,103 @@ impl HarnessCoordinator {
     }
 
     pub fn stop_all(&mut self) -> Result<()> {
-        for (id, backend) in &mut self.backends {
+        for id in self.instance_order.iter().rev() {
+            let backend_kind = {
+                let backend = self
+                    .backends
+                    .get_mut(id)
+                    .ok_or_else(|| anyhow!("unknown instance_id: {id}"))?;
+                let backend_kind = backend.as_trait().backend_kind();
+                backend.as_trait_mut().stop()?;
+                backend_kind
+            };
             self.events.push(
                 "lifecycle",
                 "stop",
                 Some(id.clone()),
-                serde_json::json!({ "backend": backend.as_trait().backend_kind() }),
+                serde_json::json!({ "backend": backend_kind }),
             );
-            backend.as_trait_mut().stop()?;
+            self.wait_for_backend_stopped(id, BACKEND_TEARDOWN_TIMEOUT)?;
+            self.verify_bind_address_released(id)?;
+            self.events.push(
+                "lifecycle",
+                "cleanup_ok",
+                Some(id.clone()),
+                serde_json::json!({ "timeout_ms": BACKEND_TEARDOWN_TIMEOUT.as_millis() }),
+            );
+        }
+        self.runtime_substrate_controller.finish()?;
+        if let Some(server) = &mut self.owned_web_server {
+            let _ = server.child.kill();
+            let _ = server.child.wait();
         }
         Ok(())
+    }
+
+    pub fn runtime_substrate(&self) -> RuntimeSubstrate {
+        self.runtime_substrate
+    }
+
+    pub fn apply_fault_delay(&mut self, actor: &str, delay_ms: u64) -> Result<()> {
+        self.runtime_substrate_controller.fault_delay(actor, delay_ms)
+    }
+
+    pub fn apply_fault_loss(&mut self, actor: &str, loss_percent: u8) -> Result<()> {
+        self.runtime_substrate_controller
+            .fault_loss(actor, loss_percent)
+    }
+
+    pub fn apply_fault_tunnel_drop(&mut self, actor: &str) -> Result<()> {
+        self.runtime_substrate_controller.fault_tunnel_drop(actor)
+    }
+
+    fn wait_for_backend_stopped(&self, instance_id: &str, timeout: Duration) -> Result<()> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let backend = self
+                .backends
+                .get(instance_id)
+                .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+            if !backend.as_trait().health_check()? {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                bail!(
+                    "instance {instance_id} failed teardown health gate within {:?}",
+                    timeout
+                );
+            }
+            std::thread::sleep(BACKEND_POLL_INTERVAL);
+        }
+    }
+
+    fn verify_bind_address_released(&self, instance_id: &str) -> Result<()> {
+        let mode = self
+            .instance_modes
+            .get(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        if matches!(mode, InstanceMode::Ssh) {
+            return Ok(());
+        }
+
+        let bind_address = self.lookup_bind_address(instance_id)?;
+        if bind_address.ends_with(":0") {
+            return Ok(());
+        }
+        let listener = TcpListener::bind(&bind_address).map_err(|error| {
+            anyhow!(
+                "instance {instance_id} did not release bind address {bind_address}: {error}"
+            )
+        })?;
+        drop(listener);
+        Ok(())
+    }
+
+    fn lookup_bind_address(&self, instance_id: &str) -> Result<String> {
+        self.instance_bind_addresses
+            .get(instance_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("missing bind_address for instance {instance_id}"))
     }
 
     pub fn screen(&self, instance_id: &str) -> Result<String> {
@@ -128,6 +356,14 @@ impl HarnessCoordinator {
             }),
         );
         Ok(snapshot)
+    }
+
+    pub fn backend_kind(&self, instance_id: &str) -> Result<&'static str> {
+        let backend = self
+            .backends
+            .get(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        Ok(backend.as_trait().backend_kind())
     }
 
     pub fn send_keys(&mut self, instance_id: &str, keys: &str) -> Result<()> {
@@ -180,6 +416,20 @@ impl HarnessCoordinator {
         backend.as_trait_mut().click_button(label)
     }
 
+    pub fn activate_control(&mut self, instance_id: &str, control_id: ControlId) -> Result<()> {
+        let backend = self
+            .backends
+            .get_mut(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        self.events.push(
+            "action",
+            "activate_control",
+            Some(instance_id.to_string()),
+            serde_json::json!({ "control_id": control_id }),
+        );
+        backend.as_trait_mut().activate_control(control_id)
+    }
+
     pub fn click_target(&mut self, instance_id: &str, selector: &str) -> Result<()> {
         let backend = self
             .backends
@@ -209,6 +459,45 @@ impl HarnessCoordinator {
             }),
         );
         backend.as_trait_mut().fill_input(selector, value)
+    }
+
+    pub fn fill_field(&mut self, instance_id: &str, field_id: FieldId, value: &str) -> Result<()> {
+        let backend = self
+            .backends
+            .get_mut(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        self.events.push(
+            "action",
+            "fill_field",
+            Some(instance_id.to_string()),
+            serde_json::json!({
+                "field_id": field_id,
+                "bytes": value.len()
+            }),
+        );
+        backend.as_trait_mut().fill_field(field_id, value)
+    }
+
+    pub fn activate_list_item(
+        &mut self,
+        instance_id: &str,
+        list_id: ListId,
+        item_id: &str,
+    ) -> Result<()> {
+        let backend = self
+            .backends
+            .get_mut(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        self.events.push(
+            "action",
+            "activate_list_item",
+            Some(instance_id.to_string()),
+            serde_json::json!({
+                "list_id": list_id,
+                "item_id": item_id,
+            }),
+        );
+        backend.as_trait_mut().activate_list_item(list_id, item_id)
     }
 
     pub fn wait_for(
@@ -476,6 +765,179 @@ impl HarnessCoordinator {
     }
 }
 
+struct BrowserAppUrlProvision {
+    url: String,
+    server: Option<OwnedWebServer>,
+    log_path: Option<PathBuf>,
+}
+
+fn owned_web_server_log_tail(log_path: Option<&Path>) -> Option<String> {
+    let log_path = log_path?;
+    let contents = fs::read_to_string(&log_path).ok()?;
+    let mut lines = contents.lines().rev().take(80).collect::<Vec<_>>();
+    lines.reverse();
+    Some(lines.join("\n"))
+}
+
+fn provision_browser_app_url(config: &RunConfig) -> Result<BrowserAppUrlProvision> {
+    let has_browser = config
+        .instances
+        .iter()
+        .any(|instance| matches!(instance.mode, InstanceMode::Browser));
+    if !has_browser {
+        return Ok(BrowserAppUrlProvision {
+            url: "http://127.0.0.1:4173".to_string(),
+            server: None,
+            log_path: None,
+        });
+    }
+
+    if let Some(existing) = config
+        .instances
+        .iter()
+        .find_map(|instance| browser_app_url_from_env(instance))
+    {
+        return Ok(BrowserAppUrlProvision {
+            url: existing,
+            server: None,
+            log_path: None,
+        });
+    }
+
+    let port = choose_available_loopback_port(4173, 32)?;
+    let script = harness_repo_root().join("scripts/web/serve-static.sh");
+    let artifact_root = config
+        .run
+        .artifact_dir
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("artifacts/harness").join(&config.run.name));
+    let artifact_root = absolutize_path(artifact_root);
+    fs::create_dir_all(&artifact_root)?;
+    let log_path = artifact_root.join("owned-web-server.log");
+    let log_file = File::create(&log_path)?;
+    let log_file_err = log_file.try_clone()?;
+    let child = Command::new(&script)
+        .arg(port.to_string())
+        .stdout(Stdio::from(log_file))
+        .stderr(Stdio::from(log_file_err))
+        .spawn()
+        .map_err(|error| anyhow!("failed to spawn owned web server {}: {error}", script.display()))?;
+    Ok(BrowserAppUrlProvision {
+        url: format!("http://127.0.0.1:{port}"),
+        server: Some(OwnedWebServer {
+            child,
+            url: format!("http://127.0.0.1:{port}"),
+        }),
+        log_path: Some(log_path),
+    })
+}
+
+fn instance_has_browser_app_url(instance: &crate::config::InstanceConfig) -> bool {
+    browser_app_url_from_env(instance).is_some()
+}
+
+fn browser_app_url_from_env(instance: &crate::config::InstanceConfig) -> Option<String> {
+    instance.env.iter().find_map(|item| {
+        let (key, value) = item.split_once('=')?;
+        let key = key.trim();
+        ((key == "AURA_HARNESS_BROWSER_APP_URL") || (key == "AURA_WEB_APP_URL"))
+            .then(|| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    })
+}
+
+fn wait_for_owned_web_server(
+    log_path: Option<&Path>,
+    server: &mut OwnedWebServer,
+    timeout: Duration,
+) -> Result<()> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = server.child.try_wait()? {
+            let log_tail = owned_web_server_log_tail(log_path)
+                .filter(|tail| !tail.trim().is_empty())
+                .map(|tail| format!("\n--- owned-web-server.log (tail) ---\n{tail}"))
+                .unwrap_or_default();
+            bail!(
+                "owned web server exited before becoming ready (status={status}) url={}{}",
+                server.url,
+                log_tail
+            );
+        }
+        if http_server_ready(&server.url) {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            let log_tail = owned_web_server_log_tail(log_path)
+                .filter(|tail| !tail.trim().is_empty())
+                .map(|tail| format!("\n--- owned-web-server.log (tail) ---\n{tail}"))
+                .unwrap_or_default();
+            bail!(
+                "owned web server did not become ready within {:?}: {}{}",
+                timeout,
+                server.url,
+                log_tail
+            );
+        }
+        std::thread::sleep(WEB_SERVER_POLL_INTERVAL);
+    }
+}
+
+fn http_server_ready(url: &str) -> bool {
+    let Some(host_port) = url.strip_prefix("http://") else {
+        return false;
+    };
+    let mut parts = host_port.splitn(2, ':');
+    let Some(host) = parts.next() else {
+        return false;
+    };
+    let Some(port) = parts.next().and_then(|value| value.parse::<u16>().ok()) else {
+        return false;
+    };
+    let Ok(mut stream) = TcpStream::connect((host, port)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+    if std::io::Write::write_all(
+        &mut stream,
+        format!("GET / HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n").as_bytes(),
+    )
+    .is_err()
+    {
+        return false;
+    }
+    let mut response = [0u8; 16];
+    std::io::Read::read(&mut stream, &mut response)
+        .ok()
+        .is_some_and(|read| read > 0)
+}
+
+fn choose_available_loopback_port(start: u16, attempts: u16) -> Result<u16> {
+    for offset in 0..attempts {
+        let port = start.saturating_add(offset);
+        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            continue;
+        }
+        if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return Ok(port);
+        }
+    }
+    bail!(
+        "failed to allocate loopback port in range 127.0.0.1:{}-{}",
+        start,
+        start.saturating_add(attempts.saturating_sub(1))
+    )
+}
+
+fn harness_repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
 fn normalize_key_stream(keys: &str) -> Cow<'_, str> {
     if keys.contains('\n') {
         Cow::Owned(keys.replace('\n', "\r"))
@@ -583,6 +1045,8 @@ mod tests {
         clear_directory_contents, normalize_key_stream, wait_pattern_matches, HarnessCoordinator,
     };
     use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, TunnelConfig};
+    use std::net::TcpListener;
+    use std::path::PathBuf;
 
     #[test]
     fn normalize_key_stream_rewrites_newline_to_carriage_return() {
@@ -653,6 +1117,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
@@ -702,5 +1167,140 @@ mod tests {
 
         let entries = std::fs::read_dir(&root).unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(entries.count(), 0, "stale entries were not cleared");
+    }
+
+    #[test]
+    fn coordinator_preserves_instance_startup_order_from_config() {
+        let run = RunConfig {
+            schema_version: 1,
+            run: RunSection {
+                name: "startup-order-test".to_string(),
+                pty_rows: Some(10),
+                pty_cols: Some(40),
+                artifact_dir: None,
+                global_budget_ms: None,
+                step_budget_ms: None,
+                seed: Some(7),
+                max_cpu_percent: None,
+                max_memory_bytes: None,
+                max_open_files: None,
+                require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
+            },
+            instances: vec![
+                InstanceConfig {
+                    id: "alpha".to_string(),
+                    mode: InstanceMode::Ssh,
+                    data_dir: PathBuf::from("/tmp/aura-harness-alpha"),
+                    device_id: None,
+                    bind_address: "127.0.0.1:45001".to_string(),
+                    demo_mode: false,
+                    command: None,
+                    args: vec![],
+                    env: vec![],
+                    log_path: None,
+                    ssh_host: Some("example.org".to_string()),
+                    ssh_user: Some("dev".to_string()),
+                    ssh_port: Some(22),
+                    ssh_strict_host_key_checking: true,
+                    ssh_known_hosts_file: Some(PathBuf::from("/tmp/known_hosts")),
+                    ssh_fingerprint: Some("SHA256:test".to_string()),
+                    ssh_require_fingerprint: true,
+                    ssh_dry_run: true,
+                    remote_workdir: None,
+                    lan_discovery: None,
+                    tunnel: None,
+                },
+                InstanceConfig {
+                    id: "beta".to_string(),
+                    mode: InstanceMode::Ssh,
+                    data_dir: PathBuf::from("/tmp/aura-harness-beta"),
+                    device_id: None,
+                    bind_address: "127.0.0.1:45002".to_string(),
+                    demo_mode: false,
+                    command: None,
+                    args: vec![],
+                    env: vec![],
+                    log_path: None,
+                    ssh_host: Some("example.org".to_string()),
+                    ssh_user: Some("dev".to_string()),
+                    ssh_port: Some(22),
+                    ssh_strict_host_key_checking: true,
+                    ssh_known_hosts_file: Some(PathBuf::from("/tmp/known_hosts")),
+                    ssh_fingerprint: Some("SHA256:test".to_string()),
+                    ssh_require_fingerprint: true,
+                    ssh_dry_run: true,
+                    remote_workdir: None,
+                    lan_discovery: None,
+                    tunnel: None,
+                },
+            ],
+        };
+
+        let coordinator =
+            HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            coordinator.instance_order,
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
+    }
+
+    #[test]
+    fn verify_bind_address_released_detects_busy_port() {
+        let listener =
+            TcpListener::bind("127.0.0.1:0").unwrap_or_else(|error| panic!("{error}"));
+        let bind_address = listener
+            .local_addr()
+            .unwrap_or_else(|error| panic!("{error}"))
+            .to_string();
+        let run = RunConfig {
+            schema_version: 1,
+            run: RunSection {
+                name: "busy-port-test".to_string(),
+                pty_rows: Some(10),
+                pty_cols: Some(40),
+                artifact_dir: None,
+                global_budget_ms: None,
+                step_budget_ms: None,
+                seed: Some(11),
+                max_cpu_percent: None,
+                max_memory_bytes: None,
+                max_open_files: None,
+                require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
+            },
+            instances: vec![InstanceConfig {
+                id: "alice".to_string(),
+                mode: InstanceMode::Local,
+                data_dir: PathBuf::from("/tmp/aura-harness-busy-port"),
+                device_id: None,
+                bind_address: bind_address.clone(),
+                demo_mode: false,
+                command: Some("bash".to_string()),
+                args: vec!["-lc".to_string(), "cat".to_string()],
+                env: vec![],
+                log_path: None,
+                ssh_host: None,
+                ssh_user: None,
+                ssh_port: None,
+                ssh_strict_host_key_checking: true,
+                ssh_known_hosts_file: None,
+                ssh_fingerprint: None,
+                ssh_require_fingerprint: false,
+                ssh_dry_run: true,
+                remote_workdir: None,
+                lan_discovery: None,
+                tunnel: None,
+            }],
+        };
+
+        let coordinator =
+            HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}"));
+        let error = coordinator
+            .verify_bind_address_released("alice")
+            .err()
+            .unwrap_or_else(|| panic!("busy port should fail teardown verification"));
+        assert!(error.to_string().contains("did not release bind address"));
+        drop(listener);
     }
 }

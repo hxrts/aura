@@ -33,6 +33,15 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  html[data-aura-harness-mode="1"] *,
+  html.aura-harness-mode * {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @layer utilities {

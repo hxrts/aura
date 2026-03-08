@@ -7,12 +7,25 @@ For infrastructure details, see [Test Infrastructure Reference](117_testkit.md).
 ## 1. Core Philosophy
 
 Aura tests follow four principles:
-1. **Effect-based**: Tests use effect traits, never direct impure functions
-2. **Real handlers**: Tests run actual protocol logic through real handlers
-3. **Deterministic**: Tests produce reproducible results
-4. **Comprehensive**: Tests validate both happy paths and error conditions
+1. Effect-based: Tests use effect traits, never direct impure functions
+2. Real handlers: Tests run actual protocol logic through real handlers
+3. Deterministic: Tests produce reproducible results
+4. Comprehensive: Tests validate both happy paths and error conditions
 
-Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or `Uuid::new_v4()` is forbidden. These operations must flow through effect traits.
+### Harness Policy
+
+Aura's runtime harness is the primary end-to-end validation lane. Default harness runs should exercise the real Aura runtime and the real TUI and web frontends. The goal of the harness is to catch integration failures in the actual product, not just prove a model or a simulated approximation.
+
+Real-runtime harness runs should still be engineered for deterministic startup, observation, and teardown. "Real runtime" is not an excuse for flaky orchestration. Simulator-backed harness runs are a complementary lane for controlled fault injection, timing control, and hard-to-reproduce distributed conditions.
+
+Quint and other verification tools generate traces and invariants. They do not replace real-runtime harness validation.
+
+The shared semantic UI and scenario contracts live in `aura-app`. `aura-harness`
+consumes those contracts to drive real frontends. `aura-simulator` is a
+selectable alternate runtime substrate. Quint remains a model and trace
+generation system rather than a frontend executor.
+
+Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or `Uuid::new_v4()` is forbidden. These operations must flow through effect traits instead.
 
 ## 2. The `#[aura_test]` Macro
 
@@ -122,9 +135,7 @@ async fn test_threshold_workflow() -> aura_core::AuraResult<()> {
 }
 ```
 
-Use `simulation_for_test*` helpers for all tests. For multi-instance tests from one callsite,
-use `simulation_for_named_test_with_salt(...)` and keep the identity/salt stable so failures
-can be replayed deterministically.
+Use `simulation_for_test*` helpers for all tests. For multi-instance tests from one callsite, use `simulation_for_named_test_with_salt(...)` and keep the identity and salt stable. This allows failures to be replayed deterministically.
 
 ## 6. Property-Based Testing
 
@@ -230,20 +241,11 @@ async fn test_status_handler() {
 }
 ```
 
-### ITF Trace Replay
+### Quint Trace Usage
 
-```rust
-use aura_terminal::testing::itf_replay::ITFTraceReplayer;
-
-#[test]
-fn test_replay_quint_trace() {
-    let replayer = ITFTraceReplayer::new();
-    let result = replayer
-        .replay_trace_file("verification/quint/tui_trace.itf.json")
-        .expect("Replay failed");
-    assert!(result.all_states_match);
-}
-```
+Quint traces are model artifacts. Export them through the shared semantic
+scenario contract and execute real TUI/web flows through `aura-harness`
+rather than replaying Quint traces directly against the TUI implementation.
 
 ## 9. Conformance Testing
 
@@ -251,14 +253,14 @@ Conformance tests validate that implementations produce identical results across
 
 ### Conformance Lanes
 
-CI runs two lanes:
+CI runs two lanes.
 
-**Strict lane** (native vs WASM cooperative):
+Strict lane (native vs WASM cooperative):
 ```bash
 just ci-conformance-strict
 ```
 
-**Differential lane** (native threaded vs cooperative):
+Differential lane (native threaded vs cooperative):
 ```bash
 just ci-conformance-diff
 ```
@@ -293,9 +295,11 @@ The runtime harness executes real Aura instances in PTYs for end-to-end validati
 
 ### Harness Overview
 
-The harness supports:
-- **Scripted mode**: Predefined steps from a scenario file
-- **Agent mode**: LLM-driven execution toward goals
+The harness is the single executor for real frontend scenarios. Scripted mode uses the shared semantic scenario contract. Agent mode uses LLM-driven execution toward goals.
+
+Shared flows should be authored semantically once, then executed through the
+harness using either the TUI or browser driver. Do not create a second
+frontend execution path for MBT or simulator replay.
 
 ### Run Config
 
@@ -319,27 +323,26 @@ bind_address = "127.0.0.1:41001"
 ### Scenario File
 
 ```toml
-schema_version = 1
 id = "discovery-smoke"
-execution_mode = "scripted"
+goal = "Validate semantic harness observation against a real TUI"
 
 [[steps]]
 id = "launch"
-action = "launch_instances"
+action = "launch_actors"
 timeout_ms = 5000
 
 [[steps]]
-id = "send"
-action = "send_keys"
-instance = "alice"
-keys = "hello\n"
+id = "nav-chat"
+actor = "alice"
+action = "navigate"
+screen_id = "chat"
 timeout_ms = 2000
 
 [[steps]]
-id = "wait"
-action = "wait_for"
-instance = "alice"
-pattern = "hello"
+id = "chat-ready"
+actor = "alice"
+action = "readiness_is"
+readiness = "ready"
 timeout_ms = 2000
 ```
 
@@ -348,11 +351,11 @@ timeout_ms = 2000
 ```bash
 # Lint before running
 just harness-lint -- --config configs/harness/local-loopback.toml \
-  --scenario scenarios/harness/local-discovery-smoke.toml
+  --scenario scenarios/harness/semantic-observation-tui-smoke.toml
 
 # Execute
 just harness-run -- --config configs/harness/local-loopback.toml \
-  --scenario scenarios/harness/local-discovery-smoke.toml
+  --scenario scenarios/harness/semantic-observation-tui-smoke.toml
 
 # Replay for deterministic reproduction
 just harness-replay -- --bundle artifacts/harness/local-loopback-smoke/replay_bundle.json
@@ -428,15 +431,11 @@ cargo test --package aura-terminal --test unit_state_machine
 
 ## 12. Best Practices
 
-- Test one behavior per function
-- Name tests descriptively
-- Use fixtures for common setup
-- Prefer real handlers over mocks
-- Test error conditions explicitly
-- Avoid testing implementation details
-- Focus on observable behavior
-- Keep tests fast
-- Parallelize independent tests
+Test one behavior per function and name tests descriptively. Use fixtures for common setup. Prefer real handlers over mocks.
+
+Test error conditions explicitly. Avoid testing implementation details. Focus on observable behavior.
+
+Keep tests fast. Parallelize independent tests.
 
 ## 13. Holepunch Backends and Artifact Triage
 
@@ -465,25 +464,11 @@ Harness writes backend resolution details to:
 artifacts/harness/<run>/network_backend_preflight.json
 ```
 
-Patchbay is the authoritative NAT-realism backend for holepunch validation:
+Patchbay is the authoritative NAT-realism backend for holepunch validation. Use native `patchbay` on Linux CI and Linux developer machines when capabilities are available. Use `patchbay-vm` on macOS and as Linux fallback to run the same scenarios in a Linux VM. Keep deterministic non-network logic in `mock` backend tests to preserve fast feedback.
 
-- Use native `patchbay` on Linux CI and Linux developer machines when capabilities are available.
-- Use `patchbay-vm` on macOS (and as Linux fallback) to run the same scenarios in a Linux VM.
-- Keep deterministic non-network logic in `mock` backend tests to preserve fast feedback.
+Implementation follows three tiers. Tier 1 covers deterministic and property tests in `aura-testkit` for retry and path-selection invariants. Tier 2 covers Patchbay integration scenarios in `aura-harness` for PR gating. Tier 3 covers Patchbay stress and flake detection suites on scheduled CI.
 
-Recommended implementation tiers:
-
-1. Tier 1: deterministic/property tests in `aura-testkit` for retry/path-selection invariants.
-2. Tier 2: Patchbay integration scenarios in `aura-harness` for PR gating.
-3. Tier 3: Patchbay stress/flake detection suites on scheduled CI.
-
-When a scenario fails, triage in this order:
-
-1. `network_backend_preflight.json` to confirm selected backend and fallback reason.
-2. `startup_summary.json` and `scenario_report.json` for run context and failing step.
-3. `events.json` and backend timeline artifacts (`timeline.json` / `event_timeline.json`) for event ordering.
-4. Namespace/network dumps (`ip-*`, `nft*`) and `*.pcap` files for packet/routing diagnosis.
-5. Agent logs for authority-local failures and retry state transitions.
+When a scenario fails, triage artifacts in this order. Check `network_backend_preflight.json` to confirm selected backend and fallback reason. Check `startup_summary.json` and `scenario_report.json` for run context and failing step. Check `events.json` and backend timeline artifacts for event ordering. Check namespace and network dumps and pcap files for packet and routing diagnosis. Check agent logs for authority-local failures and retry state transitions.
 
 ## 14. Browser Harness Workflow (WASM + Playwright)
 
@@ -508,12 +493,10 @@ In a second shell:
 
 ```bash
 # Lint browser run/scenario config
-just harness-lint-browser scenarios/harness/local-discovery-smoke.toml
+just harness-lint-browser scenarios/harness/semantic-observation-browser-smoke.toml
 
 # Run browser scenarios
-just harness-run-browser scenarios/harness/local-discovery-smoke.toml
-just harness-run-browser scenarios/harness/scenario1-invitation-chat-e2e.toml
-just harness-run-browser scenarios/harness/home-roles.toml
+just harness-run-browser scenarios/harness/semantic-observation-browser-smoke.toml
 
 # Replay the latest browser run bundle
 just harness-replay-browser
@@ -525,20 +508,15 @@ Browser harness artifacts are written under:
 artifacts/harness/browser/
 ```
 
-Key files when debugging browser failures:
-
-1. `web-serve.log` for bundle/build/runtime startup issues.
-2. `preflight_report.json` for browser prerequisites (`node`, Playwright, app URL).
-3. `timeout_diagnostics.json` for authoritative/normalized snapshots and per-instance log tails.
-4. Playwright screenshots/traces under each instance `data_dir` (`playwright-artifacts/`).
+When debugging browser failures, check `web-serve.log` for bundle and runtime startup issues. Check `preflight_report.json` for browser prerequisites including Node, Playwright, and app URL. Check `timeout_diagnostics.json` for authoritative and normalized snapshots and per-instance log tails. Playwright screenshots and traces are stored under each instance `data_dir` in `playwright-artifacts/`.
 
 ### Frontend Shell Roadmap
 
-`aura-ui` is the shared Dioxus UI core for web-first delivery today and future multi-target shells:
+`aura-ui` is the shared Dioxus UI core. It supports web-first delivery today and future multi-target shells.
 
-1. `aura-web` (current): browser shell and harness bridge.
-2. aura-desktop (future): desktop shell reusing `aura-ui`.
-3. aura-mobile (future): mobile shell reusing `aura-ui`.
+1. `aura-web` (current): browser shell and harness bridge
+2. Desktop shell (future): desktop-specific shell reusing `aura-ui`
+3. Mobile shell (future): mobile-specific shell reusing `aura-ui`
 
 ## Related Documentation
 

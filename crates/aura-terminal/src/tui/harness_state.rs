@@ -3,12 +3,14 @@
 use crate::tui::screens::Screen;
 use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::state::toast::ToastLevel;
+use crate::tui::state::CreateInvitationField;
 use crate::tui::types::SettingsSection;
+use crate::tui::types::Contact as TuiContact;
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
-    ControlId, ListId, ListItemSnapshot, ListSnapshot, ModalId, OperationId, OperationSnapshot,
-    OperationState, ScreenId, SelectionSnapshot, ToastId, ToastKind, ToastSnapshot, UiReadiness,
-    UiSnapshot,
+    ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot,
+    ModalId, OperationId, OperationSnapshot, OperationState, ScreenId, SelectionSnapshot,
+    ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::types::StateSnapshot;
 use std::fs;
@@ -20,6 +22,7 @@ const UI_STATE_FILE_ENV: &str = "AURA_TUI_UI_STATE_FILE";
 
 static UI_STATE_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
 static LAST_WRITTEN_SNAPSHOT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static CONTACTS_OVERRIDE: OnceLock<Mutex<Option<Vec<TuiContact>>>> = OnceLock::new();
 
 fn configured_ui_state_file() -> Option<&'static PathBuf> {
     UI_STATE_FILE
@@ -29,6 +32,10 @@ fn configured_ui_state_file() -> Option<&'static PathBuf> {
 
 fn last_written_snapshot() -> &'static Mutex<Option<String>> {
     LAST_WRITTEN_SNAPSHOT.get_or_init(|| Mutex::new(None))
+}
+
+fn contacts_override() -> &'static Mutex<Option<Vec<TuiContact>>> {
+    CONTACTS_OVERRIDE.get_or_init(|| Mutex::new(None))
 }
 
 fn map_screen(screen: Screen) -> ScreenId {
@@ -61,6 +68,7 @@ fn map_modal(modal: &QueuedModal) -> Option<ModalId> {
         QueuedModal::ContactsNickname(_) => Some(ModalId::EditNickname),
         QueuedModal::ContactsImport(_) => Some(ModalId::AcceptInvitation),
         QueuedModal::ContactsCreate(_) => Some(ModalId::CreateInvitation),
+        QueuedModal::ContactsCode(_) => Some(ModalId::InvitationCode),
         QueuedModal::GuardianSetup(_) => Some(ModalId::GuardianSetup),
         QueuedModal::MfaSetup(_) => Some(ModalId::MfaSetup),
         QueuedModal::SettingsNicknameSuggestion(_) => Some(ModalId::EditNickname),
@@ -78,8 +86,7 @@ fn map_modal(modal: &QueuedModal) -> Option<ModalId> {
         | QueuedModal::Confirm { .. }
         | QueuedModal::GuardianSelect(_)
         | QueuedModal::ContactSelect(_)
-        | QueuedModal::ChatMemberSelect(_)
-        | QueuedModal::ContactsCode(_) => None,
+        | QueuedModal::ChatMemberSelect(_) => None,
     }
 }
 
@@ -124,7 +131,22 @@ fn write_snapshot_file(path: &Path, snapshot_json: &str) -> io::Result<()> {
     Ok(())
 }
 
-pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> UiSnapshot {
+fn cached_snapshot(path: &Path) -> Option<UiSnapshot> {
+    let last_written = last_written_snapshot()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(snapshot_json) = last_written.as_deref() {
+        return serde_json::from_str(snapshot_json).ok();
+    }
+    let snapshot_json = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&snapshot_json).ok()
+}
+
+pub fn semantic_ui_snapshot(
+    state: &TuiState,
+    app_snapshot: &StateSnapshot,
+    contacts_override_input: Option<&[TuiContact]>,
+) -> UiSnapshot {
     let screen = map_screen(state.screen());
     let open_modal = state.modal_queue.current().and_then(map_modal);
     let readiness = if matches!(
@@ -141,6 +163,12 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         Some(QueuedModal::AccountSetup(_))
     ) {
         Some(ControlId::OnboardingRoot)
+    } else if let Some(QueuedModal::ContactsCreate(modal_state)) = state.modal_queue.current() {
+        Some(ControlId::Field(match modal_state.focused_field {
+            CreateInvitationField::Type => aura_app::ui::contract::FieldId::InvitationType,
+            CreateInvitationField::Message => aura_app::ui::contract::FieldId::InvitationMessage,
+            CreateInvitationField::Ttl => aura_app::ui::contract::FieldId::InvitationTtl,
+        }))
     } else if let Some(modal_id) = open_modal {
         Some(ControlId::Modal(modal_id))
     } else {
@@ -175,6 +203,7 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
             ListItemSnapshot {
                 id: screen_item_id(id),
                 selected: *candidate == state.screen(),
+                confirmation: ConfirmationState::Confirmed,
             }
         })
         .collect::<Vec<_>>();
@@ -199,6 +228,7 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         .map(|(idx, channel)| ListItemSnapshot {
             id: channel.id.to_string(),
             selected: idx == state.chat.selected_channel,
+            confirmation: ConfirmationState::Confirmed,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -209,20 +239,75 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         selected_by_index(&channel_ids, state.chat.selected_channel),
     );
 
-    let contact_ids = app_snapshot
-        .contacts
-        .all_contacts()
-        .map(|contact| contact.id.to_string())
-        .collect::<Vec<_>>();
-    let contact_items = app_snapshot
-        .contacts
-        .all_contacts()
-        .enumerate()
-        .map(|(idx, contact)| ListItemSnapshot {
-            id: contact.id.to_string(),
-            selected: idx == state.contacts.selected_index,
-        })
-        .collect::<Vec<_>>();
+    let effective_contacts = contacts_override_input
+        .filter(|contacts| !contacts.is_empty())
+        .map(|contacts| contacts.to_vec())
+        .unwrap_or_else(|| {
+            contacts_override()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone()
+                .unwrap_or_default()
+        });
+    let contact_ids = if !effective_contacts.is_empty() {
+        effective_contacts
+            .iter()
+            .map(|contact| contact.id.clone())
+            .collect::<Vec<_>>()
+    } else {
+        app_snapshot
+            .contacts
+            .all_contacts()
+            .map(|contact| contact.id.to_string())
+            .collect::<Vec<_>>()
+    };
+    let contact_count = if !contact_ids.is_empty() {
+        contact_ids.len()
+    } else {
+        state.contacts.contact_count
+    };
+    let contact_ids = if contact_ids.is_empty() && contact_count > 0 {
+        (0..contact_count)
+            .map(|idx| format!("contact-{idx}"))
+            .collect::<Vec<_>>()
+    } else {
+        contact_ids
+    };
+    let contact_items = if !effective_contacts.is_empty() {
+        effective_contacts
+            .iter()
+            .enumerate()
+            .map(|(idx, contact)| ListItemSnapshot {
+                id: contact.id.clone(),
+                selected: idx == state.contacts.selected_index,
+                confirmation: ConfirmationState::Confirmed,
+            })
+            .collect::<Vec<_>>()
+    } else {
+        app_snapshot
+            .contacts
+            .all_contacts()
+            .enumerate()
+            .map(|(idx, contact)| ListItemSnapshot {
+                id: contact.id.to_string(),
+                selected: idx == state.contacts.selected_index,
+                confirmation: ConfirmationState::Confirmed,
+            })
+            .collect::<Vec<_>>()
+    };
+    let contact_items = if contact_items.is_empty() && contact_count > 0 {
+        contact_ids
+            .iter()
+            .enumerate()
+            .map(|(idx, id)| ListItemSnapshot {
+                id: id.clone(),
+                selected: idx == state.contacts.selected_index,
+                confirmation: ConfirmationState::Confirmed,
+            })
+            .collect::<Vec<_>>()
+    } else {
+        contact_items
+    };
     push_list(
         &mut lists,
         &mut selections,
@@ -245,6 +330,7 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         .map(|(idx, id)| ListItemSnapshot {
             id: id.clone(),
             selected: idx == state.notifications.selected_index,
+            confirmation: ConfirmationState::Confirmed,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -254,6 +340,30 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         notification_items,
         selected_by_index(&notification_ids, state.notifications.selected_index),
     );
+
+    if let Some(QueuedModal::ContactsCreate(modal_state)) = state.modal_queue.current() {
+        let invitation_type_ids = vec![
+            "guardian".to_string(),
+            "contact".to_string(),
+            "channel".to_string(),
+        ];
+        let invitation_type_items = invitation_type_ids
+            .iter()
+            .enumerate()
+            .map(|(idx, id)| ListItemSnapshot {
+                id: id.clone(),
+                selected: idx == modal_state.type_index,
+                confirmation: ConfirmationState::Confirmed,
+            })
+            .collect::<Vec<_>>();
+        push_list(
+            &mut lists,
+            &mut selections,
+            ListId::InvitationTypes,
+            invitation_type_items,
+            selected_by_index(&invitation_type_ids, modal_state.type_index),
+        );
+    }
 
     let mut home_ids = vec![app_snapshot.neighborhood.home_home_id.to_string()];
     home_ids.extend(
@@ -268,6 +378,7 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         .map(|(idx, id)| ListItemSnapshot {
             id: id.clone(),
             selected: idx == state.neighborhood.selected_home,
+            confirmation: ConfirmationState::Confirmed,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -294,6 +405,7 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         .map(|(idx, id)| ListItemSnapshot {
             id: id.clone(),
             selected: idx == state.neighborhood.selected_member,
+            confirmation: ConfirmationState::Confirmed,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -316,6 +428,7 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         .map(|(idx, authority)| ListItemSnapshot {
             id: authority.id.clone(),
             selected: idx == state.current_authority_index,
+            confirmation: ConfirmationState::Confirmed,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -336,6 +449,7 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         .map(|(idx, section)| ListItemSnapshot {
             id: section.title().to_ascii_lowercase().replace(' ', "_"),
             selected: idx == state.settings.selected_index,
+            confirmation: ConfirmationState::Confirmed,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -358,22 +472,43 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         })
         .unwrap_or_default();
 
-    let operations = match state.modal_queue.current() {
-        Some(QueuedModal::SettingsDeviceEnrollment(modal_state)) => {
-            let operation_state = if modal_state.ceremony.has_failed {
-                OperationState::Failed
-            } else if modal_state.ceremony.is_complete {
-                OperationState::Succeeded
-            } else {
-                OperationState::Submitting
-            };
-            vec![OperationSnapshot {
-                id: OperationId("device_enrollment".to_string()),
-                state: operation_state,
-            }]
-        }
-        _ => Vec::new(),
-    };
+    let selected_channel_id = channel_ids.get(state.chat.selected_channel).cloned();
+    let messages = selected_channel_id
+        .as_ref()
+        .and_then(|channel_id| {
+            app_snapshot
+                .chat
+                .all_channels()
+                .find(|channel| channel.id.to_string() == *channel_id)
+                .map(|channel| {
+                    app_snapshot
+                        .chat
+                        .messages_for_channel(&channel.id)
+                        .iter()
+                        .map(|message| MessageSnapshot {
+                            id: message.id.clone(),
+                            content: message.content.clone(),
+                        })
+                        .collect::<Vec<_>>()
+                })
+        })
+        .unwrap_or_default();
+
+    let mut operations = state.exported_operation_snapshots();
+    if let Some(QueuedModal::SettingsDeviceEnrollment(modal_state)) = state.modal_queue.current() {
+        let operation_state = if modal_state.ceremony.has_failed {
+            OperationState::Failed
+        } else if modal_state.ceremony.is_complete {
+            OperationState::Succeeded
+        } else {
+            OperationState::Submitting
+        };
+        operations.retain(|operation| operation.id != OperationId::device_enrollment());
+        operations.push(OperationSnapshot {
+            id: OperationId::device_enrollment(),
+            state: operation_state,
+        });
+    }
 
     UiSnapshot {
         screen,
@@ -382,17 +517,22 @@ pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> U
         readiness,
         selections,
         lists,
+        messages,
         operations,
         toasts,
     }
 }
 
-pub fn maybe_export_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) {
+pub fn maybe_export_ui_snapshot(
+    state: &TuiState,
+    app_snapshot: &StateSnapshot,
+    contacts_override: Option<&[TuiContact]>,
+) {
     let Some(path) = configured_ui_state_file() else {
         return;
     };
 
-    let snapshot = semantic_ui_snapshot(state, app_snapshot);
+    let snapshot = semantic_ui_snapshot(state, app_snapshot, contacts_override);
     let Ok(snapshot_json) = serde_json::to_string_pretty(&snapshot) else {
         return;
     };
@@ -409,14 +549,63 @@ pub fn maybe_export_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) 
     }
 }
 
+pub fn publish_contacts_list_override(contacts: &[TuiContact], selected_index: usize) {
+    let Some(path) = configured_ui_state_file() else {
+        return;
+    };
+    *contacts_override()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(contacts.to_vec());
+    let Some(mut snapshot) = cached_snapshot(path) else {
+        return;
+    };
+
+    let items = contacts
+        .iter()
+        .enumerate()
+        .map(|(idx, contact)| ListItemSnapshot {
+            id: contact.id.clone(),
+            selected: idx == selected_index,
+            confirmation: ConfirmationState::Confirmed,
+        })
+        .collect::<Vec<_>>();
+
+    let selected_id = contacts.get(selected_index).map(|contact| contact.id.clone());
+    snapshot.lists.retain(|list| list.id != ListId::Contacts);
+    if !items.is_empty() {
+        snapshot.lists.push(ListSnapshot {
+            id: ListId::Contacts,
+            items,
+        });
+    }
+    snapshot.selections.retain(|selection| selection.list != ListId::Contacts);
+    if let Some(item_id) = selected_id {
+        snapshot.selections.push(SelectionSnapshot {
+            list: ListId::Contacts,
+            item_id,
+        });
+    }
+
+    let Ok(snapshot_json) = serde_json::to_string_pretty(&snapshot) else {
+        return;
+    };
+
+    let mut last_written = last_written_snapshot()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if write_snapshot_file(path, &snapshot_json).is_ok() {
+        *last_written = Some(snapshot_json);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::semantic_ui_snapshot;
     use crate::tui::screens::Screen;
     use crate::tui::state::modal_queue::QueuedModal;
-    use crate::tui::state::views::AccountSetupModalState;
+    use crate::tui::state::views::{AccountSetupModalState, DeviceEnrollmentCeremonyModalState};
     use crate::tui::TuiState;
-    use aura_app::ui::contract::{ControlId, ListId, UiReadiness};
+    use aura_app::ui::contract::{ControlId, ListId, OperationId, OperationState, UiReadiness};
     use aura_app::ui::types::StateSnapshot;
 
     #[test]
@@ -424,7 +613,7 @@ mod tests {
         let mut state = TuiState::new();
         state.show_modal(QueuedModal::AccountSetup(AccountSetupModalState::default()));
 
-        let snapshot = semantic_ui_snapshot(&state, &StateSnapshot::default());
+        let snapshot = semantic_ui_snapshot(&state, &StateSnapshot::default(), None);
         assert_eq!(snapshot.readiness, UiReadiness::Loading);
         assert_eq!(snapshot.focused_control, Some(ControlId::OnboardingRoot));
         assert_eq!(snapshot.open_modal, None);
@@ -435,12 +624,43 @@ mod tests {
         let mut state = TuiState::new();
         state.router.go_to(Screen::Contacts);
 
-        let snapshot = semantic_ui_snapshot(&state, &StateSnapshot::default());
+        let snapshot = semantic_ui_snapshot(&state, &StateSnapshot::default(), None);
         let nav = snapshot
             .lists
             .iter()
             .find(|list| list.id == ListId::Navigation)
             .unwrap_or_else(|| panic!("navigation list should exist"));
         assert!(nav.items.iter().any(|item| item.selected));
+    }
+
+    #[test]
+    fn device_enrollment_modal_exports_operation_state() {
+        let mut state = TuiState::new();
+        let mut modal = DeviceEnrollmentCeremonyModalState::started(
+            "ceremony-1".to_string(),
+            "Mobile".to_string(),
+            "code-123".to_string(),
+        );
+        modal.update_from_status(
+            1,
+            2,
+            2,
+            false,
+            false,
+            None,
+            None,
+            aura_core::threshold::AgreementMode::CoordinatorSoftSafe,
+            false,
+        );
+        state.show_modal(QueuedModal::SettingsDeviceEnrollment(modal));
+
+        let snapshot = semantic_ui_snapshot(&state, &StateSnapshot::default(), None);
+        let operation = snapshot
+            .operations
+            .iter()
+            .find(|operation| operation.id == OperationId::device_enrollment())
+            .expect("device enrollment operation should be present");
+
+        assert_eq!(operation.state, OperationState::Submitting);
     }
 }

@@ -197,9 +197,9 @@ args = ["-lc", "yes churn"]
     let response = tool_api.handle_request(ToolRequest::WaitFor {
         instance_id: "alice".to_string(),
         pattern: "__never_matches__".to_string(),
+        selector: None,
         timeout_ms: 500,
         screen_source: ScreenSource::Default,
-        selector: None,
     });
     let elapsed = started_at.elapsed();
 

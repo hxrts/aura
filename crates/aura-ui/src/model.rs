@@ -11,8 +11,9 @@ use crate::snapshot::render_canonical_snapshot;
 use async_lock::RwLock as AsyncRwLock;
 use aura_app::{
     ui::contract::{
-        ControlId, ListId, ListItemSnapshot, ListSnapshot, ModalId, SelectionSnapshot, ToastId,
-        ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
+        ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot, ListSnapshot,
+        MessageSnapshot, ModalId, OperationId, OperationSnapshot, OperationState,
+        SelectionSnapshot, ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
     },
     AppCore,
 };
@@ -84,6 +85,7 @@ pub struct ContactRow {
     pub name: String,
     pub selected: bool,
     pub is_guardian: bool,
+    pub confirmation: ConfirmationState,
 }
 
 #[derive(Debug, Clone)]
@@ -536,6 +538,7 @@ pub struct UiModel {
     pub notifications: Vec<String>,
     pub notification_ids: Vec<NotificationSelectionId>,
     pub logs: Vec<String>,
+    pub operations: Vec<OperationSnapshot>,
     pub toast: Option<ToastState>,
     pub toast_key: u64,
     pub input_mode: bool,
@@ -587,6 +590,7 @@ impl UiModel {
             notifications: Vec::new(),
             notification_ids: Vec::new(),
             logs: vec!["Aura web shell initialized".to_string()],
+            operations: Vec::new(),
             toast: None,
             toast_key: 0,
             input_mode: false,
@@ -615,6 +619,21 @@ impl UiModel {
 
     pub fn selected_channel_name(&self) -> Option<&str> {
         self.selected_channel.as_deref()
+    }
+
+    fn set_operation_state(&mut self, operation_id: OperationId, state: OperationState) {
+        if let Some(operation) = self.operations.iter_mut().find(|op| op.id == operation_id) {
+            operation.state = state;
+            return;
+        }
+        self.operations.push(OperationSnapshot {
+            id: operation_id,
+            state,
+        });
+    }
+
+    fn clear_operation(&mut self, operation_id: &OperationId) {
+        self.operations.retain(|operation| &operation.id != operation_id);
     }
 
     pub fn set_screen(&mut self, screen: UiScreen) {
@@ -740,6 +759,47 @@ impl UiModel {
             Some(
                 ActiveModal::SelectDeviceToRemove(state) | ActiveModal::ConfirmRemoveDevice(state),
             ) => Some(state),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn modal_field_id(&self) -> Option<FieldId> {
+        let active_modal = self.active_modal.as_ref()?;
+        match active_modal {
+            ActiveModal::CreateInvitation(_) => Some(FieldId::InvitationReceiver),
+            ActiveModal::AcceptInvitation(_) => Some(FieldId::InvitationCode),
+            ActiveModal::CreateHome(_) => Some(FieldId::HomeName),
+            ActiveModal::SetChannelTopic(_) => Some(FieldId::CreateChannelTopic),
+            ActiveModal::EditNickname(_) => Some(FieldId::Nickname),
+            ActiveModal::ImportDeviceEnrollmentCode(_) => Some(FieldId::DeviceImportCode),
+            ActiveModal::CreateChannel(state) => match state.step {
+                CreateChannelWizardStep::Details => Some(match state.active_field {
+                    CreateChannelDetailsField::Name => FieldId::CreateChannelName,
+                    CreateChannelDetailsField::Topic => FieldId::CreateChannelTopic,
+                }),
+                CreateChannelWizardStep::Threshold => Some(FieldId::ThresholdInput),
+                CreateChannelWizardStep::Members => None,
+            },
+            ActiveModal::GuardianSetup(state) | ActiveModal::MfaSetup(state) => {
+                if matches!(state.step, ThresholdWizardStep::Threshold) {
+                    Some(FieldId::ThresholdInput)
+                } else {
+                    None
+                }
+            }
+            ActiveModal::AddDevice(state) => {
+                if matches!(state.step, AddDeviceWizardStep::Name) {
+                    Some(FieldId::DeviceName)
+                } else {
+                    None
+                }
+            }
+            ActiveModal::CapabilityConfig(state) => Some(match state.active_tier {
+                CapabilityTier::Full => FieldId::CapabilityFull,
+                CapabilityTier::Partial => FieldId::CapabilityPartial,
+                CapabilityTier::Limited => FieldId::CapabilityLimited,
+            }),
             _ => None,
         }
     }
@@ -920,6 +980,7 @@ impl UiModel {
             name: name.to_string(),
             selected: self.contacts.is_empty(),
             is_guardian: false,
+            confirmation: ConfirmationState::Confirmed,
         });
         if self.contacts.len() == 1 {
             self.selected_contact_id = Some(authority_id);
@@ -939,6 +1000,7 @@ impl UiModel {
         {
             existing.name = name;
             existing.is_guardian = is_guardian;
+            existing.confirmation = ConfirmationState::Confirmed;
             return;
         }
 
@@ -947,6 +1009,7 @@ impl UiModel {
             name,
             selected: self.contacts.is_empty(),
             is_guardian,
+            confirmation: ConfirmationState::PendingLocal,
         });
 
         if self.selected_contact_id.is_none() {
@@ -1115,6 +1178,7 @@ impl UiModel {
                 name,
                 selected: false,
                 is_guardian,
+                confirmation: ConfirmationState::Confirmed,
             })
             .collect();
 
@@ -1226,12 +1290,36 @@ impl UiModel {
         let mut lists = Vec::new();
         let mut selections = Vec::new();
 
+        let navigation_items = [
+            UiScreen::Neighborhood,
+            UiScreen::Chat,
+            UiScreen::Contacts,
+            UiScreen::Notifications,
+            UiScreen::Settings,
+        ]
+        .into_iter()
+        .map(|screen| ListItemSnapshot {
+            id: screen.help_label().to_ascii_lowercase(),
+            selected: self.screen == screen,
+            confirmation: ConfirmationState::Confirmed,
+        })
+        .collect::<Vec<_>>();
+        lists.push(ListSnapshot {
+            id: ListId::Navigation,
+            items: navigation_items,
+        });
+        selections.push(SelectionSnapshot {
+            list: ListId::Navigation,
+            item_id: self.screen.help_label().to_ascii_lowercase(),
+        });
+
         let channel_items = self
             .channels
             .iter()
             .map(|channel| ListItemSnapshot {
                 id: channel.name.clone(),
                 selected: channel.selected,
+                confirmation: ConfirmationState::Confirmed,
             })
             .collect::<Vec<_>>();
         if !channel_items.is_empty() {
@@ -1253,6 +1341,7 @@ impl UiModel {
             .map(|contact| ListItemSnapshot {
                 id: contact.authority_id.to_string(),
                 selected: contact.selected,
+                confirmation: contact.confirmation,
             })
             .collect::<Vec<_>>();
         if !contact_items.is_empty() {
@@ -1274,6 +1363,7 @@ impl UiModel {
             .map(|authority| ListItemSnapshot {
                 id: authority.id.to_string(),
                 selected: authority.selected,
+                confirmation: ConfirmationState::Confirmed,
             })
             .collect::<Vec<_>>();
         if !authority_items.is_empty() {
@@ -1295,6 +1385,7 @@ impl UiModel {
             .map(|notification| ListItemSnapshot {
                 id: notification.0.clone(),
                 selected: self.selected_notification_id.as_ref() == Some(notification),
+                confirmation: ConfirmationState::Confirmed,
             })
             .collect::<Vec<_>>();
         if !notification_items.is_empty() {
@@ -1310,6 +1401,23 @@ impl UiModel {
             });
         }
 
+        let settings_items = SettingsSection::ALL
+            .into_iter()
+            .map(|section| ListItemSnapshot {
+                id: section.dom_id().to_string(),
+                selected: self.settings_section == section,
+                confirmation: ConfirmationState::Confirmed,
+            })
+            .collect::<Vec<_>>();
+        lists.push(ListSnapshot {
+            id: ListId::SettingsSections,
+            items: settings_items,
+        });
+        selections.push(SelectionSnapshot {
+            list: ListId::SettingsSections,
+            item_id: self.settings_section.dom_id().to_string(),
+        });
+
         let mut toasts = Vec::new();
         if let Some(toast) = &self.toast {
             let kind = match toast.icon {
@@ -1323,6 +1431,16 @@ impl UiModel {
                 message: toast.message.clone(),
             });
         }
+
+        let messages = self
+            .messages
+            .iter()
+            .enumerate()
+            .map(|(idx, content)| MessageSnapshot {
+                id: format!("local-message-{idx}"),
+                content: content.clone(),
+            })
+            .collect::<Vec<_>>();
 
         UiSnapshot {
             screen: self.screen,
@@ -1339,7 +1457,8 @@ impl UiModel {
             },
             selections,
             lists,
-            operations: Vec::new(),
+            messages,
+            operations: self.operations.clone(),
             toasts,
         }
     }
@@ -1356,8 +1475,10 @@ pub struct RenderedHarnessSnapshot {
 pub struct UiController {
     app_core: Arc<AsyncRwLock<AppCore>>,
     model: RwLock<UiModel>,
+    ui_snapshot_override: RwLock<Option<UiSnapshot>>,
     clipboard: Arc<dyn ClipboardPort>,
     authority_switcher: Option<Arc<dyn Fn(AuthorityId) + Send + Sync>>,
+    ui_snapshot_sink: Mutex<Option<Arc<dyn Fn(UiSnapshot) + Send + Sync>>>,
     rerender: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
@@ -1400,8 +1521,10 @@ impl UiController {
         Self {
             app_core,
             model: RwLock::new(UiModel::new(authority_id)),
+            ui_snapshot_override: RwLock::new(None),
             clipboard,
             authority_switcher,
+            ui_snapshot_sink: Mutex::new(None),
             rerender: Mutex::new(None),
         }
     }
@@ -1414,9 +1537,17 @@ impl UiController {
 
     pub fn request_rerender(&self) {
         if let Ok(slot) = self.rerender.lock() {
-            if let Some(rerender) = slot.as_ref() {
+            let rerender = slot.as_ref().cloned();
+            drop(slot);
+            if let Some(rerender) = rerender {
                 rerender();
             }
+        }
+    }
+
+    pub fn set_ui_snapshot_sink(&self, sink: Arc<dyn Fn(UiSnapshot) + Send + Sync>) {
+        if let Ok(mut slot) = self.ui_snapshot_sink.lock() {
+            *slot = Some(sink);
         }
     }
 
@@ -1468,6 +1599,11 @@ impl UiController {
         self.request_rerender();
     }
 
+    pub fn set_input_buffer(&self, value: impl Into<String>) {
+        write_model(&self.model).input_buffer = value.into();
+        self.request_rerender();
+    }
+
     pub fn set_selected_contact_index(&self, index: usize) {
         write_model(&self.model).set_selected_contact_index(index);
         self.request_rerender();
@@ -1500,15 +1636,15 @@ impl UiController {
         &self,
         notifications: Vec<(NotificationSelectionId, String)>,
     ) {
-        write_model(&self.model).sync_runtime_notifications(notifications);
+        self.try_update_model(|model| model.sync_runtime_notifications(notifications));
     }
 
     pub fn sync_runtime_channels(&self, channels: Vec<(String, String)>) {
-        write_model(&self.model).replace_channels(channels);
+        self.try_update_model(|model| model.replace_channels(channels));
     }
 
     pub fn sync_runtime_contacts(&self, contacts: Vec<(AuthorityId, String, bool)>) {
-        write_model(&self.model).replace_contacts(contacts);
+        self.try_update_model(|model| model.replace_contacts(contacts));
     }
 
     pub fn ensure_runtime_contact(
@@ -1517,7 +1653,7 @@ impl UiController {
         name: String,
         is_guardian: bool,
     ) {
-        write_model(&self.model).ensure_runtime_contact(authority_id, name, is_guardian);
+        self.try_update_model(|model| model.ensure_runtime_contact(authority_id, name, is_guardian));
         self.request_rerender();
     }
 
@@ -1527,6 +1663,7 @@ impl UiController {
         receiver_label: Option<&str>,
     ) {
         let mut model = write_model(&self.model);
+        model.clear_operation(&OperationId::invitation_create());
         model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
             receiver_id: receiver_id.map(ToString::to_string).unwrap_or_default(),
             receiver_label: receiver_label.map(str::to_string),
@@ -1536,15 +1673,15 @@ impl UiController {
     }
 
     pub fn sync_runtime_authorities(&self, authorities: Vec<(AuthorityId, String, bool)>) {
-        write_model(&self.model).replace_authorities(authorities);
+        self.try_update_model(|model| model.replace_authorities(authorities));
     }
 
     pub fn sync_runtime_profile(&self, authority_id: String, nickname: String) {
-        write_model(&self.model).sync_profile(authority_id, nickname);
+        self.try_update_model(|model| model.sync_profile(authority_id, nickname));
     }
 
     pub fn sync_runtime_devices(&self, devices: Vec<(String, bool)>) {
-        write_model(&self.model).sync_devices(devices);
+        self.try_update_model(|model| model.sync_devices(devices));
     }
 
     pub fn request_authority_switch(&self, authority_id: AuthorityId) -> bool {
@@ -1570,11 +1707,61 @@ impl UiController {
         self.request_rerender();
     }
 
+    pub fn start_runtime_operation(&self, operation_id: OperationId) {
+        let mut model = write_model(&self.model);
+        model.set_operation_state(operation_id, OperationState::Submitting);
+        drop(model);
+        self.request_rerender();
+    }
+
+    pub fn finish_runtime_operation(&self, operation_id: OperationId, state: OperationState) {
+        let mut model = write_model(&self.model);
+        model.set_operation_state(operation_id, state);
+        drop(model);
+        self.request_rerender();
+    }
+
+    pub fn clear_runtime_operation(&self, operation_id: &OperationId) {
+        let mut model = write_model(&self.model);
+        model.clear_operation(operation_id);
+        drop(model);
+        self.request_rerender();
+    }
+
     pub fn complete_runtime_invitation_import(&self) {
         let mut model = write_model(&self.model);
-        set_toast(&mut model, '✓', "Invitation imported");
         dismiss_modal(&mut model);
         drop(model);
+        self.request_rerender();
+    }
+
+    pub fn complete_runtime_invitation_operation(&self, state: OperationState) {
+        let mut model = write_model(&self.model);
+        dismiss_modal(&mut model);
+        model.set_operation_state(OperationId::invitation_accept(), state);
+        let snapshot = model.semantic_snapshot();
+        let snapshot_modal = snapshot
+            .open_modal
+            .map(|modal| format!("{modal:?}"))
+            .unwrap_or_else(|| "None".to_string());
+        let invitation_state = snapshot
+            .operations
+            .iter()
+            .find(|operation| operation.id == OperationId::invitation_accept())
+            .map(|operation| format!("{:?}", operation.state))
+            .unwrap_or_else(|| "Missing".to_string());
+        tracing::info!(
+            modal = %snapshot_modal,
+            invitation_accept = %invitation_state,
+            "complete_runtime_invitation_operation snapshot"
+        );
+        model.logs.push(format!(
+            "complete_runtime_invitation_operation snapshot modal={snapshot_modal} invitation_accept={invitation_state}"
+        ));
+        drop(model);
+        self.set_ui_snapshot(snapshot);
+        tracing::info!("complete_runtime_invitation_operation published");
+        self.push_log("complete_runtime_invitation_operation published");
         self.request_rerender();
     }
 
@@ -1619,6 +1806,7 @@ impl UiController {
         error_message: Option<String>,
     ) {
         let mut model = write_model(&self.model);
+        let mut operation_state = None;
         if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
             state.accepted_count = accepted_count;
             state.total_count = total_count;
@@ -1626,6 +1814,13 @@ impl UiController {
             state.is_complete = is_complete;
             state.has_failed = has_failed;
             state.error_message = error_message;
+            operation_state = Some(if has_failed {
+                OperationState::Failed
+            } else if is_complete {
+                OperationState::Succeeded
+            } else {
+                OperationState::Submitting
+            });
             let device_name = state.device_name.clone();
             if is_complete {
                 let should_set_name =
@@ -1635,6 +1830,9 @@ impl UiController {
                     model.secondary_device_name = Some(device_name);
                 }
             }
+        }
+        if let Some(operation_state) = operation_state {
+            model.set_operation_state(OperationId::device_enrollment(), operation_state);
         }
         drop(model);
         self.request_rerender();
@@ -1694,7 +1892,18 @@ impl UiController {
     }
 
     pub fn snapshot(&self) -> RenderedHarnessSnapshot {
-        let screen = render_canonical_snapshot(&read_model(&self.model));
+        let screen = self
+            .model
+            .try_read()
+            .ok()
+            .map(|model| render_canonical_snapshot(&model))
+            .unwrap_or_else(|| {
+                let snapshot = self.ui_snapshot();
+                format!(
+                    "[harness-snapshot-busy]\nscreen={:?}\nreadiness={:?}\nopen_modal={:?}\nfocused_control={:?}",
+                    snapshot.screen, snapshot.readiness, snapshot.open_modal, snapshot.focused_control
+                )
+            });
         let normalized_screen = screen
             .replace('\r', "")
             .lines()
@@ -1711,7 +1920,33 @@ impl UiController {
     }
 
     pub fn ui_snapshot(&self) -> UiSnapshot {
-        read_model(&self.model).semantic_snapshot()
+        self.ui_snapshot_override
+            .read()
+            .ok()
+            .and_then(|snapshot| snapshot.clone())
+            .or_else(|| self.model.read().ok().map(|model| model.semantic_snapshot()))
+            .unwrap_or_else(|| UiSnapshot::loading(UiScreen::Neighborhood))
+    }
+
+    pub fn set_ui_snapshot_override(&self, snapshot: UiSnapshot) {
+        if let Ok(mut slot) = self.ui_snapshot_override.write() {
+            *slot = Some(snapshot);
+        }
+    }
+
+    pub fn publish_ui_snapshot(&self, snapshot: UiSnapshot) {
+        if let Ok(slot) = self.ui_snapshot_sink.lock() {
+            let sink = slot.as_ref().cloned();
+            drop(slot);
+            if let Some(sink) = sink {
+                sink(snapshot);
+            }
+        }
+    }
+
+    pub fn set_ui_snapshot(&self, snapshot: UiSnapshot) {
+        self.set_ui_snapshot_override(snapshot.clone());
+        self.publish_ui_snapshot(snapshot);
     }
 
     pub fn read_clipboard(&self) -> String {
@@ -1767,6 +2002,12 @@ impl UiController {
         read_model(&self.model).authority_id.clone()
     }
 
+    fn try_update_model(&self, update: impl FnOnce(&mut UiModel)) {
+        if let Ok(mut model) = self.model.try_write() {
+            update(&mut model);
+        }
+    }
+
     pub fn ui_model(&self) -> Option<UiModel> {
         Some(read_model(&self.model).clone())
     }
@@ -1787,6 +2028,7 @@ fn write_model(model: &RwLock<UiModel>) -> RwLockWriteGuard<'_, UiModel> {
 #[cfg(test)]
 mod tests {
     use super::{NeighborhoodMode, UiModel, UiScreen};
+    use aura_app::ui::contract::{OperationId, OperationState};
 
     #[test]
     fn set_screen_clears_input_mode_and_buffer() {
@@ -1809,5 +2051,20 @@ mod tests {
         model.set_screen(UiScreen::Neighborhood);
 
         assert!(matches!(model.neighborhood_mode, NeighborhoodMode::Map));
+    }
+
+    #[test]
+    fn semantic_snapshot_includes_tracked_operation_state() {
+        let mut model = UiModel::new("authority-local".to_string());
+        model.set_operation_state(OperationId::invitation_accept(), OperationState::Submitting);
+
+        let snapshot = model.semantic_snapshot();
+        let operation = snapshot
+            .operations
+            .iter()
+            .find(|operation| operation.id == OperationId::invitation_accept())
+            .expect("invitation accept operation should be present");
+
+        assert_eq!(operation.state, OperationState::Submitting);
     }
 }

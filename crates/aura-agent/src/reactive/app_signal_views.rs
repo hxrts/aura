@@ -1148,6 +1148,14 @@ impl ReactiveView for ChatSignalView {
                                     }
                                 };
                             state = self.state.lock().await;
+                            tracing::info!(
+                                channel_id = %channel_id,
+                                sender_id = %sender_id,
+                                own_authority = %self.own_authority,
+                                is_own = sender_id == self.own_authority,
+                                message_id = %message_id,
+                                "ChatSignalView applying MessageSentSealed"
+                            );
                             let is_own = sender_id == self.own_authority;
 
                             // Derive delivery status from fact's consistency metadata
@@ -1275,8 +1283,27 @@ impl ReactiveView for ChatSignalView {
                                     .await
                                     .remove(&channel_id);
                             }
+                            if state.channel(&channel_id).is_none() {
+                                state.upsert_channel(Channel {
+                                    id: channel_id,
+                                    context_id: None,
+                                    name: channel_id.to_string(),
+                                    topic: None,
+                                    channel_type: ChannelType::Home,
+                                    unread_count: 0,
+                                    is_dm: false,
+                                    member_ids: Vec::new(),
+                                    member_count: 0,
+                                    last_message: None,
+                                    last_message_time: None,
+                                    last_activity: 0,
+                                    last_finalized_epoch: 0,
+                                });
+                            }
                             if let Some(channel) = state.channel_mut(&channel_id) {
-                                if !channel.member_ids.contains(&participant) {
+                                if participant != self.own_authority
+                                    && !channel.member_ids.contains(&participant)
+                                {
                                     channel.member_ids.push(participant);
                                 }
                                 let known_members =

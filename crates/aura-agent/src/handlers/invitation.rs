@@ -476,40 +476,6 @@ impl InvitationHandler {
             message,
         };
 
-        // Optimistically materialize invited contacts for the sender.
-        // This keeps contact-driven UI/navigation usable even before the invitee's
-        // acceptance envelope is delivered back over transport.
-        if matches!(invitation.invitation_type, InvitationType::Contact { .. })
-            && invitation.receiver_id != invitation.sender_id
-            && !Self::sender_contact_exists(
-                effects.as_ref(),
-                invitation.sender_id,
-                invitation.receiver_id,
-            )
-            .await
-        {
-            let now_ms = effects.current_timestamp().await.unwrap_or(current_time);
-            let contact_fact = ContactFact::Added {
-                context_id: invitation.context_id,
-                owner_id: invitation.sender_id,
-                contact_id: invitation.receiver_id,
-                nickname: invitation.receiver_id.to_string(),
-                added_at: PhysicalTime {
-                    ts_ms: now_ms,
-                    uncertainty: None,
-                },
-            };
-            effects
-                .commit_generic_fact_bytes(
-                    invitation.context_id,
-                    CONTACT_FACT_TYPE_ID.into(),
-                    contact_fact.to_bytes(),
-                )
-                .await
-                .map_err(|e| AgentError::effects(format!("commit contact fact: {e}")))?;
-            effects.await_next_view_update().await;
-        }
-
         // Persist the invitation to storage (so it survives service recreation)
         Self::persist_created_invitation(
             effects.as_ref(),
@@ -524,6 +490,12 @@ impl InvitationHandler {
             .await;
 
         match invitation.invitation_type {
+            InvitationType::Contact { .. } => {
+                tracing::debug!(
+                    invitation_id = %invitation.invitation_id,
+                    "Skipping synchronous invitation exchange sender for contact invitation"
+                );
+            }
             InvitationType::Guardian { .. } => {
                 self.execute_guardian_invitation_principal(effects.clone(), &invitation)
                     .await?;
@@ -537,7 +509,7 @@ impl InvitationHandler {
                         .await?;
                 }
             }
-            _ => {
+            InvitationType::Channel { .. } => {
                 if invitation.receiver_id != invitation.sender_id {
                     self.execute_invitation_exchange_sender(effects.clone(), &invitation)
                         .await?;
@@ -882,9 +854,10 @@ impl InvitationHandler {
                     }
                 }
                 InvitationType::Channel { .. } => {
-                    let _ = self
-                        .execute_invitation_exchange_receiver(effects.clone(), &invitation, true)
-                        .await;
+                    tracing::debug!(
+                        invitation_id = %invitation_id,
+                        "Skipping synchronous invitation exchange receiver for accepted channel invitation"
+                    );
                 }
             }
         }
@@ -1048,6 +1021,9 @@ impl InvitationHandler {
             }
 
             homes.add_home(home);
+            if homes.current_home_id().is_none() {
+                homes.select_home(Some(invite.channel_id));
+            }
             changed = true;
         } else if let Some(home) = homes.home_mut(&invite.channel_id) {
             if home.context_id.is_none() {
@@ -1076,6 +1052,10 @@ impl InvitationHandler {
 
         if !changed {
             return Ok(());
+        }
+
+        if homes.current_home_id().is_none() && homes.has_home(&invite.channel_id) {
+            homes.select_home(Some(invite.channel_id));
         }
 
         reactive
@@ -1122,6 +1102,12 @@ impl InvitationHandler {
         let shareable = ShareableInvitation::from_code(code)
             .map_err(|e| crate::core::AgentError::invalid(format!("{e}")))?;
         let sender_hint_addr = ShareableInvitation::sender_addr_from_code(code);
+        tracing::info!(
+            invitation_id = %shareable.invitation_id,
+            sender = %shareable.sender_id,
+            sender_hint_addr = ?sender_hint_addr,
+            "import_invitation_code parsed sender hint"
+        );
 
         tracing::debug!(
             invitation_id = %shareable.invitation_id,
@@ -1154,8 +1140,34 @@ impl InvitationHandler {
 
         let now_ms = effects.current_timestamp().await.unwrap_or(0);
         if let Some(addr) = sender_hint_addr {
-            self.cache_tcp_descriptor_for_peer(effects, shareable.sender_id, &addr, now_ms)
+            self.cache_direct_descriptor_for_peer(effects, shareable.sender_id, &addr, now_ms)
                 .await;
+            let cached_descriptor = if let Some(manager) = effects.rendezvous_manager() {
+                manager
+                    .get_descriptor(
+                        default_context_id_for_authority(shareable.sender_id),
+                        shareable.sender_id,
+                    )
+                    .await
+            } else {
+                None
+            };
+            let websocket_hint_count = cached_descriptor
+                .as_ref()
+                .map(|descriptor| {
+                    descriptor
+                        .transport_hints
+                        .iter()
+                        .filter(|hint| matches!(hint, TransportHint::WebSocketDirect { .. }))
+                        .count()
+                })
+                .unwrap_or(0);
+            tracing::info!(
+                invitation_id = %shareable.invitation_id,
+                sender = %shareable.sender_id,
+                websocket_hint_count,
+                "import_invitation_code cached direct descriptor"
+            );
         }
         let context_id = match &shareable.invitation_type {
             InvitationType::Channel { .. } => shareable
@@ -1184,7 +1196,7 @@ impl InvitationHandler {
         Ok(invitation)
     }
 
-    async fn cache_tcp_descriptor_for_peer(
+    pub(super) async fn cache_direct_descriptor_for_peer(
         &self,
         effects: &AuraEffectSystem,
         peer: AuthorityId,
@@ -1194,20 +1206,58 @@ impl InvitationHandler {
         let Some(manager) = effects.rendezvous_manager() else {
             return;
         };
-        let Ok(hint) = TransportHint::tcp_direct(addr) else {
-            return;
+        let hint = if addr.starts_with("ws://") || addr.starts_with("wss://") {
+            let normalized = addr
+                .trim_start_matches("ws://")
+                .trim_start_matches("wss://");
+            let Ok(hint) = TransportHint::websocket_direct(normalized) else {
+                return;
+            };
+            hint
+        } else if addr.starts_with("tcp://") {
+            let normalized = addr.trim_start_matches("tcp://");
+            let Ok(hint) = TransportHint::tcp_direct(normalized) else {
+                return;
+            };
+            hint
+        } else {
+            // Treat bare host:port hints as TCP. WebSocket hints must carry an
+            // explicit scheme so browser runtimes never misclassify raw TCP
+            // listener addresses as websocket endpoints.
+            let Ok(hint) = TransportHint::tcp_direct(addr) else {
+                return;
+            };
+            hint
         };
         let context_id = default_context_id_for_authority(peer);
-        let descriptor = RendezvousDescriptor {
-            authority_id: peer,
-            context_id,
-            transport_hints: vec![hint],
-            handshake_psk_commitment: [0u8; 32],
-            public_key: [0u8; 32],
-            valid_from: now_ms.saturating_sub(1),
-            valid_until: now_ms.saturating_add(86_400_000),
-            nonce: [0u8; 32],
-            nickname_suggestion: None,
+        let descriptor = if let Some(existing) = manager.get_descriptor(context_id, peer).await {
+            let mut transport_hints = existing.transport_hints.clone();
+            if !transport_hints.contains(&hint) {
+                transport_hints.push(hint);
+            }
+            RendezvousDescriptor {
+                authority_id: existing.authority_id,
+                context_id: existing.context_id,
+                transport_hints,
+                handshake_psk_commitment: existing.handshake_psk_commitment,
+                public_key: existing.public_key,
+                valid_from: existing.valid_from.min(now_ms.saturating_sub(1)),
+                valid_until: existing.valid_until.max(now_ms.saturating_add(86_400_000)),
+                nonce: existing.nonce,
+                nickname_suggestion: existing.nickname_suggestion.clone(),
+            }
+        } else {
+            RendezvousDescriptor {
+                authority_id: peer,
+                context_id,
+                transport_hints: vec![hint],
+                handshake_psk_commitment: [0u8; 32],
+                public_key: [0u8; 32],
+                valid_from: now_ms.saturating_sub(1),
+                valid_until: now_ms.saturating_add(86_400_000),
+                nonce: [0u8; 32],
+                nickname_suggestion: None,
+            }
         };
         let _ = manager.cache_descriptor(descriptor).await;
     }
@@ -1244,7 +1294,12 @@ impl InvitationHandler {
             .load_invitation_for_choreography(effects.as_ref(), invitation_id)
             .await
         {
-            if !matches!(invitation.invitation_type, InvitationType::Guardian { .. }) {
+            if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
+                tracing::debug!(
+                    invitation_id = %invitation_id,
+                    "Skipping synchronous invitation exchange receiver for declined channel invitation"
+                );
+            } else if !matches!(invitation.invitation_type, InvitationType::Guardian { .. }) {
                 let _ = self
                     .execute_invitation_exchange_receiver(effects.clone(), &invitation, false)
                     .await;

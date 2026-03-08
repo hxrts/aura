@@ -6,6 +6,7 @@
 
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::tui::components::ToastMessage;
 use crate::tui::context::IoContext;
@@ -681,8 +682,12 @@ impl ContactsCallbacks {
                             invitation_code: code_clone,
                         });
                     }
-                    Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                    Err(e) => {
+                        tracing::error!(error = %e, "ImportInvitation dispatch failed");
+                        let _ = tx.try_send(UiUpdate::operation_failed(
+                            "ImportInvitation",
+                            e.to_string(),
+                        ));
                     }
                 }
             });
@@ -839,14 +844,32 @@ impl InvitationsCallbacks {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
                 spawn_ctx(ctx.clone(), async move {
-                    match ctx
-                        .create_invitation_code(receiver_id, &invitation_type, message, ttl_secs)
-                        .await
+                    match tokio::time::timeout(
+                        Duration::from_secs(8),
+                        ctx.create_invitation_code(receiver_id, &invitation_type, message, ttl_secs),
+                    )
+                    .await
                     {
-                        Ok(code) => {
+                        Ok(Ok(code)) => {
                             let _ = tx.try_send(UiUpdate::InvitationExported { code });
                         }
-                        Err(_e) => {}
+                        Ok(Err(e)) => {
+                            send_ui_update_reliable(
+                                &tx,
+                                UiUpdate::operation_failed("CreateInvitation", e.to_string()),
+                            )
+                            .await;
+                        }
+                        Err(_) => {
+                            send_ui_update_reliable(
+                                &tx,
+                                UiUpdate::operation_failed(
+                                    "CreateInvitation",
+                                    "timed out waiting for invitation export",
+                                ),
+                            )
+                            .await;
+                        }
                     }
                 });
             },
@@ -883,8 +906,12 @@ impl InvitationsCallbacks {
                             invitation_code: code_clone,
                         });
                     }
-                    Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                    Err(e) => {
+                        tracing::error!(error = %e, "ImportInvitation dispatch failed");
+                        let _ = tx.try_send(UiUpdate::operation_failed(
+                            "ImportInvitation",
+                            e.to_string(),
+                        ));
                     }
                 }
             });

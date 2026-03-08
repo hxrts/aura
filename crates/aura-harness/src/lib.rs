@@ -9,12 +9,16 @@ pub mod config;
 pub mod coordinator;
 pub mod determinism;
 pub mod events;
+pub mod failure_attribution;
 pub mod executor;
 pub mod introspection;
 pub mod network_lab;
 pub mod preflight;
+pub mod provisioning;
 pub mod replay;
+pub mod residue_checks;
 pub mod resource_guards;
+pub mod runtime_substrate;
 pub mod routing;
 pub mod scenario;
 pub mod scenario_execution;
@@ -75,6 +79,8 @@ pub fn default_artifacts_dir() -> PathBuf {
 /// Load a run configuration and validate all semantic constraints.
 pub fn load_and_validate_run_config(path: &Path) -> Result<RunConfig> {
     let config = config::load_run_config(path)?;
+    config.validate()?;
+    let config = provisioning::materialize_run_config(config, path)?;
     config.validate()?;
     Ok(config)
 }

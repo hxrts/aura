@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-use aura_app::ui::contract::{ControlId, ModalId, ScreenId, UiSnapshot};
+use aura_app::ui::contract::{ControlId, FieldId, ModalId, ScreenId, UiSnapshot};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
@@ -347,6 +347,53 @@ fn execute_step(
             context.vars.insert(var.to_string(), value);
             Ok(())
         }
+        ScenarioAction::CaptureCurrentAuthorityId => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let var = step
+                .var
+                .as_deref()
+                .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
+            let payload = dispatch_payload(tool_api, ToolRequest::GetAuthorityId { instance_id })?;
+            let authority_id = payload
+                .get("authority_id")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "step {} capture_current_authority_id missing authority_id",
+                        step.id
+                    )
+                })?;
+            context
+                .vars
+                .insert(var.to_string(), authority_id.to_string());
+            Ok(())
+        }
+        ScenarioAction::CaptureSelection => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let var = step
+                .var
+                .as_deref()
+                .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
+            let list_id = step
+                .list_id
+                .ok_or_else(|| anyhow!("step {} missing list_id", step.id))?;
+            let snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
+            let selection = snapshot
+                .selections
+                .iter()
+                .find(|selection| selection.list == list_id)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "step {} capture_selection found no selection for list {:?}",
+                        step.id,
+                        list_id
+                    )
+                })?;
+            context
+                .vars
+                .insert(var.to_string(), selection.item_id.clone());
+            Ok(())
+        }
         ScenarioAction::ExtractVar => {
             let instance_id = resolve_required_instance(step, context)?;
             let var = step
@@ -429,33 +476,61 @@ fn execute_step(
                 command_body.trim().to_ascii_lowercase(),
             );
 
+            let backend_kind = tool_api.backend_kind(&instance_id).unwrap_or("unknown");
+
             // Clear any active toast/modal so command-result waits do not match stale UI.
-            dispatch(
+            let _ = dispatch(
                 tool_api,
                 ToolRequest::SendKey {
                     instance_id: instance_id.clone(),
                     key: ToolKey::Esc,
                     repeat: 1,
                 },
-            )?;
-            // Force chat context before entering insert mode to avoid cross-screen dispatch flakiness.
-            dispatch(
-                tool_api,
-                ToolRequest::SendKeys {
-                    instance_id: instance_id.clone(),
-                    keys: "2".to_string(),
-                },
-            )?;
-            let _ = dispatch(
-                tool_api,
-                ToolRequest::WaitFor {
-                    instance_id: instance_id.clone(),
-                    pattern: "Channels".to_string(),
-                    timeout_ms: step.timeout_ms.unwrap_or(step_budget_ms).min(1500),
-                    screen_source: ScreenSource::Default,
-                    selector: None,
-                },
             );
+            let snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
+            if snapshot.screen != ScreenId::Chat {
+                dispatch(
+                    tool_api,
+                    ToolRequest::ActivateControl {
+                        instance_id: instance_id.clone(),
+                        control_id: ControlId::NavChat,
+                    },
+                )?;
+                let chat_enter_timeout = step.timeout_ms.unwrap_or(step_budget_ms).min(2_000);
+                let mut wait_step = step.clone();
+                wait_step.action = ScenarioAction::WaitFor;
+                wait_step.screen_id = Some(ScreenId::Chat);
+                wait_step.modal_id = None;
+                wait_step.list_id = None;
+                wait_step.item_id = None;
+                wait_step.operation_id = None;
+                wait_step.operation_state = None;
+                wait_for_semantic_state(
+                    &wait_step,
+                    tool_api,
+                    &instance_id,
+                        chat_enter_timeout,
+                    )?;
+            }
+            if backend_kind == "playwright_browser" {
+                dispatch(
+                    tool_api,
+                    ToolRequest::FillField {
+                        instance_id: instance_id.clone(),
+                        field_id: FieldId::ChatInput,
+                        value: format!("/{command_body}"),
+                    },
+                )?;
+                dispatch(
+                    tool_api,
+                    ToolRequest::SendKey {
+                        instance_id,
+                        key: ToolKey::Enter,
+                        repeat: 1,
+                    },
+                )?;
+                return Ok(());
+            }
             // First Esc can be consumed by mode normalization; send a second Esc
             // to reliably clear any stale toast before command entry.
             dispatch(
@@ -483,7 +558,11 @@ fn execute_step(
             )?;
             // Browser harness can remain in insert mode after command submit; if so,
             // normalize back to navigation mode so subsequent digit keys switch tabs.
-            if screen_contains(tool_api, &instance_id, "mode: insert").unwrap_or(false) {
+            if fetch_ui_snapshot(tool_api, &instance_id)
+                .ok()
+                .and_then(|snapshot| snapshot.focused_control)
+                == Some(ControlId::Field(FieldId::ChatInput))
+            {
                 let _ = dispatch(
                     tool_api,
                     ToolRequest::SendKey {
@@ -499,7 +578,10 @@ fn execute_step(
                 .filter(|value| !value.is_empty())
             {
                 if instance_id.eq_ignore_ascii_case("alice")
-                    && screen_contains(tool_api, "alice", "mode: normal").unwrap_or(false)
+                    && fetch_ui_snapshot(tool_api, "alice")
+                        .ok()
+                        .and_then(|snapshot| snapshot.focused_control)
+                        != Some(ControlId::Field(FieldId::ChatInput))
                 {
                     let _ = dispatch(
                         tool_api,
@@ -509,6 +591,76 @@ fn execute_step(
                         },
                     );
                 }
+            }
+            Ok(())
+        }
+        ScenarioAction::SendChatMessage => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let message = resolve_required_field(
+                step,
+                "value",
+                step.value.as_deref().or(step.expect.as_deref()),
+                context,
+            )?;
+            let backend_kind = tool_api.backend_kind(&instance_id).unwrap_or("unknown");
+            if backend_kind == "playwright_browser" {
+                let _ = dispatch(
+                    tool_api,
+                    ToolRequest::SendKey {
+                        instance_id: instance_id.clone(),
+                        key: ToolKey::Esc,
+                        repeat: 1,
+                    },
+                );
+                let snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
+                if snapshot.screen != ScreenId::Chat {
+                    dispatch(
+                        tool_api,
+                        ToolRequest::ActivateControl {
+                            instance_id: instance_id.clone(),
+                            control_id: ControlId::NavChat,
+                        },
+                    )?;
+                    let chat_enter_timeout = step.timeout_ms.unwrap_or(step_budget_ms).min(2_000);
+                    let mut wait_step = step.clone();
+                    wait_step.action = ScenarioAction::WaitFor;
+                    wait_step.screen_id = Some(ScreenId::Chat);
+                    wait_step.modal_id = None;
+                    wait_step.list_id = None;
+                    wait_step.item_id = None;
+                    wait_step.operation_id = None;
+                    wait_step.operation_state = None;
+                    wait_for_semantic_state(
+                        &wait_step,
+                        tool_api,
+                        &instance_id,
+                        chat_enter_timeout,
+                    )?;
+                }
+                dispatch(
+                    tool_api,
+                    ToolRequest::FillField {
+                        instance_id: instance_id.clone(),
+                        field_id: FieldId::ChatInput,
+                        value: message,
+                    },
+                )?;
+                dispatch(
+                    tool_api,
+                    ToolRequest::SendKey {
+                        instance_id,
+                        key: ToolKey::Enter,
+                        repeat: 1,
+                    },
+                )?;
+            } else {
+                dispatch(
+                    tool_api,
+                    ToolRequest::SendKeys {
+                        instance_id,
+                        keys: format!("i{message}\n"),
+                    },
+                )?;
             }
             Ok(())
         }
@@ -571,15 +723,37 @@ fn execute_step(
                 .var
                 .as_deref()
                 .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
-            let payload = dispatch_payload(tool_api, ToolRequest::ReadClipboard { instance_id })?;
-            let text = payload
-                .get("text")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-                .ok_or_else(|| anyhow!("step {} read_clipboard response missing text", step.id))?;
-            if text.trim().is_empty() {
-                bail!("step {} read_clipboard returned empty text", step.id);
-            }
+            let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
+            let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+            let text = loop {
+                let attempt = dispatch_payload(
+                    tool_api,
+                    ToolRequest::ReadClipboard {
+                        instance_id: instance_id.clone(),
+                    },
+                );
+                match attempt {
+                    Ok(payload) => {
+                        if let Some(text) = payload.get("text").and_then(serde_json::Value::as_str)
+                        {
+                            if !text.trim().is_empty() {
+                                break text.to_string();
+                            }
+                        }
+                    }
+                    Err(_) => {}
+                }
+
+                if Instant::now() >= deadline {
+                    bail!(
+                        "step {} read_clipboard timed out on instance {} after {}ms",
+                        step.id,
+                        instance_id,
+                        timeout_ms
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            };
             context.vars.insert(var.to_string(), text);
             Ok(())
         }
@@ -602,8 +776,42 @@ fn execute_step(
             )?;
             Ok(())
         }
+        ScenarioAction::DismissTransient => {
+            let instance_id = resolve_required_instance(step, context)?;
+            dispatch(
+                tool_api,
+                ToolRequest::SendKey {
+                    instance_id,
+                    key: ToolKey::Esc,
+                    repeat: 1,
+                },
+            )?;
+            Ok(())
+        }
         ScenarioAction::ClickButton => {
             let instance_id = resolve_required_instance(step, context)?;
+            if let Some(control_id) = step.control_id {
+                dispatch(
+                    tool_api,
+                    ToolRequest::ActivateControl {
+                        instance_id,
+                        control_id,
+                    },
+                )?;
+                return Ok(());
+            }
+            if let (Some(list_id), Some(item_id)) = (step.list_id, step.item_id.as_deref()) {
+                let item_id = resolve_template(item_id, context)?;
+                dispatch(
+                    tool_api,
+                    ToolRequest::ActivateListItem {
+                        instance_id,
+                        list_id,
+                        item_id,
+                    },
+                )?;
+                return Ok(());
+            }
             let selector = match step.selector.as_deref() {
                 Some(selector) => Some(resolve_template(selector, context)?),
                 None => None,
@@ -634,30 +842,46 @@ fn execute_step(
         }
         ScenarioAction::FillInput => {
             let instance_id = resolve_required_instance(step, context)?;
-            let selector =
-                resolve_required_field(step, "selector", step.selector.as_deref(), context)?;
             let value = resolve_required_field(
                 step,
                 "value",
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            dispatch(
-                tool_api,
-                ToolRequest::FillInput {
-                    instance_id,
-                    selector,
-                    value,
-                },
-            )?;
+            if let Some(field_id) = step.field_id {
+                dispatch(
+                    tool_api,
+                    ToolRequest::FillField {
+                        instance_id,
+                        field_id,
+                        value,
+                    },
+                )?;
+            } else {
+                let selector =
+                    resolve_required_field(step, "selector", step.selector.as_deref(), context)?;
+                dispatch(
+                    tool_api,
+                    ToolRequest::FillInput {
+                        instance_id,
+                        selector,
+                        value,
+                    },
+                )?;
+            }
             Ok(())
         }
-        ScenarioAction::WaitFor => {
+        ScenarioAction::WaitFor | ScenarioAction::MessageContains => {
             let instance_id = resolve_required_instance(step, context)?;
-            if step.screen_id.is_some()
+            if matches!(step.action, ScenarioAction::MessageContains)
+                || step.screen_id.is_some()
                 || step.control_id.is_some()
                 || step.modal_id.is_some()
                 || step.list_id.is_some()
+                || step.readiness.is_some()
+                || step.operation_id.is_some()
+                || step.contains.is_some()
+                || step.level.is_some()
             {
                 wait_for_semantic_state(
                     step,
@@ -1024,13 +1248,23 @@ fn execute_step(
             let delay_ms = step
                 .timeout_ms
                 .unwrap_or_else(|| 25 + fault_rng.range_u64(0, 25));
-            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-            Ok(())
+            let actor = resolve_required_instance(step, context)?;
+            tool_api.apply_fault_delay(&actor, delay_ms)
         }
-        ScenarioAction::FaultLoss | ScenarioAction::FaultTunnelDrop => {
-            // Consume deterministic RNG state so replay and injected faults are seed-driven.
+        ScenarioAction::FaultLoss => {
+            let actor = resolve_required_instance(step, context)?;
             let _decision = scenario_rng.range_u64(0, 2);
-            Ok(())
+            let loss_percent = step
+                .value
+                .as_deref()
+                .and_then(|value| value.parse::<u8>().ok())
+                .unwrap_or(100);
+            tool_api.apply_fault_loss(&actor, loss_percent)
+        }
+        ScenarioAction::FaultTunnelDrop => {
+            let actor = resolve_required_instance(step, context)?;
+            let _decision = scenario_rng.range_u64(0, 2);
+            tool_api.apply_fault_tunnel_drop(&actor)
         }
     }
 }
@@ -1170,6 +1404,16 @@ fn fetch_ui_snapshot(tool_api: &mut ToolApi, instance_id: &str) -> Result<UiSnap
 }
 
 fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
+    if matches!(step.action, ScenarioAction::MessageContains) {
+        let Some(expected_contains) = step.value.as_deref().or(step.expect.as_deref()) else {
+            return false;
+        };
+        return snapshot
+            .messages
+            .iter()
+            .any(|message| message.content.contains(expected_contains));
+    }
+
     if let Some(screen_id) = step.screen_id {
         if snapshot.screen != screen_id {
             return false;
@@ -1178,6 +1422,27 @@ fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
 
     if let Some(modal_id) = step.modal_id {
         if snapshot.open_modal != Some(modal_id) {
+            return false;
+        }
+    }
+
+    if let Some(readiness) = step.readiness {
+        if snapshot.readiness != readiness {
+            return false;
+        }
+    }
+
+    if let (Some(operation_id), Some(operation_state)) =
+        (step.operation_id.as_ref(), step.operation_state)
+    {
+        let Some(operation) = snapshot
+            .operations
+            .iter()
+            .find(|candidate| &candidate.id == operation_id)
+        else {
+            return false;
+        };
+        if operation.state != operation_state {
             return false;
         }
     }
@@ -1202,10 +1467,60 @@ fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
         else {
             return false;
         };
-        if let Some(item_id) = step.item_id.as_deref() {
-            if !list.items.iter().any(|item| item.id == item_id) {
+        if let Some(count) = step.count {
+            if list.items.len() != count {
                 return false;
             }
+        }
+        if let Some(item_id) = step.item_id.as_deref() {
+            let Some(item) = list.items.iter().find(|item| item.id == item_id) else {
+                return false;
+            };
+            if let Some(confirmation) = step.confirmation {
+                if item.confirmation != confirmation {
+                    return false;
+                }
+            }
+            if let Some(selection) = snapshot
+                .selections
+                .iter()
+                .find(|selection| selection.list == list_id)
+            {
+                if selection.item_id != item_id {
+                    return false;
+                }
+            }
+        }
+    }
+
+    if step.contains.is_some() || step.level.is_some() {
+        let expected_level = step
+            .level
+            .as_deref()
+            .map(parse_toast_level)
+            .transpose()
+            .ok()
+            .flatten();
+        let Some(expected_contains) = step.contains.as_deref().or(step.expect.as_deref()) else {
+            return false;
+        };
+        let matched = snapshot.toasts.iter().any(|toast| {
+            let kind_matches = match expected_level {
+                Some(ToastLevel::Success) => {
+                    toast.kind == aura_app::ui::contract::ToastKind::Success
+                }
+                Some(ToastLevel::Info) => {
+                    toast.kind == aura_app::ui::contract::ToastKind::Info
+                }
+                Some(ToastLevel::Error) => {
+                    toast.kind == aura_app::ui::contract::ToastKind::Error
+                }
+                None => true,
+            };
+            kind_matches && toast_contains_matches(expected_contains, &toast.message)
+        });
+        if !matched {
+            return false;
         }
     }
 
@@ -1213,16 +1528,35 @@ fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
 }
 
 fn semantic_wait_description(step: &ScenarioStep) -> String {
+    if matches!(step.action, ScenarioAction::MessageContains) {
+        if let Some(value) = step.value.as_deref().or(step.expect.as_deref()) {
+            return format!("message~={value}");
+        }
+    }
     if let Some(screen_id) = step.screen_id {
         return format!("screen={}", semantic_screen_name(screen_id));
     }
     if let Some(modal_id) = step.modal_id {
         return format!("modal={}", semantic_modal_name(modal_id));
     }
+    if let Some(readiness) = step.readiness {
+        return format!("readiness={readiness:?}");
+    }
+    if let (Some(operation_id), Some(operation_state)) =
+        (step.operation_id.as_ref(), step.operation_state)
+    {
+        return format!("operation={} state={operation_state:?}", operation_id.0);
+    }
     if let Some(control_id) = step.control_id {
         return format!("control={control_id:?}");
     }
+    if let Some(contains) = step.contains.as_deref().or(step.expect.as_deref()) {
+        return format!("toast~={contains}");
+    }
     if let Some(list_id) = step.list_id {
+        if let Some(count) = step.count {
+            return format!("list={list_id:?} count={count}");
+        }
         if let Some(item_id) = step.item_id.as_deref() {
             return format!("list={list_id:?} item={item_id}");
         }
@@ -1245,6 +1579,7 @@ fn semantic_modal_name(modal: ModalId) -> &'static str {
     match modal {
         ModalId::Help => "help",
         ModalId::CreateInvitation => "create_invitation",
+        ModalId::InvitationCode => "invitation_code",
         ModalId::AcceptInvitation => "accept_invitation",
         ModalId::CreateHome => "create_home",
         ModalId::CreateChannel => "create_channel",
@@ -1273,22 +1608,23 @@ fn wait_for_semantic_state(
     timeout_ms: u64,
 ) -> Result<()> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-    loop {
+    let last_snapshot = loop {
         let snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
         if semantic_wait_matches(step, &snapshot) {
             return Ok(());
         }
         if Instant::now() >= deadline {
-            bail!(
-                "step {} semantic wait timed out on instance {} ({}) last_snapshot={:?}",
-                step.id,
-                instance_id,
-                semantic_wait_description(step),
-                snapshot
-            );
+            break snapshot;
         }
         std::thread::sleep(Duration::from_millis(40));
-    }
+    };
+    bail!(
+        "step {} semantic wait timed out on instance {} ({}) last_snapshot={:?}",
+        step.id,
+        instance_id,
+        semantic_wait_description(step),
+        Some(last_snapshot)
+    )
 }
 
 fn screen_contains(tool_api: &mut ToolApi, instance_id: &str, needle: &str) -> Result<bool> {
@@ -1731,6 +2067,10 @@ fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_app::ui::contract::{
+        ConfirmationState, ListId, ListItemSnapshot, ListSnapshot, OperationId,
+        OperationSnapshot, OperationState, ScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
+    };
     use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, ScenarioAction};
     use crate::coordinator::HarnessCoordinator;
 
@@ -1810,6 +2150,126 @@ mod tests {
     }
 
     #[test]
+    fn semantic_wait_can_require_confirmed_list_items() {
+        let step = crate::config::ScenarioStep {
+            id: "wait-confirmed-contact".to_string(),
+            action: crate::config::ScenarioAction::WaitFor,
+            list_id: Some(ListId::Contacts),
+            item_id: Some("authority-1".to_string()),
+            confirmation: Some(ConfirmationState::Confirmed),
+            ..Default::default()
+        };
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Contacts,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            selections: vec![SelectionSnapshot {
+                list: ListId::Contacts,
+                item_id: "authority-1".to_string(),
+            }],
+            lists: vec![ListSnapshot {
+                id: ListId::Contacts,
+                items: vec![ListItemSnapshot {
+                    id: "authority-1".to_string(),
+                    selected: true,
+                    confirmation: ConfirmationState::Confirmed,
+                }],
+            }],
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+        };
+
+        assert!(semantic_wait_matches(&step, &snapshot));
+    }
+
+    #[test]
+    fn semantic_wait_rejects_pending_local_when_confirmed_is_required() {
+        let step = crate::config::ScenarioStep {
+            id: "wait-confirmed-contact".to_string(),
+            action: crate::config::ScenarioAction::WaitFor,
+            list_id: Some(ListId::Contacts),
+            item_id: Some("authority-1".to_string()),
+            confirmation: Some(ConfirmationState::Confirmed),
+            ..Default::default()
+        };
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Contacts,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            selections: vec![SelectionSnapshot {
+                list: ListId::Contacts,
+                item_id: "authority-1".to_string(),
+            }],
+            lists: vec![ListSnapshot {
+                id: ListId::Contacts,
+                items: vec![ListItemSnapshot {
+                    id: "authority-1".to_string(),
+                    selected: true,
+                    confirmation: ConfirmationState::PendingLocal,
+                }],
+            }],
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+        };
+
+        assert!(!semantic_wait_matches(&step, &snapshot));
+    }
+
+    #[test]
+    fn semantic_wait_can_require_ready_state() {
+        let step = crate::config::ScenarioStep {
+            id: "wait-ready".to_string(),
+            action: crate::config::ScenarioAction::WaitFor,
+            readiness: Some(UiReadiness::Ready),
+            ..Default::default()
+        };
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Neighborhood,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            selections: Vec::new(),
+            lists: Vec::new(),
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+        };
+
+        assert!(semantic_wait_matches(&step, &snapshot));
+    }
+
+    #[test]
+    fn semantic_wait_can_require_operation_state() {
+        let step = crate::config::ScenarioStep {
+            id: "wait-op".to_string(),
+            action: crate::config::ScenarioAction::WaitFor,
+            operation_id: Some(OperationId::invitation_accept()),
+            operation_state: Some(OperationState::Succeeded),
+            ..Default::default()
+        };
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Contacts,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            selections: Vec::new(),
+            lists: Vec::new(),
+            messages: Vec::new(),
+            operations: vec![OperationSnapshot {
+                id: OperationId::invitation_accept(),
+                state: OperationState::Succeeded,
+            }],
+            toasts: Vec::new(),
+        };
+
+        assert!(semantic_wait_matches(&step, &snapshot));
+    }
+
+    #[test]
     fn command_result_contains_aliases_membership_updates() {
         assert!(command_result_contains_matches(
             "membership updated",
@@ -1877,6 +2337,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
@@ -1967,6 +2428,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
@@ -2114,6 +2576,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![
                 InstanceConfig {
@@ -2242,6 +2705,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![
                 InstanceConfig {

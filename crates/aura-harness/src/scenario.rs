@@ -7,7 +7,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::config::{load_scenario_config, require_existing_file, RunConfig, ScenarioConfig};
+use crate::config::{load_execution_scenario_config, require_existing_file, RunConfig, ScenarioConfig};
 
 pub struct ScenarioRunner;
 
@@ -20,7 +20,7 @@ pub struct ScenarioLintReport {
 impl ScenarioRunner {
     pub fn load_and_validate(path: &Path) -> Result<ScenarioConfig> {
         require_existing_file(path, "scenario config")?;
-        let scenario = load_scenario_config(path)?;
+        let scenario = load_execution_scenario_config(path)?;
         scenario.validate()?;
         Ok(scenario)
     }

@@ -20,6 +20,11 @@ use aura_app::ui::signals::{
     ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL,
     RECOVERY_SIGNAL, SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
 };
+use aura_app::ui::contract::{
+    list_item_dom_id, ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot,
+    ListSnapshot, MessageSnapshot, OperationId, OperationSnapshot, OperationState,
+    ScreenId as ContractScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
+};
 use aura_app::ui::types::{
     all_command_help, command_help, format_network_status_with_severity, parse_chat_command,
     AccessLevel, AppError, ChatCommand, ChatState, ContactsState, HomeRole, HomesState,
@@ -121,6 +126,7 @@ struct ContactsRuntimeContact {
     is_guardian: bool,
     is_member: bool,
     is_online: bool,
+    confirmation: ConfirmationState,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -470,12 +476,20 @@ fn build_chat_runtime_view(
 async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeView {
     let chat = {
         let core = controller.app_core().read().await;
-        core.read(&*CHAT_SIGNAL).await.unwrap_or_default()
+        let signal_chat = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
+        let local_chat = core.snapshot().chat;
+        merge_chat_state(signal_chat, local_chat)
     };
     let selected_name = controller
         .ui_model()
         .and_then(|model| model.selected_channel_name().map(str::to_string));
     let runtime = build_chat_runtime_view(chat, selected_name.as_deref());
+    controller.push_log(&format!(
+        "load_chat_runtime_view: selected={:?} active={} channels={}",
+        selected_name,
+        runtime.active_channel,
+        runtime.channels.len()
+    ));
     controller.sync_runtime_channels(
         runtime
             .channels
@@ -484,6 +498,45 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
             .collect(),
     );
     runtime
+}
+
+fn merge_chat_state(
+    mut signal_chat: aura_app::views::chat::ChatState,
+    local_chat: aura_app::views::chat::ChatState,
+) -> aura_app::views::chat::ChatState {
+    for local_channel in local_chat.all_channels() {
+        match signal_chat.channel_mut(&local_channel.id) {
+            Some(signal_channel) => {
+                if signal_channel.context_id.is_none() {
+                    signal_channel.context_id = local_channel.context_id;
+                }
+                if signal_channel.topic.is_none() && local_channel.topic.is_some() {
+                    signal_channel.topic = local_channel.topic.clone();
+                }
+                if signal_channel.name == signal_channel.id.to_string()
+                    && local_channel.name != local_channel.id.to_string()
+                    && !local_channel.name.trim().is_empty()
+                {
+                    signal_channel.name = local_channel.name.clone();
+                }
+                if local_channel.member_count > signal_channel.member_count {
+                    signal_channel.member_count = local_channel.member_count;
+                }
+                for member in &local_channel.member_ids {
+                    if !signal_channel.member_ids.contains(member) {
+                        signal_channel.member_ids.push(*member);
+                    }
+                }
+            }
+            None => signal_chat.upsert_channel(local_channel.clone()),
+        }
+
+        for message in local_chat.messages_for_channel(&local_channel.id) {
+            signal_chat.apply_message(local_channel.id, message.clone());
+        }
+    }
+
+    signal_chat
 }
 
 fn build_contacts_runtime_view(
@@ -502,6 +555,7 @@ fn build_contacts_runtime_view(
             is_guardian: contact.is_guardian,
             is_member: contact.is_member,
             is_online: contact.is_online,
+            confirmation: ConfirmationState::Confirmed,
         })
         .collect();
     rows.sort_by(|left, right| left.name.cmp(&right.name));
@@ -899,6 +953,7 @@ fn effective_contacts_view(
             is_guardian: contact.is_guardian,
             is_member: false,
             is_online: false,
+            confirmation: contact.confirmation,
         });
     }
 
@@ -996,6 +1051,7 @@ fn submit_runtime_modal_action(
                         return true;
                     }
 
+                    controller.start_runtime_operation(OperationId::device_enrollment());
                     let app_core = controller.app_core().clone();
                     let rerender_for_start = rerender.clone();
                     spawn(async move {
@@ -1050,7 +1106,13 @@ fn submit_runtime_modal_action(
                                     }
                                 });
                             }
-                            Err(error) => controller.runtime_error_toast(error.to_string()),
+                            Err(error) => {
+                                controller.finish_runtime_operation(
+                                    OperationId::device_enrollment(),
+                                    OperationState::Failed,
+                                );
+                                controller.runtime_error_toast(error.to_string());
+                            }
                         }
                         rerender_for_start();
                     });
@@ -1063,6 +1125,7 @@ fn submit_runtime_modal_action(
                 }
                 AddDeviceWizardStep::Confirm => {
                     if add_device_is_complete || add_device_has_failed {
+                        controller.clear_runtime_operation(&OperationId::device_enrollment());
                         controller.complete_runtime_device_enrollment_ready();
                         rerender();
                         return true;
@@ -1107,12 +1170,25 @@ fn submit_runtime_modal_action(
                 return true;
             }
 
+            controller.start_runtime_operation(OperationId::create_home());
             let app_core = controller.app_core().clone();
             let rerender_for_create = rerender.clone();
             spawn(async move {
                 match context_workflows::create_home(&app_core, Some(name.clone()), None).await {
-                    Ok(_) => controller.complete_runtime_home_created(&name),
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    Ok(_) => {
+                        controller.finish_runtime_operation(
+                            OperationId::create_home(),
+                            OperationState::Succeeded,
+                        );
+                        controller.complete_runtime_home_created(&name);
+                    }
+                    Err(error) => {
+                        controller.finish_runtime_operation(
+                            OperationId::create_home(),
+                            OperationState::Failed,
+                        );
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
                 rerender_for_create();
             });
@@ -1126,6 +1202,7 @@ fn submit_runtime_modal_action(
                 return true;
             }
 
+            controller.start_runtime_operation(OperationId::invitation_accept());
             let submit_log = format!("accept_invitation submit start code_len={}", code.len());
             controller.push_log(&submit_log);
             harness_log(&submit_log);
@@ -1190,6 +1267,10 @@ fn submit_runtime_modal_action(
                                     controller.complete_runtime_modal_success(
                                         "Device enrollment complete",
                                     );
+                                    controller_for_import.finish_runtime_operation(
+                                        OperationId::invitation_accept(),
+                                        OperationState::Succeeded,
+                                    );
                                     controller_for_import
                                         .push_log("accept_invitation complete device_enrollment");
                                     harness_log("accept_invitation complete device_enrollment");
@@ -1209,11 +1290,38 @@ fn submit_runtime_modal_action(
                                         controller_for_import.set_selected_contact_authority_id(
                                             invitation.sender_id,
                                         );
-                                        controller.complete_runtime_invitation_import();
+                                        controller_for_import.complete_runtime_invitation_operation(
+                                            OperationState::Succeeded,
+                                        );
                                         controller_for_import
                                             .push_log("accept_invitation complete generic");
                                         harness_log("accept_invitation complete generic");
                                         return;
+                                    }
+                                    match &invitation.invitation_type {
+                                        InvitationBridgeType::Guardian { .. } => {
+                                            controller_for_import.push_log(
+                                                "accept_invitation refresh_contacts start",
+                                            );
+                                            harness_log(
+                                                "accept_invitation refresh_contacts start",
+                                            );
+                                            let _ = load_contacts_runtime_view(
+                                                controller_for_import.clone(),
+                                            )
+                                            .await;
+                                            controller_for_import.push_log(
+                                                "accept_invitation refresh_contacts done",
+                                            );
+                                            harness_log(
+                                                "accept_invitation refresh_contacts done",
+                                            );
+                                        }
+                                        InvitationBridgeType::Channel { .. } => {
+                                            controller_for_import.set_screen(UiScreen::Chat);
+                                        }
+                                        InvitationBridgeType::DeviceEnrollment { .. }
+                                        | InvitationBridgeType::Contact { .. } => {}
                                     }
                                     controller_for_import
                                         .push_log("accept_invitation refresh_contacts start");
@@ -1224,7 +1332,9 @@ fn submit_runtime_modal_action(
                                     controller_for_import
                                         .push_log("accept_invitation refresh_contacts done");
                                     harness_log("accept_invitation refresh_contacts done");
-                                    controller.complete_runtime_invitation_import();
+                                    controller_for_import.complete_runtime_invitation_operation(
+                                        OperationState::Succeeded,
+                                    );
                                     controller_for_import
                                         .push_log("accept_invitation complete generic");
                                     harness_log("accept_invitation complete generic");
@@ -1235,7 +1345,11 @@ fn submit_runtime_modal_action(
                                     format!("accept_invitation runtime_accept error={error}");
                                 controller_for_import.push_log(&error_log);
                                 harness_log(&error_log);
-                                controller.runtime_error_toast(error.to_string());
+                                controller_for_import.finish_runtime_operation(
+                                    OperationId::invitation_accept(),
+                                    OperationState::Failed,
+                                );
+                                controller.runtime_error_toast(error.to_string())
                             }
                         }
                     }
@@ -1243,7 +1357,11 @@ fn submit_runtime_modal_action(
                         let error_log = format!("accept_invitation import_details error={error}");
                         controller_for_import.push_log(&error_log);
                         harness_log(&error_log);
-                        controller.runtime_error_toast(error.to_string());
+                        controller_for_import.finish_runtime_operation(
+                            OperationId::invitation_accept(),
+                            OperationState::Failed,
+                        );
+                        controller.runtime_error_toast(error.to_string())
                     }
                 }
                 rerender_for_import();
@@ -1258,6 +1376,7 @@ fn submit_runtime_modal_action(
                 return true;
             }
 
+            controller.start_runtime_operation(OperationId::device_enrollment());
             let app_core = controller.app_core().clone();
             let rerender_for_import = rerender.clone();
             spawn(async move {
@@ -1283,13 +1402,29 @@ fn submit_runtime_modal_action(
                                 let _ =
                                     settings_workflows::refresh_settings_from_runtime(&app_core)
                                         .await;
+                                controller.finish_runtime_operation(
+                                    OperationId::device_enrollment(),
+                                    OperationState::Succeeded,
+                                );
                                 controller
                                     .complete_runtime_modal_success("Device enrollment complete");
                             }
-                            Err(error) => controller.runtime_error_toast(error.to_string()),
+                            Err(error) => {
+                                controller.finish_runtime_operation(
+                                    OperationId::device_enrollment(),
+                                    OperationState::Failed,
+                                );
+                                controller.runtime_error_toast(error.to_string());
+                            }
                         }
                     }
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    Err(error) => {
+                        controller.finish_runtime_operation(
+                            OperationId::device_enrollment(),
+                            OperationState::Failed,
+                        );
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
                 rerender_for_import();
             });
@@ -1305,10 +1440,17 @@ fn submit_runtime_modal_action(
 
             let app_core = controller.app_core().clone();
             let rerender_for_create = rerender.clone();
+            controller.start_runtime_operation(OperationId::invitation_create());
             spawn(async move {
+                tracing::info!("create_invitation submit start");
                 let receiver_id = match receiver.parse::<AuthorityId>() {
                     Ok(value) => value,
                     Err(error) => {
+                        tracing::warn!(error = %error, "create_invitation invalid receiver");
+                        controller.finish_runtime_operation(
+                            OperationId::invitation_create(),
+                            OperationState::Failed,
+                        );
                         controller.runtime_error_toast(format!("Invalid authority id: {error}"));
                         rerender_for_create();
                         return;
@@ -1324,22 +1466,49 @@ fn submit_runtime_modal_action(
                 )
                 .await
                 {
-                    Ok(invitation) => match invitation_workflows::export_invitation(
-                        &app_core,
-                        &invitation.invitation_id,
-                    )
-                    .await
-                    {
-                        Ok(code) => {
-                            controller.write_clipboard(&code);
-                            controller.complete_runtime_modal_success(
-                                "Invitation code copied to clipboard",
-                            );
+                    Ok(invitation) => {
+                        tracing::info!(invitation_id = %invitation.invitation_id, "create_invitation create_contact_invitation ok");
+                        tracing::info!(invitation_id = %invitation.invitation_id, "create_invitation export_invitation start");
+                        match invitation_workflows::export_invitation(
+                            &app_core,
+                            &invitation.invitation_id,
+                        )
+                        .await
+                        {
+                            Ok(code) => {
+                                tracing::info!("create_invitation export_invitation ok");
+                                controller.write_clipboard(&code);
+                                tracing::info!("create_invitation write_clipboard ok");
+                                controller.finish_runtime_operation(
+                                    OperationId::invitation_create(),
+                                    OperationState::Succeeded,
+                                );
+                                tracing::info!("create_invitation operation succeeded");
+                                controller.complete_runtime_modal_success(
+                                    "Invitation code copied to clipboard",
+                                );
+                                tracing::info!("create_invitation complete");
+                            }
+                            Err(error) => {
+                                tracing::warn!(error = %error, "create_invitation export_invitation failed");
+                                controller.finish_runtime_operation(
+                                    OperationId::invitation_create(),
+                                    OperationState::Failed,
+                                );
+                                controller.runtime_error_toast(error.to_string());
+                            }
                         }
-                        Err(error) => controller.runtime_error_toast(error.to_string()),
-                    },
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    }
+                    Err(error) => {
+                        tracing::warn!(error = %error, "create_invitation create_contact_invitation failed");
+                        controller.finish_runtime_operation(
+                            OperationId::invitation_create(),
+                            OperationState::Failed,
+                        );
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
+                tracing::info!("create_invitation rerender");
                 rerender_for_create();
             });
             true
@@ -1898,7 +2067,10 @@ fn cancel_runtime_modal_action(
     let rerender_for_cancel = rerender.clone();
     spawn(async move {
         match ceremony_workflows::cancel_key_rotation_ceremony(&app_core, &ceremony_id).await {
-            Ok(()) => controller.complete_runtime_modal_success("Device enrollment canceled"),
+            Ok(()) => {
+                controller.clear_runtime_operation(&OperationId::device_enrollment());
+                controller.complete_runtime_modal_success("Device enrollment canceled");
+            }
             Err(error) => controller.runtime_error_toast(error.to_string()),
         }
         rerender_for_cancel();
@@ -1935,9 +2107,18 @@ fn submit_runtime_chat_input(
             let raw = format!("/{command_input}");
             match parse_chat_command(&raw) {
                 Ok(ChatCommand::Join { channel }) => {
+                    let channel_for_selection = channel.clone();
+                    controller_for_task.push_log(&format!("chat_join: start channel={channel}"));
                     messaging_workflows::join_channel_by_name(&app_core, &channel)
                         .await
-                        .map(|_| Some(format!("joined #{}", channel.trim_start_matches('#'))))
+                        .map(|_| {
+                            controller_for_task.select_channel_by_name(&channel_for_selection);
+                            controller_for_task.push_log(&format!(
+                                "chat_join: success channel={} selected={}",
+                                channel_for_selection, channel_for_selection
+                            ));
+                            Some(format!("joined #{}", channel.trim_start_matches('#')))
+                        })
                 }
                 Ok(ChatCommand::Leave) => {
                     messaging_workflows::leave_channel_by_name(&app_core, &channel_name)
@@ -2166,10 +2347,14 @@ fn submit_runtime_chat_input(
             Ok(message) => {
                 controller_for_task.clear_input_buffer();
                 if let Some(message) = message {
+                    controller_for_task.push_log(&format!("chat_command: ok message={message}"));
                     controller_for_task.info_toast(message);
                 }
             }
-            Err(error) => controller_for_task.runtime_error_toast(error.to_string()),
+            Err(error) => {
+                controller_for_task.push_log(&format!("chat_command: error {error}"));
+                controller_for_task.runtime_error_toast(error.to_string());
+            }
         }
         rerender();
     });
@@ -2257,6 +2442,9 @@ pub fn AuraUiRoot(controller: Arc<UiController>) -> Element {
             theme: themes::neutral(),
             color_scheme: ColorScheme::Dark,
             div {
+                id: ControlId::ToastRegion
+                    .web_dom_id()
+                    .unwrap_or("aura-toast-region"),
                 style: "--normal-bg: var(--popover); --normal-text: var(--popover-foreground); --normal-border: var(--border);",
                 ToastProvider {
                     default_duration: Duration::from_secs(5),
@@ -2636,10 +2824,20 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
     let cancel_rerender = rerender.clone();
     let dedicated_primary_rerender = rerender.clone();
     let generic_confirm_rerender = rerender.clone();
-
+    let semantic_snapshot = runtime_semantic_snapshot(
+        &model,
+        &runtime_snapshot,
+        &chat_runtime_snapshot,
+        &contacts_runtime_snapshot,
+        &settings_runtime_snapshot,
+        &notifications_runtime_snapshot,
+    );
+    controller.set_ui_snapshot(semantic_snapshot.clone());
     rsx! {
         main {
-            id: "aura-app-root",
+            id: ControlId::AppRoot
+                .web_dom_id()
+                .unwrap_or("aura-app-root"),
             "data-render-tick": "{render_tick_value}",
             class: "relative flex h-[100dvh] min-h-[100dvh] flex-col overflow-hidden bg-background text-foreground font-mono outline-none",
             tabindex: 0,
@@ -2716,7 +2914,9 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                 }
             },
             nav {
-                id: "aura-nav",
+                id: ControlId::NavRoot
+                    .web_dom_id()
+                    .unwrap_or("aura-nav-root"),
                 class: "border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80",
                 div {
                     class: "relative flex items-center px-4 py-3 sm:px-6",
@@ -2736,7 +2936,19 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                                     onclick: {
                                         let controller = controller.clone();
                                         move |_| {
+                                            let before_log = format!(
+                                                "nav_click start screen={}",
+                                                screen.help_label()
+                                            );
+                                            controller.push_log(&before_log);
+                                            harness_log(&before_log);
                                             controller.set_screen(screen);
+                                            let after_log = format!(
+                                                "nav_click done screen={}",
+                                                screen.help_label()
+                                            );
+                                            controller.push_log(&after_log);
+                                            harness_log(&after_log);
                                             render_tick.set(render_tick() + 1);
                                         }
                                     },
@@ -2763,10 +2975,15 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                 )}
             }
 
-            if let Some(modal) = modal {
-                if let Some(add_device_state) = model.add_device_modal() {
-                    if !matches!(add_device_state.step, AddDeviceWizardStep::Name) {
-                        UiDeviceEnrollmentModal {
+            div {
+                id: ControlId::ModalRegion
+                    .web_dom_id()
+                    .unwrap_or("aura-modal-region"),
+                class: "contents",
+                if let Some(modal) = modal {
+                    if let Some(add_device_state) = model.add_device_modal() {
+                        if !matches!(add_device_state.step, AddDeviceWizardStep::Name) {
+                            UiDeviceEnrollmentModal {
                             title: if matches!(add_device_state.step, AddDeviceWizardStep::ShareCode) {
                                 "Add Device — Step 2 of 3".to_string()
                             } else {
@@ -2940,9 +3157,9 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                                 }
                             }
                         }
-                    }
-                } else if matches!(modal_state, Some(ModalState::SwitchAuthority)) {
-                    UiAuthorityPickerModal {
+                        }
+                    } else if matches!(modal_state, Some(ModalState::SwitchAuthority)) {
+                        UiAuthorityPickerModal {
                         title: active_modal_title(&model)
                             .unwrap_or_else(|| "Switch Authority".to_string()),
                         current_label: settings_runtime_snapshot
@@ -3013,9 +3230,9 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                                 }
                             }
                         }
-                    }
-                } else {
-                    UiModal {
+                        }
+                    } else {
+                        UiModal {
                         modal,
                         on_cancel: {
                             let controller = controller.clone();
@@ -3086,6 +3303,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                                 controller.set_modal_buffer(&value);
                                 render_tick.set(render_tick() + 1);
                             }
+                        }
                         }
                     }
                 }
@@ -3326,9 +3544,10 @@ fn neighborhood_screen(
                                             p { class: "m-0 text-sm text-muted-foreground", "No channels" }
                                         } else {
                                             div { class: "space-y-2",
-                                                for (channel_name, channel_topic, is_selected) in &display_channels {
+                                for (channel_name, channel_topic, is_selected) in &display_channels {
                                                     button {
                                                         r#type: "button",
+                                                        id: list_item_dom_id(ListId::Channels, channel_name),
                                                         class: "block w-full text-left",
                                                         onclick: {
                                                             let controller = controller.clone();
@@ -3362,6 +3581,10 @@ fn neighborhood_screen(
                                             for (idx, member) in display_members.iter().enumerate() {
                                                 button {
                                                     r#type: "button",
+                                                    id: list_item_dom_id(
+                                                        ListId::NeighborhoodMembers,
+                                                        &neighborhood_member_selection_key(member).0,
+                                                    ),
                                                     class: "block w-full text-left",
                                                     onclick: {
                                                         let controller = controller.clone();
@@ -3484,6 +3707,7 @@ fn neighborhood_screen(
                                     for home in &home_rows {
                                         button {
                                             r#type: "button",
+                                            id: list_item_dom_id(ListId::Homes, &home.id),
                                             class: "block w-full text-left",
                                             onclick: {
                                                 let controller = controller.clone();
@@ -3698,8 +3922,14 @@ fn chat_screen(
     let mode = if is_input_mode { "insert" } else { "normal" };
     let composer_text = model.input_buffer.clone();
     let new_group_controller = controller.clone();
-    let composer_focus_controller = controller.clone();
+    let composer_container_focus_controller = controller.clone();
+    let composer_field_focus_controller = controller.clone();
+    let composer_input_controller = controller.clone();
+    let composer_keydown_controller = controller.clone();
     let send_message_controller = controller.clone();
+    let composer_value = composer_text.clone();
+    let composer_active_channel = active_channel.clone();
+    let composer_submit_text = composer_text.clone();
     let runtime_channels = if runtime.loaded {
         runtime.channels.clone()
     } else {
@@ -3732,6 +3962,7 @@ fn chat_screen(
                         for channel in &runtime_channels {
                             button {
                                 r#type: "button",
+                                id: list_item_dom_id(ListId::Channels, &channel.id),
                                 class: "block w-full text-left",
                                 onclick: {
                                     let controller = controller.clone();
@@ -3807,29 +4038,62 @@ fn chat_screen(
                             class: "min-h-[4.5rem] rounded-lg border border-border bg-muted/30 px-3 py-2",
                             onclick: move |_| {
                                 if !is_input_mode {
-                                    composer_focus_controller.send_action_keys("i");
+                                    composer_container_focus_controller.send_action_keys("i");
                                     render_tick.set(render_tick() + 1);
                                 }
                             },
-                            if composer_text.is_empty() {
-                                p {
-                                    class: "m-0 text-sm text-muted-foreground",
-                                    if is_input_mode {
-                                        "Type a message and press Enter to send"
-                                    } else {
-                                        "Press i to start typing"
+                            textarea {
+                                id: FieldId::ChatInput
+                                    .web_dom_id()
+                                    .unwrap_or("aura-field-chat-input"),
+                                class: "h-full min-h-[4.5rem] w-full resize-none border-0 bg-transparent p-0 text-sm text-foreground outline-none placeholder:text-muted-foreground",
+                                value: "{composer_value}",
+                                readonly: !is_input_mode,
+                                placeholder: if is_input_mode {
+                                    "Type a message and press Enter to send"
+                                } else {
+                                    "Press i to start typing"
+                                },
+                                onfocus: move |_| {
+                                    if !is_input_mode {
+                                        composer_field_focus_controller.send_action_keys("i");
+                                        render_tick.set(render_tick() + 1);
                                     }
-                                }
-                            } else {
-                                p {
-                                    class: "m-0 whitespace-pre-wrap break-words text-sm text-foreground",
-                                    "{composer_text}"
-                                }
+                                },
+                                oninput: move |event| {
+                                    composer_input_controller.set_input_buffer(event.value());
+                                },
+                                onkeydown: move |event| {
+                                    event.stop_propagation();
+                                    if matches!(event.data().key(), Key::Enter)
+                                        && !event.data().modifiers().contains(Modifiers::SHIFT)
+                                    {
+                                        event.prevent_default();
+                                        let _ = submit_runtime_chat_input(
+                                            composer_keydown_controller.clone(),
+                                            composer_active_channel.clone(),
+                                            composer_submit_text.clone(),
+                                            schedule_update(),
+                                        );
+                                        render_tick.set(render_tick() + 1);
+                                        return;
+                                    }
+                                    if matches!(event.data().key(), Key::Escape) {
+                                        event.prevent_default();
+                                        composer_keydown_controller.send_key_named("esc", 1);
+                                        render_tick.set(render_tick() + 1);
+                                    }
+                                },
                             }
                         }
                     }
                     UiButton {
-                        id: Some("aura-chat-send-message".to_string()),
+                        id: Some(
+                            ControlId::ChatSendMessageButton
+                                .web_dom_id()
+                                .unwrap_or("aura-chat-send-message")
+                                .to_string()
+                        ),
                         label: if is_input_mode { "Send".to_string() } else { "Reply".to_string() },
                         variant: ButtonVariant::Primary,
                         onclick: move |_| {
@@ -4015,7 +4279,10 @@ fn contacts_screen(
                                     for contact in contacts.iter() {
                                         button {
                                             r#type: "button",
-                                            id: format!("aura-contact-item-{}", dom_slug(&contact.name)),
+                                            id: list_item_dom_id(
+                                                ListId::Contacts,
+                                                &contact.authority_id.to_string(),
+                                            ),
                                             class: "block w-full text-left",
                                             onclick: {
                                                 let controller = controller.clone();
@@ -4030,6 +4297,11 @@ fn contacts_screen(
                                                 secondary: Some(
                                                     if contact.is_guardian {
                                                         "Guardian".to_string()
+                                                    } else if matches!(
+                                                        contact.confirmation,
+                                                        ConfirmationState::PendingLocal
+                                                    ) {
+                                                        "Pending confirmation".to_string()
                                                     } else if contact.is_member {
                                                         "Member".to_string()
                                                     } else if contact.is_online {
@@ -4049,7 +4321,12 @@ fn contacts_screen(
                 }
                 div { class: "flex gap-2 pt-1",
                     UiButton {
-                        id: Some("aura-contacts-accept-invitation".to_string()),
+                        id: Some(
+                            ControlId::ContactsAcceptInvitationButton
+                                .web_dom_id()
+                                .unwrap_or("aura-contacts-accept-invitation")
+                                .to_string(),
+                        ),
                         label: "Accept Invitation".to_string(),
                         variant: ButtonVariant::Secondary,
                         onclick: move |_| {
@@ -4058,7 +4335,12 @@ fn contacts_screen(
                         }
                     }
                     UiButton {
-                        id: Some("aura-contacts-invite".to_string()),
+                        id: Some(
+                            ControlId::ContactsCreateInvitationButton
+                                .web_dom_id()
+                                .unwrap_or("aura-contacts-create-invitation")
+                                .to_string(),
+                        ),
                         label: "Invite".to_string(),
                         variant: ButtonVariant::Primary,
                         onclick: {
@@ -4209,6 +4491,7 @@ fn notifications_screen(
                             for (idx, entry) in runtime.items.iter().enumerate() {
                                 button {
                                     r#type: "button",
+                                    id: list_item_dom_id(ListId::Notifications, &entry.id),
                                     class: "block w-full text-left",
                                     onclick: {
                                         let controller = controller.clone();
@@ -4389,7 +4672,7 @@ fn settings_screen(
                 extra_class: Some("lg:col-span-4".to_string()),
                 for section in SettingsSection::ALL {
                     UiListButton {
-                        id: Some(format!("aura-settings-section-{}", section.dom_id())),
+                        id: Some(list_item_dom_id(ListId::SettingsSections, section.dom_id())),
                         label: section.title().to_string(),
                         active: section == model.settings_section,
                         onclick: {
@@ -4526,7 +4809,12 @@ fn settings_screen(
                         div {
                             class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
                             UiButton {
-                                id: Some("aura-settings-add-device".to_string()),
+                                id: Some(
+                                    ControlId::SettingsAddDeviceButton
+                                        .web_dom_id()
+                                        .unwrap_or("aura-settings-add-device")
+                                        .to_string(),
+                                ),
                                 label: "Add Device".to_string(),
                                 variant: ButtonVariant::Primary,
                                 onclick: {
@@ -4552,7 +4840,12 @@ fn settings_screen(
                                 }
                             }
                             UiButton {
-                                id: Some("aura-settings-remove-device".to_string()),
+                                id: Some(
+                                    ControlId::SettingsRemoveDeviceButton
+                                        .web_dom_id()
+                                        .unwrap_or("aura-settings-remove-device")
+                                        .to_string(),
+                                ),
                                 label: "Remove Device".to_string(),
                                 variant: ButtonVariant::Secondary,
                                 onclick: {
@@ -4693,11 +4986,19 @@ fn screen_tabs(active: UiScreen) -> Vec<(UiScreen, &'static str, bool)> {
 
 fn nav_button_id(screen: UiScreen) -> &'static str {
     match screen {
-        UiScreen::Neighborhood => "aura-nav-neighborhood",
-        UiScreen::Chat => "aura-nav-chat",
-        UiScreen::Contacts => "aura-nav-contacts",
-        UiScreen::Notifications => "aura-nav-notifications",
-        UiScreen::Settings => "aura-nav-settings",
+        UiScreen::Neighborhood => ControlId::NavNeighborhood
+            .web_dom_id()
+            .unwrap_or("aura-nav-neighborhood"),
+        UiScreen::Chat => ControlId::NavChat.web_dom_id().unwrap_or("aura-nav-chat"),
+        UiScreen::Contacts => ControlId::NavContacts
+            .web_dom_id()
+            .unwrap_or("aura-nav-contacts"),
+        UiScreen::Notifications => ControlId::NavNotifications
+            .web_dom_id()
+            .unwrap_or("aura-nav-notifications"),
+        UiScreen::Settings => ControlId::NavSettings
+            .web_dom_id()
+            .unwrap_or("aura-nav-settings"),
     }
 }
 
@@ -4738,27 +5039,47 @@ fn render_screen_content(
 ) -> Element {
     match model.screen {
         UiScreen::Neighborhood => rsx! {
-            div { id: "aura-screen-neighborhood", class: "h-full min-h-0 w-full",
+            div {
+                id: ControlId::Screen(ContractScreenId::Neighborhood)
+                    .web_dom_id()
+                    .unwrap_or("aura-screen-neighborhood"),
+                class: "h-full min-h-0 w-full",
                 {neighborhood_screen(model, neighborhood_runtime, controller, render_tick)}
             }
         },
         UiScreen::Chat => rsx! {
-            div { id: "aura-screen-chat", class: "h-full min-h-0 w-full",
+            div {
+                id: ControlId::Screen(ContractScreenId::Chat)
+                    .web_dom_id()
+                    .unwrap_or("aura-screen-chat"),
+                class: "h-full min-h-0 w-full",
                 {chat_screen(model, chat_runtime, controller, render_tick)}
             }
         },
         UiScreen::Contacts => rsx! {
-            div { id: "aura-screen-contacts", class: "h-full min-h-0 w-full",
+            div {
+                id: ControlId::Screen(ContractScreenId::Contacts)
+                    .web_dom_id()
+                    .unwrap_or("aura-screen-contacts"),
+                class: "h-full min-h-0 w-full",
                 {contacts_screen(model, contacts_runtime, controller, render_tick)}
             }
         },
         UiScreen::Notifications => rsx! {
-            div { id: "aura-screen-notifications", class: "h-full min-h-0 w-full",
+            div {
+                id: ControlId::Screen(ContractScreenId::Notifications)
+                    .web_dom_id()
+                    .unwrap_or("aura-screen-notifications"),
+                class: "h-full min-h-0 w-full",
                 {notifications_screen(model, notifications_runtime, controller, render_tick)}
             }
         },
         UiScreen::Settings => rsx! {
-            div { id: "aura-screen-settings", class: "h-full min-h-0 w-full",
+            div {
+                id: ControlId::Screen(ContractScreenId::Settings)
+                    .web_dom_id()
+                    .unwrap_or("aura-screen-settings"),
+                class: "h-full min-h-0 w-full",
                 {settings_screen(
                     model,
                     settings_runtime,
@@ -4770,6 +5091,252 @@ fn render_screen_content(
             }
         },
     }
+}
+
+fn upsert_snapshot_list(
+    snapshot: &mut UiSnapshot,
+    list_id: ListId,
+    items: Vec<ListItemSnapshot>,
+    selected_item_id: Option<String>,
+) {
+    snapshot.lists.retain(|list| list.id != list_id);
+    snapshot.selections.retain(|selection| selection.list != list_id);
+    if items.is_empty() {
+        return;
+    }
+    snapshot.lists.push(ListSnapshot { id: list_id, items });
+    if let Some(item_id) = selected_item_id {
+        snapshot.selections.push(SelectionSnapshot {
+            list: list_id,
+            item_id,
+        });
+    }
+}
+
+fn upsert_snapshot_operation(
+    snapshot: &mut UiSnapshot,
+    operation_id: OperationId,
+    state: OperationState,
+) {
+    snapshot.operations.retain(|operation| operation.id != operation_id);
+    snapshot.operations.push(OperationSnapshot {
+        id: operation_id,
+        state,
+    });
+}
+
+fn screen_readiness(
+    screen: UiScreen,
+    neighborhood_runtime: &NeighborhoodRuntimeView,
+    chat_runtime: &ChatRuntimeView,
+    contacts_runtime: &ContactsRuntimeView,
+    settings_runtime: &SettingsRuntimeView,
+    notifications_runtime: &NotificationsRuntimeView,
+) -> UiReadiness {
+    let loaded = match screen {
+        UiScreen::Neighborhood => neighborhood_runtime.loaded,
+        UiScreen::Chat => chat_runtime.loaded,
+        UiScreen::Contacts => contacts_runtime.loaded,
+        UiScreen::Notifications => notifications_runtime.loaded,
+        UiScreen::Settings => settings_runtime.loaded,
+    };
+
+    if loaded {
+        UiReadiness::Ready
+    } else {
+        UiReadiness::Loading
+    }
+}
+
+fn runtime_semantic_snapshot(
+    model: &UiModel,
+    neighborhood_runtime: &NeighborhoodRuntimeView,
+    chat_runtime: &ChatRuntimeView,
+    contacts_runtime: &ContactsRuntimeView,
+    settings_runtime: &SettingsRuntimeView,
+    notifications_runtime: &NotificationsRuntimeView,
+) -> UiSnapshot {
+    let mut snapshot = model.semantic_snapshot();
+    snapshot.readiness = screen_readiness(
+        model.screen,
+        neighborhood_runtime,
+        chat_runtime,
+        contacts_runtime,
+        settings_runtime,
+        notifications_runtime,
+    );
+
+    if let Some(add_device_state) = model.add_device_modal() {
+        let operation_state = match add_device_state.step {
+            AddDeviceWizardStep::Name => OperationState::Idle,
+            AddDeviceWizardStep::ShareCode | AddDeviceWizardStep::Confirm => {
+                if add_device_state.has_failed {
+                    OperationState::Failed
+                } else if add_device_state.is_complete {
+                    OperationState::Succeeded
+                } else {
+                    OperationState::Submitting
+                }
+            }
+        };
+        upsert_snapshot_operation(
+            &mut snapshot,
+            OperationId::device_enrollment(),
+            operation_state,
+        );
+    }
+
+    let homes = neighborhood_runtime
+        .homes
+        .iter()
+        .map(|home| ListItemSnapshot {
+            id: home.id.clone(),
+            selected: model.selected_home_id() == Some(home.id.as_str()),
+            confirmation: ConfirmationState::Confirmed,
+        })
+        .collect::<Vec<_>>();
+    let selected_home_id = model.selected_home_id().map(str::to_string).or_else(|| {
+        neighborhood_runtime
+            .homes
+            .iter()
+            .find(|home| home.name == neighborhood_runtime.active_home_name)
+            .map(|home| home.id.clone())
+    });
+    upsert_snapshot_list(&mut snapshot, ListId::Homes, homes, selected_home_id);
+
+    let members = neighborhood_runtime
+        .members
+        .iter()
+        .map(|member| {
+            let member_key = neighborhood_member_selection_key(member);
+            ListItemSnapshot {
+                id: member_key.0.clone(),
+                selected: model.selected_neighborhood_member_key.as_ref() == Some(&member_key),
+                confirmation: ConfirmationState::Confirmed,
+            }
+        })
+        .collect::<Vec<_>>();
+    let selected_member_id = model
+        .selected_neighborhood_member_key
+        .as_ref()
+        .map(|key| key.0.clone());
+    upsert_snapshot_list(
+        &mut snapshot,
+        ListId::NeighborhoodMembers,
+        members,
+        selected_member_id,
+    );
+
+    let channels = if chat_runtime.loaded {
+        chat_runtime
+            .channels
+            .iter()
+            .map(|channel| ListItemSnapshot {
+                id: channel.id.clone(),
+                selected: channel.name.eq_ignore_ascii_case(&chat_runtime.active_channel),
+                confirmation: ConfirmationState::Confirmed,
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let selected_channel_id = if chat_runtime.loaded {
+        chat_runtime
+            .channels
+            .iter()
+            .find(|channel| channel.name.eq_ignore_ascii_case(&chat_runtime.active_channel))
+            .map(|channel| channel.id.clone())
+    } else {
+        None
+    };
+    if !channels.is_empty() {
+        upsert_snapshot_list(
+            &mut snapshot,
+            ListId::Channels,
+            channels,
+            selected_channel_id,
+        );
+    }
+
+    let contacts = if contacts_runtime.loaded {
+        effective_contacts_view(contacts_runtime, model)
+            .iter()
+            .map(|contact| ListItemSnapshot {
+                id: contact.authority_id.to_string(),
+                selected: model.selected_contact_authority_id() == Some(contact.authority_id),
+                confirmation: contact.confirmation,
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    if !contacts.is_empty() {
+        upsert_snapshot_list(
+            &mut snapshot,
+            ListId::Contacts,
+            contacts,
+            model.selected_contact_authority_id().map(|id| id.to_string()),
+        );
+    }
+
+    let devices = settings_runtime
+        .devices
+        .iter()
+        .map(|device| ListItemSnapshot {
+            id: device.id.clone(),
+            selected: device.is_current,
+            confirmation: ConfirmationState::Confirmed,
+        })
+        .collect::<Vec<_>>();
+    upsert_snapshot_list(&mut snapshot, ListId::Devices, devices, None);
+
+    let authorities = settings_runtime
+        .authorities
+        .iter()
+        .map(|authority| ListItemSnapshot {
+            id: authority.id.to_string(),
+            selected: model.selected_authority_id == Some(authority.id),
+            confirmation: ConfirmationState::Confirmed,
+        })
+        .collect::<Vec<_>>();
+    if !authorities.is_empty() {
+        upsert_snapshot_list(
+            &mut snapshot,
+            ListId::Authorities,
+            authorities,
+            model.selected_authority_id.map(|id| id.to_string()),
+        );
+    }
+
+    let notifications = notifications_runtime
+        .items
+        .iter()
+        .map(|item| ListItemSnapshot {
+            id: item.id.clone(),
+            selected: model.selected_notification_id.as_ref().map(|id| &id.0) == Some(&item.id),
+            confirmation: ConfirmationState::Confirmed,
+        })
+        .collect::<Vec<_>>();
+    if !notifications.is_empty() {
+        upsert_snapshot_list(
+            &mut snapshot,
+            ListId::Notifications,
+            notifications,
+            model.selected_notification_id.as_ref().map(|id| id.0.clone()),
+        );
+    }
+
+    snapshot.messages = chat_runtime
+        .messages
+        .iter()
+        .enumerate()
+        .map(|(idx, message)| MessageSnapshot {
+            id: format!("chat-message-{idx}"),
+            content: message.content.clone(),
+        })
+        .collect();
+
+    snapshot
 }
 
 fn active_modal_title(model: &UiModel) -> Option<String> {
@@ -4810,6 +5377,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
     let mut details = Vec::new();
     let mut keybind_rows = Vec::new();
     let mut input_label = None;
+    let mut input_field_id = None;
 
     match modal {
         ModalState::Help => {
@@ -4832,14 +5400,17 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                 details.push("Enter the target authority id, then press Enter to generate and copy the code.".to_string());
             }
             input_label = Some("Receiver Authority ID".to_string());
+            input_field_id = model.modal_field_id();
         }
         ModalState::AcceptInvitation => {
             details.push("Paste an invitation code, then press Enter.".to_string());
             input_label = Some("Invitation Code".to_string());
+            input_field_id = model.modal_field_id();
         }
         ModalState::CreateHome => {
             details.push("Enter a new home name and press Enter.".to_string());
             input_label = Some("Home Name".to_string());
+            input_field_id = model.modal_field_id();
         }
         ModalState::CreateChannel => {
             if let Some(state) = model.create_channel_modal() {
@@ -4854,6 +5425,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                         details.push(format!("Topic: {}", state.topic));
                         details.push(format!("Active field: {active} (Tab to switch)"));
                         input_label = Some(active.to_string());
+                        input_field_id = model.modal_field_id();
                     }
                     CreateChannelWizardStep::Members => {
                         details.push("Step 2 of 3: Select members to invite.".to_string());
@@ -4880,6 +5452,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                         details.push(format!("Participants (including you): {participant_total}"));
                         details.push("Use ↑/↓ to adjust, Enter to create.".to_string());
                         input_label = Some("Threshold".to_string());
+                        input_field_id = model.modal_field_id();
                     }
                 }
             }
@@ -4887,6 +5460,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
         ModalState::SetChannelTopic => {
             details.push("Set a topic for the selected channel.".to_string());
             input_label = Some("Channel Topic".to_string());
+            input_field_id = model.modal_field_id();
         }
         ModalState::ChannelInfo => {
             let active_channel = if chat_runtime.active_channel.is_empty() {
@@ -4934,6 +5508,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
         ModalState::EditNickname => {
             details.push("Update the selected nickname and press Enter.".to_string());
             input_label = Some("Nickname".to_string());
+            input_field_id = model.modal_field_id();
         }
         ModalState::RemoveContact => {
             details.push("Remove the selected contact from this authority.".to_string());
@@ -4966,6 +5541,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                         details.push(format!("Selected guardians: {}", state.selected_count));
                         details.push("Enter k (approvals required).".to_string());
                         input_label = Some("Threshold (k)".to_string());
+                        input_field_id = model.modal_field_id();
                     }
                     ThresholdWizardStep::Ceremony => {
                         details.push("Step 3 of 3: Ready to start ceremony.".to_string());
@@ -4996,6 +5572,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                             details.push(format!("Draft name: {}", state.name_input));
                         }
                         input_label = Some("Device Name".to_string());
+                        input_field_id = model.modal_field_id();
                     }
                     AddDeviceWizardStep::ShareCode => {
                         details.push(
@@ -5036,6 +5613,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
         ModalState::ImportDeviceEnrollmentCode => {
             details.push("Import a device enrollment code and press Enter.".to_string());
             input_label = Some("Enrollment Code".to_string());
+            input_field_id = model.modal_field_id();
         }
         ModalState::SelectDeviceToRemove => {
             details.push("Select the device to remove.".to_string());
@@ -5096,6 +5674,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                         details.push(format!("Selected devices: {}", state.selected_count));
                         details.push("Enter required signatures (k).".to_string());
                         input_label = Some("Threshold (k)".to_string());
+                        input_field_id = model.modal_field_id();
                     }
                     ThresholdWizardStep::Ceremony => {
                         details.push("Step 3 of 3: Ready to start MFA ceremony.".to_string());
@@ -5171,6 +5750,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
             details.push(format!("Partial: {partial_caps}"));
             details.push(format!("Limited: {limited_caps}"));
             input_label = Some(format!("{active} Capabilities"));
+            input_field_id = model.modal_field_id();
         }
     }
 
@@ -5220,6 +5800,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
         details,
         keybind_rows,
         input_label,
+        input_field_id,
         input_value,
         enter_label,
     })

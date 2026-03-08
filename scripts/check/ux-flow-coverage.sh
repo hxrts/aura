@@ -35,7 +35,8 @@ if [[ -z "${changed_files//[[:space:]]/}" ]]; then
 fi
 
 doc_touched=false
-if echo "$changed_files" | rg -Fq 'docs/997_ux_flow_coverage.md'; then
+ux_doc_path='docs/997_ux_flow_coverage.md'
+if echo "$changed_files" | rg -F -q "$ux_doc_path"; then
   doc_touched=true
 fi
 

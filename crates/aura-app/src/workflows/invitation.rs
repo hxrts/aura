@@ -314,6 +314,9 @@ pub async fn accept_invitation(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {e}")))?;
 
+    let _ = runtime.trigger_discovery().await;
+    let _ = runtime.trigger_sync().await;
+
     Ok(())
 }
 

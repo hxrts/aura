@@ -8,6 +8,11 @@ import { chromium } from 'playwright';
 
 const sessions = new Map();
 let requestChain = Promise.resolve();
+const UI_STATE_LOG_PREFIX = '[aura-ui-state]';
+const UI_STATE_JSON_LOG_PREFIX = '[aura-ui-json]';
+const PLAYWRIGHT_TRACE_ENABLED =
+  process.env.AURA_HARNESS_PLAYWRIGHT_TRACE === '1' ||
+  process.env.AURA_HARNESS_PLAYWRIGHT_TRACE === 'true';
 const DEFAULT_PAGE_GOTO_TIMEOUT_MS = 90000;
 const DEFAULT_HARNESS_READY_TIMEOUT_MS = 90000;
 const DEFAULT_START_MAX_ATTEMPTS = 3;
@@ -97,6 +102,29 @@ function normalizeDomState(payload) {
   };
 }
 
+function domStateIdSet(session) {
+  const ids = session?.domState?.ids;
+  if (ids instanceof Set) {
+    return ids;
+  }
+  if (Array.isArray(ids)) {
+    return new Set(
+      ids
+        .map((value) => String(value ?? '').trim())
+        .filter((value) => value.length > 0)
+    );
+  }
+  return new Set();
+}
+
+function domStateHasId(session, id) {
+  return domStateIdSet(session).has(String(id ?? '').trim());
+}
+
+function domStateIdList(session) {
+  return Array.from(domStateIdSet(session));
+}
+
 function consoleTailText(session, lines = 40) {
   const tail = session.consoleLog.slice(-lines);
   return tail.length > 0 ? tail.join('\n') : 'none';
@@ -175,12 +203,30 @@ async function installDomObserver(page, session) {
   });
 }
 
-async function focusAuraPage(page) {
-  await page.evaluate(() => {
-    window.focus();
-    document.body.setAttribute('tabindex', '-1');
-    document.body.focus();
+async function installUiStateObserver(page, session) {
+  await page.exposeFunction('__AURA_DRIVER_PUSH_UI_STATE', (payload) => {
+    if (typeof payload === 'string') {
+      session.uiStateCacheJson = payload;
+      try {
+        session.uiStateCache = JSON.parse(payload);
+      } catch {
+        session.uiStateCache = null;
+      }
+      return;
+    }
+    if (payload && typeof payload === 'object') {
+      session.uiStateCache = payload;
+      try {
+        session.uiStateCacheJson = JSON.stringify(payload);
+      } catch {
+        session.uiStateCacheJson = null;
+      }
+    }
   });
+}
+
+async function focusAuraPage(page) {
+  await withOperationTimeout('focus_page', page.bringToFront(), 3000);
 }
 
 function escapeRegex(value) {
@@ -224,14 +270,23 @@ function mapPlaywrightKey(key) {
 }
 
 async function pressMappedKey(page, key) {
-  await page.keyboard.press(mapPlaywrightKey(key));
+  const mapped = mapPlaywrightKey(key);
+  console.error(`[driver] key_press start key=${key} mapped=${mapped}`);
+  await withOperationTimeout(`key_press:${mapped}`, page.keyboard.press(mapped), 3000);
+  console.error(`[driver] key_press done key=${key} mapped=${mapped}`);
 }
 
 async function flushTypedBuffer(page, buffer) {
   if (!buffer) {
     return '';
   }
-  await page.keyboard.type(buffer);
+  const preview = JSON.stringify(buffer.length > 80 ? `${buffer.slice(0, 80)}…` : buffer);
+  console.error(`[driver] key_type start bytes=${buffer.length} preview=${preview}`);
+  for (const ch of buffer) {
+    const mapped = ch === ' ' ? 'Space' : ch;
+    await withOperationTimeout(`keyboard_type:${JSON.stringify(mapped)}`, page.keyboard.press(mapped), 1500);
+  }
+  console.error(`[driver] key_type done bytes=${buffer.length}`);
   return '';
 }
 
@@ -317,6 +372,25 @@ async function typeKeyStream(page, rawKeys) {
   }
 
   await flushTypedBuffer(page, buffer);
+}
+
+async function pageLivenessProbe(page) {
+  return withOperationTimeout(
+    'page_liveness_probe',
+    page.evaluate(() => {
+      const active = document.activeElement;
+      return {
+        title: document.title ?? '',
+        readyState: document.readyState ?? '',
+        visibilityState: document.visibilityState ?? '',
+        hasFocus: typeof document.hasFocus === 'function' ? document.hasFocus() : false,
+        activeTag: active?.tagName ?? null,
+        activeId: active?.id ?? null,
+        activeClass: active?.className ?? null,
+      };
+    }),
+    3000
+  );
 }
 
 async function readDomSnapshot(page) {
@@ -461,6 +535,8 @@ function withOperationTimeout(label, promise, timeoutMs = 5000) {
     }
   });
 }
+
+const UI_STATE_TIMEOUT_MS = 15000;
 
 function appRootLocator(page) {
   return page.locator('main').last();
@@ -666,10 +742,29 @@ async function startPage(params) {
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} page acquired`
       );
       page.on('console', (message) => {
-        consoleLog.push(`[${nowIso()}] ${message.type()}: ${message.text()}`);
+        const text = message.text();
+        if (text.startsWith(UI_STATE_JSON_LOG_PREFIX) && sessions.has(instanceId)) {
+          const payload = text.slice(UI_STATE_JSON_LOG_PREFIX.length);
+          const session = sessions.get(instanceId);
+          if (session) {
+            session.uiStateCacheJson = payload;
+            try {
+              session.uiStateCache = JSON.parse(payload);
+            } catch {
+              session.uiStateCache = null;
+            }
+          }
+          consoleLog.push(`[${nowIso()}] ${message.type()}: ${UI_STATE_JSON_LOG_PREFIX}<json>`);
+          return;
+        }
+        if (text.startsWith(UI_STATE_LOG_PREFIX) && sessions.has(instanceId)) {
+          consoleLog.push(`[${nowIso()}] ${message.type()}: ${text}`);
+          return;
+        }
+        consoleLog.push(`[${nowIso()}] ${message.type()}: ${text}`);
       });
 
-      if (artifactDir) {
+      if (artifactDir && PLAYWRIGHT_TRACE_ENABLED) {
         console.error(
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} tracing start`
         );
@@ -678,6 +773,14 @@ async function startPage(params) {
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} tracing done`
         );
       }
+
+      console.error(
+        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installUiStateObserver start`
+      );
+      await installUiStateObserver(page, sessions.get(instanceId));
+      console.error(
+        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installUiStateObserver done`
+      );
 
       console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} goto start url=${targetUrl}`
@@ -693,6 +796,20 @@ async function startPage(params) {
       console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensurePageInteractive done`
       );
+      try {
+        const bindingType = await page.evaluate(
+          () => typeof window.__AURA_DRIVER_PUSH_UI_STATE
+        );
+        console.error(
+          `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} uiStateBinding type=${bindingType}`
+        );
+      } catch (error) {
+        console.error(
+          `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} uiStateBinding probe failed: ${
+            error?.message ?? String(error)
+          }`
+        );
+      }
       try {
         console.error(
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensureHarnessWithTimeout start`
@@ -722,8 +839,13 @@ async function startPage(params) {
         dataDir,
         artifactDir,
         consoleLog,
-        tracePath: artifactDir ? path.join(artifactDir, `${instanceId}-trace.zip`) : null,
-        domState: normalizeDomState({ text: '', ids: [] })
+        tracePath:
+          artifactDir && PLAYWRIGHT_TRACE_ENABLED
+            ? path.join(artifactDir, `${instanceId}-trace.zip`)
+            : null,
+        domState: normalizeDomState({ text: '', ids: [] }),
+        uiStateCache: null,
+        uiStateCacheJson: null
       };
       await installDomObserver(page, session);
       console.error(
@@ -778,58 +900,24 @@ function getSession(instanceId) {
   return session;
 }
 
-function extractSubmittedMessage(keys) {
-  const value = String(keys ?? '').replace(/\r/g, '\n');
-  const newlineIndex = value.lastIndexOf('\n');
-  if (newlineIndex < 0) {
-    return null;
-  }
-
-  const beforeEnter = value.slice(0, newlineIndex).trimStart();
-  // Mirror only explicit insert-mode chat sends, e.g. `ihello world\n`.
-  // This avoids false positives from modal/account inputs that also end with Enter.
-  if (!beforeEnter.startsWith('i')) {
-    return null;
-  }
-  const candidate = beforeEnter
-    .slice(1)
-    .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
-    .replace(/\u001b/g, '')
-    .trim();
-
-  if (!candidate || candidate.startsWith('/')) {
-    return null;
-  }
-  return candidate;
-}
-
-async function mirrorSubmittedMessage(fromInstanceId, message) {
-  if (!message) {
-    return;
-  }
-  for (const [instanceId, session] of sessions.entries()) {
-    if (instanceId === fromInstanceId) {
-      continue;
-    }
-    await session.page.evaluate((value) => {
-      if (window.__AURA_HARNESS__?.inject_message) {
-        window.__AURA_HARNESS__.inject_message(value);
-      }
-    }, message);
-  }
-}
-
 async function sendKeys(params) {
   const instanceId = normalizeInstanceId(params);
   const keys = String(params?.keys ?? '');
   const session = getSession(instanceId);
 
+  console.error(`[driver] send_keys start instance=${instanceId} bytes=${keys.length}`);
+  console.error(`[driver] send_keys focus start instance=${instanceId}`);
   await focusAuraPage(session.page);
-  await typeKeyStream(session.page, keys);
+  console.error(`[driver] send_keys focus done instance=${instanceId}`);
+  console.error(`[driver] send_keys type start instance=${instanceId}`);
+  await withOperationTimeout(
+    `type_keys:${instanceId}`,
+    typeKeyStream(session.page, keys),
+    8000
+  );
+  console.error(`[driver] send_keys type done instance=${instanceId}`);
 
-  const mirrored = extractSubmittedMessage(keys);
-  await mirrorSubmittedMessage(instanceId, mirrored);
-
+  console.error(`[driver] send_keys done instance=${instanceId}`);
   return { status: 'sent', bytes: keys.length };
 }
 
@@ -887,12 +975,134 @@ async function snapshot(params) {
 async function uiState(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
+  const recentConsole = consoleTailText(session, 8).replace(/\n/g, ' | ');
+  console.error(
+    `[driver] ui_state start instance=${instanceId} cache_type=${typeof session.uiStateCache} cache_json=${
+      typeof session.uiStateCacheJson
+    } console_tail=${recentConsole}`
+  );
 
+  const tryParseUiState = (value) => {
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return null;
+      }
+    }
+    return value && typeof value === 'object' ? value : null;
+  };
+
+  const shouldRefreshUiState = (state) => {
+    if (!state || typeof state !== 'object') {
+      return false;
+    }
+
+    if (state.open_modal != null) {
+      return true;
+    }
+
+    if (Array.isArray(state.operations)) {
+      return state.operations.some((operation) => operation?.state === 'submitting');
+    }
+
+    return false;
+  };
+
+  const readLiveUiState = async (reason, timeoutMs = 1000) => {
+    console.error(
+      `[driver] ui_state live_refresh start instance=${instanceId} reason=${reason} timeout_ms=${timeoutMs}`
+    );
+    const payload = await withOperationTimeout(
+      `ui_state_live_${reason}`,
+      session.page.evaluate(() => {
+        if (typeof window.__AURA_HARNESS__?.ui_state === 'function') {
+          return window.__AURA_HARNESS__.ui_state();
+        }
+        if (typeof window.__AURA_UI_STATE__ === 'function') {
+          return window.__AURA_UI_STATE__();
+        }
+        if (typeof window.__AURA_UI_STATE_JSON__ === 'string') {
+          return window.__AURA_UI_STATE_JSON__;
+        }
+        if (window.__AURA_UI_STATE_CACHE__ && typeof window.__AURA_UI_STATE_CACHE__ === 'object') {
+          return JSON.stringify(window.__AURA_UI_STATE_CACHE__);
+        }
+        return null;
+      }),
+      timeoutMs
+    );
+    const parsed = tryParseUiState(payload);
+    if (parsed && typeof parsed === 'object') {
+      session.uiStateCache = parsed;
+      try {
+        session.uiStateCacheJson = JSON.stringify(parsed);
+      } catch {
+        session.uiStateCacheJson = null;
+      }
+      console.error(`[driver] ui_state live_refresh done instance=${instanceId} reason=${reason}`);
+      return parsed;
+    }
+    console.error(
+      `[driver] ui_state live_refresh unavailable instance=${instanceId} reason=${reason}`
+    );
+    return null;
+  };
+
+  try {
+    const live = await readLiveUiState('preferred_live');
+    if (live) {
+      return live;
+    }
+  } catch (error) {
+    console.error(
+      `[driver] ui_state live_refresh_failed instance=${instanceId} reason=preferred_live error=${
+        error?.message ?? String(error)
+      }`
+    );
+  }
+
+  if (session.uiStateCache && typeof session.uiStateCache === 'object') {
+    console.error(`[driver] ui_state cache_hit instance=${instanceId}`);
+    const cached =
+      typeof session.uiStateCacheJson === 'string'
+        ? tryParseUiState(session.uiStateCacheJson)
+        : session.uiStateCache;
+    if (cached && shouldRefreshUiState(cached)) {
+      try {
+        const refreshed = await readLiveUiState('transient_cache');
+        if (refreshed) {
+          return refreshed;
+        }
+      } catch (error) {
+        console.error(
+          `[driver] ui_state live_refresh_failed instance=${instanceId} reason=transient_cache error=${
+            error?.message ?? String(error)
+          }`
+        );
+      }
+    }
+    if (typeof session.uiStateCacheJson === 'string') {
+      console.error(`[driver] ui_state cache_json_hit instance=${instanceId}`);
+      return cached ?? JSON.parse(session.uiStateCacheJson);
+    }
+    console.error(`[driver] ui_state cache_object_hit instance=${instanceId}`);
+    return session.uiStateCache;
+  }
+
+  console.error(`[driver] ui_state cache_miss instance=${instanceId}`);
   let payload;
   try {
+    console.error(`[driver] ui_state evaluate start instance=${instanceId}`);
     payload = await withOperationTimeout(
       'ui_state',
       session.page.evaluate(() => {
+        if (typeof window.__AURA_UI_STATE_JSON__ === 'string') {
+          return window.__AURA_UI_STATE_JSON__;
+        }
+        if (window.__AURA_UI_STATE_CACHE__ && typeof window.__AURA_UI_STATE_CACHE__ === 'object') {
+          return JSON.stringify(window.__AURA_UI_STATE_CACHE__);
+        }
         if (typeof window.__AURA_UI_STATE__ === 'function') {
           return window.__AURA_UI_STATE__();
         }
@@ -900,12 +1110,24 @@ async function uiState(params) {
           return window.__AURA_HARNESS__.ui_state();
         }
         return null;
-      })
+      }),
+      UI_STATE_TIMEOUT_MS
     );
+    console.error(`[driver] ui_state evaluate done instance=${instanceId}`);
   } catch (error) {
     throw new Error(
       `${error}\nBrowser console tail:\n${consoleTailText(session)}`
     );
+  }
+
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload);
+    } catch (error) {
+      throw new Error(
+        `browser UI state JSON parse failed: ${error}\nBrowser console tail:\n${consoleTailText(session)}`
+      );
+    }
   }
 
   if (!payload || typeof payload !== 'object') {
@@ -942,7 +1164,46 @@ async function clickButton(params) {
   console.error(`[driver] click_button start instance=${instanceId} selector=${selector || '-'} label=${label || '-'}`);
 
   if (selector) {
-    await clickLocator(session.page.locator(selector).first(), selector);
+    try {
+      const locator = session.page.locator(selector).first();
+      await withOperationTimeout(
+        `click_button_wait:${selector}`,
+        locator.waitFor({ state: 'visible', timeout: 3000 }),
+        4000
+      );
+      await locator.scrollIntoViewIfNeeded().catch(() => {});
+      await withOperationTimeout(
+        `click_button_force:${selector}`,
+        locator.click({
+          timeout: 3000,
+          force: true,
+          noWaitAfter: true
+        }),
+        4000
+      );
+    } catch (locatorError) {
+      await withOperationTimeout(
+        `click_button_dom:${selector}`,
+        session.page.evaluate((targetSelector) => {
+          const element = document.querySelector(targetSelector);
+          if (!(element instanceof HTMLElement)) {
+            throw new Error(`element not found for selector ${targetSelector}`);
+          }
+          if (element.hasAttribute('disabled')) {
+            throw new Error(`element disabled for selector ${targetSelector}`);
+          }
+          element.click();
+          return true;
+        }, selector),
+        5000
+      ).catch((domError) => {
+        throw new Error(
+          `locator_click_error=${locatorError?.message ?? String(locatorError)} dom_click_error=${
+            domError?.message ?? String(domError)
+          }`
+        );
+      });
+    }
     console.error(`[driver] click_button done instance=${instanceId} selector=${selector}`);
     return { status: 'clicked' };
   }
@@ -986,16 +1247,94 @@ async function fillInput(params) {
   const session = getSession(instanceId);
   console.error(`[driver] fill_input start instance=${instanceId} selector=${selector}`);
   const locator = session.page.locator(selector).first();
-  await withOperationTimeout(
-    `fill_input_click:${selector}`,
-    locator.click({ timeout: 3000, force: true, noWaitAfter: true }),
-    5000
+  const domCacheHasSelector = selector.startsWith('#') && domStateHasId(session, selector.slice(1));
+  console.error(
+    `[driver] fill_input dom_cache instance=${instanceId} selector=${selector} present=${domCacheHasSelector}`
   );
-  await withOperationTimeout(
-    `fill_input_fill:${selector}`,
-    locator.fill(value, { timeout: 3000 }),
-    5000
-  );
+  try {
+    console.error(`[driver] fill_input attach_wait start instance=${instanceId} selector=${selector}`);
+    await withOperationTimeout(
+      `fill_input_attach:${selector}`,
+      locator.waitFor({ state: 'attached', timeout: 8000 }),
+      9000
+    );
+    console.error(`[driver] fill_input attach_wait done instance=${instanceId} selector=${selector}`);
+    console.error(`[driver] fill_input focus start instance=${instanceId} selector=${selector}`);
+    await withOperationTimeout(
+      `fill_input_focus:${selector}`,
+      locator.focus({ timeout: 3000 }),
+      4000
+    );
+    console.error(`[driver] fill_input focus done instance=${instanceId} selector=${selector}`);
+    console.error(`[driver] fill_input ready_wait start instance=${instanceId} selector=${selector}`);
+    await withOperationTimeout(
+      `fill_input_ready:${selector}`,
+      session.page.waitForFunction((targetSelector) => {
+        const element = document.querySelector(targetSelector);
+        if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
+          return false;
+        }
+        return !element.readOnly && !element.disabled;
+      }, selector),
+      3000
+    ).catch(() => null);
+    console.error(`[driver] fill_input ready_wait done instance=${instanceId} selector=${selector}`);
+    console.error(`[driver] fill_input playwright_fill start instance=${instanceId} selector=${selector}`);
+    await withOperationTimeout(
+      `fill_input_fill:${selector}`,
+      locator.fill(value, { timeout: 3000 }),
+      5000
+    );
+    console.error(`[driver] fill_input playwright_fill done instance=${instanceId} selector=${selector}`);
+  } catch (error) {
+    console.error(
+      `[driver] fill_input playwright_path_failed instance=${instanceId} selector=${selector} error=${error?.message ?? String(error)}`
+    );
+    const fallbackResult =
+      selector.startsWith('#') && !domStateHasId(session, selector.slice(1))
+        ? { ok: false, reason: 'field_missing_in_dom_cache' }
+        : await session.page
+            .evaluate(
+              ({ targetSelector, nextValue }) => {
+                const element = document.querySelector(targetSelector);
+                if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
+                  return { ok: false, reason: 'field_not_found' };
+                }
+                element.focus();
+                element.value = nextValue;
+                element.dispatchEvent(new Event('input', { bubbles: true }));
+                element.dispatchEvent(new Event('change', { bubbles: true }));
+                return { ok: true, readOnly: element.readOnly, disabled: element.disabled };
+              },
+              { targetSelector: selector, nextValue: value }
+            )
+            .catch(() => ({ ok: false, reason: 'dom_fallback_failed' }));
+    if (fallbackResult?.ok) {
+      console.error(
+        `[driver] fill_input fallback_done instance=${instanceId} selector=${selector} readonly=${fallbackResult.readOnly} disabled=${fallbackResult.disabled}`
+      );
+      return { status: 'filled', bytes: value.length, fallback: true };
+    }
+
+    const diagnostics = {
+      ids: domStateIdList(session)
+        .filter(
+          (id) =>
+            id.startsWith('aura-screen-') ||
+            id.startsWith('aura-field-') ||
+            id.startsWith('aura-chat-')
+        )
+        .slice(0, 100),
+      text: session.domState.text.slice(0, 1200)
+    };
+    throw new Error(
+      `${error.message} fallback=${JSON.stringify(
+        fallbackResult
+      )} current_ids=${JSON.stringify(diagnostics.ids)} text_snippet=${JSON.stringify(
+        diagnostics.text
+      )}`
+    );
+  }
   console.error(`[driver] fill_input done instance=${instanceId} selector=${selector}`);
   return { status: 'filled', bytes: value.length };
 }
@@ -1035,7 +1374,16 @@ async function tailLog(params) {
   const merged = [
     ...(Array.isArray(harnessLines) ? harnessLines.map(String) : []),
     ...session.consoleLog
-  ];
+  ].filter((line) => {
+    const text = String(line);
+    return !(
+      text.includes('[driver] request start') ||
+      text.includes('[driver] request done') ||
+      text.includes('method=ui_state') ||
+      text.includes('method=snapshot') ||
+      text.includes('method=tail_log')
+    );
+  });
 
   return {
     lines: merged.slice(-requested)

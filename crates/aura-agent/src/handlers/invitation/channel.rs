@@ -289,7 +289,6 @@ impl<'a> InvitationChannelHandler<'a> {
                 .commit_relational_facts(vec![fact])
                 .await
                 .map_err(|e| AgentError::effects(format!("commit invited channel fact: {e}")))?;
-            effects.await_next_view_update().await;
         }
 
         self.handler

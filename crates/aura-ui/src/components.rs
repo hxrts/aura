@@ -5,6 +5,7 @@
 
 #![allow(clippy::incompatible_msrv)]
 
+use aura_app::ui::contract::{list_item_dom_id, ControlId, FieldId, ListId};
 use aura_core::identifiers::AuthorityId;
 use dioxus::prelude::*;
 use dioxus_shadcn::components::badge::{Badge as LbBadge, BadgeVariant as LbBadgeVariant};
@@ -38,6 +39,7 @@ pub struct ModalView {
     pub details: Vec<String>,
     pub keybind_rows: Vec<(String, String)>,
     pub input_label: Option<String>,
+    pub input_field_id: Option<FieldId>,
     pub input_value: Option<String>,
     pub enter_label: String,
 }
@@ -184,6 +186,11 @@ pub fn UiModal(
     on_input_change: EventHandler<String>,
 ) -> Element {
     let mut open = use_signal(|| Some(true));
+    let input_field_id = modal
+        .input_field_id
+        .and_then(FieldId::web_dom_id)
+        .unwrap_or("aura-modal-input")
+        .to_string();
 
     rsx! {
         LbDialogRoot {
@@ -239,12 +246,12 @@ pub fn UiModal(
                         div {
                             class: "pt-1 space-y-1",
                             LbLabel {
-                                for_id: Some("aura-modal-input".to_string()),
+                                for_id: Some(input_field_id.clone()),
                                 class: Some("text-[0.7rem] uppercase tracking-[0.06em] text-muted-foreground".to_string()),
                                 "{input_label}"
                             }
                             LbInput {
-                                id: Some("aura-modal-input".to_string()),
+                                id: Some(input_field_id),
                                 value: modal.input_value.clone().unwrap_or_default(),
                                 readonly: false,
                                 full_width: true,
@@ -259,13 +266,23 @@ pub fn UiModal(
                 div {
                     class: "bg-card px-4 py-3 border-t border-border flex items-center justify-end gap-2",
                     UiButton {
-                        id: Some("aura-modal-cancel-button".to_string()),
+                        id: Some(
+                            ControlId::ModalCancelButton
+                                .web_dom_id()
+                                .unwrap_or("aura-modal-cancel-button")
+                                .to_string(),
+                        ),
                         label: "Cancel".to_string(),
                         variant: ButtonVariant::Secondary,
                         onclick: move |_| on_cancel.call(()),
                     }
                     UiButton {
-                        id: Some("aura-modal-confirm-button".to_string()),
+                        id: Some(
+                            ControlId::ModalConfirmButton
+                                .web_dom_id()
+                                .unwrap_or("aura-modal-confirm-button")
+                                .to_string(),
+                        ),
                         label: modal.enter_label.clone(),
                         variant: ButtonVariant::Primary,
                         onclick: move |_| on_confirm.call(()),
@@ -423,7 +440,12 @@ pub fn UiDeviceEnrollmentModal(
                             onclick: move |_| on_cancel.call(()),
                         }
                         UiButton {
-                            id: Some("aura-device-enrollment-copy-button".to_string()),
+                            id: Some(
+                                ControlId::ModalCopyButton
+                                    .web_dom_id()
+                                    .unwrap_or("aura-modal-copy-button")
+                                    .to_string(),
+                            ),
                             label: if copied {
                                 "Copied".to_string()
                             } else {
@@ -551,7 +573,10 @@ pub fn UiAuthorityPickerModal(
                                 for (index, authority) in authorities.into_iter().enumerate() {
                                     button {
                                         r#type: "button",
-                                        id: format!("aura-authority-picker-item-{}", authority.id),
+                                        id: list_item_dom_id(
+                                            ListId::Authorities,
+                                            &authority.id.to_string(),
+                                        ),
                                         class: if authority.is_selected {
                                             "flex w-full items-start justify-between rounded-lg border border-primary/40 bg-primary/10 px-3 py-3 text-left"
                                         } else {

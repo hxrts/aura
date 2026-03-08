@@ -437,9 +437,31 @@ impl InvitationServiceApi {
                 aura_core::AuraError::not_found(format!("Invitation not found: {}", invitation_id))
             })?;
         let mut code = Self::export_invitation(&invitation);
-        let bind_addr = self.effects.config().network.bind_address.trim();
-        if !bind_addr.is_empty() && bind_addr != "0.0.0.0:0" {
-            let encoded_addr = URL_SAFE_NO_PAD.encode(bind_addr.as_bytes());
+        // Only publish a browser-direct hint when we have an actual websocket
+        // listener address. Falling back to the raw bind address poisons the
+        // receiver cache with the TCP envelope port, which is not a websocket
+        // endpoint.
+        let sender_addr = self
+            .effects
+            .lan_transport()
+            .and_then(|transport| transport.websocket_addrs().first().cloned());
+        let sender_hint = sender_addr
+            .as_deref()
+            .map(|addr| {
+                if addr.starts_with("ws://") || addr.starts_with("wss://") {
+                    addr.to_string()
+                } else {
+                    format!("ws://{addr}")
+                }
+            });
+        tracing::info!(
+            invitation_id = %invitation_id,
+            sender_addr = ?sender_addr,
+            sender_hint = ?sender_hint,
+            "export invitation sender websocket hint"
+        );
+        if let Some(sender_hint) = sender_hint {
+            let encoded_addr = URL_SAFE_NO_PAD.encode(sender_hint.as_bytes());
             code = format!("{code}:{encoded_addr}");
         }
 

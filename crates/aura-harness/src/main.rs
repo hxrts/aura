@@ -9,15 +9,17 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use aura_harness::build_startup_summary;
 use aura_harness::config::{require_existing_file, ScreenSource};
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::build_seed_bundle;
+use aura_harness::failure_attribution::attribute_failure;
 use aura_harness::load_and_validate_run_config;
 use aura_harness::network_lab::{resolve_backend_mode, NetworkBackendMode};
 use aura_harness::preflight::{run_preflight, PreflightReport};
 use aura_harness::replay::{parse_bundle, ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
+use aura_harness::residue_checks::check_run_residue;
 use aura_harness::resource_guards::ResourceGuard;
 use aura_harness::routing::AddressResolver;
 use aura_harness::scenario::ScenarioRunner;
@@ -118,6 +120,19 @@ fn run(args: RunArgs) -> Result<()> {
 
     let summary = build_startup_summary(&config);
     let artifact_bundle = ArtifactBundle::create(&args.artifacts_dir(), &config.run.name)?;
+    let residue_report = check_run_residue(&config);
+    let _ = artifact_bundle.write_json("residue_report.json", &residue_report);
+    if !residue_report.clean {
+        return Err(anyhow!(
+            "run residue detected before startup: {}",
+            residue_report
+                .issues
+                .iter()
+                .map(|issue| format!("{}:{}:{}", issue.instance_id, issue.kind, issue.detail))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        ));
+    }
     let preflight_report = match run_preflight(&config, scenario_config.as_ref()) {
         Ok(report) => report,
         Err(error) => {
@@ -136,8 +151,10 @@ fn run(args: RunArgs) -> Result<()> {
         scenario_config.as_ref(),
     );
     if let Err(error) = run_result {
+        let attribution = attribute_failure(&error.to_string());
         let failure_payload = serde_json::json!({ "error": error.to_string() });
         let _ = artifact_bundle.write_json("failure.json", &failure_payload);
+        let _ = artifact_bundle.write_json("failure_attribution.json", &attribution);
         return Err(error);
     }
 
@@ -156,16 +173,29 @@ fn run_with_artifacts(
     backend_preflight: &aura_harness::network_lab::BackendPreflightReport,
     scenario_config: Option<&aura_harness::config::ScenarioConfig>,
 ) -> Result<()> {
+    let verbose_steps = std::env::var_os("AURA_HARNESS_VERBOSE_STEPS").is_some();
     let seed_bundle = build_seed_bundle(config);
     let mut resource_guard = ResourceGuard::from_run_config(config);
     resource_guard.sample("run_start");
 
     let coordinator = HarnessCoordinator::from_run_config(config)?;
     let mut tool_api = ToolApi::new(coordinator);
+    if verbose_steps {
+        eprintln!("[harness] startup phase=start_all begin");
+    }
     tool_api.start_all()?;
+    if verbose_steps {
+        eprintln!("[harness] startup phase=start_all done");
+    }
 
     let mut initial_screens: BTreeMap<String, String> = BTreeMap::new();
     for instance in &config.instances {
+        if verbose_steps {
+            eprintln!(
+                "[harness] startup phase=initial_screen begin instance={}",
+                instance.id
+            );
+        }
         let response = tool_api.handle_request(ToolRequest::Screen {
             instance_id: instance.id.clone(),
             screen_source: ScreenSource::Default,
@@ -178,6 +208,12 @@ fn run_with_artifacts(
                 .to_string();
             initial_screens.insert(instance.id.clone(), screen);
         }
+        if verbose_steps {
+            eprintln!(
+                "[harness] startup phase=initial_screen done instance={}",
+                instance.id
+            );
+        }
     }
 
     let scenario_report = if let Some(scenario) = scenario_config {
@@ -187,6 +223,10 @@ fn run_with_artifacts(
                 let diagnostics =
                     collect_timeout_diagnostics(config, &mut tool_api, &error.to_string());
                 artifact_bundle.write_json("timeout_diagnostics.json", &diagnostics)?;
+                artifact_bundle.write_json(
+                    "failure_attribution.json",
+                    &attribute_failure(&error.to_string()),
+                )?;
                 return Err(error);
             }
         }
@@ -265,7 +305,7 @@ fn collect_timeout_diagnostics(
 
         let log_response = tool_api.handle_request(ToolRequest::TailLog {
             instance_id: instance.id.clone(),
-            lines: 50,
+            lines: 200,
         });
         let log_tail = match log_response {
             aura_harness::tool_api::ToolResponse::Ok { payload } => payload
@@ -290,6 +330,7 @@ fn collect_timeout_diagnostics(
 
     serde_json::json!({
         "error": error_message,
+        "failure_attribution": attribute_failure(error_message),
         "instances": instances,
         "events": tool_api.event_snapshot()
     })

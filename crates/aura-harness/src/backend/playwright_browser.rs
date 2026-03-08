@@ -8,7 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
-use aura_app::ui::contract::UiSnapshot;
+use aura_app::ui::contract::{list_item_selector, ControlId, FieldId, ListId, UiSnapshot};
 use nix::poll::{poll, PollFd, PollFlags};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
@@ -175,7 +175,15 @@ impl RunningSession {
                 .and_then(Value::as_str)
                 .map(str::to_string)
                 .unwrap_or_else(|| response.to_string());
-            bail!("Playwright driver {method} failed: {error}");
+            let stderr_tail = self.stderr_tail(40);
+            let stderr_block = if stderr_tail.is_empty() {
+                "none".to_string()
+            } else {
+                stderr_tail.join("\n")
+            };
+            bail!(
+                "Playwright driver {method} failed: {error} (stderr_tail=\n{stderr_block})"
+            );
         }
     }
 
@@ -577,6 +585,13 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         })
     }
 
+    fn activate_control(&mut self, control_id: ControlId) -> Result<()> {
+        let selector = control_id
+            .web_selector()
+            .ok_or_else(|| anyhow!("control {control_id:?} does not have a web selector"))?;
+        self.click_target(&selector)
+    }
+
     fn click_target(&mut self, selector: &str) -> Result<()> {
         self.with_session(|session| {
             session.rpc_call(
@@ -602,6 +617,30 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             )?;
             Ok(())
         })
+    }
+
+    fn fill_field(&mut self, field_id: FieldId, value: &str) -> Result<()> {
+        let selector = field_id
+            .web_selector()
+            .ok_or_else(|| anyhow!("field {field_id:?} does not have a web selector"))?;
+        self.fill_input(&selector, value)
+    }
+
+    fn activate_list_item(&mut self, list_id: ListId, item_id: &str) -> Result<()> {
+        if matches!(list_id, ListId::Navigation) {
+            let control_id = match item_id {
+                "neighborhood" => ControlId::NavNeighborhood,
+                "chat" => ControlId::NavChat,
+                "contacts" => ControlId::NavContacts,
+                "notifications" => ControlId::NavNotifications,
+                "settings" => ControlId::NavSettings,
+                _ => anyhow::bail!("item {item_id} not found in list {list_id:?}"),
+            };
+            return self.activate_control(control_id);
+        }
+
+        let selector = list_item_selector(list_id, item_id);
+        self.click_target(&selector)
     }
 
     fn tail_log(&self, lines: usize) -> Result<Vec<String>> {
@@ -632,7 +671,14 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             .cloned()
             .collect::<Vec<_>>();
         for line in stderr_tail.into_iter().rev() {
-            merged.push(line);
+            let noise = line.contains("[driver] request start")
+                || line.contains("[driver] request done")
+                || line.contains("method=ui_state")
+                || line.contains("method=snapshot")
+                || line.contains("method=tail_log");
+            if !noise {
+                merged.push(line);
+            }
         }
 
         if merged.len() > lines {
@@ -704,6 +750,28 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                 .context("failed to probe Playwright child status")?
                 .is_none())
         })
+    }
+
+    fn wait_until_ready(&self, timeout: Duration) -> Result<()> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if self.ui_snapshot().is_ok() {
+                return Ok(());
+            }
+            if let Ok(screen) = self.snapshot_dom() {
+                if !screen.trim().is_empty() {
+                    return Ok(());
+                }
+            }
+            if Instant::now() >= deadline {
+                bail!(
+                    "browser instance {} did not reach readiness within {:?}",
+                    self.config.id,
+                    timeout
+                );
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
     }
 
     fn is_healthy(&self) -> bool {
