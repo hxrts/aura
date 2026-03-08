@@ -36,6 +36,8 @@ pub struct ScenarioReport {
     pub execution_mode: ExecutionMode,
     pub states_visited: Vec<String>,
     pub transitions: Vec<StateTransitionEvent>,
+    pub step_metrics: Vec<StepMetricRecord>,
+    pub total_duration_ms: u64,
     pub completed: bool,
 }
 
@@ -45,6 +47,15 @@ pub struct StateTransitionEvent {
     pub from_state: String,
     pub to_state: Option<String>,
     pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StepMetricRecord {
+    pub step_id: String,
+    pub actor: String,
+    pub action: String,
+    pub duration_ms: u64,
 }
 
 pub struct ScenarioExecutor {
@@ -217,7 +228,9 @@ impl ScenarioExecutor {
         let mut scenario_rng = DeterministicRng::new(budgets.scenario_seed);
         let mut fault_rng = DeterministicRng::new(budgets.fault_seed);
         let mut context = ScenarioContext::default();
+        let mut step_metrics = Vec::new();
         let verbose_steps = std::env::var_os("AURA_HARNESS_VERBOSE_STEPS").is_some();
+        let scenario_started = Instant::now();
 
         loop {
             let state = machine
@@ -248,6 +261,7 @@ impl ScenarioExecutor {
                 global_remaining = Some(remaining.saturating_sub(step_budget));
             }
             visited.push(state.id.clone());
+            let step_started = Instant::now();
             execute_step(
                 &state.step,
                 tool_api,
@@ -264,6 +278,12 @@ impl ScenarioExecutor {
                     state.step.instance.as_deref().unwrap_or("-")
                 )
             })?;
+            step_metrics.push(StepMetricRecord {
+                step_id: state.id.clone(),
+                actor: state.step.instance.clone().unwrap_or_else(|| "-".to_string()),
+                action: state.step.action.to_string(),
+                duration_ms: step_started.elapsed().as_millis() as u64,
+            });
 
             let next = match self.mode {
                 ExecutionMode::Scripted => state.next_state.clone(),
@@ -289,6 +309,8 @@ impl ScenarioExecutor {
             execution_mode: self.mode,
             states_visited: visited,
             transitions,
+            step_metrics,
+            total_duration_ms: scenario_started.elapsed().as_millis() as u64,
             completed: true,
         })
     }

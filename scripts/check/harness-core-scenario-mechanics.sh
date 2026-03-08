@@ -31,12 +31,19 @@ for scenario in "${core_shared_scenarios[@]}"; do
   fi
   rm -f /tmp/harness-core-label.$$ || true
 
-  if rg -n 'action\s*=\s*"(press_key|send_key|send_keys|click_button|expect_toast|expect_command_result|wait_for_dom_patterns)"' "$scenario" >/tmp/harness-core-actions.$$ 2>/dev/null; then
+  if rg -n 'action\s*=\s*"(press_key|send_key|send_keys|click_button|expect_toast|expect_command_result|wait_for_dom_patterns|wait_for|fault_delay)"' "$scenario" >/tmp/harness-core-actions.$$ 2>/dev/null; then
     cat /tmp/harness-core-actions.$$ >&2
     rm -f /tmp/harness-core-actions.$$
     fail "raw mechanics action is forbidden in core shared scenarios: $scenario"
   fi
   rm -f /tmp/harness-core-actions.$$ || true
+
+  if rg -n '^\s*pattern\s*=' "$scenario" >/tmp/harness-core-pattern.$$ 2>/dev/null; then
+    cat /tmp/harness-core-pattern.$$ >&2
+    rm -f /tmp/harness-core-pattern.$$
+    fail "raw text pattern assertions are forbidden in core shared scenarios: $scenario"
+  fi
+  rm -f /tmp/harness-core-pattern.$$ || true
 
   if rg -n '^\s*screen_source\s*=\s*"dom"' "$scenario" >/tmp/harness-core-dom.$$ 2>/dev/null; then
     cat /tmp/harness-core-dom.$$ >&2

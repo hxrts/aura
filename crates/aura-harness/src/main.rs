@@ -220,12 +220,21 @@ fn run_with_artifacts(
             Ok(report) => Some(report),
             Err(error) => {
                 let diagnostics =
-                    collect_timeout_diagnostics(config, &mut tool_api, &error.to_string());
-                artifact_bundle.write_json("timeout_diagnostics.json", &diagnostics)?;
-                artifact_bundle.write_json(
-                    "failure_attribution.json",
-                    &attribute_failure(&error.to_string()),
-                )?;
+                    collect_failure_diagnostics(config, &mut tool_api, &error.to_string());
+                artifact_bundle.write_json("failure_diagnostics.json", &diagnostics)?;
+                if let Some(step_id) = diagnostics
+                    .get("failing_step")
+                    .and_then(serde_json::Value::as_str)
+                {
+                    let file_name =
+                        format!("failure_diagnostics__{}.json", sanitize_artifact_component(step_id));
+                    artifact_bundle.write_json(&file_name, &diagnostics)?;
+                }
+                if error.to_string().to_ascii_lowercase().contains("timeout") {
+                    artifact_bundle.write_json("timeout_diagnostics.json", &diagnostics)?;
+                }
+                artifact_bundle
+                    .write_json("failure_attribution.json", &attribute_failure(&error.to_string()))?;
                 return Err(error);
             }
         }
@@ -271,7 +280,7 @@ fn run_with_artifacts(
     Ok(())
 }
 
-fn collect_timeout_diagnostics(
+fn collect_failure_diagnostics(
     config: &aura_harness::config::RunConfig,
     tool_api: &mut ToolApi,
     error_message: &str,
@@ -369,6 +378,15 @@ fn collect_timeout_diagnostics(
                 serde_json::json!([format!("tail_log_error: {message}")])
             }
         };
+        let browser_artifacts = instance
+            .env
+            .iter()
+            .find_map(|entry| {
+                let (key, value) = entry.split_once('=')?;
+                (key == "AURA_HARNESS_BROWSER_ARTIFACT_DIR").then_some(value)
+            })
+            .map(recent_artifact_paths)
+            .unwrap_or_default();
 
         instances.insert(
             instance.id.clone(),
@@ -381,7 +399,8 @@ fn collect_timeout_diagnostics(
                 "ui_state_error": ui_state_error,
                 "render_convergence": render_convergence,
                 "runtime_events": runtime_events,
-                "log_tail": log_tail
+                "log_tail": log_tail,
+                "browser_artifacts": browser_artifacts
             }),
         );
     }
@@ -406,6 +425,33 @@ fn collect_timeout_diagnostics(
     })
 }
 
+fn recent_artifact_paths(dir: &str) -> Vec<String> {
+    let mut files: Vec<_> = fs::read_dir(dir)
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.filter_map(|entry| entry.ok()))
+        .filter_map(|entry| {
+            let path = entry.path();
+            let metadata = entry.metadata().ok()?;
+            metadata.is_file().then_some((metadata.modified().ok(), path))
+        })
+        .collect();
+    files.sort_by_key(|(modified, _)| *modified);
+    files.into_iter()
+        .rev()
+        .take(8)
+        .map(|(_, path)| path.display().to_string())
+        .collect()
+}
+
+fn sanitize_artifact_component(value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' { ch } else { '_' })
+        .collect();
+    sanitized.trim_matches('_').to_string()
+}
+
 fn parse_failing_step(error_message: &str) -> Option<String> {
     let marker = "step ";
     let start = error_message.find(marker)? + marker.len();
@@ -420,7 +466,7 @@ fn parse_failing_step(error_message: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_failing_step;
+    use super::{parse_failing_step, sanitize_artifact_component};
 
     #[test]
     fn parse_failing_step_extracts_step_id_from_executor_error() {
@@ -435,6 +481,14 @@ mod tests {
     #[test]
     fn parse_failing_step_returns_none_without_step_marker() {
         assert_eq!(parse_failing_step("plain failure"), None);
+    }
+
+    #[test]
+    fn sanitize_artifact_component_rewrites_unsafe_characters() {
+        assert_eq!(
+            sanitize_artifact_component("web/join modal?"),
+            "web_join_modal"
+        );
     }
 }
 

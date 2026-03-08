@@ -37,6 +37,8 @@ fn state_machine_executes_mixed_topology_scripted_scenario() {
         .states_visited
         .iter()
         .any(|state| state == "local-send"));
+    assert_eq!(report.step_metrics.len(), scenario.steps.len());
+    assert!(report.total_duration_ms > 0);
 }
 
 #[test]
@@ -54,6 +56,10 @@ fn scripted_and_agent_modes_are_transition_equivalent() {
     assert_eq!(agent.execution_mode, ExecutionMode::Agent);
     assert!(!scripted.states_visited.is_empty());
     assert!(!agent.states_visited.is_empty());
+    assert_eq!(scripted.step_metrics.len(), scripted_scenario.steps.len());
+    assert_eq!(agent.step_metrics.len(), agent_scenario.steps.len());
+    assert!(scripted.total_duration_ms > 0);
+    assert!(agent.total_duration_ms > 0);
 }
 
 fn execute_mode(

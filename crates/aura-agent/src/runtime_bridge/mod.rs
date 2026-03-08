@@ -60,7 +60,6 @@ use gloo_net::websocket::{futures::WebSocket, Message};
 use std::collections::{BTreeSet, HashSet};
 use std::future::Future;
 use std::sync::Arc;
-use std::time::Duration;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local;
 
@@ -121,16 +120,6 @@ fn harness_sync_backoff_ms() -> u64 {
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(DEFAULT_HARNESS_SYNC_BACKOFF_MS)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-async fn harness_sync_backoff_sleep(ms: u64) {
-    tokio::time::sleep(Duration::from_millis(ms)).await;
-}
-
-#[cfg(target_arch = "wasm32")]
-async fn harness_sync_backoff_sleep(ms: u64) {
-    gloo_timers::future::sleep(Duration::from_millis(ms)).await;
 }
 
 /// Wrapper to implement RuntimeBridge for AuraAgent
@@ -1074,7 +1063,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 }
 
                 if round + 1 < rounds {
-                    harness_sync_backoff_sleep(backoff_ms).await;
+                    self.sleep_ms(backoff_ms).await;
                 }
             }
 

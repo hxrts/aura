@@ -72,7 +72,7 @@ timeout_ms = 10
 }
 
 #[test]
-fn timeout_failures_emit_timeout_diagnostics_bundle() {
+fn failure_scenarios_emit_structured_diagnostics_bundle() {
     let temp = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir failed: {error}"));
     let config_path = temp.path().join("run.toml");
     let scenario_path = temp.path().join("scenario.toml");
@@ -133,5 +133,9 @@ timeout_ms = 10
     assert!(!status.success());
 
     let run_dir = artifacts_path.join("harness").join("timeout-diagnostics");
-    assert!(run_dir.join("timeout_diagnostics.json").exists());
+    assert!(run_dir.join("failure_diagnostics.json").exists());
+    assert!(run_dir.join("failure_diagnostics__wait-never.json").exists());
+    let diagnostics = fs::read_to_string(run_dir.join("failure_diagnostics.json"))
+        .unwrap_or_else(|error| panic!("failed to read diagnostics bundle: {error}"));
+    assert!(diagnostics.contains("\"failing_step\": \"wait-never\""));
 }

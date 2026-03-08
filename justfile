@@ -138,6 +138,9 @@ harness-migration-audit:
 harness-boundary-check:
     bash scripts/check/harness-boundary-policy.sh
 
+harness-flake-metrics root="artifacts/harness":
+    bash scripts/check/harness-flake-metrics.sh {{root}}
+
 ci-shared-flow-policy:
     bash scripts/check/shared-flow-policy.sh
 

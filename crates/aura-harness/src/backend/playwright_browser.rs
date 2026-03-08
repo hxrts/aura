@@ -750,14 +750,9 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             if self.ui_snapshot().is_ok() {
                 return Ok(());
             }
-            if let Ok(screen) = self.snapshot_dom() {
-                if !screen.trim().is_empty() {
-                    return Ok(());
-                }
-            }
             if Instant::now() >= deadline {
                 bail!(
-                    "browser instance {} did not reach readiness within {:?}",
+                    "browser instance {} did not reach semantic readiness within {:?}",
                     self.config.id,
                     timeout
                 );
