@@ -947,8 +947,8 @@ mod tests {
         browser_app_url, control_selector, field_selector, navigation_control_id,
         parse_bool_setting, parse_u64_setting, tool_key_name, DEFAULT_PAGE_GOTO_TIMEOUT_MS,
     };
-    use aura_app::ui::contract::{ControlId, FieldId};
     use crate::tool_api::ToolKey;
+    use aura_app::ui::contract::{ControlId, FieldId};
 
     #[test]
     fn browser_app_url_prefers_instance_env_override() {

@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 
 use aura_harness::api_version::TOOL_API_VERSIONS;
 use aura_harness::artifact_sync::RemoteArtifactSyncReport;
-use aura_harness::config::ScreenSource;
+use aura_harness::config::{
+    InstanceConfig, InstanceMode, RunConfig, RunSection, ScreenSource, TunnelConfig,
+};
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::{build_seed_bundle, SeedBundle};
 use aura_harness::replay::ReplayBundle;
@@ -24,42 +26,76 @@ fn phase5_run_emits_hardening_artifacts_with_seed_and_sync_metadata() {
     let scenario_path = temp.path().join("scenario.toml");
     let artifacts_dir = temp.path().join("artifacts");
 
-    let config_body = format!(
-        r#"schema_version = 1
-
-[run]
-name = "phase5-regression"
-pty_rows = 40
-pty_cols = 120
-seed = 4242
-max_memory_bytes = 1
-require_remote_artifact_sync = true
-
-[[instances]]
-id = "alice"
-mode = "local"
-data_dir = "{}"
-bind_address = "127.0.0.1:52001"
-command = "bash"
-args = ["-lc", "cat"]
-
-[[instances]]
-id = "bob"
-mode = "ssh"
-data_dir = "{}"
-bind_address = "0.0.0.0:52002"
-ssh_host = "example.org"
-ssh_user = "dev"
-ssh_port = 22
-ssh_strict_host_key_checking = true
-ssh_fingerprint = "SHA256:test"
-ssh_require_fingerprint = true
-ssh_dry_run = true
-remote_workdir = "/home/dev/aura"
-"#,
-        temp.path().join("alice-data").display(),
-        temp.path().join("bob-data").display(),
-    );
+    let run_config = RunConfig {
+        schema_version: 1,
+        run: RunSection {
+            name: "phase5-regression".to_string(),
+            pty_rows: Some(40),
+            pty_cols: Some(120),
+            artifact_dir: None,
+            global_budget_ms: None,
+            step_budget_ms: None,
+            seed: Some(4242),
+            max_cpu_percent: None,
+            max_memory_bytes: Some(1),
+            max_open_files: None,
+            require_remote_artifact_sync: true,
+            runtime_substrate: Default::default(),
+        },
+        instances: vec![
+            InstanceConfig {
+                id: "alice".to_string(),
+                mode: InstanceMode::Local,
+                data_dir: temp.path().join("alice-data"),
+                device_id: None,
+                bind_address: "127.0.0.1:52001".to_string(),
+                demo_mode: false,
+                command: Some("bash".to_string()),
+                args: vec!["-lc".to_string(), "cat".to_string()],
+                env: vec![],
+                log_path: None,
+                ssh_host: None,
+                ssh_user: None,
+                ssh_port: None,
+                ssh_strict_host_key_checking: true,
+                ssh_known_hosts_file: None,
+                ssh_fingerprint: None,
+                ssh_require_fingerprint: false,
+                ssh_dry_run: true,
+                remote_workdir: None,
+                lan_discovery: None,
+                tunnel: None,
+            },
+            InstanceConfig {
+                id: "bob".to_string(),
+                mode: InstanceMode::Ssh,
+                data_dir: temp.path().join("bob-data"),
+                device_id: None,
+                bind_address: "0.0.0.0:52002".to_string(),
+                demo_mode: false,
+                command: None,
+                args: vec![],
+                env: vec![],
+                log_path: None,
+                ssh_host: Some("example.org".to_string()),
+                ssh_user: Some("dev".to_string()),
+                ssh_port: Some(22),
+                ssh_strict_host_key_checking: true,
+                ssh_known_hosts_file: None,
+                ssh_fingerprint: Some("SHA256:test".to_string()),
+                ssh_require_fingerprint: true,
+                ssh_dry_run: true,
+                remote_workdir: Some("/home/dev/aura".into()),
+                lan_discovery: None,
+                tunnel: Some(TunnelConfig {
+                    kind: "ssh".to_string(),
+                    local_forward: vec!["62102:127.0.0.1:52002".to_string()],
+                }),
+            },
+        ],
+    };
+    let config_body = toml::to_string(&run_config)
+        .unwrap_or_else(|error| panic!("serialize run config failed: {error}"));
     if let Err(error) = fs::write(&config_path, config_body) {
         panic!("failed writing run config: {error}");
     }
@@ -68,8 +104,10 @@ remote_workdir = "/home/dev/aura"
 goal = "validate phase 5 hardening artifacts"
 
 [[steps]]
-id = "launch"
-action = "launch_actors"
+id = "seed"
+action = "set_var"
+name = "artifact_seed"
+value = "ok"
 "#;
     if let Err(error) = fs::write(&scenario_path, scenario_body) {
         panic!("failed writing scenario config: {error}");

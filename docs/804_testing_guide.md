@@ -25,6 +25,8 @@ consumes those contracts to drive real frontends. `aura-simulator` is a
 selectable alternate runtime substrate. Quint remains a model and trace
 generation system rather than a frontend executor.
 
+`aura-app::ui_contract` is also the authoritative home for shared flow support declarations including `SharedFlowId` and `SHARED_FLOW_SUPPORT`. It defines structured `UiSnapshot` and transient operation identity through `OperationInstanceId`. Typed runtime diagnostics events use `RuntimeEventSnapshot`.
+
 Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or `Uuid::new_v4()` is forbidden. These operations must flow through effect traits instead.
 
 ## 2. The `#[aura_test]` Macro
@@ -301,6 +303,10 @@ Shared flows should be authored semantically once, then executed through the
 harness using either the TUI or browser driver. Do not create a second
 frontend execution path for MBT or simulator replay.
 
+Core shared scenarios should use semantic actions and state-based assertions.
+Avoid raw selector steps, raw `press_key` steps, and label-based browser clicks
+except in dedicated low-level driver tests.
+
 ### Run Config
 
 ```toml
@@ -383,7 +389,10 @@ Send JSON requests:
 just ci-harness-build
 just ci-harness-contract
 just ci-harness-replay
+just ci-shared-flow-policy
 ```
+
+`just ci-shared-flow-policy` validates the shared-flow contract end to end. It checks that `aura-app` shared-flow support declarations are internally consistent. It verifies that required shell and modal ids still exist. It confirms browser control and field mappings still line up with the shared contract and that core shared scenarios have not drifted back to raw mechanics.
 
 ## 11. Test Organization
 
@@ -509,6 +518,13 @@ artifacts/harness/browser/
 ```
 
 When debugging browser failures, check `web-serve.log` for bundle and runtime startup issues. Check `preflight_report.json` for browser prerequisites including Node, Playwright, and app URL. Check `timeout_diagnostics.json` for authoritative and normalized snapshots and per-instance log tails. Playwright screenshots and traces are stored under each instance `data_dir` in `playwright-artifacts/`.
+
+`timeout_diagnostics.json` is now the primary authoritative failure bundle. In addition to `UiSnapshot`, it should be treated as the first source for runtime event history through `runtime_events`. It contains operation lifecycle and instance ids. It provides render and readiness diagnostics along with browser and TUI backend log tails.
+
+For browser runs, the harness observes the semantic state contract first and
+uses DOM/text fallbacks only for diagnostics. If semantic state and rendered UI
+diverge, treat that as a product or frontend contract bug rather than papering
+over it with text-based assertions.
 
 ### Frontend Shell Roadmap
 

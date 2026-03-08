@@ -140,8 +140,10 @@ args = ["-lc", "cat"]
 goal = "emit artifacts"
 
 [[steps]]
-id = "launch"
-action = "launch_actors"
+id = "seed"
+action = "set_var"
+name = "artifact_seed"
+value = "ok"
 "#;
     if let Err(error) = std::fs::write(&scenario_path, scenario_body) {
         panic!("write scenario failed: {error}");
@@ -186,7 +188,7 @@ fn local_run_config(name: &str, port: u16) -> RunConfig {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
-            runtime_substrate: aura_harness::config::RuntimeSubstrate::default(),
+            runtime_substrate: Default::default(),
         },
         instances: vec![InstanceConfig {
             id: "alice".to_string(),
@@ -229,7 +231,7 @@ fn mixed_run_config(name: &str, local_port: u16, ssh_port: u16) -> RunConfig {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
-            runtime_substrate: aura_harness::config::RuntimeSubstrate::default(),
+            runtime_substrate: Default::default(),
         },
         instances: vec![
             InstanceConfig {

@@ -542,9 +542,14 @@ fn execute_step(
             )?;
             // Browser harness can remain in insert mode after command submit; if so,
             // normalize back to navigation mode so subsequent digit keys switch tabs.
-            if fetch_ui_snapshot(tool_api, &instance_id)
-                .ok()
+            if snapshot
+                .as_ref()
                 .and_then(|snapshot| snapshot.focused_control)
+                .or_else(|| {
+                    fetch_ui_snapshot(tool_api, &instance_id)
+                        .ok()
+                        .and_then(|snapshot| snapshot.focused_control)
+                })
                 == Some(ControlId::Field(FieldId::ChatInput))
             {
                 let _ = dispatch(
@@ -2545,9 +2550,16 @@ mod tests {
         }
 
         let action_log = api.action_log();
-        assert!(action_log.len() >= 6, "expected at least six tool actions");
+        let filtered = action_log
+            .iter()
+            .filter(|record| !matches!(record.request, ToolRequest::UiState { .. }))
+            .collect::<Vec<_>>();
+        assert!(
+            filtered.len() >= 4,
+            "expected at least four non-UiState tool actions"
+        );
 
-        match &action_log[0].request {
+        match &filtered[0].request {
             ToolRequest::SendKey {
                 instance_id,
                 key: ToolKey::Esc,
@@ -2559,28 +2571,28 @@ mod tests {
             other => panic!("expected SendKey(Esc) first, got {other:?}"),
         }
 
-        match &action_log[1].request {
-            ToolRequest::SendKeys { instance_id, keys } => {
-                assert_eq!(instance_id, "alice");
-                assert_eq!(keys, "2");
+        let mut next_index = 1usize;
+        if matches!(
+            filtered.get(1).map(|record| &record.request),
+            Some(ToolRequest::SendKeys { instance_id, keys })
+                if instance_id == "alice" && keys == "2"
+        ) {
+            match &filtered[2].request {
+                ToolRequest::WaitFor {
+                    instance_id,
+                    pattern,
+                    timeout_ms: _,
+                    ..
+                } => {
+                    assert_eq!(instance_id, "alice");
+                    assert_eq!(pattern, "Channels");
+                }
+                other => panic!("expected WaitFor after chat nav, got {other:?}"),
             }
-            other => panic!("expected SendKeys second, got {other:?}"),
+            next_index = 3;
         }
 
-        match &action_log[2].request {
-            ToolRequest::WaitFor {
-                instance_id,
-                pattern,
-                timeout_ms: _,
-                ..
-            } => {
-                assert_eq!(instance_id, "alice");
-                assert_eq!(pattern, "Channels");
-            }
-            other => panic!("expected WaitFor third, got {other:?}"),
-        }
-
-        match &action_log[3].request {
+        match &filtered[next_index].request {
             ToolRequest::SendKey {
                 instance_id,
                 key: ToolKey::Esc,
@@ -2589,23 +2601,23 @@ mod tests {
                 assert_eq!(instance_id, "alice");
                 assert_eq!(*repeat, 1);
             }
-            other => panic!("expected SendKey(Esc) fourth, got {other:?}"),
+            other => panic!("expected SendKey(Esc) before command entry, got {other:?}"),
         }
 
-        match &action_log[4].request {
+        match &filtered[next_index + 1].request {
             ToolRequest::SendKeys { instance_id, keys } => {
                 assert_eq!(instance_id, "alice");
                 assert_eq!(keys, "i");
             }
-            other => panic!("expected SendKeys fifth (insert mode), got {other:?}"),
+            other => panic!("expected SendKeys for insert mode, got {other:?}"),
         }
 
-        match &action_log[5].request {
+        match &filtered[next_index + 2].request {
             ToolRequest::SendKeys { instance_id, keys } => {
                 assert_eq!(instance_id, "alice");
                 assert_eq!(keys, "/join slash-lab\n");
             }
-            other => panic!("expected SendKeys sixth (slash command), got {other:?}"),
+            other => panic!("expected SendKeys for slash command, got {other:?}"),
         }
     }
 

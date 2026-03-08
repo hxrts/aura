@@ -72,29 +72,40 @@ pub struct InstanceConfig {
     pub id: String,
     pub mode: InstanceMode,
     pub data_dir: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub device_id: Option<String>,
     pub bind_address: String,
     #[serde(default)]
     pub demo_mode: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub env: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub log_path: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ssh_host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ssh_user: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ssh_port: Option<u16>,
     #[serde(default = "default_true")]
     pub ssh_strict_host_key_checking: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ssh_known_hosts_file: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ssh_fingerprint: Option<String>,
     #[serde(default)]
     pub ssh_require_fingerprint: bool,
     #[serde(default = "default_true")]
     pub ssh_dry_run: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_workdir: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub lan_discovery: Option<LanDiscoveryConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tunnel: Option<TunnelConfig>,
 }
 

@@ -39,6 +39,11 @@ By default it is intended to validate the real Aura runtime and real user interf
 - Secure SSH defaults: strict host key checking stays enabled and fingerprint policy is enforced when required.
 - Primary-lane policy: the default harness lane targets the real Aura runtime and real TUI/web surfaces; simulator-backed execution is an alternate deterministic lane, not the primary correctness oracle.
 - Single-executor policy: real frontend execution flows through `aura-harness`; Quint and simulator feed semantic traces and runtime conditions, not direct UI-driving logic.
+- Semantic-first execution: core shared scenarios are expressed in semantic
+  actions and typed ids rather than raw selectors, raw keypresses, or label
+  matching.
+- Semantic-first observation: structured `UiSnapshot` and render-heartbeat data
+  are authoritative; DOM/text fallbacks are diagnostics only.
 
 ### Detailed Specifications
 
@@ -59,6 +64,41 @@ Verification hooks:
 Contract alignment:
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines reproducibility assumptions for testing.
 - [Project Structure](../../docs/999_project_structure.md#invariant-traceability) defines canonical naming.
+
+### InvariantSharedFlowExecutionIsSemantic
+Shared harness scenarios remain portable across TUI and web because they target
+the shared semantic contract rather than frontend mechanics.
+
+Enforcement locus:
+- `config.rs` parses the shared scenario contract from `aura-app`.
+- `executor.rs` translates semantic steps into backend-specific actions.
+- policy checks reject raw mechanics in the core shared scenario set.
+
+Failure mode:
+- Scenarios become backend-specific and require per-frontend special-casing.
+- Browser/TUI parity regresses and core scenarios stop being reusable.
+
+Verification hooks:
+- `bash scripts/check/shared-flow-policy.sh`
+- `cargo test -p aura-harness --lib tui_semantic_actions_emit_expected_tool_requests`
+- `cargo test -p aura-harness --lib browser_driver_maps_shared_controls_to_selectors`
+
+### InvariantObservationUsesAuthoritativeSemanticState
+The harness observes semantic state first and uses DOM/text fallbacks only for
+debugging.
+
+Enforcement locus:
+- browser backend consumes pushed `UiSnapshot` and `RenderHeartbeat` data.
+- tool API snapshot endpoints return structured shared-contract payloads.
+
+Failure mode:
+- Timeouts become ambiguous because the harness cannot distinguish semantic
+  state drift from renderer drift.
+- Browser/TUI failures require ad hoc scraping and manual interpretation.
+
+Verification hooks:
+- Playwright driver self-test
+- browser backend contract tests
 ## Boundaries
 - This crate is tooling and test infrastructure. It is not part of the runtime layer stack.
 - It does not define Aura effect traits, domain semantics, or protocol safety rules.

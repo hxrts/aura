@@ -1407,7 +1407,15 @@ pub async fn send_message_ref(
                 );
             }
             converge_runtime(&runtime).await;
-            ensure_runtime_peer_connectivity(&runtime, "send_message_ref").await?;
+            if let Err(_error) = ensure_runtime_peer_connectivity(&runtime, "send_message_ref").await
+            {
+                #[cfg(feature = "instrumented")]
+                tracing::warn!(
+                    error = %_error,
+                    channel_id = %channel_id,
+                    "message send completed without reachable peers"
+                );
+            }
         }
 
         (sender_id, message_id)

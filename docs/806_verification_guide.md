@@ -2,11 +2,9 @@
 
 This guide covers how to use formal verification and model-based testing to validate Aura protocols. It focuses on practical workflows with Quint, Lean, and generative testing.
 
-Quint, simulator, and harness have distinct responsibilities:
-- Quint defines models, traces, and invariants.
-- `aura-simulator` is a selectable deterministic runtime substrate.
-- `aura-harness` is the single executor for real TUI and web frontend flows.
-- Shared semantic UI and scenario contracts live in `aura-app`.
+Quint, simulator, and harness have distinct responsibilities. Quint defines models, traces, and invariants. The `aura-simulator` crate is a selectable deterministic runtime substrate. The `aura-harness` crate is the single executor for real TUI and web frontend flows. Shared semantic UI and scenario contracts live in `aura-app`.
+
+`aura-app` is also the home of the shared-flow support contract used by the real-runtime harness. This includes `SharedFlowId`, `SHARED_FLOW_SUPPORT`, `UiSnapshot`, and typed runtime event diagnostics.
 
 ## When to Verify
 
@@ -184,6 +182,8 @@ Do not add direct Quint-to-TUI or Quint-to-browser execution paths. Quint should
 hand off semantic traces to the shared contract layer, then let the harness or
 simulator consume them through their own adapters.
 
+For shared end-to-end flows, the harness contract is semantic and state-based. Do not introduce frontend-specific Quint replay formats that encode raw keypress sequences, browser selectors, or label-based button targeting. Those belong in driver adapters and diagnostics, not in the semantic trace contract.
+
 ### Direct Conformance Testing
 
 The recommended approach compares Rust behavior to Quint expected states.
@@ -289,6 +289,16 @@ just ci-conformance
 
 See [Testing Guide](804_testing_guide.md) for corpus policy details.
 
+The main repository policy gate for shared-flow drift is:
+
+```bash
+just ci-shared-flow-policy
+```
+
+This complements Quint and simulator checks by enforcing that shared real-runtime
+scenarios still use the semantic contract and that the shared-flow support map in
+`aura-app` remains consistent with the harness/frontend surfaces.
+
 ## Telltale Verification Workflow in Aura
 
 Use this workflow for choreography and simulator-level verification that depends on Telltale-derived checks.
@@ -302,13 +312,9 @@ nix develop --command scripts/check/protocol-compat.sh --self-test
 nix develop --command just ci-protocol-compat
 ```
 
-This validates:
-- known-compatible fixture pairs pass async subtyping checks
-- known-breaking fixture pairs fail as expected
-- changed `.choreo` files stay backward-compatible unless intentionally breaking
+This validates that known-compatible fixture pairs pass async subtyping checks. It confirms known-breaking fixture pairs fail as expected. It ensures changed `.choreo` files stay backward-compatible unless intentionally breaking.
 
-Fixture location:
-- `crates/aura-testkit/fixtures/protocol_compat/`
+Fixtures live in `crates/aura-testkit/fixtures/protocol_compat/`.
 
 ### 2) Macro-time coherence gate
 
@@ -334,41 +340,34 @@ This verifies that injected faults produce monitor-visible invariant violations 
 
 As of March 5, 2026, Aura includes `telltale-lean-bridge` as a workspace dependency and exposes it through `aura-quint`.
 
-What this adds:
-- direct access to upstream Lean runner and equivalence utilities from the Telltale project
-- explicit schema/version linkage with upstream bridge contracts for cross-tool consistency
-- a cleaner path for future migration of local bridge helpers to upstream bridge APIs
+This adds direct access to upstream Lean runner and equivalence utilities from the Telltale project. It provides explicit schema and version linkage with upstream bridge contracts for cross-tool consistency. It also creates a cleaner path for future migration of local bridge helpers to upstream bridge APIs.
 
-Operational notes:
-- `aura-quint` re-exports the upstream crate as `upstream_telltale_lean_bridge`
-- `aura_quint::upstream_telltale_lean_bridge_schema_version()` returns the upstream schema version
-- CI lanes remain: `just ci-lean-quint-bridge` and `just ci-simulator-telltale-parity`
+The `aura-quint` crate re-exports the upstream crate as `upstream_telltale_lean_bridge`. Call `aura_quint::upstream_telltale_lean_bridge_schema_version()` to get the upstream schema version. CI lanes remain `just ci-lean-quint-bridge` and `just ci-simulator-telltale-parity`.
 
 ### 5) `aura-testkit` Lean verification API migration (March 5, 2026)
 
 As of March 5, 2026, legacy Lean verification compatibility types were removed from
 `aura_testkit::verification` and `aura_testkit::verification::lean_oracle`.
 
-Use the canonical full-fidelity types and methods:
+Use the canonical full-fidelity types and methods.
 
-- types:
-  - `Fact` -> `LeanFact`
-  - `ComparePolicy` -> `LeanComparePolicy`
-  - `TimeStamp` -> `LeanCompareTimeStamp` (compare payloads) or `LeanTimeStamp` (journal facts)
-  - `Ordering` -> `LeanTimestampOrdering`
-  - `FlowChargeInput`/`FlowChargeResult` -> `LeanFlowChargeInput`/`LeanFlowChargeResult`
-  - `TimestampCompareInput`/`TimestampCompareResult` -> `LeanTimestampCompareInput`/`LeanTimestampCompareResult`
-- methods:
-  - `verify_merge` -> `verify_journal_merge`
-  - `verify_reduce` -> `verify_journal_reduce`
-  - `verify_charge` -> `verify_flow_charge`
-  - `verify_compare` -> `verify_timestamp_compare`
+| Legacy Type | Canonical Type |
+|-------------|----------------|
+| `Fact` | `LeanFact` |
+| `ComparePolicy` | `LeanComparePolicy` |
+| `TimeStamp` | `LeanCompareTimeStamp` (compare payloads) or `LeanTimeStamp` (journal facts) |
+| `Ordering` | `LeanTimestampOrdering` |
+| `FlowChargeInput`/`FlowChargeResult` | `LeanFlowChargeInput`/`LeanFlowChargeResult` |
+| `TimestampCompareInput`/`TimestampCompareResult` | `LeanTimestampCompareInput`/`LeanTimestampCompareResult` |
 
-Downstream guidance:
+| Legacy Method | Canonical Method |
+|---------------|------------------|
+| `verify_merge` | `verify_journal_merge` |
+| `verify_reduce` | `verify_journal_reduce` |
+| `verify_charge` | `verify_flow_charge` |
+| `verify_compare` | `verify_timestamp_compare` |
 
-- import Lean verification payload types from `aura_testkit::verification` (re-exported from `lean_types`)
-- construct structured journals with `LeanJournal` + `LeanNamespace`
-- update tests to compare `LeanTimestampOrdering` values directly
+Import Lean verification payload types from `aura_testkit::verification` which re-exports from `lean_types`. Construct structured journals with `LeanJournal` and `LeanNamespace`. Update tests to compare `LeanTimestampOrdering` values directly.
 
 ## Lean-Quint Bridge
 
@@ -382,11 +381,7 @@ Run the bridge lane:
 just ci-lean-quint-bridge
 ```
 
-Inspect outputs:
-
-- `artifacts/lean-quint-bridge/bridge.log`
-- `artifacts/lean-quint-bridge/bridge_discrepancy_report.json`
-- `artifacts/lean-quint-bridge/report.json`
+Inspect outputs at `artifacts/lean-quint-bridge/bridge.log`, `artifacts/lean-quint-bridge/bridge_discrepancy_report.json`, and `artifacts/lean-quint-bridge/report.json`.
 
 Run the simulator telltale parity lane:
 
@@ -394,20 +389,20 @@ Run the simulator telltale parity lane:
 just ci-simulator-telltale-parity
 ```
 
-Inspect output:
-
-- `artifacts/telltale-parity/report.json`
+Inspect output at `artifacts/telltale-parity/report.json`.
 
 ### Data Contract
 
-`aura-quint` defines a versioned interchange schema for bridge workflows:
+`aura-quint` defines a versioned interchange schema for bridge workflows.
 
-- `BridgeBundleV1` (`schema_version = "aura.lean-quint-bridge.v1"`)
-- `SessionTypeInterchangeV1` for session graph exchange
-- `PropertyInterchangeV1` for Quint/Telltale/Lean property exchange
-- `ProofCertificateV1` for proof or model-check evidence
+| Type | Purpose |
+|------|---------|
+| `BridgeBundleV1` | Top-level bundle with `schema_version = "aura.lean-quint-bridge.v1"` |
+| `SessionTypeInterchangeV1` | Session graph exchange |
+| `PropertyInterchangeV1` | Quint, Telltale, and Lean property exchange |
+| `ProofCertificateV1` | Proof or model-check evidence |
 
-Use this schema as the canonical data contract when exporting Quint sessions to Telltale formats or importing Telltale/Lean properties into Quint harnesses.
+Use this schema as the canonical data contract when exporting Quint sessions to Telltale formats or importing Telltale and Lean properties into Quint harnesses.
 
 ### Export Workflow
 

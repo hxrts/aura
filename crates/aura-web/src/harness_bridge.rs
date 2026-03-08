@@ -325,7 +325,12 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
                 .web_dom_id()
                 .unwrap_or("aura-toast-region")
         );
-        let screen_selector = format!("#{}", aura_app::ui::contract::ControlId::Screen(snapshot.screen).web_dom_id().unwrap_or("missing-screen-id"));
+        let screen_selector = format!(
+            "#{}",
+            aura_app::ui::contract::ControlId::Screen(snapshot.screen)
+                .web_dom_id()
+                .unwrap_or("missing-screen-id")
+        );
 
         let app_root_count = document
             .query_selector_all(&app_root_selector)
@@ -418,8 +423,11 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
             Some(window) => window,
             None => return JsValue::NULL,
         };
-        Reflect::get(window.as_ref(), &JsValue::from_str("__AURA_RENDER_HEARTBEAT__"))
-            .unwrap_or(JsValue::NULL)
+        Reflect::get(
+            window.as_ref(),
+            &JsValue::from_str("__AURA_RENDER_HEARTBEAT__"),
+        )
+        .unwrap_or(JsValue::NULL)
     }) as Box<dyn FnMut() -> JsValue>);
     Reflect::set(
         window.as_ref(),

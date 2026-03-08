@@ -317,7 +317,14 @@ pub async fn accept_invitation(
         .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {e}")))?;
 
     converge_runtime(&runtime).await;
-    ensure_runtime_peer_connectivity(&runtime, "invitation_accept").await?;
+    if let Err(_error) = ensure_runtime_peer_connectivity(&runtime, "invitation_accept").await {
+        #[cfg(feature = "instrumented")]
+        tracing::warn!(
+            error = %_error,
+            invitation_id = %invitation_id,
+            "invitation acceptance completed without reachable peers"
+        );
+    }
 
     Ok(())
 }

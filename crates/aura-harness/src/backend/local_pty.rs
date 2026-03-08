@@ -40,6 +40,10 @@ pub struct LocalPtyBackend {
 }
 
 impl LocalPtyBackend {
+    fn uses_default_aura_command(&self) -> bool {
+        self.config.command.is_none()
+    }
+
     fn ui_state_file(&self) -> PathBuf {
         self.config.data_dir.join(".ui-state.json")
     }

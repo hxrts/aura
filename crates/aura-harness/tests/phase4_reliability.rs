@@ -48,8 +48,8 @@ goal = "lint should fail"
 
 [[steps]]
 id = "s1"
-action = "message_contains"
 actor = "ghost"
+action = "input_text"
 value = "never"
 timeout_ms = 10
 "#,
@@ -110,9 +110,9 @@ goal = "force timeout"
 
 [[steps]]
 id = "wait-never"
-action = "message_contains"
 actor = "alice"
-value = "this-pattern-will-not-appear"
+action = "screen_is"
+screen_id = "chat"
 timeout_ms = 10
 "#,
     )

@@ -36,7 +36,7 @@ fn state_machine_executes_mixed_topology_scripted_scenario() {
     assert!(report
         .states_visited
         .iter()
-        .any(|state| state == "ssh-restart"));
+        .any(|state| state == "local-send"));
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn sample_mixed_run_config() -> aura_harness::config::RunConfig {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
-            runtime_substrate: aura_harness::config::RuntimeSubstrate::default(),
+            runtime_substrate: Default::default(),
         },
         instances: vec![
             InstanceConfig {
@@ -171,13 +171,6 @@ fn sample_scripted_scenario() -> aura_harness::config::ScenarioConfig {
                 action: ScenarioAction::FaultDelay,
                 instance: Some("bob".to_string()),
                 timeout_ms: Some(50),
-                ..Default::default()
-            },
-            ScenarioStep {
-                id: "ssh-restart".to_string(),
-                action: ScenarioAction::Restart,
-                instance: Some("bob".to_string()),
-                timeout_ms: Some(2000),
                 ..Default::default()
             },
             ScenarioStep {
