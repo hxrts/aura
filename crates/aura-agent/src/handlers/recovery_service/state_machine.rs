@@ -1,7 +1,7 @@
 use super::*;
 use crate::runtime::vm_host_bridge::{
     close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
-    open_role_scoped_vm_session, receive_blocked_vm_message,
+    open_manifest_vm_session_admitted, receive_blocked_vm_message,
 };
 use aura_core::util::serialization::to_vec;
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, RoleIndex};
@@ -28,6 +28,8 @@ pub(super) async fn execute_recovery_protocol_account(
         recovery_role(guardian_id, 0),
     ];
     let peer_roles = BTreeMap::from([("Coordinator".to_string(), recovery_role(authority_id, 1))]);
+    let manifest =
+        aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::composition_manifest();
     let global_type =
         aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::global_type();
     let local_types =
@@ -41,12 +43,13 @@ pub(super) async fn execute_recovery_protocol_account(
         })?;
 
     let result = async {
-        let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
-            aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::role_names(),
+        let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+            &manifest,
             "Account",
             &global_type,
             &local_types,
         )
+        .await
         .map_err(AgentError::internal)?;
         handler.push_send_bytes(
             to_vec(&request)
@@ -110,6 +113,8 @@ pub(super) async fn execute_recovery_protocol_coordinator(
         ("Account".to_string(), recovery_role(authority_id, 0)),
         ("Guardian".to_string(), recovery_role(guardian_id, 0)),
     ]);
+    let manifest =
+        aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::composition_manifest();
     let global_type =
         aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::global_type();
     let local_types =
@@ -123,12 +128,13 @@ pub(super) async fn execute_recovery_protocol_coordinator(
         })?;
 
     let result = async {
-        let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
-            aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::role_names(),
+        let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+            &manifest,
             "Coordinator",
             &global_type,
             &local_types,
         )
+        .await
         .map_err(AgentError::internal)?;
         handler.push_send_bytes(
             to_vec(&request)

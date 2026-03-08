@@ -23,6 +23,73 @@ pub const PROTOCOL_SYNC_EPOCH_ROTATION: &str = "aura.sync.epoch_rotation";
 pub const PROTOCOL_DKG_CEREMONY: &str = "aura.dkg.ceremony";
 /// Aura protocol id for guardian recovery-grant choreography.
 pub const PROTOCOL_RECOVERY_GRANT: &str = "aura.recovery.grant";
+/// Aura protocol id for guardian-auth relational choreography.
+pub const PROTOCOL_GUARDIAN_AUTH_RELATIONAL: &str =
+    "aura.authentication.guardian_auth_relational";
+/// Aura protocol id for AMP transport choreography.
+pub const PROTOCOL_AMP_TRANSPORT: &str = "aura.amp.transport";
+/// Aura protocol id for invitation exchange choreography.
+pub const PROTOCOL_INVITATION_EXCHANGE: &str = "aura.invitation.exchange";
+/// Aura protocol id for guardian invitation choreography.
+pub const PROTOCOL_GUARDIAN_INVITATION: &str = "aura.invitation.guardian";
+/// Aura protocol id for device enrollment invitation choreography.
+pub const PROTOCOL_DEVICE_ENROLLMENT: &str = "aura.invitation.device_enrollment";
+/// Aura protocol id for direct rendezvous choreography.
+pub const PROTOCOL_RENDEZVOUS_EXCHANGE: &str = "aura.rendezvous.exchange";
+/// Aura protocol id for relayed rendezvous choreography.
+pub const PROTOCOL_RENDEZVOUS_RELAY: &str = "aura.rendezvous.relay";
+/// Aura protocol id for guardian ceremony choreography.
+pub const PROTOCOL_GUARDIAN_CEREMONY: &str = "aura.recovery.guardian_ceremony";
+/// Aura protocol id for guardian setup choreography.
+pub const PROTOCOL_GUARDIAN_SETUP: &str = "aura.recovery.guardian_setup";
+/// Aura protocol id for guardian membership change choreography.
+pub const PROTOCOL_GUARDIAN_MEMBERSHIP_CHANGE: &str =
+    "aura.recovery.guardian_membership_change";
+/// Aura protocol id for session coordination choreography.
+pub const PROTOCOL_SESSION_COORDINATION: &str = "aura.session.coordination";
+
+/// Admission metadata for one production protocol id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProtocolAdmissionProfile {
+    /// Runtime capability artifacts required before execution.
+    pub required_artifacts: &'static [&'static str],
+}
+
+/// Resolve explicit admission metadata for one production protocol id.
+#[must_use]
+pub fn protocol_admission_profile(protocol_id: &str) -> Option<ProtocolAdmissionProfile> {
+    match protocol_id {
+        PROTOCOL_AURA_CONSENSUS => Some(ProtocolAdmissionProfile {
+            required_artifacts: &[CAPABILITY_BYZANTINE_ENVELOPE],
+        }),
+        PROTOCOL_SYNC_EPOCH_ROTATION => Some(ProtocolAdmissionProfile {
+            required_artifacts: &[CAPABILITY_TERMINATION_BOUNDED],
+        }),
+        PROTOCOL_DKG_CEREMONY => Some(ProtocolAdmissionProfile {
+            required_artifacts: &[
+                CAPABILITY_BYZANTINE_ENVELOPE,
+                CAPABILITY_TERMINATION_BOUNDED,
+            ],
+        }),
+        PROTOCOL_RECOVERY_GRANT => Some(ProtocolAdmissionProfile {
+            required_artifacts: &[CAPABILITY_TERMINATION_BOUNDED],
+        }),
+        PROTOCOL_GUARDIAN_AUTH_RELATIONAL
+        | PROTOCOL_AMP_TRANSPORT
+        | PROTOCOL_INVITATION_EXCHANGE
+        | PROTOCOL_GUARDIAN_INVITATION
+        | PROTOCOL_DEVICE_ENROLLMENT
+        | PROTOCOL_RENDEZVOUS_EXCHANGE
+        | PROTOCOL_RENDEZVOUS_RELAY
+        | PROTOCOL_GUARDIAN_CEREMONY
+        | PROTOCOL_GUARDIAN_SETUP
+        | PROTOCOL_GUARDIAN_MEMBERSHIP_CHANGE
+        | PROTOCOL_SESSION_COORDINATION => Some(ProtocolAdmissionProfile {
+            required_artifacts: &[],
+        }),
+        _ => None,
+    }
+}
 
 /// Consensus runtime-capability profiles used for theorem-pack admission checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,16 +105,9 @@ pub enum ConsensusCapabilityProfile {
 /// Required capability/artifact identifiers for a protocol execution.
 #[must_use]
 pub fn required_artifacts(protocol_id: &str) -> &'static [&'static str] {
-    match protocol_id {
-        PROTOCOL_AURA_CONSENSUS => &[CAPABILITY_BYZANTINE_ENVELOPE],
-        PROTOCOL_SYNC_EPOCH_ROTATION => &[CAPABILITY_TERMINATION_BOUNDED],
-        PROTOCOL_DKG_CEREMONY => &[
-            CAPABILITY_BYZANTINE_ENVELOPE,
-            CAPABILITY_TERMINATION_BOUNDED,
-        ],
-        PROTOCOL_RECOVERY_GRANT => &[CAPABILITY_TERMINATION_BOUNDED],
-        _ => &[],
-    }
+    protocol_admission_profile(protocol_id)
+        .map(|profile| profile.required_artifacts)
+        .unwrap_or(&[])
 }
 
 /// Required capability keys converted to core admission types.
@@ -155,5 +215,35 @@ mod tests {
             Err(AdmissionError::MissingCapability { capability })
                 if capability == CapabilityKey::new(CAPABILITY_TERMINATION_BOUNDED)
         ));
+    }
+
+    #[test]
+    fn admission_profiles_cover_all_production_protocol_ids() {
+        let known = [
+            PROTOCOL_AURA_CONSENSUS,
+            PROTOCOL_AMP_TRANSPORT,
+            PROTOCOL_DKG_CEREMONY,
+            PROTOCOL_GUARDIAN_AUTH_RELATIONAL,
+            PROTOCOL_INVITATION_EXCHANGE,
+            PROTOCOL_GUARDIAN_INVITATION,
+            PROTOCOL_DEVICE_ENROLLMENT,
+            PROTOCOL_RECOVERY_GRANT,
+            PROTOCOL_GUARDIAN_CEREMONY,
+            PROTOCOL_GUARDIAN_SETUP,
+            PROTOCOL_GUARDIAN_MEMBERSHIP_CHANGE,
+            PROTOCOL_RENDEZVOUS_EXCHANGE,
+            PROTOCOL_RENDEZVOUS_RELAY,
+            PROTOCOL_SESSION_COORDINATION,
+            PROTOCOL_SYNC_EPOCH_ROTATION,
+        ];
+
+        for protocol_id in known {
+            assert!(
+                protocol_admission_profile(protocol_id).is_some(),
+                "missing explicit admission profile for {protocol_id}"
+            );
+        }
+
+        assert!(protocol_admission_profile("aura.unknown").is_none());
     }
 }

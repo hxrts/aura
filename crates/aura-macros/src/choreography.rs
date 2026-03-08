@@ -523,6 +523,8 @@ fn generate_helpers(messages: &[MessageType]) -> TokenStream {
 
 fn generate_vm_projection_artifacts(
     choreography: &Choreography,
+    namespace: Option<&str>,
+    annotations: &[AuraEffect],
     local_types: &[(
         telltale_choreography::ast::Role,
         telltale_choreography::ast::LocalType,
@@ -561,9 +563,52 @@ fn generate_vm_projection_artifacts(
             format!("failed to encode VM local-type artifacts: {error}"),
         )
     })?;
+    let protocol_name = choreography.name.to_string();
+    let qualified_name = aura_mpst::CompositionManifest::qualified_name(namespace, &protocol_name);
+    let startup_defaults = aura_mpst::startup_defaults_for_qualified_name(&qualified_name);
+    let manifest = aura_mpst::CompositionManifest {
+        protocol_name,
+        protocol_namespace: namespace.map(str::to_string),
+        protocol_qualified_name: qualified_name.clone(),
+        protocol_id: startup_defaults
+            .protocol_id
+            .unwrap_or(qualified_name.as_str())
+            .to_string(),
+        role_names: choreography
+            .roles
+            .iter()
+            .map(|role| role.name().to_string())
+            .collect(),
+        required_capabilities: startup_defaults
+            .required_capabilities
+            .iter()
+            .map(|capability| (*capability).to_string())
+            .collect(),
+        determinism_policy_ref: Some(startup_defaults.determinism_policy_ref.to_string()),
+        link_specs: annotations
+            .iter()
+            .filter_map(|annotation| match annotation {
+                AuraEffect::Link { directive, role } => Some(aura_mpst::CompositionLinkSpec {
+                    role: role.as_str().to_string(),
+                    bundle_id: directive.bundle_id.clone(),
+                    exports: directive.exports.clone(),
+                    imports: directive.imports.clone(),
+                }),
+                _ => None,
+            })
+            .collect(),
+        delegation_constraints: Vec::new(),
+    };
+    let manifest_json = serde_json::to_string(&manifest).map_err(|error| {
+        syn::Error::new(
+            proc_macro2::Span::call_site(),
+            format!("failed to encode composition manifest artifact: {error}"),
+        )
+    })?;
 
     let global_json_lit = LitStr::new(&global_json, proc_macro2::Span::call_site());
     let local_types_json_lit = LitStr::new(&local_types_json, proc_macro2::Span::call_site());
+    let manifest_json_lit = LitStr::new(&manifest_json, proc_macro2::Span::call_site());
     let role_names = choreography.roles.iter().map(|role| {
         let name = role.name().to_string();
         LitStr::new(&name, proc_macro2::Span::call_site())
@@ -595,6 +640,15 @@ fn generate_vm_projection_artifacts(
                 })
             }
 
+            fn decode_composition_manifest() -> &'static ::aura_mpst::CompositionManifest {
+                static COMPOSITION_MANIFEST: OnceLock<::aura_mpst::CompositionManifest> =
+                    OnceLock::new();
+                COMPOSITION_MANIFEST.get_or_init(|| {
+                    ::aura_mpst::serde_json::from_str(#manifest_json_lit)
+                        .expect("macro-generated composition manifest must decode")
+                })
+            }
+
             pub fn role_names() -> &'static [&'static str] {
                 &[#(#role_names),*]
             }
@@ -611,6 +665,10 @@ fn generate_vm_projection_artifacts(
                 role: &str,
             ) -> Option<::aura_mpst::telltale_types::LocalTypeR> {
                 decode_local_types().get(role).cloned()
+            }
+
+            pub fn composition_manifest() -> ::aura_mpst::CompositionManifest {
+                decode_composition_manifest().clone()
             }
         }
     })
@@ -1468,14 +1526,18 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
 
     // Generate the Telltale choreography using namespace-aware functions
     let message_type_names = extract_message_type_names(&parsed_input.choreography);
-    let telltale_output =
-        choreography_impl_namespace_aware(&parsed_input.choreography, &message_type_names)
-            .map_err(|err| {
-                syn::Error::new(
-                    proc_macro2::Span::call_site(),
-                    format!("Telltale generation failed: {err}"),
-                )
-            })?;
+    let telltale_output = choreography_impl_namespace_aware(
+        &parsed_input.choreography,
+        parsed_input.namespace.as_deref(),
+        &parsed_input.aura_annotations,
+        &message_type_names,
+    )
+    .map_err(|err| {
+        syn::Error::new(
+            proc_macro2::Span::call_site(),
+            format!("Telltale generation failed: {err}"),
+        )
+    })?;
 
     // Generate the Aura wrapper module with namespace support
     let namespace = parsed_input.namespace.clone();
@@ -2194,6 +2256,8 @@ fn generate_aura_wrapper(
 /// Uses namespace-aware generation to avoid module conflicts.
 fn choreography_impl_namespace_aware(
     choreography: &Choreography,
+    namespace: Option<&str>,
+    annotations: &[AuraEffect],
     message_type_names: &[String],
 ) -> Result<TokenStream, syn::Error> {
     // Project to local types
@@ -2216,7 +2280,8 @@ fn choreography_impl_namespace_aware(
     collect_messages(&choreography.protocol, &mut message_map);
     let messages: Vec<_> = message_map.into_values().collect();
     let helpers = generate_helpers(&messages);
-    let vm_projection_artifacts = generate_vm_projection_artifacts(choreography, &local_types)?;
+    let vm_projection_artifacts =
+        generate_vm_projection_artifacts(choreography, namespace, annotations, &local_types)?;
 
     // Generate code and hoist inline choice enums (choices need item-level definitions)
     let generated_code = generate_choreography_code(

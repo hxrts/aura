@@ -70,7 +70,14 @@ pub use telltale;
 pub use telltale_choreography;
 pub use telltale_types;
 
+/// Generated choreography composition metadata types.
+pub mod composition;
+
 use async_trait::async_trait;
+pub use composition::{
+    startup_defaults_for_qualified_name, CompositionDelegationConstraint, CompositionLinkSpec,
+    CompositionManifest,
+};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 /// Aura compatibility adapter for generated choreography runners.

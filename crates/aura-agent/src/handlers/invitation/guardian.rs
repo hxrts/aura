@@ -1,7 +1,7 @@
 use super::*;
 use crate::runtime::vm_host_bridge::{
     close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
-    open_role_scoped_vm_session, receive_blocked_vm_message,
+    open_manifest_vm_session_admitted, receive_blocked_vm_message,
 };
 use std::collections::BTreeMap;
 
@@ -43,6 +43,7 @@ impl<'a> InvitationGuardianHandler<'a> {
         let roles = vec![Self::role(authority_id), Self::role(invitation.receiver_id)];
         let peer_roles =
             BTreeMap::from([("Guardian".to_string(), Self::role(invitation.receiver_id))]);
+        let manifest = aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::vm_artifacts::composition_manifest();
         let global_type = aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::vm_artifacts::global_type();
         let local_types = aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::vm_artifacts::local_types();
         let confirm = GuardianInvitationConfirm(GuardianConfirm {
@@ -59,12 +60,13 @@ impl<'a> InvitationGuardianHandler<'a> {
             })?;
 
         let result = async {
-            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
-                aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::vm_artifacts::role_names(),
+            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                &manifest,
                 "Principal",
                 &global_type,
                 &local_types,
             )
+            .await
             .map_err(AgentError::internal)?;
             handler.push_send_bytes(
                 to_vec(&request)
@@ -144,6 +146,7 @@ impl<'a> InvitationGuardianHandler<'a> {
         let roles = vec![Self::role(invitation.sender_id), Self::role(authority_id)];
         let peer_roles =
             BTreeMap::from([("Principal".to_string(), Self::role(invitation.sender_id))]);
+        let manifest = aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::vm_artifacts::composition_manifest();
         let global_type = aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::vm_artifacts::global_type();
         let local_types = aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::vm_artifacts::local_types();
 
@@ -155,12 +158,13 @@ impl<'a> InvitationGuardianHandler<'a> {
             })?;
 
         let result = async {
-            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
-                aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::vm_artifacts::role_names(),
+            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                &manifest,
                 "Guardian",
                 &global_type,
                 &local_types,
             )
+            .await
             .map_err(AgentError::internal)?;
             handler.push_send_bytes(
                 to_vec(&accept)

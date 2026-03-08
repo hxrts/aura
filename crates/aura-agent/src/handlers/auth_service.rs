@@ -7,7 +7,7 @@ use super::auth::{AuthChallenge, AuthHandler, AuthMethod, AuthResponse, AuthResu
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::vm_host_bridge::{
     close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
-    open_role_scoped_vm_session, receive_blocked_vm_message,
+    open_manifest_vm_session_admitted, receive_blocked_vm_message,
 };
 use crate::runtime::AuraEffectSystem;
 use aura_authentication::dkd::{DkdMessage, DkdSessionId};
@@ -18,6 +18,7 @@ use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash;
 use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
 use aura_core::util::serialization::to_vec;
+use aura_mpst::CompositionManifest;
 use aura_mpst::telltale_types::{GlobalType, LocalTypeR};
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, RoleIndex};
 use std::collections::BTreeMap;
@@ -124,7 +125,7 @@ impl AuthServiceApi {
         roles: Vec<ChoreographicRole>,
         peer_roles: BTreeMap<String, ChoreographicRole>,
         active_role: &str,
-        role_names: &[&str],
+        manifest: &CompositionManifest,
         global_type: &GlobalType,
         local_types: &BTreeMap<String, LocalTypeR>,
         initial_payloads: Vec<Vec<u8>>,
@@ -138,7 +139,8 @@ impl AuthServiceApi {
 
         let result = async {
             let (mut engine, handler, vm_sid) =
-                open_role_scoped_vm_session(role_names, active_role, global_type, local_types)
+                open_manifest_vm_session_admitted(manifest, active_role, global_type, local_types)
+                    .await
                     .map_err(AgentError::internal)?;
 
             for payload in initial_payloads {
@@ -204,6 +206,8 @@ impl AuthServiceApi {
         let roles = vec![Self::auth_role(authority_id), Self::auth_role(participant)];
         let peer_roles =
             BTreeMap::from([("Participant".to_string(), Self::auth_role(participant))]);
+        let manifest =
+            aura_authentication::dkd::telltale_session_types_dkd_protocol::vm_artifacts::composition_manifest();
         let global_type =
             aura_authentication::dkd::telltale_session_types_dkd_protocol::vm_artifacts::global_type();
         let local_types =
@@ -243,8 +247,7 @@ impl AuthServiceApi {
             roles,
             peer_roles,
             "Initiator",
-            aura_authentication::dkd::telltale_session_types_dkd_protocol::vm_artifacts::role_names(
-            ),
+            &manifest,
             &global_type,
             &local_types,
             payloads,
@@ -268,6 +271,8 @@ impl AuthServiceApi {
             .unwrap_or(0);
         let roles = vec![Self::auth_role(initiator), Self::auth_role(authority_id)];
         let peer_roles = BTreeMap::from([("Initiator".to_string(), Self::auth_role(initiator))]);
+        let manifest =
+            aura_authentication::dkd::telltale_session_types_dkd_protocol::vm_artifacts::composition_manifest();
         let global_type =
             aura_authentication::dkd::telltale_session_types_dkd_protocol::vm_artifacts::global_type();
         let local_types =
@@ -300,8 +305,7 @@ impl AuthServiceApi {
             roles,
             peer_roles,
             "Participant",
-            aura_authentication::dkd::telltale_session_types_dkd_protocol::vm_artifacts::role_names(
-            ),
+            &manifest,
             &global_type,
             &local_types,
             payloads,
@@ -324,6 +328,7 @@ impl AuthServiceApi {
         ];
         let peer_roles =
             BTreeMap::from([("Coordinator".to_string(), Self::auth_role(coordinator))]);
+        let manifest = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::composition_manifest();
         let global_type = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::global_type();
         let local_types = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::local_types();
 
@@ -332,7 +337,7 @@ impl AuthServiceApi {
             roles,
             peer_roles,
             "Account",
-            aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::role_names(),
+            &manifest,
             &global_type,
             &local_types,
             vec![to_vec(&request).map_err(|error| {
@@ -364,6 +369,7 @@ impl AuthServiceApi {
             ("Account".to_string(), Self::auth_role(account)),
             ("Guardian".to_string(), Self::auth_role(guardian)),
         ]);
+        let manifest = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::composition_manifest();
         let global_type = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::global_type();
         let local_types = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::local_types();
 
@@ -372,7 +378,7 @@ impl AuthServiceApi {
             roles,
             peer_roles,
             "Coordinator",
-            aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::role_names(),
+            &manifest,
             &global_type,
             &local_types,
             vec![
@@ -403,6 +409,7 @@ impl AuthServiceApi {
         ];
         let peer_roles =
             BTreeMap::from([("Coordinator".to_string(), Self::auth_role(coordinator))]);
+        let manifest = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::composition_manifest();
         let global_type = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::global_type();
         let local_types = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::local_types();
 
@@ -411,7 +418,7 @@ impl AuthServiceApi {
             roles,
             peer_roles,
             "Guardian",
-            aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::role_names(),
+            &manifest,
             &global_type,
             &local_types,
             vec![to_vec(&proof).map_err(|error| {

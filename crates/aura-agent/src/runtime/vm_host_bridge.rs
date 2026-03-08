@@ -2,6 +2,7 @@ use crate::runtime::{
     build_vm_config, AuraChoreoEngine, AuraEffectSystem, AuraVmHardeningProfile,
     AuraVmParityProfile,
 };
+use aura_mpst::CompositionManifest;
 use aura_mpst::telltale_types::{GlobalType, LocalTypeR};
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, ChoreographyError};
 use parking_lot::Mutex;
@@ -159,7 +160,8 @@ pub fn build_role_scoped_code_image(
     Ok(CodeImage::from_local_types(&scoped, global_type))
 }
 
-pub fn open_role_scoped_vm_session(
+#[cfg(test)]
+fn open_role_scoped_vm_session(
     role_names: &[&str],
     active_role: &str,
     global_type: &GlobalType,
@@ -221,6 +223,39 @@ pub async fn open_role_scoped_vm_session_admitted(
         .await
         .map_err(|error| format!("failed to open VM session: {error}"))?;
     Ok((engine, handler, sid))
+}
+
+pub async fn open_manifest_vm_session_admitted(
+    manifest: &CompositionManifest,
+    active_role: &str,
+    global_type: &GlobalType,
+    local_types: &BTreeMap<String, LocalTypeR>,
+) -> Result<
+    (
+        AuraChoreoEngine<AuraQueuedVmBridgeHandler>,
+        Arc<AuraQueuedVmBridgeHandler>,
+        SessionId,
+    ),
+    String,
+> {
+    let role_names = manifest
+        .role_names
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let required_capabilities = manifest
+        .required_capabilities
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    open_role_scoped_vm_session_admitted(
+        role_names.as_slice(),
+        active_role,
+        global_type,
+        local_types,
+        required_capabilities.as_slice(),
+    )
+    .await
 }
 
 pub async fn flush_pending_vm_sends(

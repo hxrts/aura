@@ -14,12 +14,10 @@ use crate::core::{default_context_id_for_authority, AgentError, AgentResult, Aut
 use crate::runtime::services::InvitationManager;
 use crate::runtime::AuraEffectSystem;
 #[cfg(feature = "choreo-backend-telltale-vm")]
-use crate::runtime::{
-    build_vm_config, AuraChoreoEngine, AuraVmHardeningProfile, AuraVmParityProfile,
-};
+use crate::runtime::AuraChoreoEngine;
 #[cfg(feature = "choreo-backend-telltale-vm")]
 use crate::runtime::vm_host_bridge::{
-    blocked_recv_edge, build_role_scoped_code_image, AuraQueuedVmBridgeHandler,
+    blocked_recv_edge, open_manifest_vm_session_admitted, AuraQueuedVmBridgeHandler,
 };
 use crate::InvitationServiceApi;
 use device_enrollment::InvitationDeviceEnrollmentHandler;
@@ -84,8 +82,6 @@ use uuid::Uuid;
 use validation::InvitationValidationHandler;
 #[cfg(feature = "choreo-backend-telltale-vm")]
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, RoleIndex};
-#[cfg(feature = "choreo-backend-telltale-vm")]
-use telltale_vm::runtime_contracts::RuntimeContracts;
 #[cfg(feature = "choreo-backend-telltale-vm")]
 use telltale_vm::vm::StepResult;
 
@@ -1430,41 +1426,22 @@ impl InvitationHandler {
     }
 
     #[cfg(feature = "choreo-backend-telltale-vm")]
-    fn build_invitation_exchange_vm_engine(
+    async fn build_invitation_exchange_vm_engine(
         active_role: &str,
     ) -> AgentResult<(
         AuraChoreoEngine<AuraQueuedVmBridgeHandler>,
         Arc<AuraQueuedVmBridgeHandler>,
         telltale_vm::SessionId,
     )> {
+        let manifest =
+            aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::composition_manifest();
         let global_type =
             aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::global_type();
         let local_types =
             aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::local_types();
-        let image = build_role_scoped_code_image(
-            aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::role_names(),
-            active_role,
-            &global_type,
-            &local_types,
-        )
-        .map_err(AgentError::internal)?;
-
-        let handler = Arc::new(AuraQueuedVmBridgeHandler::default());
-        let config = build_vm_config(
-            AuraVmHardeningProfile::Prod,
-            AuraVmParityProfile::RuntimeDefault,
-        );
-        let mut engine = AuraChoreoEngine::new_with_contracts(
-            config,
-            Arc::clone(&handler),
-            Some(RuntimeContracts::full()),
-        )
-        .map_err(|error| AgentError::internal(format!("failed to create VM engine: {error}")))?;
-        let sid = engine
-            .open_session(&image)
-            .map_err(|error| AgentError::internal(format!("failed to open VM session: {error}")))?;
-
-        Ok((engine, handler, sid))
+        open_manifest_vm_session_admitted(&manifest, active_role, &global_type, &local_types)
+            .await
+            .map_err(AgentError::internal)
     }
 
     #[cfg(feature = "choreo-backend-telltale-vm")]
@@ -1508,7 +1485,7 @@ impl InvitationHandler {
 
         let result = async {
             let (mut engine, handler, vm_sid) =
-                Self::build_invitation_exchange_vm_engine("Sender")?;
+                Self::build_invitation_exchange_vm_engine("Sender").await?;
             handler.push_send_bytes(
                 to_vec(&offer).map_err(|error| {
                     AgentError::internal(format!("offer encode failed: {error}"))
@@ -1617,7 +1594,7 @@ impl InvitationHandler {
 
         let result = async {
             let (mut engine, handler, vm_sid) =
-                Self::build_invitation_exchange_vm_engine("Receiver")?;
+                Self::build_invitation_exchange_vm_engine("Receiver").await?;
 
             loop {
                 let step = engine.step().map_err(|error| {

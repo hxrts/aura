@@ -459,6 +459,24 @@ mod tests {
     }
 
     #[test]
+    fn invitation_exchange_manifest_includes_protocol_metadata() {
+        let manifest =
+            exchange::telltale_session_types_invitation::vm_artifacts::composition_manifest();
+
+        assert_eq!(manifest.protocol_name, "InvitationExchange");
+        assert_eq!(manifest.protocol_namespace.as_deref(), Some("invitation"));
+        assert_eq!(
+            manifest.protocol_qualified_name,
+            "invitation.InvitationExchange"
+        );
+        assert_eq!(manifest.protocol_id, "aura.invitation.exchange");
+        assert_eq!(manifest.role_names, vec!["Sender", "Receiver"]);
+        assert!(manifest.required_capabilities.is_empty());
+        assert!(manifest.link_specs.is_empty());
+        assert!(manifest.delegation_constraints.is_empty());
+    }
+
+    #[test]
     fn test_guardian_request_serialization() {
         let request = GuardianRequest {
             invitation_id: InvitationId::new("guard-456"),

@@ -9,7 +9,7 @@ use crate::handlers::shared::HandlerUtilities;
 use crate::runtime::services::SessionManager;
 use crate::runtime::vm_host_bridge::{
     close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
-    open_role_scoped_vm_session, receive_blocked_vm_message,
+    open_manifest_vm_session_admitted, receive_blocked_vm_message,
 };
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::transport::TransportEnvelope;
@@ -582,6 +582,8 @@ impl SessionOperations {
             "Coordinator".to_string(),
             coordination_role(coordinator_id, 0),
         )]);
+        let manifest =
+            self::telltale_session_types_session_coordination::vm_artifacts::composition_manifest();
         let global_type =
             self::telltale_session_types_session_coordination::vm_artifacts::global_type();
         let local_types =
@@ -593,12 +595,13 @@ impl SessionOperations {
             .map_err(|e| AgentError::internal(format!("session coordination start failed: {e}")))?;
 
         let result = async {
-            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
-                self::telltale_session_types_session_coordination::vm_artifacts::role_names(),
+            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                &manifest,
                 "Initiator",
                 &global_type,
                 &local_types,
             )
+            .await
             .map_err(AgentError::internal)?;
             handler.push_send_bytes(
                 to_vec(&session_request)
@@ -675,6 +678,8 @@ impl SessionOperations {
                 coordination_role(*participant, 0),
             );
         }
+        let manifest =
+            self::telltale_session_types_session_coordination::vm_artifacts::composition_manifest();
         let global_type =
             self::telltale_session_types_session_coordination::vm_artifacts::global_type();
         let local_types =
@@ -686,12 +691,13 @@ impl SessionOperations {
             .map_err(|e| AgentError::internal(format!("session coordination start failed: {e}")))?;
 
         let result = async {
-            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
-                self::telltale_session_types_session_coordination::vm_artifacts::role_names(),
+            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                &manifest,
                 "Coordinator",
                 &global_type,
                 &local_types,
             )
+            .await
             .map_err(AgentError::internal)?;
             for _ in &participants {
                 handler.push_send_bytes(
@@ -799,6 +805,8 @@ impl SessionOperations {
             "Coordinator".to_string(),
             coordination_role(coordinator_id, 0),
         )]);
+        let manifest =
+            self::telltale_session_types_session_coordination::vm_artifacts::composition_manifest();
         let global_type =
             self::telltale_session_types_session_coordination::vm_artifacts::global_type();
         let local_types =
@@ -810,12 +818,13 @@ impl SessionOperations {
             .map_err(|e| AgentError::internal(format!("session coordination start failed: {e}")))?;
 
         let result = async {
-            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
-                self::telltale_session_types_session_coordination::vm_artifacts::role_names(),
+            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                &manifest,
                 &active_role_name,
                 &global_type,
                 &local_types,
             )
+            .await
             .map_err(AgentError::internal)?;
             handler.push_send_bytes(
                 to_vec(&decision)

@@ -9,7 +9,7 @@ use super::{ReconfigurationManager, RuntimeTaskRegistry};
 use crate::core::default_context_id_for_authority;
 use crate::runtime::vm_host_bridge::{
     close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
-    open_role_scoped_vm_session_admitted, receive_blocked_vm_message,
+    open_manifest_vm_session_admitted, receive_blocked_vm_message,
 };
 use crate::runtime::AuraEffectSystem;
 use async_trait::async_trait;
@@ -17,7 +17,6 @@ use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash::hash;
 use aura_core::{AuthorityId, DelegationReceipt, DeviceId, SessionId};
-use aura_protocol::admission::{required_capability_keys, PROTOCOL_SYNC_EPOCH_ROTATION};
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, RoleIndex};
 use aura_sync::protocols::epoch_runners::EpochRotationProtocolRole;
 use aura_sync::protocols::{EpochCommit, EpochConfirmation, EpochRotationProposal};
@@ -634,11 +633,6 @@ impl SyncServiceManager {
         let session_id = epoch_rotation_session_id(&proposal.rotation_id);
         self.record_native_epoch_session(coordinator_id, session_id)
             .await;
-        let required_capabilities = required_capability_keys(PROTOCOL_SYNC_EPOCH_ROTATION);
-        let required_capability_refs: Vec<&str> = required_capabilities
-            .iter()
-            .map(|capability| capability.as_str())
-            .collect();
         let roles = vec![
             Self::epoch_role(coordinator_id, 0),
             Self::epoch_role(participant1_id, 0),
@@ -648,6 +642,8 @@ impl SyncServiceManager {
             ("Participant1".to_string(), Self::epoch_role(participant1_id, 0)),
             ("Participant2".to_string(), Self::epoch_role(participant2_id, 0)),
         ]);
+        let manifest =
+            aura_sync::protocols::epochs::telltale_session_types_epoch_rotation::vm_artifacts::composition_manifest();
         let global_type =
             aura_sync::protocols::epochs::telltale_session_types_epoch_rotation::vm_artifacts::global_type();
         let local_types =
@@ -659,12 +655,11 @@ impl SyncServiceManager {
             .map_err(|e| format!("epoch rotation start failed: {e}"))?;
 
         let result = async {
-            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session_admitted(
-                aura_sync::protocols::epochs::telltale_session_types_epoch_rotation::vm_artifacts::role_names(),
+            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                &manifest,
                 "Coordinator",
                 &global_type,
                 &local_types,
-                &required_capability_refs,
             )
             .await?;
             handler.push_send_bytes(
@@ -747,11 +742,6 @@ impl SyncServiceManager {
         let session_id = epoch_rotation_session_id(&confirmation.rotation_id);
         self.record_native_epoch_session(participant_id, session_id)
             .await;
-        let required_capabilities = required_capability_keys(PROTOCOL_SYNC_EPOCH_ROTATION);
-        let required_capability_refs: Vec<&str> = required_capabilities
-            .iter()
-            .map(|capability| capability.as_str())
-            .collect();
         let active_role_name = match role {
             EpochRotationProtocolRole::Participant1 => "Participant1",
             EpochRotationProtocolRole::Participant2 => "Participant2",
@@ -765,6 +755,8 @@ impl SyncServiceManager {
             "Coordinator".to_string(),
             Self::epoch_role(coordinator_id, 0),
         )]);
+        let manifest =
+            aura_sync::protocols::epochs::telltale_session_types_epoch_rotation::vm_artifacts::composition_manifest();
         let global_type =
             aura_sync::protocols::epochs::telltale_session_types_epoch_rotation::vm_artifacts::global_type();
         let local_types =
@@ -776,12 +768,11 @@ impl SyncServiceManager {
             .map_err(|e| format!("epoch rotation start failed: {e}"))?;
 
         let result = async {
-            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session_admitted(
-                aura_sync::protocols::epochs::telltale_session_types_epoch_rotation::vm_artifacts::role_names(),
+            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                &manifest,
                 active_role_name,
                 &global_type,
                 &local_types,
-                &required_capability_refs,
             )
             .await?;
             handler.push_send_bytes(

@@ -10,7 +10,7 @@ use crate::runtime::services::ceremony_runner::{
 };
 use crate::runtime::vm_host_bridge::{
     close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
-    open_role_scoped_vm_session, receive_blocked_vm_message,
+    open_manifest_vm_session_admitted, receive_blocked_vm_message,
 };
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::time::PhysicalTimeEffects;
@@ -18,6 +18,7 @@ use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, CeremonyId, ContextId};
 use aura_core::util::serialization::to_vec;
 use aura_core::Hash32;
+use aura_mpst::CompositionManifest;
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, RoleIndex};
 use aura_rendezvous::protocol::{
     DescriptorAnswer, DescriptorOffer, HandshakeComplete, HandshakeInit, RelayComplete,
@@ -126,7 +127,7 @@ impl RendezvousServiceApi {
         roles: Vec<ChoreographicRole>,
         peer_roles: BTreeMap<String, ChoreographicRole>,
         active_role: &str,
-        role_names: &[&str],
+        manifest: &CompositionManifest,
         global_type: &aura_mpst::telltale_types::GlobalType,
         local_types: &BTreeMap<String, aura_mpst::telltale_types::LocalTypeR>,
         initial_payloads: Vec<Vec<u8>>,
@@ -140,7 +141,8 @@ impl RendezvousServiceApi {
 
         let result = async {
             let (mut engine, handler, vm_sid) =
-                open_role_scoped_vm_session(role_names, active_role, global_type, local_types)
+                open_manifest_vm_session_admitted(manifest, active_role, global_type, local_types)
+                    .await
                     .map_err(AgentError::internal)?;
 
             for payload in initial_payloads {
@@ -396,6 +398,8 @@ impl RendezvousServiceApi {
     ) -> AgentResult<()> {
         let authority_id = self.handler.authority_context().authority_id();
         let session_id = rendezvous_exchange_session_id(context_id, authority_id, responder);
+        let manifest =
+            aura_rendezvous::protocol::exchange::telltale_session_types_rendezvous::vm_artifacts::composition_manifest();
         let global_type = aura_rendezvous::protocol::exchange::telltale_session_types_rendezvous::vm_artifacts::global_type();
         let local_types = aura_rendezvous::protocol::exchange::telltale_session_types_rendezvous::vm_artifacts::local_types();
 
@@ -410,7 +414,7 @@ impl RendezvousServiceApi {
                 Self::rendezvous_role(responder),
             )]),
             "Initiator",
-            aura_rendezvous::protocol::exchange::telltale_session_types_rendezvous::vm_artifacts::role_names(),
+            &manifest,
             &global_type,
             &local_types,
             vec![
@@ -438,6 +442,8 @@ impl RendezvousServiceApi {
     ) -> AgentResult<()> {
         let authority_id = self.handler.authority_context().authority_id();
         let session_id = rendezvous_exchange_session_id(context_id, initiator, authority_id);
+        let manifest =
+            aura_rendezvous::protocol::exchange::telltale_session_types_rendezvous::vm_artifacts::composition_manifest();
         let global_type = aura_rendezvous::protocol::exchange::telltale_session_types_rendezvous::vm_artifacts::global_type();
         let local_types = aura_rendezvous::protocol::exchange::telltale_session_types_rendezvous::vm_artifacts::local_types();
 
@@ -452,7 +458,7 @@ impl RendezvousServiceApi {
                 Self::rendezvous_role(initiator),
             )]),
             "Responder",
-            aura_rendezvous::protocol::exchange::telltale_session_types_rendezvous::vm_artifacts::role_names(),
+            &manifest,
             &global_type,
             &local_types,
             vec![
@@ -482,6 +488,7 @@ impl RendezvousServiceApi {
     ) -> AgentResult<()> {
         let authority_id = self.handler.authority_context().authority_id();
         let session_id = relayed_rendezvous_session_id(context_id, authority_id, relay, responder);
+        let manifest = aura_rendezvous::protocol::relayed::telltale_session_types_rendezvous_relay::vm_artifacts::composition_manifest();
         let global_type = aura_rendezvous::protocol::relayed::telltale_session_types_rendezvous_relay::vm_artifacts::global_type();
         let local_types = aura_rendezvous::protocol::relayed::telltale_session_types_rendezvous_relay::vm_artifacts::local_types();
 
@@ -497,7 +504,7 @@ impl RendezvousServiceApi {
                 ("Responder".to_string(), Self::rendezvous_role(responder)),
             ]),
             "Initiator",
-            aura_rendezvous::protocol::relayed::telltale_session_types_rendezvous_relay::vm_artifacts::role_names(),
+            &manifest,
             &global_type,
             &local_types,
             vec![to_vec(&request).map_err(|error| {
@@ -519,6 +526,7 @@ impl RendezvousServiceApi {
         let authority_id = self.handler.authority_context().authority_id();
         let session_id =
             relayed_rendezvous_session_id(context_id, initiator, authority_id, responder);
+        let manifest = aura_rendezvous::protocol::relayed::telltale_session_types_rendezvous_relay::vm_artifacts::composition_manifest();
         let global_type = aura_rendezvous::protocol::relayed::telltale_session_types_rendezvous_relay::vm_artifacts::global_type();
         let local_types = aura_rendezvous::protocol::relayed::telltale_session_types_rendezvous_relay::vm_artifacts::local_types();
 
@@ -534,7 +542,7 @@ impl RendezvousServiceApi {
                 ("Responder".to_string(), Self::rendezvous_role(responder)),
             ]),
             "Relay",
-            aura_rendezvous::protocol::relayed::telltale_session_types_rendezvous_relay::vm_artifacts::role_names(),
+            &manifest,
             &global_type,
             &local_types,
             vec![
@@ -559,6 +567,7 @@ impl RendezvousServiceApi {
     ) -> AgentResult<()> {
         let authority_id = self.handler.authority_context().authority_id();
         let session_id = relayed_rendezvous_session_id(context_id, initiator, relay, authority_id);
+        let manifest = aura_rendezvous::protocol::relayed::telltale_session_types_rendezvous_relay::vm_artifacts::composition_manifest();
         let global_type = aura_rendezvous::protocol::relayed::telltale_session_types_rendezvous_relay::vm_artifacts::global_type();
         let local_types = aura_rendezvous::protocol::relayed::telltale_session_types_rendezvous_relay::vm_artifacts::local_types();
 
@@ -571,7 +580,7 @@ impl RendezvousServiceApi {
             ],
             BTreeMap::from([("Relay".to_string(), Self::rendezvous_role(relay))]),
             "Responder",
-            aura_rendezvous::protocol::relayed::telltale_session_types_rendezvous_relay::vm_artifacts::role_names(),
+            &manifest,
             &global_type,
             &local_types,
             vec![to_vec(&response).map_err(|error| {

@@ -14,7 +14,7 @@ use crate::runtime::services::ceremony_runner::{
 use crate::runtime::services::{CeremonyTracker, ReconfigurationManager};
 use crate::runtime::vm_host_bridge::{
     close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
-    open_role_scoped_vm_session, receive_blocked_vm_message,
+    open_manifest_vm_session_admitted, receive_blocked_vm_message,
 };
 use crate::runtime::AuraEffectSystem;
 use aura_core::crypto::Ed25519Signature;
@@ -550,6 +550,8 @@ impl RecoveryServiceApi {
         ];
         let peer_roles =
             BTreeMap::from([("Coordinator".to_string(), Self::role(account_authority, 1))]);
+        let manifest =
+            aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::composition_manifest();
         let global_type = aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::global_type();
         let local_types = aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::local_types();
 
@@ -561,12 +563,13 @@ impl RecoveryServiceApi {
             })?;
 
         let result = async {
-            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
-                aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::role_names(),
+            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                &manifest,
                 "Guardian",
                 &global_type,
                 &local_types,
             )
+            .await
             .map_err(AgentError::internal)?;
             handler.push_send_bytes(
                 to_vec(&protocol_approval).map_err(|error| {
@@ -950,14 +953,16 @@ impl RecoveryServiceApi {
         }
 
         let result = async {
+            let manifest = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::composition_manifest();
             let global_type = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::global_type();
             let local_types = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::local_types();
-            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
-                aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::role_names(),
+            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                &manifest,
                 "Initiator",
                 &global_type,
                 &local_types,
             )
+            .await
             .map_err(AgentError::internal)?;
 
             for key_package in &sorted_key_packages {
@@ -1156,14 +1161,16 @@ impl RecoveryServiceApi {
         }
 
         let result = async {
+            let manifest = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::composition_manifest();
             let global_type = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::global_type();
             let local_types = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::local_types();
-            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
-                aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::role_names(),
+            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                &manifest,
                 active_role_name,
                 &global_type,
                 &local_types,
             )
+            .await
             .map_err(AgentError::internal)?;
             handler.push_send_bytes(
                 to_vec(&response_msg).map_err(|error| {
@@ -1256,6 +1263,8 @@ impl RecoveryServiceApi {
             ("Guardian2".to_string(), Self::role(guardians[1], 0)),
             ("Guardian3".to_string(), Self::role(guardians[2], 0)),
         ]);
+        let manifest =
+            aura_recovery::guardian_setup::telltale_session_types_guardian_setup::vm_artifacts::composition_manifest();
         let global_type =
             aura_recovery::guardian_setup::telltale_session_types_guardian_setup::vm_artifacts::global_type();
         let local_types =
@@ -1269,12 +1278,13 @@ impl RecoveryServiceApi {
             })?;
 
         let result = async {
-            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
-                aura_recovery::guardian_setup::telltale_session_types_guardian_setup::vm_artifacts::role_names(),
+            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                &manifest,
                 "SetupInitiator",
                 &global_type,
                 &local_types,
             )
+            .await
             .map_err(AgentError::internal)?;
 
             for _ in 0..guardians.len() {
@@ -1421,6 +1431,8 @@ impl RecoveryServiceApi {
             "SetupInitiator".to_string(),
             Self::role(invitation.account_id, 0),
         )]);
+        let manifest =
+            aura_recovery::guardian_setup::telltale_session_types_guardian_setup::vm_artifacts::composition_manifest();
         let global_type =
             aura_recovery::guardian_setup::telltale_session_types_guardian_setup::vm_artifacts::global_type();
         let local_types =
@@ -1434,12 +1446,13 @@ impl RecoveryServiceApi {
             })?;
 
         let result = async {
-            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
-                aura_recovery::guardian_setup::telltale_session_types_guardian_setup::vm_artifacts::role_names(),
+            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                &manifest,
                 active_role_name,
                 &global_type,
                 &local_types,
             )
+            .await
             .map_err(AgentError::internal)?;
             handler.push_send_bytes(to_vec(&acceptance).map_err(|error| {
                 AgentError::internal(format!("guardian acceptance encode failed: {error}"))
@@ -1575,6 +1588,7 @@ impl RecoveryServiceApi {
             ("Guardian2".to_string(), Self::role(guardians[1], 0)),
             ("Guardian3".to_string(), Self::role(guardians[2], 0)),
         ]);
+        let manifest = aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::composition_manifest();
         let global_type = aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::global_type();
         let local_types = aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::local_types();
 
@@ -1586,12 +1600,13 @@ impl RecoveryServiceApi {
             })?;
 
         let completion = async {
-            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
-                aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::role_names(),
+            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                &manifest,
                 "ChangeInitiator",
                 &global_type,
                 &local_types,
             )
+            .await
             .map_err(AgentError::internal)?;
 
             for _ in 0..3 {
@@ -1790,6 +1805,7 @@ impl RecoveryServiceApi {
         let roles = vec![Self::role(initiator_id, 0), Self::role(authority_id, 0)];
         let peer_roles =
             BTreeMap::from([("ChangeInitiator".to_string(), Self::role(initiator_id, 0))]);
+        let manifest = aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::composition_manifest();
         let global_type = aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::global_type();
         let local_types = aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::local_types();
 
@@ -1801,12 +1817,13 @@ impl RecoveryServiceApi {
             })?;
 
         let result = async {
-            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
-                aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::role_names(),
+            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                &manifest,
                 active_role_name,
                 &global_type,
                 &local_types,
             )
+            .await
             .map_err(AgentError::internal)?;
             handler.push_send_bytes(to_vec(&vote).map_err(|error| {
                 AgentError::internal(format!("guardian vote encode failed: {error}"))

@@ -11,7 +11,7 @@ use crate::handlers::shared::context_commitment_from_journal;
 use crate::runtime::consensus::build_consensus_params;
 use crate::runtime::vm_host_bridge::{
     close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
-    open_role_scoped_vm_session, receive_blocked_vm_message,
+    open_manifest_vm_session_admitted, receive_blocked_vm_message,
 };
 use crate::runtime::AuraEffectSystem;
 use aura_chat::guards::{EffectCommand, GuardOutcome, GuardSnapshot};
@@ -112,16 +112,19 @@ impl ChatServiceApi {
             })?;
 
         let result = async {
+            let manifest =
+                aura_protocol::amp::choreography::telltale_session_types_amp_transport::vm_artifacts::composition_manifest();
             let global_type =
                 aura_protocol::amp::choreography::telltale_session_types_amp_transport::vm_artifacts::global_type();
             let local_types =
                 aura_protocol::amp::choreography::telltale_session_types_amp_transport::vm_artifacts::local_types();
-            let (mut engine, handler, vm_sid) = open_role_scoped_vm_session(
-                aura_protocol::amp::choreography::telltale_session_types_amp_transport::vm_artifacts::role_names(),
+            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                &manifest,
                 active_role,
                 &global_type,
                 &local_types,
             )
+            .await
             .map_err(AgentError::internal)?;
 
             for payload in initial_payloads {
