@@ -2572,10 +2572,10 @@ module simple_choice exposing (SimpleChoice)
 
 protocol SimpleChoice =
   roles A, B
-  case choose A of
-    Accept ->
+  choice at A
+    | Accept ->
       A -> B : AcceptMsg
-    Reject ->
+    | Reject ->
       A -> B : RejectMsg
 "#;
         let choreography = parse_test_choreography(dsl);
@@ -2600,10 +2600,10 @@ module loop_proto exposing (LoopProto)
 protocol LoopProto =
   roles Coordinator, Peer
   loop decide by Coordinator
-    case choose Coordinator of
-      Continue ->
+    choice at Coordinator
+      | Continue ->
         Coordinator -> Peer : Tick
-      Stop ->
+      | Stop ->
         Coordinator -> Peer : Stop
 "#;
         let choreography = parse_test_choreography(dsl);
@@ -2662,10 +2662,10 @@ module subset_proto exposing (SubsetProto)
 
 protocol SubsetProto =
   roles A, B
-  case choose A of
-    Accept ->
+  choice at A
+    | Accept ->
       A -> B : AcceptMsg
-    Reject ->
+    | Reject ->
       A -> B : RejectMsg
 "#;
         let choreography = parse_test_choreography(dsl);

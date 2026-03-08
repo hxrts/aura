@@ -4,18 +4,18 @@ protocol GuardianCeremony =
   roles Initiator, Guardian1, Guardian2
 
   -- Phase 1: Propose rotation to all guardians
-  Initiator -> Guardian1 : ProposeRotation(crate::guardian_ceremony::CeremonyProposal)
-  Initiator -> Guardian2 : ProposeRotation(crate::guardian_ceremony::CeremonyProposal)
+  Initiator -> Guardian1 : ProposeRotation of crate.guardian_ceremony.CeremonyProposal
+  Initiator -> Guardian2 : ProposeRotation of crate.guardian_ceremony.CeremonyProposal
 
   -- Phase 2: Guardians respond
-  Guardian1 -> Initiator : RespondCeremony(crate::guardian_ceremony::CeremonyResponseMsg)
-  Guardian2 -> Initiator : RespondCeremony(crate::guardian_ceremony::CeremonyResponseMsg)
+  Guardian1 -> Initiator : RespondCeremony of crate.guardian_ceremony.CeremonyResponseMsg
+  Guardian2 -> Initiator : RespondCeremony of crate.guardian_ceremony.CeremonyResponseMsg
 
   -- Phase 3: Initiator decides outcome
-  case choose Initiator of
-    finalize ->
-      Initiator -> Guardian1 : CommitCeremony(crate::guardian_ceremony::CeremonyCommit)
-      Initiator -> Guardian2 : CommitCeremony(crate::guardian_ceremony::CeremonyCommit)
-    cancel ->
-      Initiator -> Guardian1 : AbortCeremony(crate::guardian_ceremony::CeremonyAbort)
-      Initiator -> Guardian2 : AbortCeremony(crate::guardian_ceremony::CeremonyAbort)
+  choice at Initiator
+    | finalize ->
+        Initiator -> Guardian1 : CommitCeremony of crate.guardian_ceremony.CeremonyCommit
+        Initiator -> Guardian2 : CommitCeremony of crate.guardian_ceremony.CeremonyCommit
+    | cancel ->
+        Initiator -> Guardian1 : AbortCeremony of crate.guardian_ceremony.CeremonyAbort
+        Initiator -> Guardian2 : AbortCeremony of crate.guardian_ceremony.CeremonyAbort

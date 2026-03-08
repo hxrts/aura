@@ -4,17 +4,21 @@ protocol GuardianAuthRelational =
   roles Account, Guardian, Coordinator
 
   -- Phase 1: Request guardian approval
-  Account[ guard_capability = "request_guardian_approval"
-         , flow_cost = 50 ] -> Coordinator : RequestGuardianAuth(crate::guardian_auth_relational::GuardianAuthRequest)
+  Account { guard_capability = "request_guardian_approval"
+          , flow_cost = 50 }
+    -> Coordinator : RequestGuardianAuth of crate.guardian_auth_relational.GuardianAuthRequest
 
   -- Phase 2: Forward to guardian
-  Coordinator[ guard_capability = "coordinate_guardians"
-             , flow_cost = 30 ] -> Guardian : ForwardAuthRequest(crate::guardian_auth_relational::GuardianAuthRequest)
+  Coordinator { guard_capability = "coordinate_guardians"
+              , flow_cost = 30 }
+    -> Guardian : ForwardAuthRequest of crate.guardian_auth_relational.GuardianAuthRequest
 
   -- Phase 3: Guardian proof submission
-  Guardian[ guard_capability = "submit_guardian_proof"
-          , flow_cost = 50 ] -> Coordinator : SubmitGuardianProof(crate::guardian_auth_relational::GuardianAuthProof)
+  Guardian { guard_capability = "submit_guardian_proof"
+           , flow_cost = 50 }
+    -> Coordinator : SubmitGuardianProof of crate.guardian_auth_relational.GuardianAuthProof
 
   -- Phase 4: Return result to account
-  Coordinator[ guard_capability = "verify_guardian"
-             , flow_cost = 30 ] -> Account : GuardianAuthResult(crate::guardian_auth_relational::GuardianAuthResponse)
+  Coordinator { guard_capability = "verify_guardian"
+              , flow_cost = 30 }
+    -> Account : GuardianAuthResult of crate.guardian_auth_relational.GuardianAuthResponse

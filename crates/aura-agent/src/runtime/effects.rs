@@ -1096,12 +1096,13 @@ impl AuraEffectSystem {
 
     /// Create effect system for simulation with controlled seed.
     pub fn simulation(config: &AgentConfig, seed: u64) -> Result<Self, crate::core::AgentError> {
+        let config = Self::normalize_test_config(config.clone());
         let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
         // Convert u64 seed to [u8; 32] for crypto handler
         let mut crypto_seed = [0u8; 32];
         crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
         Ok(Self::build_internal(
-            config.clone(),
+            config,
             composite,
             ExecutionMode::Simulation { seed },
             Some(crypto_seed),
@@ -1121,12 +1122,13 @@ impl AuraEffectSystem {
         seed: u64,
         shared_transport: SharedTransport,
     ) -> Result<Self, crate::core::AgentError> {
+        let config = Self::normalize_test_config(config.clone());
         let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
         // Convert u64 seed to [u8; 32] for crypto handler
         let mut crypto_seed = [0u8; 32];
         crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
         Ok(Self::build_internal(
-            config.clone(),
+            config,
             composite,
             ExecutionMode::Simulation { seed },
             Some(crypto_seed),
@@ -1145,11 +1147,12 @@ impl AuraEffectSystem {
         seed: u64,
         shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
     ) -> Result<Self, crate::core::AgentError> {
+        let config = Self::normalize_test_config(config.clone());
         let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
         let mut crypto_seed = [0u8; 32];
         crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
         Ok(Self::build_internal(
-            config.clone(),
+            config,
             composite,
             ExecutionMode::Simulation { seed },
             Some(crypto_seed),
@@ -1205,11 +1208,12 @@ impl AuraEffectSystem {
         seed: u64,
         authority_id: AuthorityId,
     ) -> Result<Self, crate::core::AgentError> {
+        let config = Self::normalize_test_config(config.clone());
         let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
         let mut crypto_seed = [0u8; 32];
         crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
         Ok(Self::build_internal(
-            config.clone(),
+            config,
             composite,
             ExecutionMode::Simulation { seed },
             Some(crypto_seed),
@@ -1226,11 +1230,12 @@ impl AuraEffectSystem {
         authority_id: AuthorityId,
         shared_transport: SharedTransport,
     ) -> Result<Self, crate::core::AgentError> {
+        let config = Self::normalize_test_config(config.clone());
         let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
         let mut crypto_seed = [0u8; 32];
         crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
         Ok(Self::build_internal(
-            config.clone(),
+            config,
             composite,
             ExecutionMode::Simulation { seed },
             Some(crypto_seed),
@@ -1247,11 +1252,12 @@ impl AuraEffectSystem {
         authority_id: AuthorityId,
         shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
     ) -> Result<Self, crate::core::AgentError> {
+        let config = Self::normalize_test_config(config.clone());
         let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
         let mut crypto_seed = [0u8; 32];
         crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
         Ok(Self::build_internal(
-            config.clone(),
+            config,
             composite,
             ExecutionMode::Simulation { seed },
             Some(crypto_seed),
@@ -1466,6 +1472,14 @@ mod tests {
 
         // Test operation permissions
         assert!(effect_system.can_perform_operation("test_operation"));
+    }
+
+    #[test]
+    fn test_simulation_uses_isolated_storage_for_default_config() {
+        let config = AgentConfig::default();
+        let effect_system = AuraEffectSystem::simulation_for_test(&config).unwrap();
+
+        assert_ne!(effect_system.config().storage.base_path, default_storage_path());
     }
 
     #[tokio::test]

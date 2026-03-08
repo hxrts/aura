@@ -113,12 +113,12 @@ futures-signals = "0.3"
 socket2 = { version = "0.5", features = ["all"] }
 
 # Session types & choreographic programming
-telltale = "3.0"
-telltale-choreography = "3.0"
-telltale-vm = "3.0"
-telltale-types = "3.0"
-telltale-theory = "3.0"
-telltale-lean-bridge = "3.0"
+telltale = "4.0.1"
+telltale-choreography = "4.0.1"
+telltale-vm = "4.0.1"
+telltale-types = "4.0.1"
+telltale-theory = "4.0.1"
+telltale-lean-bridge = "4.0.1"
 signature = "2.2"
 
 # KeyJournal dependencies for threshold operations and graph algorithms

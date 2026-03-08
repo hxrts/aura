@@ -102,10 +102,7 @@ real-android-keystore = []  # Enable real Android Keystore implementation
 # for decoupling the simulator from agent internals
 simulation = ["aura-core/simulation"]
 
-# Choreography backend switch flags.
-# Production/default runtime uses the Telltale VM backend.
-# The adapter backend remains opt-in while migration work is being retired.
-choreo-backend-telltale-adapter = []
+# Production/default runtime requires the Telltale VM backend.
 choreo-backend-telltale-vm = ["dep:telltale-vm", "aura-effects/telltale-runtime-capability"]
 
 # Platform-specific presets

@@ -331,6 +331,14 @@ fn detect_annotations_in_text(
                     });
                     has_flow_cost = true;
                 }
+                "parallel" => match item.value {
+                    None | Some(AnnotationValue::Bool(_)) => {}
+                    Some(_) => {
+                        return Err(AuraExtractionError::InvalidAnnotationValue(
+                            "parallel expects a boolean literal".to_string(),
+                        ))
+                    }
+                },
                 "journal_facts" => {
                     let facts = match item.value {
                         Some(AnnotationValue::Str(value)) => value,
@@ -405,14 +413,19 @@ fn detect_annotations_in_text(
                 }
                 "leakage_budget" => match item.value {
                     Some(AnnotationValue::IntList(_values)) => {}
+                    Some(AnnotationValue::Str(value)) => {
+                        parse_leakage_budget_string(&value)?;
+                    }
                     Some(_) => {
                         return Err(AuraExtractionError::InvalidAnnotationValue(
-                            "leakage_budget expects a list of integers".to_string(),
+                            "leakage_budget expects a list of integers or a quoted integer sequence"
+                                .to_string(),
                         ))
                     }
                     None => {
                         return Err(AuraExtractionError::InvalidAnnotationValue(
-                            "leakage_budget requires a list of integers".to_string(),
+                            "leakage_budget requires a list of integers or a quoted integer sequence"
+                                .to_string(),
                         ))
                     }
                 },
@@ -467,18 +480,22 @@ fn extract_annotation_content(line: &str) -> Option<String> {
     let bytes = line.as_bytes();
     let mut index = 0usize;
     while index < bytes.len() {
-        if bytes[index] != b'[' {
-            index += 1;
-            continue;
-        }
+        let (open, close) = match bytes[index] {
+            b'[' => (b'[', b']'),
+            b'{' => (b'{', b'}'),
+            _ => {
+                index += 1;
+                continue;
+            }
+        };
 
         let start = index + 1;
         let mut depth = 1usize;
         index += 1;
         while index < bytes.len() && depth > 0 {
             match bytes[index] {
-                b'[' => depth += 1,
-                b']' => depth = depth.saturating_sub(1),
+                byte if byte == open => depth += 1,
+                byte if byte == close => depth = depth.saturating_sub(1),
                 _ => {}
             }
             index += 1;
@@ -511,6 +528,22 @@ fn is_annotation_content(content: &str) -> bool {
     ]
     .iter()
     .any(|key| normalized.contains(key))
+}
+
+fn extract_role_before_delimiter(line: &str, delimiter: char) -> Option<RoleId> {
+    if let Some(position) = line.find(delimiter) {
+        let before_delimiter = line[..position].trim();
+        if !before_delimiter.is_empty() {
+            return Some(RoleId::new(before_delimiter));
+        }
+    }
+    None
+}
+
+/// Extract role from a line - simple implementation
+fn extract_role_from_line(line: &str) -> Option<RoleId> {
+    extract_role_before_delimiter(line, '[')
+        .or_else(|| extract_role_before_delimiter(line, '{'))
 }
 
 fn parse_link_directive(raw: &str) -> Result<LinkDirective, AuraExtractionError> {
@@ -577,16 +610,41 @@ fn parse_link_directive(raw: &str) -> Result<LinkDirective, AuraExtractionError>
     })
 }
 
-/// Extract role from a line - simple implementation
-fn extract_role_from_line(line: &str) -> Option<RoleId> {
-    // Try to find role before brackets like "Alice[guard_capability = ...]"
-    if let Some(bracket_pos) = line.find('[') {
-        let before_bracket = line[..bracket_pos].trim();
-        if !before_bracket.is_empty() {
-            return Some(RoleId::new(before_bracket));
-        }
+fn parse_leakage_budget_string(raw: &str) -> Result<Vec<u64>, AuraExtractionError> {
+    let trimmed = raw.trim();
+    let inner = trimmed
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(trimmed)
+        .trim();
+
+    if inner.is_empty() {
+        return Err(AuraExtractionError::InvalidAnnotationValue(
+            "leakage_budget string must contain at least one integer".to_string(),
+        ));
     }
-    None
+
+    inner
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            value.parse::<u64>().map_err(|_| {
+                AuraExtractionError::InvalidAnnotationValue(format!(
+                    "leakage_budget string contains a non-integer entry: {value}"
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .and_then(|values| {
+            if values.is_empty() {
+                Err(AuraExtractionError::InvalidAnnotationValue(
+                    "leakage_budget string must contain at least one integer".to_string(),
+                ))
+            } else {
+                Ok(values)
+            }
+        })
 }
 
 #[cfg(test)]
@@ -629,6 +687,16 @@ mod tests {
     #[test]
     fn test_extract_role_from_line() {
         let line = r#"Alice[guard_capability = "send_message"] -> Bob: Message;"#;
+        let role = extract_role_from_line(line);
+        assert_eq!(
+            role.map(|role| role.as_str().to_string()),
+            Some("Alice".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_role_from_record_line() {
+        let line = r#"Alice { guard_capability = "send_message" } -> Bob : Message of crate.demo.Payload"#;
         let role = extract_role_from_line(line);
         assert_eq!(
             role.map(|role| role.as_str().to_string()),
@@ -816,6 +884,36 @@ mod tests {
         assert!(
             err.to_string().contains("bundle=<id>"),
             "error should mention required bundle key"
+        );
+    }
+
+    #[test]
+    fn test_link_annotation_record_syntax() {
+        let choreography = r#"
+            Coordinator { link = "bundle=sync_chat|exports=chat.send,sync.push|imports=journal.commit" } -> Worker : Step of crate.demo.Payload
+        "#;
+        let effects = extract_aura_annotations(choreography).unwrap();
+        let has_link = effects.iter().any(|effect| {
+            matches!(effect, AuraEffect::Link { directive, role }
+                if directive.bundle_id == "sync_chat"
+                && directive.exports.contains(&"chat.send".to_string())
+                && directive.imports.contains(&"journal.commit".to_string())
+                && role.as_str() == "Coordinator")
+        });
+        assert!(has_link, "Should parse record-style link annotation directive");
+    }
+
+    #[test]
+    fn test_leakage_budget_annotation_quoted() {
+        let choreography = r#"
+            Alice[leakage_budget = "1, 0, 0"] -> Bob: Message;
+        "#;
+        let effects = extract_aura_annotations(choreography).unwrap();
+        assert!(
+            effects
+                .iter()
+                .any(|effect| matches!(effect, AuraEffect::FlowCost { cost: 100, .. })),
+            "quoted leakage_budget should parse without breaking annotation extraction"
         );
     }
 }

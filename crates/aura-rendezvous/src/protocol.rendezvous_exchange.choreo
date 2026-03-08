@@ -4,20 +4,24 @@ protocol RendezvousExchange =
   roles Initiator, Responder
 
   -- Phase 1: Initiator publishes descriptor
-  Initiator[ guard_capability = "rendezvous:publish"
-           , flow_cost = 1
-           , journal_facts = "RendezvousFact::Descriptor" ] -> Responder : DescriptorOffer(crate::DescriptorOffer)
+  Initiator { guard_capability = "rendezvous:publish"
+            , flow_cost = 1
+            , journal_facts = "RendezvousFact::Descriptor" }
+    -> Responder : DescriptorOffer of crate.DescriptorOffer
 
   -- Phase 2: Responder publishes answer
-  Responder[ guard_capability = "rendezvous:publish"
-           , flow_cost = 1
-           , journal_facts = "RendezvousFact::Descriptor" ] -> Initiator : DescriptorAnswer(crate::DescriptorAnswer)
+  Responder { guard_capability = "rendezvous:publish"
+            , flow_cost = 1
+            , journal_facts = "RendezvousFact::Descriptor" }
+    -> Initiator : DescriptorAnswer of crate.DescriptorAnswer
 
   -- Phase 3: Handshake initiation
-  Initiator[ guard_capability = "rendezvous:connect"
-           , flow_cost = 2 ] -> Responder : HandshakeInit(crate::HandshakeInit)
+  Initiator { guard_capability = "rendezvous:connect"
+            , flow_cost = 2 }
+    -> Responder : HandshakeInit of crate.HandshakeInit
 
   -- Phase 4: Handshake complete, channel established
-  Responder[ guard_capability = "rendezvous:connect"
-           , flow_cost = 2
-           , journal_facts = "RendezvousFact::ChannelEstablished" ] -> Initiator : HandshakeComplete(crate::HandshakeComplete)
+  Responder { guard_capability = "rendezvous:connect"
+            , flow_cost = 2
+            , journal_facts = "RendezvousFact::ChannelEstablished" }
+    -> Initiator : HandshakeComplete of crate.HandshakeComplete

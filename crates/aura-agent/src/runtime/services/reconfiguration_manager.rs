@@ -249,7 +249,6 @@ fn composed_bundle_from_manifest(manifest: &CompositionManifest) -> Vec<Composed
     bundles.into_values().collect()
 }
 
-#[cfg(feature = "choreo-backend-telltale-vm")]
 fn generated_linkable_bundles() -> Vec<ComposedBundle> {
     let manifests = [
         aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::composition_manifest(),
@@ -276,11 +275,6 @@ fn generated_linkable_bundles() -> Vec<ComposedBundle> {
     }
 
     grouped.into_values().collect()
-}
-
-#[cfg(not(feature = "choreo-backend-telltale-vm"))]
-fn generated_linkable_bundles() -> Vec<ComposedBundle> {
-    Vec::new()
 }
 
 fn default_runtime_capability_handler() -> RuntimeCapabilityHandler {

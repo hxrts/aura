@@ -4,17 +4,21 @@ protocol RecoveryProtocol =
   roles Account, Guardian, Coordinator
 
   -- Phase 1: Account initiates recovery
-  Account[ guard_capability = "initiate_recovery"
-         , flow_cost = 100 ] -> Coordinator : InitiateRecovery(crate::RecoveryRequest)
+  Account { guard_capability = "initiate_recovery"
+          , flow_cost = 100 }
+    -> Coordinator : InitiateRecovery of crate.RecoveryRequest
 
   -- Phase 2: Coordinator distributes to guardian
-  Coordinator[ guard_capability = "coordinate_recovery"
-             , flow_cost = 50 ] -> Guardian : DistributeRecoveryRequest(crate::RecoveryRequest)
+  Coordinator { guard_capability = "coordinate_recovery"
+              , flow_cost = 50 }
+    -> Guardian : DistributeRecoveryRequest of crate.RecoveryRequest
 
   -- Phase 3: Guardian submits approval
-  Guardian[ guard_capability = "approve_recovery"
-          , flow_cost = 50 ] -> Coordinator : SubmitApproval(crate::recovery_protocol::GuardianApproval)
+  Guardian { guard_capability = "approve_recovery"
+           , flow_cost = 50 }
+    -> Coordinator : SubmitApproval of crate.recovery_protocol.GuardianApproval
 
   -- Phase 4: Recovery complete
-  Coordinator[ guard_capability = "finalize_recovery"
-             , flow_cost = 100 ] -> Account : RecoveryComplete(crate::RecoveryOutcome)
+  Coordinator { guard_capability = "finalize_recovery"
+              , flow_cost = 100 }
+    -> Account : RecoveryComplete of crate.RecoveryOutcome
