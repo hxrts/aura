@@ -16,7 +16,8 @@ inversion through the `RuntimeBridge` trait.
 - Reactive signals: `CHAT_SIGNAL`, `SYNC_STATUS_SIGNAL`, `ERROR_SIGNAL`, etc.
 - Shared UI contract surfaces: `UiSnapshot`, `RenderHeartbeat`,
   `OperationInstanceId`, `RuntimeEventSnapshot`, `SharedFlowId`,
-  `SHARED_FLOW_SUPPORT`.
+  `SHARED_FLOW_SUPPORT`, `SHARED_SCREEN_SUPPORT`, `SHARED_MODAL_SUPPORT`,
+  `SHARED_LIST_SUPPORT`, `SHARED_SCREEN_MODULE_MAP`.
 - `RuntimeBridge`, `OfflineRuntimeBridge` for testing.
 - `QueryHandler`, `ReactiveHandler`, `UnifiedHandler`.
 
@@ -51,11 +52,15 @@ Contract alignment:
 
 ### InvariantSharedUiContractAuthority
 `aura-app` is the authoritative home for shared semantic UI identity,
-shared-flow support declarations, and typed harness-visible diagnostics.
+shared-flow parity declarations, shared screen/modal/list parity declarations,
+typed harness-visible diagnostics, and the machine-checkable screen/module map
+used for web/TUI parity enforcement.
 
 Enforcement locus:
 - `src/ui_contract.rs` defines semantic ids, `UiSnapshot`,
-  `RenderHeartbeat`, `RuntimeEventSnapshot`, and `SHARED_FLOW_SUPPORT`.
+  `RenderHeartbeat`, `RuntimeEventSnapshot`, `SHARED_FLOW_SUPPORT`,
+  `SHARED_SCREEN_SUPPORT`, `SHARED_MODAL_SUPPORT`, and
+  `SHARED_LIST_SUPPORT`, plus `SHARED_SCREEN_MODULE_MAP`.
 - `src/ui.rs` re-exports the contract for harness and frontend consumption.
 
 Failure mode:
@@ -65,6 +70,8 @@ Failure mode:
 
 Verification hooks:
 - `cargo test -p aura-app shared_flow_support_contract_is_consistent`
+- `cargo test -p aura-app shared_screen_modal_and_list_support_is_unique_and_addressable`
+- `cargo test -p aura-app shared_screen_module_map_uses_canonical_screen_names`
 - `just ci-shared-flow-policy`
 
 Contract alignment:

@@ -4,7 +4,7 @@ This guide covers how to use formal verification and model-based testing to vali
 
 Quint, simulator, and harness have distinct responsibilities. Quint defines models, traces, and invariants. The `aura-simulator` crate is a selectable deterministic runtime substrate. The `aura-harness` crate is the single executor for real TUI and web frontend flows. Shared semantic UI and scenario contracts live in `aura-app`.
 
-`aura-app` is also the home of the shared-flow support contract used by the real-runtime harness. This includes `SharedFlowId`, `SHARED_FLOW_SUPPORT`, `UiSnapshot`, and typed runtime event diagnostics.
+`aura-app` is also the home of the shared-flow support and parity contract used by the real-runtime harness. This includes `SharedFlowId`, `SHARED_FLOW_SUPPORT`, `SHARED_FLOW_SCENARIO_COVERAGE`, `UiSnapshot`, semantic parity comparison helpers, and typed runtime event diagnostics.
 
 ## When to Verify
 
@@ -176,7 +176,7 @@ just quint-semantic-trace spec=verification/quint/harness/flows.qnt \
 
 ITF traces capture semantic state sequences and non-deterministic choices.
 These traces are model artifacts. Real TUI and web execution belongs to the
-harness, which consumes the shared semantic scenario contract.
+harness, which consumes the shared semantic scenario contract. Shared web/TUI parity assertions also run against the same `UiSnapshot` contract rather than renderer text or DOM structure.
 
 Do not add direct Quint-to-TUI or Quint-to-browser execution paths. Quint should
 hand off semantic traces to the shared contract layer, then let the harness or

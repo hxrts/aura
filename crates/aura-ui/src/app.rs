@@ -3359,7 +3359,8 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
     }
 }
 
-fn neighborhood_screen(
+#[allow(non_snake_case)]
+fn NeighborhoodScreen(
     model: &UiModel,
     runtime: &NeighborhoodRuntimeView,
     controller: Arc<UiController>,
@@ -3938,7 +3939,8 @@ fn neighborhood_hop_hint(access_label: &str) -> &'static str {
     }
 }
 
-fn chat_screen(
+#[allow(non_snake_case)]
+fn ChatScreen(
     model: &UiModel,
     runtime: &ChatRuntimeView,
     controller: Arc<UiController>,
@@ -4196,7 +4198,8 @@ fn render_chat_message_bubble(message: ChatRuntimeMessage) -> Element {
     }
 }
 
-fn contacts_screen(
+#[allow(non_snake_case)]
+fn ContactsScreen(
     model: &UiModel,
     runtime: &ContactsRuntimeView,
     controller: Arc<UiController>,
@@ -4498,7 +4501,8 @@ fn contacts_screen(
     }
 }
 
-fn notifications_screen(
+#[allow(non_snake_case)]
+fn NotificationsScreen(
     model: &UiModel,
     runtime: &NotificationsRuntimeView,
     controller: Arc<UiController>,
@@ -4695,7 +4699,8 @@ fn neighborhood_member_selection_key(
     }
 }
 
-fn settings_screen(
+#[allow(non_snake_case)]
+fn SettingsScreen(
     model: &UiModel,
     runtime: &SettingsRuntimeView,
     controller: Arc<UiController>,
@@ -5084,7 +5089,7 @@ fn render_screen_content(
                     .web_dom_id()
                     .unwrap_or("aura-screen-neighborhood"),
                 class: "h-full min-h-0 w-full",
-                {neighborhood_screen(model, neighborhood_runtime, controller, render_tick)}
+                {NeighborhoodScreen(model, neighborhood_runtime, controller, render_tick)}
             }
         },
         UiScreen::Chat => rsx! {
@@ -5093,7 +5098,7 @@ fn render_screen_content(
                     .web_dom_id()
                     .unwrap_or("aura-screen-chat"),
                 class: "h-full min-h-0 w-full",
-                {chat_screen(model, chat_runtime, controller, render_tick)}
+                {ChatScreen(model, chat_runtime, controller, render_tick)}
             }
         },
         UiScreen::Contacts => rsx! {
@@ -5102,7 +5107,7 @@ fn render_screen_content(
                     .web_dom_id()
                     .unwrap_or("aura-screen-contacts"),
                 class: "h-full min-h-0 w-full",
-                {contacts_screen(model, contacts_runtime, controller, render_tick)}
+                {ContactsScreen(model, contacts_runtime, controller, render_tick)}
             }
         },
         UiScreen::Notifications => rsx! {
@@ -5111,7 +5116,7 @@ fn render_screen_content(
                     .web_dom_id()
                     .unwrap_or("aura-screen-notifications"),
                 class: "h-full min-h-0 w-full",
-                {notifications_screen(model, notifications_runtime, controller, render_tick)}
+                {NotificationsScreen(model, notifications_runtime, controller, render_tick)}
             }
         },
         UiScreen::Settings => rsx! {
@@ -5120,7 +5125,7 @@ fn render_screen_content(
                     .web_dom_id()
                     .unwrap_or("aura-screen-settings"),
                 class: "h-full min-h-0 w-full",
-                {settings_screen(
+                {SettingsScreen(
                     model,
                     settings_runtime,
                     controller,

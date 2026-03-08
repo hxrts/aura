@@ -55,12 +55,18 @@ pub mod signals {
 
 pub mod contract {
     pub use crate::ui_contract::{
-        list_item_dom_id, list_item_selector, shared_flow_support, ConfirmationState, ControlId,
-        FieldId, FlowAvailability, FrontendId, ListId, ListItemSnapshot, ListSnapshot,
-        MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
-        OperationState, ParityException, RenderHeartbeat, RuntimeEventId, RuntimeEventKind,
-        RuntimeEventSnapshot, ScreenId, SelectionSnapshot, SharedFlowId, SharedFlowSupport,
-        ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot, SHARED_FLOW_SUPPORT,
+        compare_ui_snapshots_for_parity, list_item_dom_id, list_item_selector,
+        shared_flow_scenarios, shared_flow_support, shared_list_support, shared_modal_support,
+        shared_screen_support, ConfirmationState, ControlId, FieldId, FlowAvailability,
+        FrontendId, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId,
+        OperationId, OperationInstanceId, OperationSnapshot, OperationState, ParityException,
+        RenderHeartbeat, RuntimeEventId, RuntimeEventKind, RuntimeEventSnapshot, ScreenId,
+        SelectionSnapshot, SharedFlowId, SharedFlowScenarioCoverage, SharedFlowSupport,
+        SharedListSupport, SharedModalSupport, SharedScreenModuleMap, SharedScreenSupport,
+        ToastId, ToastKind, ToastSnapshot, UiParityMismatch, UiReadiness, UiSnapshot,
+        ALL_SHARED_FLOW_IDS, SHARED_FLOW_SCENARIO_COVERAGE, SHARED_FLOW_SUPPORT,
+        SHARED_LIST_SUPPORT, SHARED_MODAL_SUPPORT, SHARED_SCREEN_MODULE_MAP,
+        SHARED_SCREEN_SUPPORT,
     };
 }
 

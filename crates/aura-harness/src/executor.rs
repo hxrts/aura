@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-use aura_app::ui::contract::{ControlId, FieldId, ModalId, ScreenId, UiSnapshot};
+use aura_app::ui::contract::{
+    compare_ui_snapshots_for_parity, ControlId, FieldId, ModalId, ScreenId, UiSnapshot,
+};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
@@ -836,6 +838,22 @@ fn execute_step(
             }
             Ok(())
         }
+        ScenarioAction::AssertParity => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let peer_instance = resolve_required_field(
+                step,
+                "peer_instance",
+                step.peer_instance.as_deref(),
+                context,
+            )?;
+            wait_for_parity(
+                step,
+                tool_api,
+                &instance_id,
+                &peer_instance,
+                step.timeout_ms.unwrap_or(step_budget_ms),
+            )
+        }
         ScenarioAction::WaitFor | ScenarioAction::MessageContains => {
             let instance_id = resolve_required_instance(step, context)?;
             if matches!(step.action, ScenarioAction::MessageContains)
@@ -1639,6 +1657,9 @@ fn semantic_wait_description(step: &ScenarioStep) -> String {
         }
         return format!("list={list_id:?}");
     }
+    if let Some(peer_instance) = step.peer_instance.as_deref() {
+        return format!("parity_with={peer_instance}");
+    }
     "semantic state".to_string()
 }
 
@@ -1701,6 +1722,37 @@ fn wait_for_semantic_state(
         instance_id,
         semantic_wait_description(step),
         Some(last_snapshot)
+    )
+}
+
+fn wait_for_parity(
+    step: &ScenarioStep,
+    tool_api: &mut ToolApi,
+    instance_id: &str,
+    peer_instance: &str,
+    timeout_ms: u64,
+) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let (last_local, last_peer, last_mismatches) = loop {
+        let local = fetch_ui_snapshot(tool_api, instance_id)?;
+        let peer = fetch_ui_snapshot(tool_api, peer_instance)?;
+        let mismatches = compare_ui_snapshots_for_parity(&local, &peer);
+        if mismatches.is_empty() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            break (local, peer, mismatches);
+        }
+        std::thread::sleep(Duration::from_millis(40));
+    };
+    bail!(
+        "step {} parity wait timed out on {} vs {} mismatches={:?} local={:?} peer={:?}",
+        step.id,
+        instance_id,
+        peer_instance,
+        last_mismatches,
+        last_local,
+        last_peer
     )
 }
 

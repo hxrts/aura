@@ -168,6 +168,7 @@ pub enum ScenarioAction {
     SendKey,
     ClickButton,
     FillInput,
+    AssertParity,
     WaitFor,
     MessageContains,
     ExpectToast,
@@ -212,6 +213,7 @@ impl fmt::Display for ScenarioAction {
             Self::SendKey => "send_key",
             Self::ClickButton => "click_button",
             Self::FillInput => "fill_input",
+            Self::AssertParity => "assert_parity",
             Self::WaitFor => "wait_for",
             Self::MessageContains => "message_contains",
             Self::ExpectToast => "expect_toast",
@@ -286,6 +288,8 @@ pub struct ScenarioStep {
     pub repeat: Option<u16>,
     /// Explicit source instance for `send_clipboard`.
     pub source_instance: Option<String>,
+    /// Peer instance identifier for semantic parity assertions.
+    pub peer_instance: Option<String>,
     /// Variable identifier for set/extract/introspection actions.
     pub var: Option<String>,
     /// Static or templated value for `set_var`.
@@ -416,6 +420,15 @@ impl ScenarioStep {
                 ))),
                 None => None,
             },
+            ScenarioAction::AssertParity => Some(SemanticAction::Expect(
+                Expectation::ParityWithActor {
+                    actor: ActorId(required_field(
+                        self.peer_instance.clone(),
+                        "peer_instance",
+                        self.action,
+                    )?),
+                },
+            )),
             ScenarioAction::WaitFor => expectation_from_step(self)?,
             ScenarioAction::MessageContains => {
                 Some(SemanticAction::Expect(Expectation::MessageContains {
@@ -665,6 +678,10 @@ impl TryFrom<SemanticStep> for ScenarioStep {
                 step.action = ScenarioAction::WaitFor;
                 step.operation_id = Some(operation_id);
                 step.operation_state = Some(state);
+            }
+            SemanticAction::Expect(Expectation::ParityWithActor { actor }) => {
+                step.action = ScenarioAction::AssertParity;
+                step.peer_instance = Some(actor.0);
             }
             SemanticAction::Variables(VariableAction::Set { name, value }) => {
                 step.action = ScenarioAction::SetVar;
@@ -1143,6 +1160,14 @@ impl ScenarioConfig {
                     step.id
                 );
             }
+            if matches!(step.action, ScenarioAction::AssertParity)
+                && (step.instance.is_none() || step.peer_instance.is_none())
+            {
+                bail!(
+                    "scenario step {} uses assert_parity without both instance and peer_instance",
+                    step.id
+                );
+            }
         }
 
         Ok(())
@@ -1510,6 +1535,30 @@ mod tests {
     }
 
     #[test]
+    fn semantic_parity_expectation_translates_into_execution_scenario() {
+        let definition = ScenarioDefinition {
+            id: "semantic-parity".to_string(),
+            goal: "semantic parity translation".to_string(),
+            steps: vec![SemanticStep {
+                id: "parity".to_string(),
+                actor: Some(ActorId("web".to_string())),
+                timeout_ms: Some(500),
+                action: SemanticAction::Expect(Expectation::ParityWithActor {
+                    actor: ActorId("tui".to_string()),
+                }),
+            }],
+        };
+
+        let scenario = ScenarioConfig::try_from(definition)
+            .unwrap_or_else(|error| panic!("semantic scenario translation failed: {error}"));
+
+        assert_eq!(scenario.steps.len(), 1);
+        assert_eq!(scenario.steps[0].action, ScenarioAction::AssertParity);
+        assert_eq!(scenario.steps[0].instance.as_deref(), Some("web"));
+        assert_eq!(scenario.steps[0].peer_instance.as_deref(), Some("tui"));
+    }
+
+    #[test]
     fn browser_instance_rejects_ssh_fields() {
         let config = RunConfig {
             schema_version: RUN_SCHEMA_VERSION,
@@ -1716,6 +1765,26 @@ mod tests {
             steps: vec![ScenarioStep {
                 id: "wait".to_string(),
                 action: ScenarioAction::WaitFor,
+                timeout_ms: Some(1000),
+                ..ScenarioStep::default()
+            }],
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn scenario_assert_parity_requires_peer_instance() {
+        let config = ScenarioConfig {
+            schema_version: SCENARIO_SCHEMA_VERSION,
+            id: "parity-invalid".to_string(),
+            goal: "reject parity without peer".to_string(),
+            execution_mode: Some("scripted".to_string()),
+            required_capabilities: Vec::new(),
+            steps: vec![ScenarioStep {
+                id: "parity".to_string(),
+                action: ScenarioAction::AssertParity,
+                instance: Some("web".to_string()),
                 timeout_ms: Some(1000),
                 ..ScenarioStep::default()
             }],

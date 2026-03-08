@@ -144,6 +144,9 @@ harness-flake-metrics root="artifacts/harness":
 ci-shared-flow-policy:
     bash scripts/check/shared-flow-policy.sh
 
+ci-ui-parity-contract:
+    bash scripts/check/ui-parity-contract.sh
+
 quint-observation-scenario:
     ./scripts/verify/quint-observation-scenario.sh
 

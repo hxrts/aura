@@ -444,12 +444,267 @@ pub enum SharedFlowId {
     ThemeAppearance,
 }
 
+pub const ALL_SHARED_FLOW_IDS: &[SharedFlowId] = &[
+    SharedFlowId::NavigateNeighborhood,
+    SharedFlowId::NavigateChat,
+    SharedFlowId::NavigateContacts,
+    SharedFlowId::NavigateNotifications,
+    SharedFlowId::NavigateSettings,
+    SharedFlowId::CreateInvitation,
+    SharedFlowId::AcceptInvitation,
+    SharedFlowId::CreateHome,
+    SharedFlowId::JoinChannel,
+    SharedFlowId::SendChatMessage,
+    SharedFlowId::AddDevice,
+    SharedFlowId::RemoveDevice,
+    SharedFlowId::SwitchAuthority,
+    SharedFlowId::ThemeAppearance,
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SharedFlowSupport {
     pub flow: SharedFlowId,
     pub web: FlowAvailability,
     pub tui: FlowAvailability,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharedFlowScenarioCoverage {
+    pub flow: SharedFlowId,
+    pub scenario_id: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharedScreenSupport {
+    pub screen: ScreenId,
+    pub web: FlowAvailability,
+    pub tui: FlowAvailability,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharedModalSupport {
+    pub modal: ModalId,
+    pub web: FlowAvailability,
+    pub tui: FlowAvailability,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharedListSupport {
+    pub list: ListId,
+    pub web: FlowAvailability,
+    pub tui: FlowAvailability,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharedScreenModuleMap {
+    pub screen: ScreenId,
+    pub web_symbol: &'static str,
+    pub web_path: &'static str,
+    pub tui_symbol: &'static str,
+    pub tui_path: &'static str,
+}
+
+pub const SHARED_SCREEN_SUPPORT: &[SharedScreenSupport] = &[
+    SharedScreenSupport {
+        screen: ScreenId::Neighborhood,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedScreenSupport {
+        screen: ScreenId::Chat,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedScreenSupport {
+        screen: ScreenId::Contacts,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedScreenSupport {
+        screen: ScreenId::Notifications,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedScreenSupport {
+        screen: ScreenId::Settings,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+];
+
+pub const SHARED_MODAL_SUPPORT: &[SharedModalSupport] = &[
+    SharedModalSupport {
+        modal: ModalId::Help,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::CreateInvitation,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::AcceptInvitation,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::CreateHome,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::CreateChannel,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::SetChannelTopic,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::ChannelInfo,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::EditNickname,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::GuardianSetup,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::RequestRecovery,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::AddDevice,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::ImportDeviceEnrollmentCode,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::SelectDeviceToRemove,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::ConfirmRemoveDevice,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::MfaSetup,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::AssignModerator,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::SwitchAuthority,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::AccessOverride,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::CapabilityConfig,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+];
+
+pub const SHARED_LIST_SUPPORT: &[SharedListSupport] = &[
+    SharedListSupport {
+        list: ListId::Navigation,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedListSupport {
+        list: ListId::Contacts,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedListSupport {
+        list: ListId::Channels,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedListSupport {
+        list: ListId::Notifications,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedListSupport {
+        list: ListId::SettingsSections,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedListSupport {
+        list: ListId::Homes,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedListSupport {
+        list: ListId::NeighborhoodMembers,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+];
+
+pub const SHARED_SCREEN_MODULE_MAP: &[SharedScreenModuleMap] = &[
+    SharedScreenModuleMap {
+        screen: ScreenId::Neighborhood,
+        web_symbol: "NeighborhoodScreen",
+        web_path: "crates/aura-ui/src/app.rs",
+        tui_symbol: "NeighborhoodScreen",
+        tui_path: "crates/aura-terminal/src/tui/screens/neighborhood/screen.rs",
+    },
+    SharedScreenModuleMap {
+        screen: ScreenId::Chat,
+        web_symbol: "ChatScreen",
+        web_path: "crates/aura-ui/src/app.rs",
+        tui_symbol: "ChatScreen",
+        tui_path: "crates/aura-terminal/src/tui/screens/chat/screen.rs",
+    },
+    SharedScreenModuleMap {
+        screen: ScreenId::Contacts,
+        web_symbol: "ContactsScreen",
+        web_path: "crates/aura-ui/src/app.rs",
+        tui_symbol: "ContactsScreen",
+        tui_path: "crates/aura-terminal/src/tui/screens/contacts/screen.rs",
+    },
+    SharedScreenModuleMap {
+        screen: ScreenId::Notifications,
+        web_symbol: "NotificationsScreen",
+        web_path: "crates/aura-ui/src/app.rs",
+        tui_symbol: "NotificationsScreen",
+        tui_path: "crates/aura-terminal/src/tui/screens/notifications/screen.rs",
+    },
+    SharedScreenModuleMap {
+        screen: ScreenId::Settings,
+        web_symbol: "SettingsScreen",
+        web_path: "crates/aura-ui/src/app.rs",
+        tui_symbol: "SettingsScreen",
+        tui_path: "crates/aura-terminal/src/tui/screens/settings/screen.rs",
+    },
+];
 
 pub const SHARED_FLOW_SUPPORT: &[SharedFlowSupport] = &[
     SharedFlowSupport {
@@ -524,12 +779,112 @@ pub const SHARED_FLOW_SUPPORT: &[SharedFlowSupport] = &[
     },
 ];
 
+pub const SHARED_FLOW_SCENARIO_COVERAGE: &[SharedFlowScenarioCoverage] = &[
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::NavigateNeighborhood,
+        scenario_id: "real-runtime-mixed-startup-smoke",
+    },
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::NavigateChat,
+        scenario_id: "scenario13-mixed-contact-channel-message-e2e",
+    },
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::NavigateContacts,
+        scenario_id: "scenario13-mixed-contact-channel-message-e2e",
+    },
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::NavigateNotifications,
+        scenario_id: "scenario10-recovery-and-notifications-e2e",
+    },
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::NavigateSettings,
+        scenario_id: "shared-settings-parity",
+    },
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::CreateInvitation,
+        scenario_id: "scenario13-mixed-contact-channel-message-e2e",
+    },
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::AcceptInvitation,
+        scenario_id: "scenario13-mixed-contact-channel-message-e2e",
+    },
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::CreateHome,
+        scenario_id: "scenario13-mixed-contact-channel-message-e2e",
+    },
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::JoinChannel,
+        scenario_id: "scenario13-mixed-contact-channel-message-e2e",
+    },
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::SendChatMessage,
+        scenario_id: "scenario13-mixed-contact-channel-message-e2e",
+    },
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::AddDevice,
+        scenario_id: "scenario12-mixed-device-enrollment-removal-e2e",
+    },
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::RemoveDevice,
+        scenario_id: "scenario12-mixed-device-enrollment-removal-e2e",
+    },
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::SwitchAuthority,
+        scenario_id: "scenario8-settings-devices-authority-e2e",
+    },
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::ThemeAppearance,
+        scenario_id: "shared-settings-parity",
+    },
+];
+
 #[must_use]
 pub fn shared_flow_support(flow: SharedFlowId) -> &'static SharedFlowSupport {
     SHARED_FLOW_SUPPORT
         .iter()
         .find(|support| support.flow == flow)
         .expect("shared flow support must be declared")
+}
+
+#[must_use]
+pub fn shared_flow_scenarios(flow: SharedFlowId) -> Vec<&'static str> {
+    SHARED_FLOW_SCENARIO_COVERAGE
+        .iter()
+        .filter(|coverage| coverage.flow == flow)
+        .map(|coverage| coverage.scenario_id)
+        .collect()
+}
+
+#[must_use]
+pub fn shared_screen_support(screen: ScreenId) -> &'static SharedScreenSupport {
+    SHARED_SCREEN_SUPPORT
+        .iter()
+        .find(|support| support.screen == screen)
+        .expect("shared screen support must be declared")
+}
+
+#[must_use]
+pub fn shared_modal_support(modal: ModalId) -> &'static SharedModalSupport {
+    SHARED_MODAL_SUPPORT
+        .iter()
+        .find(|support| support.modal == modal)
+        .expect("shared modal support must be declared")
+}
+
+#[must_use]
+pub fn shared_list_support(list: ListId) -> &'static SharedListSupport {
+    SHARED_LIST_SUPPORT
+        .iter()
+        .find(|support| support.list == list)
+        .expect("shared list support must be declared")
+}
+
+#[must_use]
+pub fn shared_screen_module_map(screen: ScreenId) -> &'static SharedScreenModuleMap {
+    SHARED_SCREEN_MODULE_MAP
+        .iter()
+        .find(|mapping| mapping.screen == screen)
+        .expect("shared screen module mapping must be declared")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -564,14 +919,162 @@ impl UiSnapshot {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiParityMismatch {
+    pub field: &'static str,
+    pub web: String,
+    pub tui: String,
+}
+
+fn parity_list_signature(snapshot: &UiSnapshot) -> Vec<(ListId, Vec<(String, bool, ConfirmationState)>)> {
+    let mut lists = snapshot
+        .lists
+        .iter()
+        .map(|list| {
+            let mut items = list
+                .items
+                .iter()
+                .map(|item| (item.id.clone(), item.selected, item.confirmation))
+                .collect::<Vec<_>>();
+            items.sort_by(|left, right| {
+                left.0
+                    .cmp(&right.0)
+                    .then_with(|| left.1.cmp(&right.1))
+                    .then_with(|| format!("{:?}", left.2).cmp(&format!("{:?}", right.2)))
+            });
+            (list.id, items)
+        })
+        .collect::<Vec<_>>();
+    lists.sort_by_key(|(list_id, _)| list_id.dom_segment());
+    lists
+}
+
+fn parity_selection_signature(snapshot: &UiSnapshot) -> Vec<(ListId, String)> {
+    let mut selections = snapshot
+        .selections
+        .iter()
+        .map(|selection| (selection.list, selection.item_id.clone()))
+        .collect::<Vec<_>>();
+    selections.sort_by(|left, right| {
+        left.0
+            .dom_segment()
+            .cmp(right.0.dom_segment())
+            .then_with(|| left.1.cmp(&right.1))
+    });
+    selections
+}
+
+fn parity_operation_signature(snapshot: &UiSnapshot) -> Vec<(String, OperationState)> {
+    let mut operations = snapshot
+        .operations
+        .iter()
+        .map(|operation| (operation.id.0.clone(), operation.state))
+        .collect::<Vec<_>>();
+    operations.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| format!("{:?}", left.1).cmp(&format!("{:?}", right.1)))
+    });
+    operations
+}
+
+fn parity_message_signature(snapshot: &UiSnapshot) -> Vec<String> {
+    let mut messages = snapshot
+        .messages
+        .iter()
+        .map(|message| message.content.clone())
+        .collect::<Vec<_>>();
+    messages.sort();
+    messages
+}
+
+#[must_use]
+pub fn compare_ui_snapshots_for_parity(
+    web: &UiSnapshot,
+    tui: &UiSnapshot,
+) -> Vec<UiParityMismatch> {
+    let mut mismatches = Vec::new();
+
+    if web.screen != tui.screen {
+        mismatches.push(UiParityMismatch {
+            field: "screen",
+            web: format!("{:?}", web.screen),
+            tui: format!("{:?}", tui.screen),
+        });
+    }
+    if web.readiness != tui.readiness {
+        mismatches.push(UiParityMismatch {
+            field: "readiness",
+            web: format!("{:?}", web.readiness),
+            tui: format!("{:?}", tui.readiness),
+        });
+    }
+    if web.open_modal != tui.open_modal {
+        mismatches.push(UiParityMismatch {
+            field: "open_modal",
+            web: format!("{:?}", web.open_modal),
+            tui: format!("{:?}", tui.open_modal),
+        });
+    }
+
+    let web_selections = parity_selection_signature(web);
+    let tui_selections = parity_selection_signature(tui);
+    if web_selections != tui_selections {
+        mismatches.push(UiParityMismatch {
+            field: "selections",
+            web: format!("{web_selections:?}"),
+            tui: format!("{tui_selections:?}"),
+        });
+    }
+
+    let web_lists = parity_list_signature(web);
+    let tui_lists = parity_list_signature(tui);
+    if web_lists != tui_lists {
+        mismatches.push(UiParityMismatch {
+            field: "lists",
+            web: format!("{web_lists:?}"),
+            tui: format!("{tui_lists:?}"),
+        });
+    }
+
+    let web_operations = parity_operation_signature(web);
+    let tui_operations = parity_operation_signature(tui);
+    if web_operations != tui_operations {
+        mismatches.push(UiParityMismatch {
+            field: "operations",
+            web: format!("{web_operations:?}"),
+            tui: format!("{tui_operations:?}"),
+        });
+    }
+
+    let web_messages = parity_message_signature(web);
+    let tui_messages = parity_message_signature(tui);
+    if web_messages != tui_messages {
+        mismatches.push(UiParityMismatch {
+            field: "messages",
+            web: format!("{web_messages:?}"),
+            tui: format!("{tui_messages:?}"),
+        });
+    }
+
+    mismatches
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        list_item_dom_id, list_item_selector, shared_flow_support, ControlId, FieldId,
-        FlowAvailability, ListId, ModalId, ParityException, RenderHeartbeat, ScreenId,
-        SharedFlowId, UiReadiness, UiSnapshot, SHARED_FLOW_SUPPORT,
+        compare_ui_snapshots_for_parity, list_item_dom_id, list_item_selector,
+        shared_flow_scenarios, shared_flow_support, shared_list_support, shared_modal_support,
+        shared_screen_module_map, shared_screen_support, ConfirmationState, ControlId, FieldId,
+        FlowAvailability, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId,
+        OperationId, OperationInstanceId, OperationSnapshot, OperationState, ParityException,
+        RenderHeartbeat, ScreenId, SelectionSnapshot, SharedFlowId, UiParityMismatch,
+        UiReadiness, UiSnapshot, ALL_SHARED_FLOW_IDS, SHARED_FLOW_SCENARIO_COVERAGE,
+        SHARED_FLOW_SUPPORT, SHARED_LIST_SUPPORT, SHARED_MODAL_SUPPORT,
+        SHARED_SCREEN_MODULE_MAP, SHARED_SCREEN_SUPPORT,
     };
     use std::collections::HashSet;
+    use std::path::Path;
 
     #[test]
     fn screen_ids_have_stable_help_labels() {
@@ -676,11 +1179,37 @@ mod tests {
 
     #[test]
     fn shared_flow_support_contract_is_consistent() {
+        let all_declared: HashSet<_> = ALL_SHARED_FLOW_IDS.iter().copied().collect();
         let unique: HashSet<_> = SHARED_FLOW_SUPPORT
             .iter()
             .map(|support| support.flow)
             .collect();
         assert_eq!(unique.len(), SHARED_FLOW_SUPPORT.len());
+        assert_eq!(
+            unique, all_declared,
+            "shared flow support manifest must stay exhaustive"
+        );
+
+        let scenario_coverage_unique: HashSet<_> = SHARED_FLOW_SCENARIO_COVERAGE
+            .iter()
+            .map(|coverage| (coverage.flow, coverage.scenario_id))
+            .collect();
+        assert_eq!(
+            scenario_coverage_unique.len(),
+            SHARED_FLOW_SCENARIO_COVERAGE.len()
+        );
+
+        for support in SHARED_FLOW_SUPPORT {
+            if support.web == FlowAvailability::Supported
+                && support.tui == FlowAvailability::Supported
+            {
+                assert!(
+                    !shared_flow_scenarios(support.flow).is_empty(),
+                    "shared flow {:?} must declare at least one parity scenario",
+                    support.flow
+                );
+            }
+        }
 
         let theme_support = shared_flow_support(SharedFlowId::ThemeAppearance);
         assert_eq!(theme_support.web, FlowAvailability::Supported);
@@ -688,5 +1217,183 @@ mod tests {
             theme_support.tui,
             FlowAvailability::Exception(ParityException::BrowserThemeControl)
         );
+    }
+
+    #[test]
+    fn shared_flow_scenario_coverage_points_to_existing_scenarios() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("workspace root");
+        let scenarios_dir = workspace_root.join("scenarios").join("harness");
+        let entries = std::fs::read_dir(&scenarios_dir).expect("scenario directory should exist");
+        let mut known_ids = HashSet::new();
+        for entry in entries {
+            let entry = entry.expect("scenario dir entry");
+            if entry.path().extension().and_then(|ext| ext.to_str()) != Some("toml") {
+                continue;
+            }
+            let body = std::fs::read_to_string(entry.path()).expect("scenario file should read");
+            for line in body.lines() {
+                let trimmed = line.trim();
+                if let Some(id) = trimmed.strip_prefix("id = \"") {
+                    if let Some(id) = id.strip_suffix('"') {
+                        known_ids.insert(id.to_string());
+                    }
+                    break;
+                }
+            }
+        }
+
+        for coverage in SHARED_FLOW_SCENARIO_COVERAGE {
+            assert!(
+                known_ids.contains(coverage.scenario_id),
+                "shared flow {:?} references missing scenario id {}",
+                coverage.flow,
+                coverage.scenario_id
+            );
+        }
+    }
+
+    #[test]
+    fn shared_screen_modal_and_list_support_is_unique_and_addressable() {
+        let unique_screens: HashSet<_> = SHARED_SCREEN_SUPPORT
+            .iter()
+            .map(|support| support.screen)
+            .collect();
+        assert_eq!(unique_screens.len(), SHARED_SCREEN_SUPPORT.len());
+
+        let unique_modals: HashSet<_> = SHARED_MODAL_SUPPORT
+            .iter()
+            .map(|support| support.modal)
+            .collect();
+        assert_eq!(unique_modals.len(), SHARED_MODAL_SUPPORT.len());
+
+        let unique_lists: HashSet<_> = SHARED_LIST_SUPPORT
+            .iter()
+            .map(|support| support.list)
+            .collect();
+        assert_eq!(unique_lists.len(), SHARED_LIST_SUPPORT.len());
+
+        assert_eq!(
+            shared_screen_support(ScreenId::Settings).web,
+            FlowAvailability::Supported
+        );
+        assert_eq!(
+            shared_modal_support(ModalId::AcceptInvitation).tui,
+            FlowAvailability::Supported
+        );
+        assert_eq!(
+            shared_list_support(ListId::Contacts).web,
+            FlowAvailability::Supported
+        );
+    }
+
+    #[test]
+    fn shared_screen_module_map_uses_canonical_screen_names() {
+        let unique_screens: HashSet<_> = SHARED_SCREEN_MODULE_MAP
+            .iter()
+            .map(|mapping| mapping.screen)
+            .collect();
+        assert_eq!(unique_screens.len(), SHARED_SCREEN_MODULE_MAP.len());
+
+        let chat = shared_screen_module_map(ScreenId::Chat);
+        assert_eq!(chat.web_symbol, "ChatScreen");
+        assert_eq!(chat.tui_symbol, "ChatScreen");
+        assert!(chat.web_path.ends_with("crates/aura-ui/src/app.rs"));
+        assert!(chat.tui_path.ends_with("crates/aura-terminal/src/tui/screens/chat/screen.rs"));
+    }
+
+    #[test]
+    fn ui_snapshot_parity_ignores_occurrence_ids_but_catches_state_drift() {
+        let web = UiSnapshot {
+            screen: ScreenId::Chat,
+            focused_control: Some(ControlId::Screen(ScreenId::Chat)),
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            selections: vec![SelectionSnapshot {
+                list: ListId::Channels,
+                item_id: "amp-bridge".to_string(),
+            }],
+            lists: vec![ListSnapshot {
+                id: ListId::Channels,
+                items: vec![ListItemSnapshot {
+                    id: "amp-bridge".to_string(),
+                    selected: true,
+                    confirmation: ConfirmationState::Confirmed,
+                }],
+            }],
+            messages: vec![MessageSnapshot {
+                id: "web-1".to_string(),
+                content: "hello".to_string(),
+            }],
+            operations: vec![OperationSnapshot {
+                id: OperationId::invitation_accept(),
+                instance_id: OperationInstanceId("web-op".to_string()),
+                state: OperationState::Succeeded,
+            }],
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+        let mut tui = web.clone();
+        tui.focused_control = Some(ControlId::List(ListId::Channels));
+        tui.messages[0].id = "tui-1".to_string();
+        tui.operations[0].instance_id = OperationInstanceId("tui-op".to_string());
+
+        assert!(compare_ui_snapshots_for_parity(&web, &tui).is_empty());
+
+        tui.messages[0].content = "different".to_string();
+        let mismatches = compare_ui_snapshots_for_parity(&web, &tui);
+        assert_eq!(
+            mismatches,
+            vec![UiParityMismatch {
+                field: "messages",
+                web: "[\"hello\"]".to_string(),
+                tui: "[\"different\"]".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn parity_module_map_points_to_existing_frontend_symbols() {
+        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root");
+
+        for mapping in SHARED_SCREEN_MODULE_MAP {
+            let web_path = workspace_root.join(mapping.web_path);
+            let tui_path = workspace_root.join(mapping.tui_path);
+            assert!(
+                web_path.exists(),
+                "missing web parity path for {:?}: {}",
+                mapping.screen,
+                web_path.display()
+            );
+            assert!(
+                tui_path.exists(),
+                "missing tui parity path for {:?}: {}",
+                mapping.screen,
+                tui_path.display()
+            );
+
+            let web_source = std::fs::read_to_string(&web_path)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", web_path.display()));
+            let tui_source = std::fs::read_to_string(&tui_path)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", tui_path.display()));
+
+            assert!(
+                web_source.contains(mapping.web_symbol),
+                "web parity symbol {:?} missing from {}",
+                mapping.web_symbol,
+                web_path.display()
+            );
+            assert!(
+                tui_source.contains(mapping.tui_symbol),
+                "tui parity symbol {:?} missing from {}",
+                mapping.tui_symbol,
+                tui_path.display()
+            );
+        }
     }
 }

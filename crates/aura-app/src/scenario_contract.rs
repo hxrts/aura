@@ -151,6 +151,9 @@ pub enum Expectation {
         operation_id: OperationId,
         state: OperationState,
     },
+    ParityWithActor {
+        actor: ActorId,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -183,6 +186,7 @@ pub struct SemanticScenarioFileStep {
     pub readiness: Option<UiReadiness>,
     pub operation_id: Option<OperationId>,
     pub operation_state: Option<OperationState>,
+    pub peer_actor: Option<ActorId>,
     pub confirmation: Option<ConfirmationState>,
     pub name: Option<String>,
     pub regex: Option<String>,
@@ -221,6 +225,7 @@ pub enum SemanticActionKind {
     SelectionIs,
     ReadinessIs,
     OperationStateIs,
+    ParityWithActor,
     CaptureCurrentAuthorityId,
     CaptureSelection,
     SetVar,
@@ -381,6 +386,11 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                     state: required(value.operation_state, "operation_state", value.action)?,
                 })
             }
+            SemanticActionKind::ParityWithActor => {
+                ScenarioAction::Expect(Expectation::ParityWithActor {
+                    actor: required(value.peer_actor, "peer_actor", value.action)?,
+                })
+            }
             SemanticActionKind::CaptureCurrentAuthorityId => {
                 ScenarioAction::Variables(VariableAction::CaptureCurrentAuthorityId {
                     name: required(value.name, "name", value.action)?,
@@ -451,6 +461,8 @@ mod tests {
                     operation_id: None,
                     operation_state: None,
                     confirmation: None,
+                    peer_actor: None,
+                    confirmation: None,
                     name: None,
                     regex: None,
                     group: None,
@@ -478,6 +490,8 @@ mod tests {
                     readiness: None,
                     operation_id: None,
                     operation_state: None,
+                    confirmation: None,
+                    peer_actor: None,
                     confirmation: None,
                     name: None,
                     regex: None,
@@ -531,6 +545,8 @@ mod tests {
             operation_id: None,
             operation_state: None,
             confirmation: None,
+            peer_actor: None,
+            confirmation: None,
             name: None,
             regex: None,
             group: None,
@@ -550,6 +566,44 @@ mod tests {
         assert!(matches!(
             expectation,
             Expectation::ScreenIs(ScreenId::Settings)
+        ));
+    }
+
+    #[test]
+    fn semantic_parity_expectation_requires_peer_actor() {
+        let step = SemanticScenarioFileStep {
+            id: "parity".to_string(),
+            actor: Some(super::ActorId("web".to_string())),
+            timeout_ms: Some(1000),
+            action: SemanticActionKind::ParityWithActor,
+            screen_id: None,
+            control_id: None,
+            field_id: None,
+            modal_id: None,
+            list_id: None,
+            item_id: None,
+            value: None,
+            key: None,
+            repeat: None,
+            source_actor: None,
+            kind: None,
+            readiness: None,
+            operation_id: None,
+            operation_state: None,
+            peer_actor: Some(super::ActorId("tui".to_string())),
+            confirmation: None,
+            name: None,
+            regex: None,
+            group: None,
+            from: None,
+            count: None,
+        };
+
+        let converted = ScenarioStep::try_from(step).expect("parity conversion should succeed");
+        assert!(matches!(
+            converted.action,
+            ScenarioAction::Expect(Expectation::ParityWithActor { actor })
+                if actor.0 == "tui"
         ));
     }
 }

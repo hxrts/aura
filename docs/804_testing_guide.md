@@ -25,7 +25,7 @@ consumes those contracts to drive real frontends. `aura-simulator` is a
 selectable alternate runtime substrate. Quint remains a model and trace
 generation system rather than a frontend executor.
 
-`aura-app::ui_contract` is also the authoritative home for shared flow support declarations including `SharedFlowId` and `SHARED_FLOW_SUPPORT`. It defines structured `UiSnapshot` and transient operation identity through `OperationInstanceId`. Typed runtime diagnostics events use `RuntimeEventSnapshot`.
+`aura-app::ui_contract` is also the authoritative home for shared flow support declarations including `SharedFlowId`, `SHARED_FLOW_SUPPORT`, and `SHARED_FLOW_SCENARIO_COVERAGE`. It defines structured `UiSnapshot`, semantic parity comparison through `compare_ui_snapshots_for_parity`, and transient operation identity through `OperationInstanceId`. Typed runtime diagnostics events use `RuntimeEventSnapshot`.
 
 Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or `Uuid::new_v4()` is forbidden. These operations must flow through effect traits instead.
 
@@ -392,7 +392,9 @@ just ci-harness-replay
 just ci-shared-flow-policy
 ```
 
-`just ci-shared-flow-policy` validates the shared-flow contract end to end. It checks that `aura-app` shared-flow support declarations are internally consistent. It verifies that required shell and modal ids still exist. It confirms browser control and field mappings still line up with the shared contract and that core shared scenarios have not drifted back to raw mechanics.
+`just ci-shared-flow-policy` validates the shared-flow contract end to end. It checks that `aura-app` shared-flow support declarations are internally consistent, that every fully shared flow has explicit parity-scenario coverage, and that required shell and modal ids still exist. It confirms browser control and field mappings still line up with the shared contract and that core shared scenarios have not drifted back to raw mechanics.
+
+Use `just ci-ui-parity-contract` for the narrower parity gate. That lane validates shared screen/module mappings, shared-flow scenario coverage, and parity-manifest consistency without running a full scenario matrix.
 
 ## 11. Test Organization
 

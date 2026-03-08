@@ -168,8 +168,11 @@ pub use crate::scenario_contract::{
 };
 pub use crate::ui_contract::{
     ConfirmationState, ControlId, FieldId, ListId, MessageSnapshot, ModalId, OperationId,
-    OperationSnapshot, OperationState, ScreenId, SelectionSnapshot as UiSelectionSnapshot, ToastId,
-    ToastKind, ToastSnapshot as UiToastSnapshot, UiReadiness, UiSnapshot,
+    OperationSnapshot, OperationState, ScreenId, SelectionSnapshot as UiSelectionSnapshot,
+    SharedFlowId, SharedFlowScenarioCoverage, SharedListSupport, SharedModalSupport,
+    SharedScreenModuleMap, SharedScreenSupport, ToastId, ToastKind,
+    ToastSnapshot as UiToastSnapshot, UiParityMismatch, UiReadiness, UiSnapshot,
+    ALL_SHARED_FLOW_IDS, SHARED_FLOW_SCENARIO_COVERAGE,
 };
 pub use crate::views::{
     Channel, ChannelType, ChatState, ContactsState, HomeState, InvitationsState, Message,

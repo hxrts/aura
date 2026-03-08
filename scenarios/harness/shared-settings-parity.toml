@@ -1,0 +1,100 @@
+id = "shared-settings-parity"
+goal = "Execute the same shared Settings flow in web and TUI and compare semantic results."
+
+[[steps]]
+id = "launch"
+action = "launch_actors"
+timeout_ms = 20000
+
+[[steps]]
+id = "tui-onboarding-visible"
+action = "control_visible"
+actor = "tui"
+control_id = "onboarding_root"
+timeout_ms = 30000
+
+[[steps]]
+id = "web-onboarding-visible"
+action = "control_visible"
+actor = "web"
+control_id = "onboarding_root"
+timeout_ms = 60000
+
+[[steps]]
+id = "tui-fill-account-name"
+action = "fill"
+actor = "tui"
+field_id = "account_name"
+value = "TuiUser"
+timeout_ms = 4000
+
+[[steps]]
+id = "web-fill-account-name"
+action = "fill"
+actor = "web"
+field_id = "account_name"
+value = "WebUser"
+timeout_ms = 4000
+
+[[steps]]
+id = "tui-create-account"
+action = "activate"
+actor = "tui"
+control_id = "onboarding_create_account_button"
+timeout_ms = 4000
+
+[[steps]]
+id = "web-create-account"
+action = "activate"
+actor = "web"
+control_id = "onboarding_create_account_button"
+timeout_ms = 4000
+
+[[steps]]
+id = "tui-ready"
+action = "readiness_is"
+actor = "tui"
+readiness = "ready"
+timeout_ms = 120000
+
+[[steps]]
+id = "web-ready"
+action = "readiness_is"
+actor = "web"
+readiness = "ready"
+timeout_ms = 120000
+
+[[steps]]
+id = "tui-open-settings"
+action = "navigate"
+actor = "tui"
+screen_id = "settings"
+timeout_ms = 4000
+
+[[steps]]
+id = "web-open-settings"
+action = "navigate"
+actor = "web"
+screen_id = "settings"
+timeout_ms = 4000
+
+[[steps]]
+id = "tui-settings-visible"
+action = "screen_is"
+actor = "tui"
+screen_id = "settings"
+timeout_ms = 30000
+
+[[steps]]
+id = "web-settings-visible"
+action = "screen_is"
+actor = "web"
+screen_id = "settings"
+timeout_ms = 30000
+
+[[steps]]
+id = "web-matches-tui-settings"
+action = "parity_with_actor"
+actor = "web"
+peer_actor = "tui"
+timeout_ms = 5000
