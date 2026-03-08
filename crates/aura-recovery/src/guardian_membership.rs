@@ -92,7 +92,7 @@ pub struct ChangeCompletion {
     pub change_evidence: Vec<u8>,
 }
 
-// Guardian Membership Change Choreography - 3 phase protocol
+// Guardian Membership Change Choreography - 3 phase protocol with guardian-handoff link metadata.
 choreography!(include_str!("src/guardian_membership.choreo"));
 
 /// Guardian membership coordinator.

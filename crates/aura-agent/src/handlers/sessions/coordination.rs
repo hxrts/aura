@@ -11,7 +11,7 @@ use crate::runtime::vm_host_bridge::{
     close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
     open_manifest_vm_session_admitted, receive_blocked_vm_message,
 };
-use crate::runtime::AuraEffectSystem;
+use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId};
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{
     RandomExtendedEffects, SessionType, StorageCoreEffects, TransportEffects, TransportError,
@@ -328,8 +328,9 @@ impl SessionOperations {
         let _timestamp_millis = self.effects.current_timestamp().await.unwrap_or(0);
 
         // Generate unique session ID
-        let session_uuid = self.effects.random_uuid().await;
-        let session_id = SessionId::from_uuid(session_uuid);
+        let runtime_session_id =
+            RuntimeChoreographySessionId::from_uuid(self.effects.random_uuid().await);
+        let session_id = runtime_session_id.into_aura_session_id();
 
         // Create session request message for choreography with provided metadata
         let session_request = SessionRequest {
@@ -572,7 +573,8 @@ impl SessionOperations {
     ) -> AgentResult<()> {
         let authority_id = self.authority_context.authority_id();
 
-        let session_uuid = session_coordination_session_id(&session_request.session_id)?;
+        let session_uuid =
+            session_coordination_runtime_session_id(&session_request.session_id)?.as_uuid();
         let mut roles = vec![coordination_role(authority_id, 0)];
         roles.push(coordination_role(coordinator_id, 0));
         for participant in &participants {
@@ -665,7 +667,8 @@ impl SessionOperations {
         accept_threshold: usize, // usize ok: function parameter, not serialized
     ) -> AgentResult<()> {
         let authority_id = self.authority_context.authority_id();
-        let session_uuid = session_coordination_session_id(&invitation.session_id)?;
+        let session_uuid =
+            session_coordination_runtime_session_id(&invitation.session_id)?.as_uuid();
         let mut roles = vec![coordination_role(authority_id, 0)];
         roles.push(coordination_role(initiator_id, 0));
         for participant in &participants {
@@ -793,7 +796,7 @@ impl SessionOperations {
         decision: SessionDecision,
     ) -> AgentResult<()> {
         let authority_id = self.authority_context.authority_id();
-        let session_uuid = session_coordination_session_id(&decision.session_id)?;
+        let session_uuid = session_coordination_runtime_session_id(&decision.session_id)?.as_uuid();
         let participant_index = participants
             .iter()
             .position(|id| *id == authority_id)
@@ -888,8 +891,12 @@ fn parse_session_id(session_id: &str) -> AgentResult<SessionId> {
     })
 }
 
-fn session_coordination_session_id(session_id: &SessionId) -> AgentResult<uuid::Uuid> {
-    Ok(session_id.uuid())
+fn session_coordination_runtime_session_id(
+    session_id: &SessionId,
+) -> AgentResult<RuntimeChoreographySessionId> {
+    Ok(RuntimeChoreographySessionId::from_aura_session_id(
+        *session_id,
+    ))
 }
 
 fn coordination_role(authority_id: AuthorityId, role_index: u16) -> ChoreographicRole {
@@ -978,7 +985,7 @@ impl SessionOperations {
             }
         }
         let session_id = SessionId::new_from_entropy(hash::hash(&material));
-        let session_id_string = format!("session-{}", session_id.uuid().simple());
+        let session_id_string = session_id.to_string();
 
         // Session created successfully (logging removed for simplicity)
 

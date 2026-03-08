@@ -70,6 +70,7 @@ pub mod storage_coordinator;
 pub mod time_handler;
 
 // Re-export main types for convenience
+pub use aura_core::OperationSessionId;
 pub use builder::EffectSystemBuilder;
 #[allow(unused_imports)] // Re-exported for public API
 #[cfg(feature = "choreo-backend-telltale-vm")]
@@ -97,25 +98,22 @@ pub use vm_effect_handler::{AuraVmEffectEvent, AuraVmEffectHandler};
 #[allow(unused_imports)] // Re-exported for public API
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use vm_hardening::{
-    apply_protocol_execution_policy, apply_scheduler_execution_policy,
-    aura_flow_policy_predicate, aura_output_predicate_allow_list, build_vm_config,
-    configured_guard_capacity, parse_communication_replay_mode, parse_determinism_mode,
-    parse_effect_determinism_tier, policy_for_protocol, policy_for_ref,
-    scheduler_control_input_for_image, scheduler_policy_for_input, scheduler_policy_ref,
-    validate_determinism_profile, validate_protocol_execution_policy,
-    validate_scheduler_execution_policy, vm_config_for_profile,
-    AuraVmDeterminismProfileError, AuraVmGuardLayer, AuraVmHardeningProfile,
-    AuraVmParityProfile, AuraVmProtocolExecutionPolicy, AuraVmSchedulerControlInput,
-    AuraVmSchedulerExecutionPolicy, AuraVmSchedulerSignals, AuraVmSchedulerSignalsProvider,
-    AURA_OUTPUT_PREDICATE_CHOICE, AURA_OUTPUT_PREDICATE_GUARD_ACQUIRE,
-    AURA_OUTPUT_PREDICATE_GUARD_RELEASE, AURA_OUTPUT_PREDICATE_OBSERVABLE,
-    AURA_OUTPUT_PREDICATE_STEP, AURA_OUTPUT_PREDICATE_TRANSPORT_RECV,
-    AURA_OUTPUT_PREDICATE_TRANSPORT_SEND, AURA_OUTPUT_PREDICATE_VM_OBSERVABLE,
-    AURA_VM_POLICY_CONSENSUS_FALLBACK, AURA_VM_POLICY_CONSENSUS_FAST_PATH,
-    AURA_VM_POLICY_DKG_CEREMONY, AURA_VM_POLICY_PROD_DEFAULT,
-    AURA_VM_POLICY_RECOVERY_GRANT, AURA_VM_POLICY_SYNC_ANTI_ENTROPY,
-    AURA_VM_SCHED_PRIORITY_AGING, AURA_VM_SCHED_PROGRESS_AWARE,
-    AURA_VM_SCHED_ROUND_ROBIN,
+    apply_protocol_execution_policy, apply_scheduler_execution_policy, aura_flow_policy_predicate,
+    aura_output_predicate_allow_list, build_vm_config, configured_guard_capacity,
+    parse_communication_replay_mode, parse_determinism_mode, parse_effect_determinism_tier,
+    policy_for_protocol, policy_for_ref, scheduler_control_input_for_image,
+    scheduler_policy_for_input, scheduler_policy_ref, validate_determinism_profile,
+    validate_protocol_execution_policy, validate_scheduler_execution_policy, vm_config_for_profile,
+    AuraVmDeterminismProfileError, AuraVmGuardLayer, AuraVmHardeningProfile, AuraVmParityProfile,
+    AuraVmProtocolExecutionPolicy, AuraVmSchedulerControlInput, AuraVmSchedulerExecutionPolicy,
+    AuraVmSchedulerSignals, AuraVmSchedulerSignalsProvider, AURA_OUTPUT_PREDICATE_CHOICE,
+    AURA_OUTPUT_PREDICATE_GUARD_ACQUIRE, AURA_OUTPUT_PREDICATE_GUARD_RELEASE,
+    AURA_OUTPUT_PREDICATE_OBSERVABLE, AURA_OUTPUT_PREDICATE_STEP,
+    AURA_OUTPUT_PREDICATE_TRANSPORT_RECV, AURA_OUTPUT_PREDICATE_TRANSPORT_SEND,
+    AURA_OUTPUT_PREDICATE_VM_OBSERVABLE, AURA_VM_POLICY_CONSENSUS_FALLBACK,
+    AURA_VM_POLICY_CONSENSUS_FAST_PATH, AURA_VM_POLICY_DKG_CEREMONY, AURA_VM_POLICY_PROD_DEFAULT,
+    AURA_VM_POLICY_RECOVERY_GRANT, AURA_VM_POLICY_SYNC_ANTI_ENTROPY, AURA_VM_SCHED_PRIORITY_AGING,
+    AURA_VM_SCHED_PROGRESS_AWARE, AURA_VM_SCHED_ROUND_ROBIN,
 };
 
 // Re-export JournalCoupler for choreography journal coupling
@@ -125,6 +123,7 @@ pub use aura_guards::guards::journal::{
 };
 
 // Subsystem re-exports (available for incremental adoption
+pub use subsystems::choreography::RuntimeChoreographySessionId;
 #[allow(unused_imports)]
 pub use subsystems::{ChoreographyState, CryptoSubsystem, JournalSubsystem, TransportSubsystem};
 

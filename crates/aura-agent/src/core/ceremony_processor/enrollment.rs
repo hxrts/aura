@@ -9,6 +9,7 @@ use crate::core::default_context_id_for_authority;
 use crate::runtime::effects::AuraEffectSystem;
 use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyRunner};
 use crate::runtime::services::{CeremonyTracker, ReconfigurationManager};
+use crate::runtime::RuntimeChoreographySessionId;
 use crate::ThresholdSigningService;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{
@@ -18,7 +19,7 @@ use aura_core::identifiers::CeremonyId;
 use aura_core::tree::metadata::DeviceLeafMetadata;
 use aura_core::tree::LeafRole;
 use aura_core::{
-    hash, AttestedOp, AuthorityId, DeviceId, LeafId, LeafNode, NodeIndex, SessionId, TreeOp,
+    hash, AttestedOp, AuthorityId, DeviceId, LeafId, LeafNode, NodeIndex, TreeOp,
 };
 use aura_protocol::effects::TreeEffects;
 use uuid::Uuid;
@@ -481,7 +482,7 @@ impl<'a> EnrollmentHandler<'a> {
             }
         };
 
-        let session_id = ceremony_runtime_session_id(ceremony_id);
+        let session_id = ceremony_runtime_session_id(ceremony_id).into_aura_session_id();
         self.reconfiguration
             .record_native_session(self.authority_id, session_id)
             .await;
@@ -583,9 +584,9 @@ impl<'a> EnrollmentHandler<'a> {
     }
 }
 
-fn ceremony_runtime_session_id(ceremony_id: &CeremonyId) -> SessionId {
+fn ceremony_runtime_session_id(ceremony_id: &CeremonyId) -> RuntimeChoreographySessionId {
     let digest = hash::hash(ceremony_id.as_str().as_bytes());
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(&digest[..16]);
-    SessionId::from_uuid(Uuid::from_bytes(bytes))
+    RuntimeChoreographySessionId::from_uuid(Uuid::from_bytes(bytes))
 }

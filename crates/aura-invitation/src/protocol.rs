@@ -297,6 +297,7 @@ pub mod device_enrollment {
     //
     // Note: The new device must create its own authority first, making it
     // addressable before the enrollment choreography can proceed.
+    // The generated manifest carries device-migration link metadata for reconfiguration.
     choreography!(include_str!("src/protocol.device_enrollment.choreo"));
 }
 

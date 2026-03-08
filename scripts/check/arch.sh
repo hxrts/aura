@@ -376,6 +376,18 @@ check_effects() {
   app_impls=$(grep -R "impl.*\($app_effects\)" crates/aura-effects/src 2>/dev/null | grep -v "test" || true)
   emit_hits "Application effects in aura-effects (should be in domain crates)" "$app_impls"
 
+  # Explicit session-id domain crossings only through dedicated bridge APIs
+  local session_from_uuid_hits session_uuid_hits
+  session_from_uuid_hits=$(rg --no-heading -n "\bSessionId::from_uuid\(" crates/aura-agent/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/runtime/subsystems/choreography.rs" || true)
+  session_from_uuid_hits=$(filter_test_modules "$session_from_uuid_hits")
+  emit_hits "Implicit runtime-to-domain session-id crossings (use RuntimeChoreographySessionId bridge APIs)" "$session_from_uuid_hits"
+
+  session_uuid_hits=$(rg --no-heading -n "session_id\.uuid\(" crates/aura-agent/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/runtime/subsystems/choreography.rs" || true)
+  session_uuid_hits=$(filter_test_modules "$session_uuid_hits")
+  emit_hits "Implicit domain-to-runtime session-id crossings (use RuntimeChoreographySessionId bridge APIs)" "$session_uuid_hits"
+
   # ─── Direct OS operations ───
   section "Direct OS operations — use effect traits instead"
 

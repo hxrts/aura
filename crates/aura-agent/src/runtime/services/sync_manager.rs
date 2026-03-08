@@ -11,18 +11,18 @@ use crate::runtime::vm_host_bridge::{
     close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
     open_manifest_vm_session_admitted, receive_blocked_vm_message,
 };
-use crate::runtime::AuraEffectSystem;
+use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId};
 use async_trait::async_trait;
 use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash::hash;
-use aura_core::{AuthorityId, DelegationReceipt, DeviceId, SessionId};
+use aura_core::util::serialization::to_vec;
+use aura_core::{AuthorityId, DelegationReceipt, DeviceId};
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, RoleIndex};
 use aura_sync::protocols::epoch_runners::EpochRotationProtocolRole;
 use aura_sync::protocols::{EpochCommit, EpochConfirmation, EpochRotationProposal};
 use aura_sync::services::{Service, SyncService, SyncServiceConfig};
 use aura_sync::verification::{MerkleVerifier, VerificationResult};
-use aura_core::util::serialization::to_vec;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -639,8 +639,14 @@ impl SyncServiceManager {
             Self::epoch_role(participant2_id, 0),
         ];
         let peer_roles = BTreeMap::from([
-            ("Participant1".to_string(), Self::epoch_role(participant1_id, 0)),
-            ("Participant2".to_string(), Self::epoch_role(participant2_id, 0)),
+            (
+                "Participant1".to_string(),
+                Self::epoch_role(participant1_id, 0),
+            ),
+            (
+                "Participant2".to_string(),
+                Self::epoch_role(participant2_id, 0),
+            ),
         ]);
         let manifest =
             aura_sync::protocols::epochs::telltale_session_types_epoch_rotation::vm_artifacts::composition_manifest();
@@ -664,17 +670,17 @@ impl SyncServiceManager {
             )
             .await?;
             handler.push_send_bytes(
-                to_vec(&proposal).map_err(|error| format!("epoch proposal encode failed: {error}"))?,
+                to_vec(&proposal)
+                    .map_err(|error| format!("epoch proposal encode failed: {error}"))?,
             );
             let mut confirmations = Vec::new();
             let mut commit_queued = false;
 
             loop {
-                let step = engine
-                    .step()
-                    .map_err(|error| format!("epoch rotation coordinator VM step failed: {error}"))?;
-                flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles)
-                    .await?;
+                let step = engine.step().map_err(|error| {
+                    format!("epoch rotation coordinator VM step failed: {error}")
+                })?;
+                flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles).await?;
 
                 if let Some(blocked) = receive_blocked_vm_message(
                     effects.as_ref(),
@@ -684,15 +690,16 @@ impl SyncServiceManager {
                     &peer_roles,
                 )
                 .await
-                .map_err(|error| format!("epoch rotation coordinator receive failed: {error}"))? {
-                    let confirmation: EpochConfirmation = aura_core::util::serialization::from_slice(
-                        &blocked.payload,
-                    )
-                    .map_err(|error| format!("epoch confirmation decode failed: {error}"))?;
+                .map_err(|error| format!("epoch rotation coordinator receive failed: {error}"))?
+                {
+                    let confirmation: EpochConfirmation =
+                        aura_core::util::serialization::from_slice(&blocked.payload).map_err(
+                            |error| format!("epoch confirmation decode failed: {error}"),
+                        )?;
                     confirmations.push(confirmation);
                     if !commit_queued && confirmations.len() == 2 {
-                        let payload =
-                            to_vec(&commit).map_err(|error| format!("epoch commit encode failed: {error}"))?;
+                        let payload = to_vec(&commit)
+                            .map_err(|error| format!("epoch commit encode failed: {error}"))?;
                         handler.push_send_bytes(payload.clone());
                         handler.push_send_bytes(payload);
                         commit_queued = true;
@@ -783,11 +790,10 @@ impl SyncServiceManager {
             );
 
             loop {
-                let step = engine
-                    .step()
-                    .map_err(|error| format!("epoch rotation participant VM step failed: {error}"))?;
-                flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles)
-                    .await?;
+                let step = engine.step().map_err(|error| {
+                    format!("epoch rotation participant VM step failed: {error}")
+                })?;
+                flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles).await?;
 
                 if let Some(blocked) = receive_blocked_vm_message(
                     effects.as_ref(),
@@ -797,7 +803,8 @@ impl SyncServiceManager {
                     &peer_roles,
                 )
                 .await
-                .map_err(|error| format!("epoch rotation participant receive failed: {error}"))? {
+                .map_err(|error| format!("epoch rotation participant receive failed: {error}"))?
+                {
                     inject_vm_receive(&mut engine, vm_sid, &blocked)?;
                     continue;
                 }
@@ -835,8 +842,9 @@ impl SyncServiceManager {
         to_authority: AuthorityId,
         bundle_id: Option<String>,
     ) -> Result<DelegationReceipt, String> {
-        let session_uuid = epoch_rotation_session_id(rotation_id);
-        let session_id = SessionId::from_uuid(session_uuid);
+        let session_id =
+            RuntimeChoreographySessionId::from_uuid(epoch_rotation_session_id(rotation_id))
+                .into_aura_session_id();
         self.reconfiguration
             .record_native_session(from_authority, session_id)
             .await;
@@ -854,7 +862,8 @@ impl SyncServiceManager {
     }
 
     async fn record_native_epoch_session(&self, authority_id: AuthorityId, session_uuid: Uuid) {
-        let session_id = SessionId::from_uuid(session_uuid);
+        let session_id =
+            RuntimeChoreographySessionId::from_uuid(session_uuid).into_aura_session_id();
         self.reconfiguration
             .record_native_session(authority_id, session_id)
             .await;

@@ -2,9 +2,10 @@
 //!
 //! In-memory choreography session state for runtime coordination.
 
-use aura_core::{ContextId, DeviceId};
+use aura_core::{ContextId, DeviceId, SessionId};
 use aura_protocol::effects::{ChoreographicRole, ChoreographyMetrics, RoleIndex};
 use std::collections::HashMap;
+use std::fmt;
 use std::thread::ThreadId;
 use tokio::task::Id as TaskId;
 use uuid::Uuid;
@@ -15,11 +16,43 @@ enum ExecutionBindingKey {
     Thread(ThreadId),
 }
 
+/// Runtime choreography session identity bound to one active protocol execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct RuntimeChoreographySessionId(Uuid);
+
+impl RuntimeChoreographySessionId {
+    /// Wrap one raw runtime session UUID.
+    pub fn from_uuid(session_id: Uuid) -> Self {
+        Self(session_id)
+    }
+
+    /// Borrow the raw runtime session UUID.
+    pub fn as_uuid(self) -> Uuid {
+        self.0
+    }
+
+    /// Explicitly bridge one durable Aura session identifier into runtime choreography scope.
+    pub fn from_aura_session_id(session_id: SessionId) -> Self {
+        Self::from_uuid(session_id.uuid())
+    }
+
+    /// Explicitly bridge one runtime choreography session into durable Aura session scope.
+    pub fn into_aura_session_id(self) -> SessionId {
+        SessionId::from_uuid(self.as_uuid())
+    }
+}
+
+impl fmt::Display for RuntimeChoreographySessionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// In-memory choreography session state for one runtime session.
 #[derive(Debug, Clone)]
 pub struct ChoreographySessionState {
     /// Current session ID.
-    pub session_id: Uuid,
+    pub session_id: RuntimeChoreographySessionId,
     /// Context ID for this session
     pub context_id: ContextId,
     /// Roles participating in this choreography
@@ -36,7 +69,7 @@ pub struct ChoreographySessionState {
 
 impl ChoreographySessionState {
     fn new(
-        session_id: Uuid,
+        session_id: RuntimeChoreographySessionId,
         context_id: ContextId,
         roles: Vec<ChoreographicRole>,
         current_role: ChoreographicRole,
@@ -58,8 +91,8 @@ impl ChoreographySessionState {
 /// In-memory choreography session registry keyed by runtime session id.
 #[derive(Debug, Clone, Default)]
 pub struct ChoreographyState {
-    sessions: HashMap<Uuid, ChoreographySessionState>,
-    task_bindings: HashMap<ExecutionBindingKey, Uuid>,
+    sessions: HashMap<RuntimeChoreographySessionId, ChoreographySessionState>,
+    task_bindings: HashMap<ExecutionBindingKey, RuntimeChoreographySessionId>,
 }
 
 fn default_metrics() -> ChoreographyMetrics {
@@ -76,7 +109,7 @@ fn default_metrics() -> ChoreographyMetrics {
 impl Default for ChoreographySessionState {
     fn default() -> Self {
         Self {
-            session_id: Uuid::nil(),
+            session_id: RuntimeChoreographySessionId::from_uuid(Uuid::nil()),
             context_id: ContextId::new_from_entropy([0; 32]),
             roles: Vec::new(),
             current_role: ChoreographicRole::new(
@@ -104,7 +137,7 @@ impl ChoreographyState {
     }
 
     /// Return the active session id bound to the current Tokio task, if any.
-    pub fn current_session_id(&self) -> Option<Uuid> {
+    pub fn current_session_id(&self) -> Option<RuntimeChoreographySessionId> {
         self.task_bindings
             .get(&Self::current_binding_key())
             .copied()
@@ -124,7 +157,7 @@ impl ChoreographyState {
     /// Start a new session and bind it to the current Tokio task.
     pub fn start_session(
         &mut self,
-        session_id: Uuid,
+        session_id: RuntimeChoreographySessionId,
         context_id: ContextId,
         roles: Vec<ChoreographicRole>,
         current_role: ChoreographicRole,
@@ -160,7 +193,7 @@ impl ChoreographyState {
     }
 
     /// End the current task-bound session and clean up all session bindings.
-    pub fn end_session(&mut self, now_ms: u64) -> Result<Uuid, String> {
+    pub fn end_session(&mut self, now_ms: u64) -> Result<RuntimeChoreographySessionId, String> {
         let task_id = Self::current_binding_key();
         let session_id = self
             .task_bindings
@@ -216,5 +249,19 @@ impl ChoreographyState {
             (Some(started), Some(timeout)) => now_ms.saturating_sub(started) > timeout,
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_choreography_session_id_bridges_aura_session_id_explicitly() {
+        let aura_session_id = SessionId::new_from_entropy([9; 32]);
+        let runtime_session_id =
+            RuntimeChoreographySessionId::from_aura_session_id(aura_session_id);
+
+        assert_eq!(runtime_session_id.into_aura_session_id(), aura_session_id);
     }
 }

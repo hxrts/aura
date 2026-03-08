@@ -266,4 +266,5 @@ impl EpochRotationCoordinator {
 
 // Choreographic Protocol Definition
 // Coordinated epoch rotation across multiple participants
+// The generated manifest carries epoch-rotation transfer link metadata for reconfiguration.
 choreography!(include_str!("src/protocols/epochs.choreo"));

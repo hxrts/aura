@@ -157,7 +157,7 @@ pub use conformance::{
     AuraVmDeterminismProfileV1, ConformanceSurfaceName, ConformanceValidationError,
     AURA_CONFORMANCE_SCHEMA_VERSION, AURA_EFFECT_ENVELOPE_CLASSIFICATIONS,
 };
-pub use context::{ContextSnapshot, EffectContext};
+pub use context::{ContextSnapshot, EffectContext, OperationSessionId};
 pub use reconfiguration::{
     ComposedBundle, DelegationReceipt, SessionFootprint, RECONFIGURATION_SCHEMA_V1,
 };

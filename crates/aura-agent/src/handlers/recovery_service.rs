@@ -16,7 +16,7 @@ use crate::runtime::vm_host_bridge::{
     close_and_reap_vm_session, flush_pending_vm_sends, inject_vm_receive,
     open_manifest_vm_session_admitted, receive_blocked_vm_message,
 };
-use crate::runtime::AuraEffectSystem;
+use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId};
 use aura_core::crypto::Ed25519Signature;
 use aura_core::effects::{CryptoCoreEffects, PhysicalTimeEffects, RandomCoreEffects};
 use aura_core::hash::hash;
@@ -24,7 +24,7 @@ use aura_core::identifiers::CeremonyId;
 use aura_core::identifiers::{AuthorityId, RecoveryId};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::util::serialization::{from_slice, to_vec};
-use aura_core::{SessionId, TimeEffects};
+use aura_core::TimeEffects;
 use aura_journal::fact::{ProtocolRelationalFact, RelationalFact};
 use aura_protocol::effects::{
     ChoreographicEffects, ChoreographicRole, ChoreographyError, RoleIndex, TreeEffects,
@@ -572,11 +572,9 @@ impl RecoveryServiceApi {
             )
             .await
             .map_err(AgentError::internal)?;
-            handler.push_send_bytes(
-                to_vec(&protocol_approval).map_err(|error| {
-                    AgentError::internal(format!("guardian approval encode failed: {error}"))
-                })?,
-            );
+            handler.push_send_bytes(to_vec(&protocol_approval).map_err(|error| {
+                AgentError::internal(format!("guardian approval encode failed: {error}"))
+            })?);
 
             let loop_result = loop {
                 let step = engine.step().map_err(|error| {
@@ -1311,7 +1309,9 @@ impl RecoveryServiceApi {
 
             let loop_result = loop {
                 let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!("guardian setup initiator VM step failed: {error}"))
+                    AgentError::internal(format!(
+                        "guardian setup initiator VM step failed: {error}"
+                    ))
                 })?;
                 flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
                     .await
@@ -1336,8 +1336,11 @@ impl RecoveryServiceApi {
                         })?;
                     acceptances.push(acceptance);
                     if !completion_queued && acceptances.len() == guardians.len() {
-                        let completion =
-                            build_guardian_setup_completion(setup_id, threshold, acceptances.clone());
+                        let completion = build_guardian_setup_completion(
+                            setup_id,
+                            threshold,
+                            acceptances.clone(),
+                        );
                         let payload = to_vec(&completion).map_err(|error| {
                             AgentError::internal(format!(
                                 "guardian setup completion encode failed: {error}"
@@ -1354,11 +1357,13 @@ impl RecoveryServiceApi {
                 }
 
                 match step {
-                    StepResult::AllDone => break Ok(build_guardian_setup_completion(
-                        setup_id,
-                        threshold,
-                        acceptances.clone(),
-                    )),
+                    StepResult::AllDone => {
+                        break Ok(build_guardian_setup_completion(
+                            setup_id,
+                            threshold,
+                            acceptances.clone(),
+                        ))
+                    }
                     StepResult::Continue => {}
                     StepResult::Stuck => {
                         break Err(AgentError::internal(
@@ -1639,7 +1644,9 @@ impl RecoveryServiceApi {
 
             let loop_result = loop {
                 let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!("membership change initiator VM step failed: {error}"))
+                    AgentError::internal(format!(
+                        "membership change initiator VM step failed: {error}"
+                    ))
                 })?;
                 flush_pending_vm_sends(self.effects.as_ref(), handler.as_ref(), &peer_roles)
                     .await
@@ -1947,7 +1954,9 @@ impl RecoveryServiceApi {
             return Ok(());
         };
 
-        let session_id = SessionId::from_uuid(membership_session_id(&completion.change_id));
+        let session_id =
+            RuntimeChoreographySessionId::from_uuid(membership_session_id(&completion.change_id))
+                .into_aura_session_id();
         let account_authority = self.handler.authority_context().authority_id();
         let context_id = default_context_id_for_authority(account_authority);
 

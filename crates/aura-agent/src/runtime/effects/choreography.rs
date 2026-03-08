@@ -12,6 +12,8 @@ use aura_protocol::effects::{
 };
 use std::collections::HashMap;
 
+use crate::runtime::subsystems::choreography::RuntimeChoreographySessionId;
+
 fn current_session_snapshot(
     effects: &AuraEffectSystem,
 ) -> Result<crate::runtime::subsystems::choreography::ChoreographySessionState, ChoreographyError> {
@@ -24,7 +26,7 @@ fn current_session_snapshot(
 
 fn take_session_envelope(
     effects: &AuraEffectSystem,
-    session_id: uuid::Uuid,
+    session_id: RuntimeChoreographySessionId,
     source: AuthorityId,
     context: ContextId,
 ) -> Option<TransportEnvelope> {
@@ -93,8 +95,8 @@ impl ChoreographicEffects for AuraEffectSystem {
             FlowCost::new(flow_cost),
         )
         .with_operation_id(format!(
-            "choreography_send_{:?}_{:?}",
-            context_id, role.device_id
+            "choreography_send_{}_{}_{:?}",
+            session.session_id, context_id, role.device_id
         ));
 
         let guard_result =
@@ -302,6 +304,7 @@ impl ChoreographicEffects for AuraEffectSystem {
         session_id: uuid::Uuid,
         roles: Vec<ChoreographicRole>,
     ) -> Result<(), ChoreographyError> {
+        let runtime_session_id = RuntimeChoreographySessionId::from_uuid(session_id);
         let current_device = DeviceId::from_uuid(self.authority_id.0);
         let current_role = roles
             .iter()
@@ -314,10 +317,12 @@ impl ChoreographicEffects for AuraEffectSystem {
                 }
             })?;
 
+        // Each runtime choreography session gets its own derived relational context so
+        // guard, leakage, and journal coupling stay isolated under concurrent execution.
         let context_id = ContextId::new_from_entropy(hash(session_id.as_bytes()));
         tracing::debug!(
             "Choreography start_session: session_id={}, context_id={:?}, authority={:?}, roles={:?}",
-            session_id,
+            runtime_session_id,
             context_id,
             self.authority_id,
             roles.iter().map(|r| r.device_id).collect::<Vec<_>>()
@@ -331,7 +336,7 @@ impl ChoreographicEffects for AuraEffectSystem {
         let mut state = self.choreography_state.write();
         state
             .start_session(
-                session_id,
+                runtime_session_id,
                 context_id,
                 roles,
                 current_role,
@@ -475,6 +480,88 @@ mod tests {
         task_a.await.expect("task a");
         task_b.await.expect("task b");
         assert_eq!(effects.choreography_state.read().active_session_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn concurrent_session_sends_keep_guard_and_transport_contexts_isolated() {
+        let authority_id = AuthorityId::from_uuid(Uuid::from_bytes([13; 16]));
+        let effects = test_effects(authority_id);
+        let barrier = Arc::new(Barrier::new(3));
+
+        let session_a = Uuid::from_u128(41);
+        let session_b = Uuid::from_u128(42);
+        let self_role = authority_device_role(authority_id, 0);
+        let loopback_peer = authority_device_role(authority_id, 1);
+
+        let task_a_effects = Arc::clone(&effects);
+        let task_a_barrier = Arc::clone(&barrier);
+        let task_a = tokio::spawn(async move {
+            task_a_effects
+                .start_session(session_a, vec![self_role, loopback_peer])
+                .await
+                .expect("session a starts");
+            task_a_barrier.wait().await;
+            task_a_effects
+                .send_to_role_bytes(loopback_peer, b"alpha".to_vec())
+                .await
+                .expect("session a send succeeds");
+            task_a_effects.end_session().await.expect("session a ends");
+        });
+
+        let task_b_effects = Arc::clone(&effects);
+        let task_b_barrier = Arc::clone(&barrier);
+        let task_b = tokio::spawn(async move {
+            task_b_effects
+                .start_session(session_b, vec![self_role, loopback_peer])
+                .await
+                .expect("session b starts");
+            task_b_barrier.wait().await;
+            task_b_effects
+                .send_to_role_bytes(loopback_peer, b"beta".to_vec())
+                .await
+                .expect("session b send succeeds");
+            task_b_effects.end_session().await.expect("session b ends");
+        });
+
+        barrier.wait().await;
+        task_a.await.expect("task a");
+        task_b.await.expect("task b");
+
+        let inbox = effects.transport.inbox();
+        let inbox = inbox.read();
+        assert_eq!(
+            inbox.len(),
+            2,
+            "both session sends should be queued locally"
+        );
+
+        let expected = [
+            (
+                session_a.to_string(),
+                ContextId::new_from_entropy(hash(session_a.as_bytes())),
+            ),
+            (
+                session_b.to_string(),
+                ContextId::new_from_entropy(hash(session_b.as_bytes())),
+            ),
+        ];
+
+        for (session_id, context_id) in expected {
+            let envelope = inbox
+                .iter()
+                .find(|env| {
+                    env.metadata
+                        .get("session-id")
+                        .is_some_and(|value| value == &session_id)
+                })
+                .expect("session envelope should be present");
+            assert_eq!(envelope.context, context_id);
+            assert_eq!(
+                envelope.receipt.as_ref().map(|receipt| receipt.context),
+                Some(context_id),
+                "guard/journal receipt context must remain session-scoped"
+            );
+        }
     }
 
     #[tokio::test]

@@ -13,13 +13,54 @@ use crate::hash::hash;
 use crate::identifiers::{AuthorityId, ContextId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
+
+/// Operation-scoped session identity for `EffectContext`.
+///
+/// This is intentionally distinct from long-lived Aura `SessionId` values used for
+/// durable domain state and from runtime choreography session identities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct OperationSessionId(SessionId);
+
+impl OperationSessionId {
+    /// Wrap one raw Aura session identifier as an operation-scoped session identity.
+    #[must_use]
+    pub fn new(session_id: SessionId) -> Self {
+        Self(session_id)
+    }
+
+    /// Borrow the underlying Aura session identifier.
+    #[must_use]
+    pub fn raw(self) -> SessionId {
+        self.0
+    }
+}
+
+impl fmt::Display for OperationSessionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl From<SessionId> for OperationSessionId {
+    fn from(value: SessionId) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<OperationSessionId> for SessionId {
+    fn from(value: OperationSessionId) -> Self {
+        value.raw()
+    }
+}
 
 /// Operation-scoped context threaded through effectful calls.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EffectContext {
     authority_id: AuthorityId,
     context_id: ContextId,
-    session_id: SessionId,
+    session_id: OperationSessionId,
     execution_mode: ExecutionMode,
     metadata: HashMap<String, String>,
 }
@@ -29,7 +70,7 @@ pub struct EffectContext {
 pub struct ContextSnapshot {
     authority_id: AuthorityId,
     context_id: ContextId,
-    session_id: SessionId,
+    session_id: OperationSessionId,
     execution_mode: ExecutionMode,
 }
 
@@ -37,7 +78,7 @@ fn derive_session_id(
     authority_id: AuthorityId,
     context_id: ContextId,
     execution_mode: ExecutionMode,
-) -> SessionId {
+) -> OperationSessionId {
     let mut material = Vec::with_capacity(1 + 32 + 32 + 9);
     material.extend_from_slice(b"aura-session");
     material.extend_from_slice(&authority_id.to_bytes());
@@ -50,7 +91,7 @@ fn derive_session_id(
             material.extend_from_slice(&seed.to_le_bytes());
         }
     }
-    SessionId::new_from_entropy(hash(&material))
+    OperationSessionId::new(SessionId::new_from_entropy(hash(&material)))
 }
 
 impl EffectContext {
@@ -92,7 +133,7 @@ impl EffectContext {
     }
 
     /// Operation/session identifier.
-    pub fn session_id(&self) -> SessionId {
+    pub fn session_id(&self) -> OperationSessionId {
         self.session_id
     }
 
@@ -165,12 +206,36 @@ impl ContextSnapshot {
     }
 
     /// Operation/session identifier.
-    pub fn session_id(&self) -> SessionId {
+    pub fn session_id(&self) -> OperationSessionId {
         self.session_id
     }
 
     /// Execution mode controlling handler selection.
     pub fn execution_mode(&self) -> ExecutionMode {
         self.execution_mode
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn operation_session_id_round_trips_raw_session_id() {
+        let raw = SessionId::new_from_entropy([7; 32]);
+        let operation = OperationSessionId::new(raw);
+        assert_eq!(operation.raw(), raw);
+    }
+
+    #[test]
+    fn effect_context_uses_operation_session_id_boundary() {
+        let authority_id = AuthorityId::new_from_entropy([1; 32]);
+        let context_id = ContextId::new_from_entropy([2; 32]);
+        let context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
+
+        let operation_session = context.session_id();
+        let raw_session: SessionId = operation_session.into();
+
+        assert_eq!(operation_session.raw(), raw_session);
     }
 }

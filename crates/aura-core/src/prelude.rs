@@ -40,7 +40,7 @@ pub use crate::domain::journal::{Cap, Fact, FactKey, Journal};
 pub use crate::semilattice::{JoinSemilattice, MeetSemiLattice};
 
 // === Context ===
-pub use crate::context::EffectContext;
+pub use crate::context::{EffectContext, OperationSessionId};
 
 // === Time ===
 pub use crate::time::{TimeDomain, TimeStamp};
