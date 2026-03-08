@@ -65,6 +65,7 @@ impl<'a> InvitationGuardianHandler<'a> {
                 "Principal",
                 &global_type,
                 &local_types,
+                crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
             .map_err(AgentError::internal)?;
@@ -163,6 +164,7 @@ impl<'a> InvitationGuardianHandler<'a> {
                 "Guardian",
                 &global_type,
                 &local_types,
+                crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
             .map_err(AgentError::internal)?;

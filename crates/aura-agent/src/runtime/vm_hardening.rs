@@ -1,9 +1,14 @@
 //! Telltale VM hardening profiles and parity-lane configuration for Aura.
 
+use aura_core::AuraVmDeterminismProfileV1;
+use aura_mpst::termination::{compute_weighted_measure, SessionBufferSnapshot};
+use aura_protocol::termination::TerminationProtocolClass;
+use telltale_vm::loader::CodeImage;
 use telltale_vm::vm::{FlowPolicy, FlowPredicate, GuardLayerConfig};
 use telltale_vm::{
     CommunicationReplayMode, DeterminismMode, EffectDeterminismTier, EffectTraceCaptureMode,
-    MonitorMode, OutputConditionPolicy, PayloadValidationMode, SchedPolicy, VMConfig,
+    MonitorMode, OutputConditionPolicy, PayloadValidationMode, PriorityPolicy, SchedPolicy,
+    VMConfig,
 };
 
 /// Default output predicate when no operation-specific hint is provided.
@@ -22,6 +27,24 @@ pub const AURA_OUTPUT_PREDICATE_STEP: &str = "aura.protocol.step";
 pub const AURA_OUTPUT_PREDICATE_GUARD_ACQUIRE: &str = "aura.guard.acquire";
 /// Output predicate used for guard release visibility.
 pub const AURA_OUTPUT_PREDICATE_GUARD_RELEASE: &str = "aura.guard.release";
+/// Production determinism policy reference for generic short-running protocols.
+pub const AURA_VM_POLICY_PROD_DEFAULT: &str = "aura.vm.prod.default";
+/// Production determinism policy reference for consensus fallback protocols.
+pub const AURA_VM_POLICY_CONSENSUS_FALLBACK: &str = "aura.vm.consensus_fallback.prod";
+/// Production determinism policy reference for consensus fast-path protocols.
+pub const AURA_VM_POLICY_CONSENSUS_FAST_PATH: &str = "aura.vm.consensus_fast_path.prod";
+/// Production determinism policy reference for DKG protocols.
+pub const AURA_VM_POLICY_DKG_CEREMONY: &str = "aura.vm.dkg_ceremony.prod";
+/// Production determinism policy reference for recovery-grant style protocols.
+pub const AURA_VM_POLICY_RECOVERY_GRANT: &str = "aura.vm.recovery_grant.prod";
+/// Production determinism policy reference for sync/anti-entropy protocols.
+pub const AURA_VM_POLICY_SYNC_ANTI_ENTROPY: &str = "aura.vm.sync_anti_entropy.prod";
+/// Scheduler policy reference for fair low-pressure workloads.
+pub const AURA_VM_SCHED_ROUND_ROBIN: &str = "aura.vm.scheduler.round_robin";
+/// Scheduler policy reference for token-biased heavy workloads.
+pub const AURA_VM_SCHED_PROGRESS_AWARE: &str = "aura.vm.scheduler.progress_aware";
+/// Scheduler policy reference for contention/budget-constrained workloads.
+pub const AURA_VM_SCHED_PRIORITY_AGING: &str = "aura.vm.scheduler.priority_aging";
 
 /// Typed guard-layer identifiers reserved by Aura runtime profiles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,6 +132,12 @@ pub enum AuraVmDeterminismProfileError {
         /// Invalid input value.
         raw: String,
     },
+    /// Unknown VM policy selector.
+    #[error("unknown VM determinism policy reference: {raw}")]
+    UnknownPolicyRef {
+        /// Invalid input value.
+        raw: String,
+    },
     /// Invalid profile combination in VM config.
     #[error(
         "invalid determinism profile combination: mode={mode:?}, tier={tier:?}, replay={replay:?} ({reason})"
@@ -123,6 +152,406 @@ pub enum AuraVmDeterminismProfileError {
         /// Human-readable reason.
         reason: &'static str,
     },
+    /// Selected policy reference does not match protocol class.
+    #[error(
+        "determinism policy {policy_ref} is incompatible with protocol class {protocol_class} for protocol {protocol_id}"
+    )]
+    PolicyClassMismatch {
+        /// Selected policy reference.
+        policy_ref: String,
+        /// Protocol identifier being admitted.
+        protocol_id: String,
+        /// Resolved Aura protocol class.
+        protocol_class: String,
+    },
+    /// Selected scheduler policy does not match the runtime recommendation.
+    #[error(
+        "scheduler policy {actual_policy_ref} does not match recommended policy {expected_policy_ref} for protocol class {protocol_class} (initial_weight={initial_weight}, guard_capacity_slots={guard_capacity_slots})"
+    )]
+    SchedulerPolicyMismatch {
+        /// Recommended stable scheduler policy reference.
+        expected_policy_ref: String,
+        /// Actual configured scheduler policy reference.
+        actual_policy_ref: String,
+        /// Resolved Aura protocol class.
+        protocol_class: String,
+        /// Initial weighted measure for the admitted image.
+        initial_weight: u64,
+        /// Effective guard capacity used for the decision.
+        guard_capacity_slots: usize,
+    },
+}
+
+/// Canonical VM execution policy bound to one Aura protocol class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuraVmProtocolExecutionPolicy {
+    /// Stable policy selector reference.
+    pub policy_ref: &'static str,
+    /// Aura protocol class.
+    pub protocol_class: TerminationProtocolClass,
+    /// Telltale determinism mode.
+    pub determinism_mode: DeterminismMode,
+    /// Telltale effect determinism tier.
+    pub effect_determinism_tier: EffectDeterminismTier,
+    /// Telltale communication replay mode.
+    pub communication_replay_mode: CommunicationReplayMode,
+}
+
+/// Runtime signals that influence scheduler selection without bypassing the VM scheduler.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AuraVmSchedulerSignals {
+    /// Recent guard contention events observed by the host bridge.
+    pub guard_contention_events: u64,
+    /// Flow-budget pressure in basis points (`0..=10_000`).
+    pub flow_budget_pressure_bps: u16,
+    /// Leakage-budget pressure in basis points (`0..=10_000`).
+    pub leakage_budget_pressure_bps: u16,
+}
+
+impl AuraVmSchedulerSignals {
+    /// Clamp pressure signals to the representable basis-point range.
+    #[must_use]
+    pub fn normalized(self) -> Self {
+        Self {
+            guard_contention_events: self.guard_contention_events,
+            flow_budget_pressure_bps: self.flow_budget_pressure_bps.min(10_000),
+            leakage_budget_pressure_bps: self.leakage_budget_pressure_bps.min(10_000),
+        }
+    }
+}
+
+/// Host-side scheduler selection input for one admitted VM session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuraVmSchedulerControlInput {
+    /// Aura protocol class for the admitted session.
+    pub protocol_class: TerminationProtocolClass,
+    /// Initial Telltale weighted progress measure.
+    pub initial_weight: u64,
+    /// Effective active guard capacity available to the VM.
+    pub guard_capacity_slots: usize,
+    /// Host bridge pressure/contention signals.
+    pub signals: AuraVmSchedulerSignals,
+}
+
+/// Canonical scheduler decision selected by the host for one VM session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuraVmSchedulerExecutionPolicy {
+    /// Stable scheduler policy selector reference.
+    pub policy_ref: &'static str,
+    /// Concrete Telltale scheduler policy to configure.
+    pub sched_policy: SchedPolicy,
+}
+
+/// Host handlers that can surface scheduler-control signals at admission time.
+pub trait AuraVmSchedulerSignalsProvider {
+    /// Snapshot scheduler signals visible to the host bridge.
+    fn scheduler_signals(&self) -> AuraVmSchedulerSignals;
+}
+
+impl AuraVmProtocolExecutionPolicy {
+    /// Lossless metadata snapshot suitable for conformance/trace artifacts.
+    #[must_use]
+    pub fn artifact_metadata(self) -> AuraVmDeterminismProfileV1 {
+        AuraVmDeterminismProfileV1 {
+            policy_ref: self.policy_ref.to_string(),
+            protocol_class: self.protocol_class.to_string(),
+            determinism_mode: determinism_mode_ref(self.determinism_mode).to_string(),
+            effect_determinism_tier: effect_determinism_tier_ref(
+                self.effect_determinism_tier,
+            )
+            .to_string(),
+            communication_replay_mode: communication_replay_mode_ref(
+                self.communication_replay_mode,
+            )
+            .to_string(),
+        }
+    }
+}
+
+/// Stable textual identifier for one determinism mode.
+#[must_use]
+pub const fn determinism_mode_ref(mode: DeterminismMode) -> &'static str {
+    match mode {
+        DeterminismMode::Full => "full",
+        DeterminismMode::ModuloEffects => "modulo_effects",
+        DeterminismMode::ModuloCommutativity => "modulo_commutativity",
+        DeterminismMode::Replay => "replay",
+    }
+}
+
+/// Stable textual identifier for one effect determinism tier.
+#[must_use]
+pub const fn effect_determinism_tier_ref(tier: EffectDeterminismTier) -> &'static str {
+    match tier {
+        EffectDeterminismTier::StrictDeterministic => "strict_deterministic",
+        EffectDeterminismTier::ReplayDeterministic => "replay_deterministic",
+        EffectDeterminismTier::EnvelopeBoundedNondeterministic => {
+            "envelope_bounded_nondeterministic"
+        }
+    }
+}
+
+/// Stable textual identifier for one communication replay mode.
+#[must_use]
+pub const fn communication_replay_mode_ref(mode: CommunicationReplayMode) -> &'static str {
+    match mode {
+        CommunicationReplayMode::Off => "off",
+        CommunicationReplayMode::Sequence => "sequence",
+        CommunicationReplayMode::Nullifier => "nullifier",
+    }
+}
+
+/// Canonical execution policy for one stable policy selector.
+///
+/// # Errors
+///
+/// Returns [`AuraVmDeterminismProfileError::UnknownPolicyRef`] for unsupported selectors.
+pub fn policy_for_ref(
+    policy_ref: &str,
+) -> Result<AuraVmProtocolExecutionPolicy, AuraVmDeterminismProfileError> {
+    match policy_ref {
+        AURA_VM_POLICY_PROD_DEFAULT => Ok(AuraVmProtocolExecutionPolicy {
+            policy_ref: AURA_VM_POLICY_PROD_DEFAULT,
+            protocol_class: TerminationProtocolClass::RecoveryGrant,
+            determinism_mode: DeterminismMode::Full,
+            effect_determinism_tier: EffectDeterminismTier::StrictDeterministic,
+            communication_replay_mode: CommunicationReplayMode::Off,
+        }),
+        AURA_VM_POLICY_CONSENSUS_FALLBACK => Ok(AuraVmProtocolExecutionPolicy {
+            policy_ref: AURA_VM_POLICY_CONSENSUS_FALLBACK,
+            protocol_class: TerminationProtocolClass::ConsensusFallback,
+            determinism_mode: DeterminismMode::ModuloCommutativity,
+            effect_determinism_tier: EffectDeterminismTier::ReplayDeterministic,
+            communication_replay_mode: CommunicationReplayMode::Sequence,
+        }),
+        AURA_VM_POLICY_CONSENSUS_FAST_PATH => Ok(AuraVmProtocolExecutionPolicy {
+            policy_ref: AURA_VM_POLICY_CONSENSUS_FAST_PATH,
+            protocol_class: TerminationProtocolClass::ConsensusFastPath,
+            determinism_mode: DeterminismMode::Full,
+            effect_determinism_tier: EffectDeterminismTier::StrictDeterministic,
+            communication_replay_mode: CommunicationReplayMode::Sequence,
+        }),
+        AURA_VM_POLICY_DKG_CEREMONY => Ok(AuraVmProtocolExecutionPolicy {
+            policy_ref: AURA_VM_POLICY_DKG_CEREMONY,
+            protocol_class: TerminationProtocolClass::DkgCeremony,
+            determinism_mode: DeterminismMode::Replay,
+            effect_determinism_tier: EffectDeterminismTier::ReplayDeterministic,
+            communication_replay_mode: CommunicationReplayMode::Sequence,
+        }),
+        AURA_VM_POLICY_RECOVERY_GRANT => Ok(AuraVmProtocolExecutionPolicy {
+            policy_ref: AURA_VM_POLICY_RECOVERY_GRANT,
+            protocol_class: TerminationProtocolClass::RecoveryGrant,
+            determinism_mode: DeterminismMode::Full,
+            effect_determinism_tier: EffectDeterminismTier::StrictDeterministic,
+            communication_replay_mode: CommunicationReplayMode::Off,
+        }),
+        AURA_VM_POLICY_SYNC_ANTI_ENTROPY => Ok(AuraVmProtocolExecutionPolicy {
+            policy_ref: AURA_VM_POLICY_SYNC_ANTI_ENTROPY,
+            protocol_class: TerminationProtocolClass::SyncAntiEntropy,
+            determinism_mode: DeterminismMode::ModuloEffects,
+            effect_determinism_tier: EffectDeterminismTier::EnvelopeBoundedNondeterministic,
+            communication_replay_mode: CommunicationReplayMode::Sequence,
+        }),
+        _ => Err(AuraVmDeterminismProfileError::UnknownPolicyRef {
+            raw: policy_ref.to_string(),
+        }),
+    }
+}
+
+/// Canonical execution policy for one protocol id plus optional manifest selector.
+///
+/// # Errors
+///
+/// Returns an error when the protocol id is unknown or the selected policy ref is incompatible
+/// with the resolved protocol class.
+pub fn policy_for_protocol(
+    protocol_id: &str,
+    policy_ref: Option<&str>,
+) -> Result<AuraVmProtocolExecutionPolicy, AuraVmDeterminismProfileError> {
+    let protocol_class = TerminationProtocolClass::from_protocol_id(protocol_id).ok_or_else(|| {
+        AuraVmDeterminismProfileError::PolicyClassMismatch {
+            policy_ref: policy_ref.unwrap_or(AURA_VM_POLICY_PROD_DEFAULT).to_string(),
+            protocol_id: protocol_id.to_string(),
+            protocol_class: "unknown".to_string(),
+        }
+    })?;
+    let selected_policy_ref = policy_ref.unwrap_or(match protocol_class {
+        TerminationProtocolClass::ConsensusFastPath => AURA_VM_POLICY_CONSENSUS_FAST_PATH,
+        TerminationProtocolClass::ConsensusFallback => AURA_VM_POLICY_CONSENSUS_FALLBACK,
+        TerminationProtocolClass::SyncAntiEntropy => AURA_VM_POLICY_SYNC_ANTI_ENTROPY,
+        TerminationProtocolClass::DkgCeremony => AURA_VM_POLICY_DKG_CEREMONY,
+        TerminationProtocolClass::RecoveryGrant => AURA_VM_POLICY_RECOVERY_GRANT,
+    });
+    let policy = policy_for_ref(selected_policy_ref)?;
+    if policy.protocol_class != protocol_class {
+        return Err(AuraVmDeterminismProfileError::PolicyClassMismatch {
+            policy_ref: selected_policy_ref.to_string(),
+            protocol_id: protocol_id.to_string(),
+            protocol_class: protocol_class.to_string(),
+        });
+    }
+    Ok(policy)
+}
+
+/// Apply the selected protocol execution policy onto a VM config.
+pub fn apply_protocol_execution_policy(
+    config: &mut VMConfig,
+    policy: AuraVmProtocolExecutionPolicy,
+) {
+    config.determinism_mode = policy.determinism_mode;
+    config.effect_determinism_tier = policy.effect_determinism_tier;
+    config.communication_replay_mode = policy.communication_replay_mode;
+}
+
+/// Stable textual identifier for one scheduler policy.
+#[must_use]
+pub fn scheduler_policy_ref(policy: &SchedPolicy) -> &'static str {
+    match policy {
+        SchedPolicy::Cooperative => "cooperative",
+        SchedPolicy::RoundRobin => AURA_VM_SCHED_ROUND_ROBIN,
+        SchedPolicy::Priority(PriorityPolicy::Aging) => AURA_VM_SCHED_PRIORITY_AGING,
+        SchedPolicy::Priority(PriorityPolicy::TokenWeighted) => {
+            "aura.vm.scheduler.priority_token_weighted"
+        }
+        SchedPolicy::Priority(PriorityPolicy::FixedMap(_)) => "aura.vm.scheduler.priority_fixed",
+        SchedPolicy::ProgressAware => AURA_VM_SCHED_PROGRESS_AWARE,
+    }
+}
+
+/// Effective guard capacity available in this VM config.
+#[must_use]
+pub fn configured_guard_capacity(config: &VMConfig) -> usize {
+    config
+        .guard_layers
+        .iter()
+        .filter(|layer| layer.active)
+        .count()
+        .max(1)
+}
+
+/// Compute scheduler-selection input for one admitted code image.
+#[must_use]
+pub fn scheduler_control_input_for_image(
+    image: &CodeImage,
+    protocol_class: TerminationProtocolClass,
+    guard_capacity_slots: usize,
+    signals: AuraVmSchedulerSignals,
+) -> AuraVmSchedulerControlInput {
+    let local_types = image.local_types.values().cloned().collect::<Vec<_>>();
+    let initial_weight = compute_weighted_measure(&local_types, &SessionBufferSnapshot::new());
+    AuraVmSchedulerControlInput {
+        protocol_class,
+        initial_weight,
+        guard_capacity_slots: guard_capacity_slots.max(1),
+        signals: signals.normalized(),
+    }
+}
+
+/// Canonical scheduler policy for one admitted session.
+#[must_use]
+pub fn scheduler_policy_for_input(
+    input: AuraVmSchedulerControlInput,
+) -> AuraVmSchedulerExecutionPolicy {
+    let high_budget_pressure = input.signals.flow_budget_pressure_bps >= 7_500
+        || input.signals.leakage_budget_pressure_bps >= 7_500;
+    let guard_constrained =
+        input.guard_capacity_slots <= 1 || input.signals.guard_contention_events > 0;
+    let heavy_protocol = matches!(
+        input.protocol_class,
+        TerminationProtocolClass::ConsensusFallback
+            | TerminationProtocolClass::SyncAntiEntropy
+            | TerminationProtocolClass::DkgCeremony
+    );
+    let (_, high_weight) = input.protocol_class.expected_weight_range();
+    let heavy_weight = input.initial_weight >= high_weight;
+
+    if guard_constrained || high_budget_pressure {
+        AuraVmSchedulerExecutionPolicy {
+            policy_ref: AURA_VM_SCHED_PRIORITY_AGING,
+            sched_policy: SchedPolicy::Priority(PriorityPolicy::Aging),
+        }
+    } else if heavy_protocol || heavy_weight {
+        AuraVmSchedulerExecutionPolicy {
+            policy_ref: AURA_VM_SCHED_PROGRESS_AWARE,
+            sched_policy: SchedPolicy::ProgressAware,
+        }
+    } else {
+        AuraVmSchedulerExecutionPolicy {
+            policy_ref: AURA_VM_SCHED_ROUND_ROBIN,
+            sched_policy: SchedPolicy::RoundRobin,
+        }
+    }
+}
+
+/// Apply the selected scheduler execution policy onto a VM config.
+pub fn apply_scheduler_execution_policy(
+    config: &mut VMConfig,
+    policy: &AuraVmSchedulerExecutionPolicy,
+) {
+    config.sched_policy = policy.sched_policy.clone();
+}
+
+/// Validate that a VM config matches the selected scheduler execution policy.
+///
+/// # Errors
+///
+/// Returns [`AuraVmDeterminismProfileError::SchedulerPolicyMismatch`] when the config drifts
+/// from the recommended scheduler policy.
+pub fn validate_scheduler_execution_policy(
+    config: &VMConfig,
+    input: AuraVmSchedulerControlInput,
+) -> Result<AuraVmSchedulerExecutionPolicy, AuraVmDeterminismProfileError> {
+    let expected = scheduler_policy_for_input(input);
+    if config.sched_policy != expected.sched_policy {
+        return Err(AuraVmDeterminismProfileError::SchedulerPolicyMismatch {
+            expected_policy_ref: expected.policy_ref.to_string(),
+            actual_policy_ref: scheduler_policy_ref(&config.sched_policy).to_string(),
+            protocol_class: input.protocol_class.to_string(),
+            initial_weight: input.initial_weight,
+            guard_capacity_slots: input.guard_capacity_slots,
+        });
+    }
+    Ok(expected)
+}
+
+/// Validate that a VM config matches the selected protocol execution policy.
+///
+/// # Errors
+///
+/// Returns [`AuraVmDeterminismProfileError::InvalidCombination`] when the config drifts from the
+/// selected policy dimensions.
+pub fn validate_protocol_execution_policy(
+    config: &VMConfig,
+    policy: AuraVmProtocolExecutionPolicy,
+) -> Result<(), AuraVmDeterminismProfileError> {
+    validate_determinism_profile(config)?;
+
+    if config.determinism_mode != policy.determinism_mode {
+        return Err(AuraVmDeterminismProfileError::InvalidCombination {
+            mode: config.determinism_mode,
+            tier: config.effect_determinism_tier,
+            replay: config.communication_replay_mode,
+            reason: "vm determinism mode does not match protocol policy",
+        });
+    }
+    if config.effect_determinism_tier != policy.effect_determinism_tier {
+        return Err(AuraVmDeterminismProfileError::InvalidCombination {
+            mode: config.determinism_mode,
+            tier: config.effect_determinism_tier,
+            replay: config.communication_replay_mode,
+            reason: "vm effect determinism tier does not match protocol policy",
+        });
+    }
+    if config.communication_replay_mode != policy.communication_replay_mode {
+        return Err(AuraVmDeterminismProfileError::InvalidCombination {
+            mode: config.determinism_mode,
+            tier: config.effect_determinism_tier,
+            replay: config.communication_replay_mode,
+            reason: "vm communication replay mode does not match protocol policy",
+        });
+    }
+
+    Ok(())
 }
 
 /// Parse `DeterminismMode` from a stable textual identifier.
@@ -573,5 +1002,123 @@ mod tests {
 
         config.effect_determinism_tier = EffectDeterminismTier::StrictDeterministic;
         assert!(validate_determinism_profile(&config).is_ok());
+    }
+
+    #[test]
+    fn protocol_policy_mapping_is_class_driven() {
+        let dkg = policy_for_protocol("aura.dkg.ceremony", Some(AURA_VM_POLICY_DKG_CEREMONY))
+            .expect("dkg policy must resolve");
+        assert_eq!(dkg.protocol_class, TerminationProtocolClass::DkgCeremony);
+        assert_eq!(dkg.determinism_mode, DeterminismMode::Replay);
+        assert_eq!(
+            dkg.effect_determinism_tier,
+            EffectDeterminismTier::ReplayDeterministic
+        );
+        assert_eq!(
+            dkg.communication_replay_mode,
+            CommunicationReplayMode::Sequence
+        );
+
+        let invitation = policy_for_protocol(
+            "aura.invitation.exchange",
+            Some(AURA_VM_POLICY_PROD_DEFAULT),
+        )
+        .expect("invitation policy must resolve");
+        assert_eq!(invitation.protocol_class, TerminationProtocolClass::RecoveryGrant);
+        assert_eq!(invitation.determinism_mode, DeterminismMode::Full);
+    }
+
+    #[test]
+    fn protocol_policy_validation_rejects_class_mismatches() {
+        let err = policy_for_protocol(
+            "aura.sync.epoch_rotation",
+            Some(AURA_VM_POLICY_RECOVERY_GRANT),
+        )
+        .expect_err("mismatched policy ref must fail");
+        assert!(matches!(
+            err,
+            AuraVmDeterminismProfileError::PolicyClassMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn protocol_policy_validation_rejects_vm_config_drift() {
+        let policy = policy_for_protocol("aura.sync.epoch_rotation", None)
+            .expect("sync policy must resolve");
+        let config = build_vm_config(
+            AuraVmHardeningProfile::Prod,
+            AuraVmParityProfile::RuntimeDefault,
+        );
+        assert!(matches!(
+            validate_protocol_execution_policy(&config, policy),
+            Err(AuraVmDeterminismProfileError::InvalidCombination { .. })
+        ));
+
+        let mut aligned = config;
+        apply_protocol_execution_policy(&mut aligned, policy);
+        assert!(validate_protocol_execution_policy(&aligned, policy).is_ok());
+    }
+
+    #[test]
+    fn scheduler_policy_uses_progress_aware_for_heavy_protocol_classes() {
+        let image = flow_compatibility_image();
+        let input = scheduler_control_input_for_image(
+            &image,
+            TerminationProtocolClass::SyncAntiEntropy,
+            2,
+            AuraVmSchedulerSignals::default(),
+        );
+        let selected = scheduler_policy_for_input(input);
+        assert_eq!(selected.policy_ref, AURA_VM_SCHED_PROGRESS_AWARE);
+        assert_eq!(selected.sched_policy, SchedPolicy::ProgressAware);
+    }
+
+    #[test]
+    fn scheduler_policy_uses_aging_when_capacity_or_budget_pressure_is_low() {
+        let image = flow_compatibility_image();
+        let input = scheduler_control_input_for_image(
+            &image,
+            TerminationProtocolClass::RecoveryGrant,
+            1,
+            AuraVmSchedulerSignals {
+                guard_contention_events: 0,
+                flow_budget_pressure_bps: 8_000,
+                leakage_budget_pressure_bps: 0,
+            },
+        );
+        let selected = scheduler_policy_for_input(input);
+        assert_eq!(selected.policy_ref, AURA_VM_SCHED_PRIORITY_AGING);
+        assert_eq!(
+            selected.sched_policy,
+            SchedPolicy::Priority(PriorityPolicy::Aging)
+        );
+    }
+
+    #[test]
+    fn scheduler_policy_validation_rejects_config_drift() {
+        let image = flow_compatibility_image();
+        let input = scheduler_control_input_for_image(
+            &image,
+            TerminationProtocolClass::RecoveryGrant,
+            1,
+            AuraVmSchedulerSignals {
+                guard_contention_events: 2,
+                flow_budget_pressure_bps: 0,
+                leakage_budget_pressure_bps: 7_900,
+            },
+        );
+        let config = build_vm_config(
+            AuraVmHardeningProfile::Prod,
+            AuraVmParityProfile::RuntimeDefault,
+        );
+        assert!(matches!(
+            validate_scheduler_execution_policy(&config, input),
+            Err(AuraVmDeterminismProfileError::SchedulerPolicyMismatch { .. })
+        ));
+
+        let mut aligned = config;
+        let selected = scheduler_policy_for_input(input);
+        apply_scheduler_execution_policy(&mut aligned, &selected);
+        assert!(validate_scheduler_execution_policy(&aligned, input).is_ok());
     }
 }

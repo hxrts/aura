@@ -600,6 +600,7 @@ impl SessionOperations {
                 "Initiator",
                 &global_type,
                 &local_types,
+                crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
             .map_err(AgentError::internal)?;
@@ -696,6 +697,7 @@ impl SessionOperations {
                 "Coordinator",
                 &global_type,
                 &local_types,
+                crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
             .map_err(AgentError::internal)?;
@@ -823,6 +825,7 @@ impl SessionOperations {
                 &active_role_name,
                 &global_type,
                 &local_types,
+                crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
             .map_err(AgentError::internal)?;

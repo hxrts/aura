@@ -48,6 +48,7 @@ pub(super) async fn execute_recovery_protocol_account(
             "Account",
             &global_type,
             &local_types,
+            crate::runtime::AuraVmSchedulerSignals::default(),
         )
         .await
         .map_err(AgentError::internal)?;
@@ -133,6 +134,7 @@ pub(super) async fn execute_recovery_protocol_coordinator(
             "Coordinator",
             &global_type,
             &local_types,
+            crate::runtime::AuraVmSchedulerSignals::default(),
         )
         .await
         .map_err(AgentError::internal)?;

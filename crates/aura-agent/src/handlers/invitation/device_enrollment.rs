@@ -153,6 +153,7 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
                 "Initiator",
                 &global_type,
                 &local_types,
+                crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
             .map_err(AgentError::internal)?;
@@ -266,6 +267,7 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
                 "Invitee",
                 &global_type,
                 &local_types,
+                crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
             .map_err(AgentError::internal)?;

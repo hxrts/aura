@@ -5,14 +5,14 @@ use std::sync::Arc;
 
 use aura_core::conformance::{
     assert_effect_kinds_classified, AuraConformanceArtifactV1, AuraConformanceRunMetadataV1,
-    AuraConformanceSurfaceV1, ConformanceSurfaceName, ConformanceValidationError,
+    AuraConformanceSurfaceV1, AuraVmDeterminismProfileV1, ConformanceSurfaceName,
+    ConformanceValidationError,
 };
 use aura_core::effects::guard::{EffectInterpreter, EffectResult};
 use aura_core::effects::{AdmissionError, CapabilityKey, RuntimeCapabilityEffects};
 use aura_core::hash::hash;
 use aura_effects::RuntimeCapabilityHandler;
 use aura_mpst::termination::{compute_weighted_measure, SessionBufferSnapshot};
-use aura_protocol::admission::{CAPABILITY_BYZANTINE_ENVELOPE, CAPABILITY_TERMINATION_BOUNDED};
 use aura_protocol::termination::{
     TerminationBudget, TerminationBudgetConfig, TerminationBudgetError, TerminationProtocolClass,
 };
@@ -33,8 +33,11 @@ use tracing::warn;
 
 use super::vm_effect_handler::AuraVmEffectHandler;
 use super::vm_hardening::{
-    build_vm_config, validate_determinism_profile, vm_config_for_profile, AuraVmHardeningProfile,
-    AuraVmParityProfile,
+    build_vm_config, configured_guard_capacity, policy_for_protocol,
+    scheduler_control_input_for_image, validate_determinism_profile,
+    validate_protocol_execution_policy, validate_scheduler_execution_policy,
+    vm_config_for_profile, AuraVmHardeningProfile, AuraVmParityProfile,
+    AuraVmProtocolExecutionPolicy, AuraVmSchedulerSignalsProvider,
 };
 
 /// Errors raised by [`AuraChoreoEngine`].
@@ -122,12 +125,14 @@ impl From<VMError> for AuraChoreoEngineError {
 #[derive(Debug)]
 pub struct AuraChoreoEngine<H: VmEffectHandler = AuraVmEffectHandler> {
     vm: VM,
+    vm_config: VMConfig,
     handler: Arc<H>,
     runtime_contracts: Option<RuntimeContracts>,
     runtime_capabilities: RuntimeCapabilityHandler,
     capability_snapshot: Vec<(String, bool)>,
     active_sessions: BTreeSet<SessionId>,
     session_protocol_classes: BTreeMap<SessionId, TerminationProtocolClass>,
+    session_determinism_profiles: BTreeMap<SessionId, AuraVmProtocolExecutionPolicy>,
     termination_budget_config: TerminationBudgetConfig,
 }
 
@@ -189,13 +194,15 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
         );
 
         Ok(Self {
-            vm: VM::new(config),
+            vm: VM::new(config.clone()),
+            vm_config: config,
             handler,
             runtime_contracts,
             runtime_capabilities,
             capability_snapshot,
             active_sessions: BTreeSet::new(),
             session_protocol_classes: BTreeMap::new(),
+            session_determinism_profiles: BTreeMap::new(),
             termination_budget_config: TerminationBudgetConfig::default(),
         })
     }
@@ -251,6 +258,11 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
     /// Borrow the underlying VM for advanced operations.
     pub fn vm(&self) -> &VM {
         &self.vm
+    }
+
+    /// Active VM configuration for this engine instance.
+    pub fn vm_config(&self) -> &VMConfig {
+        &self.vm_config
     }
 
     /// Mutably borrow the underlying VM for advanced operations.
@@ -317,21 +329,6 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
         Ok(sid)
     }
 
-    /// Admit required runtime capabilities, then open the choreography session.
-    pub async fn open_session_admitted(
-        &mut self,
-        image: &CodeImage,
-        required_capabilities: &[&str],
-    ) -> Result<SessionId, AuraChoreoEngineError> {
-        self.admit_bundle(required_capabilities).await?;
-        let sid = self.open_session(image)?;
-        self.session_protocol_classes.insert(
-            sid,
-            protocol_class_for_required_capabilities(required_capabilities),
-        );
-        Ok(sid)
-    }
-
     /// Execute one scheduler step using the configured effect handler.
     pub fn step(&mut self) -> Result<StepResult, AuraChoreoEngineError> {
         let result = self.vm.step(self.handler.as_ref());
@@ -379,8 +376,9 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
     pub fn run_recording_conformance(
         &mut self,
         max_steps: usize,
-        metadata: AuraConformanceRunMetadataV1,
+        mut metadata: AuraConformanceRunMetadataV1,
     ) -> Result<(RunStatus, AuraConformanceArtifactV1), AuraChoreoEngineError> {
+        metadata.vm_determinism_profile = self.active_determinism_profile_metadata();
         let (status, effect_trace) = self.run_recording(max_steps)?;
         let normalized_observable = normalize_trace(self.vm.trace());
         let canonical_effects = canonical_effect_trace(&effect_trace);
@@ -496,6 +494,7 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
             .map_err(|message| AuraChoreoEngineError::SessionLifecycle { message })?;
         self.active_sessions.remove(&sid);
         self.session_protocol_classes.remove(&sid);
+        self.session_determinism_profiles.remove(&sid);
         Ok(())
     }
 
@@ -620,6 +619,8 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
         });
         self.session_protocol_classes
             .retain(|sid, _| self.active_sessions.contains(sid));
+        self.session_determinism_profiles
+            .retain(|sid, _| self.active_sessions.contains(sid));
     }
 
     fn cleanup_terminal_sessions(&mut self) {
@@ -699,24 +700,6 @@ fn capability_key_ref(key: &str) -> String {
     hex::encode(&digest[..8])
 }
 
-fn protocol_class_for_required_capabilities(
-    required_capabilities: &[&str],
-) -> TerminationProtocolClass {
-    if required_capabilities
-        .iter()
-        .any(|capability| *capability == CAPABILITY_TERMINATION_BOUNDED)
-    {
-        return TerminationProtocolClass::SyncAntiEntropy;
-    }
-    if required_capabilities
-        .iter()
-        .any(|capability| *capability == CAPABILITY_BYZANTINE_ENVELOPE)
-    {
-        return TerminationProtocolClass::ConsensusFallback;
-    }
-    TerminationProtocolClass::RecoveryGrant
-}
-
 fn map_termination_error_to_engine(error: TerminationBudgetError) -> AuraChoreoEngineError {
     match error {
         TerminationBudgetError::BoundExceeded {
@@ -741,6 +724,63 @@ fn map_termination_error_to_engine(error: TerminationBudgetError) -> AuraChoreoE
                 message: format!("invalid termination divergence ratio: {ratio}"),
             }
         }
+    }
+}
+
+impl<H: VmEffectHandler> AuraChoreoEngine<H> {
+    fn dominant_determinism_policy(&self) -> Option<AuraVmProtocolExecutionPolicy> {
+        self.session_determinism_profiles
+            .values()
+            .copied()
+            .max_by(|left, right| {
+                left.protocol_class
+                    .scheduler_factor()
+                    .partial_cmp(&right.protocol_class.scheduler_factor())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    }
+
+    fn active_determinism_profile_metadata(&self) -> Option<AuraVmDeterminismProfileV1> {
+        self.dominant_determinism_policy()
+            .map(AuraVmProtocolExecutionPolicy::artifact_metadata)
+    }
+}
+
+impl<H: VmEffectHandler + AuraVmSchedulerSignalsProvider> AuraChoreoEngine<H> {
+    /// Admit required runtime capabilities, then open the choreography session.
+    pub async fn open_session_admitted(
+        &mut self,
+        image: &CodeImage,
+        protocol_id: &str,
+        determinism_policy_ref: Option<&str>,
+        required_capabilities: &[&str],
+    ) -> Result<SessionId, AuraChoreoEngineError> {
+        self.admit_bundle(required_capabilities).await?;
+        let policy = policy_for_protocol(protocol_id, determinism_policy_ref).map_err(
+            |error| AuraChoreoEngineError::Interpreter {
+                message: format!("invalid VM protocol policy: {error}"),
+            },
+        )?;
+        validate_protocol_execution_policy(&self.vm_config, policy).map_err(|error| {
+            AuraChoreoEngineError::Interpreter {
+                message: format!("unsupported VM runtime profile for protocol: {error}"),
+            }
+        })?;
+        let scheduler_input = scheduler_control_input_for_image(
+            image,
+            policy.protocol_class,
+            configured_guard_capacity(&self.vm_config),
+            self.handler.scheduler_signals(),
+        );
+        validate_scheduler_execution_policy(&self.vm_config, scheduler_input).map_err(
+            |error| AuraChoreoEngineError::Interpreter {
+                message: format!("unsupported VM scheduler profile for protocol: {error}"),
+            },
+        )?;
+        let sid = self.open_session(image)?;
+        self.session_protocol_classes.insert(sid, policy.protocol_class);
+        self.session_determinism_profiles.insert(sid, policy);
+        Ok(sid)
     }
 }
 
@@ -773,6 +813,7 @@ mod tests {
     use super::*;
     use aura_mpst::telltale_types::{GlobalType, LocalTypeR};
     use std::collections::BTreeMap;
+    use telltale_vm::runtime_contracts::RuntimeContracts;
 
     #[test]
     fn step_reaps_completed_sessions() {
@@ -795,5 +836,68 @@ mod tests {
         assert!(!engine.active_sessions().contains(&sid));
         assert!(engine.vm().sessions().get(sid).is_none());
         assert_eq!(engine.vm().sessions().archived_closed().len(), 1);
+    }
+
+    #[test]
+    fn conformance_artifact_includes_selected_determinism_profile() {
+        let image = CodeImage::from_local_types(
+            &BTreeMap::from([("Solo".to_string(), LocalTypeR::End)]),
+            &GlobalType::End,
+        );
+        let policy =
+            super::super::vm_hardening::policy_for_protocol("aura.recovery.grant", None)
+                .expect("policy");
+        let mut config = vm_config_for_profile(AuraVmHardeningProfile::Prod);
+        super::super::vm_hardening::apply_protocol_execution_policy(&mut config, policy);
+        let scheduler_input = super::super::vm_hardening::scheduler_control_input_for_image(
+            &image,
+            policy.protocol_class,
+            super::super::vm_hardening::configured_guard_capacity(&config),
+            super::super::vm_hardening::AuraVmSchedulerSignals::default(),
+        );
+        let scheduler_policy =
+            super::super::vm_hardening::scheduler_policy_for_input(scheduler_input);
+        super::super::vm_hardening::apply_scheduler_execution_policy(
+            &mut config,
+            &scheduler_policy,
+        );
+        let mut engine = AuraChoreoEngine::new_with_contracts(
+            config,
+            Arc::new(AuraVmEffectHandler::default()),
+            Some(RuntimeContracts::full()),
+        )
+        .expect("engine");
+
+        futures::executor::block_on(async {
+            engine
+                .open_session_admitted(&image, "aura.recovery.grant", None, &[])
+                .await
+                .expect("session opens");
+        });
+
+        let (_status, artifact) = engine
+            .run_recording_conformance(
+                8,
+                AuraConformanceRunMetadataV1 {
+                    target: "native".to_string(),
+                    profile: "test".to_string(),
+                    scenario: "determinism_profile".to_string(),
+                    seed: Some(1),
+                    commit: None,
+                    async_host_transcript_entries: None,
+                    async_host_transcript_digest_hex: None,
+                    vm_determinism_profile: None,
+                },
+            )
+            .expect("conformance run succeeds");
+
+        assert_eq!(
+            artifact
+                .metadata
+                .vm_determinism_profile
+                .as_ref()
+                .map(|profile| profile.policy_ref.as_str()),
+            Some("aura.vm.recovery_grant.prod")
+        );
     }
 }

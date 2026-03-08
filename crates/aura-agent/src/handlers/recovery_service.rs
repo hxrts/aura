@@ -568,6 +568,7 @@ impl RecoveryServiceApi {
                 "Guardian",
                 &global_type,
                 &local_types,
+                crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
             .map_err(AgentError::internal)?;
@@ -961,6 +962,7 @@ impl RecoveryServiceApi {
                 "Initiator",
                 &global_type,
                 &local_types,
+                crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
             .map_err(AgentError::internal)?;
@@ -1169,6 +1171,7 @@ impl RecoveryServiceApi {
                 active_role_name,
                 &global_type,
                 &local_types,
+                crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
             .map_err(AgentError::internal)?;
@@ -1283,6 +1286,7 @@ impl RecoveryServiceApi {
                 "SetupInitiator",
                 &global_type,
                 &local_types,
+                crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
             .map_err(AgentError::internal)?;
@@ -1451,6 +1455,7 @@ impl RecoveryServiceApi {
                 active_role_name,
                 &global_type,
                 &local_types,
+                crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
             .map_err(AgentError::internal)?;
@@ -1605,6 +1610,7 @@ impl RecoveryServiceApi {
                 "ChangeInitiator",
                 &global_type,
                 &local_types,
+                crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
             .map_err(AgentError::internal)?;
@@ -1822,6 +1828,7 @@ impl RecoveryServiceApi {
                 active_role_name,
                 &global_type,
                 &local_types,
+                crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
             .map_err(AgentError::internal)?;

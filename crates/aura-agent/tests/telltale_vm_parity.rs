@@ -624,6 +624,7 @@ mod native {
             commit: option_env!("GIT_COMMIT_HASH").map(ToString::to_string),
             async_host_transcript_entries: None,
             async_host_transcript_digest_hex: None,
+            vm_determinism_profile: None,
         });
 
         let observable_entries = run
@@ -1163,6 +1164,7 @@ mod wasm {
             commit: option_env!("GIT_COMMIT_HASH").map(ToString::to_string),
             async_host_transcript_entries: None,
             async_host_transcript_digest_hex: None,
+            vm_determinism_profile: None,
         });
 
         let entries = trace

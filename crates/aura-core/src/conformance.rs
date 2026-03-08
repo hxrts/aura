@@ -62,6 +62,21 @@ impl ConformanceSurfaceName {
 
 /// Run metadata captured in conformance artifacts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AuraVmDeterminismProfileV1 {
+    /// Stable policy selector reference used by the host runtime.
+    pub policy_ref: String,
+    /// Aura protocol class bound to this run.
+    pub protocol_class: String,
+    /// Telltale determinism mode identifier.
+    pub determinism_mode: String,
+    /// Telltale effect determinism tier identifier.
+    pub effect_determinism_tier: String,
+    /// Telltale communication replay mode identifier.
+    pub communication_replay_mode: String,
+}
+
+/// Run metadata captured in conformance artifacts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct AuraConformanceRunMetadataV1 {
     /// Runtime target (`native`, `wasm`, etc).
     pub target: String,
@@ -79,6 +94,9 @@ pub struct AuraConformanceRunMetadataV1 {
     /// Optional async host transcript digest.
     #[serde(default)]
     pub async_host_transcript_digest_hex: Option<String>,
+    /// Optional VM determinism profile selected for this run.
+    #[serde(default)]
+    pub vm_determinism_profile: Option<AuraVmDeterminismProfileV1>,
 }
 
 /// Surface payload captured for one conformance dimension.
@@ -322,6 +340,7 @@ mod tests {
             commit: None,
             async_host_transcript_entries: None,
             async_host_transcript_digest_hex: None,
+            vm_determinism_profile: None,
         };
         let mut artifact = AuraConformanceArtifactV1::new(metadata);
         artifact.insert_surface(
@@ -353,6 +372,7 @@ mod tests {
             commit: Some("deadbeef".to_string()),
             async_host_transcript_entries: None,
             async_host_transcript_digest_hex: None,
+            vm_determinism_profile: None,
         };
         let mut artifact = AuraConformanceArtifactV1::new(metadata);
         for surface in ConformanceSurfaceName::REQUIRED {
@@ -400,6 +420,7 @@ mod tests {
             commit: Some("abc123".to_string()),
             async_host_transcript_entries: None,
             async_host_transcript_digest_hex: None,
+            vm_determinism_profile: None,
         };
 
         let mut first = AuraConformanceArtifactV1::new(metadata.clone());
@@ -435,7 +456,8 @@ mod tests {
                 "seed": null,
                 "commit": null,
                 "async_host_transcript_entries": null,
-                "async_host_transcript_digest_hex": null
+                "async_host_transcript_digest_hex": null,
+                "vm_determinism_profile": null
             },
             "surfaces": {},
             "step_hashes": {},
@@ -460,7 +482,8 @@ mod tests {
                 "seed": null,
                 "commit": null,
                 "async_host_transcript_entries": null,
-                "async_host_transcript_digest_hex": null
+                "async_host_transcript_digest_hex": null,
+                "vm_determinism_profile": null
             },
             "surfaces": {},
             "step_hashes": {},

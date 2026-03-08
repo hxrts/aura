@@ -1439,9 +1439,15 @@ impl InvitationHandler {
             aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::global_type();
         let local_types =
             aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::local_types();
-        open_manifest_vm_session_admitted(&manifest, active_role, &global_type, &local_types)
-            .await
-            .map_err(AgentError::internal)
+        open_manifest_vm_session_admitted(
+            &manifest,
+            active_role,
+            &global_type,
+            &local_types,
+            crate::runtime::AuraVmSchedulerSignals::default(),
+        )
+        .await
+        .map_err(AgentError::internal)
     }
 
     #[cfg(feature = "choreo-backend-telltale-vm")]

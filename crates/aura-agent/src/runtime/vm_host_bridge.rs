@@ -2,6 +2,11 @@ use crate::runtime::{
     build_vm_config, AuraChoreoEngine, AuraEffectSystem, AuraVmHardeningProfile,
     AuraVmParityProfile,
 };
+use crate::runtime::vm_hardening::{
+    apply_protocol_execution_policy, apply_scheduler_execution_policy,
+    configured_guard_capacity, policy_for_protocol, scheduler_control_input_for_image,
+    scheduler_policy_for_input, AuraVmSchedulerSignals, AuraVmSchedulerSignalsProvider,
+};
 use aura_mpst::CompositionManifest;
 use aura_mpst::telltale_types::{GlobalType, LocalTypeR};
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, ChoreographyError};
@@ -36,6 +41,7 @@ pub struct AuraQueuedVmBridgeHandler {
     outbound_values: Mutex<VecDeque<Value>>,
     choice_labels: Mutex<VecDeque<String>>,
     pending_sends: Mutex<VecDeque<PendingVmSend>>,
+    scheduler_signals: Mutex<AuraVmSchedulerSignals>,
 }
 
 impl AuraQueuedVmBridgeHandler {
@@ -69,6 +75,17 @@ impl AuraQueuedVmBridgeHandler {
 
     pub fn bytes_to_value(payload: &[u8]) -> Value {
         Value::Str(hex::encode(payload))
+    }
+
+    #[allow(dead_code)]
+    pub fn set_scheduler_signals(&self, signals: AuraVmSchedulerSignals) {
+        *self.scheduler_signals.lock() = signals.normalized();
+    }
+}
+
+impl AuraVmSchedulerSignalsProvider for AuraQueuedVmBridgeHandler {
+    fn scheduler_signals(&self) -> AuraVmSchedulerSignals {
+        *self.scheduler_signals.lock()
     }
 }
 
@@ -197,6 +214,9 @@ pub async fn open_role_scoped_vm_session_admitted(
     active_role: &str,
     global_type: &GlobalType,
     local_types: &BTreeMap<String, LocalTypeR>,
+    protocol_id: &str,
+    determinism_policy_ref: Option<&str>,
+    scheduler_signals: AuraVmSchedulerSignals,
     required_capabilities: &[&str],
 ) -> Result<
     (
@@ -208,10 +228,22 @@ pub async fn open_role_scoped_vm_session_admitted(
 > {
     let image = build_role_scoped_code_image(role_names, active_role, global_type, local_types)?;
     let handler = Arc::new(AuraQueuedVmBridgeHandler::default());
-    let config = build_vm_config(
+    handler.set_scheduler_signals(scheduler_signals);
+    let mut config = build_vm_config(
         AuraVmHardeningProfile::Prod,
         AuraVmParityProfile::RuntimeDefault,
     );
+    let policy = policy_for_protocol(protocol_id, determinism_policy_ref)
+        .map_err(|error| format!("failed to resolve VM protocol policy: {error}"))?;
+    apply_protocol_execution_policy(&mut config, policy);
+    let scheduler_input = scheduler_control_input_for_image(
+        &image,
+        policy.protocol_class,
+        configured_guard_capacity(&config),
+        handler.scheduler_signals(),
+    );
+    let scheduler_policy = scheduler_policy_for_input(scheduler_input);
+    apply_scheduler_execution_policy(&mut config, &scheduler_policy);
     let mut engine = AuraChoreoEngine::new_with_contracts(
         config,
         Arc::clone(&handler),
@@ -219,7 +251,7 @@ pub async fn open_role_scoped_vm_session_admitted(
     )
     .map_err(|error| format!("failed to create VM engine: {error}"))?;
     let sid = engine
-        .open_session_admitted(&image, required_capabilities)
+        .open_session_admitted(&image, protocol_id, determinism_policy_ref, required_capabilities)
         .await
         .map_err(|error| format!("failed to open VM session: {error}"))?;
     Ok((engine, handler, sid))
@@ -230,6 +262,7 @@ pub async fn open_manifest_vm_session_admitted(
     active_role: &str,
     global_type: &GlobalType,
     local_types: &BTreeMap<String, LocalTypeR>,
+    scheduler_signals: AuraVmSchedulerSignals,
 ) -> Result<
     (
         AuraChoreoEngine<AuraQueuedVmBridgeHandler>,
@@ -253,6 +286,9 @@ pub async fn open_manifest_vm_session_admitted(
         active_role,
         global_type,
         local_types,
+        manifest.protocol_id.as_str(),
+        manifest.determinism_policy_ref.as_deref(),
+        scheduler_signals,
         required_capabilities.as_slice(),
     )
     .await

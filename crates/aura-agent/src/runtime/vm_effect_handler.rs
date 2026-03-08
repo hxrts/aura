@@ -17,7 +17,8 @@ use super::vm_hardening::{
     AURA_OUTPUT_PREDICATE_CHOICE, AURA_OUTPUT_PREDICATE_GUARD_ACQUIRE,
     AURA_OUTPUT_PREDICATE_GUARD_RELEASE, AURA_OUTPUT_PREDICATE_OBSERVABLE,
     AURA_OUTPUT_PREDICATE_STEP, AURA_OUTPUT_PREDICATE_TRANSPORT_RECV,
-    AURA_OUTPUT_PREDICATE_TRANSPORT_SEND,
+    AURA_OUTPUT_PREDICATE_TRANSPORT_SEND, AuraVmSchedulerSignals,
+    AuraVmSchedulerSignalsProvider,
 };
 
 /// Structured event emitted by [`AuraVmEffectHandler`] for debugging/replay hooks.
@@ -127,6 +128,7 @@ pub struct AuraVmEffectHandler {
     envelopes: Mutex<VecDeque<AuraVmEffectEnvelope>>,
     topology_schedule: Mutex<BTreeMap<u64, Vec<TopologyPerturbation>>>,
     envelope_sink: Mutex<Option<EnvelopeSink>>,
+    scheduler_signals: Mutex<AuraVmSchedulerSignals>,
 }
 
 impl std::fmt::Debug for AuraVmEffectHandler {
@@ -146,6 +148,7 @@ impl std::fmt::Debug for AuraVmEffectHandler {
             .field("events_len", &self.events.lock().len())
             .field("envelopes_len", &self.envelopes.lock().len())
             .field("topology_ticks_len", &self.topology_schedule.lock().len())
+            .field("scheduler_signals", &*self.scheduler_signals.lock())
             .finish()
     }
 }
@@ -172,6 +175,7 @@ impl AuraVmEffectHandler {
             envelopes: Mutex::new(VecDeque::new()),
             topology_schedule: Mutex::new(BTreeMap::new()),
             envelope_sink: Mutex::new(None),
+            scheduler_signals: Mutex::new(AuraVmSchedulerSignals::default()),
         }
     }
 
@@ -274,6 +278,11 @@ impl AuraVmEffectHandler {
         self.topology_schedule.lock().clear();
     }
 
+    /// Override host-visible scheduler signals for the next admitted run.
+    pub fn set_scheduler_signals(&self, signals: AuraVmSchedulerSignals) {
+        *self.scheduler_signals.lock() = signals.normalized();
+    }
+
     fn record(&self, event: AuraVmEffectEvent) {
         self.events.lock().push(event);
     }
@@ -294,6 +303,20 @@ impl AuraVmEffectHandler {
         }
         self.envelopes.lock().push_back(envelope);
         Ok(())
+    }
+}
+
+impl AuraVmSchedulerSignalsProvider for AuraVmEffectHandler {
+    fn scheduler_signals(&self) -> AuraVmSchedulerSignals {
+        let telemetry = self.telemetry();
+        let mut signals = *self.scheduler_signals.lock();
+        signals.guard_contention_events = signals.guard_contention_events.saturating_add(
+            telemetry
+                .acquire_denied
+                .saturating_add(telemetry.release_faults)
+                .saturating_add(telemetry.envelope_sink_faults),
+        );
+        signals.normalized()
     }
 }
 

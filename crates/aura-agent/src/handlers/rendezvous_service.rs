@@ -141,9 +141,15 @@ impl RendezvousServiceApi {
 
         let result = async {
             let (mut engine, handler, vm_sid) =
-                open_manifest_vm_session_admitted(manifest, active_role, global_type, local_types)
-                    .await
-                    .map_err(AgentError::internal)?;
+                open_manifest_vm_session_admitted(
+                    manifest,
+                    active_role,
+                    global_type,
+                    local_types,
+                    crate::runtime::AuraVmSchedulerSignals::default(),
+                )
+                .await
+                .map_err(AgentError::internal)?;
 
             for payload in initial_payloads {
                 handler.push_send_bytes(payload);

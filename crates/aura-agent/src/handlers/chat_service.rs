@@ -123,6 +123,7 @@ impl ChatServiceApi {
                 active_role,
                 &global_type,
                 &local_types,
+                crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
             .map_err(AgentError::internal)?;
