@@ -455,6 +455,8 @@ mod tests {
                     regex: None,
                     group: None,
                     from: None,
+                    count: None,
+                    confirmation: None,
                 },
                 SemanticScenarioFileStep {
                     id: "fill".to_string(),
@@ -481,6 +483,8 @@ mod tests {
                     regex: None,
                     group: None,
                     from: None,
+                    count: None,
+                    confirmation: None,
                 },
             ],
         };
@@ -531,6 +535,8 @@ mod tests {
             regex: None,
             group: None,
             from: None,
+            count: None,
+            confirmation: None,
         };
 
         let error = ScenarioStep::try_from(step)

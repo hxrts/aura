@@ -351,6 +351,11 @@ fn collect_timeout_diagnostics(
             }),
         };
 
+        let runtime_events = ui_state
+            .as_ref()
+            .and_then(|ui_state| ui_state.get("runtime_events").cloned())
+            .unwrap_or_else(|| serde_json::json!([]));
+
         let log_response = tool_api.handle_request(ToolRequest::TailLog {
             instance_id: instance.id.clone(),
             lines: 200,
@@ -375,6 +380,7 @@ fn collect_timeout_diagnostics(
                 "ui_state": ui_state,
                 "ui_state_error": ui_state_error,
                 "render_convergence": render_convergence,
+                "runtime_events": runtime_events,
                 "log_tail": log_tail
             }),
         );

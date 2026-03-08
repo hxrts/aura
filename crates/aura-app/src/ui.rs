@@ -55,10 +55,12 @@ pub mod signals {
 
 pub mod contract {
     pub use crate::ui_contract::{
-        list_item_dom_id, list_item_selector, ConfirmationState, ControlId, FieldId, ListId,
-        ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId, OperationId,
-        OperationInstanceId, OperationSnapshot, OperationState, RenderHeartbeat, ScreenId,
-        SelectionSnapshot, ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
+        list_item_dom_id, list_item_selector, shared_flow_support, ConfirmationState, ControlId,
+        FieldId, FlowAvailability, FrontendId, ListId, ListItemSnapshot, ListSnapshot,
+        MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
+        OperationState, ParityException, RenderHeartbeat, RuntimeEventId, RuntimeEventKind,
+        RuntimeEventSnapshot, ScreenId, SelectionSnapshot, SharedFlowId, SharedFlowSupport,
+        ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot, SHARED_FLOW_SUPPORT,
     };
 }
 

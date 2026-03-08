@@ -138,8 +138,9 @@ pub fn prev_ttl_preset(current_hours: u64) -> u64 {
     INVITATION_TTL_PRESETS[prev_index]
 }
 use crate::signal_defs::INVITATIONS_SIGNAL;
-use crate::workflows::runtime::require_runtime;
-use crate::workflows::runtime::converge_runtime;
+use crate::workflows::runtime::{
+    converge_runtime, ensure_runtime_peer_connectivity, require_runtime,
+};
 #[cfg(feature = "signals")]
 use crate::workflows::signals::read_signal;
 use crate::workflows::signals::read_signal_or_default;
@@ -316,6 +317,7 @@ pub async fn accept_invitation(
         .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {e}")))?;
 
     converge_runtime(&runtime).await;
+    ensure_runtime_peer_connectivity(&runtime, "invitation_accept").await?;
 
     Ok(())
 }

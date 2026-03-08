@@ -612,7 +612,7 @@ fn execute_step(
                         key: ToolKey::Enter,
                         repeat: 1,
                     },
-                    )?;
+                )?;
             } else {
                 for request in plan_tui_send_chat_message_request(&instance_id, &message) {
                     dispatch(tool_api, request)?;
@@ -791,7 +791,10 @@ fn execute_step(
                 context,
             )?;
             if let Some(field_id) = step.field_id {
-                dispatch(tool_api, plan_fill_field_request(&instance_id, field_id, value))?;
+                dispatch(
+                    tool_api,
+                    plan_fill_field_request(&instance_id, field_id, value),
+                )?;
             } else {
                 let selector =
                     resolve_required_field(step, "selector", step.selector.as_deref(), context)?;
@@ -2114,13 +2117,13 @@ fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_app::ui::contract::{
-        ConfirmationState, ListId, ListItemSnapshot, ListSnapshot, OperationId,
-        OperationInstanceId,
-        OperationSnapshot, OperationState, ScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
-    };
     use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, ScenarioAction};
     use crate::coordinator::HarnessCoordinator;
+    use aura_app::ui::contract::{
+        ConfirmationState, ListId, ListItemSnapshot, ListSnapshot, OperationId,
+        OperationInstanceId, OperationSnapshot, OperationState, ScreenId, SelectionSnapshot,
+        UiReadiness, UiSnapshot,
+    };
 
     #[test]
     fn expected_consistency_accepts_stronger_observed_levels() {
@@ -2227,6 +2230,7 @@ mod tests {
             messages: Vec::new(),
             operations: Vec::new(),
             toasts: Vec::new(),
+            runtime_events: Vec::new(),
         };
 
         assert!(semantic_wait_matches(&step, &snapshot));
@@ -2262,6 +2266,7 @@ mod tests {
             messages: Vec::new(),
             operations: Vec::new(),
             toasts: Vec::new(),
+            runtime_events: Vec::new(),
         };
 
         assert!(!semantic_wait_matches(&step, &snapshot));
@@ -2285,6 +2290,7 @@ mod tests {
             messages: Vec::new(),
             operations: Vec::new(),
             toasts: Vec::new(),
+            runtime_events: Vec::new(),
         };
 
         assert!(semantic_wait_matches(&step, &snapshot));
@@ -2313,6 +2319,7 @@ mod tests {
                 state: OperationState::Succeeded,
             }],
             toasts: Vec::new(),
+            runtime_events: Vec::new(),
         };
 
         assert!(semantic_wait_matches(&step, &snapshot));

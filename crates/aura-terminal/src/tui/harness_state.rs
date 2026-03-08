@@ -8,8 +8,8 @@ use crate::tui::types::Contact as TuiContact;
 use crate::tui::types::SettingsSection;
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
-    ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot,
-    ModalId, OperationId, OperationInstanceId, OperationSnapshot, OperationState, ScreenId,
+    ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId,
+    OperationId, OperationInstanceId, OperationSnapshot, OperationState, ScreenId,
     SelectionSnapshot, ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::types::StateSnapshot;
@@ -521,6 +521,7 @@ pub fn semantic_ui_snapshot(
         messages,
         operations,
         toasts,
+        runtime_events: Vec::new(),
     }
 }
 

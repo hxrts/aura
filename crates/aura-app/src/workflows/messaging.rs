@@ -7,7 +7,9 @@ use crate::workflows::channel_ref::ChannelRef;
 use crate::workflows::chat_commands::normalize_channel_name;
 use crate::workflows::context::current_home_context_or_fallback;
 use crate::workflows::parse::parse_authority_id;
-use crate::workflows::runtime::{converge_runtime, cooperative_yield, require_runtime};
+use crate::workflows::runtime::{
+    converge_runtime, cooperative_yield, ensure_runtime_peer_connectivity, require_runtime,
+};
 use crate::workflows::signals::{emit_signal, read_signal};
 use crate::workflows::snapshot_policy::{chat_snapshot, contacts_snapshot};
 use crate::workflows::state_helpers::with_chat_state;
@@ -1023,6 +1025,7 @@ pub async fn join_channel_by_name(
             .await?;
             let runtime = require_runtime(app_core).await?;
             converge_runtime(&runtime).await;
+            ensure_runtime_peer_connectivity(&runtime, "join_channel_by_name").await?;
             Ok(())
         }
         Err(join_error) => {
@@ -1374,6 +1377,16 @@ pub async fn send_message_ref(
             let recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
             let mut attempted_fanout = 0usize;
             let mut failed_fanout = Vec::new();
+            let channel_requires_remote_delivery = chat_snapshot(app_core)
+                .await
+                .channel(&channel_id)
+                .map(|channel| channel.is_dm || channel.member_count > 1)
+                .unwrap_or(false);
+            if recipients.is_empty() && channel_requires_remote_delivery {
+                return Err(AuraError::agent(format!(
+                    "Missing sync prerequisite for channel {channel_id}: no recipient peers resolved"
+                )));
+            }
             for peer in recipients {
                 attempted_fanout = attempted_fanout.saturating_add(1);
                 if let Err(error) =
@@ -1394,6 +1407,7 @@ pub async fn send_message_ref(
                 );
             }
             converge_runtime(&runtime).await;
+            ensure_runtime_peer_connectivity(&runtime, "send_message_ref").await?;
         }
 
         (sender_id, message_id)

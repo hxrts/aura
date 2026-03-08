@@ -138,6 +138,9 @@ harness-migration-audit:
 harness-boundary-check:
     bash scripts/check/harness-boundary-policy.sh
 
+ci-shared-flow-policy:
+    bash scripts/check/shared-flow-policy.sh
+
 quint-observation-scenario:
     ./scripts/verify/quint-observation-scenario.sh
 
@@ -562,9 +565,9 @@ ci-dry-run profile="push":
     }
 
     case "{{profile}}" in
-        pr) total=12 ;;
-        push) total=23 ;;
-        all) total=31 ;;
+        pr) total=13 ;;
+        push) total=24 ;;
+        all) total=32 ;;
         *)
             echo "Unknown ci-dry-run profile: {{profile}}"
             echo "Valid profiles: pr, push, all"
@@ -593,6 +596,7 @@ ci-dry-run profile="push":
     run_step "Clippy Check"          "just ci-clippy"
     run_step "Build Check"           "just ci-build"
     run_step "Architecture Check"    "scripts/check/arch.sh --quick"
+    run_step "Shared Flow Policy"    "just ci-shared-flow-policy"
     run_step "UX Flow Coverage"      "just ci-ux-flow-coverage"
     run_step "Tests"                 "just ci-test"
     run_step "Protocol Compat"       "just ci-protocol-compat"

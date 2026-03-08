@@ -18,7 +18,7 @@ use aura_app::signal_defs::{DiscoveredPeersState, SettingsState};
 use aura_app::ui::contract::{
     list_item_dom_id, ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot,
     ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot, OperationState,
-    ScreenId as ContractScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
+    RuntimeEventKind, ScreenId as ContractScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::signals::{
     DiscoveredPeerMethod, NetworkStatus, CHAT_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL,
@@ -497,6 +497,15 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
             .map(|channel| (channel.name.clone(), channel.topic.clone()))
             .collect(),
     );
+    controller.push_runtime_event(
+        RuntimeEventKind::ChatSignalUpdated,
+        format!(
+            "active_channel={} channels={} messages={}",
+            runtime.active_channel,
+            runtime.channels.len(),
+            runtime.messages.len()
+        ),
+    );
     runtime
 }
 
@@ -607,6 +616,14 @@ async fn load_contacts_runtime_view(controller: Arc<UiController>) -> ContactsRu
                 )
             })
             .collect(),
+    );
+    controller.push_runtime_event(
+        RuntimeEventKind::RemoteFactsPulled,
+        format!(
+            "contacts={} lan_peers={}",
+            runtime.contacts.len(),
+            runtime.lan_peers.len()
+        ),
     );
     runtime
 }
@@ -1250,6 +1267,10 @@ fn submit_runtime_modal_action(
                                 controller_for_import
                                     .push_log("accept_invitation runtime_accept ok");
                                 harness_log("accept_invitation runtime_accept ok");
+                                controller_for_import.push_runtime_event(
+                                    RuntimeEventKind::RemoteFactsPulled,
+                                    format!("invitation_kind={invitation_kind}"),
+                                );
                                 if matches!(
                                     invitation.invitation_type,
                                     InvitationBridgeType::DeviceEnrollment { .. }
@@ -1287,6 +1308,13 @@ fn submit_runtime_modal_action(
                                             display_name,
                                             false,
                                         );
+                                        controller_for_import.push_runtime_event(
+                                            RuntimeEventKind::InvitationAccepted,
+                                            format!(
+                                                "kind=contact sender_id={}",
+                                                invitation.sender_id
+                                            ),
+                                        );
                                         controller_for_import.set_selected_contact_authority_id(
                                             invitation.sender_id,
                                         );
@@ -1315,6 +1343,10 @@ fn submit_runtime_modal_action(
                                             harness_log("accept_invitation refresh_contacts done");
                                         }
                                         InvitationBridgeType::Channel { .. } => {
+                                            controller_for_import.push_runtime_event(
+                                                RuntimeEventKind::ChannelJoined,
+                                                format!("source=accepted_invitation"),
+                                            );
                                             controller_for_import.set_screen(UiScreen::Chat);
                                         }
                                         InvitationBridgeType::DeviceEnrollment { .. }
@@ -2110,6 +2142,10 @@ fn submit_runtime_chat_input(
                         .await
                         .map(|_| {
                             controller_for_task.select_channel_by_name(&channel_for_selection);
+                            controller_for_task.push_runtime_event(
+                                RuntimeEventKind::ChannelJoined,
+                                format!("channel={channel_for_selection}"),
+                            );
                             controller_for_task.push_log(&format!(
                                 "chat_join: success channel={channel_for_selection} selected={channel_for_selection}"
                             ));
@@ -2336,7 +2372,13 @@ fn submit_runtime_chat_input(
                 timestamp_ms,
             )
             .await
-            .map(|_| None)
+            .map(|_| {
+                controller_for_task.push_runtime_event(
+                    RuntimeEventKind::MessageCommitted,
+                    format!("channel={channel_name} message={trimmed}"),
+                );
+                None
+            })
         };
 
         match result {

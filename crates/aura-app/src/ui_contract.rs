@@ -314,6 +314,10 @@ pub struct OperationId(pub String);
 #[serde(transparent)]
 pub struct OperationInstanceId(pub String);
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RuntimeEventId(pub String);
+
 impl OperationId {
     #[must_use]
     pub fn create_home() -> Self {
@@ -369,6 +373,25 @@ pub struct OperationSnapshot {
     pub state: OperationState,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeEventKind {
+    InvitationAccepted,
+    HomeCreated,
+    HomeEntered,
+    ChannelJoined,
+    MessageCommitted,
+    RemoteFactsPulled,
+    ChatSignalUpdated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeEventSnapshot {
+    pub id: RuntimeEventId,
+    pub kind: RuntimeEventKind,
+    pub detail: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageSnapshot {
     pub id: String,
@@ -382,6 +405,133 @@ pub struct RenderHeartbeat {
     pub render_seq: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrontendId {
+    Web,
+    Tui,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParityException {
+    BrowserThemeControl,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FlowAvailability {
+    Supported,
+    Exception(ParityException),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SharedFlowId {
+    NavigateNeighborhood,
+    NavigateChat,
+    NavigateContacts,
+    NavigateNotifications,
+    NavigateSettings,
+    CreateInvitation,
+    AcceptInvitation,
+    CreateHome,
+    JoinChannel,
+    SendChatMessage,
+    AddDevice,
+    RemoveDevice,
+    SwitchAuthority,
+    ThemeAppearance,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharedFlowSupport {
+    pub flow: SharedFlowId,
+    pub web: FlowAvailability,
+    pub tui: FlowAvailability,
+}
+
+pub const SHARED_FLOW_SUPPORT: &[SharedFlowSupport] = &[
+    SharedFlowSupport {
+        flow: SharedFlowId::NavigateNeighborhood,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedFlowSupport {
+        flow: SharedFlowId::NavigateChat,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedFlowSupport {
+        flow: SharedFlowId::NavigateContacts,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedFlowSupport {
+        flow: SharedFlowId::NavigateNotifications,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedFlowSupport {
+        flow: SharedFlowId::NavigateSettings,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedFlowSupport {
+        flow: SharedFlowId::CreateInvitation,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedFlowSupport {
+        flow: SharedFlowId::AcceptInvitation,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedFlowSupport {
+        flow: SharedFlowId::CreateHome,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedFlowSupport {
+        flow: SharedFlowId::JoinChannel,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedFlowSupport {
+        flow: SharedFlowId::SendChatMessage,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedFlowSupport {
+        flow: SharedFlowId::AddDevice,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedFlowSupport {
+        flow: SharedFlowId::RemoveDevice,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedFlowSupport {
+        flow: SharedFlowId::SwitchAuthority,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedFlowSupport {
+        flow: SharedFlowId::ThemeAppearance,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Exception(ParityException::BrowserThemeControl),
+    },
+];
+
+#[must_use]
+pub fn shared_flow_support(flow: SharedFlowId) -> &'static SharedFlowSupport {
+    SHARED_FLOW_SUPPORT
+        .iter()
+        .find(|support| support.flow == flow)
+        .expect("shared flow support must be declared")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiSnapshot {
     pub screen: ScreenId,
@@ -393,6 +543,7 @@ pub struct UiSnapshot {
     pub messages: Vec<MessageSnapshot>,
     pub operations: Vec<OperationSnapshot>,
     pub toasts: Vec<ToastSnapshot>,
+    pub runtime_events: Vec<RuntimeEventSnapshot>,
 }
 
 impl UiSnapshot {
@@ -408,6 +559,7 @@ impl UiSnapshot {
             messages: Vec::new(),
             operations: Vec::new(),
             toasts: Vec::new(),
+            runtime_events: Vec::new(),
         }
     }
 }
@@ -415,9 +567,11 @@ impl UiSnapshot {
 #[cfg(test)]
 mod tests {
     use super::{
-        list_item_dom_id, list_item_selector, ConfirmationState, ControlId, FieldId, ListId,
-        ModalId, RenderHeartbeat, ScreenId, UiReadiness, UiSnapshot,
+        list_item_dom_id, list_item_selector, shared_flow_support, ControlId, FieldId,
+        FlowAvailability, ListId, ModalId, ParityException, RenderHeartbeat, ScreenId,
+        SharedFlowId, UiReadiness, UiSnapshot, SHARED_FLOW_SUPPORT,
     };
+    use std::collections::HashSet;
 
     #[test]
     fn screen_ids_have_stable_help_labels() {
@@ -517,6 +671,22 @@ mod tests {
         assert_eq!(
             list_item_selector(ListId::SettingsSections, "devices"),
             "#aura-list-settings-sections-item-devices"
+        );
+    }
+
+    #[test]
+    fn shared_flow_support_contract_is_consistent() {
+        let unique: HashSet<_> = SHARED_FLOW_SUPPORT
+            .iter()
+            .map(|support| support.flow)
+            .collect();
+        assert_eq!(unique.len(), SHARED_FLOW_SUPPORT.len());
+
+        let theme_support = shared_flow_support(SharedFlowId::ThemeAppearance);
+        assert_eq!(theme_support.web, FlowAvailability::Supported);
+        assert_eq!(
+            theme_support.tui,
+            FlowAvailability::Exception(ParityException::BrowserThemeControl)
         );
     }
 }
