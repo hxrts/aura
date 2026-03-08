@@ -45,6 +45,9 @@ pub fn available_capabilities(run_config: &RunConfig) -> BTreeSet<String> {
     if has_ssh && !has_local && !has_browser {
         capabilities.insert("remote-only".to_string());
     }
+    if run_config.run.runtime_substrate == crate::config::RuntimeSubstrate::Simulator {
+        capabilities.insert("simulator".to_string());
+    }
 
     capabilities
 }
@@ -93,6 +96,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![
                 base_instance("alice", InstanceMode::Local),
@@ -121,6 +125,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![base_instance("alice", InstanceMode::Browser)],
         };

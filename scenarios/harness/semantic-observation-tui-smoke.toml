@@ -1,61 +1,57 @@
-schema_version = 1
 id = "semantic-observation-tui-smoke"
 goal = "Validate PTY harness structured observation using semantic waits for screens and modals."
-execution_mode = "scripted"
-required_capabilities = ["local"]
 
 [[steps]]
 id = "launch"
-action = "launch_instances"
+action = "launch_actors"
 timeout_ms = 15000
 
 [[steps]]
 id = "alice-onboarding-visible"
-action = "wait_for"
-instance = "alice"
+action = "control_visible"
+actor = "alice"
 control_id = "onboarding_root"
 timeout_ms = 30000
 
 [[steps]]
 id = "alice-fill-account-name"
-action = "fill_input"
-instance = "alice"
+action = "fill"
+actor = "alice"
 field_id = "account_name"
 value = "Alice"
 timeout_ms = 3000
 
 [[steps]]
 id = "alice-submit-account"
-action = "click_button"
-instance = "alice"
+action = "activate"
+actor = "alice"
 control_id = "onboarding_create_account_button"
 timeout_ms = 3000
 
 [[steps]]
 id = "alice-neighborhood-visible"
-action = "wait_for"
-instance = "alice"
+action = "screen_is"
+actor = "alice"
 screen_id = "neighborhood"
 timeout_ms = 30000
 
 [[steps]]
 id = "alice-neighborhood-ready"
-action = "wait_for"
-instance = "alice"
+action = "readiness_is"
+actor = "alice"
 readiness = "ready"
 timeout_ms = 30000
 
 [[steps]]
 id = "alice-open-settings-via-nav-list"
-action = "click_button"
-instance = "alice"
-list_id = "navigation"
-item_id = "settings"
+action = "navigate"
+actor = "alice"
+screen_id = "settings"
 timeout_ms = 3000
 
 [[steps]]
 id = "alice-settings-visible"
-action = "wait_for"
-instance = "alice"
+action = "screen_is"
+actor = "alice"
 screen_id = "settings"
 timeout_ms = 30000

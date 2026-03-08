@@ -17,6 +17,10 @@ Simulation is a first-class alternate runtime substrate, not the primary one. Us
 
 This separation keeps responsibilities clean. The harness executes real frontends and gathers semantic observations. The simulator provides controlled runtime conditions when explicitly selected. Quint and related verification tooling generate traces and invariants.
 
+The shared semantic contracts for UI state and scenario execution live in
+`aura-app`. Simulation should integrate through those contracts rather than
+introducing a parallel frontend-driving format.
+
 ## Two Simulation Systems
 
 Aura provides two complementary simulation systems.
@@ -31,6 +35,10 @@ Quint actions suit model-based testing. They enable generative state space explo
 | Named fault injection | TOML scenarios |
 | Conformance testing | Quint actions |
 | State space exploration | Quint actions |
+
+When you need user-facing coverage, promote the scenario into the real-runtime
+harness lane after it is stable in simulation. Treat simulation as a substrate
+for controlled runtime conditions, not as the final UI executor.
 
 ## TOML Scenario Authoring
 

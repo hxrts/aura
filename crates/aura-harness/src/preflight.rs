@@ -14,7 +14,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::capabilities::{check_scenario_capabilities, CapabilityReport};
-use crate::config::{InstanceMode, RunConfig, ScenarioConfig};
+use crate::config::{InstanceMode, RunConfig, RuntimeSubstrate, ScenarioConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -45,6 +45,14 @@ pub fn run_preflight(
             "required={:?} available={:?}",
             capabilities.required, capabilities.available
         ),
+    });
+
+    validate_runtime_substrate(run_config)?;
+    checks.push(PreflightCheck {
+        name: "runtime_substrate".to_string(),
+        ok: true,
+        details: format!("runtime_substrate={:?}", run_config.run.runtime_substrate)
+            .to_ascii_lowercase(),
     });
 
     let local_instances: Vec<_> = run_config
@@ -274,6 +282,19 @@ fn validate_browser_runtime(browser_instances: &[&crate::config::InstanceConfig]
     Ok(())
 }
 
+fn validate_runtime_substrate(run_config: &RunConfig) -> Result<()> {
+    if run_config.run.runtime_substrate == RuntimeSubstrate::Simulator
+        && run_config
+            .instances
+            .iter()
+            .any(|instance| !matches!(instance.mode, InstanceMode::Local))
+    {
+        bail!("simulator substrate currently supports local instances only");
+    }
+
+    Ok(())
+}
+
 fn browser_app_url(instance: &crate::config::InstanceConfig) -> String {
     env_value("AURA_HARNESS_BROWSER_APP_URL", &instance.env)
         .or_else(|| env_value("AURA_WEB_APP_URL", &instance.env))
@@ -476,6 +497,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![local],
         }

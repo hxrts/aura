@@ -7,7 +7,7 @@ use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
 use serde::{Deserialize, Serialize};
 
 use crate::api_version::{negotiate, TOOL_API_DEFAULT_VERSION, TOOL_API_VERSIONS};
-use crate::config::{RunConfig, ScreenSource};
+use crate::config::{RunConfig, RuntimeSubstrate, ScreenSource};
 use crate::coordinator::HarnessCoordinator;
 use crate::introspection::{
     extract_authority_id, extract_channels, extract_contacts, extract_current_selection,
@@ -21,6 +21,7 @@ pub struct StartupSummary {
     pub tool_api_version: String,
     pub schema_version: u32,
     pub run_name: String,
+    pub runtime_substrate: RuntimeSubstrate,
     pub artifact_dir: Option<String>,
     pub instance_count: u64,
     pub instances: Vec<StartupInstanceSummary>,
@@ -57,6 +58,7 @@ impl StartupSummary {
             tool_api_version: TOOL_API_DEFAULT_VERSION.to_string(),
             schema_version: config.schema_version,
             run_name: config.run.name.clone(),
+            runtime_substrate: config.run.runtime_substrate,
             artifact_dir: config
                 .run
                 .artifact_dir
@@ -205,6 +207,22 @@ impl ToolApi {
 
     pub fn stop_all(&mut self) -> anyhow::Result<()> {
         self.coordinator.stop_all()
+    }
+
+    pub fn runtime_substrate(&self) -> RuntimeSubstrate {
+        self.coordinator.runtime_substrate()
+    }
+
+    pub fn apply_fault_delay(&mut self, actor: &str, delay_ms: u64) -> anyhow::Result<()> {
+        self.coordinator.apply_fault_delay(actor, delay_ms)
+    }
+
+    pub fn apply_fault_loss(&mut self, actor: &str, loss_percent: u8) -> anyhow::Result<()> {
+        self.coordinator.apply_fault_loss(actor, loss_percent)
+    }
+
+    pub fn apply_fault_tunnel_drop(&mut self, actor: &str) -> anyhow::Result<()> {
+        self.coordinator.apply_fault_tunnel_drop(actor)
     }
 
     pub fn handle_request(&mut self, request: ToolRequest) -> ToolResponse {

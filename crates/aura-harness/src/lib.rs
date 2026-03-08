@@ -18,6 +18,7 @@ pub mod provisioning;
 pub mod replay;
 pub mod residue_checks;
 pub mod resource_guards;
+pub mod runtime_substrate;
 pub mod routing;
 pub mod scenario;
 pub mod scenario_execution;

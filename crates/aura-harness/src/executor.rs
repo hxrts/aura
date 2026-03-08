@@ -1059,13 +1059,23 @@ fn execute_step(
             let delay_ms = step
                 .timeout_ms
                 .unwrap_or_else(|| 25 + fault_rng.range_u64(0, 25));
-            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-            Ok(())
+            let actor = resolve_required_instance(step, context)?;
+            tool_api.apply_fault_delay(&actor, delay_ms)
         }
-        ScenarioAction::FaultLoss | ScenarioAction::FaultTunnelDrop => {
-            // Consume deterministic RNG state so replay and injected faults are seed-driven.
+        ScenarioAction::FaultLoss => {
+            let actor = resolve_required_instance(step, context)?;
             let _decision = scenario_rng.range_u64(0, 2);
-            Ok(())
+            let loss_percent = step
+                .value
+                .as_deref()
+                .and_then(|value| value.parse::<u8>().ok())
+                .unwrap_or(100);
+            tool_api.apply_fault_loss(&actor, loss_percent)
+        }
+        ScenarioAction::FaultTunnelDrop => {
+            let actor = resolve_required_instance(step, context)?;
+            let _decision = scenario_rng.range_u64(0, 2);
+            tool_api.apply_fault_tunnel_drop(&actor)
         }
     }
 }
@@ -1347,24 +1357,22 @@ fn wait_for_semantic_state(
     timeout_ms: u64,
 ) -> Result<()> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-    let mut last_snapshot = None;
-    loop {
+    let last_snapshot = loop {
         let snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
         if semantic_wait_matches(step, &snapshot) {
             return Ok(());
         }
-        last_snapshot = Some(snapshot);
         if Instant::now() >= deadline {
-            break;
+            break snapshot;
         }
         std::thread::sleep(Duration::from_millis(40));
-    }
+    };
     bail!(
         "step {} semantic wait timed out on instance {} ({}) last_snapshot={:?}",
         step.id,
         instance_id,
         semantic_wait_description(step),
-        last_snapshot
+        Some(last_snapshot)
     )
 }
 
@@ -2074,6 +2082,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
@@ -2164,6 +2173,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
@@ -2311,6 +2321,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![
                 InstanceConfig {
@@ -2439,6 +2450,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![
                 InstanceConfig {

@@ -19,11 +19,6 @@ name = "aura"
 path = "src/main.rs"
 required-features = ["terminal"]
 
-# Integration tests requiring the testing module
-[[test]]
-name = "verification_itf_replay"
-required-features = ["testing"]
-
 [[test]]
 name = "demo_peer_count"
 required-features = ["development"]

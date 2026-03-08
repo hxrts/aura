@@ -49,10 +49,5 @@ fi
 
 cargo run -p aura-harness --bin aura-harness -- run \
   --config configs/harness/browser-loopback.toml \
-  --scenario scenarios/harness/local-discovery-smoke.toml \
-  --artifacts-dir artifacts/harness/browser
-
-cargo run -p aura-harness --bin aura-harness -- run \
-  --config configs/harness/browser-loopback.toml \
-  --scenario scenarios/harness/scenario1-invitation-chat-e2e.toml \
+  --scenario scenarios/harness/semantic-observation-browser-smoke.toml \
   --artifacts-dir artifacts/harness/browser

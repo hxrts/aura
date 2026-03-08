@@ -1,24 +1,21 @@
-schema_version = 1
 id = "real-runtime-mixed-startup-smoke"
 goal = "Validate mixed real-runtime startup, readiness, and teardown for one TUI and one browser instance."
-execution_mode = "scripted"
-required_capabilities = ["local", "browser"]
 
 [[steps]]
 id = "launch"
-action = "launch_instances"
+action = "launch_actors"
 timeout_ms = 20000
 
 [[steps]]
 id = "tui-onboarding-visible"
-action = "wait_for"
-instance = "tui"
+action = "control_visible"
+actor = "tui"
 control_id = "onboarding_root"
 timeout_ms = 30000
 
 [[steps]]
 id = "web-onboarding-visible"
-action = "wait_for"
-instance = "web"
+action = "control_visible"
+actor = "web"
 control_id = "onboarding_root"
 timeout_ms = 60000

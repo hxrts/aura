@@ -20,6 +20,11 @@ Real-runtime harness runs should still be engineered for deterministic startup, 
 
 Quint and other verification tools generate traces and invariants. They do not replace real-runtime harness validation.
 
+The shared semantic UI and scenario contracts live in `aura-app`. `aura-harness`
+consumes those contracts to drive real frontends. `aura-simulator` is a
+selectable alternate runtime substrate. Quint remains a model and trace
+generation system rather than a frontend executor.
+
 Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or `Uuid::new_v4()` is forbidden. These operations must flow through effect traits instead.
 
 ## 2. The `#[aura_test]` Macro
@@ -236,20 +241,11 @@ async fn test_status_handler() {
 }
 ```
 
-### ITF Trace Replay
+### Quint Trace Usage
 
-```rust
-use aura_terminal::testing::itf_replay::ITFTraceReplayer;
-
-#[test]
-fn test_replay_quint_trace() {
-    let replayer = ITFTraceReplayer::new();
-    let result = replayer
-        .replay_trace_file("verification/quint/tui_trace.itf.json")
-        .expect("Replay failed");
-    assert!(result.all_states_match);
-}
-```
+Quint traces are model artifacts. Export them through the shared semantic
+scenario contract and execute real TUI/web flows through `aura-harness`
+rather than replaying Quint traces directly against the TUI implementation.
 
 ## 9. Conformance Testing
 
@@ -299,7 +295,11 @@ The runtime harness executes real Aura instances in PTYs for end-to-end validati
 
 ### Harness Overview
 
-The harness supports two modes. Scripted mode uses predefined steps from a scenario file. Agent mode uses LLM-driven execution toward goals.
+The harness is the single executor for real frontend scenarios. Scripted mode uses the shared semantic scenario contract. Agent mode uses LLM-driven execution toward goals.
+
+Shared flows should be authored semantically once, then executed through the
+harness using either the TUI or browser driver. Do not create a second
+frontend execution path for MBT or simulator replay.
 
 ### Run Config
 
@@ -323,27 +323,26 @@ bind_address = "127.0.0.1:41001"
 ### Scenario File
 
 ```toml
-schema_version = 1
 id = "discovery-smoke"
-execution_mode = "scripted"
+goal = "Validate semantic harness observation against a real TUI"
 
 [[steps]]
 id = "launch"
-action = "launch_instances"
+action = "launch_actors"
 timeout_ms = 5000
 
 [[steps]]
-id = "send"
-action = "send_keys"
-instance = "alice"
-keys = "hello\n"
+id = "nav-chat"
+actor = "alice"
+action = "navigate"
+screen_id = "chat"
 timeout_ms = 2000
 
 [[steps]]
-id = "wait"
-action = "wait_for"
-instance = "alice"
-pattern = "hello"
+id = "chat-ready"
+actor = "alice"
+action = "readiness_is"
+readiness = "ready"
 timeout_ms = 2000
 ```
 
@@ -352,11 +351,11 @@ timeout_ms = 2000
 ```bash
 # Lint before running
 just harness-lint -- --config configs/harness/local-loopback.toml \
-  --scenario scenarios/harness/local-discovery-smoke.toml
+  --scenario scenarios/harness/semantic-observation-tui-smoke.toml
 
 # Execute
 just harness-run -- --config configs/harness/local-loopback.toml \
-  --scenario scenarios/harness/local-discovery-smoke.toml
+  --scenario scenarios/harness/semantic-observation-tui-smoke.toml
 
 # Replay for deterministic reproduction
 just harness-replay -- --bundle artifacts/harness/local-loopback-smoke/replay_bundle.json
@@ -494,12 +493,10 @@ In a second shell:
 
 ```bash
 # Lint browser run/scenario config
-just harness-lint-browser scenarios/harness/local-discovery-smoke.toml
+just harness-lint-browser scenarios/harness/semantic-observation-browser-smoke.toml
 
 # Run browser scenarios
-just harness-run-browser scenarios/harness/local-discovery-smoke.toml
-just harness-run-browser scenarios/harness/scenario1-invitation-chat-e2e.toml
-just harness-run-browser scenarios/harness/home-roles.toml
+just harness-run-browser scenarios/harness/semantic-observation-browser-smoke.toml
 
 # Replay the latest browser run bundle
 just harness-replay-browser

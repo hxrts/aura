@@ -2,6 +2,12 @@
 
 This guide covers how to use formal verification and model-based testing to validate Aura protocols. It focuses on practical workflows with Quint, Lean, and generative testing.
 
+Quint, simulator, and harness have distinct responsibilities:
+- Quint defines models, traces, and invariants.
+- `aura-simulator` is a selectable deterministic runtime substrate.
+- `aura-harness` is the single executor for real TUI and web frontend flows.
+- Shared semantic UI and scenario contracts live in `aura-app`.
+
 ## When to Verify
 
 Verification suits protocols with complex state machines or security-critical properties. Use Quint model checking for exhaustive state exploration. Use Lean proofs for mathematical guarantees. Use generative testing to validate implementations against models.
@@ -93,7 +99,8 @@ module harness_example {
 }
 ```
 
-Harnesses provide standardized entry points for tooling.
+Harnesses provide standardized entry points for tooling. They should emit
+semantic traces and invariants, not frontend-specific scripts or key sequences.
 
 ## Model Checking Workflow
 
@@ -162,13 +169,20 @@ Quint Specification
 
 Each link adds verification value. Specifications validate design. Traces validate reachability. Replay validates implementation.
 
-### Generating Traces
+### Generating Semantic Traces
 
 ```bash
-quint run --main=harness_example --out-itf=trace.itf.json verification/quint/protocol_example.qnt
+just quint-semantic-trace spec=verification/quint/harness/flows.qnt \
+  out=verification/quint/traces/harness_flows.itf.json
 ```
 
-ITF traces capture state sequences and non-deterministic choices.
+ITF traces capture semantic state sequences and non-deterministic choices.
+These traces are model artifacts. Real TUI and web execution belongs to the
+harness, which consumes the shared semantic scenario contract.
+
+Do not add direct Quint-to-TUI or Quint-to-browser execution paths. Quint should
+hand off semantic traces to the shared contract layer, then let the harness or
+simulator consume them through their own adapters.
 
 ### Direct Conformance Testing
 

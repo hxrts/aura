@@ -46,6 +46,16 @@ pub struct RunSection {
     pub max_open_files: Option<u64>,
     #[serde(default)]
     pub require_remote_artifact_sync: bool,
+    #[serde(default)]
+    pub runtime_substrate: RuntimeSubstrate,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeSubstrate {
+    #[default]
+    Real,
+    Simulator,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -414,8 +424,228 @@ impl ScenarioStep {
     }
 }
 
+impl TryFrom<ScenarioDefinition> for ScenarioConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(value: ScenarioDefinition) -> Result<Self> {
+        let mut steps = Vec::with_capacity(value.steps.len());
+        for step in value.steps {
+            steps.push(ScenarioStep::try_from(step)?);
+        }
+        Ok(Self {
+            schema_version: SCENARIO_SCHEMA_VERSION,
+            id: value.id,
+            goal: value.goal,
+            execution_mode: Some("scripted".to_string()),
+            required_capabilities: Vec::new(),
+            steps,
+        })
+    }
+}
+
+impl TryFrom<SemanticStep> for ScenarioStep {
+    type Error = anyhow::Error;
+
+    fn try_from(value: SemanticStep) -> Result<Self> {
+        let SemanticStep {
+            id,
+            actor,
+            timeout_ms,
+            action,
+        } = value;
+
+        let instance = actor.map(|actor| actor.0);
+        let mut step = ScenarioStep {
+            id,
+            instance,
+            timeout_ms,
+            ..Default::default()
+        };
+
+        match action {
+            SemanticAction::Environment(EnvironmentAction::LaunchActors) => {
+                step.action = ScenarioAction::LaunchInstances;
+            }
+            SemanticAction::Environment(EnvironmentAction::RestartActor { actor }) => {
+                step.action = ScenarioAction::Restart;
+                step.instance = Some(actor.0);
+            }
+            SemanticAction::Environment(EnvironmentAction::KillActor { actor }) => {
+                step.action = ScenarioAction::Kill;
+                step.instance = Some(actor.0);
+            }
+            SemanticAction::Environment(EnvironmentAction::FaultDelay { actor, delay_ms }) => {
+                step.action = ScenarioAction::FaultDelay;
+                step.instance = Some(actor.0);
+                step.timeout_ms = Some(delay_ms);
+            }
+            SemanticAction::Environment(EnvironmentAction::FaultLoss {
+                actor,
+                loss_percent,
+            }) => {
+                step.action = ScenarioAction::FaultLoss;
+                step.instance = Some(actor.0);
+                step.expect = Some(loss_percent.to_string());
+            }
+            SemanticAction::Environment(EnvironmentAction::FaultTunnelDrop { actor }) => {
+                step.action = ScenarioAction::FaultTunnelDrop;
+                step.instance = Some(actor.0);
+            }
+            SemanticAction::Ui(UiAction::Navigate(screen_id)) => {
+                step.action = ScenarioAction::ClickButton;
+                step.control_id = Some(nav_control_id_for_screen(screen_id));
+            }
+            SemanticAction::Ui(UiAction::Activate(control_id)) => {
+                step.action = ScenarioAction::ClickButton;
+                step.control_id = Some(control_id);
+            }
+            SemanticAction::Ui(UiAction::ActivateListItem { list, item_id }) => {
+                step.action = ScenarioAction::ClickButton;
+                step.list_id = Some(list);
+                step.item_id = Some(item_id);
+            }
+            SemanticAction::Ui(UiAction::Fill(field_id, value)) => {
+                step.action = ScenarioAction::FillInput;
+                step.field_id = Some(field_id);
+                step.value = Some(value);
+            }
+            SemanticAction::Ui(UiAction::InputText(value)) => {
+                step.action = ScenarioAction::SendKeys;
+                step.keys = Some(value);
+            }
+            SemanticAction::Ui(UiAction::PressKey(key, repeat)) => {
+                step.action = ScenarioAction::SendKey;
+                step.key = Some(format_input_key(key));
+                step.repeat = Some(repeat);
+            }
+            SemanticAction::Ui(UiAction::PasteClipboard { source_actor }) => {
+                step.action = ScenarioAction::SendClipboard;
+                step.source_instance = source_actor.map(|actor| actor.0);
+            }
+            SemanticAction::Ui(UiAction::ReadClipboard) => {
+                step.action = ScenarioAction::ReadClipboard;
+            }
+            SemanticAction::Expect(Expectation::ScreenIs(screen_id)) => {
+                step.action = ScenarioAction::WaitFor;
+                step.screen_id = Some(screen_id);
+            }
+            SemanticAction::Expect(Expectation::ControlVisible(control_id)) => {
+                step.action = ScenarioAction::WaitFor;
+                step.control_id = Some(control_id);
+            }
+            SemanticAction::Expect(Expectation::ModalOpen(modal_id)) => {
+                step.action = ScenarioAction::WaitFor;
+                step.modal_id = Some(modal_id);
+            }
+            SemanticAction::Expect(Expectation::ToastContains {
+                kind,
+                message_contains,
+            }) => {
+                step.action = ScenarioAction::ExpectToast;
+                step.level = kind.map(format_toast_kind);
+                step.contains = Some(message_contains);
+            }
+            SemanticAction::Expect(Expectation::ListContains { list, item_id }) => {
+                step.action = ScenarioAction::WaitFor;
+                step.list_id = Some(list);
+                step.item_id = Some(item_id);
+            }
+            SemanticAction::Expect(Expectation::ListItemConfirmation {
+                list,
+                item_id,
+                confirmation,
+            }) => {
+                step.action = ScenarioAction::WaitFor;
+                step.list_id = Some(list);
+                step.item_id = Some(item_id);
+                step.confirmation = Some(confirmation);
+            }
+            SemanticAction::Expect(Expectation::SelectionIs { list, item_id }) => {
+                step.action = ScenarioAction::WaitFor;
+                step.list_id = Some(list);
+                step.item_id = Some(item_id);
+            }
+            SemanticAction::Expect(Expectation::ReadinessIs(readiness)) => {
+                step.action = ScenarioAction::WaitFor;
+                step.readiness = Some(readiness);
+            }
+            SemanticAction::Expect(Expectation::OperationStateIs {
+                operation_id,
+                state,
+            }) => {
+                step.action = ScenarioAction::WaitFor;
+                step.operation_id = Some(operation_id);
+                step.operation_state = Some(state);
+            }
+            SemanticAction::Variables(VariableAction::Set { name, value }) => {
+                step.action = ScenarioAction::SetVar;
+                step.var = Some(name);
+                step.value = Some(value);
+            }
+            SemanticAction::Variables(VariableAction::Extract { name, regex, group, from }) => {
+                step.action = ScenarioAction::ExtractVar;
+                step.var = Some(name);
+                step.regex = Some(regex);
+                step.group = Some(group);
+                step.from = Some(format_extract_source(from));
+            }
+        }
+
+        Ok(step)
+    }
+}
+
 fn required_field(value: Option<String>, field: &str, action: ScenarioAction) -> Result<String> {
     value.ok_or_else(|| anyhow!("action {} requires {field}", action))
+}
+
+fn nav_control_id_for_screen(screen_id: ScreenId) -> ControlId {
+    match screen_id {
+        ScreenId::Neighborhood => ControlId::NavNeighborhood,
+        ScreenId::Chat => ControlId::NavChat,
+        ScreenId::Contacts => ControlId::NavContacts,
+        ScreenId::Notifications => ControlId::NavNotifications,
+        ScreenId::Settings => ControlId::NavSettings,
+    }
+}
+
+fn format_input_key(value: InputKey) -> String {
+    match value {
+        InputKey::Enter => "enter",
+        InputKey::Esc => "esc",
+        InputKey::Tab => "tab",
+        InputKey::BackTab => "backtab",
+        InputKey::Up => "up",
+        InputKey::Down => "down",
+        InputKey::Left => "left",
+        InputKey::Right => "right",
+        InputKey::Home => "home",
+        InputKey::End => "end",
+        InputKey::PageUp => "pageup",
+        InputKey::PageDown => "pagedown",
+        InputKey::Backspace => "backspace",
+        InputKey::Delete => "delete",
+    }
+    .to_string()
+}
+
+fn format_toast_kind(value: ToastKind) -> String {
+    match value {
+        ToastKind::Success => "success",
+        ToastKind::Info => "info",
+        ToastKind::Error => "error",
+    }
+    .to_string()
+}
+
+fn format_extract_source(value: ExtractSource) -> String {
+    match value {
+        ExtractSource::Screen => "screen",
+        ExtractSource::RawScreen => "raw_screen",
+        ExtractSource::AuthoritativeScreen => "authoritative_screen",
+        ExtractSource::NormalizedScreen => "normalized_screen",
+    }
+    .to_string()
 }
 
 fn parse_extract_source(value: &str) -> Result<ExtractSource> {
@@ -518,6 +748,17 @@ pub fn load_scenario_config(path: &Path) -> Result<ScenarioConfig> {
     Ok(config)
 }
 
+pub fn load_execution_scenario_config(path: &Path) -> Result<ScenarioConfig> {
+    let semantic = load_semantic_scenario_definition(path)
+        .with_context(|| format!("failed to load semantic scenario at {}", path.display()))?;
+    ScenarioConfig::try_from(semantic).with_context(|| {
+        format!(
+            "failed to translate semantic scenario {} into harness execution steps",
+            path.display()
+        )
+    })
+}
+
 pub fn load_semantic_scenario_definition(path: &Path) -> Result<ScenarioDefinition> {
     let body = fs::read_to_string(path).with_context(|| {
         format!(
@@ -555,6 +796,17 @@ impl RunConfig {
 
         if self.instances.is_empty() {
             bail!("at least one instance must be configured");
+        }
+
+        if self.run.runtime_substrate == RuntimeSubstrate::Simulator
+            && self
+                .instances
+                .iter()
+                .any(|instance| !matches!(instance.mode, InstanceMode::Local))
+        {
+            bail!(
+                "run.runtime_substrate = \"simulator\" currently supports local instances only"
+            );
         }
 
         let mut instance_ids = HashSet::new();
@@ -828,6 +1080,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![
                 InstanceConfig {
@@ -1095,6 +1348,37 @@ mod tests {
     }
 
     #[test]
+    fn semantic_definition_translates_into_execution_scenario() {
+        let definition = ScenarioDefinition {
+            id: "semantic-exec".to_string(),
+            goal: "semantic execution translation".to_string(),
+            steps: vec![
+                SemanticStep {
+                    id: "launch".to_string(),
+                    actor: None,
+                    timeout_ms: Some(1000),
+                    action: SemanticAction::Environment(EnvironmentAction::LaunchActors),
+                },
+                SemanticStep {
+                    id: "nav".to_string(),
+                    actor: Some(ActorId("alice".to_string())),
+                    timeout_ms: Some(500),
+                    action: SemanticAction::Ui(UiAction::Navigate(ScreenId::Chat)),
+                },
+            ],
+        };
+
+        let scenario = ScenarioConfig::try_from(definition)
+            .unwrap_or_else(|error| panic!("semantic scenario translation failed: {error}"));
+
+        assert_eq!(scenario.steps.len(), 2);
+        assert_eq!(scenario.steps[0].action, ScenarioAction::LaunchInstances);
+        assert_eq!(scenario.steps[1].action, ScenarioAction::ClickButton);
+        assert_eq!(scenario.steps[1].instance.as_deref(), Some("alice"));
+        assert_eq!(scenario.steps[1].control_id, Some(ControlId::NavChat));
+    }
+
+    #[test]
     fn browser_instance_rejects_ssh_fields() {
         let config = RunConfig {
             schema_version: RUN_SCHEMA_VERSION,
@@ -1110,6 +1394,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
@@ -1159,6 +1444,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![
                 InstanceConfig {
@@ -1215,6 +1501,57 @@ mod tests {
             .err()
             .unwrap_or_else(|| panic!("duplicate explicit bind addresses must fail"));
         assert!(error.to_string().contains("duplicate explicit bind_address"));
+    }
+
+    #[test]
+    fn simulator_substrate_rejects_browser_instances() {
+        let config = RunConfig {
+            schema_version: RUN_SCHEMA_VERSION,
+            run: RunSection {
+                name: "simulator-browser-invalid".to_string(),
+                pty_rows: Some(40),
+                pty_cols: Some(120),
+                artifact_dir: None,
+                global_budget_ms: None,
+                step_budget_ms: None,
+                seed: Some(1),
+                max_cpu_percent: None,
+                max_memory_bytes: None,
+                max_open_files: None,
+                require_remote_artifact_sync: false,
+                runtime_substrate: RuntimeSubstrate::Simulator,
+            },
+            instances: vec![InstanceConfig {
+                id: "browser".to_string(),
+                mode: InstanceMode::Browser,
+                data_dir: PathBuf::from(".tmp/browser"),
+                device_id: None,
+                bind_address: "127.0.0.1:41001".to_string(),
+                demo_mode: false,
+                command: None,
+                args: vec![],
+                env: vec![],
+                log_path: None,
+                ssh_host: None,
+                ssh_user: None,
+                ssh_port: None,
+                ssh_strict_host_key_checking: true,
+                ssh_known_hosts_file: None,
+                ssh_fingerprint: None,
+                ssh_require_fingerprint: false,
+                ssh_dry_run: true,
+                remote_workdir: None,
+                lan_discovery: None,
+                tunnel: None,
+            }],
+        };
+
+        let error = config
+            .validate()
+            .err()
+            .unwrap_or_else(|| panic!("simulator substrate should reject browser instances"))
+            .to_string();
+        assert!(error.contains("currently supports local instances only"));
     }
 
     #[test]

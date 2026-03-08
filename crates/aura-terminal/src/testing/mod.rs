@@ -47,8 +47,6 @@
 //! - **Easy to debug**: Full state visibility
 
 pub mod cli;
-pub mod itf_replay;
-
 use crate::tui::runtime::TuiRuntime;
 use crate::tui::screens::Screen;
 use crate::tui::state_machine::{TuiCommand, TuiState};

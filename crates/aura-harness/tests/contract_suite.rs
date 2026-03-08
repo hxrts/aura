@@ -188,6 +188,7 @@ fn local_run_config(name: &str, port: u16) -> RunConfig {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
         },
         instances: vec![InstanceConfig {
             id: "alice".to_string(),
@@ -230,6 +231,7 @@ fn mixed_run_config(name: &str, local_port: u16, ssh_port: u16) -> RunConfig {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
         },
         instances: vec![
             InstanceConfig {

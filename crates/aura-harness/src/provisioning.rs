@@ -214,6 +214,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![
                 InstanceConfig {

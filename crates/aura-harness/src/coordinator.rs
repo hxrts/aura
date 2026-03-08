@@ -15,8 +15,9 @@ use anyhow::{anyhow, bail, Result};
 use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
 
 use crate::backend::BackendHandle;
-use crate::config::{InstanceMode, RunConfig, ScreenSource};
+use crate::config::{InstanceMode, RunConfig, RuntimeSubstrate, ScreenSource};
 use crate::events::EventStream;
+use crate::runtime_substrate::RuntimeSubstrateController;
 use crate::screen_normalization::normalize_screen;
 use crate::tool_api::ToolKey;
 
@@ -31,6 +32,8 @@ pub struct HarnessCoordinator {
     instance_modes: HashMap<String, InstanceMode>,
     instance_bind_addresses: HashMap<String, String>,
     instance_data_dirs: HashMap<String, PathBuf>,
+    runtime_substrate: RuntimeSubstrate,
+    runtime_substrate_controller: RuntimeSubstrateController,
     events: EventStream,
 }
 
@@ -53,6 +56,13 @@ impl HarnessCoordinator {
             instance_data_dirs.insert(id.clone(), absolutize_path(instance.data_dir.clone()));
             backends.insert(id, backend);
         }
+        let artifact_dir = config.run.artifact_dir.clone().map(absolutize_path);
+        let runtime_substrate_controller = RuntimeSubstrateController::new(
+            config.run.runtime_substrate,
+            config.run.seed.unwrap_or_default(),
+            instance_order.clone(),
+            artifact_dir,
+        )?;
 
         Ok(Self {
             backends,
@@ -60,12 +70,15 @@ impl HarnessCoordinator {
             instance_modes,
             instance_bind_addresses,
             instance_data_dirs,
+            runtime_substrate: config.run.runtime_substrate,
+            runtime_substrate_controller,
             events: EventStream::new(),
         })
     }
 
     pub fn start_all(&mut self) -> Result<()> {
         self.clear_stale_local_state()?;
+        self.runtime_substrate_controller.start()?;
         for id in self.instance_order.clone() {
             let backend_kind = {
                 let backend = self
@@ -174,7 +187,25 @@ impl HarnessCoordinator {
                 serde_json::json!({ "timeout_ms": BACKEND_TEARDOWN_TIMEOUT.as_millis() }),
             );
         }
+        self.runtime_substrate_controller.finish()?;
         Ok(())
+    }
+
+    pub fn runtime_substrate(&self) -> RuntimeSubstrate {
+        self.runtime_substrate
+    }
+
+    pub fn apply_fault_delay(&mut self, actor: &str, delay_ms: u64) -> Result<()> {
+        self.runtime_substrate_controller.fault_delay(actor, delay_ms)
+    }
+
+    pub fn apply_fault_loss(&mut self, actor: &str, loss_percent: u8) -> Result<()> {
+        self.runtime_substrate_controller
+            .fault_loss(actor, loss_percent)
+    }
+
+    pub fn apply_fault_tunnel_drop(&mut self, actor: &str) -> Result<()> {
+        self.runtime_substrate_controller.fault_tunnel_drop(actor)
     }
 
     fn wait_for_backend_stopped(&self, instance_id: &str, timeout: Duration) -> Result<()> {
@@ -837,6 +868,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
@@ -904,6 +936,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![
                 InstanceConfig {
@@ -985,6 +1018,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
+                runtime_substrate: Default::default(),
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),

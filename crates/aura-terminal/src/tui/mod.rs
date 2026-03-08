@@ -30,7 +30,8 @@
 //! - **Fast tests**: No PTY setup, no sleeps, pure computation (<1ms per test)
 //! - **Determinism**: Same inputs = same outputs, every time
 //! - **Debuggability**: Full state visibility at every step
-//! - **Formal verification**: Quint spec at `verification/quint/tui_state_machine.qnt`
+//! - **Formal verification**: semantic traces and invariants flow through the
+//!   shared scenario contract rather than a direct Quint-to-TUI replay path
 //!
 //! See `tests/tui_deterministic.rs` for examples.
 

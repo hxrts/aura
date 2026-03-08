@@ -131,6 +131,13 @@ harness-run-browser scenario config="configs/harness/browser-loopback.toml" arti
 harness-lint-browser scenario config="configs/harness/browser-loopback.toml":
     just harness-lint -- --config {{config}} --scenario {{scenario}}
 
+# Audit semantic migration state for harness scenarios and legacy MBT executor paths
+harness-migration-audit:
+    bash scripts/check/harness-migration-audit.sh
+
+harness-boundary-check:
+    bash scripts/check/harness-boundary-policy.sh
+
 # Replay latest browser harness bundle
 harness-replay-browser bundle="artifacts/harness/browser/harness/browser-loopback-smoke/replay_bundle.json":
     just harness-replay -- --bundle {{bundle}}
@@ -267,7 +274,7 @@ ci-harness-contract:
 # Harness replay regression (nightly mixed-topology lane)
 ci-harness-replay:
     cargo build -p aura-terminal --bin aura -q
-    AURA_HARNESS_AURA_BIN="$PWD/target/debug/aura" cargo run -p aura-harness --bin aura-harness -- run --config configs/harness/local-loopback.toml --scenario scenarios/harness/local-discovery-smoke.toml
+    AURA_HARNESS_AURA_BIN="$PWD/target/debug/aura" cargo run -p aura-harness --bin aura-harness -- run --config configs/harness/local-loopback.toml --scenario scenarios/harness/semantic-observation-tui-smoke.toml
     AURA_HARNESS_AURA_BIN="$PWD/target/debug/aura" cargo run -p aura-harness --bin aura-harness -- replay --bundle artifacts/harness/local-loopback-smoke/replay_bundle.json
 
 # Browser harness lane (WASM build + Playwright smoke + browser scenarios)
@@ -795,16 +802,16 @@ verification-coverage format="--md":
     ./scripts/verify/workflow.sh coverage {{format}}
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TUI ITF Traces
+# Quint Semantic Traces
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Regenerate deterministic ITF trace for TUI replay tests
-tui-itf-trace out="verification/quint/traces/tui_trace.itf.json" seed="424242" max_steps="50":
-    TUI_ITF_SEED={{seed}} TUI_ITF_MAX_STEPS={{max_steps}} just _nix-dev -- ./scripts/harness/tui-itf-trace.sh generate {{out}}
+# Regenerate a deterministic Quint semantic trace for harness / simulator workflows
+quint-semantic-trace spec="verification/quint/harness/flows.qnt" out="verification/quint/traces/harness_flows.itf.json" seed="424242" max_steps="50":
+    QUINT_TRACE_SEED={{seed}} QUINT_TRACE_MAX_STEPS={{max_steps}} just _nix-dev -- ./scripts/verify/quint-semantic-trace.sh generate {{spec}} {{out}}
 
-# Check that the checked-in ITF trace matches regeneration
-tui-itf-trace-check seed="424242" max_steps="50":
-    TUI_ITF_SEED={{seed}} TUI_ITF_MAX_STEPS={{max_steps}} just _nix-dev -- ./scripts/harness/tui-itf-trace.sh check
+# Check that the checked-in Quint semantic trace matches regeneration
+quint-semantic-trace-check spec="verification/quint/harness/flows.qnt" expected="verification/quint/traces/harness_flows.itf.json" seed="424242" max_steps="50":
+    QUINT_TRACE_SEED={{seed}} QUINT_TRACE_MAX_STEPS={{max_steps}} just _nix-dev -- ./scripts/verify/quint-semantic-trace.sh check {{spec}} {{expected}}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Lean Formal Verification
