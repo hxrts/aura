@@ -1894,15 +1894,23 @@ impl UiController {
             .unwrap_or_else(|| UiSnapshot::loading(UiScreen::Neighborhood))
     }
 
-    pub fn set_ui_snapshot(&self, snapshot: UiSnapshot) {
+    pub fn set_ui_snapshot_override(&self, snapshot: UiSnapshot) {
         if let Ok(mut slot) = self.ui_snapshot_override.try_write() {
-            *slot = Some(snapshot.clone());
+            *slot = Some(snapshot);
         }
+    }
+
+    pub fn publish_ui_snapshot(&self, snapshot: UiSnapshot) {
         if let Ok(slot) = self.ui_snapshot_sink.try_lock() {
             if let Some(sink) = slot.as_ref() {
                 sink(snapshot);
             }
         }
+    }
+
+    pub fn set_ui_snapshot(&self, snapshot: UiSnapshot) {
+        self.set_ui_snapshot_override(snapshot.clone());
+        self.publish_ui_snapshot(snapshot);
     }
 
     pub fn read_clipboard(&self) -> String {

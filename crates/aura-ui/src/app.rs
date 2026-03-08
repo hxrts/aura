@@ -1323,18 +1323,6 @@ fn submit_runtime_modal_action(
                                         InvitationBridgeType::DeviceEnrollment { .. }
                                         | InvitationBridgeType::Contact { .. } => {}
                                     }
-                                    controller_for_import.push_log(
-                                        "accept_invitation refresh_notifications start",
-                                    );
-                                    harness_log("accept_invitation refresh_notifications start");
-                                    let _ = load_notifications_runtime_view(
-                                        controller_for_import.clone(),
-                                    )
-                                    .await;
-                                    controller_for_import.push_log(
-                                        "accept_invitation refresh_notifications done",
-                                    );
-                                    harness_log("accept_invitation refresh_notifications done");
                                     controller.complete_runtime_invitation_import();
                                     controller_for_import.finish_runtime_operation(
                                         OperationId::invitation_accept(),

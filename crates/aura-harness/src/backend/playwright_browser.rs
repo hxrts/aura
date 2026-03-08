@@ -173,7 +173,15 @@ impl RunningSession {
                 .and_then(Value::as_str)
                 .map(str::to_string)
                 .unwrap_or_else(|| response.to_string());
-            bail!("Playwright driver {method} failed: {error}");
+            let stderr_tail = self.stderr_tail(40);
+            let stderr_block = if stderr_tail.is_empty() {
+                "none".to_string()
+            } else {
+                stderr_tail.join("\n")
+            };
+            bail!(
+                "Playwright driver {method} failed: {error} (stderr_tail=\n{stderr_block})"
+            );
         }
     }
 

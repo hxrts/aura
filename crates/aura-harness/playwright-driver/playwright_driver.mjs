@@ -179,12 +179,30 @@ async function installDomObserver(page, session) {
   });
 }
 
-async function focusAuraPage(page) {
-  await page.evaluate(() => {
-    window.focus();
-    document.body.setAttribute('tabindex', '-1');
-    document.body.focus();
+async function installUiStateObserver(page, session) {
+  await page.exposeBinding('__AURA_DRIVER_PUSH_UI_STATE', (_source, payload) => {
+    if (typeof payload === 'string') {
+      session.uiStateCacheJson = payload;
+      try {
+        session.uiStateCache = JSON.parse(payload);
+      } catch {
+        session.uiStateCache = null;
+      }
+      return;
+    }
+    if (payload && typeof payload === 'object') {
+      session.uiStateCache = payload;
+      try {
+        session.uiStateCacheJson = JSON.stringify(payload);
+      } catch {
+        session.uiStateCacheJson = null;
+      }
+    }
   });
+}
+
+async function focusAuraPage(page) {
+  await withOperationTimeout('focus_page', page.bringToFront(), 3000);
 }
 
 function escapeRegex(value) {
@@ -228,14 +246,20 @@ function mapPlaywrightKey(key) {
 }
 
 async function pressMappedKey(page, key) {
-  await page.keyboard.press(mapPlaywrightKey(key));
+  const mapped = mapPlaywrightKey(key);
+  console.error(`[driver] key_press start key=${key} mapped=${mapped}`);
+  await withOperationTimeout(`key_press:${mapped}`, page.keyboard.press(mapped), 3000);
+  console.error(`[driver] key_press done key=${key} mapped=${mapped}`);
 }
 
 async function flushTypedBuffer(page, buffer) {
   if (!buffer) {
     return '';
   }
-  await page.keyboard.type(buffer);
+  const preview = JSON.stringify(buffer.length > 80 ? `${buffer.slice(0, 80)}…` : buffer);
+  console.error(`[driver] key_type start bytes=${buffer.length} preview=${preview}`);
+  await withOperationTimeout(`keyboard_type:${buffer.length}`, page.keyboard.type(buffer), 4000);
+  console.error(`[driver] key_type done bytes=${buffer.length}`);
   return '';
 }
 
@@ -321,6 +345,25 @@ async function typeKeyStream(page, rawKeys) {
   }
 
   await flushTypedBuffer(page, buffer);
+}
+
+async function pageLivenessProbe(page) {
+  return withOperationTimeout(
+    'page_liveness_probe',
+    page.evaluate(() => {
+      const active = document.activeElement;
+      return {
+        title: document.title ?? '',
+        readyState: document.readyState ?? '',
+        visibilityState: document.visibilityState ?? '',
+        hasFocus: typeof document.hasFocus === 'function' ? document.hasFocus() : false,
+        activeTag: active?.tagName ?? null,
+        activeId: active?.id ?? null,
+        activeClass: active?.className ?? null,
+      };
+    }),
+    3000
+  );
 }
 
 async function readDomSnapshot(page) {
@@ -674,19 +717,7 @@ async function startPage(params) {
       page.on('console', (message) => {
         const text = message.text();
         if (text.startsWith(UI_STATE_LOG_PREFIX) && sessions.has(instanceId)) {
-          try {
-            const snapshot = JSON.parse(text.slice(UI_STATE_LOG_PREFIX.length));
-            sessions.get(instanceId).uiStateCache = snapshot;
-            consoleLog.push(
-              `[${nowIso()}] ${message.type()}: [aura-ui-state] screen=${
-                snapshot?.screen ?? 'unknown'
-              } modal=${snapshot?.modal ?? 'none'}`
-            );
-          } catch (error) {
-            consoleLog.push(
-              `[${nowIso()}] ui_state_cache_parse_error: ${error?.message ?? String(error)}`
-            );
-          }
+          consoleLog.push(`[${nowIso()}] ${message.type()}: ${text}`);
           return;
         }
         consoleLog.push(`[${nowIso()}] ${message.type()}: ${text}`);
@@ -715,6 +746,13 @@ async function startPage(params) {
       await ensurePageInteractive(page, harnessReadyTimeoutMs);
       console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensurePageInteractive done`
+      );
+      console.error(
+        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installUiStateObserver start`
+      );
+      await installUiStateObserver(page, sessions.get(instanceId));
+      console.error(
+        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installUiStateObserver done`
       );
       try {
         console.error(
@@ -750,7 +788,8 @@ async function startPage(params) {
             ? path.join(artifactDir, `${instanceId}-trace.zip`)
             : null,
         domState: normalizeDomState({ text: '', ids: [] }),
-        uiStateCache: null
+        uiStateCache: null,
+        uiStateCacheJson: null
       };
       await installDomObserver(page, session);
       console.error(
@@ -851,12 +890,36 @@ async function sendKeys(params) {
   const keys = String(params?.keys ?? '');
   const session = getSession(instanceId);
 
+  console.error(`[driver] send_keys start instance=${instanceId} bytes=${keys.length}`);
+  const preFocusProbe = await pageLivenessProbe(session.page).catch((error) => ({
+    probe_error: error.message
+  }));
+  console.error(`[driver] send_keys probe_before_focus instance=${instanceId} ${JSON.stringify(preFocusProbe)}`);
+  console.error(`[driver] send_keys focus start instance=${instanceId}`);
   await focusAuraPage(session.page);
-  await typeKeyStream(session.page, keys);
+  console.error(`[driver] send_keys focus done instance=${instanceId}`);
+  const postFocusProbe = await pageLivenessProbe(session.page).catch((error) => ({
+    probe_error: error.message
+  }));
+  console.error(`[driver] send_keys probe_after_focus instance=${instanceId} ${JSON.stringify(postFocusProbe)}`);
+  console.error(`[driver] send_keys type start instance=${instanceId}`);
+  await withOperationTimeout(
+    `type_keys:${instanceId}`,
+    typeKeyStream(session.page, keys),
+    8000
+  );
+  console.error(`[driver] send_keys type done instance=${instanceId}`);
 
   const mirrored = extractSubmittedMessage(keys);
-  await mirrorSubmittedMessage(instanceId, mirrored);
+  console.error(`[driver] send_keys mirror start instance=${instanceId}`);
+  await withOperationTimeout(
+    `mirror_submitted_message:${instanceId}`,
+    mirrorSubmittedMessage(instanceId, mirrored),
+    5000
+  );
+  console.error(`[driver] send_keys mirror done instance=${instanceId}`);
 
+  console.error(`[driver] send_keys done instance=${instanceId}`);
   return { status: 'sent', bytes: keys.length };
 }
 
@@ -914,13 +977,27 @@ async function snapshot(params) {
 async function uiState(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
+  const recentConsole = consoleTailText(session, 8).replace(/\n/g, ' | ');
+  console.error(
+    `[driver] ui_state start instance=${instanceId} cache_type=${typeof session.uiStateCache} cache_json=${
+      typeof session.uiStateCacheJson
+    } console_tail=${recentConsole}`
+  );
 
   if (session.uiStateCache && typeof session.uiStateCache === 'object') {
+    console.error(`[driver] ui_state cache_hit instance=${instanceId}`);
+    if (typeof session.uiStateCacheJson === 'string') {
+      console.error(`[driver] ui_state cache_json_hit instance=${instanceId}`);
+      return JSON.parse(session.uiStateCacheJson);
+    }
+    console.error(`[driver] ui_state cache_object_hit instance=${instanceId}`);
     return session.uiStateCache;
   }
 
+  console.error(`[driver] ui_state cache_miss instance=${instanceId}`);
   let payload;
   try {
+    console.error(`[driver] ui_state evaluate start instance=${instanceId}`);
     payload = await withOperationTimeout(
       'ui_state',
       session.page.evaluate(() => {
@@ -940,6 +1017,7 @@ async function uiState(params) {
       }),
       UI_STATE_TIMEOUT_MS
     );
+    console.error(`[driver] ui_state evaluate done instance=${instanceId}`);
   } catch (error) {
     throw new Error(
       `${error}\nBrowser console tail:\n${consoleTailText(session)}`
