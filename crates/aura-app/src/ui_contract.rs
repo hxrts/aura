@@ -35,6 +35,7 @@ impl ScreenId {
 pub enum ModalId {
     Help,
     CreateInvitation,
+    InvitationCode,
     AcceptInvitation,
     CreateHome,
     CreateChannel,
@@ -61,6 +62,9 @@ pub enum FieldId {
     AccountName,
     InvitationCode,
     InvitationReceiver,
+    InvitationType,
+    InvitationMessage,
+    InvitationTtl,
     ChatInput,
     HomeName,
     CreateChannelName,
@@ -82,6 +86,7 @@ impl FieldId {
             Self::DeviceImportCode => Some("aura-account-import-code-input"),
             Self::InvitationCode => Some("aura-field-invitation-code"),
             Self::InvitationReceiver => Some("aura-field-invitation-receiver"),
+            Self::InvitationType | Self::InvitationMessage | Self::InvitationTtl => None,
             Self::ChatInput => Some("aura-field-chat-input"),
             Self::HomeName => Some("aura-field-home-name"),
             Self::CreateChannelName => Some("aura-field-create-channel-name"),
@@ -120,6 +125,7 @@ pub enum ListId {
     Channels,
     Contacts,
     Notifications,
+    InvitationTypes,
     Homes,
     NeighborhoodMembers,
     Devices,
@@ -135,6 +141,7 @@ impl ListId {
             Self::Channels => "channels",
             Self::Contacts => "contacts",
             Self::Notifications => "notifications",
+            Self::InvitationTypes => "invitation-types",
             Self::Homes => "homes",
             Self::NeighborhoodMembers => "neighborhood-members",
             Self::Devices => "devices",
@@ -167,12 +174,16 @@ pub enum ControlId {
     ToastRegion,
     OnboardingCreateAccountButton,
     OnboardingImportDeviceButton,
+    ModalCopyButton,
     NavRoot,
     NavNeighborhood,
     NavChat,
     NavContacts,
     NavNotifications,
     NavSettings,
+    NeighborhoodNewHomeButton,
+    NeighborhoodAcceptInvitationButton,
+    ContactsCreateInvitationButton,
     Screen(ScreenId),
     Field(FieldId),
     List(ListId),
@@ -180,6 +191,9 @@ pub enum ControlId {
     ModalConfirmButton,
     ModalCancelButton,
     ContactsAcceptInvitationButton,
+    SettingsAddDeviceButton,
+    SettingsRemoveDeviceButton,
+    ChatSendMessageButton,
 }
 
 impl ControlId {
@@ -192,15 +206,22 @@ impl ControlId {
             Self::ToastRegion => Some("aura-toast-region"),
             Self::OnboardingCreateAccountButton => Some("aura-onboarding-create-account-button"),
             Self::OnboardingImportDeviceButton => Some("aura-onboarding-import-device-button"),
+            Self::ModalCopyButton => Some("aura-modal-copy-button"),
             Self::NavRoot => Some("aura-nav-root"),
             Self::NavNeighborhood => Some("aura-nav-neighborhood"),
             Self::NavChat => Some("aura-nav-chat"),
             Self::NavContacts => Some("aura-nav-contacts"),
             Self::NavNotifications => Some("aura-nav-notifications"),
             Self::NavSettings => Some("aura-nav-settings"),
+            Self::NeighborhoodNewHomeButton => Some("aura-neighborhood-new-home"),
+            Self::NeighborhoodAcceptInvitationButton => Some("aura-neighborhood-accept-invitation"),
+            Self::ContactsCreateInvitationButton => Some("aura-contacts-create-invitation"),
             Self::ModalConfirmButton => Some("aura-modal-confirm-button"),
             Self::ModalCancelButton => Some("aura-modal-cancel-button"),
             Self::ContactsAcceptInvitationButton => Some("aura-contacts-accept-invitation"),
+            Self::SettingsAddDeviceButton => Some("aura-settings-add-device"),
+            Self::SettingsRemoveDeviceButton => Some("aura-settings-remove-device"),
+            Self::ChatSendMessageButton => Some("aura-chat-send-message"),
             Self::Screen(ScreenId::Neighborhood) => Some("aura-screen-neighborhood"),
             Self::Screen(ScreenId::Chat) => Some("aura-screen-chat"),
             Self::Screen(ScreenId::Contacts) => Some("aura-screen-contacts"),
@@ -262,6 +283,11 @@ impl OperationId {
     }
 
     #[must_use]
+    pub fn invitation_create() -> Self {
+        Self("invitation_create".to_string())
+    }
+
+    #[must_use]
     pub fn invitation_accept() -> Self {
         Self("invitation_accept".to_string())
     }
@@ -305,6 +331,12 @@ pub struct OperationSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageSnapshot {
+    pub id: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiSnapshot {
     pub screen: ScreenId,
     pub focused_control: Option<ControlId>,
@@ -312,6 +344,7 @@ pub struct UiSnapshot {
     pub readiness: UiReadiness,
     pub selections: Vec<SelectionSnapshot>,
     pub lists: Vec<ListSnapshot>,
+    pub messages: Vec<MessageSnapshot>,
     pub operations: Vec<OperationSnapshot>,
     pub toasts: Vec<ToastSnapshot>,
 }
@@ -326,6 +359,7 @@ impl UiSnapshot {
             readiness: UiReadiness::Loading,
             selections: Vec::new(),
             lists: Vec::new(),
+            messages: Vec::new(),
             operations: Vec::new(),
             toasts: Vec::new(),
         }
@@ -357,6 +391,7 @@ mod tests {
         assert_eq!(snapshot.open_modal, None);
         assert!(snapshot.selections.is_empty());
         assert!(snapshot.lists.is_empty());
+        assert!(snapshot.messages.is_empty());
         assert!(snapshot.operations.is_empty());
         assert!(snapshot.toasts.is_empty());
     }

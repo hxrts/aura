@@ -51,6 +51,8 @@ pub use views::{ChatMemberCandidate, CreateChannelModalState, CreateChannelStep}
 
 use crate::tui::screens::{Router, Screen};
 use crate::tui::types::AuthorityInfo;
+use aura_app::ui::contract::{OperationId, OperationSnapshot, OperationState};
+use std::collections::HashMap;
 
 /// Complete TUI state
 ///
@@ -121,6 +123,9 @@ pub struct TuiState {
     /// Index of the currently active authority in the authorities list
     /// This is app-global context, not screen-specific state.
     pub current_authority_index: usize,
+
+    /// Semantic operation states exported to the harness snapshot.
+    pub operation_states: HashMap<OperationId, OperationState>,
 }
 
 impl TuiState {
@@ -224,6 +229,25 @@ impl TuiState {
     pub fn show_account_setup_queued(&mut self) {
         self.modal_queue
             .enqueue(QueuedModal::AccountSetup(AccountSetupModalState::default()));
+    }
+
+    pub fn set_operation_state(&mut self, operation_id: OperationId, state: OperationState) {
+        self.operation_states.insert(operation_id, state);
+    }
+
+    pub fn clear_operation_state(&mut self, operation_id: &OperationId) {
+        self.operation_states.remove(operation_id);
+    }
+
+    #[must_use]
+    pub fn exported_operation_snapshots(&self) -> Vec<OperationSnapshot> {
+        self.operation_states
+            .iter()
+            .map(|(id, state)| OperationSnapshot {
+                id: id.clone(),
+                state: state.clone(),
+            })
+            .collect()
     }
 
     /// Signal that account creation succeeded (queue-based)

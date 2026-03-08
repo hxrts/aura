@@ -9,9 +9,9 @@ use crate::snapshot::render_canonical_snapshot;
 use async_lock::RwLock as AsyncRwLock;
 use aura_app::{
     ui::contract::{
-        ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot, ListSnapshot, ModalId,
-        OperationId, OperationSnapshot, OperationState, SelectionSnapshot, ToastId, ToastKind,
-        ToastSnapshot, UiReadiness, UiSnapshot,
+        ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot, ListSnapshot,
+        MessageSnapshot, ModalId, OperationId, OperationSnapshot, OperationState,
+        SelectionSnapshot, ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
     },
     AppCore,
 };
@@ -1430,6 +1430,16 @@ impl UiModel {
             });
         }
 
+        let messages = self
+            .messages
+            .iter()
+            .enumerate()
+            .map(|(idx, content)| MessageSnapshot {
+                id: format!("local-message-{idx}"),
+                content: content.clone(),
+            })
+            .collect::<Vec<_>>();
+
         UiSnapshot {
             screen: self.screen,
             focused_control: Some(if self.account_ready {
@@ -1445,6 +1455,7 @@ impl UiModel {
             },
             selections,
             lists,
+            messages,
             operations: self.operations.clone(),
             toasts,
         }
@@ -1465,6 +1476,7 @@ pub struct UiController {
     ui_snapshot_override: RwLock<Option<UiSnapshot>>,
     clipboard: Arc<dyn ClipboardPort>,
     authority_switcher: Option<Arc<dyn Fn(AuthorityId) + Send + Sync>>,
+    ui_snapshot_sink: Mutex<Option<Arc<dyn Fn(UiSnapshot) + Send + Sync>>>,
     rerender: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
@@ -1510,21 +1522,28 @@ impl UiController {
             ui_snapshot_override: RwLock::new(None),
             clipboard,
             authority_switcher,
+            ui_snapshot_sink: Mutex::new(None),
             rerender: Mutex::new(None),
         }
     }
 
     pub fn set_rerender_callback(&self, rerender: Arc<dyn Fn() + Send + Sync>) {
-        if let Ok(mut slot) = self.rerender.lock() {
+        if let Ok(mut slot) = self.rerender.try_lock() {
             *slot = Some(rerender);
         }
     }
 
     pub fn request_rerender(&self) {
-        if let Ok(slot) = self.rerender.lock() {
+        if let Ok(slot) = self.rerender.try_lock() {
             if let Some(rerender) = slot.as_ref() {
                 rerender();
             }
+        }
+    }
+
+    pub fn set_ui_snapshot_sink(&self, sink: Arc<dyn Fn(UiSnapshot) + Send + Sync>) {
+        if let Ok(mut slot) = self.ui_snapshot_sink.try_lock() {
+            *slot = Some(sink);
         }
     }
 
@@ -1576,6 +1595,11 @@ impl UiController {
         self.request_rerender();
     }
 
+    pub fn set_input_buffer(&self, value: impl Into<String>) {
+        write_model(&self.model).input_buffer = value.into();
+        self.request_rerender();
+    }
+
     pub fn set_selected_contact_index(&self, index: usize) {
         write_model(&self.model).set_selected_contact_index(index);
         self.request_rerender();
@@ -1608,15 +1632,15 @@ impl UiController {
         &self,
         notifications: Vec<(NotificationSelectionId, String)>,
     ) {
-        write_model(&self.model).sync_runtime_notifications(notifications);
+        self.try_update_model(|model| model.sync_runtime_notifications(notifications));
     }
 
     pub fn sync_runtime_channels(&self, channels: Vec<(String, String)>) {
-        write_model(&self.model).replace_channels(channels);
+        self.try_update_model(|model| model.replace_channels(channels));
     }
 
     pub fn sync_runtime_contacts(&self, contacts: Vec<(AuthorityId, String, bool)>) {
-        write_model(&self.model).replace_contacts(contacts);
+        self.try_update_model(|model| model.replace_contacts(contacts));
     }
 
     pub fn ensure_runtime_contact(
@@ -1625,7 +1649,7 @@ impl UiController {
         name: String,
         is_guardian: bool,
     ) {
-        write_model(&self.model).ensure_runtime_contact(authority_id, name, is_guardian);
+        self.try_update_model(|model| model.ensure_runtime_contact(authority_id, name, is_guardian));
         self.request_rerender();
     }
 
@@ -1635,6 +1659,7 @@ impl UiController {
         receiver_label: Option<&str>,
     ) {
         let mut model = write_model(&self.model);
+        model.clear_operation(&OperationId::invitation_create());
         model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
             receiver_id: receiver_id.map(ToString::to_string).unwrap_or_default(),
             receiver_label: receiver_label.map(str::to_string),
@@ -1644,15 +1669,15 @@ impl UiController {
     }
 
     pub fn sync_runtime_authorities(&self, authorities: Vec<(AuthorityId, String, bool)>) {
-        write_model(&self.model).replace_authorities(authorities);
+        self.try_update_model(|model| model.replace_authorities(authorities));
     }
 
     pub fn sync_runtime_profile(&self, authority_id: String, nickname: String) {
-        write_model(&self.model).sync_profile(authority_id, nickname);
+        self.try_update_model(|model| model.sync_profile(authority_id, nickname));
     }
 
     pub fn sync_runtime_devices(&self, devices: Vec<(String, bool)>) {
-        write_model(&self.model).sync_devices(devices);
+        self.try_update_model(|model| model.sync_devices(devices));
     }
 
     pub fn request_authority_switch(&self, authority_id: AuthorityId) -> bool {
@@ -1701,7 +1726,6 @@ impl UiController {
 
     pub fn complete_runtime_invitation_import(&self) {
         let mut model = write_model(&self.model);
-        set_toast(&mut model, '✓', "Invitation imported");
         dismiss_modal(&mut model);
         drop(model);
         self.request_rerender();
@@ -1834,7 +1858,18 @@ impl UiController {
     }
 
     pub fn snapshot(&self) -> RenderedHarnessSnapshot {
-        let screen = render_canonical_snapshot(&read_model(&self.model));
+        let screen = self
+            .model
+            .try_read()
+            .ok()
+            .map(|model| render_canonical_snapshot(&model))
+            .unwrap_or_else(|| {
+                let snapshot = self.ui_snapshot();
+                format!(
+                    "[harness-snapshot-busy]\nscreen={:?}\nreadiness={:?}\nopen_modal={:?}\nfocused_control={:?}",
+                    snapshot.screen, snapshot.readiness, snapshot.open_modal, snapshot.focused_control
+                )
+            });
         let normalized_screen = screen
             .replace('\r', "")
             .lines()
@@ -1852,15 +1887,21 @@ impl UiController {
 
     pub fn ui_snapshot(&self) -> UiSnapshot {
         self.ui_snapshot_override
-            .read()
+            .try_read()
             .ok()
             .and_then(|snapshot| snapshot.clone())
-            .unwrap_or_else(|| read_model(&self.model).semantic_snapshot())
+            .or_else(|| self.model.try_read().ok().map(|model| model.semantic_snapshot()))
+            .unwrap_or_else(|| UiSnapshot::loading(UiScreen::Neighborhood))
     }
 
     pub fn set_ui_snapshot(&self, snapshot: UiSnapshot) {
-        if let Ok(mut slot) = self.ui_snapshot_override.write() {
-            *slot = Some(snapshot);
+        if let Ok(mut slot) = self.ui_snapshot_override.try_write() {
+            *slot = Some(snapshot.clone());
+        }
+        if let Ok(slot) = self.ui_snapshot_sink.try_lock() {
+            if let Some(sink) = slot.as_ref() {
+                sink(snapshot);
+            }
         }
     }
 
@@ -1915,6 +1956,12 @@ impl UiController {
 
     pub fn authority_id(&self) -> String {
         read_model(&self.model).authority_id.clone()
+    }
+
+    fn try_update_model(&self, update: impl FnOnce(&mut UiModel)) {
+        if let Ok(mut model) = self.model.try_write() {
+            update(&mut model);
+        }
     }
 
     pub fn ui_model(&self) -> Option<UiModel> {

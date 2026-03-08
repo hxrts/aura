@@ -661,7 +661,14 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             .cloned()
             .collect::<Vec<_>>();
         for line in stderr_tail.into_iter().rev() {
-            merged.push(line);
+            let noise = line.contains("[driver] request start")
+                || line.contains("[driver] request done")
+                || line.contains("method=ui_state")
+                || line.contains("method=snapshot")
+                || line.contains("method=tail_log");
+            if !noise {
+                merged.push(line);
+            }
         }
 
         if merged.len() > lines {

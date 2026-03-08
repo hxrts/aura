@@ -19,6 +19,8 @@ use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
 use aura_core::effects::task::TaskSpawner;
 use aura_core::effects::time::PhysicalTimeEffects;
 #[cfg(not(target_arch = "wasm32"))]
+use aura_core::effects::transport::TransportEnvelope;
+#[cfg(not(target_arch = "wasm32"))]
 use aura_core::effects::{AmpChannelEffects, ChannelCreateParams, ChannelJoinParams};
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
@@ -26,21 +28,29 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::util::serialization::from_slice;
 use aura_core::DeviceId;
 #[cfg(not(target_arch = "wasm32"))]
-use aura_journal::fact::RelationalFact;
+use aura_journal::fact::{FactContent, RelationalFact};
 #[cfg(not(target_arch = "wasm32"))]
 use aura_journal::DomainFact;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_protocol::amp::get_channel_state;
 use aura_rendezvous::TransportHint;
+#[cfg(not(target_arch = "wasm32"))]
+use futures::{SinkExt, StreamExt};
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncReadExt;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio_tungstenite::accept_async;
+#[cfg(not(target_arch = "wasm32"))]
+use aura_guards::GuardContextProvider;
 
 const MIN_SYNC_PEER_RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_SYNC_PEER_RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
 #[cfg(not(target_arch = "wasm32"))]
 const CHAT_FACT_CONTENT_TYPE: &str = "application/aura-chat-fact";
+const FACT_SYNC_REQUEST_CONTENT_TYPE: &str = "application/aura-fact-sync-request";
+const FACT_SYNC_RESPONSE_CONTENT_TYPE: &str = "application/aura-fact-sync-response";
 
 fn sync_peer_reconcile_interval(sync_manager: &SyncServiceManager) -> Duration {
     sync_manager.config().auto_sync_interval.clamp(
@@ -630,6 +640,7 @@ impl RuntimeSystem {
         };
 
         let listener = lan_transport.listener();
+        let websocket_listener = lan_transport.websocket_listener();
         let effects = self.effect_system.clone();
         let metrics = lan_transport.metrics_handle();
         let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
@@ -721,25 +732,24 @@ impl RuntimeSystem {
                         return;
                     }
 
-                    let envelope: aura_core::effects::transport::TransportEnvelope =
-                        match aura_core::util::serialization::from_slice(&payload) {
-                            Ok(envelope) => envelope,
-                            Err(err) => {
-                                tracing::debug!(error = %err, addr = %addr, "LAN transport decode failed");
-                                let now_ms = time_effects
-                                    .physical_time()
-                                    .await
-                                    .ok()
-                                    .map(|t| t.ts_ms)
-                                    .unwrap_or(0);
-                                let mut metrics = metrics.write().await;
-                                metrics.decode_errors = metrics.decode_errors.saturating_add(1);
-                                if now_ms > 0 {
-                                    metrics.last_error_ms = now_ms;
-                                }
-                                return;
+                    let envelope = match aura_core::util::serialization::from_slice(&payload) {
+                        Ok(envelope) => envelope,
+                        Err(err) => {
+                            tracing::debug!(error = %err, addr = %addr, "LAN transport decode failed");
+                            let now_ms = time_effects
+                                .physical_time()
+                                .await
+                                .ok()
+                                .map(|t| t.ts_ms)
+                                .unwrap_or(0);
+                            let mut metrics = metrics.write().await;
+                            metrics.decode_errors = metrics.decode_errors.saturating_add(1);
+                            if now_ms > 0 {
+                                metrics.last_error_ms = now_ms;
                             }
-                        };
+                            return;
+                        }
+                    };
                     let now_ms = time_effects
                         .physical_time()
                         .await
@@ -755,106 +765,103 @@ impl RuntimeSystem {
                         }
                     }
 
-                    if envelope
-                        .metadata
-                        .get("content-type")
-                        .is_some_and(|content_type| content_type == CHAT_FACT_CONTENT_TYPE)
-                    {
-                        match from_slice::<RelationalFact>(&envelope.payload) {
-                            Ok(fact) => {
-                                // Provision AMP channel state only for ChannelCreated chat facts.
-                                // Other relational fact families can still arrive through this
-                                // transport envelope and must not be dropped.
-                                if let RelationalFact::Generic {
-                                    envelope: chat_envelope,
-                                    ..
-                                } = &fact
-                                {
-                                    if chat_envelope.type_id.as_str() == CHAT_FACT_TYPE_ID {
-                                        if let Some(ChatFact::ChannelCreated {
-                                            context_id,
-                                            channel_id,
-                                            creator_id,
-                                            ..
-                                        }) = ChatFact::from_envelope(chat_envelope)
-                                        {
-                                            let local_authority = envelope.destination;
-                                            if get_channel_state(effects.as_ref(), context_id, channel_id)
-                                                .await
-                                                .is_err()
-                                            {
-                                                if let Err(err) = effects
-                                                    .create_channel(ChannelCreateParams {
-                                                        context: context_id,
-                                                        channel: Some(channel_id),
-                                                        skip_window: None,
-                                                        topic: None,
-                                                    })
-                                                    .await
-                                                {
-                                                    let lowered = err.to_string().to_ascii_lowercase();
-                                                    if !lowered.contains("already")
-                                                        && !lowered.contains("exists")
-                                                    {
-                                                        tracing::warn!(
-                                                            context_id = %context_id,
-                                                            channel_id = %channel_id,
-                                                            error = %err,
-                                                            "Failed to provision AMP channel checkpoint from inbound chat fact"
-                                                        );
-                                                    }
-                                                }
+                    let _ = handle_inbound_transport_envelope(effects, envelope).await;
+                });
+            }
+        });
 
-                                                let mut participants = vec![local_authority];
-                                                if creator_id != local_authority {
-                                                    participants.push(creator_id);
-                                                }
+        let effects = self.effect_system.clone();
+        let metrics = lan_transport.metrics_handle();
+        let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
+            Arc::new(self.effect_system.time_effects().clone());
+        self.runtime_tasks.spawn_cancellable(async move {
+            loop {
+                let (stream, addr) = match websocket_listener.accept().await {
+                    Ok((stream, addr)) => (stream, addr),
+                    Err(err) => {
+                        tracing::warn!(error = %err, "LAN websocket accept failed");
+                        continue;
+                    }
+                };
 
-                                                for participant in participants {
-                                                    if let Err(err) = effects
-                                                        .join_channel(ChannelJoinParams {
-                                                            context: context_id,
-                                                            channel: channel_id,
-                                                            participant,
-                                                        })
-                                                        .await
-                                                    {
-                                                        tracing::debug!(
-                                                            context_id = %context_id,
-                                                            channel_id = %channel_id,
-                                                            participant = %participant,
-                                                            error = %err,
-                                                            "AMP join provisioning from inbound chat fact failed"
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if let Err(err) = effects.commit_relational_facts(vec![fact]).await
-                                {
-                                    tracing::debug!(
-                                        error = %err,
-                                        "LAN transport failed to commit incoming chat fact envelope"
-                                    );
-                                } else {
-                                    effects.await_next_view_update().await;
-                                }
+                let effects = effects.clone();
+                let metrics = metrics.clone();
+                let time_effects = time_effects.clone();
+                tokio::spawn(async move {
+                    let websocket = match accept_async(stream).await {
+                        Ok(websocket) => websocket,
+                        Err(err) => {
+                            tracing::debug!(error = %err, addr = %addr, "LAN websocket handshake failed");
+                            return;
+                        }
+                    };
+                    let (mut sink, mut stream) = websocket.split();
+                    while let Some(message) = stream.next().await {
+                        let message = match message {
+                            Ok(message) => message,
+                            Err(err) => {
+                                tracing::debug!(error = %err, addr = %addr, "LAN websocket read failed");
                                 return;
                             }
+                        };
+
+                        if !message.is_binary() {
+                            continue;
+                        }
+
+                        let payload = message.into_data();
+                        let envelope = match aura_core::util::serialization::from_slice::<TransportEnvelope>(&payload) {
+                            Ok(envelope) => envelope,
                             Err(err) => {
-                                tracing::warn!(
-                                    error = %err,
-                                    "LAN transport received invalid chat fact envelope payload"
-                                );
-                                return;
+                                tracing::debug!(error = %err, addr = %addr, "LAN websocket decode failed");
+                                let mut metrics = metrics.write().await;
+                                metrics.decode_errors = metrics.decode_errors.saturating_add(1);
+                                continue;
+                            }
+                        };
+
+                        let now_ms = time_effects
+                            .physical_time()
+                            .await
+                            .ok()
+                            .map(|t| t.ts_ms)
+                            .unwrap_or(0);
+                        {
+                            let mut metrics = metrics.write().await;
+                            metrics.frames_received = metrics.frames_received.saturating_add(1);
+                            metrics.bytes_received =
+                                metrics.bytes_received.saturating_add(payload.len() as u64);
+                            if now_ms > 0 {
+                                metrics.last_frame_ms = now_ms;
+                            }
+                        }
+
+                        if let Some(response) =
+                            handle_inbound_transport_envelope(effects.clone(), envelope).await
+                        {
+                            match aura_core::util::serialization::to_vec(&response) {
+                                Ok(bytes) => {
+                                    if let Err(err) =
+                                        sink.send(tokio_tungstenite::tungstenite::Message::Binary(bytes)).await
+                                    {
+                                        tracing::debug!(
+                                            error = %err,
+                                            addr = %addr,
+                                            "LAN websocket response send failed"
+                                        );
+                                        return;
+                                    }
+                                }
+                                Err(err) => {
+                                    tracing::debug!(
+                                        error = %err,
+                                        addr = %addr,
+                                        "LAN websocket response encode failed"
+                                    );
+                                }
                             }
                         }
                     }
-
-                    effects.requeue_envelope(envelope);
                 });
             }
         });
@@ -978,6 +985,158 @@ impl RuntimeSystem {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+async fn handle_inbound_transport_envelope(
+    effects: Arc<AuraEffectSystem>,
+    envelope: TransportEnvelope,
+) -> Option<TransportEnvelope> {
+    if envelope
+        .metadata
+        .get("content-type")
+        .is_some_and(|content_type| content_type == FACT_SYNC_REQUEST_CONTENT_TYPE)
+    {
+        let local_authority = GuardContextProvider::authority_id(effects.as_ref());
+        let facts = match effects.load_committed_facts(local_authority).await {
+            Ok(facts) => facts
+                .into_iter()
+                .filter_map(|fact| match fact.content {
+                    FactContent::Relational(rel) => Some(rel),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            Err(err) => {
+                tracing::debug!(
+                    error = %err,
+                    "Failed to load committed facts for fact sync response"
+                );
+                Vec::new()
+            }
+        };
+
+        let payload = match aura_core::util::serialization::to_vec(&facts) {
+            Ok(payload) => payload,
+            Err(err) => {
+                tracing::debug!(
+                    error = %err,
+                    "Failed to encode fact sync response payload"
+                );
+                return None;
+            }
+        };
+
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert(
+            "content-type".to_string(),
+            FACT_SYNC_RESPONSE_CONTENT_TYPE.to_string(),
+        );
+
+        return Some(TransportEnvelope {
+            destination: envelope.source,
+            source: envelope.destination,
+            context: envelope.context,
+            payload,
+            metadata,
+            receipt: None,
+        });
+    }
+
+    if envelope
+        .metadata
+        .get("content-type")
+        .is_some_and(|content_type| content_type == CHAT_FACT_CONTENT_TYPE)
+    {
+        match from_slice::<RelationalFact>(&envelope.payload) {
+            Ok(fact) => {
+                if let RelationalFact::Generic {
+                    envelope: chat_envelope,
+                    ..
+                } = &fact
+                {
+                    if chat_envelope.type_id.as_str() == CHAT_FACT_TYPE_ID {
+                        if let Some(ChatFact::ChannelCreated {
+                            context_id,
+                            channel_id,
+                            creator_id,
+                            ..
+                        }) = ChatFact::from_envelope(chat_envelope)
+                        {
+                            let local_authority = envelope.destination;
+                            if get_channel_state(effects.as_ref(), context_id, channel_id)
+                                .await
+                                .is_err()
+                            {
+                                if let Err(err) = effects
+                                    .create_channel(ChannelCreateParams {
+                                        context: context_id,
+                                        channel: Some(channel_id),
+                                        skip_window: None,
+                                        topic: None,
+                                    })
+                                    .await
+                                {
+                                    let lowered = err.to_string().to_ascii_lowercase();
+                                    if !lowered.contains("already") && !lowered.contains("exists") {
+                                        tracing::warn!(
+                                            context_id = %context_id,
+                                            channel_id = %channel_id,
+                                            error = %err,
+                                            "Failed to provision AMP channel checkpoint from inbound chat fact"
+                                        );
+                                    }
+                                }
+
+                                let mut participants = vec![local_authority];
+                                if creator_id != local_authority {
+                                    participants.push(creator_id);
+                                }
+
+                                for participant in participants {
+                                    if let Err(err) = effects
+                                        .join_channel(ChannelJoinParams {
+                                            context: context_id,
+                                            channel: channel_id,
+                                            participant,
+                                        })
+                                        .await
+                                    {
+                                        tracing::debug!(
+                                            context_id = %context_id,
+                                            channel_id = %channel_id,
+                                            participant = %participant,
+                                            error = %err,
+                                            "AMP join provisioning from inbound chat fact failed"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let Err(err) = effects.commit_relational_facts(vec![fact]).await {
+                    tracing::debug!(
+                        error = %err,
+                        "LAN transport failed to commit incoming chat fact envelope"
+                    );
+                } else {
+                    effects.await_next_view_update().await;
+                }
+                return None;
+            }
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "LAN transport received invalid chat fact envelope payload"
+                );
+                return None;
+            }
+        }
+    }
+
+    effects.requeue_envelope(envelope);
+    None
+}
+
 async fn publish_lan_descriptor_with(
     effects: Arc<AuraEffectSystem>,
     authority_id: AuthorityId,
@@ -991,11 +1150,29 @@ async fn publish_lan_descriptor_with(
     let context_id = authority_context.default_context_id();
 
     let mut hints = Vec::new();
+    tracing::info!(
+        authority = %authority_id,
+        tcp_addrs = ?lan_transport.advertised_addrs(),
+        websocket_addrs = ?lan_transport.websocket_addrs(),
+        "publish_lan_descriptor_with transport addresses"
+    );
     for addr in lan_transport.advertised_addrs() {
         match TransportHint::tcp_direct(addr) {
             Ok(hint) => hints.push(hint),
             Err(err) => {
                 tracing::warn!(addr = %addr, error = %err, "Skipping invalid LAN transport hint");
+            }
+        }
+    }
+    for addr in lan_transport.websocket_addrs() {
+        match TransportHint::websocket_direct(addr) {
+            Ok(hint) => hints.push(hint),
+            Err(err) => {
+                tracing::warn!(
+                    addr = %addr,
+                    error = %err,
+                    "Skipping invalid LAN websocket transport hint"
+                );
             }
         }
     }

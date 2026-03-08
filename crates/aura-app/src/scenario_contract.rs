@@ -48,8 +48,10 @@ pub enum UiAction {
     Fill(FieldId, String),
     InputText(String),
     PressKey(InputKey, u16),
+    SendChatCommand(String),
+    SendChatMessage(String),
     PasteClipboard { source_actor: Option<ActorId> },
-    ReadClipboard,
+    ReadClipboard { name: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,6 +91,13 @@ pub enum VariableAction {
         name: String,
         value: String,
     },
+    CaptureCurrentAuthorityId {
+        name: String,
+    },
+    CaptureSelection {
+        name: String,
+        list: ListId,
+    },
     Extract {
         name: String,
         regex: String,
@@ -112,6 +121,9 @@ pub enum Expectation {
     ScreenIs(ScreenId),
     ControlVisible(ControlId),
     ModalOpen(ModalId),
+    MessageContains {
+        message_contains: String,
+    },
     ToastContains {
         kind: Option<ToastKind>,
         message_contains: String,
@@ -119,6 +131,10 @@ pub enum Expectation {
     ListContains {
         list: ListId,
         item_id: String,
+    },
+    ListCountIs {
+        list: ListId,
+        count: usize,
     },
     ListItemConfirmation {
         list: ListId,
@@ -157,6 +173,7 @@ pub struct SemanticScenarioFileStep {
     pub modal_id: Option<ModalId>,
     pub list_id: Option<ListId>,
     pub item_id: Option<String>,
+    pub count: Option<usize>,
     pub value: Option<String>,
     pub key: Option<InputKey>,
     pub repeat: Option<u16>,
@@ -187,17 +204,23 @@ pub enum SemanticActionKind {
     Fill,
     InputText,
     PressKey,
+    SendChatCommand,
+    SendChatMessage,
     PasteClipboard,
     ReadClipboard,
     ScreenIs,
     ControlVisible,
     ModalOpen,
+    MessageContains,
     ToastContains,
     ListContains,
+    ListCountIs,
     ListItemConfirmation,
     SelectionIs,
     ReadinessIs,
     OperationStateIs,
+    CaptureCurrentAuthorityId,
+    CaptureSelection,
     SetVar,
     ExtractVar,
 }
@@ -291,10 +314,26 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                 required(value.key, "key", value.action)?,
                 value.repeat.unwrap_or(1).max(1),
             )),
+            SemanticActionKind::SendChatCommand => {
+                ScenarioAction::Ui(UiAction::SendChatCommand(required(
+                    value.value,
+                    "value",
+                    value.action,
+                )?))
+            }
+            SemanticActionKind::SendChatMessage => {
+                ScenarioAction::Ui(UiAction::SendChatMessage(required(
+                    value.value,
+                    "value",
+                    value.action,
+                )?))
+            }
             SemanticActionKind::PasteClipboard => ScenarioAction::Ui(UiAction::PasteClipboard {
                 source_actor: value.source_actor,
             }),
-            SemanticActionKind::ReadClipboard => ScenarioAction::Ui(UiAction::ReadClipboard),
+            SemanticActionKind::ReadClipboard => ScenarioAction::Ui(UiAction::ReadClipboard {
+                name: required(value.name, "name", value.action)?,
+            }),
             SemanticActionKind::ScreenIs => ScenarioAction::Expect(Expectation::ScreenIs(
                 required(value.screen_id, "screen_id", value.action)?,
             )),
@@ -308,6 +347,11 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
             SemanticActionKind::ModalOpen => ScenarioAction::Expect(Expectation::ModalOpen(
                 required(value.modal_id, "modal_id", value.action)?,
             )),
+            SemanticActionKind::MessageContains => {
+                ScenarioAction::Expect(Expectation::MessageContains {
+                    message_contains: required(value.value, "value", value.action)?,
+                })
+            }
             SemanticActionKind::ToastContains => {
                 ScenarioAction::Expect(Expectation::ToastContains {
                     kind: value.kind,
@@ -317,6 +361,10 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
             SemanticActionKind::ListContains => ScenarioAction::Expect(Expectation::ListContains {
                 list: required(value.list_id, "list_id", value.action)?,
                 item_id: required(value.item_id, "item_id", value.action)?,
+            }),
+            SemanticActionKind::ListCountIs => ScenarioAction::Expect(Expectation::ListCountIs {
+                list: required(value.list_id, "list_id", value.action)?,
+                count: required(value.count, "count", value.action)?,
             }),
             SemanticActionKind::ListItemConfirmation => {
                 ScenarioAction::Expect(Expectation::ListItemConfirmation {
@@ -336,6 +384,17 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                 ScenarioAction::Expect(Expectation::OperationStateIs {
                     operation_id: required(value.operation_id, "operation_id", value.action)?,
                     state: required(value.operation_state, "operation_state", value.action)?,
+                })
+            }
+            SemanticActionKind::CaptureCurrentAuthorityId => {
+                ScenarioAction::Variables(VariableAction::CaptureCurrentAuthorityId {
+                    name: required(value.name, "name", value.action)?,
+                })
+            }
+            SemanticActionKind::CaptureSelection => {
+                ScenarioAction::Variables(VariableAction::CaptureSelection {
+                    name: required(value.name, "name", value.action)?,
+                    list: required(value.list_id, "list_id", value.action)?,
                 })
             }
             SemanticActionKind::SetVar => ScenarioAction::Variables(VariableAction::Set {

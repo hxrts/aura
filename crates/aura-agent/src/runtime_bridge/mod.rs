@@ -9,6 +9,8 @@ use crate::handlers::shared::context_commitment_from_journal;
 use crate::handlers::InvitationServiceApi;
 use crate::runtime::consensus::build_consensus_params;
 use async_trait::async_trait;
+#[cfg(target_arch = "wasm32")]
+use futures::{SinkExt, StreamExt};
 use aura_app::runtime_bridge::{
     BridgeAuthorityInfo, BridgeDeviceInfo, InvitationInfo, LanPeerInfo, RendezvousStatus,
     RuntimeBridge, SettingsBridgeState, SyncStatus,
@@ -38,6 +40,8 @@ use aura_core::DeviceId;
 use aura_core::EffectContext;
 use aura_core::Hash32;
 use aura_core::Prestate;
+#[cfg(target_arch = "wasm32")]
+use aura_journal::fact::{Fact as TypedFact, FactContent};
 use aura_journal::fact::{
     ChannelBootstrap, ChannelBumpReason, FactOptions, ProposedChannelEpochBump, RelationalFact,
 };
@@ -52,6 +56,14 @@ use aura_social::moderation::{
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::sync::Arc;
+#[cfg(target_arch = "wasm32")]
+use gloo_net::websocket::{futures::WebSocket, Message};
+#[cfg(target_arch = "wasm32")]
+use futures::channel::oneshot;
+#[cfg(target_arch = "wasm32")]
+use std::future::Future;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local;
 
 use crate::core::default_context_id_for_authority;
 use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyInitRequest};
@@ -71,6 +83,10 @@ use consensus::{map_consensus_error, persist_consensus_dkg_transcript};
 use invitation::convert_invitation_to_bridge_info;
 
 const CHAT_FACT_CONTENT_TYPE: &str = "application/aura-chat-fact";
+#[cfg(target_arch = "wasm32")]
+const FACT_SYNC_REQUEST_CONTENT_TYPE: &str = "application/aura-fact-sync-request";
+#[cfg(target_arch = "wasm32")]
+const FACT_SYNC_RESPONSE_CONTENT_TYPE: &str = "application/aura-fact-sync-response";
 
 fn service_error_to_intent(err: ServiceError) -> IntentError {
     IntentError::service_error(err.to_string())
@@ -101,6 +117,197 @@ impl AgentRuntimeBridge {
     pub fn new(agent: Arc<AuraAgent>) -> Self {
         Self { agent }
     }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn pull_remote_relational_facts(
+        &self,
+        peer: AuthorityId,
+    ) -> Result<usize, IntentError> {
+        tracing::info!(peer = %peer, "pull_remote_relational_facts start");
+        let Some(rendezvous) = self.agent.runtime().rendezvous() else {
+            tracing::info!(peer = %peer, "pull_remote_relational_facts skipped: no rendezvous");
+            return Ok(0);
+        };
+
+        let context = default_context_id_for_authority(peer);
+        let mut descriptor = rendezvous.get_descriptor(context, peer).await;
+        if descriptor
+            .as_ref()
+            .is_none_or(|descriptor| {
+                !descriptor.transport_hints.iter().any(|hint| {
+                    matches!(hint, aura_rendezvous::TransportHint::WebSocketDirect { .. })
+                })
+            })
+        {
+            let lan_descriptor = rendezvous
+                .list_lan_discovered_peers()
+                .await
+                .into_iter()
+                .find(|candidate| candidate.authority_id == peer)
+                .map(|candidate| candidate.descriptor);
+            if lan_descriptor.is_some() {
+                descriptor = lan_descriptor;
+            }
+        }
+        let Some(descriptor) = descriptor else {
+            tracing::info!(peer = %peer, context = %context, "pull_remote_relational_facts skipped: no descriptor");
+            return Ok(0);
+        };
+
+        let addr: Option<String> = descriptor.transport_hints.iter().find_map(|hint| match hint {
+            aura_rendezvous::TransportHint::WebSocketDirect { addr, .. } => {
+                Some(addr.to_string())
+            }
+            _ => None,
+        });
+        let Some(addr) = addr else {
+            tracing::info!(peer = %peer, "pull_remote_relational_facts skipped: no websocket direct hint");
+            return Ok(0);
+        };
+
+        let url = if addr.starts_with("ws://") || addr.starts_with("wss://") {
+            addr
+        } else {
+            format!("ws://{addr}")
+        };
+
+        let request = TransportEnvelope {
+            destination: peer,
+            source: self.agent.authority_id(),
+            context,
+            payload: Vec::new(),
+            metadata: std::collections::HashMap::from([(
+                "content-type".to_string(),
+                FACT_SYNC_REQUEST_CONTENT_TYPE.to_string(),
+            )]),
+            receipt: None,
+        };
+
+        let bytes = aura_core::util::serialization::to_vec(&request).map_err(|e| {
+            IntentError::internal_error(format!("Failed to encode fact sync request: {e}"))
+        })?;
+
+        let remote_facts: Vec<RelationalFact> = run_local_ws(move || async move {
+            let mut socket = WebSocket::open(&url).map_err(|e| {
+                IntentError::network_error(format!(
+                    "Failed to open fact sync websocket {url}: {e}"
+                ))
+            })?;
+            socket.send(Message::Bytes(bytes)).await.map_err(|e| {
+                IntentError::network_error(format!("Failed to send fact sync request: {e}"))
+            })?;
+
+            let response = socket.next().await.ok_or_else(|| {
+                IntentError::network_error(
+                    "Fact sync websocket closed before response".to_string(),
+                )
+            })?;
+            let payload = match response.map_err(|e| {
+                IntentError::network_error(format!("Fact sync websocket read failed: {e}"))
+            })? {
+                Message::Bytes(payload) => payload,
+                _ => {
+                    return Err(IntentError::network_error(
+                        "Fact sync websocket returned non-binary payload".to_string(),
+                    ));
+                }
+            };
+
+            let envelope: TransportEnvelope =
+                aura_core::util::serialization::from_slice(&payload).map_err(|e| {
+                    IntentError::internal_error(format!(
+                        "Failed to decode fact sync response: {e}"
+                    ))
+                })?;
+
+            if envelope
+                .metadata
+                .get("content-type")
+                .is_none_or(|value| value != FACT_SYNC_RESPONSE_CONTENT_TYPE)
+            {
+                return Err(IntentError::network_error(
+                    "Fact sync response had unexpected content type".to_string(),
+                ));
+            }
+
+            aura_core::util::serialization::from_slice(&envelope.payload).map_err(|e| {
+                IntentError::internal_error(format!("Failed to decode fact sync payload: {e}"))
+            })
+        })
+        .await?;
+
+        tracing::info!(
+            peer = %peer,
+            fact_count = remote_facts.len(),
+            "pull_remote_relational_facts response"
+        );
+
+        if remote_facts.is_empty() {
+            return Ok(0);
+        }
+
+        let effects = self.agent.runtime().effects();
+        let local = effects
+            .load_committed_facts(self.agent.authority_id())
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to load local facts: {e}")))?;
+
+        let mut known = HashSet::new();
+        for fact in local {
+            let TypedFact { content, .. } = fact;
+            if let FactContent::Relational(rel) = content {
+                if let Ok(bytes) = aura_core::util::serialization::to_vec(&rel) {
+                    known.insert(bytes);
+                }
+            }
+        }
+
+        let mut new_facts = Vec::new();
+        for fact in remote_facts {
+            let bytes = aura_core::util::serialization::to_vec(&fact).map_err(|e| {
+                IntentError::internal_error(format!("Failed to encode relational fact: {e}"))
+            })?;
+            if known.insert(bytes) {
+                new_facts.push(fact);
+            }
+        }
+
+        if new_facts.is_empty() {
+            tracing::info!(peer = %peer, "pull_remote_relational_facts no new facts");
+            return Ok(0);
+        }
+
+        effects
+            .commit_relational_facts(new_facts.clone())
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to merge synced facts: {e}")))?;
+        effects.await_next_view_update().await;
+
+        tracing::info!(
+            peer = %peer,
+            committed = new_facts.len(),
+            "pull_remote_relational_facts committed"
+        );
+
+        Ok(new_facts.len())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn run_local_ws<Mk, Fut, T>(make_fut: Mk) -> Result<T, IntentError>
+where
+    Mk: FnOnce() -> Fut + 'static,
+    Fut: Future<Output = Result<T, IntentError>> + 'static,
+    T: 'static,
+{
+    let (tx, rx) = oneshot::channel();
+    spawn_local(async move {
+        let _ = tx.send(make_fut().await);
+    });
+
+    rx.await.map_err(|_| {
+        IntentError::internal_error("Fact sync websocket task dropped before completion")
+    })?
 }
 
 #[async_trait]
@@ -773,10 +980,54 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn trigger_sync(&self) -> Result<(), IntentError> {
-        if let Some(_sync) = self.agent.runtime().sync() {
-            // The sync service runs continuously in the background
-            // Triggering a manual sync would be a new feature
-            Ok(())
+        if let Some(sync) = self.agent.runtime().sync() {
+            let effects = self.agent.runtime().effects();
+            #[cfg(target_arch = "wasm32")]
+            let authority_peers: Vec<AuthorityId> =
+                if let Some(rendezvous) = self.agent.runtime().rendezvous() {
+                    let mut peers = rendezvous.list_cached_peers().await;
+                    if peers.is_empty() {
+                        peers = rendezvous
+                            .list_lan_discovered_peers()
+                            .await
+                            .into_iter()
+                            .map(|peer| peer.authority_id)
+                            .collect();
+                    }
+                    peers.sort();
+                    peers.dedup();
+                    peers
+                } else {
+                    Vec::new()
+                };
+            let peers = sync.peers().await;
+
+            let sync_result = if peers.is_empty() {
+                Ok(())
+            } else {
+                sync.sync_with_peers(&effects, peers)
+                    .await
+                    .map_err(|e| IntentError::internal_error(format!("Sync failed: {e}")))
+            };
+
+            #[cfg(target_arch = "wasm32")]
+            {
+                let mut pull_error: Option<IntentError> = None;
+                for peer in authority_peers {
+                    if let Err(error) = self.pull_remote_relational_facts(peer).await {
+                        tracing::warn!(peer = %peer, error = %error, "web fact sync pull failed");
+                        if pull_error.is_none() {
+                            pull_error = Some(error);
+                        }
+                    }
+                }
+
+                if let Some(error) = pull_error {
+                    return Err(error);
+                }
+            }
+
+            sync_result
         } else {
             Err(service_unavailable("sync_service"))
         }

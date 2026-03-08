@@ -139,15 +139,19 @@ pub enum ScenarioAction {
     #[default]
     Noop,
     SetVar,
+    CaptureCurrentAuthorityId,
+    CaptureSelection,
     ExtractVar,
     SendKeys,
     SendChatCommand,
+    SendChatMessage,
     SendClipboard,
     ReadClipboard,
     SendKey,
     ClickButton,
     FillInput,
     WaitFor,
+    MessageContains,
     ExpectToast,
     ExpectCommandResult,
     ExpectMembership,
@@ -178,15 +182,19 @@ impl fmt::Display for ScenarioAction {
             Self::LaunchInstances => "launch_instances",
             Self::Noop => "noop",
             Self::SetVar => "set_var",
+            Self::CaptureCurrentAuthorityId => "capture_current_authority_id",
+            Self::CaptureSelection => "capture_selection",
             Self::ExtractVar => "extract_var",
             Self::SendKeys => "send_keys",
             Self::SendChatCommand => "send_chat_command",
+            Self::SendChatMessage => "send_chat_message",
             Self::SendClipboard => "send_clipboard",
             Self::ReadClipboard => "read_clipboard",
             Self::SendKey => "send_key",
             Self::ClickButton => "click_button",
             Self::FillInput => "fill_input",
             Self::WaitFor => "wait_for",
+            Self::MessageContains => "message_contains",
             Self::ExpectToast => "expect_toast",
             Self::ExpectCommandResult => "expect_command_result",
             Self::ExpectMembership => "expect_membership",
@@ -251,6 +259,8 @@ pub struct ScenarioStep {
     pub list_id: Option<ListId>,
     /// Stable list item identifier for typed list expectations.
     pub item_id: Option<String>,
+    /// Expected list size for typed list expectations.
+    pub count: Option<usize>,
     /// Expected confirmation state for typed list expectations.
     pub confirmation: Option<ConfirmationState>,
     /// Repeat count for `send_key` actions.
@@ -308,6 +318,21 @@ impl ScenarioStep {
                     self.action,
                 )?,
             })),
+            ScenarioAction::CaptureCurrentAuthorityId => {
+                Some(SemanticAction::Variables(
+                    VariableAction::CaptureCurrentAuthorityId {
+                        name: required_field(self.var.clone(), "var", self.action)?,
+                    },
+                ))
+            }
+            ScenarioAction::CaptureSelection => Some(SemanticAction::Variables(
+                VariableAction::CaptureSelection {
+                    name: required_field(self.var.clone(), "var", self.action)?,
+                    list: self
+                        .list_id
+                        .ok_or_else(|| anyhow!("action {} requires list_id", self.action))?,
+                },
+            )),
             ScenarioAction::ExtractVar => {
                 Some(SemanticAction::Variables(VariableAction::Extract {
                     name: required_field(self.var.clone(), "var", self.action)?,
@@ -326,10 +351,28 @@ impl ScenarioStep {
             ScenarioAction::SendClipboard => Some(SemanticAction::Ui(UiAction::PasteClipboard {
                 source_actor: self.source_instance.clone().map(ActorId),
             })),
-            ScenarioAction::ReadClipboard => Some(SemanticAction::Ui(UiAction::ReadClipboard)),
+            ScenarioAction::ReadClipboard => {
+                Some(SemanticAction::Ui(UiAction::ReadClipboard {
+                    name: required_field(self.var.clone(), "var", self.action)?,
+                }))
+            }
             ScenarioAction::SendKey => Some(SemanticAction::Ui(UiAction::PressKey(
                 parse_input_key(self.key.as_deref().unwrap_or_default())?,
                 self.repeat.unwrap_or(1).max(1),
+            ))),
+            ScenarioAction::SendChatCommand => Some(SemanticAction::Ui(UiAction::SendChatCommand(
+                required_field(
+                    self.command.clone().or_else(|| self.expect.clone()),
+                    "command",
+                    self.action,
+                )?,
+            ))),
+            ScenarioAction::SendChatMessage => Some(SemanticAction::Ui(UiAction::SendChatMessage(
+                required_field(
+                    self.value.clone().or_else(|| self.expect.clone()),
+                    "value",
+                    self.action,
+                )?,
             ))),
             ScenarioAction::ClickButton => {
                 if let Some(control_id) = self.control_id {
@@ -357,6 +400,15 @@ impl ScenarioStep {
                 None => None,
             },
             ScenarioAction::WaitFor => expectation_from_step(self)?,
+            ScenarioAction::MessageContains => {
+                Some(SemanticAction::Expect(Expectation::MessageContains {
+                    message_contains: required_field(
+                        self.value.clone().or_else(|| self.expect.clone()),
+                        "value",
+                        self.action,
+                    )?,
+                }))
+            }
             ScenarioAction::ExpectToast => {
                 Some(SemanticAction::Expect(Expectation::ToastContains {
                     kind: self.level.as_deref().map(parse_toast_kind).transpose()?,
@@ -404,8 +456,7 @@ impl ScenarioStep {
                         .ok_or_else(|| anyhow!("step {} requires instance", self.id))?,
                 },
             )),
-            ScenarioAction::SendChatCommand
-            | ScenarioAction::ExpectCommandResult
+            ScenarioAction::ExpectCommandResult
             | ScenarioAction::ExpectMembership
             | ScenarioAction::ExpectDenied
             | ScenarioAction::GetAuthorityId
@@ -518,12 +569,21 @@ impl TryFrom<SemanticStep> for ScenarioStep {
                 step.key = Some(format_input_key(key));
                 step.repeat = Some(repeat);
             }
+            SemanticAction::Ui(UiAction::SendChatCommand(command)) => {
+                step.action = ScenarioAction::SendChatCommand;
+                step.command = Some(command);
+            }
+            SemanticAction::Ui(UiAction::SendChatMessage(message)) => {
+                step.action = ScenarioAction::SendChatMessage;
+                step.value = Some(message);
+            }
             SemanticAction::Ui(UiAction::PasteClipboard { source_actor }) => {
                 step.action = ScenarioAction::SendClipboard;
                 step.source_instance = source_actor.map(|actor| actor.0);
             }
-            SemanticAction::Ui(UiAction::ReadClipboard) => {
+            SemanticAction::Ui(UiAction::ReadClipboard { name }) => {
                 step.action = ScenarioAction::ReadClipboard;
+                step.var = Some(name);
             }
             SemanticAction::Expect(Expectation::ScreenIs(screen_id)) => {
                 step.action = ScenarioAction::WaitFor;
@@ -537,11 +597,15 @@ impl TryFrom<SemanticStep> for ScenarioStep {
                 step.action = ScenarioAction::WaitFor;
                 step.modal_id = Some(modal_id);
             }
+            SemanticAction::Expect(Expectation::MessageContains { message_contains }) => {
+                step.action = ScenarioAction::MessageContains;
+                step.value = Some(message_contains);
+            }
             SemanticAction::Expect(Expectation::ToastContains {
                 kind,
                 message_contains,
             }) => {
-                step.action = ScenarioAction::ExpectToast;
+                step.action = ScenarioAction::WaitFor;
                 step.level = kind.map(format_toast_kind);
                 step.contains = Some(message_contains);
             }
@@ -549,6 +613,11 @@ impl TryFrom<SemanticStep> for ScenarioStep {
                 step.action = ScenarioAction::WaitFor;
                 step.list_id = Some(list);
                 step.item_id = Some(item_id);
+            }
+            SemanticAction::Expect(Expectation::ListCountIs { list, count }) => {
+                step.action = ScenarioAction::WaitFor;
+                step.list_id = Some(list);
+                step.count = Some(count);
             }
             SemanticAction::Expect(Expectation::ListItemConfirmation {
                 list,
@@ -581,6 +650,15 @@ impl TryFrom<SemanticStep> for ScenarioStep {
                 step.action = ScenarioAction::SetVar;
                 step.var = Some(name);
                 step.value = Some(value);
+            }
+            SemanticAction::Variables(VariableAction::CaptureCurrentAuthorityId { name }) => {
+                step.action = ScenarioAction::CaptureCurrentAuthorityId;
+                step.var = Some(name);
+            }
+            SemanticAction::Variables(VariableAction::CaptureSelection { name, list }) => {
+                step.action = ScenarioAction::CaptureSelection;
+                step.var = Some(name);
+                step.list_id = Some(list);
             }
             SemanticAction::Variables(VariableAction::Extract { name, regex, group, from }) => {
                 step.action = ScenarioAction::ExtractVar;
@@ -688,6 +766,25 @@ fn parse_toast_kind(value: &str) -> Result<ToastKind> {
 }
 
 fn expectation_from_step(step: &ScenarioStep) -> Result<Option<SemanticAction>> {
+    if matches!(step.action, ScenarioAction::MessageContains) {
+        return Ok(Some(SemanticAction::Expect(Expectation::MessageContains {
+            message_contains: required_field(
+                step.value.clone().or_else(|| step.expect.clone()),
+                "value",
+                step.action,
+            )?,
+        })));
+    }
+    if step.contains.is_some() || step.level.is_some() {
+        return Ok(Some(SemanticAction::Expect(Expectation::ToastContains {
+            kind: step.level.as_deref().map(parse_toast_kind).transpose()?,
+            message_contains: required_field(
+                step.contains.clone().or_else(|| step.expect.clone()),
+                "contains",
+                step.action,
+            )?,
+        })));
+    }
     if let Some(screen_id) = step.screen_id {
         return Ok(Some(SemanticAction::Expect(Expectation::ScreenIs(
             screen_id,
@@ -727,6 +824,12 @@ fn expectation_from_step(step: &ScenarioStep) -> Result<Option<SemanticAction>> 
         return Ok(Some(SemanticAction::Expect(Expectation::ListContains {
             list: list_id,
             item_id,
+        })));
+    }
+    if let (Some(list_id), Some(count)) = (step.list_id, step.count) {
+        return Ok(Some(SemanticAction::Expect(Expectation::ListCountIs {
+            list: list_id,
+            count,
         })));
     }
     Ok(None)
@@ -998,6 +1101,8 @@ impl ScenarioConfig {
             if matches!(step.action, ScenarioAction::WaitFor)
                 && step.pattern.is_none()
                 && step.selector.is_none()
+                && step.contains.is_none()
+                && step.level.is_none()
                 && step.screen_id.is_none()
                 && step.control_id.is_none()
                 && step.modal_id.is_none()

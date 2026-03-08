@@ -173,16 +173,29 @@ fn run_with_artifacts(
     backend_preflight: &aura_harness::network_lab::BackendPreflightReport,
     scenario_config: Option<&aura_harness::config::ScenarioConfig>,
 ) -> Result<()> {
+    let verbose_steps = std::env::var_os("AURA_HARNESS_VERBOSE_STEPS").is_some();
     let seed_bundle = build_seed_bundle(config);
     let mut resource_guard = ResourceGuard::from_run_config(config);
     resource_guard.sample("run_start");
 
     let coordinator = HarnessCoordinator::from_run_config(config)?;
     let mut tool_api = ToolApi::new(coordinator);
+    if verbose_steps {
+        eprintln!("[harness] startup phase=start_all begin");
+    }
     tool_api.start_all()?;
+    if verbose_steps {
+        eprintln!("[harness] startup phase=start_all done");
+    }
 
     let mut initial_screens: BTreeMap<String, String> = BTreeMap::new();
     for instance in &config.instances {
+        if verbose_steps {
+            eprintln!(
+                "[harness] startup phase=initial_screen begin instance={}",
+                instance.id
+            );
+        }
         let response = tool_api.handle_request(ToolRequest::Screen {
             instance_id: instance.id.clone(),
             screen_source: ScreenSource::Default,
@@ -194,6 +207,12 @@ fn run_with_artifacts(
                 .unwrap_or_default()
                 .to_string();
             initial_screens.insert(instance.id.clone(), screen);
+        }
+        if verbose_steps {
+            eprintln!(
+                "[harness] startup phase=initial_screen done instance={}",
+                instance.id
+            );
         }
     }
 
@@ -286,7 +305,7 @@ fn collect_timeout_diagnostics(
 
         let log_response = tool_api.handle_request(ToolRequest::TailLog {
             instance_id: instance.id.clone(),
-            lines: 50,
+            lines: 200,
         });
         let log_tail = match log_response {
             aura_harness::tool_api::ToolResponse::Ok { payload } => payload

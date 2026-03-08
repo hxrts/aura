@@ -10,6 +10,8 @@ use aura_rendezvous::TransportHint;
 use cfg_if::cfg_if;
 #[cfg(target_arch = "wasm32")]
 use futures::channel::oneshot;
+#[cfg(not(target_arch = "wasm32"))]
+use futures::SinkExt;
 #[cfg(target_arch = "wasm32")]
 use futures::SinkExt;
 #[cfg(target_arch = "wasm32")]
@@ -24,6 +26,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::time::timeout;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local;
 
@@ -177,7 +181,7 @@ async fn resolve_peer_addr(
     if let Some(addr) = manager
         .get_descriptor(context, peer)
         .await
-        .and_then(descriptor_tcp_addr)
+        .and_then(descriptor_transport_addr)
     {
         return Some(addr);
     }
@@ -190,10 +194,24 @@ async fn resolve_peer_addr(
     manager
         .get_descriptor(fallback_context, peer)
         .await
-        .and_then(descriptor_tcp_addr)
+        .and_then(descriptor_transport_addr)
 }
 
-fn descriptor_tcp_addr(descriptor: aura_rendezvous::RendezvousDescriptor) -> Option<String> {
+fn descriptor_transport_addr(descriptor: aura_rendezvous::RendezvousDescriptor) -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    for hint in &descriptor.transport_hints {
+        if let TransportHint::WebSocketDirect { addr, .. } = hint {
+            return Some(addr.to_string());
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    for hint in &descriptor.transport_hints {
+        if let TransportHint::WebSocketDirect { addr, .. } = hint {
+            return Some(format!("ws://{}", addr));
+        }
+    }
+
     for hint in descriptor.transport_hints {
         if let TransportHint::TcpDirect { addr, .. } = hint {
             return Some(addr.to_string());
@@ -227,12 +245,48 @@ async fn send_envelope_tcp(addr: &str, envelope: &TransportEnvelope) -> Result<(
                 reason,
             })
         } else {
+            let config = TransportConfig::default();
+            if addr.starts_with("ws://") || addr.starts_with("wss://") {
+                let (mut ws, _) = timeout(config.connect_timeout.get(), connect_async(addr))
+                    .await
+                    .map_err(|_| TransportError::SendFailed {
+                        destination: envelope.destination,
+                        reason: "WebSocket connect timeout".to_string(),
+                    })?
+                    .map_err(|e| TransportError::SendFailed {
+                        destination: envelope.destination,
+                        reason: format!("WebSocket connect failed: {e}"),
+                    })?;
+
+                let payload = aura_core::util::serialization::to_vec(envelope).map_err(|e| {
+                    TransportError::SendFailed {
+                        destination: envelope.destination,
+                        reason: format!("Envelope serialization failed: {e}"),
+                    }
+                })?;
+
+                timeout(
+                    config.write_timeout.get(),
+                    ws.send(TungsteniteMessage::Binary(payload)),
+                )
+                .await
+                .map_err(|_| TransportError::SendFailed {
+                    destination: envelope.destination,
+                    reason: "WebSocket write timeout".to_string(),
+                })?
+                .map_err(|e| TransportError::SendFailed {
+                    destination: envelope.destination,
+                    reason: format!("WebSocket send failed: {e}"),
+                })?;
+
+                return Ok(());
+            }
+
             let socket_addr: SocketAddr = addr.parse().map_err(|e| TransportError::SendFailed {
                 destination: envelope.destination,
                 reason: format!("Invalid transport address '{addr}': {e}"),
             })?;
 
-            let config = TransportConfig::default();
             let mut stream = timeout(
                 config.connect_timeout.get(),
                 TcpStream::connect(socket_addr),
@@ -349,7 +403,8 @@ mod tests {
         let fallback_context = default_context_id_for_authority(peer);
 
         let config = AgentConfig::default();
-        let effects = AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap();
+        let effects =
+            AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap();
         let manager = RendezvousManager::new_with_default_udp(
             authority,
             RendezvousManagerConfig::default(),

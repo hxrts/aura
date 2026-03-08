@@ -21,9 +21,9 @@ use aura_app::ui::signals::{
     RECOVERY_SIGNAL, SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
 };
 use aura_app::ui::contract::{
-    list_item_dom_id, ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot,
-    OperationId, OperationSnapshot, OperationState, ScreenId as ContractScreenId,
-    SelectionSnapshot, UiReadiness, UiSnapshot,
+    list_item_dom_id, ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot,
+    ListSnapshot, MessageSnapshot, OperationId, OperationSnapshot, OperationState,
+    ScreenId as ContractScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::types::{
     all_command_help, command_help, format_network_status_with_severity, parse_chat_command,
@@ -476,12 +476,20 @@ fn build_chat_runtime_view(
 async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeView {
     let chat = {
         let core = controller.app_core().read().await;
-        core.read(&*CHAT_SIGNAL).await.unwrap_or_default()
+        let signal_chat = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
+        let local_chat = core.snapshot().chat;
+        merge_chat_state(signal_chat, local_chat)
     };
     let selected_name = controller
         .ui_model()
         .and_then(|model| model.selected_channel_name().map(str::to_string));
     let runtime = build_chat_runtime_view(chat, selected_name.as_deref());
+    controller.push_log(&format!(
+        "load_chat_runtime_view: selected={:?} active={} channels={}",
+        selected_name,
+        runtime.active_channel,
+        runtime.channels.len()
+    ));
     controller.sync_runtime_channels(
         runtime
             .channels
@@ -490,6 +498,45 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
             .collect(),
     );
     runtime
+}
+
+fn merge_chat_state(
+    mut signal_chat: aura_app::views::chat::ChatState,
+    local_chat: aura_app::views::chat::ChatState,
+) -> aura_app::views::chat::ChatState {
+    for local_channel in local_chat.all_channels() {
+        match signal_chat.channel_mut(&local_channel.id) {
+            Some(signal_channel) => {
+                if signal_channel.context_id.is_none() {
+                    signal_channel.context_id = local_channel.context_id;
+                }
+                if signal_channel.topic.is_none() && local_channel.topic.is_some() {
+                    signal_channel.topic = local_channel.topic.clone();
+                }
+                if signal_channel.name == signal_channel.id.to_string()
+                    && local_channel.name != local_channel.id.to_string()
+                    && !local_channel.name.trim().is_empty()
+                {
+                    signal_channel.name = local_channel.name.clone();
+                }
+                if local_channel.member_count > signal_channel.member_count {
+                    signal_channel.member_count = local_channel.member_count;
+                }
+                for member in &local_channel.member_ids {
+                    if !signal_channel.member_ids.contains(member) {
+                        signal_channel.member_ids.push(*member);
+                    }
+                }
+            }
+            None => signal_chat.upsert_channel(local_channel.clone()),
+        }
+
+        for message in local_chat.messages_for_channel(&local_channel.id) {
+            signal_chat.apply_message(local_channel.id, message.clone());
+        }
+    }
+
+    signal_chat
 }
 
 fn build_contacts_runtime_view(
@@ -1253,15 +1300,41 @@ fn submit_runtime_modal_action(
                                         harness_log("accept_invitation complete generic");
                                         return;
                                     }
-                                    controller_for_import
-                                        .push_log("accept_invitation refresh_contacts start");
-                                    harness_log("accept_invitation refresh_contacts start");
-                                    let _ =
-                                        load_contacts_runtime_view(controller_for_import.clone())
+                                    match &invitation.invitation_type {
+                                        InvitationBridgeType::Guardian { .. } => {
+                                            controller_for_import.push_log(
+                                                "accept_invitation refresh_contacts start",
+                                            );
+                                            harness_log(
+                                                "accept_invitation refresh_contacts start",
+                                            );
+                                            let _ = load_contacts_runtime_view(
+                                                controller_for_import.clone(),
+                                            )
                                             .await;
-                                    controller_for_import
-                                        .push_log("accept_invitation refresh_contacts done");
-                                    harness_log("accept_invitation refresh_contacts done");
+                                            controller_for_import.push_log(
+                                                "accept_invitation refresh_contacts done",
+                                            );
+                                            harness_log(
+                                                "accept_invitation refresh_contacts done",
+                                            );
+                                        }
+                                        InvitationBridgeType::Channel { .. } => {}
+                                        InvitationBridgeType::DeviceEnrollment { .. }
+                                        | InvitationBridgeType::Contact { .. } => {}
+                                    }
+                                    controller_for_import.push_log(
+                                        "accept_invitation refresh_notifications start",
+                                    );
+                                    harness_log("accept_invitation refresh_notifications start");
+                                    let _ = load_notifications_runtime_view(
+                                        controller_for_import.clone(),
+                                    )
+                                    .await;
+                                    controller_for_import.push_log(
+                                        "accept_invitation refresh_notifications done",
+                                    );
+                                    harness_log("accept_invitation refresh_notifications done");
                                     controller.complete_runtime_invitation_import();
                                     controller_for_import.finish_runtime_operation(
                                         OperationId::invitation_accept(),
@@ -1372,10 +1445,17 @@ fn submit_runtime_modal_action(
 
             let app_core = controller.app_core().clone();
             let rerender_for_create = rerender.clone();
+            controller.start_runtime_operation(OperationId::invitation_create());
             spawn(async move {
+                tracing::info!("create_invitation submit start");
                 let receiver_id = match receiver.parse::<AuthorityId>() {
                     Ok(value) => value,
                     Err(error) => {
+                        tracing::warn!(error = %error, "create_invitation invalid receiver");
+                        controller.finish_runtime_operation(
+                            OperationId::invitation_create(),
+                            OperationState::Failed,
+                        );
                         controller.runtime_error_toast(format!("Invalid authority id: {error}"));
                         rerender_for_create();
                         return;
@@ -1391,22 +1471,49 @@ fn submit_runtime_modal_action(
                 )
                 .await
                 {
-                    Ok(invitation) => match invitation_workflows::export_invitation(
-                        &app_core,
-                        &invitation.invitation_id,
-                    )
-                    .await
-                    {
-                        Ok(code) => {
-                            controller.write_clipboard(&code);
-                            controller.complete_runtime_modal_success(
-                                "Invitation code copied to clipboard",
-                            );
+                    Ok(invitation) => {
+                        tracing::info!(invitation_id = %invitation.invitation_id, "create_invitation create_contact_invitation ok");
+                        tracing::info!(invitation_id = %invitation.invitation_id, "create_invitation export_invitation start");
+                        match invitation_workflows::export_invitation(
+                            &app_core,
+                            &invitation.invitation_id,
+                        )
+                        .await
+                        {
+                            Ok(code) => {
+                                tracing::info!("create_invitation export_invitation ok");
+                                controller.write_clipboard(&code);
+                                tracing::info!("create_invitation write_clipboard ok");
+                                controller.finish_runtime_operation(
+                                    OperationId::invitation_create(),
+                                    OperationState::Succeeded,
+                                );
+                                tracing::info!("create_invitation operation succeeded");
+                                controller.complete_runtime_modal_success(
+                                    "Invitation code copied to clipboard",
+                                );
+                                tracing::info!("create_invitation complete");
+                            }
+                            Err(error) => {
+                                tracing::warn!(error = %error, "create_invitation export_invitation failed");
+                                controller.finish_runtime_operation(
+                                    OperationId::invitation_create(),
+                                    OperationState::Failed,
+                                );
+                                controller.runtime_error_toast(error.to_string());
+                            }
                         }
-                        Err(error) => controller.runtime_error_toast(error.to_string()),
-                    },
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    }
+                    Err(error) => {
+                        tracing::warn!(error = %error, "create_invitation create_contact_invitation failed");
+                        controller.finish_runtime_operation(
+                            OperationId::invitation_create(),
+                            OperationState::Failed,
+                        );
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
+                tracing::info!("create_invitation rerender");
                 rerender_for_create();
             });
             true
@@ -2005,9 +2112,18 @@ fn submit_runtime_chat_input(
             let raw = format!("/{command_input}");
             match parse_chat_command(&raw) {
                 Ok(ChatCommand::Join { channel }) => {
+                    let channel_for_selection = channel.clone();
+                    controller_for_task.push_log(&format!("chat_join: start channel={channel}"));
                     messaging_workflows::join_channel_by_name(&app_core, &channel)
                         .await
-                        .map(|_| Some(format!("joined #{}", channel.trim_start_matches('#'))))
+                        .map(|_| {
+                            controller_for_task.select_channel_by_name(&channel_for_selection);
+                            controller_for_task.push_log(&format!(
+                                "chat_join: success channel={} selected={}",
+                                channel_for_selection, channel_for_selection
+                            ));
+                            Some(format!("joined #{}", channel.trim_start_matches('#')))
+                        })
                 }
                 Ok(ChatCommand::Leave) => {
                     messaging_workflows::leave_channel_by_name(&app_core, &channel_name)
@@ -2236,10 +2352,14 @@ fn submit_runtime_chat_input(
             Ok(message) => {
                 controller_for_task.clear_input_buffer();
                 if let Some(message) = message {
+                    controller_for_task.push_log(&format!("chat_command: ok message={message}"));
                     controller_for_task.info_toast(message);
                 }
             }
-            Err(error) => controller_for_task.runtime_error_toast(error.to_string()),
+            Err(error) => {
+                controller_for_task.push_log(&format!("chat_command: error {error}"));
+                controller_for_task.runtime_error_toast(error.to_string());
+            }
         }
         rerender();
     });
@@ -2709,14 +2829,15 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
     let cancel_rerender = rerender.clone();
     let dedicated_primary_rerender = rerender.clone();
     let generic_confirm_rerender = rerender.clone();
-    controller.set_ui_snapshot(runtime_semantic_snapshot(
+    let semantic_snapshot = runtime_semantic_snapshot(
         &model,
         &runtime_snapshot,
         &chat_runtime_snapshot,
         &contacts_runtime_snapshot,
         &settings_runtime_snapshot,
         &notifications_runtime_snapshot,
-    ));
+    );
+    controller.set_ui_snapshot(semantic_snapshot.clone());
 
     rsx! {
         main {
@@ -2821,7 +2942,19 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                                     onclick: {
                                         let controller = controller.clone();
                                         move |_| {
+                                            let before_log = format!(
+                                                "nav_click start screen={}",
+                                                screen.help_label()
+                                            );
+                                            controller.push_log(&before_log);
+                                            harness_log(&before_log);
                                             controller.set_screen(screen);
+                                            let after_log = format!(
+                                                "nav_click done screen={}",
+                                                screen.help_label()
+                                            );
+                                            controller.push_log(&after_log);
+                                            harness_log(&after_log);
                                             render_tick.set(render_tick() + 1);
                                         }
                                     },
@@ -3795,8 +3928,14 @@ fn chat_screen(
     let mode = if is_input_mode { "insert" } else { "normal" };
     let composer_text = model.input_buffer.clone();
     let new_group_controller = controller.clone();
-    let composer_focus_controller = controller.clone();
+    let composer_container_focus_controller = controller.clone();
+    let composer_field_focus_controller = controller.clone();
+    let composer_input_controller = controller.clone();
+    let composer_keydown_controller = controller.clone();
     let send_message_controller = controller.clone();
+    let composer_value = composer_text.clone();
+    let composer_active_channel = active_channel.clone();
+    let composer_submit_text = composer_text.clone();
     let runtime_channels = if runtime.loaded {
         runtime.channels.clone()
     } else {
@@ -3905,29 +4044,62 @@ fn chat_screen(
                             class: "min-h-[4.5rem] rounded-lg border border-border bg-muted/30 px-3 py-2",
                             onclick: move |_| {
                                 if !is_input_mode {
-                                    composer_focus_controller.send_action_keys("i");
+                                    composer_container_focus_controller.send_action_keys("i");
                                     render_tick.set(render_tick() + 1);
                                 }
                             },
-                            if composer_text.is_empty() {
-                                p {
-                                    class: "m-0 text-sm text-muted-foreground",
-                                    if is_input_mode {
-                                        "Type a message and press Enter to send"
-                                    } else {
-                                        "Press i to start typing"
+                            textarea {
+                                id: FieldId::ChatInput
+                                    .web_dom_id()
+                                    .unwrap_or("aura-field-chat-input"),
+                                class: "h-full min-h-[4.5rem] w-full resize-none border-0 bg-transparent p-0 text-sm text-foreground outline-none placeholder:text-muted-foreground",
+                                value: "{composer_value}",
+                                readonly: !is_input_mode,
+                                placeholder: if is_input_mode {
+                                    "Type a message and press Enter to send"
+                                } else {
+                                    "Press i to start typing"
+                                },
+                                onfocus: move |_| {
+                                    if !is_input_mode {
+                                        composer_field_focus_controller.send_action_keys("i");
+                                        render_tick.set(render_tick() + 1);
                                     }
-                                }
-                            } else {
-                                p {
-                                    class: "m-0 whitespace-pre-wrap break-words text-sm text-foreground",
-                                    "{composer_text}"
-                                }
+                                },
+                                oninput: move |event| {
+                                    composer_input_controller.set_input_buffer(event.value());
+                                },
+                                onkeydown: move |event| {
+                                    event.stop_propagation();
+                                    if matches!(event.data().key(), Key::Enter)
+                                        && !event.data().modifiers().contains(Modifiers::SHIFT)
+                                    {
+                                        event.prevent_default();
+                                        let _ = submit_runtime_chat_input(
+                                            composer_keydown_controller.clone(),
+                                            composer_active_channel.clone(),
+                                            composer_submit_text.clone(),
+                                            schedule_update(),
+                                        );
+                                        render_tick.set(render_tick() + 1);
+                                        return;
+                                    }
+                                    if matches!(event.data().key(), Key::Escape) {
+                                        event.prevent_default();
+                                        composer_keydown_controller.send_key_named("esc", 1);
+                                        render_tick.set(render_tick() + 1);
+                                    }
+                                },
                             }
                         }
                     }
                     UiButton {
-                        id: Some("aura-chat-send-message".to_string()),
+                        id: Some(
+                            ControlId::ChatSendMessageButton
+                                .web_dom_id()
+                                .unwrap_or("aura-chat-send-message")
+                                .to_string()
+                        ),
                         label: if is_input_mode { "Send".to_string() } else { "Reply".to_string() },
                         variant: ButtonVariant::Primary,
                         onclick: move |_| {
@@ -4169,7 +4341,12 @@ fn contacts_screen(
                         }
                     }
                     UiButton {
-                        id: Some("aura-contacts-invite".to_string()),
+                        id: Some(
+                            ControlId::ContactsCreateInvitationButton
+                                .web_dom_id()
+                                .unwrap_or("aura-contacts-create-invitation")
+                                .to_string(),
+                        ),
                         label: "Invite".to_string(),
                         variant: ButtonVariant::Primary,
                         onclick: {
@@ -4638,7 +4815,12 @@ fn settings_screen(
                         div {
                             class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
                             UiButton {
-                                id: Some("aura-settings-add-device".to_string()),
+                                id: Some(
+                                    ControlId::SettingsAddDeviceButton
+                                        .web_dom_id()
+                                        .unwrap_or("aura-settings-add-device")
+                                        .to_string(),
+                                ),
                                 label: "Add Device".to_string(),
                                 variant: ButtonVariant::Primary,
                                 onclick: {
@@ -4664,7 +4846,12 @@ fn settings_screen(
                                 }
                             }
                             UiButton {
-                                id: Some("aura-settings-remove-device".to_string()),
+                                id: Some(
+                                    ControlId::SettingsRemoveDeviceButton
+                                        .web_dom_id()
+                                        .unwrap_or("aura-settings-remove-device")
+                                        .to_string(),
+                                ),
                                 label: "Remove Device".to_string(),
                                 variant: ButtonVariant::Secondary,
                                 onclick: {
@@ -5144,6 +5331,16 @@ fn runtime_semantic_snapshot(
             model.selected_notification_id.as_ref().map(|id| id.0.clone()),
         );
     }
+
+    snapshot.messages = chat_runtime
+        .messages
+        .iter()
+        .enumerate()
+        .map(|(idx, message)| MessageSnapshot {
+            id: format!("chat-message-{idx}"),
+            content: message.content.clone(),
+        })
+        .collect();
 
     snapshot
 }

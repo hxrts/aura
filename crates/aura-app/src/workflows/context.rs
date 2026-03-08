@@ -10,6 +10,7 @@ use crate::{
         neighborhood::{NeighborHome, NeighborhoodState, OneHopLinkType, TraversalPosition},
     },
     workflows::channel_ref::HomeSelector,
+    workflows::signals::read_signal,
     AppCore,
 };
 use async_lock::RwLock;
@@ -70,6 +71,25 @@ fn fallback_home(homes: &HomesState) -> Option<(ChannelId, HomeState)> {
         .map(|(home_id, home)| (*home_id, home.clone()))
 }
 
+async fn homes_state_signal_fallback(app_core: &Arc<RwLock<AppCore>>) -> HomesState {
+    let view_homes = {
+        let core = app_core.read().await;
+        core.views().get_homes()
+    };
+    if view_homes.iter().next().is_some() {
+        return view_homes;
+    }
+
+    let signal_homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME)
+        .await
+        .unwrap_or_default();
+    if signal_homes.iter().next().is_some() {
+        let mut core = app_core.write().await;
+        core.views_mut().set_homes(signal_homes.clone());
+    }
+    signal_homes
+}
+
 /// Set active context for navigation and command targeting
 ///
 /// **What it does**: Sets the active context ID
@@ -116,11 +136,16 @@ pub async fn move_position(
         _ => 1, // Default to partial
     };
 
+    let signal_homes = homes_state_signal_fallback(app_core).await;
+
     let mut core = app_core.write().await;
 
     // Get current neighborhood state
     let mut neighborhood = core.views().get_neighborhood();
     let mut homes = core.views().get_homes();
+    if homes.iter().next().is_none() && signal_homes.iter().next().is_some() {
+        homes = signal_homes;
+    }
 
     // Determine target home ID
     let target_selector = HomeSelector::parse(home_id)?;
@@ -457,8 +482,7 @@ pub async fn resolve_active_home(
     app_core: &Arc<RwLock<AppCore>>,
     home_hint: Option<ChannelId>,
 ) -> Result<ActiveHomeResolution, AuraError> {
-    let core = app_core.read().await;
-    let homes = core.views().get_homes();
+    let homes = homes_state_signal_fallback(app_core).await;
 
     if let Some(home_id) = home_hint {
         if let Some(home_state) = homes.home_state(&home_id) {

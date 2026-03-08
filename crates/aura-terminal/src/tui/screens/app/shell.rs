@@ -29,6 +29,7 @@ use aura_app::ceremonies::{
     ChannelError, GuardianSetupError, MfaSetupError, RecoveryError, MIN_CHANNEL_PARTICIPANTS,
     MIN_MFA_DEVICES,
 };
+use aura_app::ui::contract::OperationState;
 use aura_app::ui::prelude::*;
 use aura_app::ui::signals::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
 use aura_app::ui::workflows::access as access_workflows;
@@ -1025,6 +1026,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // Invitations
                         // =========================================================================
                         UiUpdate::InvitationAccepted { invitation_id: _ } => {
+                            tui.with_mut(|state| {
+                                state.set_operation_state(
+                                    OperationId::invitation_accept(),
+                                    OperationState::Succeeded,
+                                );
+                            });
                             enqueue_toast!(
                                 "Invitation accepted".to_string(),
                                 crate::tui::state_machine::ToastLevel::Success
@@ -1054,6 +1061,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             });
                         }
                         UiUpdate::InvitationImported { invitation_code: _ } => {
+                            tui.with_mut(|state| {
+                                state.set_operation_state(
+                                    OperationId::invitation_accept(),
+                                    OperationState::Succeeded,
+                                );
+                            });
                             enqueue_toast!(
                                 "Invitation imported".to_string(),
                                 crate::tui::state_machine::ToastLevel::Success
@@ -1315,6 +1328,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // UI-only errors (domain/runtime errors use ERROR_SIGNAL)
                         // =========================================================================
                         UiUpdate::OperationFailed { operation, error } => {
+                            if operation.to_ascii_lowercase().contains("invitation") {
+                                tui.with_mut(|state| {
+                                    state.set_operation_state(
+                                        OperationId::invitation_accept(),
+                                        OperationState::Failed,
+                                    );
+                                });
+                            }
                             // For account creation, show error in the modal instead of toast.
                             if operation == "CreateAccount" {
                                 tui.with_mut(|state| {
@@ -1351,7 +1372,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // reactivity, ensuring the component re-renders when state changes via tui.replace().
     // See TuiStateHandle and TuiStateSnapshot docs for the reactivity model.
     let tui_snapshot = tui.read_for_render();
-    maybe_export_ui_snapshot(&tui_snapshot, &app_ctx.snapshot());
+    let harness_contacts = shared_contacts
+        .read()
+        .ok()
+        .map(|contacts| contacts.clone());
+    maybe_export_ui_snapshot(
+        &tui_snapshot,
+        &app_ctx.snapshot(),
+        harness_contacts.as_deref(),
+    );
 
     // Callbacks registry and individual callback extraction for screen props
     let callbacks = props.callbacks.clone();

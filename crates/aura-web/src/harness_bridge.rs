@@ -5,7 +5,7 @@
 
 use aura_app::ui::contract::UiSnapshot;
 use aura_ui::UiController;
-use js_sys::{Array, Object, Reflect};
+use js_sys::{Array, JSON, Object, Reflect};
 use serde_wasm_bindgen::to_value;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -14,6 +14,7 @@ use wasm_bindgen::{JsCast, JsValue};
 
 thread_local! {
     static CONTROLLER: RefCell<Option<Arc<UiController>>> = const { RefCell::new(None) };
+    static LAST_PUBLISHED_UI_STATE_JSON: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 pub fn set_controller(controller: Arc<UiController>) {
@@ -22,13 +23,54 @@ pub fn set_controller(controller: Arc<UiController>) {
     });
 }
 
+pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Ok(value) = to_value(snapshot) else {
+        return;
+    };
+    let Ok(json) = JSON::stringify(&value) else {
+        return;
+    };
+    let Some(json) = json.as_string() else {
+        return;
+    };
+    let _ = Reflect::set(
+        window.as_ref(),
+        &JsValue::from_str("__AURA_UI_STATE_CACHE__"),
+        &value,
+    );
+    let _ = Reflect::set(
+        window.as_ref(),
+        &JsValue::from_str("__AURA_UI_STATE_JSON__"),
+        &JsValue::from_str(&json),
+    );
+    let should_log = LAST_PUBLISHED_UI_STATE_JSON.with(|slot| {
+        let mut last = slot.borrow_mut();
+        if last.as_deref() == Some(json.as_str()) {
+            false
+        } else {
+            *last = Some(json.clone());
+            true
+        }
+    });
+    if should_log {
+        web_sys::console::log_1(&JsValue::from_str(&format!("[aura-ui-state]{json}")));
+    }
+}
+
 fn serialize_ui_snapshot(snapshot: &UiSnapshot) -> JsValue {
-    match to_value(snapshot) {
-        Ok(value) => value,
-        Err(error) => {
-            web_sys::console::error_1(
-                &JsValue::from_str(&format!("failed to serialize UiSnapshot: {error}")),
-            );
+    match to_value(snapshot)
+        .ok()
+        .and_then(|value| JSON::stringify(&value).ok())
+        .and_then(|value| value.as_string())
+    {
+        Some(value) => JsValue::from_str(&value),
+        None => {
+            web_sys::console::error_1(&JsValue::from_str(&format!(
+                "failed to serialize UiSnapshot to JSON string"
+            )));
             JsValue::NULL
         }
     }

@@ -8,6 +8,10 @@ import { chromium } from 'playwright';
 
 const sessions = new Map();
 let requestChain = Promise.resolve();
+const UI_STATE_LOG_PREFIX = '[aura-ui-state]';
+const PLAYWRIGHT_TRACE_ENABLED =
+  process.env.AURA_HARNESS_PLAYWRIGHT_TRACE === '1' ||
+  process.env.AURA_HARNESS_PLAYWRIGHT_TRACE === 'true';
 const DEFAULT_PAGE_GOTO_TIMEOUT_MS = 90000;
 const DEFAULT_HARNESS_READY_TIMEOUT_MS = 90000;
 const DEFAULT_START_MAX_ATTEMPTS = 3;
@@ -462,6 +466,8 @@ function withOperationTimeout(label, promise, timeoutMs = 5000) {
   });
 }
 
+const UI_STATE_TIMEOUT_MS = 15000;
+
 function appRootLocator(page) {
   return page.locator('main').last();
 }
@@ -666,10 +672,27 @@ async function startPage(params) {
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} page acquired`
       );
       page.on('console', (message) => {
-        consoleLog.push(`[${nowIso()}] ${message.type()}: ${message.text()}`);
+        const text = message.text();
+        if (text.startsWith(UI_STATE_LOG_PREFIX) && sessions.has(instanceId)) {
+          try {
+            const snapshot = JSON.parse(text.slice(UI_STATE_LOG_PREFIX.length));
+            sessions.get(instanceId).uiStateCache = snapshot;
+            consoleLog.push(
+              `[${nowIso()}] ${message.type()}: [aura-ui-state] screen=${
+                snapshot?.screen ?? 'unknown'
+              } modal=${snapshot?.modal ?? 'none'}`
+            );
+          } catch (error) {
+            consoleLog.push(
+              `[${nowIso()}] ui_state_cache_parse_error: ${error?.message ?? String(error)}`
+            );
+          }
+          return;
+        }
+        consoleLog.push(`[${nowIso()}] ${message.type()}: ${text}`);
       });
 
-      if (artifactDir) {
+      if (artifactDir && PLAYWRIGHT_TRACE_ENABLED) {
         console.error(
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} tracing start`
         );
@@ -722,8 +745,12 @@ async function startPage(params) {
         dataDir,
         artifactDir,
         consoleLog,
-        tracePath: artifactDir ? path.join(artifactDir, `${instanceId}-trace.zip`) : null,
-        domState: normalizeDomState({ text: '', ids: [] })
+        tracePath:
+          artifactDir && PLAYWRIGHT_TRACE_ENABLED
+            ? path.join(artifactDir, `${instanceId}-trace.zip`)
+            : null,
+        domState: normalizeDomState({ text: '', ids: [] }),
+        uiStateCache: null
       };
       await installDomObserver(page, session);
       console.error(
@@ -888,11 +915,21 @@ async function uiState(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
 
+  if (session.uiStateCache && typeof session.uiStateCache === 'object') {
+    return session.uiStateCache;
+  }
+
   let payload;
   try {
     payload = await withOperationTimeout(
       'ui_state',
       session.page.evaluate(() => {
+        if (typeof window.__AURA_UI_STATE_JSON__ === 'string') {
+          return window.__AURA_UI_STATE_JSON__;
+        }
+        if (window.__AURA_UI_STATE_CACHE__ && typeof window.__AURA_UI_STATE_CACHE__ === 'object') {
+          return JSON.stringify(window.__AURA_UI_STATE_CACHE__);
+        }
         if (typeof window.__AURA_UI_STATE__ === 'function') {
           return window.__AURA_UI_STATE__();
         }
@@ -900,12 +937,23 @@ async function uiState(params) {
           return window.__AURA_HARNESS__.ui_state();
         }
         return null;
-      })
+      }),
+      UI_STATE_TIMEOUT_MS
     );
   } catch (error) {
     throw new Error(
       `${error}\nBrowser console tail:\n${consoleTailText(session)}`
     );
+  }
+
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload);
+    } catch (error) {
+      throw new Error(
+        `browser UI state JSON parse failed: ${error}\nBrowser console tail:\n${consoleTailText(session)}`
+      );
+    }
   }
 
   if (!payload || typeof payload !== 'object') {
@@ -942,7 +990,31 @@ async function clickButton(params) {
   console.error(`[driver] click_button start instance=${instanceId} selector=${selector || '-'} label=${label || '-'}`);
 
   if (selector) {
-    await clickLocator(session.page.locator(selector).first(), selector);
+    try {
+      await withOperationTimeout(
+        `click_button_dom:${selector}`,
+        session.page.evaluate((targetSelector) => {
+          const element = document.querySelector(targetSelector);
+          if (!(element instanceof HTMLElement)) {
+            throw new Error(`element not found for selector ${targetSelector}`);
+          }
+          if (element.hasAttribute('disabled')) {
+            throw new Error(`element disabled for selector ${targetSelector}`);
+          }
+          element.click();
+          return true;
+        }, selector),
+        5000
+      );
+    } catch (domError) {
+      await clickLocator(session.page.locator(selector).first(), selector).catch((locatorError) => {
+        throw new Error(
+          `dom_click_error=${domError?.message ?? String(domError)} locator_click_error=${
+            locatorError?.message ?? String(locatorError)
+          }`
+        );
+      });
+    }
     console.error(`[driver] click_button done instance=${instanceId} selector=${selector}`);
     return { status: 'clicked' };
   }
@@ -1035,7 +1107,16 @@ async function tailLog(params) {
   const merged = [
     ...(Array.isArray(harnessLines) ? harnessLines.map(String) : []),
     ...session.consoleLog
-  ];
+  ].filter((line) => {
+    const text = String(line);
+    return !(
+      text.includes('[driver] request start') ||
+      text.includes('[driver] request done') ||
+      text.includes('method=ui_state') ||
+      text.includes('method=snapshot') ||
+      text.includes('method=tail_log')
+    );
+  });
 
   return {
     lines: merged.slice(-requested)

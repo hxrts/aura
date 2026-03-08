@@ -1,0 +1,57 @@
+id = "quint-semantic-observation-smoke"
+goal = "Execute a Quint-originated semantic observation flow through aura-harness."
+
+[[steps]]
+id = "launch"
+action = "launch_actors"
+timeout_ms = 15000
+
+[[steps]]
+id = "alice-onboarding-visible"
+action = "control_visible"
+actor = "alice"
+control_id = "onboarding_root"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-fill-account-name"
+action = "fill"
+actor = "alice"
+field_id = "account_name"
+value = "Alice"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-submit-account"
+action = "activate"
+actor = "alice"
+control_id = "onboarding_create_account_button"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-neighborhood-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "neighborhood"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-neighborhood-ready"
+action = "readiness_is"
+actor = "alice"
+readiness = "ready"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-open-settings-via-nav"
+action = "navigate"
+actor = "alice"
+screen_id = "settings"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-settings-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "settings"
+timeout_ms = 30000

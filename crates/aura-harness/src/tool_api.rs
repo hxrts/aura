@@ -213,6 +213,10 @@ impl ToolApi {
         self.coordinator.runtime_substrate()
     }
 
+    pub fn backend_kind(&self, instance_id: &str) -> anyhow::Result<&'static str> {
+        self.coordinator.backend_kind(instance_id)
+    }
+
     pub fn apply_fault_delay(&mut self, actor: &str, delay_ms: u64) -> anyhow::Result<()> {
         self.coordinator.apply_fault_delay(actor, delay_ms)
     }

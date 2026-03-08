@@ -22,9 +22,11 @@ async fn device_migration_delegation_persists_audit_fact_and_coherence() {
     let to_authority = authority(2);
     let session_id = session(9);
 
-    let effects =
-        AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), from_authority)
-            .expect("simulation effect system");
+    let effects = AuraEffectSystem::simulation_for_test_for_authority(
+        &AgentConfig::default(),
+        from_authority,
+    )
+    .expect("simulation effect system");
     let manager = ReconfigurationManager::new();
 
     manager

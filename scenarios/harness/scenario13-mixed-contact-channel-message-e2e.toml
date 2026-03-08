@@ -1,282 +1,419 @@
-schema_version = 1
 id = "scenario13-mixed-contact-channel-message-e2e"
-goal = "Use one TUI and one web instance as distinct users: accept contact invite, join a shared channel, and verify bidirectional message delivery."
-execution_mode = "scripted"
-required_capabilities = ["local", "browser"]
+goal = "Use one TUI and one web instance as distinct users: accept a contact invite, join a shared channel, and verify bidirectional message delivery."
 
 [[steps]]
 id = "launch"
-action = "launch_instances"
+action = "launch_actors"
 timeout_ms = 15000
 
 [[steps]]
-id = "tui-ready"
-action = "wait_for"
-instance = "tui"
-pattern = "Welcome to Aura"
-timeout_ms = 180000
-
-[[steps]]
-id = "web-ready"
-action = "wait_for"
-instance = "web"
-pattern = "Welcome to Aura"
-screen_source = "dom"
+id = "tui-onboarding-visible"
+action = "control_visible"
+actor = "tui"
+control_id = "onboarding_root"
 timeout_ms = 60000
 
 [[steps]]
+id = "web-onboarding-visible"
+action = "control_visible"
+actor = "web"
+control_id = "onboarding_root"
+timeout_ms = 60000
+
+[[steps]]
+id = "tui-fill-account-name"
+action = "fill"
+actor = "tui"
+field_id = "account_name"
+value = "TuiUser"
+timeout_ms = 3000
+
+[[steps]]
 id = "tui-create-account"
-action = "send_keys"
-instance = "tui"
-keys = "TuiUser\n"
+action = "activate"
+actor = "tui"
+control_id = "onboarding_create_account_button"
 timeout_ms = 3000
 
 [[steps]]
 id = "web-fill-account-name"
-action = "fill_input"
-instance = "web"
+action = "fill"
+actor = "web"
 field_id = "account_name"
 value = "WebUser"
 timeout_ms = 4000
 
 [[steps]]
 id = "web-create-account"
-action = "click_button"
-instance = "web"
+action = "activate"
+actor = "web"
 control_id = "onboarding_create_account_button"
 timeout_ms = 4000
 
 [[steps]]
-id = "tui-map-ready"
-action = "wait_for"
-instance = "tui"
-pattern = "Map → Limited"
+id = "tui-neighborhood-visible"
+action = "screen_is"
+actor = "tui"
+screen_id = "neighborhood"
 timeout_ms = 120000
 
 [[steps]]
-id = "web-map-ready"
-action = "wait_for"
-instance = "web"
-pattern = "Map → Limited"
+id = "tui-neighborhood-ready"
+action = "readiness_is"
+actor = "tui"
+readiness = "ready"
+timeout_ms = 120000
+
+[[steps]]
+id = "web-neighborhood-visible"
+action = "screen_is"
+actor = "web"
+screen_id = "neighborhood"
+timeout_ms = 120000
+
+[[steps]]
+id = "web-neighborhood-ready"
+action = "readiness_is"
+actor = "web"
+readiness = "ready"
 timeout_ms = 120000
 
 [[steps]]
 id = "tui-open-contacts"
-action = "send_keys"
-instance = "tui"
-keys = "3"
-timeout_ms = 2000
+action = "navigate"
+actor = "tui"
+screen_id = "contacts"
+timeout_ms = 3000
 
 [[steps]]
 id = "web-open-contacts"
-action = "click_button"
-instance = "web"
-control_id = "nav_contacts"
-timeout_ms = 4000
+action = "navigate"
+actor = "web"
+screen_id = "contacts"
+timeout_ms = 3000
 
 [[steps]]
-id = "tui-open-invite-modal"
-action = "send_keys"
-instance = "tui"
-keys = "n"
-timeout_ms = 2000
+id = "capture-tui-authority-id"
+action = "capture_current_authority_id"
+actor = "tui"
+name = "tui_authority_id"
+timeout_ms = 3000
 
 [[steps]]
-id = "tui-create-contact-invite"
-action = "send_key"
-instance = "tui"
-key = "enter"
-timeout_ms = 2000
+id = "capture-web-authority-id"
+action = "capture_current_authority_id"
+actor = "web"
+name = "web_authority_id"
+timeout_ms = 3000
 
 [[steps]]
-id = "tui-invite-created"
-action = "wait_for"
-instance = "tui"
-pattern = "Invitation Created"
-timeout_ms = 10000
+id = "web-open-invite-modal"
+action = "activate"
+actor = "web"
+control_id = "contacts_create_invitation_button"
+timeout_ms = 3000
 
 [[steps]]
-id = "tui-copy-invite-code"
-action = "send_keys"
-instance = "tui"
-keys = "c"
-timeout_ms = 2000
-
-[[steps]]
-id = "tui-copy-toast"
-action = "expect_toast"
-instance = "tui"
-contains = "Copied to clipboard"
-timeout_ms = 8000
-
-[[steps]]
-id = "tui-close-invite-modal"
-action = "send_key"
-instance = "tui"
-key = "esc"
-timeout_ms = 1500
-
-[[steps]]
-id = "tui-dismiss-copy-toast"
-action = "send_key"
-instance = "tui"
-key = "esc"
-timeout_ms = 1000
-
-[[steps]]
-id = "web-open-accept-modal"
-action = "click_button"
-instance = "web"
-control_id = "contacts_accept_invitation_button"
-timeout_ms = 4000
-
-[[steps]]
-id = "web-accept-modal-visible"
-action = "wait_for"
-instance = "web"
-pattern = "Accept Invitation"
-timeout_ms = 8000
-
-[[steps]]
-id = "tui-read-invite-code"
-action = "read_clipboard"
-instance = "tui"
-var = "invite_code"
+id = "web-create-invite-modal-open"
+action = "modal_open"
+actor = "web"
+modal_id = "create_invitation"
 timeout_ms = 12000
 
 [[steps]]
-id = "web-fill-invite-code"
-action = "fill_input"
-instance = "web"
+id = "web-fill-invite-receiver"
+action = "fill"
+actor = "web"
+field_id = "invitation_receiver"
+value = "${tui_authority_id}"
+timeout_ms = 3000
+
+[[steps]]
+id = "web-create-invite"
+action = "activate"
+actor = "web"
+control_id = "modal_confirm_button"
+timeout_ms = 3000
+
+[[steps]]
+id = "web-invite-created"
+action = "operation_state_is"
+actor = "web"
+operation_id = "invitation_create"
+operation_state = "succeeded"
+timeout_ms = 30000
+
+[[steps]]
+id = "web-read-invite-code"
+action = "read_clipboard"
+actor = "web"
+name = "invite_code"
+timeout_ms = 12000
+
+[[steps]]
+id = "tui-open-accept-modal"
+action = "activate"
+actor = "tui"
+control_id = "contacts_accept_invitation_button"
+timeout_ms = 3000
+
+[[steps]]
+id = "tui-accept-modal-open"
+action = "modal_open"
+actor = "tui"
+modal_id = "accept_invitation"
+timeout_ms = 8000
+
+[[steps]]
+id = "tui-fill-invite-code"
+action = "fill"
+actor = "tui"
 field_id = "invitation_code"
 value = "${invite_code}"
 timeout_ms = 12000
 
 [[steps]]
-id = "web-submit-invite"
-action = "click_button"
-instance = "web"
+id = "tui-submit-invite"
+action = "activate"
+actor = "tui"
 control_id = "modal_confirm_button"
-timeout_ms = 4000
+timeout_ms = 3000
 
 [[steps]]
-id = "web-invitation-accepted"
-action = "wait_for"
-instance = "web"
+id = "tui-contact-count-one"
+action = "list_count_is"
+actor = "tui"
+list_id = "contacts"
+count = 1
+timeout_ms = 30000
+
+[[steps]]
+id = "tui-open-neighborhood"
+action = "navigate"
+actor = "tui"
+screen_id = "neighborhood"
+timeout_ms = 3000
+
+[[steps]]
+id = "tui-open-create-home-modal"
+action = "activate"
+actor = "tui"
+control_id = "neighborhood_new_home_button"
+timeout_ms = 3000
+
+[[steps]]
+id = "tui-create-home-modal-open"
+action = "modal_open"
+actor = "tui"
+modal_id = "create_home"
+timeout_ms = 8000
+
+[[steps]]
+id = "tui-fill-home-name"
+action = "fill"
+actor = "tui"
+field_id = "home_name"
+value = "BridgeHome13"
+timeout_ms = 3000
+
+[[steps]]
+id = "tui-submit-home"
+action = "activate"
+actor = "tui"
+control_id = "modal_confirm_button"
+timeout_ms = 3000
+
+[[steps]]
+id = "tui-home-count-one"
+action = "list_count_is"
+actor = "tui"
+list_id = "homes"
+count = 1
+timeout_ms = 12000
+
+[[steps]]
+id = "tui-open-chat"
+action = "navigate"
+actor = "tui"
+screen_id = "chat"
+timeout_ms = 3000
+
+[[steps]]
+id = "tui-open-contacts-for-home-invite"
+action = "navigate"
+actor = "tui"
+screen_id = "contacts"
+timeout_ms = 3000
+
+[[steps]]
+id = "tui-open-create-home-invite-modal"
+action = "activate"
+actor = "tui"
+control_id = "contacts_create_invitation_button"
+timeout_ms = 3000
+
+[[steps]]
+id = "tui-create-home-invite-modal-open"
+action = "modal_open"
+actor = "tui"
+modal_id = "create_invitation"
+timeout_ms = 8000
+
+[[steps]]
+id = "tui-select-channel-invitation-kind"
+action = "activate_list_item"
+actor = "tui"
+list_id = "invitation_types"
+item_id = "channel"
+timeout_ms = 3000
+
+[[steps]]
+id = "tui-submit-home-invite"
+action = "activate"
+actor = "tui"
+control_id = "modal_confirm_button"
+timeout_ms = 3000
+
+[[steps]]
+id = "tui-home-invite-code-open"
+action = "modal_open"
+actor = "tui"
+modal_id = "invitation_code"
+timeout_ms = 12000
+
+[[steps]]
+id = "tui-copy-home-invite-code"
+action = "activate"
+actor = "tui"
+control_id = "modal_copy_button"
+timeout_ms = 3000
+
+[[steps]]
+id = "tui-read-home-invite-code"
+action = "read_clipboard"
+actor = "tui"
+name = "home_invite_code"
+timeout_ms = 12000
+
+[[steps]]
+id = "tui-close-home-invite-code-modal"
+action = "activate"
+actor = "tui"
+control_id = "modal_cancel_button"
+timeout_ms = 3000
+
+[[steps]]
+id = "tui-return-to-chat-after-home-invite"
+action = "navigate"
+actor = "tui"
+screen_id = "chat"
+timeout_ms = 3000
+
+[[steps]]
+id = "web-open-accept-home-invite-modal"
+action = "navigate"
+actor = "web"
+screen_id = "neighborhood"
+timeout_ms = 3000
+
+[[steps]]
+id = "web-open-neighborhood-accept-home-invite-modal"
+action = "activate"
+actor = "web"
+control_id = "neighborhood_accept_invitation_button"
+timeout_ms = 3000
+
+[[steps]]
+id = "web-accept-home-invite-modal-open"
+action = "modal_open"
+actor = "web"
+modal_id = "accept_invitation"
+timeout_ms = 12000
+
+[[steps]]
+id = "web-fill-home-invite-code"
+action = "fill"
+actor = "web"
+field_id = "invitation_code"
+value = "${home_invite_code}"
+timeout_ms = 12000
+
+[[steps]]
+id = "web-submit-home-invite"
+action = "activate"
+actor = "web"
+control_id = "modal_confirm_button"
+timeout_ms = 3000
+
+[[steps]]
+id = "web-home-invite-accepted"
+action = "operation_state_is"
+actor = "web"
 operation_id = "invitation_accept"
 operation_state = "succeeded"
 timeout_ms = 30000
 
 [[steps]]
-id = "web-contact-added"
-action = "wait_for"
-instance = "web"
-selector = "#aura-contact-selected-tuiuser"
-timeout_ms = 30000
+id = "tui-join-channel"
+action = "send_chat_command"
+actor = "tui"
+value = "/join amp-bridge"
+timeout_ms = 6000
 
 [[steps]]
-id = "tui-open-neighborhood"
-action = "send_keys"
-instance = "tui"
-keys = "1"
-timeout_ms = 2000
+id = "web-join-channel"
+action = "send_chat_command"
+actor = "web"
+value = "/join amp-bridge"
+timeout_ms = 6000
 
 [[steps]]
-id = "tui-open-create-home-modal"
-action = "send_keys"
-instance = "tui"
-keys = "n"
-timeout_ms = 2000
-
-[[steps]]
-id = "tui-create-home-modal-visible"
-action = "wait_for"
-instance = "tui"
-pattern = "Create New Home"
-timeout_ms = 8000
-
-[[steps]]
-id = "tui-create-home"
-action = "send_keys"
-instance = "tui"
-keys = "BridgeHome13\n"
-timeout_ms = 3000
-
-[[steps]]
-id = "tui-home-created"
-action = "wait_for"
-instance = "tui"
-pattern = "BridgeHome13"
+id = "tui-channel-present"
+action = "list_count_is"
+actor = "tui"
+list_id = "channels"
+count = 1
 timeout_ms = 12000
 
 [[steps]]
-id = "tui-open-chat"
-action = "send_keys"
-instance = "tui"
-keys = "2"
-timeout_ms = 2000
+id = "web-channel-present"
+action = "list_count_is"
+actor = "web"
+list_id = "channels"
+count = 1
+timeout_ms = 12000
 
 [[steps]]
-id = "web-open-chat"
-action = "click_button"
-instance = "web"
-control_id = "nav_chat"
+id = "tui-send-message"
+action = "send_chat_message"
+actor = "tui"
+value = "hello-from-tu1"
 timeout_ms = 4000
 
 [[steps]]
-id = "tui-join-amp-channel"
-action = "send_chat_command"
-instance = "tui"
-command = "/join amp-bridge"
-timeout_ms = 6000
-
-[[steps]]
-id = "tui-channel-visible"
-action = "wait_for"
-instance = "tui"
-pattern = "amp-bridge"
-timeout_ms = 12000
-
-[[steps]]
-id = "web-join-amp-channel"
-action = "send_chat_command"
-instance = "web"
-command = "/join amp-bridge"
-timeout_ms = 6000
-
-[[steps]]
-id = "web-channel-visible"
-action = "wait_for"
-instance = "web"
-pattern = "amp-bridge"
-screen_source = "dom"
-timeout_ms = 12000
-
-[[steps]]
-id = "tui-send-message-to-web"
-action = "send_keys"
-instance = "tui"
-keys = "ihello-from-tu1\n"
-timeout_ms = 3000
-
-[[steps]]
 id = "web-receives-tui-message"
-action = "wait_for"
-instance = "web"
-pattern = "hello-from-tu1"
-screen_source = "dom"
+action = "message_contains"
+actor = "web"
+value = "hello-from-tu1"
 timeout_ms = 12000
 
 [[steps]]
-id = "web-send-message-to-tui"
-action = "send_keys"
-instance = "web"
-keys = "ihello-from-web\n"
-timeout_ms = 3000
+id = "web-send-message"
+action = "send_chat_message"
+actor = "web"
+value = "hello-from-web"
+timeout_ms = 4000
+
+[[steps]]
+id = "tui-still-on-chat"
+action = "screen_is"
+actor = "tui"
+screen_id = "chat"
+timeout_ms = 12000
 
 [[steps]]
 id = "tui-receives-web-message"
-action = "wait_for"
-instance = "tui"
-pattern = "hello-from-web"
+action = "message_contains"
+actor = "tui"
+value = "hello-from-web"
 timeout_ms = 12000

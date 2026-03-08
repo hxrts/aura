@@ -440,7 +440,12 @@ pub fn UiDeviceEnrollmentModal(
                             onclick: move |_| on_cancel.call(()),
                         }
                         UiButton {
-                            id: Some("aura-device-enrollment-copy-button".to_string()),
+                            id: Some(
+                                ControlId::ModalCopyButton
+                                    .web_dom_id()
+                                    .unwrap_or("aura-modal-copy-button")
+                                    .to_string(),
+                            ),
                             label: if copied {
                                 "Copied".to_string()
                             } else {

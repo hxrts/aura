@@ -235,6 +235,9 @@ async fn try_join_via_pending_channel_invitation(
         }
     }
 
+    let _ = runtime.trigger_discovery().await;
+    let _ = runtime.trigger_sync().await;
+
     // Joining by invited channel id is best-effort; some runtimes auto-join on accept.
     let _ = join_channel(app_core, invited_channel_id).await;
     Ok(true)
@@ -559,6 +562,7 @@ async fn recipient_peers_for_channel(
     let Some(channel) = chat.channel(&channel_id) else {
         return Vec::new();
     };
+    let channel_context = channel.context_id;
 
     let mut recipients = BTreeSet::new();
     for member in &channel.member_ids {
@@ -579,6 +583,52 @@ async fn recipient_peers_for_channel(
                 if member != self_authority {
                     recipients.insert(member);
                 }
+            }
+        }
+
+        if recipients.is_empty() {
+            if let Some(context_id) = channel_context {
+                for (_, home) in homes.iter() {
+                    if home.context_id == Some(context_id) {
+                        for member in home.members.iter().map(|member| member.id) {
+                            if member != self_authority {
+                                recipients.insert(member);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if recipients.is_empty() {
+            if let Some(home) = homes.current_home() {
+                if channel_context.is_none() || home.context_id == channel_context {
+                    for member in home.members.iter().map(|member| member.id) {
+                        if member != self_authority {
+                            recipients.insert(member);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if recipients.is_empty() {
+        let runtime = {
+            let core = app_core.read().await;
+            core.runtime().cloned()
+        };
+        if let Some(runtime) = runtime {
+            let discovered: Vec<AuthorityId> = runtime
+                .get_discovered_peers()
+                .await
+                .into_iter()
+                .filter(|peer| *peer != self_authority)
+                .collect();
+            if channel.is_dm {
+                recipients.extend(discovered);
+            } else if discovered.len() == 1 {
+                recipients.extend(discovered);
             }
         }
     }
@@ -975,6 +1025,9 @@ pub async fn join_channel_by_name(
                 Some(channel_name),
             )
             .await?;
+            let runtime = require_runtime(app_core).await?;
+            let _ = runtime.trigger_discovery().await;
+            let _ = runtime.trigger_sync().await;
             Ok(())
         }
         Err(join_error) => {
@@ -1345,6 +1398,7 @@ pub async fn send_message_ref(
                     failed_fanout.join("; ")
                 );
             }
+            let _ = runtime.trigger_sync().await;
         }
 
         (sender_id, message_id)

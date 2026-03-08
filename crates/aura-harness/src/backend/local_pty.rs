@@ -353,8 +353,15 @@ impl InstanceBackend for LocalPtyBackend {
             ControlId::NavNotifications => "4",
             ControlId::NavSettings => "5",
             ControlId::OnboardingCreateAccountButton => "\r",
+            ControlId::ModalCopyButton => "c",
+            ControlId::NeighborhoodNewHomeButton => "n",
+            ControlId::NeighborhoodAcceptInvitationButton => "a",
+            ControlId::ContactsCreateInvitationButton => "n",
+            ControlId::ContactsAcceptInvitationButton => "a",
             ControlId::ModalConfirmButton => "\r",
             ControlId::ModalCancelButton => "\x1b",
+            ControlId::SettingsAddDeviceButton => "a",
+            ControlId::SettingsRemoveDeviceButton => "r",
             _ => anyhow::bail!(
                 "control {:?} does not have a PTY activation mapping",
                 control_id
@@ -363,7 +370,17 @@ impl InstanceBackend for LocalPtyBackend {
         self.send_keys(sequence)
     }
 
-    fn fill_field(&mut self, _field_id: FieldId, value: &str) -> Result<()> {
+    fn fill_field(&mut self, field_id: FieldId, value: &str) -> Result<()> {
+        if matches!(field_id, FieldId::InvitationCode) {
+            for ch in value.chars() {
+                let mut buf = [0u8; 4];
+                let s = ch.encode_utf8(&mut buf);
+                self.send_keys(s)?;
+                thread::sleep(Duration::from_millis(3));
+            }
+            thread::sleep(Duration::from_millis(50));
+            return Ok(());
+        }
         self.send_keys(value)
     }
 
@@ -384,6 +401,37 @@ impl InstanceBackend for LocalPtyBackend {
             .iter()
             .position(|item| item.selected)
             .unwrap_or(0);
+        if matches!(list_id, ListId::InvitationTypes) {
+            match snapshot.focused_control {
+                Some(ControlId::Field(FieldId::InvitationType)) => {}
+                Some(ControlId::Field(FieldId::InvitationMessage)) => self.send_keys("\u{1b}[A")?,
+                Some(ControlId::Field(FieldId::InvitationTtl)) => self.send_keys("\u{1b}[B")?,
+                Some(other) => anyhow::bail!(
+                    "invitation type selector is visible but focus is on incompatible control {:?}",
+                    other
+                ),
+                None => anyhow::bail!(
+                    "invitation type selector is visible but the TUI snapshot has no focused control"
+                ),
+            }
+
+            let len = list.items.len();
+            if len == 0 {
+                return Ok(());
+            }
+            let forward_steps = (target_index + len - current_index) % len;
+            let backward_steps = (current_index + len - target_index) % len;
+            if forward_steps <= backward_steps {
+                for _ in 0..forward_steps {
+                    self.send_keys("\u{1b}[C")?;
+                }
+            } else {
+                for _ in 0..backward_steps {
+                    self.send_keys("\u{1b}[D")?;
+                }
+            }
+            return Ok(());
+        }
         let delta = target_index as isize - current_index as isize;
         if matches!(list_id, ListId::Navigation) {
             let list_len = list.items.len();

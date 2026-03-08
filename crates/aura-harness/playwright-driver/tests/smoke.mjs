@@ -10,6 +10,9 @@ import { spawn } from 'node:child_process';
 const fixtureHtml = `<!doctype html>
 <html>
   <body>
+    <main id="main">
+      <div id="aura-app-root">Neighborhood Chat Contacts Notifications Settings</div>
+    </main>
     <script>
       (() => {
         const state = {
@@ -21,19 +24,29 @@ const fixtureHtml = `<!doctype html>
         const pushLog = (line) => {
           state.logs.push(String(line));
         };
+        const syncRoot = () => {
+          const root = document.getElementById('aura-app-root');
+          if (root) {
+            root.textContent = state.screen;
+          }
+        };
+
+        document.addEventListener('keydown', (event) => {
+          pushLog('keydown:' + event.key);
+          if (event.key === 'c') {
+            state.clipboard = 'fixture-clipboard';
+          }
+          if (event.key === '2') {
+            state.screen = 'Neighborhood Chat Contacts Notifications Settings\\nChannels';
+          } else if (event.key.length === 1 && event.key !== 'c') {
+            state.screen += event.key;
+          }
+          syncRoot();
+        });
 
         window.__AURA_HARNESS__ = {
           send_keys(keys) {
             pushLog('send_keys:' + keys);
-            if (keys.includes('c')) {
-              state.clipboard = 'fixture-clipboard';
-            }
-            if (keys.includes('2')) {
-              state.screen = 'Neighborhood Chat Contacts Notifications Settings\\nChannels';
-            }
-            if (keys.includes('hello')) {
-              state.screen += '\\nhello';
-            }
             return true;
           },
           send_key(key, repeat) {
@@ -158,7 +171,7 @@ async function main() {
 
     const logs = await driver.call('tail_log', { instance_id: 'smoke-a', lines: 5 });
     assert.ok(Array.isArray(logs.lines));
-    assert.ok(logs.lines.some((line) => line.includes('send_keys')));
+    assert.ok(logs.lines.some((line) => line.includes('keydown:')));
 
     const stop = await driver.call('stop', { instance_id: 'smoke-a' });
     assert.equal(stop.status, 'stopped');

@@ -14,6 +14,7 @@ cfg_if! {
         #[derive(Debug)]
         pub struct LanTransportService {
             advertised_addrs: Vec<String>,
+            websocket_addrs: Vec<String>,
             metrics: Arc<RwLock<LanTransportMetrics>>,
         }
 
@@ -39,6 +40,7 @@ cfg_if! {
             pub async fn bind(_bind_addr: &str) -> Result<Self, String> {
                 Ok(Self {
                     advertised_addrs: Vec::new(),
+                    websocket_addrs: Vec::new(),
                     metrics: Arc::new(RwLock::new(LanTransportMetrics::default())),
                 })
             }
@@ -46,6 +48,11 @@ cfg_if! {
             /// Get advertised addresses for rendezvous descriptors.
             pub fn advertised_addrs(&self) -> &[String] {
                 &self.advertised_addrs
+            }
+
+            /// Get advertised WebSocket addresses for browser runtimes.
+            pub fn websocket_addrs(&self) -> &[String] {
+                &self.websocket_addrs
             }
 
             /// Get a snapshot of LAN transport metrics.
@@ -67,6 +74,8 @@ cfg_if! {
         pub struct LanTransportService {
             listener: Arc<TcpListener>,
             advertised_addrs: Vec<String>,
+            websocket_listener: Arc<TcpListener>,
+            websocket_addrs: Vec<String>,
             metrics: Arc<RwLock<LanTransportMetrics>>,
         }
 
@@ -133,6 +142,52 @@ cfg_if! {
                     }
                 }
 
+                let websocket_bind_addr = std::net::SocketAddr::new(local_addr.ip(), 0);
+                let websocket_listener = TcpListener::bind(websocket_bind_addr)
+                    .await
+                    .map_err(|e| format!("LAN websocket bind failed ({websocket_bind_addr}): {e}"))?;
+                let websocket_local_addr = websocket_listener
+                    .local_addr()
+                    .map_err(|e| format!("Failed to read LAN websocket local addr: {e}"))?;
+                let websocket_port = websocket_local_addr.port();
+                let mut websocket_addrs = Vec::new();
+                if !local_ip.is_unspecified() {
+                    websocket_addrs.push(websocket_local_addr.to_string());
+                } else {
+                    let mut loopback_ws_addrs = Vec::new();
+                    match get_if_addrs() {
+                        Ok(ifaces) => {
+                            for iface in ifaces {
+                                let addr = match iface.addr {
+                                    IfAddr::V4(v4) => IpAddr::V4(v4.ip),
+                                    IfAddr::V6(v6) => IpAddr::V6(v6.ip),
+                                };
+                                if is_advertisable_ip(addr) {
+                                    websocket_addrs.push(format!("{addr}:{websocket_port}"));
+                                    continue;
+                                }
+                                if addr.is_loopback() {
+                                    loopback_ws_addrs.push(format!("{addr}:{websocket_port}"));
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                error = %err,
+                                "Failed to enumerate interfaces for LAN websocket advertise"
+                            );
+                        }
+                    }
+
+                    if websocket_addrs.is_empty() {
+                        if !loopback_ws_addrs.is_empty() {
+                            websocket_addrs.extend(loopback_ws_addrs);
+                        } else {
+                            websocket_addrs.push(format!("127.0.0.1:{websocket_port}"));
+                        }
+                    }
+                }
+
                 info!(
                     component = "lan_transport",
                     bind_addr = %bind_addr,
@@ -143,6 +198,8 @@ cfg_if! {
                 Ok(Self {
                     listener: Arc::new(listener),
                     advertised_addrs,
+                    websocket_listener: Arc::new(websocket_listener),
+                    websocket_addrs,
                     metrics: Arc::new(RwLock::new(LanTransportMetrics::default())),
                 })
             }
@@ -150,6 +207,11 @@ cfg_if! {
             /// Get advertised addresses for rendezvous descriptors.
             pub fn advertised_addrs(&self) -> &[String] {
                 &self.advertised_addrs
+            }
+
+            /// Get advertised WebSocket addresses for browser runtimes.
+            pub fn websocket_addrs(&self) -> &[String] {
+                &self.websocket_addrs
             }
 
             /// Get a snapshot of LAN transport metrics.
@@ -165,6 +227,11 @@ cfg_if! {
             /// Access the underlying listener.
             pub fn listener(&self) -> Arc<TcpListener> {
                 self.listener.clone()
+            }
+
+            /// Access the WebSocket listener.
+            pub fn websocket_listener(&self) -> Arc<TcpListener> {
+                self.websocket_listener.clone()
             }
         }
 

@@ -256,13 +256,15 @@ fn validate_browser_runtime(browser_instances: &[&crate::config::InstanceConfig]
     }
 
     for instance in browser_instances {
-        let app_url = browser_app_url(instance);
-        ensure_app_url_reachable(&app_url).with_context(|| {
-            format!(
-                "browser preflight failed app_url reachability for instance {}",
-                instance.id
-            )
-        })?;
+        if browser_app_url_is_explicit(instance) {
+            let app_url = browser_app_url(instance);
+            ensure_app_url_reachable(&app_url).with_context(|| {
+                format!(
+                    "browser preflight failed app_url reachability for instance {}",
+                    instance.id
+                )
+            })?;
+        }
 
         if instance.command.is_none() {
             let path = default_driver.as_ref().ok_or_else(|| {
@@ -302,6 +304,15 @@ fn browser_app_url(instance: &crate::config::InstanceConfig) -> String {
         .or_else(|| std::env::var("AURA_WEB_APP_URL").ok())
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "http://127.0.0.1:4173".to_string())
+}
+
+fn browser_app_url_is_explicit(instance: &crate::config::InstanceConfig) -> bool {
+    env_value("AURA_HARNESS_BROWSER_APP_URL", &instance.env)
+        .or_else(|| env_value("AURA_WEB_APP_URL", &instance.env))
+        .or_else(|| std::env::var("AURA_HARNESS_BROWSER_APP_URL").ok())
+        .or_else(|| std::env::var("AURA_WEB_APP_URL").ok())
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
 }
 
 fn env_value(key: &str, env_entries: &[String]) -> Option<String> {

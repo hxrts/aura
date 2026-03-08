@@ -681,8 +681,12 @@ impl ContactsCallbacks {
                             invitation_code: code_clone,
                         });
                     }
-                    Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                    Err(e) => {
+                        tracing::error!(error = %e, "ImportInvitation dispatch failed");
+                        let _ = tx.try_send(UiUpdate::operation_failed(
+                            "ImportInvitation",
+                            e.to_string(),
+                        ));
                     }
                 }
             });
@@ -883,8 +887,12 @@ impl InvitationsCallbacks {
                             invitation_code: code_clone,
                         });
                     }
-                    Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                    Err(e) => {
+                        tracing::error!(error = %e, "ImportInvitation dispatch failed");
+                        let _ = tx.try_send(UiUpdate::operation_failed(
+                            "ImportInvitation",
+                            e.to_string(),
+                        ));
                     }
                 }
             });

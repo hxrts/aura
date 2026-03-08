@@ -1,288 +1,227 @@
-schema_version = 1
 id = "scenario12-mixed-device-enrollment-removal-e2e"
 goal = "Use one TUI and one web instance to exercise out-of-band add-device acceptance and mirrored device removal completion on both sides."
-execution_mode = "scripted"
-required_capabilities = ["local", "browser"]
 
 [[steps]]
 id = "launch"
-action = "launch_instances"
+action = "launch_actors"
 timeout_ms = 15000
 
 [[steps]]
-id = "tui-ready"
-action = "wait_for"
-instance = "tui"
-pattern = "Welcome to Aura"
-timeout_ms = 180000
-
-[[steps]]
-id = "web-ready"
-action = "wait_for"
-instance = "web"
-pattern = "Welcome to Aura"
-screen_source = "dom"
+id = "tui-onboarding-visible"
+action = "control_visible"
+actor = "tui"
+control_id = "onboarding_root"
 timeout_ms = 60000
 
 [[steps]]
-id = "tui-create-account"
-action = "send_keys"
-instance = "tui"
-keys = "TuiOwner\n"
+id = "web-onboarding-visible"
+action = "control_visible"
+actor = "web"
+control_id = "onboarding_root"
+timeout_ms = 60000
+
+[[steps]]
+id = "tui-fill-account-name"
+action = "fill"
+actor = "tui"
+field_id = "account_name"
+value = "TuiOwner"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-map-ready"
-action = "wait_for"
-instance = "tui"
-pattern = "Map → Limited"
+id = "tui-create-account"
+action = "activate"
+actor = "tui"
+control_id = "onboarding_create_account_button"
+timeout_ms = 3000
+
+[[steps]]
+id = "tui-neighborhood-visible"
+action = "screen_is"
+actor = "tui"
+screen_id = "neighborhood"
+timeout_ms = 120000
+
+[[steps]]
+id = "tui-neighborhood-ready"
+action = "readiness_is"
+actor = "tui"
+readiness = "ready"
 timeout_ms = 120000
 
 [[steps]]
 id = "tui-open-settings"
-action = "send_keys"
-instance = "tui"
-keys = "5"
-timeout_ms = 2000
+action = "navigate"
+actor = "tui"
+screen_id = "settings"
+timeout_ms = 3000
 
 [[steps]]
-id = "tui-settings-profile"
-action = "wait_for"
-instance = "tui"
-pattern = "➤ Profile"
-timeout_ms = 8000
-
-[[steps]]
-id = "tui-settings-to-guardians"
-action = "send_key"
-instance = "tui"
-key = "down"
-timeout_ms = 1200
-
-[[steps]]
-id = "tui-settings-guardians"
-action = "wait_for"
-instance = "tui"
-pattern = "➤ Guardian Threshold"
-timeout_ms = 8000
-
-[[steps]]
-id = "tui-settings-to-recovery"
-action = "send_key"
-instance = "tui"
-key = "down"
-timeout_ms = 1200
-
-[[steps]]
-id = "tui-settings-recovery"
-action = "wait_for"
-instance = "tui"
-pattern = "➤ Request Recovery"
-timeout_ms = 8000
-
-[[steps]]
-id = "tui-settings-to-devices"
-action = "send_key"
-instance = "tui"
-key = "down"
-timeout_ms = 1200
-
-[[steps]]
-id = "tui-settings-devices"
-action = "wait_for"
-instance = "tui"
-pattern = "➤ Devices"
-timeout_ms = 8000
+id = "tui-open-devices-section"
+action = "activate_list_item"
+actor = "tui"
+list_id = "settings_sections"
+item_id = "devices"
+timeout_ms = 3000
 
 [[steps]]
 id = "tui-open-add-device-modal"
-action = "send_keys"
-instance = "tui"
-keys = "a"
-timeout_ms = 2000
+action = "activate"
+actor = "tui"
+control_id = "settings_add_device_button"
+timeout_ms = 3000
 
 [[steps]]
-id = "tui-add-device-modal-visible"
-action = "wait_for"
-instance = "tui"
-pattern = "Add Device — Step 1 of 3"
+id = "tui-add-device-modal-open"
+action = "modal_open"
+actor = "tui"
+modal_id = "add_device"
 timeout_ms = 8000
 
 [[steps]]
+id = "tui-fill-device-name"
+action = "fill"
+actor = "tui"
+field_id = "device_name"
+value = "WebApp"
+timeout_ms = 3000
+
+[[steps]]
 id = "tui-submit-add-device"
-action = "send_keys"
-instance = "tui"
-keys = "WebApp\n"
-timeout_ms = 2000
+action = "activate"
+actor = "tui"
+control_id = "modal_confirm_button"
+timeout_ms = 3000
 
 [[steps]]
 id = "tui-device-enrollment-submitting"
-action = "wait_for"
-instance = "tui"
+action = "operation_state_is"
+actor = "tui"
 operation_id = "device_enrollment"
 operation_state = "submitting"
 timeout_ms = 15000
 
 [[steps]]
-id = "tui-device-enrollment-ceremony-visible"
-action = "wait_for"
-instance = "tui"
-pattern = "Import this code on the new device"
-timeout_ms = 15000
-
-[[steps]]
-id = "tui-copy-device-enrollment-code"
-action = "send_keys"
-instance = "tui"
-keys = "c"
-timeout_ms = 2000
-
-[[steps]]
-id = "tui-copy-toast-visible"
-action = "expect_toast"
-instance = "tui"
-contains = "Copied to clipboard"
-timeout_ms = 8000
+id = "tui-copy-device-code"
+action = "activate"
+actor = "tui"
+control_id = "modal_copy_button"
+timeout_ms = 3000
 
 [[steps]]
 id = "tui-read-device-code"
 action = "read_clipboard"
-instance = "tui"
-var = "device_code"
+actor = "tui"
+name = "device_code"
 timeout_ms = 12000
 
 [[steps]]
 id = "web-fill-device-code"
-action = "fill_input"
-instance = "web"
+action = "fill"
+actor = "web"
 field_id = "device_import_code"
 value = "${device_code}"
 timeout_ms = 12000
 
 [[steps]]
 id = "web-import-device-code"
-action = "click_button"
-instance = "web"
+action = "activate"
+actor = "web"
 control_id = "onboarding_import_device_button"
 timeout_ms = 4000
 
 [[steps]]
 id = "web-device-import-succeeded"
-action = "wait_for"
-instance = "web"
+action = "operation_state_is"
+actor = "web"
 operation_id = "device_enrollment"
 operation_state = "succeeded"
 timeout_ms = 30000
 
 [[steps]]
-id = "web-device-imported"
-action = "wait_for"
-instance = "web"
-control_id = "nav_settings"
-timeout_ms = 30000
-
-[[steps]]
 id = "web-open-settings"
-action = "click_button"
-instance = "web"
-control_id = "nav_settings"
-timeout_ms = 4000
+action = "navigate"
+actor = "web"
+screen_id = "settings"
+timeout_ms = 3000
 
 [[steps]]
-id = "web-open-devices"
-action = "click_button"
-instance = "web"
-selector = "#aura-settings-section-devices"
-timeout_ms = 4000
+id = "web-open-devices-section"
+action = "activate_list_item"
+actor = "web"
+list_id = "settings_sections"
+item_id = "devices"
+timeout_ms = 3000
 
 [[steps]]
 id = "web-devices-count-two"
-action = "wait_for"
-instance = "web"
-pattern = "Devices: 2"
+action = "list_count_is"
+actor = "web"
+list_id = "devices"
+count = 2
 timeout_ms = 20000
 
 [[steps]]
-id = "tui-still-waiting-for-acceptance"
-action = "wait_for"
-instance = "tui"
+id = "tui-still-submitting"
+action = "operation_state_is"
+actor = "tui"
 operation_id = "device_enrollment"
 operation_state = "submitting"
 timeout_ms = 10000
 
 [[steps]]
 id = "tui-cancel-pending-enrollment"
-action = "send_key"
-instance = "tui"
-key = "esc"
-timeout_ms = 2000
+action = "activate"
+actor = "tui"
+control_id = "modal_cancel_button"
+timeout_ms = 3000
 
 [[steps]]
-id = "tui-enrollment-canceled-toast"
-action = "expect_toast"
-instance = "tui"
-contains = "canceled"
+id = "tui-back-on-settings"
+action = "screen_is"
+actor = "tui"
+screen_id = "settings"
 timeout_ms = 10000
 
 [[steps]]
-id = "web-dismiss-enrollment-toast"
-action = "send_key"
-instance = "web"
-key = "esc"
-timeout_ms = 1000
-
-[[steps]]
-id = "web-still-on-devices"
-action = "wait_for"
-instance = "web"
-pattern = "Remove Device"
-timeout_ms = 8000
-
-[[steps]]
-id = "web-open-device-select"
-action = "click_button"
-instance = "web"
-label = "Remove Device"
+id = "web-open-remove-device"
+action = "activate"
+actor = "web"
+control_id = "settings_remove_device_button"
 timeout_ms = 4000
 
 [[steps]]
-id = "web-device-select-modal-visible"
-action = "wait_for"
-instance = "web"
-pattern = "Select Device to Remove"
+id = "web-device-select-modal-open"
+action = "modal_open"
+actor = "web"
+modal_id = "select_device_to_remove"
 timeout_ms = 10000
 
 [[steps]]
-id = "web-choose-device-to-remove"
-action = "send_key"
-instance = "web"
-key = "enter"
-timeout_ms = 2000
+id = "web-choose-device"
+action = "activate"
+actor = "web"
+control_id = "modal_confirm_button"
+timeout_ms = 3000
 
 [[steps]]
-id = "web-remove-confirm-modal-visible"
-action = "wait_for"
-instance = "web"
-pattern = "Confirm Device Removal"
+id = "web-confirm-remove-modal-open"
+action = "modal_open"
+actor = "web"
+modal_id = "confirm_remove_device"
 timeout_ms = 10000
-
-[[steps]]
-id = "web-focus-remove-confirm"
-action = "send_key"
-instance = "web"
-key = "tab"
-timeout_ms = 1000
 
 [[steps]]
 id = "web-confirm-remove-device"
-action = "send_key"
-instance = "web"
-key = "enter"
-timeout_ms = 2000
+action = "activate"
+actor = "web"
+control_id = "modal_confirm_button"
+timeout_ms = 3000
 
 [[steps]]
-id = "web-device-removal-complete"
-action = "wait_for"
-instance = "web"
-pattern = "Devices: 1"
+id = "web-devices-count-one"
+action = "list_count_is"
+actor = "web"
+list_id = "devices"
+count = 1
 timeout_ms = 30000
