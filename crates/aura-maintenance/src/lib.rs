@@ -11,21 +11,24 @@ pub mod release;
 pub mod scope;
 
 pub use facts::{
-    maintenance_fact_type_id, AdminReplacement, CacheInvalidated, CacheKey, IdentityEpochFence,
-    MaintenanceEpoch, MaintenanceFact, MaintenanceFactDelta, MaintenanceFactKey,
-    MaintenanceFactReducer, ReleaseDistributionFact, ReleasePolicyFact, SnapshotCompleted,
-    SnapshotProposed, UpgradeActivated, UpgradeExecutionFact, UpgradeProposalMetadata,
-    MAINTENANCE_FACT_SCHEMA_VERSION, MAINTENANCE_FACT_TYPE_ID,
+    maintenance_fact_type_id, AdminReplacement, AuraUpgradeFailure, AuraUpgradeFailureClass,
+    CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceEpoch, MaintenanceFact,
+    MaintenanceFactDelta, MaintenanceFactKey, MaintenanceFactReducer, ReleaseDistributionFact,
+    ReleasePolicyFact, SnapshotCompleted, SnapshotProposed, UpgradeActivated, UpgradeExecutionFact,
+    UpgradeProposalMetadata, MAINTENANCE_FACT_SCHEMA_VERSION, MAINTENANCE_FACT_TYPE_ID,
 };
 pub use gc::{plan_dkg_transcript_gc, TranscriptGcPlan};
 pub use policy::{
-    AuraActivationTrustPolicy, AuraReleaseActivationPolicy, AuraReleaseDiscoveryPolicy,
-    AuraReleaseSharingPolicy, AuthoritySelector, ContextSelector, PinPolicy, RecommendationPolicy,
+    AuraActivationTrustPolicy, AuraActivationWindow, AuraReleaseActivationPolicy,
+    AuraReleaseDiscoveryPolicy, AuraReleaseSharingPolicy, AuraRollbackPreference,
+    AuthoritySelector, ContextSelector, PinPolicy, RecommendationPolicy,
 };
 pub use release::{
-    AuraArtifactDescriptor, AuraArtifactKind, AuraCompatibilityClass,
-    AuraDeterministicBuildCertificate, AuraHealthGate, AuraReleaseId, AuraReleaseManifest,
-    AuraReleaseProvenance, AuraReleaseSeriesId, AuraTeeAttestation,
+    AuraActivationProfile, AuraArtifactDescriptor, AuraArtifactKind, AuraArtifactPackaging,
+    AuraCompatibilityClass, AuraCompatibilityManifest, AuraDataMigration,
+    AuraDeterministicBuildCertificate, AuraHealthGate, AuraLauncherEntrypoint, AuraReleaseId,
+    AuraReleaseManifest, AuraReleaseProvenance, AuraReleaseSeriesId, AuraRollbackRequirement,
+    AuraTargetPlatform, AuraTeeAttestation,
 };
 pub use scope::{AuraActivationScope, AuraPolicyScope, ReleaseResidency, TransitionState};
 

@@ -1,7 +1,9 @@
 //! Scoped OTA transition engine and mixed-version session behavior.
 
+use aura_core::{AuthorityId, TimeStamp};
 use aura_maintenance::{
-    AuraActivationScope, AuraCompatibilityClass, AuraReleaseId, ReleaseResidency, TransitionState,
+    AuraActivationScope, AuraCompatibilityClass, AuraReleaseId, AuraUpgradeFailure,
+    MaintenanceFact, ReleaseResidency, TransitionState, UpgradeExecutionFact,
 };
 
 /// Admission policy for new sessions during scoped rollout.
@@ -71,8 +73,8 @@ pub struct RollbackDirective {
     pub from_release_id: AuraReleaseId,
     /// Release being restored.
     pub to_release_id: AuraReleaseId,
-    /// Deterministic rollback reason.
-    pub reason: String,
+    /// Structured failure that triggered rollback.
+    pub failure: AuraUpgradeFailure,
 }
 
 /// Scoped OTA transition engine.
@@ -138,13 +140,13 @@ impl ScopedOtaTransitionEngine {
     pub fn begin_rollback(
         &self,
         mut state: ScopedUpgradeState,
-        reason: impl Into<String>,
+        failure: AuraUpgradeFailure,
     ) -> Option<(ScopedUpgradeState, RollbackDirective)> {
         let legacy_release_id = state.legacy_release_id?;
         let directive = RollbackDirective {
             from_release_id: state.target_release_id,
             to_release_id: legacy_release_id,
-            reason: reason.into(),
+            failure,
         };
         state.transition = TransitionState::RollingBack;
         state.session_plan = SessionCompatibilityPlan {
@@ -164,6 +166,42 @@ impl ScopedOtaTransitionEngine {
         state.transition = TransitionState::Idle;
         state.session_plan = SessionCompatibilityPlan::compatible_coexistence();
         state
+    }
+
+    /// Build a rollback journal fact for a completed scoped rollback.
+    pub fn rollback_executed_fact(
+        &self,
+        authority_id: AuthorityId,
+        scope: AuraActivationScope,
+        directive: &RollbackDirective,
+        rolled_back_at: TimeStamp,
+    ) -> MaintenanceFact {
+        MaintenanceFact::UpgradeExecution(UpgradeExecutionFact::RollbackExecuted {
+            authority_id,
+            scope,
+            from_release_id: directive.from_release_id,
+            to_release_id: directive.to_release_id,
+            failure: directive.failure.clone(),
+            rolled_back_at,
+        })
+    }
+
+    /// Build a partition observation journal fact for an incompatible scoped cutover.
+    pub fn partition_observed_fact(
+        &self,
+        authority_id: AuthorityId,
+        scope: AuraActivationScope,
+        release_id: AuraReleaseId,
+        failure: AuraUpgradeFailure,
+        observed_at: TimeStamp,
+    ) -> MaintenanceFact {
+        MaintenanceFact::UpgradeExecution(UpgradeExecutionFact::PartitionObserved {
+            authority_id,
+            scope,
+            release_id,
+            failure,
+            observed_at,
+        })
     }
 
     fn session_plan_for_cutover(
@@ -214,7 +252,9 @@ impl ScopedOtaTransitionEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::time::PhysicalTime;
     use aura_core::Hash32;
+    use aura_maintenance::AuraUpgradeFailureClass;
 
     fn release(byte: u8) -> AuraReleaseId {
         AuraReleaseId::new(Hash32([byte; 32]))
@@ -224,6 +264,13 @@ mod tests {
         AuraActivationScope::AuthorityLocal {
             authority_id: aura_core::AuthorityId::new_from_entropy([7; 32]),
         }
+    }
+
+    fn ts(ms: u64) -> TimeStamp {
+        TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: ms,
+            uncertainty: Some(5),
+        })
     }
 
     #[test]
@@ -277,15 +324,87 @@ mod tests {
         let cutting_over =
             engine.begin_cutover(staged, InFlightIncompatibilityAction::Drain, false);
         let (rolling_back, directive) = engine
-            .begin_rollback(cutting_over, "health gate failed")
+            .begin_rollback(
+                cutting_over,
+                AuraUpgradeFailure::new(
+                    AuraUpgradeFailureClass::HealthGateFailed,
+                    "health gate failed",
+                ),
+            )
             .unwrap_or_else(|| panic!("legacy release exists"));
         assert_eq!(rolling_back.transition, TransitionState::RollingBack);
         assert_eq!(directive.from_release_id, release(2));
         assert_eq!(directive.to_release_id, release(1));
-        assert_eq!(directive.reason, "health gate failed");
+        assert_eq!(
+            directive.failure,
+            AuraUpgradeFailure::new(
+                AuraUpgradeFailureClass::HealthGateFailed,
+                "health gate failed",
+            )
+        );
 
         let restored = engine.complete_rollback(rolling_back);
         assert_eq!(restored.residency, ReleaseResidency::LegacyOnly);
         assert_eq!(restored.transition, TransitionState::Idle);
+    }
+
+    #[test]
+    fn rollback_and_partition_facts_preserve_failure_classification() {
+        let engine = ScopedOtaTransitionEngine::new();
+        let staged = engine.stage_scope(
+            scope(),
+            Some(release(1)),
+            release(2),
+            AuraCompatibilityClass::IncompatibleWithoutPartition,
+        );
+        let cutting_over =
+            engine.begin_cutover(staged, InFlightIncompatibilityAction::Abort, false);
+        let (rolling_back, directive) = engine
+            .begin_rollback(
+                cutting_over.clone(),
+                AuraUpgradeFailure::new(
+                    AuraUpgradeFailureClass::HealthGateFailed,
+                    "post-cutover health failure",
+                ),
+            )
+            .unwrap_or_else(|| panic!("legacy release exists"));
+        let authority_id = aura_core::AuthorityId::new_from_entropy([8; 32]);
+        let rollback_fact =
+            engine.rollback_executed_fact(authority_id, scope(), &directive, ts(10));
+        assert_eq!(
+            rollback_fact,
+            MaintenanceFact::UpgradeExecution(UpgradeExecutionFact::RollbackExecuted {
+                authority_id,
+                scope: scope(),
+                from_release_id: directive.from_release_id,
+                to_release_id: directive.to_release_id,
+                failure: directive.failure.clone(),
+                rolled_back_at: ts(10),
+            })
+        );
+
+        let partition_fact = engine.partition_observed_fact(
+            authority_id,
+            rolling_back.scope.clone(),
+            rolling_back.target_release_id,
+            AuraUpgradeFailure::new(
+                AuraUpgradeFailureClass::PartitionRequired,
+                "incompatible peer partition required",
+            ),
+            ts(11),
+        );
+        assert_eq!(
+            partition_fact,
+            MaintenanceFact::UpgradeExecution(UpgradeExecutionFact::PartitionObserved {
+                authority_id,
+                scope: rolling_back.scope,
+                release_id: rolling_back.target_release_id,
+                failure: AuraUpgradeFailure::new(
+                    AuraUpgradeFailureClass::PartitionRequired,
+                    "incompatible peer partition required",
+                ),
+                observed_at: ts(11),
+            })
+        );
     }
 }

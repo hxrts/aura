@@ -343,6 +343,41 @@ impl ReleasePolicyFact {
     }
 }
 
+/// Structured failure class for scoped OTA execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AuraUpgradeFailureClass {
+    /// Post-activation health validation failed.
+    HealthGateFailed,
+    /// The release was revoked after staging or activation.
+    ReleaseRevoked,
+    /// Explicit partition handling was required for incompatibility.
+    PartitionRequired,
+    /// Launcher handoff or activation execution failed.
+    LauncherActivationFailed,
+    /// An operator or policy explicitly requested rollback.
+    ManualRollbackRequested,
+}
+
+/// Structured failure payload for rollback and partition execution facts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuraUpgradeFailure {
+    /// Stable classification for the failure.
+    pub class: AuraUpgradeFailureClass,
+    /// Human-readable detail for operator audit.
+    pub detail: String,
+}
+
+impl AuraUpgradeFailure {
+    /// Build a structured scoped-upgrade failure.
+    pub fn new(class: AuraUpgradeFailureClass, detail: impl Into<String>) -> Self {
+        Self {
+            class,
+            detail: detail.into(),
+        }
+    }
+}
+
 /// Scoped OTA execution and outcome facts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -431,8 +466,8 @@ pub enum UpgradeExecutionFact {
         from_release_id: AuraReleaseId,
         /// Release being restored.
         to_release_id: AuraReleaseId,
-        /// Human-readable rollback reason.
-        reason: String,
+        /// Structured failure that caused rollback.
+        failure: AuraUpgradeFailure,
         /// Rollback time carried in the fact.
         rolled_back_at: TimeStamp,
     },
@@ -444,8 +479,8 @@ pub enum UpgradeExecutionFact {
         scope: AuraActivationScope,
         /// Release associated with the partition.
         release_id: AuraReleaseId,
-        /// Human-readable reason for the partition.
-        reason: String,
+        /// Structured failure that caused the partition observation.
+        failure: AuraUpgradeFailure,
         /// Observation time carried in the fact.
         observed_at: TimeStamp,
     },

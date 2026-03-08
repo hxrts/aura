@@ -42,11 +42,7 @@ impl OtaDistributionService {
         certificates: &[AuraDeterministicBuildCertificate],
         published_at: TimeStamp,
     ) -> SyncResult<ReleaseBundlePublication> {
-        if !manifest.release_id_matches_provenance()? {
-            return Err(sync_validation_error(
-                "release manifest does not match canonical provenance-derived release id",
-            ));
-        }
+        Self::validate_manifest(manifest)?;
 
         let manifest_key = Self::manifest_storage_key(manifest.release_id);
         let manifest_bytes = to_vec(manifest)?;
@@ -202,6 +198,21 @@ impl OtaDistributionService {
                 "build certificate does not match canonical provenance-derived release id",
             ));
         }
+        certificate.verify_signature().map_err(|err| {
+            sync_validation_error(format!("invalid build certificate signature: {err}"))
+        })?;
+        Ok(())
+    }
+
+    fn validate_manifest(manifest: &AuraReleaseManifest) -> SyncResult<()> {
+        if !manifest.release_id_matches_provenance()? {
+            return Err(sync_validation_error(
+                "release manifest does not match canonical provenance-derived release id",
+            ));
+        }
+        manifest.verify_signature().map_err(|err| {
+            sync_validation_error(format!("invalid release manifest signature: {err}"))
+        })?;
         Ok(())
     }
 
@@ -233,7 +244,10 @@ mod tests {
     use aura_core::time::PhysicalTime;
     use aura_core::SemanticVersion;
     use aura_maintenance::{
-        AuraArtifactKind, AuraReleaseProvenance, AuraReleaseSeriesId, AuraTeeAttestation,
+        AuraActivationProfile, AuraArtifactKind, AuraArtifactPackaging, AuraCompatibilityClass,
+        AuraCompatibilityManifest, AuraDataMigration, AuraLauncherEntrypoint,
+        AuraReleaseProvenance, AuraReleaseSeriesId, AuraRollbackRequirement, AuraTargetPlatform,
+        AuraTeeAttestation,
     };
     use aura_testkit::MemoryStorageHandler;
     use std::collections::BTreeMap;
@@ -260,14 +274,6 @@ mod tests {
         )
     }
 
-    fn signing_material(seed: u8) -> (aura_core::Ed25519VerifyingKey, aura_core::Ed25519Signature) {
-        let signing_key = Ed25519SigningKey::from_bytes([seed; 32]);
-        (
-            signing_key.verifying_key().unwrap(),
-            signing_key.sign(b"ota-distribution-test").unwrap(),
-        )
-    }
-
     #[tokio::test]
     async fn publish_release_bundle_persists_all_distribution_objects() {
         let storage = MemoryStorageHandler::new();
@@ -275,12 +281,19 @@ mod tests {
         let authority_id = AuthorityId::new_from_entropy([1; 32]);
         let series_id = AuraReleaseSeriesId::new(hash(9));
         let provenance = provenance(20);
-        let (manifest_key, manifest_sig) = signing_material(2);
+        let manifest_signing_key = Ed25519SigningKey::from_bytes([2; 32]);
         let artifact_bytes = b"artifact-payload".to_vec();
         let artifact = AuraArtifactDescriptor::new(
             AuraArtifactKind::Binary,
             "aura-agent-x86_64-linux",
-            Some("x86_64-linux".to_string()),
+            Some(AuraTargetPlatform::new("x86_64-linux")),
+            AuraArtifactPackaging::TarZst,
+            "bin/aura-agent",
+            Some(AuraLauncherEntrypoint::new(
+                "bin/aura-agent",
+                vec!["--serve".to_string()],
+            )),
+            AuraRollbackRequirement::KeepPriorReleaseStaged,
             Hash32::from_bytes(&artifact_bytes),
             artifact_bytes.len() as u64,
         );
@@ -290,18 +303,36 @@ mod tests {
             authority_id,
             provenance.clone(),
             vec![artifact.clone()],
+            AuraCompatibilityManifest::new(
+                AuraCompatibilityClass::MixedCoexistenceAllowed,
+                None,
+                BTreeMap::new(),
+                BTreeMap::new(),
+            ),
+            vec![AuraDataMigration::new(
+                "journal-v3",
+                "Upgrade journal metadata encoding",
+                true,
+            )],
+            AuraActivationProfile::new(false, false, vec!["post-stage-smoke".to_string()]),
             BTreeMap::from([("channel".to_string(), "candidate".to_string())]),
             None,
             Some(1_900_000_000_000),
-            manifest_key,
-            manifest_sig,
+            manifest_signing_key.verifying_key().unwrap(),
+            manifest_signing_key
+                .sign(b"ota-distribution-placeholder")
+                .unwrap(),
         )
         .unwrap();
-        let (cert_key, cert_sig) = signing_material(3);
+        let mut manifest = manifest;
+        let manifest_payload = manifest.signature_payload().unwrap();
+        manifest.signature = manifest_signing_key.sign(&manifest_payload).unwrap();
+
+        let cert_signing_key = Ed25519SigningKey::from_bytes([3; 32]);
         let certificate = AuraDeterministicBuildCertificate::new(
             series_id,
             authority_id,
-            provenance,
+            manifest.provenance.clone(),
             hash(77),
             ts(5),
             Some(AuraTeeAttestation {
@@ -309,10 +340,15 @@ mod tests {
                 measurement_hash: hash(78),
                 evidence_hash: hash(79),
             }),
-            cert_key,
-            cert_sig,
+            cert_signing_key.verifying_key().unwrap(),
+            cert_signing_key
+                .sign(b"ota-certificate-placeholder")
+                .unwrap(),
         )
         .unwrap();
+        let mut certificate = certificate;
+        let certificate_payload = certificate.signature_payload().unwrap();
+        certificate.signature = cert_signing_key.sign(&certificate_payload).unwrap();
 
         let publication = service
             .publish_release_bundle(

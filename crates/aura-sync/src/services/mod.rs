@@ -69,8 +69,8 @@ pub use aura_maintenance::{
 pub use maintenance::{MaintenanceService, MaintenanceServiceConfig, UpgradeProposal};
 pub use ota_distribution::{OtaDistributionService, ReleaseBundlePublication};
 pub use ota_policy::{
-    ActivationCandidate, ActivationDecision, DiscoveryCandidate, DiscoveryDecision,
-    OtaPolicyEvaluator, SharingCandidate, SharingDecision,
+    ActivationCandidate, ActivationDecision, ActivationDecisionReason, DiscoveryCandidate,
+    DiscoveryDecision, OtaPolicyEvaluator, SharingCandidate, SharingDecision,
 };
 pub use ota_transition::{
     InFlightIncompatibilityAction, NewSessionAdmission, RollbackDirective,

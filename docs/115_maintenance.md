@@ -144,6 +144,8 @@ Scoped activation uses journal facts plus local policy evaluation. A scope may m
 
 Hard-fork behavior is explicit. After local cutover, incompatible new sessions are rejected. In-flight incompatible sessions must drain, abort, or delegate according to policy. If post-cutover validation fails, rollback is deterministic and recorded in `UpgradeExecutionFact`.
 
+Managed quorum cutover requires explicit approval from the participant set bound into `AuraActivationScope::ManagedQuorum`. Staged revoked releases are canceled before cutover. Active revoked releases follow the local rollback preference. Automatic rollback queues the revert path immediately. Manual rollback leaves the scope failed until an operator approves rollback.
+
 ### 4.5 Updater / Launcher Boundary
 
 Aura does not rely on in-place self-replacement of the running runtime. Layer 6 owns an updater/launcher control plane that:

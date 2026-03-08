@@ -267,6 +267,30 @@ For hard forks, the operator must define:
 
 If post-cutover checks fail, rollback is explicit and deterministic.
 
+### Managed Quorum Approval Runbook
+
+Use managed quorum cutover only when the scope has an explicit participant set. Record approval from every participant in the quorum before starting cutover. Reject approval from authorities that are not members of that scope.
+
+If one participant has not approved, keep the scope in `TransitionState::AwaitingCutover`. Do not begin launcher activation for that scope. Resolve membership or policy disagreement before retrying.
+
+### Failed Rollout Runbook
+
+Check the failure classification before acting. `AuraUpgradeFailureClass::HealthGateFailed` means the new release started and failed local verification. `AuraUpgradeFailureClass::LauncherActivationFailed` means the launcher handoff failed before healthy activation.
+
+If policy uses `AuraRollbackPreference::Automatic`, allow the queued rollback to execute and confirm the scope returns to `ReleaseResidency::LegacyOnly` with `TransitionState::Idle`. If policy uses `AuraRollbackPreference::ManualApproval`, keep the scope failed and require operator approval before rollback.
+
+### Revoked Release Runbook
+
+Treat a revoked staged release differently from a revoked active release. If the target release is only staged, cancel the staged scope and remove it from activation consideration. Do not proceed to cutover for that scope.
+
+If the revoked release is already active, follow the configured rollback preference. Automatic rollback should queue a rollback to the prior staged release. Manual rollback should leave the scope failed until an operator approves the revert path.
+
+### Partition Response Runbook
+
+If `SessionCompatibilityPlan.partition_required` is true, assume incompatible peers may separate cleanly rather than interoperate. Stop admitting incompatible new sessions in that scope. Drain, abort, or delegate in-flight sessions according to the recorded incompatibility action.
+
+Record partition observations with the associated failure classification and scope. This keeps rollback and peer-partition handling auditable.
+
 ## Cache Management
 
 The maintenance system coordinates cache invalidation across all devices. Cache invalidation facts specify which keys must be refreshed and the epoch where the cache entry is no longer valid.

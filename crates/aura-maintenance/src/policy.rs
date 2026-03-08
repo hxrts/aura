@@ -117,8 +117,32 @@ pub struct AuraActivationTrustPolicy {
     pub allowed_builder_sources: AuthoritySelector,
     /// Minimum number of distinct builder certificates required, if any.
     pub required_builder_threshold: Option<u16>,
+    /// Minimum number of distinct trusted builders that must also carry TEE evidence, if any.
+    pub required_tee_builder_threshold: Option<u16>,
     /// Whether a local rebuild is required before activation.
     pub require_local_rebuild: bool,
+    /// Whether trusted revocation evidence blocks activation.
+    pub block_on_trusted_revocation: bool,
+    /// Whether trusted supersession evidence blocks activation.
+    pub block_on_supersession: bool,
+}
+
+/// Local activation window evaluated against the local wall clock.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuraActivationWindow {
+    /// Earliest local Unix time at which activation may proceed.
+    pub not_before_unix_ms: Option<u64>,
+    /// Latest local Unix time at which activation may proceed.
+    pub not_after_unix_ms: Option<u64>,
+}
+
+/// Rollback behavior preferred by local activation policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AuraRollbackPreference {
+    /// Roll back automatically when cutover fails.
+    Automatic,
+    /// Hold rollback for explicit operator approval.
+    ManualApproval,
 }
 
 /// Activation policy controls staging and activation inside one activation scope.
@@ -130,11 +154,17 @@ pub struct AuraReleaseActivationPolicy {
     pub auto_stage: bool,
     /// Whether a fully trusted/staged bundle may activate automatically.
     pub auto_activate: bool,
+    /// Optional rollout cohort label required before automatic activation.
+    pub required_rollout_cohort: Option<String>,
+    /// Optional local activation window for the release.
+    pub activation_window: Option<AuraActivationWindow>,
     /// Whether local policy should honor the manifest's suggested activation time.
     ///
     /// When enabled, the suggestion is evaluated against the local wall clock and
     /// acts only as a "not before" hint. It is not a fence.
     pub respect_suggested_activation_time: bool,
+    /// Rollback behavior to prefer after failed cutover.
+    pub rollback_preference: AuraRollbackPreference,
     /// Activation scope governed by this policy.
     pub activation_scope: AuraActivationScope,
 }

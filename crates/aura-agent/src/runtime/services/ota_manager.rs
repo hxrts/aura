@@ -1,12 +1,16 @@
 //! Runtime-owned OTA updater/launcher control plane.
 
 use super::state::with_state_mut_validated;
-use aura_maintenance::{AuraActivationScope, AuraCompatibilityClass, AuraReleaseId};
+use aura_core::AuthorityId;
+use aura_maintenance::{
+    AuraActivationScope, AuraCompatibilityClass, AuraReleaseId, AuraRollbackPreference,
+    AuraUpgradeFailure, ReleaseResidency, TransitionState,
+};
 use aura_sync::services::{
     InFlightIncompatibilityAction, RollbackDirective, ScopedOtaTransitionEngine,
     ScopedUpgradeState, SessionCompatibilityPlan,
 };
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -66,7 +70,7 @@ pub enum LauncherCommand {
     Rollback {
         from_release_id: AuraReleaseId,
         to_release_id: AuraReleaseId,
-        reason: String,
+        failure: AuraUpgradeFailure,
     },
 }
 
@@ -80,7 +84,7 @@ struct ActivationIntent {
 struct RollbackIntent {
     from_release_id: AuraReleaseId,
     to_release_id: AuraReleaseId,
-    reason: String,
+    failure: AuraUpgradeFailure,
 }
 
 #[derive(Debug, Default)]
@@ -89,6 +93,7 @@ struct OtaState {
     status: UpdateStatus,
     staged_releases: BTreeMap<AuraReleaseId, StagedRelease>,
     scoped_states: BTreeMap<AuraActivationScope, ScopedUpgradeState>,
+    managed_quorum_approvals: BTreeMap<AuraActivationScope, BTreeSet<AuthorityId>>,
     launcher_queue: VecDeque<LauncherCommand>,
     active_release: Option<AuraReleaseId>,
     pending_activation: Option<ActivationIntent>,
@@ -115,6 +120,23 @@ impl OtaState {
                 .contains_key(&scoped_state.target_release_id)
             {
                 return Err("scoped upgrade target must be staged".to_string());
+            }
+        }
+
+        for (scope, approvals) in &self.managed_quorum_approvals {
+            let AuraActivationScope::ManagedQuorum { participants, .. } = scope else {
+                return Err(
+                    "managed quorum approvals must only exist for managed quorum scopes"
+                        .to_string(),
+                );
+            };
+            if !approvals
+                .iter()
+                .all(|authority_id| participants.contains(authority_id))
+            {
+                return Err(
+                    "managed quorum approvals must be a subset of scope participants".to_string(),
+                );
             }
         }
 
@@ -192,10 +214,39 @@ impl OtaManager {
             .launcher_queue
             .push_back(LauncherCommand::Stage(release.clone()));
         guard.staged_releases.insert(release.release_id, release);
+        if matches!(scope, AuraActivationScope::ManagedQuorum { .. }) {
+            guard
+                .managed_quorum_approvals
+                .insert(scope.clone(), BTreeSet::new());
+        }
         guard.scoped_states.insert(scope, scope_state.clone());
         guard.status = UpdateStatus::Ready { version };
         guard.validate()?;
         Ok(scope_state)
+    }
+
+    #[allow(dead_code)] // Used by managed rollout hardening.
+    pub(crate) async fn record_managed_quorum_approval(
+        &self,
+        scope: &AuraActivationScope,
+        authority_id: AuthorityId,
+    ) -> Result<usize, String> {
+        let AuraActivationScope::ManagedQuorum { participants, .. } = scope else {
+            return Err("managed quorum approvals require a managed quorum scope".to_string());
+        };
+        if !participants.contains(&authority_id) {
+            return Err("managed quorum approval must come from a scope participant".to_string());
+        }
+
+        let mut guard = self.state.write().await;
+        let approvals = guard
+            .managed_quorum_approvals
+            .entry(scope.clone())
+            .or_insert_with(BTreeSet::new);
+        approvals.insert(authority_id);
+        let approval_count = approvals.len();
+        guard.validate()?;
+        Ok(approval_count)
     }
 
     #[allow(dead_code)] // Used by the upcoming launcher bridge.
@@ -212,6 +263,17 @@ impl OtaManager {
             .get(scope)
             .cloned()
             .ok_or_else(|| "scope is not staged for OTA cutover".to_string())?;
+        if let AuraActivationScope::ManagedQuorum { participants, .. } = scope {
+            let approval_count = guard
+                .managed_quorum_approvals
+                .get(scope)
+                .map_or(0, BTreeSet::len);
+            if approval_count < participants.len() {
+                return Err(
+                    "managed quorum cutover requires approval from every participant".to_string(),
+                );
+            }
+        }
         let version = guard
             .staged_releases
             .get(&current.target_release_id)
@@ -259,10 +321,9 @@ impl OtaManager {
     pub(crate) async fn fail_scoped_cutover(
         &self,
         scope: &AuraActivationScope,
-        reason: impl Into<String>,
+        failure: AuraUpgradeFailure,
     ) -> Result<RollbackDirective, String> {
         let engine = ScopedOtaTransitionEngine::new();
-        let reason = reason.into();
         let mut guard = self.state.write().await;
         let current = guard
             .scoped_states
@@ -270,7 +331,7 @@ impl OtaManager {
             .cloned()
             .ok_or_else(|| "scope is not staged for OTA cutover".to_string())?;
         let (next, directive) = engine
-            .begin_rollback(current, reason)
+            .begin_rollback(current, failure)
             .ok_or_else(|| "rollback requires a legacy release".to_string())?;
         let version = guard
             .staged_releases
@@ -281,17 +342,103 @@ impl OtaManager {
         guard.pending_rollback = Some(RollbackIntent {
             from_release_id: directive.from_release_id,
             to_release_id: directive.to_release_id,
-            reason: directive.reason.clone(),
+            failure: directive.failure.clone(),
         });
         guard.launcher_queue.push_back(LauncherCommand::Rollback {
             from_release_id: directive.from_release_id,
             to_release_id: directive.to_release_id,
-            reason: directive.reason.clone(),
+            failure: directive.failure.clone(),
         });
         guard.scoped_states.insert(scope.clone(), next);
         guard.status = UpdateStatus::Installing { version };
         guard.validate()?;
         Ok(directive)
+    }
+
+    #[allow(dead_code)] // Used by rollout policy integration.
+    pub(crate) async fn handle_scoped_cutover_failure(
+        &self,
+        scope: &AuraActivationScope,
+        failure: AuraUpgradeFailure,
+        rollback_preference: AuraRollbackPreference,
+    ) -> Result<Option<RollbackDirective>, String> {
+        match rollback_preference {
+            AuraRollbackPreference::Automatic => {
+                self.fail_scoped_cutover(scope, failure).await.map(Some)
+            }
+            AuraRollbackPreference::ManualApproval => {
+                let mut guard = self.state.write().await;
+                let current = guard
+                    .scoped_states
+                    .get(scope)
+                    .cloned()
+                    .ok_or_else(|| "scope is not staged for OTA cutover".to_string())?;
+                let rollback_target = current
+                    .legacy_release_id
+                    .ok_or_else(|| "rollback requires a legacy release".to_string())?;
+                guard.pending_activation = None;
+                guard.pending_rollback = Some(RollbackIntent {
+                    from_release_id: current.target_release_id,
+                    to_release_id: rollback_target,
+                    failure: failure.clone(),
+                });
+                guard.status = UpdateStatus::Failed {
+                    reason: failure.detail.clone(),
+                };
+                guard.validate()?;
+                Ok(None)
+            }
+        }
+    }
+
+    #[allow(dead_code)] // Used by revocation handling.
+    pub(crate) async fn apply_scope_revocation(
+        &self,
+        scope: &AuraActivationScope,
+        revoked_release_id: AuraReleaseId,
+        failure: AuraUpgradeFailure,
+        rollback_preference: AuraRollbackPreference,
+    ) -> Result<Option<RollbackDirective>, String> {
+        {
+            let mut guard = self.state.write().await;
+            let current = guard
+                .scoped_states
+                .get(scope)
+                .cloned()
+                .ok_or_else(|| "scope is not staged for OTA handling".to_string())?;
+            if current.target_release_id != revoked_release_id {
+                return Ok(None);
+            }
+
+            if current.transition == TransitionState::AwaitingCutover
+                && current.residency != ReleaseResidency::TargetOnly
+            {
+                guard.scoped_states.remove(scope);
+                guard.staged_releases.remove(&revoked_release_id);
+                if guard
+                    .pending_activation
+                    .as_ref()
+                    .is_some_and(|intent| intent.to_release_id == revoked_release_id)
+                {
+                    guard.pending_activation = None;
+                }
+                if guard
+                    .pending_rollback
+                    .as_ref()
+                    .is_some_and(|intent| intent.from_release_id == revoked_release_id)
+                {
+                    guard.pending_rollback = None;
+                }
+                guard.status = UpdateStatus::Failed {
+                    reason: failure.detail.clone(),
+                };
+                guard.validate()?;
+                return Ok(None);
+            }
+        }
+
+        self.handle_scoped_cutover_failure(scope, failure, rollback_preference)
+            .await
     }
 
     #[allow(dead_code)] // Used by the upcoming launcher bridge.
@@ -364,9 +511,8 @@ impl OtaManager {
         &self,
         from_release_id: AuraReleaseId,
         to_release_id: AuraReleaseId,
-        reason: impl Into<String>,
+        failure: AuraUpgradeFailure,
     ) -> Result<(), String> {
-        let reason = reason.into();
         let mut guard = self.state.write().await;
         let version = guard
             .staged_releases
@@ -377,12 +523,12 @@ impl OtaManager {
         guard.pending_rollback = Some(RollbackIntent {
             from_release_id,
             to_release_id,
-            reason: reason.clone(),
+            failure: failure.clone(),
         });
         guard.launcher_queue.push_back(LauncherCommand::Rollback {
             from_release_id,
             to_release_id,
-            reason,
+            failure,
         });
         guard.status = UpdateStatus::Installing { version };
         guard.validate()
@@ -419,8 +565,8 @@ mod tests {
     use super::*;
     use aura_core::{AuthorityId, ContextId, DeviceId, Hash32};
     use aura_maintenance::{
-        AuraActivationScope, AuraCompatibilityClass, AuraReleaseId, ReleaseResidency,
-        TransitionState,
+        AuraActivationScope, AuraCompatibilityClass, AuraReleaseId, AuraRollbackPreference,
+        AuraUpgradeFailure, AuraUpgradeFailureClass, ReleaseResidency, TransitionState,
     };
     use aura_sync::services::{InFlightIncompatibilityAction, NewSessionAdmission};
     use serde::Serialize;
@@ -534,7 +680,14 @@ mod tests {
         assert_eq!(manager.active_release().await, Some(target.release_id));
 
         manager
-            .queue_rollback(target.release_id, current.release_id, "health gate failed")
+            .queue_rollback(
+                target.release_id,
+                current.release_id,
+                AuraUpgradeFailure::new(
+                    AuraUpgradeFailureClass::HealthGateFailed,
+                    "health gate failed",
+                ),
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -542,9 +695,93 @@ mod tests {
             Some(LauncherCommand::Rollback {
                 from_release_id: target.release_id,
                 to_release_id: current.release_id,
-                reason: "health gate failed".to_string(),
+                failure: AuraUpgradeFailure::new(
+                    AuraUpgradeFailureClass::HealthGateFailed,
+                    "health gate failed",
+                ),
             })
         );
+    }
+
+    #[tokio::test]
+    async fn manual_rollback_preference_holds_launcher_rollback() {
+        let manager = OtaManager::new();
+        let current = release(16, "16.0.0");
+        manager.register_staged_release(current.clone()).await;
+        let _ = manager.next_launcher_command().await;
+        manager
+            .stage_scope_upgrade(
+                scope(),
+                release(17, "17.0.0"),
+                Some(current.release_id),
+                AuraCompatibilityClass::ScopedHardFork,
+            )
+            .await
+            .unwrap();
+        let _ = manager.next_launcher_command().await;
+        manager
+            .begin_scoped_cutover(&scope(), InFlightIncompatibilityAction::Abort, false)
+            .await
+            .unwrap();
+        let _ = manager.next_launcher_command().await;
+
+        let directive = manager
+            .handle_scoped_cutover_failure(
+                &scope(),
+                AuraUpgradeFailure::new(
+                    AuraUpgradeFailureClass::HealthGateFailed,
+                    "manual rollback requested after health gate failure",
+                ),
+                AuraRollbackPreference::ManualApproval,
+            )
+            .await
+            .unwrap();
+        assert_eq!(directive, None);
+        assert_eq!(manager.next_launcher_command().await, None);
+        assert_eq!(
+            manager.status().await,
+            UpdateStatus::Failed {
+                reason: "manual rollback requested after health gate failure".to_string(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn staged_revocation_cancels_scope_before_cutover() {
+        let manager = OtaManager::new();
+        let target = release(18, "18.0.0");
+        manager
+            .stage_scope_upgrade(
+                scope(),
+                target.clone(),
+                Some(release(1, "1.0.0").release_id),
+                AuraCompatibilityClass::BackwardCompatible,
+            )
+            .await
+            .unwrap();
+        let _ = manager.next_launcher_command().await;
+
+        let directive = manager
+            .apply_scope_revocation(
+                &scope(),
+                target.release_id,
+                AuraUpgradeFailure::new(
+                    AuraUpgradeFailureClass::ReleaseRevoked,
+                    "staged release revoked",
+                ),
+                AuraRollbackPreference::Automatic,
+            )
+            .await
+            .unwrap();
+        assert_eq!(directive, None);
+        assert_eq!(manager.scope_state(&scope()).await, None);
+        assert_eq!(
+            manager.status().await,
+            UpdateStatus::Failed {
+                reason: "staged release revoked".to_string(),
+            }
+        );
+        assert_eq!(manager.next_launcher_command().await, None);
     }
 
     #[tokio::test]
@@ -622,6 +859,15 @@ mod tests {
             .await
             .unwrap();
         let _ = manager.next_launcher_command().await;
+        let AuraActivationScope::ManagedQuorum { participants, .. } = &scope else {
+            panic!("expected managed quorum scope");
+        };
+        for participant in participants {
+            manager
+                .record_managed_quorum_approval(&scope, *participant)
+                .await
+                .unwrap();
+        }
 
         let plan = manager
             .begin_scoped_cutover(&scope, InFlightIncompatibilityAction::Abort, false)
@@ -634,6 +880,44 @@ mod tests {
         let completed = manager.complete_scoped_cutover(&scope).await.unwrap();
         assert_eq!(completed.residency, ReleaseResidency::TargetOnly);
         assert_eq!(completed.transition, TransitionState::Idle);
+    }
+
+    #[tokio::test]
+    async fn managed_quorum_cutover_requires_member_approval() {
+        let manager = OtaManager::new();
+        let scope = managed_quorum_scope();
+        let current = release(14, "14.0.0");
+        manager.register_staged_release(current.clone()).await;
+        let _ = manager.next_launcher_command().await;
+        manager
+            .stage_scope_upgrade(
+                scope.clone(),
+                release(15, "15.0.0"),
+                Some(current.release_id),
+                AuraCompatibilityClass::ScopedHardFork,
+            )
+            .await
+            .unwrap();
+        let _ = manager.next_launcher_command().await;
+
+        let err = manager
+            .begin_scoped_cutover(&scope, InFlightIncompatibilityAction::Abort, false)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err,
+            "managed quorum cutover requires approval from every participant"
+        );
+
+        let outsider = AuthorityId::new_from_entropy([21; 32]);
+        let err = manager
+            .record_managed_quorum_approval(&scope, outsider)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err,
+            "managed quorum approval must come from a scope participant"
+        );
     }
 
     #[tokio::test]
@@ -664,7 +948,13 @@ mod tests {
         assert!(plan.partition_required);
 
         let rollback = manager
-            .fail_scoped_cutover(&scope(), "post-cutover health failure")
+            .fail_scoped_cutover(
+                &scope(),
+                AuraUpgradeFailure::new(
+                    AuraUpgradeFailureClass::HealthGateFailed,
+                    "post-cutover health failure",
+                ),
+            )
             .await
             .unwrap();
         assert_eq!(rollback.to_release_id, current.release_id);
@@ -673,7 +963,10 @@ mod tests {
             Some(LauncherCommand::Rollback {
                 from_release_id: rollback.from_release_id,
                 to_release_id: rollback.to_release_id,
-                reason: "post-cutover health failure".to_string(),
+                failure: AuraUpgradeFailure::new(
+                    AuraUpgradeFailureClass::HealthGateFailed,
+                    "post-cutover health failure",
+                ),
             })
         );
 
@@ -681,6 +974,59 @@ mod tests {
         assert_eq!(restored.residency, ReleaseResidency::LegacyOnly);
         assert_eq!(restored.transition, TransitionState::Idle);
         assert_eq!(manager.active_release().await, Some(current.release_id));
+    }
+
+    #[tokio::test]
+    async fn active_revocation_triggers_automatic_rollback() {
+        let manager = OtaManager::new();
+        let current = release(19, "19.0.0");
+        let target = release(20, "20.0.0");
+        manager.register_staged_release(current.clone()).await;
+        let _ = manager.next_launcher_command().await;
+        manager
+            .stage_scope_upgrade(
+                scope(),
+                target.clone(),
+                Some(current.release_id),
+                AuraCompatibilityClass::ScopedHardFork,
+            )
+            .await
+            .unwrap();
+        let _ = manager.next_launcher_command().await;
+        manager
+            .begin_scoped_cutover(&scope(), InFlightIncompatibilityAction::Abort, false)
+            .await
+            .unwrap();
+        let _ = manager.next_launcher_command().await;
+        manager.complete_scoped_cutover(&scope()).await.unwrap();
+
+        let rollback = manager
+            .apply_scope_revocation(
+                &scope(),
+                target.release_id,
+                AuraUpgradeFailure::new(
+                    AuraUpgradeFailureClass::ReleaseRevoked,
+                    "active release revoked",
+                ),
+                AuraRollbackPreference::Automatic,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            rollback.as_ref().map(|d| d.to_release_id),
+            Some(current.release_id)
+        );
+        assert_eq!(
+            manager.next_launcher_command().await,
+            Some(LauncherCommand::Rollback {
+                from_release_id: target.release_id,
+                to_release_id: current.release_id,
+                failure: AuraUpgradeFailure::new(
+                    AuraUpgradeFailureClass::ReleaseRevoked,
+                    "active release revoked",
+                ),
+            })
+        );
     }
 
     #[tokio::test]
@@ -767,12 +1113,27 @@ mod tests {
             .await
             .unwrap();
         let _ = quorum_manager.next_launcher_command().await;
+        let AuraActivationScope::ManagedQuorum { participants, .. } = &quorum_scope else {
+            panic!("expected managed quorum scope");
+        };
+        for participant in participants {
+            quorum_manager
+                .record_managed_quorum_approval(&quorum_scope, *participant)
+                .await
+                .unwrap();
+        }
         let quorum_plan = quorum_manager
             .begin_scoped_cutover(&quorum_scope, InFlightIncompatibilityAction::Delegate, true)
             .await
             .unwrap();
         let rollback = quorum_manager
-            .fail_scoped_cutover(&quorum_scope, "managed quorum health gate failed")
+            .fail_scoped_cutover(
+                &quorum_scope,
+                AuraUpgradeFailure::new(
+                    AuraUpgradeFailureClass::HealthGateFailed,
+                    "managed quorum health gate failed",
+                ),
+            )
             .await
             .unwrap();
         let _ = quorum_manager.next_launcher_command().await;
