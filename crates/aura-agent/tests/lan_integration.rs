@@ -568,6 +568,7 @@ async fn test_lan_chat_fact_ingress_commits_without_manual_inbox_poll() -> TestR
 }
 
 #[tokio::test]
+#[ignore = "deep lan"]
 async fn test_lan_invitation_dm_message_e2e() -> TestResult {
     let _lan_lock = lock_lan_test().await;
     let discovery_port = next_lan_port();
@@ -739,6 +740,7 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
 }
 
 #[tokio::test]
+#[ignore = "deep lan"]
 async fn test_lan_invitation_dm_message_e2e_without_descriptor_wait() -> TestResult {
     let _lan_lock = lock_lan_test().await;
     let discovery_port = next_lan_port();
@@ -840,6 +842,7 @@ async fn test_lan_invitation_dm_message_e2e_without_descriptor_wait() -> TestRes
 }
 
 #[tokio::test]
+#[ignore = "deep lan"]
 async fn test_lan_group_channel_invitation_roundtrip_plaintext() -> TestResult {
     let _lan_lock = lock_lan_test().await;
     let (agent_a, agent_b, app_a, app_b, channel_id) =
@@ -881,6 +884,7 @@ async fn test_lan_group_channel_invitation_roundtrip_plaintext() -> TestResult {
 }
 
 #[tokio::test]
+#[ignore = "deep lan"]
 async fn test_lan_strong_command_mute_blocks_cross_instance_delivery_until_unmute() -> TestResult {
     let _lan_lock = lock_lan_test().await;
     let (agent_a, agent_b, app_a, app_b, channel_id) =
@@ -959,6 +963,7 @@ async fn test_lan_strong_command_mute_blocks_cross_instance_delivery_until_unmut
 }
 
 #[tokio::test]
+#[ignore = "deep lan"]
 async fn test_lan_leave_then_join_reuses_channel_id_cross_instance() -> TestResult {
     let _lan_lock = lock_lan_test().await;
     let (_agent_a, agent_b, app_a, app_b, channel_id) =

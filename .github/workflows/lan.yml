@@ -1,0 +1,50 @@
+name: CI / Deep LAN
+run-name: ci/deep-lan/${{ github.event_name }}
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  AURA_SUPPRESS_NIX_WELCOME: 1
+
+jobs:
+  smoke:
+    name: LAN Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: lan-smoke
+      - run: nix develop --command just ci-lan-smoke
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: lan-deep
+          replay-command: nix develop --command just ci-lan-smoke
+
+  deep:
+    name: LAN Deep
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: lan-deep
+      - run: nix develop --command just ci-lan-deep
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: lan-deep
+          replay-command: nix develop --command just ci-lan-deep

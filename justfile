@@ -287,6 +287,14 @@ ci-harness-replay:
 ci-harness-browser:
     ./scripts/ci/harness-browser.sh
 
+# LAN smoke lane for workspace-fast coverage
+ci-lan-smoke:
+    cargo test -p aura-agent --test lan_integration -q
+
+# LAN deep lane for serialized end-to-end coverage
+ci-lan-deep:
+    cargo test -p aura-agent --test lan_integration -q -- --ignored
+
 # Test suite (excludes patchbay tests which run in ci-holepunch-tier2)
 ci-test:
     cargo test --workspace -- --skip patchbay
@@ -566,8 +574,8 @@ ci-dry-run profile="push":
 
     case "{{profile}}" in
         pr) total=13 ;;
-        push) total=24 ;;
-        all) total=32 ;;
+        push) total=25 ;;
+        all) total=33 ;;
         *)
             echo "Unknown ci-dry-run profile: {{profile}}"
             echo "Valid profiles: pr, push, all"
@@ -613,6 +621,7 @@ ci-dry-run profile="push":
         run_step "Harness Build"         "just ci-harness-build"
         run_step "Harness Contract"      "just ci-harness-contract"
         run_step "Harness Browser"       "just ci-harness-browser"
+        run_step "LAN Smoke"             "just ci-lan-smoke"
 
         # Deep conformance workflow lanes that run on push
         run_step "Conformance Suite"     "just ci-conformance"
@@ -630,6 +639,7 @@ ci-dry-run profile="push":
     if [[ "{{profile}}" == "all" ]]; then
         # Scheduled/manual-only lanes
         run_step "Harness Replay"                    "just ci-harness-replay"
+        run_step "LAN Deep"                          "just ci-lan-deep"
         run_step "Quint Typecheck"                   "just ci-quint-typecheck"
         run_step "Quint Verification"                "just ci-quint-verify"
         run_step "Holepunch Daily Smoke"             "just ci-holepunch-daily-smoke"
@@ -1088,6 +1098,14 @@ harness-replay *ARGS:
 # Run harness crate tests
 harness-test:
     cargo test -p aura-harness
+
+# Run LAN integration smoke coverage
+lan-test-smoke:
+    just ci-lan-smoke
+
+# Run LAN integration deep coverage
+lan-test-deep:
+    just ci-lan-deep
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Nix / Hermetic Builds
