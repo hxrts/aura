@@ -127,14 +127,19 @@ fn write_snapshot_file(path: &Path, snapshot_json: &str) -> io::Result<()> {
 pub fn semantic_ui_snapshot(state: &TuiState, app_snapshot: &StateSnapshot) -> UiSnapshot {
     let screen = map_screen(state.screen());
     let open_modal = state.modal_queue.current().and_then(map_modal);
-    let readiness = if matches!(state.modal_queue.current(), Some(QueuedModal::AccountSetup(_))) {
+    let readiness = if matches!(
+        state.modal_queue.current(),
+        Some(QueuedModal::AccountSetup(_))
+    ) {
         UiReadiness::Loading
     } else {
         UiReadiness::Ready
     };
 
-    let focused_control = if matches!(state.modal_queue.current(), Some(QueuedModal::AccountSetup(_)))
-    {
+    let focused_control = if matches!(
+        state.modal_queue.current(),
+        Some(QueuedModal::AccountSetup(_))
+    ) {
         Some(ControlId::OnboardingRoot)
     } else if let Some(modal_id) = open_modal {
         Some(ControlId::Modal(modal_id))
@@ -435,7 +440,7 @@ mod tests {
             .lists
             .iter()
             .find(|list| list.id == ListId::Navigation)
-            .expect("navigation list should exist");
+            .unwrap_or_else(|| panic!("navigation list should exist"));
         assert!(nav.items.iter().any(|item| item.selected));
     }
 }

@@ -18,9 +18,7 @@ use aura_core::effects::{
 use aura_core::identifiers::CeremonyId;
 use aura_core::tree::metadata::DeviceLeafMetadata;
 use aura_core::tree::LeafRole;
-use aura_core::{
-    hash, AttestedOp, AuthorityId, DeviceId, LeafId, LeafNode, NodeIndex, TreeOp,
-};
+use aura_core::{hash, AttestedOp, AuthorityId, DeviceId, LeafId, LeafNode, NodeIndex, TreeOp};
 use aura_protocol::effects::TreeEffects;
 use uuid::Uuid;
 

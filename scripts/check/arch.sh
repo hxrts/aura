@@ -388,6 +388,47 @@ check_effects() {
   session_uuid_hits=$(filter_test_modules "$session_uuid_hits")
   emit_hits "Implicit domain-to-runtime session-id crossings (use RuntimeChoreographySessionId bridge APIs)" "$session_uuid_hits"
 
+  section "VM composition admission — production starts must stay manifest-driven"
+
+  local vm_non_admitted_hits vm_manifest_bypass_hits vm_direct_admitted_hits
+  vm_non_admitted_hits=$(rg --no-heading -n "\.open_session\(" crates/aura-agent/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/runtime/choreo_engine.rs" \
+    | grep -v "crates/aura-agent/src/runtime/vm_host_bridge.rs" || true)
+  vm_non_admitted_hits=$(filter_test_modules "$vm_non_admitted_hits")
+  emit_hits "Non-admitted VM session starts in production code (use open_manifest_vm_session_admitted)" "$vm_non_admitted_hits"
+
+  vm_manifest_bypass_hits=$(rg --no-heading -n "\bopen_role_scoped_vm_session_admitted\(" crates/aura-agent/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/runtime/vm_host_bridge.rs" || true)
+  vm_manifest_bypass_hits=$(filter_test_modules "$vm_manifest_bypass_hits")
+  emit_hits "Manifest-bypass VM startup in production code (use open_manifest_vm_session_admitted)" "$vm_manifest_bypass_hits"
+
+  vm_direct_admitted_hits=$(rg --no-heading -n "\.open_session_admitted\(" crates/aura-agent/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/runtime/choreo_engine.rs" \
+    | grep -v "crates/aura-agent/src/runtime/vm_host_bridge.rs" || true)
+  vm_direct_admitted_hits=$(filter_test_modules "$vm_direct_admitted_hits")
+  emit_hits "Direct admitted VM startup bypasses manifest metadata (use open_manifest_vm_session_admitted)" "$vm_direct_admitted_hits"
+
+  section "Reconfiguration discipline — delegate/link only through runtime manager"
+
+  local direct_reconfig_controller_hits
+  direct_reconfig_controller_hits=$(rg --no-heading -n "ReconfigurationController" crates/aura-agent/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/lib.rs" \
+    | grep -v "crates/aura-agent/src/reconfiguration.rs" \
+    | grep -v "crates/aura-agent/src/runtime/services/reconfiguration_manager.rs" || true)
+  direct_reconfig_controller_hits=$(filter_test_modules "$direct_reconfig_controller_hits")
+  emit_hits "Direct ReconfigurationController usage in production code (use ReconfigurationManager)" "$direct_reconfig_controller_hits"
+
+  section "OTA scope model — no network-wide authoritative cutover in code"
+
+  local ota_global_cutover_hits
+  ota_global_cutover_hits=$(rg --no-heading -n "GlobalNetwork|NetworkWide|network-wide authoritative cutover|global cutover|whole Aura network.*cutover" \
+    crates/aura-maintenance/src \
+    crates/aura-sync/src/services \
+    crates/aura-agent/src/runtime/services/ota_manager.rs \
+    -g "*.rs" || true)
+  ota_global_cutover_hits=$(filter_test_modules "$ota_global_cutover_hits")
+  emit_hits "OTA code assumes a network-wide authoritative cutover model" "$ota_global_cutover_hits"
+
   # ─── Direct OS operations ───
   section "Direct OS operations — use effect traits instead"
 
@@ -1148,7 +1189,7 @@ check_serialization() {
   # SessionId::new outside tests
   section "Identifier invariants — SessionId::new() is test-only"
   local session_hits
-  session_hits=$(rg --no-heading "SessionId::new\\(" crates -g "*.rs" \
+  session_hits=$(rg --no-heading "\\bSessionId::new\\(" crates -g "*.rs" \
     | grep -Ev "/tests/|/benches/|/examples/|cfg(test)|cfg\\(test\\)" || true)
   emit_hits "SessionId::new() outside tests" "$session_hits"
 

@@ -404,9 +404,15 @@ mod tests {
     use uuid::Uuid;
 
     fn test_effects(authority_id: AuthorityId) -> Arc<AuraEffectSystem> {
+        let authority_bytes = authority_id.to_bytes();
+        let seed_salt = u64::from_le_bytes(authority_bytes[..8].try_into().expect("salt bytes"));
         Arc::new(
-            AuraEffectSystem::testing_for_authority(&AgentConfig::default(), authority_id)
-                .expect("testing effect system"),
+            AuraEffectSystem::simulation_for_test_for_authority_with_salt(
+                &AgentConfig::default(),
+                authority_id,
+                seed_salt,
+            )
+            .expect("testing effect system"),
         )
     }
 

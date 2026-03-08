@@ -119,6 +119,72 @@ fn category_c_recovery_global() -> GlobalType {
     )
 }
 
+// Mixed-class workload: invitation, sync, consensus, and reconfiguration-style steps
+// are interleaved in one choreography and then loaded concurrently as many sessions.
+fn mixed_protocol_pressure_global() -> GlobalType {
+    GlobalType::send(
+        "Coordinator",
+        "Witness",
+        Label::new("proposal"),
+        GlobalType::send(
+            "Witness",
+            "Coordinator",
+            Label::new("ack"),
+            GlobalType::send(
+                "Inviter",
+                "Invitee",
+                Label::new("invite_issue"),
+                GlobalType::send(
+                    "Primary",
+                    "Replica",
+                    Label::new("delta"),
+                    GlobalType::send(
+                        "Invitee",
+                        "Inviter",
+                        Label::new("invite_accept"),
+                        GlobalType::send(
+                            "Controller",
+                            "BundleA",
+                            Label::new("link_bundle"),
+                            GlobalType::send(
+                                "Replica",
+                                "Primary",
+                                Label::new("receipt"),
+                                GlobalType::send(
+                                    "Controller",
+                                    "BundleB",
+                                    Label::new("delegate_session"),
+                                    GlobalType::send(
+                                        "BundleB",
+                                        "Controller",
+                                        Label::new("verify_coherence"),
+                                        GlobalType::send(
+                                            "Inviter",
+                                            "Context",
+                                            Label::new("invite_commit"),
+                                            GlobalType::send(
+                                                "Primary",
+                                                "Relay",
+                                                Label::new("propagate"),
+                                                GlobalType::send(
+                                                    "Relay",
+                                                    "Replica",
+                                                    Label::new("relay_receipt"),
+                                                    GlobalType::End,
+                                                ),
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+}
+
 fn run_cooperative(image: &CodeImage, sessions: usize, max_rounds: usize) {
     let handler = NoOpHandler;
     let mut vm = VM::new(VMConfig::default());
@@ -144,18 +210,26 @@ fn run_threaded(image: &CodeImage, sessions: usize, max_rounds: usize, workers: 
 }
 
 fn bench_pair(c: &mut Criterion, bench_name: &str, global: GlobalType) {
+    bench_pair_with_params(c, bench_name, global, 32, 1024);
+}
+
+fn bench_pair_with_params(
+    c: &mut Criterion,
+    bench_name: &str,
+    global: GlobalType,
+    sessions: usize,
+    max_rounds: usize,
+) {
     let locals = project_locals(&global);
     let image = CodeImage::from_local_types(&locals, &global);
-    let sessions = 32usize;
-    let max_rounds = 1024usize;
 
     let mut group = c.benchmark_group(bench_name);
     group.throughput(Throughput::Elements(sessions as u64));
     group.bench_function("cooperative", |b| {
-        b.iter(|| run_cooperative(&image, sessions, max_rounds))
+        b.iter(|| run_cooperative(&image, sessions, max_rounds));
     });
     group.bench_function("threaded_4_workers", |b| {
-        b.iter(|| run_threaded(&image, sessions, max_rounds, 4))
+        b.iter(|| run_threaded(&image, sessions, max_rounds, 4));
     });
     group.finish();
 }
@@ -170,6 +244,27 @@ fn telltale_vm_runtime_benches(c: &mut Criterion) {
         c,
         "category_c_recovery_runtime",
         category_c_recovery_global(),
+    );
+    bench_pair_with_params(
+        c,
+        "mixed_class_throughput_runtime",
+        mixed_protocol_pressure_global(),
+        32,
+        2048,
+    );
+    bench_pair_with_params(
+        c,
+        "mixed_class_latency_runtime",
+        mixed_protocol_pressure_global(),
+        1,
+        2048,
+    );
+    bench_pair_with_params(
+        c,
+        "mixed_class_contention_runtime",
+        mixed_protocol_pressure_global(),
+        64,
+        4096,
     );
 }
 

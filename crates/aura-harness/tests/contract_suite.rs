@@ -33,6 +33,7 @@ fn contract_pty_control_path() {
         pattern: "contract-pty".to_string(),
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
+        selector: None,
     }));
 
     if let Err(error) = api.stop_all() {
@@ -77,6 +78,7 @@ fn contract_replay_and_artifacts_subsystems() {
         pattern: "contract-replay".to_string(),
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
+        selector: None,
     }));
 
     if let Err(error) = api.stop_all() {

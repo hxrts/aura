@@ -256,10 +256,8 @@ impl AuraVmProtocolExecutionPolicy {
             policy_ref: self.policy_ref.to_string(),
             protocol_class: self.protocol_class.to_string(),
             determinism_mode: determinism_mode_ref(self.determinism_mode).to_string(),
-            effect_determinism_tier: effect_determinism_tier_ref(
-                self.effect_determinism_tier,
-            )
-            .to_string(),
+            effect_determinism_tier: effect_determinism_tier_ref(self.effect_determinism_tier)
+                .to_string(),
             communication_replay_mode: communication_replay_mode_ref(
                 self.communication_replay_mode,
             )
@@ -368,13 +366,16 @@ pub fn policy_for_protocol(
     protocol_id: &str,
     policy_ref: Option<&str>,
 ) -> Result<AuraVmProtocolExecutionPolicy, AuraVmDeterminismProfileError> {
-    let protocol_class = TerminationProtocolClass::from_protocol_id(protocol_id).ok_or_else(|| {
-        AuraVmDeterminismProfileError::PolicyClassMismatch {
-            policy_ref: policy_ref.unwrap_or(AURA_VM_POLICY_PROD_DEFAULT).to_string(),
-            protocol_id: protocol_id.to_string(),
-            protocol_class: "unknown".to_string(),
-        }
-    })?;
+    let protocol_class =
+        TerminationProtocolClass::from_protocol_id(protocol_id).ok_or_else(|| {
+            AuraVmDeterminismProfileError::PolicyClassMismatch {
+                policy_ref: policy_ref
+                    .unwrap_or(AURA_VM_POLICY_PROD_DEFAULT)
+                    .to_string(),
+                protocol_id: protocol_id.to_string(),
+                protocol_class: "unknown".to_string(),
+            }
+        })?;
     let selected_policy_ref = policy_ref.unwrap_or(match protocol_class {
         TerminationProtocolClass::ConsensusFastPath => AURA_VM_POLICY_CONSENSUS_FAST_PATH,
         TerminationProtocolClass::ConsensusFallback => AURA_VM_POLICY_CONSENSUS_FALLBACK,
@@ -1024,7 +1025,10 @@ mod tests {
             Some(AURA_VM_POLICY_PROD_DEFAULT),
         )
         .expect("invitation policy must resolve");
-        assert_eq!(invitation.protocol_class, TerminationProtocolClass::RecoveryGrant);
+        assert_eq!(
+            invitation.protocol_class,
+            TerminationProtocolClass::RecoveryGrant
+        );
         assert_eq!(invitation.determinism_mode, DeterminismMode::Full);
     }
 

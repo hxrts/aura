@@ -96,9 +96,11 @@ pub fn startup_defaults_for_qualified_name(qualified_name: &str) -> CompositionS
             required_capabilities: &["byzantine_envelope", "termination_bounded"],
             determinism_policy_ref: "aura.vm.dkg_ceremony.prod",
         },
-        "guardian_auth_relational.GuardianAuthRelational" => CompositionStartupDefaults::production_default(
-            "aura.authentication.guardian_auth_relational",
-        ),
+        "guardian_auth_relational.GuardianAuthRelational" => {
+            CompositionStartupDefaults::production_default(
+                "aura.authentication.guardian_auth_relational",
+            )
+        }
         "invitation.InvitationExchange" => {
             CompositionStartupDefaults::production_default("aura.invitation.exchange")
         }
@@ -119,9 +121,11 @@ pub fn startup_defaults_for_qualified_name(qualified_name: &str) -> CompositionS
         "guardian_setup.GuardianSetup" => {
             CompositionStartupDefaults::production_default("aura.recovery.guardian_setup")
         }
-        "guardian_membership_change.GuardianMembershipChange" => CompositionStartupDefaults::production_default(
-            "aura.recovery.guardian_membership_change",
-        ),
+        "guardian_membership_change.GuardianMembershipChange" => {
+            CompositionStartupDefaults::production_default(
+                "aura.recovery.guardian_membership_change",
+            )
+        }
         "rendezvous.RendezvousExchange" => {
             CompositionStartupDefaults::production_default("aura.rendezvous.exchange")
         }
@@ -186,7 +190,10 @@ mod tests {
                 "aura.authentication.guardian_auth_relational",
             ),
             ("invitation.InvitationExchange", "aura.invitation.exchange"),
-            ("invitation_guardian.GuardianInvitation", "aura.invitation.guardian"),
+            (
+                "invitation_guardian.GuardianInvitation",
+                "aura.invitation.guardian",
+            ),
             (
                 "invitation_device_enrollment.DeviceEnrollment",
                 "aura.invitation.device_enrollment",
@@ -196,13 +203,19 @@ mod tests {
                 "guardian_ceremony.GuardianCeremony",
                 "aura.recovery.guardian_ceremony",
             ),
-            ("guardian_setup.GuardianSetup", "aura.recovery.guardian_setup"),
+            (
+                "guardian_setup.GuardianSetup",
+                "aura.recovery.guardian_setup",
+            ),
             (
                 "guardian_membership_change.GuardianMembershipChange",
                 "aura.recovery.guardian_membership_change",
             ),
             ("rendezvous.RendezvousExchange", "aura.rendezvous.exchange"),
-            ("rendezvous_relay.RelayedRendezvous", "aura.rendezvous.relay"),
+            (
+                "rendezvous_relay.RelayedRendezvous",
+                "aura.rendezvous.relay",
+            ),
             (
                 "session_coordination.SessionCoordinationChoreography",
                 "aura.session.coordination",

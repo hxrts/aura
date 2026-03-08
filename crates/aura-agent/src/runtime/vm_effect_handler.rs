@@ -4,9 +4,10 @@
 //! the VM host boundary while Aura routes protocol semantics through existing
 //! effect interpreters.
 
-use parking_lot::Mutex;
+#![allow(clippy::disallowed_types)] // Synchronous VM effect callbacks require short, non-async critical sections.
+
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use telltale_vm::effect::{AcquireDecision, EffectHandler, TopologyPerturbation};
 use telltale_vm::{OutputConditionHint, SessionId, Value};
 
@@ -14,11 +15,10 @@ use aura_core::effects::guard::EffectCommand;
 use aura_core::types::scope::ResourceScope;
 
 use super::vm_hardening::{
-    AURA_OUTPUT_PREDICATE_CHOICE, AURA_OUTPUT_PREDICATE_GUARD_ACQUIRE,
-    AURA_OUTPUT_PREDICATE_GUARD_RELEASE, AURA_OUTPUT_PREDICATE_OBSERVABLE,
-    AURA_OUTPUT_PREDICATE_STEP, AURA_OUTPUT_PREDICATE_TRANSPORT_RECV,
-    AURA_OUTPUT_PREDICATE_TRANSPORT_SEND, AuraVmSchedulerSignals,
-    AuraVmSchedulerSignalsProvider,
+    AuraVmSchedulerSignals, AuraVmSchedulerSignalsProvider, AURA_OUTPUT_PREDICATE_CHOICE,
+    AURA_OUTPUT_PREDICATE_GUARD_ACQUIRE, AURA_OUTPUT_PREDICATE_GUARD_RELEASE,
+    AURA_OUTPUT_PREDICATE_OBSERVABLE, AURA_OUTPUT_PREDICATE_STEP,
+    AURA_OUTPUT_PREDICATE_TRANSPORT_RECV, AURA_OUTPUT_PREDICATE_TRANSPORT_SEND,
 };
 
 /// Structured event emitted by [`AuraVmEffectHandler`] for debugging/replay hooks.
@@ -131,24 +131,48 @@ pub struct AuraVmEffectHandler {
     scheduler_signals: Mutex<AuraVmSchedulerSignals>,
 }
 
+fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .expect("VM effect handler mutex poisoned during deterministic runtime execution")
+}
+
 impl std::fmt::Debug for AuraVmEffectHandler {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuraVmEffectHandler")
             .field("identity", &self.identity)
-            .field("outbound_len", &self.outbound.lock().len())
-            .field("branch_choices_len", &self.branch_choices.lock().len())
-            .field("denied_layers_len", &self.denied_layers.lock().len())
-            .field("layer_scope_map_len", &self.layer_scope_map.lock().len())
-            .field("active_leases_len", &self.active_leases.lock().len())
+            .field("outbound_len", &lock_unpoisoned(&self.outbound).len())
+            .field(
+                "branch_choices_len",
+                &lock_unpoisoned(&self.branch_choices).len(),
+            )
+            .field(
+                "denied_layers_len",
+                &lock_unpoisoned(&self.denied_layers).len(),
+            )
+            .field(
+                "layer_scope_map_len",
+                &lock_unpoisoned(&self.layer_scope_map).len(),
+            )
+            .field(
+                "active_leases_len",
+                &lock_unpoisoned(&self.active_leases).len(),
+            )
             .field(
                 "output_predicates_len",
-                &self.output_predicates.lock().len(),
+                &lock_unpoisoned(&self.output_predicates).len(),
             )
-            .field("telemetry", &*self.telemetry.lock())
-            .field("events_len", &self.events.lock().len())
-            .field("envelopes_len", &self.envelopes.lock().len())
-            .field("topology_ticks_len", &self.topology_schedule.lock().len())
-            .field("scheduler_signals", &*self.scheduler_signals.lock())
+            .field("telemetry", &*lock_unpoisoned(&self.telemetry))
+            .field("events_len", &lock_unpoisoned(&self.events).len())
+            .field("envelopes_len", &lock_unpoisoned(&self.envelopes).len())
+            .field(
+                "topology_ticks_len",
+                &lock_unpoisoned(&self.topology_schedule).len(),
+            )
+            .field(
+                "scheduler_signals",
+                &*lock_unpoisoned(&self.scheduler_signals),
+            )
             .finish()
     }
 }
@@ -181,42 +205,45 @@ impl AuraVmEffectHandler {
 
     /// Queue a payload to be used by the next VM send hook.
     pub fn push_send_value(&self, value: Value) {
-        self.outbound.lock().push_back(value);
+        lock_unpoisoned(&self.outbound).push_back(value);
     }
 
     /// Queue a label to be selected by the next VM choose hook.
     pub fn push_branch_choice(&self, label: impl Into<String>) {
-        self.branch_choices.lock().push_back(label.into());
+        lock_unpoisoned(&self.branch_choices).push_back(label.into());
     }
 
     /// Mark a guard layer as denied for acquire checks.
     pub fn deny_layer(&self, layer: impl Into<String>) {
-        self.denied_layers.lock().insert(layer.into());
+        lock_unpoisoned(&self.denied_layers).insert(layer.into());
     }
 
     /// Remove a guard-layer deny rule.
     pub fn allow_layer(&self, layer: &str) {
-        self.denied_layers.lock().remove(layer);
+        lock_unpoisoned(&self.denied_layers).remove(layer);
     }
 
     /// Map a VM layer id to an Aura resource scope.
     pub fn bind_layer_scope(&self, layer: impl Into<String>, scope: ResourceScope) {
-        self.layer_scope_map.lock().insert(layer.into(), scope);
+        lock_unpoisoned(&self.layer_scope_map).insert(layer.into(), scope);
     }
 
     /// Resolve a mapped Aura resource scope for a VM layer id.
     pub fn layer_scope(&self, layer: &str) -> Option<ResourceScope> {
-        self.layer_scope_map.lock().get(layer).cloned()
+        lock_unpoisoned(&self.layer_scope_map).get(layer).cloned()
     }
 
     /// Snapshot currently active VM capability leases.
     pub fn active_leases(&self) -> Vec<AuraVmCapabilityLease> {
-        self.active_leases.lock().values().cloned().collect()
+        lock_unpoisoned(&self.active_leases)
+            .values()
+            .cloned()
+            .collect()
     }
 
     /// Snapshot deterministic acquire/release telemetry.
     pub fn telemetry(&self) -> AuraVmTelemetry {
-        self.telemetry.lock().clone()
+        lock_unpoisoned(&self.telemetry).clone()
     }
 
     /// Guard contention/failure counters suitable for structured telemetry export.
@@ -234,12 +261,12 @@ impl AuraVmEffectHandler {
 
     /// Snapshot the recorded VM effect events.
     pub fn events(&self) -> Vec<AuraVmEffectEvent> {
-        self.events.lock().clone()
+        lock_unpoisoned(&self.events).clone()
     }
 
     /// Drain queued effect envelopes emitted by VM callbacks.
     pub fn drain_envelopes(&self) -> Vec<AuraVmEffectEnvelope> {
-        let mut guard = self.envelopes.lock();
+        let mut guard = lock_unpoisoned(&self.envelopes);
         guard.drain(..).collect()
     }
 
@@ -248,13 +275,12 @@ impl AuraVmEffectHandler {
         &self,
         sink: impl Fn(&AuraVmEffectEnvelope) -> Result<(), String> + Send + Sync + 'static,
     ) {
-        *self.envelope_sink.lock() = Some(Arc::new(sink));
+        *lock_unpoisoned(&self.envelope_sink) = Some(Arc::new(sink));
     }
 
     /// Schedule one topology perturbation to be emitted at an exact scheduler tick.
     pub fn schedule_topology_event(&self, tick: u64, event: TopologyPerturbation) {
-        self.topology_schedule
-            .lock()
+        lock_unpoisoned(&self.topology_schedule)
             .entry(tick)
             .or_default()
             .push(event);
@@ -266,8 +292,7 @@ impl AuraVmEffectHandler {
         tick: u64,
         events: impl IntoIterator<Item = TopologyPerturbation>,
     ) {
-        self.topology_schedule
-            .lock()
+        lock_unpoisoned(&self.topology_schedule)
             .entry(tick)
             .or_default()
             .extend(events);
@@ -275,33 +300,32 @@ impl AuraVmEffectHandler {
 
     /// Remove all queued topology perturbations.
     pub fn clear_topology_schedule(&self) {
-        self.topology_schedule.lock().clear();
+        lock_unpoisoned(&self.topology_schedule).clear();
     }
 
     /// Override host-visible scheduler signals for the next admitted run.
     pub fn set_scheduler_signals(&self, signals: AuraVmSchedulerSignals) {
-        *self.scheduler_signals.lock() = signals.normalized();
+        *lock_unpoisoned(&self.scheduler_signals) = signals.normalized();
     }
 
     fn record(&self, event: AuraVmEffectEvent) {
-        self.events.lock().push(event);
+        lock_unpoisoned(&self.events).push(event);
     }
 
     fn record_output_predicate(&self, role: &str, predicate_ref: &str) {
-        self.output_predicates
-            .lock()
+        lock_unpoisoned(&self.output_predicates)
             .insert(role.to_string(), predicate_ref.to_string());
     }
 
     fn emit_envelope(&self, envelope: AuraVmEffectEnvelope) -> Result<(), String> {
-        if let Some(sink) = self.envelope_sink.lock().clone() {
+        if let Some(sink) = lock_unpoisoned(&self.envelope_sink).clone() {
             if let Err(error) = sink(&envelope) {
-                let mut telemetry = self.telemetry.lock();
+                let mut telemetry = lock_unpoisoned(&self.telemetry);
                 telemetry.envelope_sink_faults = telemetry.envelope_sink_faults.saturating_add(1);
                 return Err(format!("envelope sink failed: {error}"));
             }
         }
-        self.envelopes.lock().push_back(envelope);
+        lock_unpoisoned(&self.envelopes).push_back(envelope);
         Ok(())
     }
 }
@@ -309,7 +333,7 @@ impl AuraVmEffectHandler {
 impl AuraVmSchedulerSignalsProvider for AuraVmEffectHandler {
     fn scheduler_signals(&self) -> AuraVmSchedulerSignals {
         let telemetry = self.telemetry();
-        let mut signals = *self.scheduler_signals.lock();
+        let mut signals = *lock_unpoisoned(&self.scheduler_signals);
         signals.guard_contention_events = signals.guard_contention_events.saturating_add(
             telemetry
                 .acquire_denied
@@ -345,7 +369,7 @@ impl EffectHandler for AuraVmEffectHandler {
             format!("{role}->{partner}:{label}"),
         ))?;
 
-        if let Some(value) = self.outbound.lock().pop_front() {
+        if let Some(value) = lock_unpoisoned(&self.outbound).pop_front() {
             return Ok(value);
         }
 
@@ -392,7 +416,7 @@ impl EffectHandler for AuraVmEffectHandler {
             return Err("no labels available".to_string());
         }
 
-        let selected = if let Some(candidate) = self.branch_choices.lock().pop_front() {
+        let selected = if let Some(candidate) = lock_unpoisoned(&self.branch_choices).pop_front() {
             if labels.iter().any(|label| label == &candidate) {
                 candidate
             } else {
@@ -440,7 +464,7 @@ impl EffectHandler for AuraVmEffectHandler {
         layer: &str,
         _state: &[Value],
     ) -> Result<AcquireDecision, String> {
-        let granted = !self.denied_layers.lock().contains(layer);
+        let granted = !lock_unpoisoned(&self.denied_layers).contains(layer);
         let mapped_scope = self.layer_scope(layer);
         let evidence = Value::Str(layer.to_string());
         let event = AuraVmEffectEvent::Acquire {
@@ -464,7 +488,7 @@ impl EffectHandler for AuraVmEffectHandler {
         ))?;
 
         if granted {
-            self.active_leases.lock().insert(
+            lock_unpoisoned(&self.active_leases).insert(
                 (sid, role.to_string(), layer.to_string()),
                 AuraVmCapabilityLease {
                     sid,
@@ -476,7 +500,7 @@ impl EffectHandler for AuraVmEffectHandler {
             );
             Ok(AcquireDecision::Grant(evidence))
         } else {
-            let mut telemetry = self.telemetry.lock();
+            let mut telemetry = lock_unpoisoned(&self.telemetry);
             telemetry.acquire_denied = telemetry.acquire_denied.saturating_add(1);
             Ok(AcquireDecision::Block)
         }
@@ -503,12 +527,13 @@ impl EffectHandler for AuraVmEffectHandler {
             "vm.release",
             format!("sid={sid}:{role}:{layer}"),
         ))?;
-        let removed = self
-            .active_leases
-            .lock()
-            .remove(&(sid, role.to_string(), layer.to_string()));
+        let removed = lock_unpoisoned(&self.active_leases).remove(&(
+            sid,
+            role.to_string(),
+            layer.to_string(),
+        ));
         if removed.is_none() {
-            let mut telemetry = self.telemetry.lock();
+            let mut telemetry = lock_unpoisoned(&self.telemetry);
             telemetry.release_faults = telemetry.release_faults.saturating_add(1);
             return Err(format!(
                 "release without active lease sid={sid} role={role} layer={layer}"
@@ -523,9 +548,7 @@ impl EffectHandler for AuraVmEffectHandler {
         role: &str,
         _state: &[Value],
     ) -> Option<OutputConditionHint> {
-        let predicate_ref = self
-            .output_predicates
-            .lock()
+        let predicate_ref = lock_unpoisoned(&self.output_predicates)
             .get(role)
             .cloned()
             .unwrap_or_else(|| AURA_OUTPUT_PREDICATE_OBSERVABLE.to_string());
@@ -536,9 +559,7 @@ impl EffectHandler for AuraVmEffectHandler {
     }
 
     fn topology_events(&self, tick: u64) -> Result<Vec<TopologyPerturbation>, String> {
-        let mut events = self
-            .topology_schedule
-            .lock()
+        let mut events = lock_unpoisoned(&self.topology_schedule)
             .remove(&tick)
             .unwrap_or_default();
         events.sort_by_key(TopologyPerturbation::ordering_key);

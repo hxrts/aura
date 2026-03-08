@@ -51,6 +51,9 @@
 
 pub mod ack_routing;
 pub mod maintenance;
+pub mod ota_distribution;
+pub mod ota_policy;
+pub mod ota_transition;
 pub mod sync;
 
 // Re-export key service types
@@ -64,6 +67,15 @@ pub use aura_maintenance::{
     UpgradeProposalMetadata, MAINTENANCE_FACT_TYPE_ID,
 };
 pub use maintenance::{MaintenanceService, MaintenanceServiceConfig, UpgradeProposal};
+pub use ota_distribution::{OtaDistributionService, ReleaseBundlePublication};
+pub use ota_policy::{
+    ActivationCandidate, ActivationDecision, DiscoveryCandidate, DiscoveryDecision,
+    OtaPolicyEvaluator, SharingCandidate, SharingDecision,
+};
+pub use ota_transition::{
+    InFlightIncompatibilityAction, NewSessionAdmission, RollbackDirective,
+    ScopedOtaTransitionEngine, ScopedUpgradeState, SessionCompatibilityPlan,
+};
 pub use sync::{SyncService, SyncServiceBuilder, SyncServiceConfig, SyncServiceHealth};
 
 use serde::{Deserialize, Serialize};

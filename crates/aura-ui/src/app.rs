@@ -1177,9 +1177,8 @@ fn submit_runtime_modal_action(
                                     invitation.invitation_type,
                                     InvitationBridgeType::DeviceEnrollment { .. }
                                 ) {
-                                    controller_for_import.push_log(
-                                        "accept_invitation refresh_settings start",
-                                    );
+                                    controller_for_import
+                                        .push_log("accept_invitation refresh_settings start");
                                     harness_log("accept_invitation refresh_settings start");
                                     let _ = settings_workflows::refresh_settings_from_runtime(
                                         &app_core,
@@ -1191,9 +1190,8 @@ fn submit_runtime_modal_action(
                                     controller.complete_runtime_modal_success(
                                         "Device enrollment complete",
                                     );
-                                    controller_for_import.push_log(
-                                        "accept_invitation complete device_enrollment",
-                                    );
+                                    controller_for_import
+                                        .push_log("accept_invitation complete device_enrollment");
                                     harness_log("accept_invitation complete device_enrollment");
                                 } else {
                                     if let InvitationBridgeType::Contact { nickname } =
@@ -1208,10 +1206,9 @@ fn submit_runtime_modal_action(
                                             display_name,
                                             false,
                                         );
-                                        controller_for_import
-                                            .set_selected_contact_authority_id(
-                                                invitation.sender_id,
-                                            );
+                                        controller_for_import.set_selected_contact_authority_id(
+                                            invitation.sender_id,
+                                        );
                                         controller.complete_runtime_invitation_import();
                                         controller_for_import
                                             .push_log("accept_invitation complete generic");
@@ -1221,10 +1218,9 @@ fn submit_runtime_modal_action(
                                     controller_for_import
                                         .push_log("accept_invitation refresh_contacts start");
                                     harness_log("accept_invitation refresh_contacts start");
-                                    let _ = load_contacts_runtime_view(
-                                        controller_for_import.clone(),
-                                    )
-                                    .await;
+                                    let _ =
+                                        load_contacts_runtime_view(controller_for_import.clone())
+                                            .await;
                                     controller_for_import
                                         .push_log("accept_invitation refresh_contacts done");
                                     harness_log("accept_invitation refresh_contacts done");
@@ -1239,16 +1235,15 @@ fn submit_runtime_modal_action(
                                     format!("accept_invitation runtime_accept error={error}");
                                 controller_for_import.push_log(&error_log);
                                 harness_log(&error_log);
-                                controller.runtime_error_toast(error.to_string())
+                                controller.runtime_error_toast(error.to_string());
                             }
                         }
                     }
                     Err(error) => {
-                        let error_log =
-                            format!("accept_invitation import_details error={error}");
+                        let error_log = format!("accept_invitation import_details error={error}");
                         controller_for_import.push_log(&error_log);
                         harness_log(&error_log);
-                        controller.runtime_error_toast(error.to_string())
+                        controller.runtime_error_toast(error.to_string());
                     }
                 }
                 rerender_for_import();
@@ -2351,8 +2346,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut chat_for_initial = chat_runtime;
         let controller_for_chat_initial = controller_for_runtime.clone();
         spawn(async move {
-            chat_for_initial
-                .set(load_chat_runtime_view(controller_for_chat_initial.clone()).await);
+            chat_for_initial.set(load_chat_runtime_view(controller_for_chat_initial.clone()).await);
             controller_for_chat_initial.request_rerender();
         });
 
@@ -2375,8 +2369,9 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut notifications_for_initial = notifications_runtime;
         let controller_for_notifications_initial = controller_for_runtime.clone();
         spawn(async move {
-            notifications_for_initial
-                .set(load_notifications_runtime_view(controller_for_notifications_initial.clone()).await);
+            notifications_for_initial.set(
+                load_notifications_runtime_view(controller_for_notifications_initial.clone()).await,
+            );
             controller_for_notifications_initial.request_rerender();
         });
 

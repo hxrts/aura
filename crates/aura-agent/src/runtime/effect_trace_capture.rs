@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::Path;
 
-use aura_core::AuraVmDeterminismProfileV1;
 use aura_core::AuraFault;
+use aura_core::AuraVmDeterminismProfileV1;
 use serde::{Deserialize, Serialize};
 use telltale_vm::{canonical_effect_trace, EffectTraceCaptureMode, EffectTraceEntry, VMConfig};
 

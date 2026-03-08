@@ -259,9 +259,11 @@ The creation and lifecycle of sessions are themselves managed as choreographic p
 
 ### Telltale Integration
 
-Aura executes choreography sessions through Telltale integration in Layer 6. `AuraProtocolAdapter` bridges generated role runners to `ChoreographicEffects`. `AuraChoreoEngine` runs Telltale VM sessions and exposes deterministic trace and replay APIs.
+Aura executes production choreography sessions through the Telltale VM in Layer 6. Production startup is manifest-driven: generated `CompositionManifest` metadata defines the protocol id, required capabilities, determinism profile reference, and link/delegation constraints for each choreography. `AuraChoreoEngine` runs admitted VM sessions and exposes deterministic trace and replay APIs.
 
-`AuraVmEffectHandler` is the synchronous VM host boundary. All real async side effects run through `EffectInterpreter` and `EffectCommand`. The simulator provides an async request and resume boundary for fault and scenario middleware.
+`AuraVmEffectHandler` is the synchronous VM host boundary. `open_manifest_vm_session_admitted(...)` is the canonical runtime entrypoint for production VM sessions. Non-admitted session startup helpers are test-only. All real async side effects run through `EffectInterpreter` and `EffectCommand`. The simulator provides an async request and resume boundary for fault and scenario middleware.
+
+Dynamic reconfiguration follows the same rule. Runtime code must go through `ReconfigurationManager` for link and delegation so bundle evidence, capability admission, and coherence checks are enforced before any transfer occurs.
 
 ### VM Profiles
 
@@ -270,6 +272,8 @@ Telltale VM execution is configured through explicit runtime profiles. Use `buil
 `AuraVmHardeningProfile` controls safety posture. The `Dev` profile enables host contract assertions and full trace capture. The `Ci` profile enforces strict output predicate allow-lists and sequence replay mode. The `Prod` profile preserves safety checks with bounded overhead.
 
 `AuraVmParityProfile` controls deterministic cross-target lanes. `NativeCooperative` provides the native parity baseline. `WasmCooperative` provides the WASM parity lane. Both use cooperative scheduling and strict effect determinism.
+
+Determinism and scheduler policy are protocol-driven rather than ad hoc. Admission resolves the protocol class, applies the configured determinism tier and replay mode, validates the selected VM profile, and chooses scheduler controls from weighted measure plus guard-capacity signals. Production code should not mutate these settings directly after admission.
 
 ## Fact Registry
 

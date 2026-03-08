@@ -109,11 +109,11 @@ fn default_metrics() -> ChoreographyMetrics {
 impl Default for ChoreographySessionState {
     fn default() -> Self {
         Self {
-            session_id: RuntimeChoreographySessionId::from_uuid(Uuid::nil()),
+            session_id: RuntimeChoreographySessionId::from_uuid(Uuid::from_bytes([0xA5; 16])),
             context_id: ContextId::new_from_entropy([0; 32]),
             roles: Vec::new(),
             current_role: ChoreographicRole::new(
-                DeviceId::from_uuid(Uuid::nil()),
+                DeviceId::from_uuid(Uuid::from_bytes([0x5A; 16])),
                 RoleIndex::new(0).expect("role index"),
             ),
             timeout_ms: None,
@@ -125,6 +125,7 @@ impl Default for ChoreographySessionState {
 
 #[allow(dead_code)]
 impl ChoreographyState {
+    #[allow(clippy::disallowed_methods)] // Fallback for tests/sync callers outside a Tokio task.
     fn current_binding_key() -> ExecutionBindingKey {
         tokio::task::try_id()
             .map(ExecutionBindingKey::Task)

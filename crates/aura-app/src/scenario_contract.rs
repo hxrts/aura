@@ -91,7 +91,7 @@ pub enum VariableAction {
     Extract {
         name: String,
         regex: String,
-        group: usize,
+        group: u32,
         from: ExtractSource,
     },
 }
@@ -161,7 +161,7 @@ pub struct SemanticScenarioFileStep {
     pub operation_state: Option<OperationState>,
     pub name: Option<String>,
     pub regex: Option<String>,
-    pub group: Option<usize>,
+    pub group: Option<u32>,
     pub from: Option<ExtractSource>,
 }
 
@@ -338,7 +338,7 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
 }
 
 fn required<T>(value: Option<T>, field: &str, action: SemanticActionKind) -> Result<T, String> {
-    value.ok_or_else(|| format!("semantic action {:?} requires {field}", action))
+    value.ok_or_else(|| format!("semantic action {action:?} requires {field}"))
 }
 
 #[cfg(test)]
@@ -453,7 +453,7 @@ mod tests {
 
         let error = ScenarioStep::try_from(step)
             .expect_err("screen expectation without screen_id must fail");
-        assert!(error.to_string().contains("screen_id"));
+        assert!(error.contains("screen_id"));
     }
 
     #[test]

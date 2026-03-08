@@ -92,24 +92,40 @@ async fn test_home_signals_initialization() {
     match homes_state {
         Ok(state) => {
             println!("  HOMES_SIGNAL initialized");
-            if let Some(home_state) = state.current_home() {
-                println!("  Home ID: {home_id}", home_id = home_state.id);
-                println!("  Home name: {name}", name = home_state.name);
-                println!(
-                    "  Member count: {member_count}",
-                    member_count = home_state.member_count
-                );
-                // Default state should have empty/default values
-                assert!(
-                    home_state.members.is_empty() || home_state.id == ChannelId::default(),
-                    "Initial home state should be empty or default"
-                );
-            } else {
-                println!("  No current home yet");
-            }
+            let home_state = state
+                .current_home()
+                .expect("account bootstrap should create a current home");
+            println!("  Home ID: {home_id}", home_id = home_state.id);
+            println!("  Home name: {name}", name = home_state.name);
+            println!(
+                "  Member count: {member_count}",
+                member_count = home_state.member_count
+            );
+            assert_ne!(
+                home_state.id,
+                ChannelId::default(),
+                "bootstrap home should have a real channel id"
+            );
+            assert_eq!(
+                home_state.name, "TestUser-home-init's Home",
+                "bootstrap home name should derive from account nickname"
+            );
+            assert_eq!(
+                home_state.member_count, 1,
+                "bootstrap home should contain the creator only"
+            );
+            assert_eq!(
+                home_state.members.len(),
+                1,
+                "bootstrap home should expose a single initial member"
+            );
+            assert!(
+                home_state.is_primary,
+                "bootstrap home should be marked as the primary home"
+            );
         }
         Err(e) => {
-            println!("  HOMES_SIGNAL read error (expected for uninitialized): {e:?}");
+            panic!("HOMES_SIGNAL should be initialized after account creation: {e:?}");
         }
     }
 
@@ -126,11 +142,17 @@ async fn test_home_signals_initialization() {
                 "  Current home ID: {current_home_id:?}",
                 current_home_id = state.current_home_id()
             );
-            // Should start with no homes
-            assert!(state.is_empty(), "Initial homes state should be empty");
+            assert_eq!(
+                home_count, 1,
+                "account bootstrap should register exactly one initial home"
+            );
+            assert!(
+                state.current_home_id().is_some(),
+                "bootstrap state should select the current home"
+            );
         }
         Err(e) => {
-            println!("  HOMES_SIGNAL read error (expected for uninitialized): {e:?}");
+            panic!("HOMES_SIGNAL should be initialized after account creation: {e:?}");
         }
     }
 

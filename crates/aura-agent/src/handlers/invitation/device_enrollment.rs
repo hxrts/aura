@@ -157,20 +157,18 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
             )
             .await
             .map_err(AgentError::internal)?;
-            handler.push_send_bytes(
-                to_vec(&request).map_err(|error| {
-                    AgentError::internal(format!("device enrollment request encode failed: {error}"))
-                })?,
-            );
-            handler.push_send_bytes(
-                to_vec(&confirm).map_err(|error| {
-                    AgentError::internal(format!("device enrollment confirm encode failed: {error}"))
-                })?,
-            );
+            handler.push_send_bytes(to_vec(&request).map_err(|error| {
+                AgentError::internal(format!("device enrollment request encode failed: {error}"))
+            })?);
+            handler.push_send_bytes(to_vec(&confirm).map_err(|error| {
+                AgentError::internal(format!("device enrollment confirm encode failed: {error}"))
+            })?);
 
             let loop_result = loop {
                 let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!("device enrollment initiator VM step failed: {error}"))
+                    AgentError::internal(format!(
+                        "device enrollment initiator VM step failed: {error}"
+                    ))
                 })?;
                 flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles)
                     .await
@@ -271,15 +269,15 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
             )
             .await
             .map_err(AgentError::internal)?;
-            handler.push_send_bytes(
-                to_vec(&accept).map_err(|error| {
-                    AgentError::internal(format!("device enrollment accept encode failed: {error}"))
-                })?,
-            );
+            handler.push_send_bytes(to_vec(&accept).map_err(|error| {
+                AgentError::internal(format!("device enrollment accept encode failed: {error}"))
+            })?);
 
             let loop_result = loop {
                 let step = engine.step().map_err(|error| {
-                    AgentError::internal(format!("device enrollment invitee VM step failed: {error}"))
+                    AgentError::internal(format!(
+                        "device enrollment invitee VM step failed: {error}"
+                    ))
                 })?;
                 flush_pending_vm_sends(effects.as_ref(), handler.as_ref(), &peer_roles)
                     .await
@@ -294,7 +292,9 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
                 )
                 .await
                 .map_err(|error| {
-                    AgentError::internal(format!("device enrollment invitee receive failed: {error}"))
+                    AgentError::internal(format!(
+                        "device enrollment invitee receive failed: {error}"
+                    ))
                 })? {
                     inject_vm_receive(&mut engine, vm_sid, &blocked)
                         .map_err(AgentError::internal)?;

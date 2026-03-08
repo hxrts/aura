@@ -199,6 +199,7 @@ args = ["-lc", "yes churn"]
         pattern: "__never_matches__".to_string(),
         timeout_ms: 500,
         screen_source: ScreenSource::Default,
+        selector: None,
     });
     let elapsed = started_at.elapsed();
 

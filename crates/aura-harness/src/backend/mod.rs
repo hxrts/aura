@@ -106,7 +106,7 @@ fn tool_key_sequence(key: ToolKey) -> &'static str {
 
 pub enum BackendHandle {
     Local(local_pty::LocalPtyBackend),
-    Browser(playwright_browser::PlaywrightBrowserBackend),
+    Browser(Box<playwright_browser::PlaywrightBrowserBackend>),
     Ssh(ssh_tunnel::SshTunnelBackend),
 }
 
@@ -120,9 +120,9 @@ impl BackendHandle {
             InstanceMode::Local => Ok(Self::Local(local_pty::LocalPtyBackend::new(
                 config, pty_rows, pty_cols,
             ))),
-            InstanceMode::Browser => Ok(Self::Browser(
+            InstanceMode::Browser => Ok(Self::Browser(Box::new(
                 playwright_browser::PlaywrightBrowserBackend::new(config)?,
-            )),
+            ))),
             InstanceMode::Ssh => Ok(Self::Ssh(ssh_tunnel::SshTunnelBackend::new(config))),
         }
     }
@@ -130,7 +130,7 @@ impl BackendHandle {
     pub fn as_trait_mut(&mut self) -> &mut dyn InstanceBackend {
         match self {
             Self::Local(backend) => backend,
-            Self::Browser(backend) => backend,
+            Self::Browser(backend) => backend.as_mut(),
             Self::Ssh(backend) => backend,
         }
     }
@@ -138,7 +138,7 @@ impl BackendHandle {
     pub fn as_trait(&self) -> &dyn InstanceBackend {
         match self {
             Self::Local(backend) => backend,
-            Self::Browser(backend) => backend,
+            Self::Browser(backend) => backend.as_ref(),
             Self::Ssh(backend) => backend,
         }
     }

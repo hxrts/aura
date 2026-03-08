@@ -64,6 +64,7 @@ fn replay_runner_reexecutes_recorded_actions_without_llm() {
         pattern: "phase2-replay".to_string(),
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
+        selector: None,
     }));
     if let Err(error) = tool_api.stop_all() {
         panic!("stop_all failed: {error}");

@@ -378,7 +378,7 @@ fn execute_step(
                 )
             })?;
             let group = step.group.unwrap_or(1);
-            let capture = captures.get(group).ok_or_else(|| {
+            let capture = captures.get(group as usize).ok_or_else(|| {
                 anyhow!(
                     "step {} extract_var missing capture group {}",
                     step.id,
@@ -1195,7 +1195,11 @@ fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
     }
 
     if let Some(list_id) = step.list_id {
-        let Some(list) = snapshot.lists.iter().find(|candidate| candidate.id == list_id) else {
+        let Some(list) = snapshot
+            .lists
+            .iter()
+            .find(|candidate| candidate.id == list_id)
+        else {
             return false;
         };
         if let Some(item_id) = step.item_id.as_deref() {
@@ -1269,25 +1273,22 @@ fn wait_for_semantic_state(
     timeout_ms: u64,
 ) -> Result<()> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-    let mut last_snapshot = None;
     loop {
         let snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
         if semantic_wait_matches(step, &snapshot) {
             return Ok(());
         }
-        last_snapshot = Some(snapshot);
         if Instant::now() >= deadline {
-            break;
+            bail!(
+                "step {} semantic wait timed out on instance {} ({}) last_snapshot={:?}",
+                step.id,
+                instance_id,
+                semantic_wait_description(step),
+                snapshot
+            );
         }
         std::thread::sleep(Duration::from_millis(40));
     }
-    bail!(
-        "step {} semantic wait timed out on instance {} ({}) last_snapshot={:?}",
-        step.id,
-        instance_id,
-        semantic_wait_description(step),
-        last_snapshot
-    )
 }
 
 fn screen_contains(tool_api: &mut ToolApi, instance_id: &str, needle: &str) -> Result<bool> {

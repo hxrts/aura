@@ -271,18 +271,18 @@ async fn admitted_sync_sessions_select_progress_aware_scheduler() {
     assert_eq!(scheduler_policy.policy_ref, AURA_VM_SCHED_PROGRESS_AWARE);
     apply_scheduler_execution_policy(&mut config, &scheduler_policy);
 
-    let mut engine = AuraChoreoEngine::new_with_contracts(
-        config,
-        handler,
-        Some(RuntimeContracts::full()),
-    )
-    .expect("engine with admitted scheduler policy");
+    let mut engine =
+        AuraChoreoEngine::new_with_contracts(config, handler, Some(RuntimeContracts::full()))
+            .expect("engine with admitted scheduler policy");
     engine
         .open_session_admitted(&image, "aura.sync.epoch_rotation", None, &[])
         .await
         .expect("admitted session should open");
 
-    assert_eq!(engine.vm_config().sched_policy, scheduler_policy.sched_policy);
+    assert_eq!(
+        engine.vm_config().sched_policy,
+        scheduler_policy.sched_policy
+    );
 }
 
 #[tokio::test]
@@ -302,12 +302,9 @@ async fn admission_rejects_scheduler_drift_under_budget_pressure() {
     );
     apply_protocol_execution_policy(&mut config, policy);
 
-    let mut engine = AuraChoreoEngine::new_with_contracts(
-        config,
-        handler,
-        Some(RuntimeContracts::full()),
-    )
-    .expect("engine should admit base config");
+    let mut engine =
+        AuraChoreoEngine::new_with_contracts(config, handler, Some(RuntimeContracts::full()))
+            .expect("engine should admit base config");
     let err = engine
         .open_session_admitted(&image, "aura.recovery.grant", None, &[])
         .await

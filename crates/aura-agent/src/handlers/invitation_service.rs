@@ -72,8 +72,7 @@ impl InvitationServiceApi {
     fn should_track_ceremony(invitation_type: &InvitationType) -> bool {
         matches!(
             invitation_type,
-            InvitationType::Guardian { .. }
-                | InvitationType::Channel { .. }
+            InvitationType::Guardian { .. } | InvitationType::Channel { .. }
         )
     }
 

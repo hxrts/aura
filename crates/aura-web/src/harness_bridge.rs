@@ -26,9 +26,9 @@ fn serialize_ui_snapshot(snapshot: &UiSnapshot) -> JsValue {
     match to_value(snapshot) {
         Ok(value) => value,
         Err(error) => {
-            web_sys::console::error_1(
-                &JsValue::from_str(&format!("failed to serialize UiSnapshot: {error}")),
-            );
+            web_sys::console::error_1(&JsValue::from_str(&format!(
+                "failed to serialize UiSnapshot: {error}"
+            )));
             JsValue::NULL
         }
     }

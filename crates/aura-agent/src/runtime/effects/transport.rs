@@ -349,7 +349,8 @@ mod tests {
         let fallback_context = default_context_id_for_authority(peer);
 
         let config = AgentConfig::default();
-        let effects = AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap();
+        let effects =
+            AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap();
         let manager = RendezvousManager::new_with_default_udp(
             authority,
             RendezvousManagerConfig::default(),

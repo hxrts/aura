@@ -645,9 +645,8 @@ impl SessionOperations {
                     }
                 }
             }
-            .and_then(|result| {
+            .map(|_| {
                 let _ = close_and_reap_vm_session(&mut engine, vm_sid);
-                Ok(result)
             })
         }
         .await;
@@ -776,9 +775,8 @@ impl SessionOperations {
                     }
                 }
             }
-            .and_then(|result| {
+            .map(|_| {
                 let _ = close_and_reap_vm_session(&mut engine, vm_sid);
-                Ok(result)
             })
         }
         .await;
@@ -871,9 +869,8 @@ impl SessionOperations {
                     }
                 }
             }
-            .and_then(|result| {
+            .map(|_| {
                 let _ = close_and_reap_vm_session(&mut engine, vm_sid);
-                Ok(result)
             })
         }
         .await;

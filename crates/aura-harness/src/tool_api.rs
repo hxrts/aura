@@ -215,7 +215,9 @@ impl ToolApi {
             ToolRequest::UiState { instance_id } => self
                 .coordinator
                 .ui_snapshot(&instance_id)
-                .and_then(|snapshot: UiSnapshot| serde_json::to_value(snapshot).map_err(Into::into)),
+                .and_then(|snapshot: UiSnapshot| {
+                    serde_json::to_value(snapshot).map_err(Into::into)
+                }),
             ToolRequest::SendKeys { instance_id, keys } => self
                 .coordinator
                 .send_keys(&instance_id, &keys)

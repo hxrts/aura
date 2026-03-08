@@ -243,7 +243,7 @@ pub struct ScenarioStep {
     /// Regular expression for `extract_var`.
     pub regex: Option<String>,
     /// Capture group index for `extract_var`.
-    pub group: Option<usize>,
+    pub group: Option<u32>,
     /// Source field for `extract_var`: `screen`, `raw_screen`, `authoritative_screen`, or `normalized_screen`.
     pub from: Option<String>,
     /// Substring expectation for typed assertion actions.
@@ -310,10 +310,9 @@ impl ScenarioStep {
                 parse_input_key(self.key.as_deref().unwrap_or_default())?,
                 self.repeat.unwrap_or(1).max(1),
             ))),
-            ScenarioAction::ClickButton => match self.control_id {
-                Some(control_id) => Some(SemanticAction::Ui(UiAction::Activate(control_id))),
-                None => None,
-            },
+            ScenarioAction::ClickButton => self
+                .control_id
+                .map(|control_id| SemanticAction::Ui(UiAction::Activate(control_id))),
             ScenarioAction::FillInput => match self.field_id {
                 Some(field_id) => Some(SemanticAction::Ui(UiAction::Fill(
                     field_id,
@@ -394,7 +393,7 @@ impl ScenarioStep {
 }
 
 fn required_field(value: Option<String>, field: &str, action: ScenarioAction) -> Result<String> {
-    value.ok_or_else(|| anyhow!("action {} requires {field}", action))
+    value.ok_or_else(|| anyhow!("action {action} requires {field}"))
 }
 
 fn parse_extract_source(value: &str) -> Result<ExtractSource> {
@@ -943,9 +942,7 @@ mod tests {
             ..ScenarioStep::default()
         };
 
-        let error = step
-            .to_semantic_step()
-            .expect_err("fill input without value must fail");
+        let error = step.to_semantic_step().unwrap_err();
         assert!(error
             .to_string()
             .contains("action fill_input requires value"));
@@ -964,7 +961,7 @@ mod tests {
         let semantic = step
             .to_semantic_step()
             .unwrap_or_else(|error| panic!("toast semantic translation failed: {error}"))
-            .expect("toast step should map");
+            .unwrap_or_else(|| panic!("toast step should map"));
 
         assert!(matches!(
             semantic.action,

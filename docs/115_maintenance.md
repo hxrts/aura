@@ -11,12 +11,14 @@ pub enum MaintenanceFact {
     SnapshotProposed(SnapshotProposed),
     SnapshotCompleted(SnapshotCompleted),
     CacheInvalidated(CacheInvalidated),
-    UpgradeActivated(UpgradeActivated),
     AdminReplacement(AdminReplacement),
+    ReleaseDistribution(ReleaseDistributionFact),
+    ReleasePolicy(ReleasePolicyFact),
+    UpgradeExecution(UpgradeExecutionFact),
 }
 ```
 
-This fact model defines snapshot, cache, and upgrade events. Each fact is immutable and merges by set union. Devices reduce maintenance facts with deterministic rules.
+This fact model defines snapshot, cache, release-distribution, policy-publication, and scoped upgrade-execution events. Each fact is immutable and merges by set union. Devices reduce maintenance facts with deterministic rules.
 
 ## 2. Snapshots and Garbage Collection
 
@@ -54,19 +56,102 @@ This structure identifies a cached entry. Devices invalidate cached data when th
 
 ## 4. OTA Upgrades
 
-Upgrades appear as monotone activation facts. Devices advertise supported versions and upgrade policies inside device metadata. Operators publish upgrade metadata containing package identifiers and version information.
+OTA in Aura separates two concerns:
 
-Devices verify upgrade artifacts using their hashes. Devices mark readiness when policies allow. A hard fork upgrade uses an `IdentityEpochFence { account_id, epoch }`. An activation fact contains the target version, artifact metadata, and the fence. Devices reject sessions when their local epoch does not satisfy the fence.
+- global and eventual release distribution
+- local or scope-bound staging, activation, cutover, and rollback
+
+Aura does not model "the whole network is now in cutover" as a valid primitive. Release propagation is multi-directional and eventual. Hard cutover is meaningful only inside a scope that actually has agreement or a legitimate fence.
+
+### 4.1 Release Identity and Provenance
 
 ```rust
-pub struct UpgradeProposalMetadata {
-    pub package_id: Uuid,
+pub struct AuraReleaseProvenance {
+    pub source_repo_url: String,
+    pub source_bundle_hash: Hash32,
+    pub build_recipe_hash: Hash32,
+    pub output_hash: Hash32,
+    pub nix_flake_hash: Hash32,
+    pub nix_flake_lock_hash: Hash32,
+}
+
+pub struct AuraReleaseManifest {
+    pub series_id: AuraReleaseSeriesId,
+    pub release_id: AuraReleaseId,
     pub version: SemanticVersion,
-    pub artifact_hash: Hash32,
+    pub provenance: AuraReleaseProvenance,
+    pub artifacts: Vec<AuraArtifactDescriptor>,
+    pub compatibility: AuraCompatibilityManifest,
+    pub suggested_activation_time_unix_ms: Option<u64>,
 }
 ```
 
-This structure identifies an upgrade package. Devices must install the binary before publishing readiness. OTA upgrades rely on device metadata and maintenance facts.
+`AuraReleaseId` is derived from the release series and the full provenance. `source_repo_url` participates in that derivation, so the declared upstream repository location is part of canonical release identity. Builder authorities may publish deterministic build certificates over the same provenance. TEE attestation is optional hardening, not the source of release identity.
+
+### 4.2 Policy Surfaces
+
+OTA policy is not one switch. Aura distinguishes:
+
+- discovery policy: what release authorities, builders, and contexts a device is willing to learn from
+- sharing policy: what manifests, artifacts, certificates, or recommendations it is willing to forward or pin
+- activation policy: what trust, compatibility, health, approval, and fence conditions must hold before local activation
+
+Discovering a release does not imply forwarding it. Forwarding it does not imply activating it.
+
+### 4.3 Activation Scopes and State
+
+Activation is modeled per scope, not globally.
+
+```rust
+pub enum AuraActivationScope {
+    DeviceLocal { device_id: DeviceId },
+    AuthorityLocal { authority_id: AuthorityId },
+    RelationalContext { context_id: ContextId },
+    ManagedQuorum {
+        context_id: ContextId,
+        participants: BTreeSet<AuthorityId>,
+    },
+}
+
+pub enum ReleaseResidency {
+    LegacyOnly,
+    Coexisting,
+    TargetOnly,
+}
+
+pub enum TransitionState {
+    Idle,
+    AwaitingCutover,
+    CuttingOver,
+    RollingBack,
+}
+```
+
+`ReleaseResidency` describes which release set may currently run in the scope. `TransitionState` describes whether the scope is stable, waiting on evidence, actively switching, or rolling back.
+
+### 4.4 Cutover and Rollback
+
+Scoped activation uses journal facts plus local policy evaluation. A scope may move toward cutover only when the relevant evidence is present:
+
+- manifest and certificate verification
+- compatibility classification
+- staged artifacts
+- local trust policy satisfaction
+- optional local-policy respect for `suggested_activation_time_unix_ms`
+- threshold approval, if that scope actually supports threshold approval
+- epoch fence, if that scope actually owns the relevant fence
+- health gate checks
+
+Hard-fork behavior is explicit. After local cutover, incompatible new sessions are rejected. In-flight incompatible sessions must drain, abort, or delegate according to policy. If post-cutover validation fails, rollback is deterministic and recorded in `UpgradeExecutionFact`.
+
+### 4.5 Updater / Launcher Boundary
+
+Aura does not rely on in-place self-replacement of the running runtime. Layer 6 owns an updater/launcher control plane that:
+
+- stages manifests, artifacts, and certificates
+- emits explicit activate/rollback commands
+- records scoped upgrade state
+- restores the previous release deterministically when rollback is required
 
 ## 5. Admin Replacement
 
@@ -200,10 +285,10 @@ Migrations are ordered by target version. Each migration runs at most once (idem
 
 ## 10. Evolution
 
-Maintenance evolves in phases. Phase one includes snapshots, GC, cache invalidation, and OTA activation. Phase two includes replicated cache CRDTs, staged OTA rollouts, and automatic synchronization. Phase three includes proxy re-encryption for historical blobs and automated snapshot triggers.
+Maintenance evolves in phases. Current OTA work focuses on release identity/provenance, scoped activation, deterministic rollback, and Aura-native distribution. Future phases may add richer replicated cache CRDTs, stronger builder attestation, staged rollout tooling, and automatic snapshot triggers.
 
 Future phases build on the same journal schema. Maintenance semantics remain compatible with older releases.
 
 ## 11. Summary
 
-Distributed maintenance uses journal facts to coordinate snapshots, cache invalidation, upgrades, and admin replacement. All operations use join-semilattice semantics. All reductions are deterministic. Devices prune storage only after observing snapshot completion. Epoch rules provide safety during upgrades and recovery. The system remains consistent across offline and online operation.
+Distributed maintenance uses journal facts to coordinate snapshots, cache invalidation, release distribution, scoped upgrades, and admin replacement. All operations use join-semilattice semantics. All reductions are deterministic. Devices prune storage only after observing snapshot completion. OTA release propagation is eventual, while activation is always local or scope-bound. The system remains consistent across offline and online operation.

@@ -35,10 +35,10 @@ case "$mode" in
         [ -f "$spec" ] || continue
         if quint typecheck "$spec" > /dev/null 2>&1; then
           echo -e "  ${GREEN}✓${NC} $(basename "$spec")"
-          ((passed++))
+          passed=$((passed + 1))
         else
           echo -e "  ${RED}✗${NC} $(basename "$spec")"
-          ((failed++))
+          failed=$((failed + 1))
         fi
       done
     done

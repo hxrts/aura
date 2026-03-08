@@ -56,6 +56,7 @@ impl RunningSession {
             .collect()
     }
 
+    #[allow(clippy::disallowed_methods)]
     fn wait_for_response_ready(
         &mut self,
         method: &str,
@@ -111,6 +112,7 @@ impl RunningSession {
         ))
     }
 
+    #[allow(clippy::disallowed_methods)]
     fn rpc_call_with_timeout(
         &mut self,
         method: &str,

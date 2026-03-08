@@ -3,6 +3,8 @@
 //! Defines the core UI model (screens, selections, modals, toasts) and the
 //! controller that bridges the model to the application core and input handlers.
 
+#![allow(clippy::disallowed_types)]
+
 use crate::clipboard::ClipboardPort;
 use crate::keyboard::{apply_named_key, apply_text_keys};
 use crate::snapshot::render_canonical_snapshot;
@@ -1775,11 +1777,11 @@ impl UiController {
 }
 
 fn read_model(model: &RwLock<UiModel>) -> RwLockReadGuard<'_, UiModel> {
-    model.read().expect("ui model read lock poisoned")
+    model.read().unwrap_or_else(|poison| poison.into_inner())
 }
 
 fn write_model(model: &RwLock<UiModel>) -> RwLockWriteGuard<'_, UiModel> {
-    model.write().expect("ui model write lock poisoned")
+    model.write().unwrap_or_else(|poison| poison.into_inner())
 }
 
 #[cfg(test)]

@@ -73,6 +73,7 @@ fn tool_api_primitives_control_local_pty_instance() {
         pattern: "hello-pty".to_string(),
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
+        selector: None,
     }) {
         ToolResponse::Ok { .. } => {}
         ToolResponse::Error { message } => panic!("wait_for failed: {message}"),
@@ -98,6 +99,7 @@ fn tool_api_primitives_control_local_pty_instance() {
         pattern: "hello-key".to_string(),
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
+        selector: None,
     }) {
         ToolResponse::Ok { .. } => {}
         ToolResponse::Error { message } => panic!("wait_for hello-key failed: {message}"),

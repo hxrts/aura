@@ -52,10 +52,9 @@ pub(super) async fn execute_recovery_protocol_account(
         )
         .await
         .map_err(AgentError::internal)?;
-        handler.push_send_bytes(
-            to_vec(&request)
-                .map_err(|error| AgentError::internal(format!("recovery request encode failed: {error}")))?,
-        );
+        handler.push_send_bytes(to_vec(&request).map_err(|error| {
+            AgentError::internal(format!("recovery request encode failed: {error}"))
+        })?);
 
         let loop_result = loop {
             let step = engine.step().map_err(|error| {
@@ -73,7 +72,9 @@ pub(super) async fn execute_recovery_protocol_account(
                 &peer_roles,
             )
             .await
-            .map_err(|error| AgentError::internal(format!("recovery account receive failed: {error}")))? {
+            .map_err(|error| {
+                AgentError::internal(format!("recovery account receive failed: {error}"))
+            })? {
                 inject_vm_receive(&mut engine, vm_sid, &blocked).map_err(AgentError::internal)?;
                 continue;
             }
@@ -138,10 +139,9 @@ pub(super) async fn execute_recovery_protocol_coordinator(
         )
         .await
         .map_err(AgentError::internal)?;
-        handler.push_send_bytes(
-            to_vec(&request)
-                .map_err(|error| AgentError::internal(format!("recovery request encode failed: {error}")))?,
-        );
+        handler.push_send_bytes(to_vec(&request).map_err(|error| {
+            AgentError::internal(format!("recovery request encode failed: {error}"))
+        })?);
         let mut approvals = Vec::new();
 
         let loop_result = loop {
@@ -163,11 +163,10 @@ pub(super) async fn execute_recovery_protocol_coordinator(
             .map_err(|error| {
                 AgentError::internal(format!("recovery coordinator receive failed: {error}"))
             })? {
-                let approval: ProtocolGuardianApproval = from_slice(&blocked.payload).map_err(
-                    |error| {
+                let approval: ProtocolGuardianApproval =
+                    from_slice(&blocked.payload).map_err(|error| {
                         AgentError::internal(format!("guardian approval decode failed: {error}"))
-                    },
-                )?;
+                    })?;
                 approvals.push(approval.clone());
                 handler.push_send_bytes(
                     to_vec(&RecoveryOutcome {

@@ -55,7 +55,8 @@ impl AgentRuntimeBridge {
         config.created_at = Some(config.created_at.unwrap_or(created_at));
         self.store_account_config(&key, &config).await?;
 
-        self.ensure_authority_record(authority_id, created_at).await?;
+        self.ensure_authority_record(authority_id, created_at)
+            .await?;
         Ok(())
     }
 
@@ -71,7 +72,9 @@ impl AgentRuntimeBridge {
             .retrieve(&key)
             .await
             .map_err(|error| {
-                IntentError::storage_error(format!("Failed to read authority record {key}: {error}"))
+                IntentError::storage_error(format!(
+                    "Failed to read authority record {key}: {error}"
+                ))
             })?
             .is_some()
         {

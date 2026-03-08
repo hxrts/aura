@@ -1,18 +1,19 @@
+#![allow(clippy::disallowed_types)] // Synchronous VM host callbacks require short, non-async critical sections.
+
+use crate::runtime::vm_hardening::{
+    apply_protocol_execution_policy, apply_scheduler_execution_policy, configured_guard_capacity,
+    policy_for_protocol, scheduler_control_input_for_image, scheduler_policy_for_input,
+    AuraVmSchedulerSignals, AuraVmSchedulerSignalsProvider,
+};
 use crate::runtime::{
     build_vm_config, AuraChoreoEngine, AuraEffectSystem, AuraVmHardeningProfile,
     AuraVmParityProfile,
 };
-use crate::runtime::vm_hardening::{
-    apply_protocol_execution_policy, apply_scheduler_execution_policy,
-    configured_guard_capacity, policy_for_protocol, scheduler_control_input_for_image,
-    scheduler_policy_for_input, AuraVmSchedulerSignals, AuraVmSchedulerSignalsProvider,
-};
-use aura_mpst::CompositionManifest;
 use aura_mpst::telltale_types::{GlobalType, LocalTypeR};
+use aura_mpst::CompositionManifest;
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, ChoreographyError};
-use parking_lot::Mutex;
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use telltale_vm::coroutine::{BlockReason, CoroStatus, Value};
 use telltale_vm::effect::EffectHandler;
 use telltale_vm::loader::CodeImage;
@@ -44,21 +45,25 @@ pub struct AuraQueuedVmBridgeHandler {
     scheduler_signals: Mutex<AuraVmSchedulerSignals>,
 }
 
+fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .expect("VM host bridge mutex poisoned during deterministic runtime execution")
+}
+
 impl AuraQueuedVmBridgeHandler {
     pub fn push_send_bytes(&self, payload: Vec<u8>) {
-        self.outbound_values
-            .lock()
-            .push_back(Value::Str(hex::encode(payload)));
+        lock_unpoisoned(&self.outbound_values).push_back(Value::Str(hex::encode(payload)));
     }
 
     pub fn drain_pending_sends(&self) -> Vec<PendingVmSend> {
-        let mut guard = self.pending_sends.lock();
+        let mut guard = lock_unpoisoned(&self.pending_sends);
         guard.drain(..).collect()
     }
 
     #[allow(dead_code)]
     pub fn push_choice_label(&self, label: impl Into<String>) {
-        self.choice_labels.lock().push_back(label.into());
+        lock_unpoisoned(&self.choice_labels).push_back(label.into());
     }
 
     pub fn value_to_bytes(value: &Value) -> Result<Vec<u8>, String> {
@@ -79,13 +84,13 @@ impl AuraQueuedVmBridgeHandler {
 
     #[allow(dead_code)]
     pub fn set_scheduler_signals(&self, signals: AuraVmSchedulerSignals) {
-        *self.scheduler_signals.lock() = signals.normalized();
+        *lock_unpoisoned(&self.scheduler_signals) = signals.normalized();
     }
 }
 
 impl AuraVmSchedulerSignalsProvider for AuraQueuedVmBridgeHandler {
     fn scheduler_signals(&self) -> AuraVmSchedulerSignals {
-        *self.scheduler_signals.lock()
+        *lock_unpoisoned(&self.scheduler_signals)
     }
 }
 
@@ -101,11 +106,13 @@ impl EffectHandler for AuraQueuedVmBridgeHandler {
         label: &str,
         _state: &[Value],
     ) -> Result<Value, String> {
-        let payload = self.outbound_values.lock().pop_front().ok_or_else(|| {
-            format!("missing queued outbound payload for VM send {role}->{partner}:{label}")
-        })?;
+        let payload = lock_unpoisoned(&self.outbound_values)
+            .pop_front()
+            .ok_or_else(|| {
+                format!("missing queued outbound payload for VM send {role}->{partner}:{label}")
+            })?;
         let payload_bytes = Self::value_to_bytes(&payload)?;
-        self.pending_sends.lock().push_back(PendingVmSend {
+        lock_unpoisoned(&self.pending_sends).push_back(PendingVmSend {
             from_role: role.to_string(),
             to_role: partner.to_string(),
             label: label.to_string(),
@@ -137,7 +144,7 @@ impl EffectHandler for AuraQueuedVmBridgeHandler {
         labels: &[String],
         _state: &[Value],
     ) -> Result<String, String> {
-        if let Some(choice) = self.choice_labels.lock().pop_front() {
+        if let Some(choice) = lock_unpoisoned(&self.choice_labels).pop_front() {
             if labels.iter().any(|label| label == &choice) {
                 return Ok(choice);
             }
@@ -251,7 +258,12 @@ pub async fn open_role_scoped_vm_session_admitted(
     )
     .map_err(|error| format!("failed to create VM engine: {error}"))?;
     let sid = engine
-        .open_session_admitted(&image, protocol_id, determinism_policy_ref, required_capabilities)
+        .open_session_admitted(
+            &image,
+            protocol_id,
+            determinism_policy_ref,
+            required_capabilities,
+        )
         .await
         .map_err(|error| format!("failed to open VM session: {error}"))?;
     Ok((engine, handler, sid))

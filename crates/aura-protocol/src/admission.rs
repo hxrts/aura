@@ -24,8 +24,7 @@ pub const PROTOCOL_DKG_CEREMONY: &str = "aura.dkg.ceremony";
 /// Aura protocol id for guardian recovery-grant choreography.
 pub const PROTOCOL_RECOVERY_GRANT: &str = "aura.recovery.grant";
 /// Aura protocol id for guardian-auth relational choreography.
-pub const PROTOCOL_GUARDIAN_AUTH_RELATIONAL: &str =
-    "aura.authentication.guardian_auth_relational";
+pub const PROTOCOL_GUARDIAN_AUTH_RELATIONAL: &str = "aura.authentication.guardian_auth_relational";
 /// Aura protocol id for AMP transport choreography.
 pub const PROTOCOL_AMP_TRANSPORT: &str = "aura.amp.transport";
 /// Aura protocol id for invitation exchange choreography.
@@ -43,8 +42,7 @@ pub const PROTOCOL_GUARDIAN_CEREMONY: &str = "aura.recovery.guardian_ceremony";
 /// Aura protocol id for guardian setup choreography.
 pub const PROTOCOL_GUARDIAN_SETUP: &str = "aura.recovery.guardian_setup";
 /// Aura protocol id for guardian membership change choreography.
-pub const PROTOCOL_GUARDIAN_MEMBERSHIP_CHANGE: &str =
-    "aura.recovery.guardian_membership_change";
+pub const PROTOCOL_GUARDIAN_MEMBERSHIP_CHANGE: &str = "aura.recovery.guardian_membership_change";
 /// Aura protocol id for session coordination choreography.
 pub const PROTOCOL_SESSION_COORDINATION: &str = "aura.session.coordination";
 

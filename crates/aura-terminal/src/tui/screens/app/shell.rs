@@ -46,8 +46,8 @@ use crate::tui::components::{
     DiscoveredPeerInfo, Footer, NavBar, ToastContainer, ToastLevel, ToastMessage,
 };
 use crate::tui::context::IoContext;
-use crate::tui::hooks::{AppCoreContext, CallbackContext};
 use crate::tui::harness_state::maybe_export_ui_snapshot;
+use crate::tui::hooks::{AppCoreContext, CallbackContext};
 use crate::tui::keymap::{global_footer_hints, screen_footer_hints};
 use crate::tui::layout::dim;
 use crate::tui::navigation::clamp_list_index;

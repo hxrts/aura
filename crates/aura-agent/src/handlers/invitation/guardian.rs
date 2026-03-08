@@ -69,14 +69,12 @@ impl<'a> InvitationGuardianHandler<'a> {
             )
             .await
             .map_err(AgentError::internal)?;
-            handler.push_send_bytes(
-                to_vec(&request)
-                    .map_err(|error| AgentError::internal(format!("guardian request encode failed: {error}")))?,
-            );
-            handler.push_send_bytes(
-                to_vec(&confirm)
-                    .map_err(|error| AgentError::internal(format!("guardian confirm encode failed: {error}")))?,
-            );
+            handler.push_send_bytes(to_vec(&request).map_err(|error| {
+                AgentError::internal(format!("guardian request encode failed: {error}"))
+            })?);
+            handler.push_send_bytes(to_vec(&confirm).map_err(|error| {
+                AgentError::internal(format!("guardian confirm encode failed: {error}"))
+            })?);
 
             let loop_result = loop {
                 let step = engine.step().map_err(|error| {
@@ -168,10 +166,9 @@ impl<'a> InvitationGuardianHandler<'a> {
             )
             .await
             .map_err(AgentError::internal)?;
-            handler.push_send_bytes(
-                to_vec(&accept)
-                    .map_err(|error| AgentError::internal(format!("guardian accept encode failed: {error}")))?,
-            );
+            handler.push_send_bytes(to_vec(&accept).map_err(|error| {
+                AgentError::internal(format!("guardian accept encode failed: {error}"))
+            })?);
 
             let loop_result = loop {
                 let step = engine.step().map_err(|error| {

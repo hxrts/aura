@@ -35,9 +35,9 @@ use super::vm_effect_handler::AuraVmEffectHandler;
 use super::vm_hardening::{
     build_vm_config, configured_guard_capacity, policy_for_protocol,
     scheduler_control_input_for_image, validate_determinism_profile,
-    validate_protocol_execution_policy, validate_scheduler_execution_policy,
-    vm_config_for_profile, AuraVmHardeningProfile, AuraVmParityProfile,
-    AuraVmProtocolExecutionPolicy, AuraVmSchedulerSignalsProvider,
+    validate_protocol_execution_policy, validate_scheduler_execution_policy, vm_config_for_profile,
+    AuraVmHardeningProfile, AuraVmParityProfile, AuraVmProtocolExecutionPolicy,
+    AuraVmSchedulerSignalsProvider,
 };
 
 /// Errors raised by [`AuraChoreoEngine`].
@@ -756,11 +756,11 @@ impl<H: VmEffectHandler + AuraVmSchedulerSignalsProvider> AuraChoreoEngine<H> {
         required_capabilities: &[&str],
     ) -> Result<SessionId, AuraChoreoEngineError> {
         self.admit_bundle(required_capabilities).await?;
-        let policy = policy_for_protocol(protocol_id, determinism_policy_ref).map_err(
-            |error| AuraChoreoEngineError::Interpreter {
+        let policy = policy_for_protocol(protocol_id, determinism_policy_ref).map_err(|error| {
+            AuraChoreoEngineError::Interpreter {
                 message: format!("invalid VM protocol policy: {error}"),
-            },
-        )?;
+            }
+        })?;
         validate_protocol_execution_policy(&self.vm_config, policy).map_err(|error| {
             AuraChoreoEngineError::Interpreter {
                 message: format!("unsupported VM runtime profile for protocol: {error}"),
@@ -772,13 +772,14 @@ impl<H: VmEffectHandler + AuraVmSchedulerSignalsProvider> AuraChoreoEngine<H> {
             configured_guard_capacity(&self.vm_config),
             self.handler.scheduler_signals(),
         );
-        validate_scheduler_execution_policy(&self.vm_config, scheduler_input).map_err(
-            |error| AuraChoreoEngineError::Interpreter {
+        validate_scheduler_execution_policy(&self.vm_config, scheduler_input).map_err(|error| {
+            AuraChoreoEngineError::Interpreter {
                 message: format!("unsupported VM scheduler profile for protocol: {error}"),
-            },
-        )?;
+            }
+        })?;
         let sid = self.open_session(image)?;
-        self.session_protocol_classes.insert(sid, policy.protocol_class);
+        self.session_protocol_classes
+            .insert(sid, policy.protocol_class);
         self.session_determinism_profiles.insert(sid, policy);
         Ok(sid)
     }
@@ -838,15 +839,14 @@ mod tests {
         assert_eq!(engine.vm().sessions().archived_closed().len(), 1);
     }
 
-    #[test]
-    fn conformance_artifact_includes_selected_determinism_profile() {
+    #[tokio::test]
+    async fn conformance_artifact_includes_selected_determinism_profile() {
         let image = CodeImage::from_local_types(
             &BTreeMap::from([("Solo".to_string(), LocalTypeR::End)]),
             &GlobalType::End,
         );
-        let policy =
-            super::super::vm_hardening::policy_for_protocol("aura.recovery.grant", None)
-                .expect("policy");
+        let policy = super::super::vm_hardening::policy_for_protocol("aura.recovery.grant", None)
+            .expect("policy");
         let mut config = vm_config_for_profile(AuraVmHardeningProfile::Prod);
         super::super::vm_hardening::apply_protocol_execution_policy(&mut config, policy);
         let scheduler_input = super::super::vm_hardening::scheduler_control_input_for_image(
@@ -868,12 +868,10 @@ mod tests {
         )
         .expect("engine");
 
-        futures::executor::block_on(async {
-            engine
-                .open_session_admitted(&image, "aura.recovery.grant", None, &[])
-                .await
-                .expect("session opens");
-        });
+        engine
+            .open_session_admitted(&image, "aura.recovery.grant", None, &[])
+            .await
+            .expect("session opens");
 
         let (_status, artifact) = engine
             .run_recording_conformance(

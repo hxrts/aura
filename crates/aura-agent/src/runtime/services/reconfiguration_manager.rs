@@ -287,7 +287,7 @@ fn default_runtime_capability_handler() -> RuntimeCapabilityHandler {
     #[cfg(feature = "choreo-backend-telltale-vm")]
     {
         let contracts = telltale_vm::runtime_contracts::RuntimeContracts::full();
-        return RuntimeCapabilityHandler::from_runtime_contracts(&contracts);
+        RuntimeCapabilityHandler::from_runtime_contracts(&contracts)
     }
 
     #[cfg(not(feature = "choreo-backend-telltale-vm"))]

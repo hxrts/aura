@@ -10,7 +10,6 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use aura_harness::{artifacts::ArtifactBundle, default_artifacts_dir};
 use aura_harness::build_startup_summary;
 use aura_harness::config::{require_existing_file, ScreenSource};
 use aura_harness::coordinator::HarnessCoordinator;
@@ -26,6 +25,7 @@ use aura_harness::scenario_execution::{execute_with_run_budgets, lint_for_run};
 use aura_harness::screen_normalization::normalize_screen;
 use aura_harness::tool_api::{ToolApi, ToolRequest};
 use aura_harness::{api_version::TOOL_API_DEFAULT_VERSION, artifact_sync::sync_remote_artifacts};
+use aura_harness::{artifacts::ArtifactBundle, default_artifacts_dir};
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]

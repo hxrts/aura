@@ -57,12 +57,14 @@ fn two_local_instances_are_controllable() {
         pattern: "alice-msg".to_string(),
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
+        selector: None,
     }));
     assert_ok(tool_api.handle_request(ToolRequest::WaitFor {
         instance_id: "bob".to_string(),
         pattern: "bob-msg".to_string(),
         timeout_ms: 2000,
         screen_source: ScreenSource::Default,
+        selector: None,
     }));
 
     if let Err(error) = tool_api.stop_all() {
