@@ -347,6 +347,7 @@ impl<'a> InvitationChannelHandler<'a> {
             ))
             .await
             .map_err(|e| AgentError::effects(format!("insert AMP bootstrap fact: {e}")))?;
+        effects.await_next_view_update().await;
 
         Ok(())
     }

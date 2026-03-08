@@ -237,7 +237,7 @@ async fn soft_fork_workflow(
 }
 ```
 
-Soft forks do not require a globally shared instant. Each scope transitions from `LegacyOnly` to `Coexisting` to `TargetOnly` based on its own evidence and policy.
+Soft forks do not require a globally shared instant. Each scope moves from legacy-only residency to coexistence and then to target-only residency based on its own evidence and policy.
 
 ### Hard Fork Workflow
 
@@ -262,7 +262,7 @@ For hard forks, the operator must define:
 
 - the activation scope
 - the compatibility class
-- how incompatible in-flight sessions are handled: `Drain`, `Abort`, or `Delegate`
+- how incompatible in-flight sessions are handled: drain, abort, or delegate
 - whether threshold approval or an epoch fence is actually available in that scope
 
 If post-cutover checks fail, rollback is explicit and deterministic.
@@ -271,13 +271,13 @@ If post-cutover checks fail, rollback is explicit and deterministic.
 
 Use managed quorum cutover only when the scope has an explicit participant set. Record approval from every participant in the quorum before starting cutover. Reject approval from authorities that are not members of that scope.
 
-If one participant has not approved, keep the scope in `TransitionState::AwaitingCutover`. Do not begin launcher activation for that scope. Resolve membership or policy disagreement before retrying.
+If one participant has not approved, keep the scope waiting for cutover evidence. Do not begin launcher activation for that scope. Resolve membership or policy disagreement before retrying.
 
 ### Failed Rollout Runbook
 
 Check the failure classification before acting. `AuraUpgradeFailureClass::HealthGateFailed` means the new release started and failed local verification. `AuraUpgradeFailureClass::LauncherActivationFailed` means the launcher handoff failed before healthy activation.
 
-If policy uses `AuraRollbackPreference::Automatic`, allow the queued rollback to execute and confirm the scope returns to `ReleaseResidency::LegacyOnly` with `TransitionState::Idle`. If policy uses `AuraRollbackPreference::ManualApproval`, keep the scope failed and require operator approval before rollback.
+If policy uses `AuraRollbackPreference::Automatic`, allow the queued rollback to execute and confirm the scope returns to legacy-only residency with an idle transition state. If policy uses `AuraRollbackPreference::ManualApproval`, keep the scope failed and require operator approval before rollback.
 
 ### Revoked Release Runbook
 
