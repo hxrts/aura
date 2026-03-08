@@ -47,6 +47,7 @@ pub enum UiAction {
     ActivateListItem { list: ListId, item_id: String },
     Fill(FieldId, String),
     InputText(String),
+    DismissTransient,
     PressKey(InputKey, u16),
     SendChatCommand(String),
     SendChatMessage(String),
@@ -203,6 +204,7 @@ pub enum SemanticActionKind {
     ActivateListItem,
     Fill,
     InputText,
+    DismissTransient,
     PressKey,
     SendChatCommand,
     SendChatMessage,
@@ -310,6 +312,9 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                 "value",
                 value.action,
             )?)),
+            SemanticActionKind::DismissTransient => {
+                ScenarioAction::Ui(UiAction::DismissTransient)
+            }
             SemanticActionKind::PressKey => ScenarioAction::Ui(UiAction::PressKey(
                 required(value.key, "key", value.action)?,
                 value.repeat.unwrap_or(1).max(1),

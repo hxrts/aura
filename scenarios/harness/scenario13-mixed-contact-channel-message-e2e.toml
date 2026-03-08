@@ -233,9 +233,8 @@ timeout_ms = 12000
 
 [[steps]]
 id = "tui-dismiss-home-created-toast"
-action = "press_key"
+action = "dismiss_transient"
 actor = "tui"
-key = "esc"
 timeout_ms = 3000
 
 [[steps]]

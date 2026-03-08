@@ -1528,21 +1528,23 @@ impl UiController {
     }
 
     pub fn set_rerender_callback(&self, rerender: Arc<dyn Fn() + Send + Sync>) {
-        if let Ok(mut slot) = self.rerender.try_lock() {
+        if let Ok(mut slot) = self.rerender.lock() {
             *slot = Some(rerender);
         }
     }
 
     pub fn request_rerender(&self) {
-        if let Ok(slot) = self.rerender.try_lock() {
-            if let Some(rerender) = slot.as_ref() {
+        if let Ok(slot) = self.rerender.lock() {
+            let rerender = slot.as_ref().cloned();
+            drop(slot);
+            if let Some(rerender) = rerender {
                 rerender();
             }
         }
     }
 
     pub fn set_ui_snapshot_sink(&self, sink: Arc<dyn Fn(UiSnapshot) + Send + Sync>) {
-        if let Ok(mut slot) = self.ui_snapshot_sink.try_lock() {
+        if let Ok(mut slot) = self.ui_snapshot_sink.lock() {
             *slot = Some(sink);
         }
     }
@@ -1735,7 +1737,29 @@ impl UiController {
         let mut model = write_model(&self.model);
         dismiss_modal(&mut model);
         model.set_operation_state(OperationId::invitation_accept(), state);
+        let snapshot = model.semantic_snapshot();
+        let snapshot_modal = snapshot
+            .open_modal
+            .map(|modal| format!("{modal:?}"))
+            .unwrap_or_else(|| "None".to_string());
+        let invitation_state = snapshot
+            .operations
+            .iter()
+            .find(|operation| operation.id == OperationId::invitation_accept())
+            .map(|operation| format!("{:?}", operation.state))
+            .unwrap_or_else(|| "Missing".to_string());
+        tracing::info!(
+            modal = %snapshot_modal,
+            invitation_accept = %invitation_state,
+            "complete_runtime_invitation_operation snapshot"
+        );
+        model.logs.push(format!(
+            "complete_runtime_invitation_operation snapshot modal={snapshot_modal} invitation_accept={invitation_state}"
+        ));
         drop(model);
+        self.set_ui_snapshot(snapshot);
+        tracing::info!("complete_runtime_invitation_operation published");
+        self.push_log("complete_runtime_invitation_operation published");
         self.request_rerender();
     }
 
@@ -1895,22 +1919,24 @@ impl UiController {
 
     pub fn ui_snapshot(&self) -> UiSnapshot {
         self.ui_snapshot_override
-            .try_read()
+            .read()
             .ok()
             .and_then(|snapshot| snapshot.clone())
-            .or_else(|| self.model.try_read().ok().map(|model| model.semantic_snapshot()))
+            .or_else(|| self.model.read().ok().map(|model| model.semantic_snapshot()))
             .unwrap_or_else(|| UiSnapshot::loading(UiScreen::Neighborhood))
     }
 
     pub fn set_ui_snapshot_override(&self, snapshot: UiSnapshot) {
-        if let Ok(mut slot) = self.ui_snapshot_override.try_write() {
+        if let Ok(mut slot) = self.ui_snapshot_override.write() {
             *slot = Some(snapshot);
         }
     }
 
     pub fn publish_ui_snapshot(&self, snapshot: UiSnapshot) {
-        if let Ok(slot) = self.ui_snapshot_sink.try_lock() {
-            if let Some(sink) = slot.as_ref() {
+        if let Ok(slot) = self.ui_snapshot_sink.lock() {
+            let sink = slot.as_ref().cloned();
+            drop(slot);
+            if let Some(sink) = sink {
                 sink(snapshot);
             }
         }

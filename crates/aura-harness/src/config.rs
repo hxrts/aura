@@ -147,6 +147,7 @@ pub enum ScenarioAction {
     SendChatMessage,
     SendClipboard,
     ReadClipboard,
+    DismissTransient,
     SendKey,
     ClickButton,
     FillInput,
@@ -190,6 +191,7 @@ impl fmt::Display for ScenarioAction {
             Self::SendChatMessage => "send_chat_message",
             Self::SendClipboard => "send_clipboard",
             Self::ReadClipboard => "read_clipboard",
+            Self::DismissTransient => "dismiss_transient",
             Self::SendKey => "send_key",
             Self::ClickButton => "click_button",
             Self::FillInput => "fill_input",
@@ -356,6 +358,9 @@ impl ScenarioStep {
                     name: required_field(self.var.clone(), "var", self.action)?,
                 }))
             }
+            ScenarioAction::DismissTransient => Some(SemanticAction::Ui(
+                UiAction::DismissTransient,
+            )),
             ScenarioAction::SendKey => Some(SemanticAction::Ui(UiAction::PressKey(
                 parse_input_key(self.key.as_deref().unwrap_or_default())?,
                 self.repeat.unwrap_or(1).max(1),
@@ -584,6 +589,9 @@ impl TryFrom<SemanticStep> for ScenarioStep {
             SemanticAction::Ui(UiAction::ReadClipboard { name }) => {
                 step.action = ScenarioAction::ReadClipboard;
                 step.var = Some(name);
+            }
+            SemanticAction::Ui(UiAction::DismissTransient) => {
+                step.action = ScenarioAction::DismissTransient;
             }
             SemanticAction::Expect(Expectation::ScreenIs(screen_id)) => {
                 step.action = ScenarioAction::WaitFor;

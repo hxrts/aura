@@ -2825,7 +2825,6 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         &notifications_runtime_snapshot,
     );
     controller.set_ui_snapshot(semantic_snapshot.clone());
-
     rsx! {
         main {
             id: ControlId::AppRoot

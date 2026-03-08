@@ -5,7 +5,7 @@
 
 use aura_app::ui::contract::UiSnapshot;
 use aura_ui::UiController;
-use js_sys::{Array, JSON, Object, Reflect};
+use js_sys::{Array, Function, JSON, Object, Reflect};
 use serde_wasm_bindgen::to_value;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -15,6 +15,55 @@ use wasm_bindgen::{JsCast, JsValue};
 thread_local! {
     static CONTROLLER: RefCell<Option<Arc<UiController>>> = const { RefCell::new(None) };
     static LAST_PUBLISHED_UI_STATE_JSON: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+fn publish_ui_snapshot_now(
+    window: &web_sys::Window,
+    value: JsValue,
+    json: String,
+    screen: aura_app::ui::contract::ScreenId,
+    modal: Option<aura_app::ui::contract::ModalId>,
+    operation_count: usize,
+) {
+    let _ = Reflect::set(
+        window.as_ref(),
+        &JsValue::from_str("__AURA_UI_STATE_CACHE__"),
+        &value,
+    );
+    let _ = Reflect::set(
+        window.as_ref(),
+        &JsValue::from_str("__AURA_UI_STATE_JSON__"),
+        &JsValue::from_str(&json),
+    );
+
+    let binding_mode =
+        Reflect::get(window.as_ref(), &JsValue::from_str("__AURA_DRIVER_PUSH_UI_STATE"))
+            .ok()
+            .and_then(|candidate| candidate.dyn_into::<Function>().ok())
+            .map(|function| {
+                let _ = function.call1(window.as_ref(), &JsValue::from_str(&json));
+                "driver_push"
+            })
+            .unwrap_or("console_only");
+
+    let should_log = LAST_PUBLISHED_UI_STATE_JSON.with(|slot| {
+        let mut last = slot.borrow_mut();
+        if last.as_deref() == Some(json.as_str()) {
+            false
+        } else {
+            *last = Some(json.clone());
+            true
+        }
+    });
+    if should_log {
+        web_sys::console::log_1(&JsValue::from_str(&format!(
+            "[aura-ui-publish]binding={binding_mode};screen={screen:?};modal={modal:?};ops={operation_count}",
+        )));
+        web_sys::console::log_1(&JsValue::from_str(&format!(
+            "[aura-ui-state]screen={screen:?};modal={modal:?};ops={operation_count};binding={binding_mode}",
+        )));
+        web_sys::console::log_1(&JsValue::from_str(&format!("[aura-ui-json]{json}")));
+    }
 }
 
 pub fn set_controller(controller: Arc<UiController>) {
@@ -36,42 +85,27 @@ pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
     let Some(json) = json.as_string() else {
         return;
     };
-    let _ = Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str("__AURA_UI_STATE_CACHE__"),
-        &value,
+    let screen = snapshot.screen;
+    let modal = snapshot.open_modal;
+    let operation_count = snapshot.operations.len();
+
+    // Publish semantic state immediately so harness waits are not gated on
+    // the browser reaching the next animation frame.
+    publish_ui_snapshot_now(
+        &window,
+        value.clone(),
+        json.clone(),
+        screen,
+        modal,
+        operation_count,
     );
-    let _ = Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str("__AURA_UI_STATE_JSON__"),
-        &JsValue::from_str(&json),
-    );
-    let should_log = LAST_PUBLISHED_UI_STATE_JSON.with(|slot| {
-        let mut last = slot.borrow_mut();
-        if last.as_deref() == Some(json.as_str()) {
-            false
-        } else {
-            *last = Some(json.clone());
-            true
-        }
+
+    let raf_window = window.clone();
+    let raf_callback = Closure::once_into_js(move || {
+        publish_ui_snapshot_now(&raf_window, value, json, screen, modal, operation_count);
     });
-    if should_log {
-        web_sys::console::log_1(&JsValue::from_str(&format!(
-            "[aura-ui-publish]binding=console_only;screen={:?};modal={:?};ops={}",
-            snapshot.screen,
-            snapshot.open_modal,
-            snapshot.operations.len()
-        )));
-        web_sys::console::log_1(&JsValue::from_str(&format!(
-            "[aura-ui-state]screen={:?};modal={:?};ops={};binding=console_only",
-            snapshot.screen,
-            snapshot.open_modal,
-            snapshot.operations.len(),
-        )));
-    }
-    if should_log {
-        web_sys::console::log_1(&JsValue::from_str(&format!("[aura-ui-json]{json}")));
-    }
+    let raf_function: &Function = raf_callback.unchecked_ref();
+    let _ = window.request_animation_frame(raf_function);
 }
 
 fn serialize_ui_snapshot(snapshot: &UiSnapshot) -> JsValue {

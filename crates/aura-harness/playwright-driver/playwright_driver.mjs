@@ -102,6 +102,29 @@ function normalizeDomState(payload) {
   };
 }
 
+function domStateIdSet(session) {
+  const ids = session?.domState?.ids;
+  if (ids instanceof Set) {
+    return ids;
+  }
+  if (Array.isArray(ids)) {
+    return new Set(
+      ids
+        .map((value) => String(value ?? '').trim())
+        .filter((value) => value.length > 0)
+    );
+  }
+  return new Set();
+}
+
+function domStateHasId(session, id) {
+  return domStateIdSet(session).has(String(id ?? '').trim());
+}
+
+function domStateIdList(session) {
+  return Array.from(domStateIdSet(session));
+}
+
 function consoleTailText(session, lines = 40) {
   const tail = session.consoleLog.slice(-lines);
   return tail.length > 0 ? tail.join('\n') : 'none';
@@ -181,7 +204,7 @@ async function installDomObserver(page, session) {
 }
 
 async function installUiStateObserver(page, session) {
-  await page.exposeBinding('__AURA_DRIVER_PUSH_UI_STATE', (_source, payload) => {
+  await page.exposeFunction('__AURA_DRIVER_PUSH_UI_STATE', (payload) => {
     if (typeof payload === 'string') {
       session.uiStateCacheJson = payload;
       try {
@@ -259,7 +282,10 @@ async function flushTypedBuffer(page, buffer) {
   }
   const preview = JSON.stringify(buffer.length > 80 ? `${buffer.slice(0, 80)}…` : buffer);
   console.error(`[driver] key_type start bytes=${buffer.length} preview=${preview}`);
-  await withOperationTimeout(`keyboard_type:${buffer.length}`, page.keyboard.type(buffer), 4000);
+  for (const ch of buffer) {
+    const mapped = ch === ' ' ? 'Space' : ch;
+    await withOperationTimeout(`keyboard_type:${JSON.stringify(mapped)}`, page.keyboard.press(mapped), 1500);
+  }
   console.error(`[driver] key_type done bytes=${buffer.length}`);
   return '';
 }
@@ -874,64 +900,15 @@ function getSession(instanceId) {
   return session;
 }
 
-function extractSubmittedMessage(keys) {
-  const value = String(keys ?? '').replace(/\r/g, '\n');
-  const newlineIndex = value.lastIndexOf('\n');
-  if (newlineIndex < 0) {
-    return null;
-  }
-
-  const beforeEnter = value.slice(0, newlineIndex).trimStart();
-  // Mirror only explicit insert-mode chat sends, e.g. `ihello world\n`.
-  // This avoids false positives from modal/account inputs that also end with Enter.
-  if (!beforeEnter.startsWith('i')) {
-    return null;
-  }
-  const candidate = beforeEnter
-    .slice(1)
-    .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
-    .replace(/\u001b/g, '')
-    .trim();
-
-  if (!candidate || candidate.startsWith('/')) {
-    return null;
-  }
-  return candidate;
-}
-
-async function mirrorSubmittedMessage(fromInstanceId, message) {
-  if (!message) {
-    return;
-  }
-  for (const [instanceId, session] of sessions.entries()) {
-    if (instanceId === fromInstanceId) {
-      continue;
-    }
-    await session.page.evaluate((value) => {
-      if (window.__AURA_HARNESS__?.inject_message) {
-        window.__AURA_HARNESS__.inject_message(value);
-      }
-    }, message);
-  }
-}
-
 async function sendKeys(params) {
   const instanceId = normalizeInstanceId(params);
   const keys = String(params?.keys ?? '');
   const session = getSession(instanceId);
 
   console.error(`[driver] send_keys start instance=${instanceId} bytes=${keys.length}`);
-  const preFocusProbe = await pageLivenessProbe(session.page).catch((error) => ({
-    probe_error: error.message
-  }));
-  console.error(`[driver] send_keys probe_before_focus instance=${instanceId} ${JSON.stringify(preFocusProbe)}`);
   console.error(`[driver] send_keys focus start instance=${instanceId}`);
   await focusAuraPage(session.page);
   console.error(`[driver] send_keys focus done instance=${instanceId}`);
-  const postFocusProbe = await pageLivenessProbe(session.page).catch((error) => ({
-    probe_error: error.message
-  }));
-  console.error(`[driver] send_keys probe_after_focus instance=${instanceId} ${JSON.stringify(postFocusProbe)}`);
   console.error(`[driver] send_keys type start instance=${instanceId}`);
   await withOperationTimeout(
     `type_keys:${instanceId}`,
@@ -939,15 +916,6 @@ async function sendKeys(params) {
     8000
   );
   console.error(`[driver] send_keys type done instance=${instanceId}`);
-
-  const mirrored = extractSubmittedMessage(keys);
-  console.error(`[driver] send_keys mirror start instance=${instanceId}`);
-  await withOperationTimeout(
-    `mirror_submitted_message:${instanceId}`,
-    mirrorSubmittedMessage(instanceId, mirrored),
-    5000
-  );
-  console.error(`[driver] send_keys mirror done instance=${instanceId}`);
 
   console.error(`[driver] send_keys done instance=${instanceId}`);
   return { status: 'sent', bytes: keys.length };
@@ -1014,11 +982,109 @@ async function uiState(params) {
     } console_tail=${recentConsole}`
   );
 
+  const tryParseUiState = (value) => {
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return null;
+      }
+    }
+    return value && typeof value === 'object' ? value : null;
+  };
+
+  const shouldRefreshUiState = (state) => {
+    if (!state || typeof state !== 'object') {
+      return false;
+    }
+
+    if (state.open_modal != null) {
+      return true;
+    }
+
+    if (Array.isArray(state.operations)) {
+      return state.operations.some((operation) => operation?.state === 'submitting');
+    }
+
+    return false;
+  };
+
+  const readLiveUiState = async (reason, timeoutMs = 1000) => {
+    console.error(
+      `[driver] ui_state live_refresh start instance=${instanceId} reason=${reason} timeout_ms=${timeoutMs}`
+    );
+    const payload = await withOperationTimeout(
+      `ui_state_live_${reason}`,
+      session.page.evaluate(() => {
+        if (typeof window.__AURA_HARNESS__?.ui_state === 'function') {
+          return window.__AURA_HARNESS__.ui_state();
+        }
+        if (typeof window.__AURA_UI_STATE__ === 'function') {
+          return window.__AURA_UI_STATE__();
+        }
+        if (typeof window.__AURA_UI_STATE_JSON__ === 'string') {
+          return window.__AURA_UI_STATE_JSON__;
+        }
+        if (window.__AURA_UI_STATE_CACHE__ && typeof window.__AURA_UI_STATE_CACHE__ === 'object') {
+          return JSON.stringify(window.__AURA_UI_STATE_CACHE__);
+        }
+        return null;
+      }),
+      timeoutMs
+    );
+    const parsed = tryParseUiState(payload);
+    if (parsed && typeof parsed === 'object') {
+      session.uiStateCache = parsed;
+      try {
+        session.uiStateCacheJson = JSON.stringify(parsed);
+      } catch {
+        session.uiStateCacheJson = null;
+      }
+      console.error(`[driver] ui_state live_refresh done instance=${instanceId} reason=${reason}`);
+      return parsed;
+    }
+    console.error(
+      `[driver] ui_state live_refresh unavailable instance=${instanceId} reason=${reason}`
+    );
+    return null;
+  };
+
+  try {
+    const live = await readLiveUiState('preferred_live');
+    if (live) {
+      return live;
+    }
+  } catch (error) {
+    console.error(
+      `[driver] ui_state live_refresh_failed instance=${instanceId} reason=preferred_live error=${
+        error?.message ?? String(error)
+      }`
+    );
+  }
+
   if (session.uiStateCache && typeof session.uiStateCache === 'object') {
     console.error(`[driver] ui_state cache_hit instance=${instanceId}`);
+    const cached =
+      typeof session.uiStateCacheJson === 'string'
+        ? tryParseUiState(session.uiStateCacheJson)
+        : session.uiStateCache;
+    if (cached && shouldRefreshUiState(cached)) {
+      try {
+        const refreshed = await readLiveUiState('transient_cache');
+        if (refreshed) {
+          return refreshed;
+        }
+      } catch (error) {
+        console.error(
+          `[driver] ui_state live_refresh_failed instance=${instanceId} reason=transient_cache error=${
+            error?.message ?? String(error)
+          }`
+        );
+      }
+    }
     if (typeof session.uiStateCacheJson === 'string') {
       console.error(`[driver] ui_state cache_json_hit instance=${instanceId}`);
-      return JSON.parse(session.uiStateCacheJson);
+      return cached ?? JSON.parse(session.uiStateCacheJson);
     }
     console.error(`[driver] ui_state cache_object_hit instance=${instanceId}`);
     return session.uiStateCache;
@@ -1181,16 +1247,94 @@ async function fillInput(params) {
   const session = getSession(instanceId);
   console.error(`[driver] fill_input start instance=${instanceId} selector=${selector}`);
   const locator = session.page.locator(selector).first();
-  await withOperationTimeout(
-    `fill_input_click:${selector}`,
-    locator.click({ timeout: 3000, force: true, noWaitAfter: true }),
-    5000
+  const domCacheHasSelector = selector.startsWith('#') && domStateHasId(session, selector.slice(1));
+  console.error(
+    `[driver] fill_input dom_cache instance=${instanceId} selector=${selector} present=${domCacheHasSelector}`
   );
-  await withOperationTimeout(
-    `fill_input_fill:${selector}`,
-    locator.fill(value, { timeout: 3000 }),
-    5000
-  );
+  try {
+    console.error(`[driver] fill_input attach_wait start instance=${instanceId} selector=${selector}`);
+    await withOperationTimeout(
+      `fill_input_attach:${selector}`,
+      locator.waitFor({ state: 'attached', timeout: 8000 }),
+      9000
+    );
+    console.error(`[driver] fill_input attach_wait done instance=${instanceId} selector=${selector}`);
+    console.error(`[driver] fill_input focus start instance=${instanceId} selector=${selector}`);
+    await withOperationTimeout(
+      `fill_input_focus:${selector}`,
+      locator.focus({ timeout: 3000 }),
+      4000
+    );
+    console.error(`[driver] fill_input focus done instance=${instanceId} selector=${selector}`);
+    console.error(`[driver] fill_input ready_wait start instance=${instanceId} selector=${selector}`);
+    await withOperationTimeout(
+      `fill_input_ready:${selector}`,
+      session.page.waitForFunction((targetSelector) => {
+        const element = document.querySelector(targetSelector);
+        if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
+          return false;
+        }
+        return !element.readOnly && !element.disabled;
+      }, selector),
+      3000
+    ).catch(() => null);
+    console.error(`[driver] fill_input ready_wait done instance=${instanceId} selector=${selector}`);
+    console.error(`[driver] fill_input playwright_fill start instance=${instanceId} selector=${selector}`);
+    await withOperationTimeout(
+      `fill_input_fill:${selector}`,
+      locator.fill(value, { timeout: 3000 }),
+      5000
+    );
+    console.error(`[driver] fill_input playwright_fill done instance=${instanceId} selector=${selector}`);
+  } catch (error) {
+    console.error(
+      `[driver] fill_input playwright_path_failed instance=${instanceId} selector=${selector} error=${error?.message ?? String(error)}`
+    );
+    const fallbackResult =
+      selector.startsWith('#') && !domStateHasId(session, selector.slice(1))
+        ? { ok: false, reason: 'field_missing_in_dom_cache' }
+        : await session.page
+            .evaluate(
+              ({ targetSelector, nextValue }) => {
+                const element = document.querySelector(targetSelector);
+                if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
+                  return { ok: false, reason: 'field_not_found' };
+                }
+                element.focus();
+                element.value = nextValue;
+                element.dispatchEvent(new Event('input', { bubbles: true }));
+                element.dispatchEvent(new Event('change', { bubbles: true }));
+                return { ok: true, readOnly: element.readOnly, disabled: element.disabled };
+              },
+              { targetSelector: selector, nextValue: value }
+            )
+            .catch(() => ({ ok: false, reason: 'dom_fallback_failed' }));
+    if (fallbackResult?.ok) {
+      console.error(
+        `[driver] fill_input fallback_done instance=${instanceId} selector=${selector} readonly=${fallbackResult.readOnly} disabled=${fallbackResult.disabled}`
+      );
+      return { status: 'filled', bytes: value.length, fallback: true };
+    }
+
+    const diagnostics = {
+      ids: domStateIdList(session)
+        .filter(
+          (id) =>
+            id.startsWith('aura-screen-') ||
+            id.startsWith('aura-field-') ||
+            id.startsWith('aura-chat-')
+        )
+        .slice(0, 100),
+      text: session.domState.text.slice(0, 1200)
+    };
+    throw new Error(
+      `${error.message} fallback=${JSON.stringify(
+        fallbackResult
+      )} current_ids=${JSON.stringify(diagnostics.ids)} text_snippet=${JSON.stringify(
+        diagnostics.text
+      )}`
+    );
+  }
   console.error(`[driver] fill_input done instance=${instanceId} selector=${selector}`);
   return { status: 'filled', bytes: value.length };
 }
