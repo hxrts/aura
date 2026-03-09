@@ -2185,8 +2185,40 @@ async function fillInput(params) {
 async function readClipboard(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
-  const text = await session.page.evaluate(() => window.__AURA_HARNESS__.read_clipboard());
-  return { text: String(text ?? '') };
+  let lastText = '';
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const text = await withOperationTimeout(
+      `read_clipboard_eval_${attempt + 1}`,
+      session.page.evaluate(() => {
+        const globalText = String(window.__AURA_HARNESS_CLIPBOARD__ ?? '');
+        if (globalText.trim().length > 0) {
+          return globalText;
+        }
+        const harnessText =
+          typeof window.__AURA_HARNESS__?.read_clipboard === 'function'
+            ? String(window.__AURA_HARNESS__.read_clipboard() ?? '')
+            : '';
+        if (harnessText.trim().length > 0) {
+          return harnessText;
+        }
+        const clipboard = window.navigator?.clipboard;
+        if (clipboard && typeof clipboard.readText === 'function') {
+          return clipboard
+            .readText()
+            .then((value) => String(value ?? ''))
+            .catch(() => '');
+        }
+        return '';
+      }),
+      1000
+    );
+    lastText = String(text ?? '');
+    if (lastText.trim().length > 0) {
+      return { text: lastText };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return { text: lastText };
 }
 
 async function getAuthorityId(params) {

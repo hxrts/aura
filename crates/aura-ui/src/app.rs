@@ -3580,7 +3580,7 @@ fn NeighborhoodScreen(
                     div {
                         class: "flex flex-1 min-h-0 flex-col gap-3",
                         div {
-                            class: "rounded-lg border border-border bg-background/60 px-3 py-3",
+                            class: "rounded-sm border border-border bg-background/60 px-3 py-3",
                             p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Home" }
                             p { class: "m-0 mt-1 text-sm text-foreground", "Name: {selected_home}" }
                             p {
@@ -3592,7 +3592,7 @@ fn NeighborhoodScreen(
                             div {
                                 class: "grid flex-1 min-h-0 gap-3 md:grid-cols-2",
                                 div {
-                                    class: "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-background/60 px-3 py-3",
+                                    class: "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-sm border border-border bg-background/60 px-3 py-3",
                                     p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Channels" }
                                     div {
                                         class: "mt-3 flex-1 min-h-0 min-w-0 overflow-y-auto pr-1",
@@ -3629,7 +3629,7 @@ fn NeighborhoodScreen(
                                     }
                                 }
                                 div {
-                                    class: "flex min-h-0 flex-col rounded-lg border border-border bg-background/60 px-3 py-3",
+                                    class: "flex min-h-0 flex-col rounded-sm border border-border bg-background/60 px-3 py-3",
                                     p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Members & Participants" }
                                     div {
                                         class: "mt-3 flex-1 min-h-0 overflow-y-auto pr-1",
@@ -3678,7 +3678,7 @@ fn NeighborhoodScreen(
                             }
                         } else {
                             div {
-                                class: "flex flex-1 items-center justify-center rounded-lg border border-border bg-background/40 px-4 py-6 text-center",
+                                class: "flex flex-1 items-center justify-center rounded-sm border border-border bg-background/40 px-4 py-6 text-center",
                                 p {
                                     class: "m-0 text-sm text-muted-foreground",
                                     "Partial/Limited view: full channel and membership details are hidden until Full access is active."
@@ -3797,7 +3797,7 @@ fn NeighborhoodScreen(
                             }
                         }
                         div {
-                            class: "rounded-lg border border-border bg-background/60 px-3 py-3",
+                            class: "rounded-sm border border-border bg-background/60 px-3 py-3",
                             p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Traversal" }
                             p {
                                 class: "m-0 mt-1 text-sm text-foreground",
@@ -4098,9 +4098,9 @@ fn ChatScreen(
                     }
                 }
                 div {
-                    class: "mt-3 flex flex-col gap-2 rounded-xl border border-border bg-background/80 px-3 py-3",
+                    class: "mt-3 flex flex-col gap-2 rounded-sm border border-border bg-background/80 px-3 py-3",
                     div {
-                        class: "min-h-[4.5rem] rounded-lg border border-border bg-muted/30 px-3 py-2",
+                        class: "min-h-[4.5rem] rounded-sm border border-border bg-muted/30 px-3 py-2",
                         onclick: move |_| {
                             if !is_input_mode {
                                 composer_container_focus_controller.send_action_keys("i");
@@ -4262,7 +4262,7 @@ fn ContactsScreen(
                 div {
                     class: "flex flex-1 min-h-0 flex-col gap-3",
                     div {
-                        class: "rounded-lg border border-border bg-background/60 px-3 py-3",
+                        class: "rounded-sm border border-border bg-background/60 px-3 py-3",
                         div {
                             class: "flex items-center justify-between gap-3",
                             p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "LAN Peers" }
@@ -5163,9 +5163,9 @@ fn dom_slug(value: &str) -> String {
 
 fn nav_tab_class(is_active: bool) -> &'static str {
     if is_active {
-        "inline-flex h-9 items-center rounded-md bg-accent px-3 text-xs uppercase tracking-[0.08em] text-foreground"
+        "inline-flex h-9 items-center rounded-sm bg-accent px-3 text-xs uppercase tracking-[0.08em] text-foreground"
     } else {
-        "inline-flex h-9 items-center rounded-md px-3 text-xs uppercase tracking-[0.08em] text-muted-foreground hover:bg-accent hover:text-foreground"
+        "inline-flex h-9 items-center rounded-sm px-3 text-xs uppercase tracking-[0.08em] text-muted-foreground hover:bg-accent hover:text-foreground"
     }
 }
 

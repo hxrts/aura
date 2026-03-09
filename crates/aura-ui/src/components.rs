@@ -56,10 +56,10 @@ pub struct AuthorityPickerItem {
 fn ui_button_class(variant: ButtonVariant) -> &'static str {
     match variant {
         ButtonVariant::Primary => {
-            "inline-flex h-8 items-center justify-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            "inline-flex h-8 items-center justify-center rounded-sm bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
         }
         ButtonVariant::Secondary => {
-            "inline-flex h-8 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            "inline-flex h-8 items-center justify-center rounded-sm border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
         }
     }
 }
@@ -81,9 +81,9 @@ pub fn UiCard(
 ) -> Element {
     let card_class = match extra_class {
         Some(extra_class) if !extra_class.is_empty() => {
-            format!("flex h-full min-h-0 flex-col {extra_class}")
+            format!("flex h-full min-h-0 flex-col rounded-sm {extra_class}")
         }
-        _ => "flex h-full min-h-0 flex-col".to_string(),
+        _ => "flex h-full min-h-0 flex-col rounded-sm".to_string(),
     };
 
     rsx! {
@@ -136,9 +136,9 @@ pub fn UiListButton(
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
     let class = if active {
-        "inline-flex h-9 w-full items-center justify-start rounded-md bg-accent pl-4 text-left text-sm font-medium text-foreground"
+        "inline-flex h-9 w-full items-center justify-start rounded-sm bg-accent pl-4 text-left text-sm font-medium text-foreground"
     } else {
-        "inline-flex h-9 w-full items-center justify-start rounded-md pl-4 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+        "inline-flex h-9 w-full items-center justify-start rounded-sm pl-4 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
     };
 
     rsx! {
@@ -167,9 +167,9 @@ pub fn UiPill(label: String, tone: PillTone) -> Element {
 #[component]
 pub fn UiListItem(label: String, secondary: Option<String>, active: bool) -> Element {
     let class = if active {
-        "rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-2 min-w-0 overflow-hidden"
+        "rounded-sm border border-primary/40 bg-primary/10 px-2.5 py-2 min-w-0 overflow-hidden"
     } else {
-        "rounded-lg border border-border bg-background/60 px-2.5 py-2 min-w-0 overflow-hidden"
+        "rounded-sm border border-border bg-background/60 px-2.5 py-2 min-w-0 overflow-hidden"
     };
     rsx! {
         div {
@@ -231,7 +231,7 @@ pub fn UiModal(
                     }
                     if !modal.keybind_rows.is_empty() {
                         div {
-                            class: "rounded-lg border border-border bg-background/70 divide-y divide-border overflow-hidden",
+                            class: "rounded-sm border border-border bg-background/70 divide-y divide-border overflow-hidden",
                             for (keys, description) in modal.keybind_rows {
                                 div {
                                     class: "flex items-center justify-between gap-3 px-3 py-2",
@@ -380,24 +380,24 @@ pub fn UiDeviceEnrollmentModal(
                     div {
                         class: "grid gap-2 md:grid-cols-3",
                         div {
-                            class: "rounded-lg border border-border bg-background/70 px-3 py-2",
+                            class: "rounded-sm border border-border bg-background/70 px-3 py-2",
                             p { class: "m-0 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground", "Progress" }
                             p { class: "m-0 mt-1 text-sm text-foreground", "{accepted_count}/{total_count.max(1)} accepted" }
                         }
                         div {
-                            class: "rounded-lg border border-border bg-background/70 px-3 py-2",
+                            class: "rounded-sm border border-border bg-background/70 px-3 py-2",
                             p { class: "m-0 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground", "Threshold" }
                             p { class: "m-0 mt-1 text-sm text-foreground", "{threshold.max(1)} required" }
                         }
                         div {
-                            class: "rounded-lg border border-border bg-background/70 px-3 py-2",
+                            class: "rounded-sm border border-border bg-background/70 px-3 py-2",
                             p { class: "m-0 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground", "Device" }
                             p { class: "m-0 mt-1 text-sm text-foreground", "{device_name}" }
                         }
                     }
                     if let Some(ceremony_id) = ceremony_id {
                         div {
-                            class: "rounded-lg border border-border bg-background/70 px-3 py-2",
+                            class: "rounded-sm border border-border bg-background/70 px-3 py-2",
                             p { class: "m-0 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground", "Ceremony Id" }
                             p {
                                 class: "m-0 mt-1 break-all font-mono text-xs text-foreground",
@@ -406,7 +406,7 @@ pub fn UiDeviceEnrollmentModal(
                         }
                     }
                     div {
-                        class: "rounded-xl border border-border bg-background px-4 py-4",
+                        class: "rounded-sm border border-border bg-background px-4 py-4",
                         p { class: "m-0 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground", "Enrollment Code" }
                         p {
                             class: "m-0 mt-3 break-all font-mono text-sm leading-6 text-foreground",
@@ -414,7 +414,7 @@ pub fn UiDeviceEnrollmentModal(
                         }
                     }
                     div {
-                        class: "rounded-lg border border-border bg-background/70 px-3 py-3",
+                        class: "rounded-sm border border-border bg-background/70 px-3 py-3",
                         p { class: "m-0 text-sm text-foreground", "{status_text}" }
                         if copied {
                             p {
@@ -545,7 +545,7 @@ pub fn UiAuthorityPickerModal(
                     div {
                         class: "grid gap-2 md:grid-cols-3",
                         div {
-                            class: "rounded-lg border border-border bg-background/70 px-3 py-2",
+                            class: "rounded-sm border border-border bg-background/70 px-3 py-2",
                             p { class: "m-0 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground", "Current Authority" }
                             p { class: "m-0 mt-1 text-sm text-foreground", "{current_label}" }
                             p {
@@ -554,7 +554,7 @@ pub fn UiAuthorityPickerModal(
                             }
                         }
                         div {
-                            class: "rounded-lg border border-border bg-background/70 px-3 py-2",
+                            class: "rounded-sm border border-border bg-background/70 px-3 py-2",
                             p { class: "m-0 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground", "Selected" }
                             p { class: "m-0 mt-1 text-sm text-foreground", "{selected_label}" }
                             if let Some(selected_id) = selected_id.as_ref() {
@@ -565,7 +565,7 @@ pub fn UiAuthorityPickerModal(
                             }
                         }
                         div {
-                            class: "rounded-lg border border-border bg-background/70 px-3 py-2",
+                            class: "rounded-sm border border-border bg-background/70 px-3 py-2",
                             p { class: "m-0 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground", "Policy" }
                             p { class: "m-0 mt-1 text-sm text-foreground", "{mfa_policy}" }
                             p {
@@ -575,7 +575,7 @@ pub fn UiAuthorityPickerModal(
                         }
                     }
                     div {
-                        class: "rounded-xl border border-border bg-background/70 overflow-hidden",
+                        class: "rounded-sm border border-border bg-background/70 overflow-hidden",
                         div {
                             class: "border-b border-border px-4 py-3",
                             p {
@@ -587,7 +587,7 @@ pub fn UiAuthorityPickerModal(
                             class: "max-h-[18rem] overflow-y-auto p-2 space-y-2",
                             if authorities.is_empty() {
                                 div {
-                                    class: "rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground",
+                                    class: "rounded-sm border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground",
                                     "No authorities are available in this browser profile."
                                 }
                             } else {
@@ -599,9 +599,9 @@ pub fn UiAuthorityPickerModal(
                                             &authority.id.to_string(),
                                         ),
                                         class: if authority.is_selected {
-                                            "flex w-full items-start justify-between rounded-lg border border-primary/40 bg-primary/10 px-3 py-3 text-left"
+                                            "flex w-full items-start justify-between rounded-sm border border-primary/40 bg-primary/10 px-3 py-3 text-left"
                                         } else {
-                                            "flex w-full items-start justify-between rounded-lg border border-border bg-background px-3 py-3 text-left hover:bg-accent/50"
+                                            "flex w-full items-start justify-between rounded-sm border border-border bg-background px-3 py-3 text-left hover:bg-accent/50"
                                         },
                                         onclick: move |_| on_select.call(index),
                                         div {

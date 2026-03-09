@@ -295,6 +295,18 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
 
     let read_clipboard_controller = controller.clone();
     let read_clipboard = Closure::wrap(Box::new(move || -> JsValue {
+        if let Some(window) = web_sys::window() {
+            if let Ok(value) = Reflect::get(
+                window.as_ref(),
+                &JsValue::from_str("__AURA_HARNESS_CLIPBOARD__"),
+            ) {
+                if let Some(text) = value.as_string() {
+                    if !text.is_empty() {
+                        return JsValue::from_str(&text);
+                    }
+                }
+            }
+        }
         JsValue::from_str(&read_clipboard_controller.read_clipboard())
     }) as Box<dyn FnMut() -> JsValue>);
     Reflect::set(
