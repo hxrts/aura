@@ -9,7 +9,10 @@ fail() {
 inventory="scenarios/harness_inventory.toml"
 [[ -f "$inventory" ]] || fail "missing inventory: $inventory"
 
-mapfile -t shared_paths < <(
+shared_paths=()
+while IFS= read -r line; do
+  shared_paths+=("$line")
+done < <(
   awk '
     /^\[\[scenario\]\]/ { path=""; class="" }
     /^path = / { gsub(/^path = "|"$/, "", $0); path=$0; sub(/^path = /, "", path); gsub(/"/, "", path) }

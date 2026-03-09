@@ -510,15 +510,17 @@ fn execute_step(
 
             let backend_kind = tool_api.backend_kind(&instance_id).unwrap_or("unknown");
 
-            // Clear any active toast/modal so command-result waits do not match stale UI.
-            let _ = dispatch(
-                tool_api,
-                ToolRequest::SendKey {
-                    instance_id: instance_id.clone(),
-                    key: ToolKey::Esc,
-                    repeat: 1,
-                },
-            );
+            if backend_kind != "playwright_browser" {
+                // Clear any active toast/modal so command-result waits do not match stale UI.
+                let _ = dispatch(
+                    tool_api,
+                    ToolRequest::SendKey {
+                        instance_id: instance_id.clone(),
+                        key: ToolKey::Esc,
+                        repeat: 1,
+                    },
+                );
+            }
             ensure_chat_screen(step, tool_api, &instance_id, backend_kind, step_budget_ms)?;
             if backend_kind == "playwright_browser" {
                 dispatch(
@@ -617,14 +619,6 @@ fn execute_step(
             )?;
             let backend_kind = tool_api.backend_kind(&instance_id).unwrap_or("unknown");
             if backend_kind == "playwright_browser" {
-                let _ = dispatch(
-                    tool_api,
-                    ToolRequest::SendKey {
-                        instance_id: instance_id.clone(),
-                        key: ToolKey::Esc,
-                        repeat: 1,
-                    },
-                );
                 ensure_chat_screen(step, tool_api, &instance_id, backend_kind, step_budget_ms)?;
                 dispatch(
                     tool_api,
@@ -1665,6 +1659,7 @@ fn semantic_wait_description(step: &ScenarioStep) -> String {
 
 fn semantic_screen_name(screen: ScreenId) -> &'static str {
     match screen {
+        ScreenId::Onboarding => "onboarding",
         ScreenId::Neighborhood => "neighborhood",
         ScreenId::Chat => "chat",
         ScreenId::Contacts => "contacts",

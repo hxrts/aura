@@ -433,6 +433,9 @@ cfg_if! {
                 let controller = controller.clone();
                 move || {
                     let base = controller.semantic_model_snapshot();
+                    if base.readiness == UiReadiness::Ready {
+                        return;
+                    }
                     let mut operations = base.operations;
                     if creating_account()
                         && !operations
@@ -446,7 +449,7 @@ cfg_if! {
                         });
                     }
                     controller.set_ui_snapshot(UiSnapshot {
-                        screen: ScreenId::Neighborhood,
+                        screen: ScreenId::Onboarding,
                         focused_control: Some(ControlId::OnboardingRoot),
                         open_modal: None,
                         readiness: if account_ready() {
@@ -515,10 +518,11 @@ cfg_if! {
                     let controller = controller.clone();
                     spawn(async move {
                         let app_core = controller.app_core().clone();
-                        let result = async {
-                            let invitation =
-                                invitation_workflows::import_invitation_details(&app_core, &code)
-                                    .await?;
+                            let result = async {
+                                let mut requires_reload = false;
+                                let invitation =
+                                    invitation_workflows::import_invitation_details(&app_core, &code)
+                                        .await?;
                             let InvitationBridgeType::DeviceEnrollment {
                                 subject_authority,
                                 device_id,
@@ -533,9 +537,9 @@ cfg_if! {
                             let runtime = runtime_workflows::require_runtime(&app_core).await?;
                             let current_authority = runtime.authority_id();
                             let selected_device = load_selected_device(&device_storage_key);
-                            if current_authority != subject_authority
-                                || selected_device.as_ref() != Some(&device_id)
-                            {
+                                if current_authority != subject_authority
+                                    || selected_device.as_ref() != Some(&device_id)
+                                {
                                 web_sys::console::log_1(
                                     &format!(
                                         "[web-import-device] staging_reload current_authority={};subject_authority={};selected_device={:?};invited_device={}",
@@ -565,8 +569,9 @@ cfg_if! {
                                     )
                                     .into(),
                                 );
+                                requires_reload = true;
                                 reload_page().map_err(aura_core::AuraError::agent)?;
-                                return Ok(());
+                                return Ok(requires_reload);
                             }
 
                             let _ = clear_pending_device_enrollment_code(&pending_code_storage_key);
@@ -633,20 +638,23 @@ cfg_if! {
                                 bootstrap_name,
                             )
                             .await?;
-                            reload_page().map_err(aura_core::AuraError::agent)?;
-                            Ok(())
+                            Ok(requires_reload)
                         }
                         .await;
 
                         match result {
-                            Ok(()) => {
-                                controller.finish_runtime_operation(
-                                    OperationId::device_enrollment(),
-                                    OperationState::Succeeded,
-                                );
-                                controller.info_toast("Device enrollment complete");
-                                controller.set_account_setup_state(true, "", None);
-                                account_ready.set(true);
+                            Ok(requires_reload) => {
+                                if !requires_reload {
+                                    controller.finish_runtime_operation(
+                                        OperationId::device_enrollment(),
+                                        OperationState::Succeeded,
+                                    );
+                                    controller.info_toast("Device enrollment complete");
+                                    controller.set_account_setup_state(true, "", None);
+                                    account_ready.set(true);
+                                } else {
+                                    controller.info_toast("Reloading to finish import");
+                                }
                                 importing_code.set(false);
                             }
                             Err(error) => {
@@ -697,6 +705,13 @@ cfg_if! {
                     }
 
                     let nickname = account_name();
+                    web_sys::console::log_1(
+                        &format!(
+                            "[web-onboarding] submit_account start nickname={}",
+                            nickname
+                        )
+                        .into(),
+                    );
                     creating_account.set(true);
                     account_error.set(None);
                     controller.set_account_setup_state(false, nickname.clone(), None);
@@ -710,12 +725,21 @@ cfg_if! {
                         .await
                         {
                             Ok(()) => {
+                                web_sys::console::log_1(
+                                    &"[web-onboarding] submit_account ok".into(),
+                                );
                                 controller.set_account_setup_state(true, "", None);
                                 account_ready.set(true);
                                 creating_account.set(false);
                             }
                             Err(error) => {
                                 let message = error.to_string();
+                                web_sys::console::error_1(
+                                    &format!(
+                                        "[web-onboarding] submit_account error {message}"
+                                    )
+                                    .into(),
+                                );
                                 controller.set_account_setup_state(
                                     false,
                                     nickname.clone(),

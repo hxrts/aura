@@ -61,6 +61,7 @@ fn render_account_setup_snapshot(model: &UiModel) -> String {
 
 fn panel_row(model: &UiModel, row_idx: usize) -> (String, String, String) {
     match model.screen {
+        UiScreen::Onboarding => (String::new(), String::new(), String::new()),
         UiScreen::Neighborhood => neighborhood_row(model, row_idx),
         UiScreen::Chat => chat_row(model, row_idx),
         UiScreen::Contacts => contacts_row(model, row_idx),

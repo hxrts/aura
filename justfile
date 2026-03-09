@@ -147,6 +147,18 @@ harness-shared-scenario-contract-check:
 harness-flake-metrics root="artifacts/harness":
     bash scripts/check/harness-flake-metrics.sh {{root}}
 
+harness-matrix lane="all" *ARGS:
+    bash scripts/harness/run-matrix.sh --lane {{lane}} {{ARGS}}
+
+harness-matrix-tui *ARGS:
+    just harness-matrix tui {{ARGS}}
+
+harness-matrix-web *ARGS:
+    just harness-matrix web {{ARGS}}
+
+harness-matrix-all *ARGS:
+    just harness-matrix all {{ARGS}}
+
 ci-shared-flow-policy:
     bash scripts/check/shared-flow-policy.sh
 
@@ -298,6 +310,9 @@ ci-harness-replay:
 # Browser harness lane (WASM build + Playwright smoke + browser scenarios)
 ci-harness-browser:
     ./scripts/ci/harness-browser.sh
+
+ci-harness-matrix:
+    just harness-matrix-all
 
 # LAN smoke lane for workspace-fast coverage
 ci-lan-smoke:

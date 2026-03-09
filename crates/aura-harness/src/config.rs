@@ -721,6 +721,7 @@ fn required_field(value: Option<String>, field: &str, action: ScenarioAction) ->
 
 fn nav_control_id_for_screen(screen_id: ScreenId) -> ControlId {
     match screen_id {
+        ScreenId::Onboarding => ControlId::OnboardingRoot,
         ScreenId::Neighborhood => ControlId::NavNeighborhood,
         ScreenId::Chat => ControlId::NavChat,
         ScreenId::Contacts => ControlId::NavContacts,

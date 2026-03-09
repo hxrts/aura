@@ -50,6 +50,7 @@ fn map_screen(screen: Screen) -> ScreenId {
 
 fn screen_item_id(screen: ScreenId) -> String {
     match screen {
+        ScreenId::Onboarding => "onboarding",
         ScreenId::Neighborhood => "neighborhood",
         ScreenId::Chat => "chat",
         ScreenId::Contacts => "contacts",
@@ -147,21 +148,20 @@ pub fn semantic_ui_snapshot(
     app_snapshot: &StateSnapshot,
     contacts_override_input: Option<&[TuiContact]>,
 ) -> UiSnapshot {
-    let screen = map_screen(state.screen());
+    let onboarding_active = matches!(state.modal_queue.current(), Some(QueuedModal::AccountSetup(_)));
+    let screen = if onboarding_active {
+        ScreenId::Onboarding
+    } else {
+        map_screen(state.screen())
+    };
     let open_modal = state.modal_queue.current().and_then(map_modal);
-    let readiness = if matches!(
-        state.modal_queue.current(),
-        Some(QueuedModal::AccountSetup(_))
-    ) {
+    let readiness = if onboarding_active {
         UiReadiness::Loading
     } else {
         UiReadiness::Ready
     };
 
-    let focused_control = if matches!(
-        state.modal_queue.current(),
-        Some(QueuedModal::AccountSetup(_))
-    ) {
+    let focused_control = if onboarding_active {
         Some(ControlId::OnboardingRoot)
     } else if let Some(QueuedModal::ContactsCreate(modal_state)) = state.modal_queue.current() {
         Some(ControlId::Field(match modal_state.focused_field {

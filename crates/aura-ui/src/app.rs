@@ -1347,7 +1347,6 @@ fn submit_runtime_modal_action(
                                                 RuntimeEventKind::ChannelJoined,
                                                 format!("source=accepted_invitation"),
                                             );
-                                            controller_for_import.set_screen(UiScreen::Chat);
                                         }
                                         InvitationBridgeType::DeviceEnrollment { .. }
                                         | InvitationBridgeType::Contact { .. } => {}
@@ -5046,6 +5045,9 @@ fn screen_tabs(active: UiScreen) -> Vec<(UiScreen, &'static str, bool)> {
 
 fn nav_button_id(screen: UiScreen) -> &'static str {
     match screen {
+        UiScreen::Onboarding => ControlId::OnboardingRoot
+            .web_dom_id()
+            .unwrap_or("aura-onboarding-root"),
         UiScreen::Neighborhood => ControlId::NavNeighborhood
             .web_dom_id()
             .unwrap_or("aura-nav-neighborhood"),
@@ -5098,6 +5100,14 @@ fn render_screen_content(
     resolved_scheme: ColorScheme,
 ) -> Element {
     match model.screen {
+        UiScreen::Onboarding => rsx! {
+            div {
+                id: ControlId::Screen(ContractScreenId::Onboarding)
+                    .web_dom_id()
+                    .unwrap_or("aura-screen-onboarding"),
+                class: "h-full min-h-0 w-full",
+            }
+        },
         UiScreen::Neighborhood => rsx! {
             div {
                 id: ControlId::Screen(ContractScreenId::Neighborhood)
@@ -5199,6 +5209,7 @@ fn screen_readiness(
     notifications_runtime: &NotificationsRuntimeView,
 ) -> UiReadiness {
     let loaded = match screen {
+        UiScreen::Onboarding => false,
         UiScreen::Neighborhood => neighborhood_runtime.loaded,
         UiScreen::Chat => chat_runtime.loaded,
         UiScreen::Contacts => contacts_runtime.loaded,
@@ -5885,6 +5896,10 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
 
 fn help_modal_content(screen: UiScreen) -> (Vec<String>, Vec<(String, String)>) {
     let details = match screen {
+        UiScreen::Onboarding => vec![
+            "Onboarding reference".to_string(),
+            "Create or import a local account before entering the main application.".to_string(),
+        ],
         UiScreen::Neighborhood => vec![
             "Neighborhood reference".to_string(),
             "Browse homes, access depth, and neighborhood detail views.".to_string(),
@@ -5908,6 +5923,10 @@ fn help_modal_content(screen: UiScreen) -> (Vec<String>, Vec<(String, String)>) 
     };
 
     let keybind_rows = match screen {
+        UiScreen::Onboarding => vec![
+            ("type".to_string(), "Enter account name or import code".to_string()),
+            ("enter".to_string(), "Submit the active onboarding form".to_string()),
+        ],
         UiScreen::Neighborhood => vec![
             ("1-5".to_string(), "Switch screens".to_string()),
             ("tab / shift+tab".to_string(), "Cycle screens".to_string()),

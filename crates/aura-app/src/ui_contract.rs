@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScreenId {
+    Onboarding,
     Neighborhood,
     Chat,
     Contacts,
@@ -21,6 +22,7 @@ impl ScreenId {
     #[must_use]
     pub const fn help_label(self) -> &'static str {
         match self {
+            Self::Onboarding => "Onboarding",
             Self::Neighborhood => "Neighborhood",
             Self::Chat => "Chat",
             Self::Contacts => "Contacts",
@@ -256,6 +258,7 @@ impl ControlId {
             Self::SettingsAddDeviceButton => Some("aura-settings-add-device"),
             Self::SettingsRemoveDeviceButton => Some("aura-settings-remove-device"),
             Self::ChatSendMessageButton => Some("aura-chat-send-message"),
+            Self::Screen(ScreenId::Onboarding) => Some("aura-screen-onboarding"),
             Self::Screen(ScreenId::Neighborhood) => Some("aura-screen-neighborhood"),
             Self::Screen(ScreenId::Chat) => Some("aura-screen-chat"),
             Self::Screen(ScreenId::Contacts) => Some("aura-screen-contacts"),
@@ -506,6 +509,11 @@ pub struct SharedScreenModuleMap {
 
 pub const SHARED_SCREEN_SUPPORT: &[SharedScreenSupport] = &[
     SharedScreenSupport {
+        screen: ScreenId::Onboarding,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedScreenSupport {
         screen: ScreenId::Neighborhood,
         web: FlowAvailability::Supported,
         tui: FlowAvailability::Supported,
@@ -669,6 +677,13 @@ pub const SHARED_LIST_SUPPORT: &[SharedListSupport] = &[
 ];
 
 pub const SHARED_SCREEN_MODULE_MAP: &[SharedScreenModuleMap] = &[
+    SharedScreenModuleMap {
+        screen: ScreenId::Onboarding,
+        web_symbol: "OnboardingScreen",
+        web_path: "crates/aura-web/src/main.rs",
+        tui_symbol: "OnboardingScreen",
+        tui_path: "crates/aura-terminal/src/handlers/tui.rs",
+    },
     SharedScreenModuleMap {
         screen: ScreenId::Neighborhood,
         web_symbol: "NeighborhoodScreen",
@@ -938,6 +953,7 @@ fn normalize_parity_item_id(list_id: ListId, item_id: &str) -> Option<String> {
 
 fn parity_relevant_lists(screen: ScreenId) -> &'static [ListId] {
     match screen {
+        ScreenId::Onboarding => &[],
         ScreenId::Neighborhood => &[ListId::Navigation, ListId::Homes, ListId::NeighborhoodMembers],
         ScreenId::Chat => &[ListId::Navigation, ListId::Channels],
         ScreenId::Contacts => &[ListId::Navigation, ListId::Contacts],
@@ -1108,6 +1124,7 @@ mod tests {
 
     #[test]
     fn screen_ids_have_stable_help_labels() {
+        assert_eq!(ScreenId::Onboarding.help_label(), "Onboarding");
         assert_eq!(ScreenId::Neighborhood.help_label(), "Neighborhood");
         assert_eq!(ScreenId::Chat.help_label(), "Chat");
         assert_eq!(ScreenId::Contacts.help_label(), "Contacts");

@@ -1471,7 +1471,11 @@ impl UiModel {
             .collect::<Vec<_>>();
 
         UiSnapshot {
-            screen: self.screen,
+            screen: if self.account_ready {
+                self.screen
+            } else {
+                UiScreen::Onboarding
+            },
             focused_control: Some(if self.account_ready {
                 ControlId::Screen(self.screen)
             } else {
@@ -1504,7 +1508,6 @@ pub struct RenderedHarnessSnapshot {
 pub struct UiController {
     app_core: Arc<AsyncRwLock<AppCore>>,
     model: RwLock<UiModel>,
-    ui_snapshot_override: RwLock<Option<UiSnapshot>>,
     clipboard: Arc<dyn ClipboardPort>,
     authority_switcher: Option<Arc<dyn Fn(AuthorityId) + Send + Sync>>,
     ui_snapshot_sink: Mutex<Option<UiSnapshotSink>>,
@@ -1552,7 +1555,6 @@ impl UiController {
         Self {
             app_core,
             model: RwLock::new(UiModel::new(authority_id)),
-            ui_snapshot_override: RwLock::new(None),
             clipboard,
             authority_switcher,
             ui_snapshot_sink: Mutex::new(None),
@@ -1801,9 +1803,6 @@ impl UiController {
             "complete_runtime_invitation_operation snapshot modal={snapshot_modal} invitation_accept={invitation_state}"
         ));
         drop(model);
-        self.set_ui_snapshot(snapshot);
-        tracing::info!("complete_runtime_invitation_operation published");
-        self.push_log("complete_runtime_invitation_operation published");
         self.request_rerender();
     }
 
@@ -1966,16 +1965,10 @@ impl UiController {
     }
 
     pub fn ui_snapshot(&self) -> UiSnapshot {
-        self.ui_snapshot_override
+        self.model
             .read()
             .ok()
-            .and_then(|snapshot| snapshot.clone())
-            .or_else(|| {
-                self.model
-                    .read()
-                    .ok()
-                    .map(|model| model.semantic_snapshot())
-            })
+            .map(|model| model.semantic_snapshot())
             .unwrap_or_else(|| UiSnapshot::loading(UiScreen::Neighborhood))
     }
 
@@ -1985,12 +1978,6 @@ impl UiController {
             .ok()
             .map(|model| model.semantic_snapshot())
             .unwrap_or_else(|| UiSnapshot::loading(UiScreen::Neighborhood))
-    }
-
-    pub fn set_ui_snapshot_override(&self, snapshot: UiSnapshot) {
-        if let Ok(mut slot) = self.ui_snapshot_override.write() {
-            *slot = Some(snapshot);
-        }
     }
 
     pub fn publish_ui_snapshot(&self, snapshot: UiSnapshot) {
@@ -2004,7 +1991,6 @@ impl UiController {
     }
 
     pub fn set_ui_snapshot(&self, snapshot: UiSnapshot) {
-        self.set_ui_snapshot_override(snapshot.clone());
         self.publish_ui_snapshot(snapshot);
     }
 
@@ -2043,7 +2029,9 @@ impl UiController {
         model.account_ready = account_ready;
         model.account_setup_name = account_setup_name.into();
         model.account_setup_error = account_setup_error;
+        let snapshot = model.semantic_snapshot();
         drop(model);
+        self.publish_ui_snapshot(snapshot);
         self.request_rerender();
     }
 

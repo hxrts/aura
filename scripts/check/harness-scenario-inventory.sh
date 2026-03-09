@@ -9,11 +9,30 @@ fail() {
 inventory="scenarios/harness_inventory.toml"
 [[ -f "$inventory" ]] || fail "missing inventory: $inventory"
 
-mapfile -t scenario_files < <(find scenarios/harness -maxdepth 1 -name '*.toml' | sort)
-mapfile -t inventory_paths < <(rg '^path\s*=\s*"([^"]+)"' -or '$1' "$inventory" | sort)
-mapfile -t inventory_ids < <(rg '^id\s*=\s*"([^"]+)"' -or '$1' "$inventory" | sort)
-mapfile -t inventory_classes < <(rg '^classification\s*=\s*"([^"]+)"' -or '$1' "$inventory" | sort)
-mapfile -t inventory_statuses < <(rg '^migration_status\s*=\s*"([^"]+)"' -or '$1' "$inventory" | sort)
+scenario_files=()
+while IFS= read -r line; do
+  scenario_files+=("$line")
+done < <(find scenarios/harness -maxdepth 1 -name '*.toml' | sort)
+
+inventory_paths=()
+while IFS= read -r line; do
+  inventory_paths+=("$line")
+done < <(rg '^path\s*=\s*"([^"]+)"' -or '$1' "$inventory" | sort)
+
+inventory_ids=()
+while IFS= read -r line; do
+  inventory_ids+=("$line")
+done < <(rg '^id\s*=\s*"([^"]+)"' -or '$1' "$inventory" | sort)
+
+inventory_classes=()
+while IFS= read -r line; do
+  inventory_classes+=("$line")
+done < <(rg '^classification\s*=\s*"([^"]+)"' -or '$1' "$inventory" | sort)
+
+inventory_statuses=()
+while IFS= read -r line; do
+  inventory_statuses+=("$line")
+done < <(rg '^migration_status\s*=\s*"([^"]+)"' -or '$1' "$inventory" | sort)
 
 [[ ${#scenario_files[@]} -eq ${#inventory_paths[@]} ]] || fail "inventory path count (${#inventory_paths[@]}) does not match scenario file count (${#scenario_files[@]})"
 

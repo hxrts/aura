@@ -143,6 +143,7 @@ function normalizeRenderHeartbeat(payload) {
 }
 
 const SCREEN_DOM_IDS = Object.freeze({
+  onboarding: 'aura-onboarding-root',
   neighborhood: 'aura-screen-neighborhood',
   chat: 'aura-screen-chat',
   contacts: 'aura-screen-contacts',
@@ -441,6 +442,21 @@ async function installUiStateObserver(page, session) {
   });
 }
 
+function installPageNavigationReset(session) {
+  const clearSessionCache = () => {
+    session.uiStateCache = null;
+    session.uiStateCacheJson = null;
+    session.renderHeartbeat = null;
+  };
+  const onNavigation = () => {
+    clearSessionCache();
+    console.error(`[driver] navigation_cache_clear instance=${session.id}`);
+  };
+  session.page.on('framenavigated', onNavigation);
+  session.page.on('domcontentloaded', onNavigation);
+  session.page.on('load', onNavigation);
+}
+
 async function assertRootStructure(session, reason) {
   let structure = await withOperationTimeout(
     `root_structure_${reason}`,
@@ -580,8 +596,9 @@ function mapPlaywrightKey(key) {
 
 async function pressMappedKey(page, key) {
   const mapped = mapPlaywrightKey(key);
+  const actionTimeoutMs = 10000;
   console.error(`[driver] key_press start key=${key} mapped=${mapped}`);
-  await withOperationTimeout(`key_press:${mapped}`, page.keyboard.press(mapped), 3000);
+  await withOperationTimeout(`key_press:${mapped}`, page.keyboard.press(mapped), actionTimeoutMs);
   console.error(`[driver] key_press done key=${key} mapped=${mapped}`);
 }
 
@@ -589,11 +606,16 @@ async function flushTypedBuffer(page, buffer) {
   if (!buffer) {
     return '';
   }
+  const actionTimeoutMs = 5000;
   const preview = JSON.stringify(buffer.length > 80 ? `${buffer.slice(0, 80)}…` : buffer);
   console.error(`[driver] key_type start bytes=${buffer.length} preview=${preview}`);
   for (const ch of buffer) {
     const mapped = ch === ' ' ? 'Space' : ch;
-    await withOperationTimeout(`keyboard_type:${JSON.stringify(mapped)}`, page.keyboard.press(mapped), 1500);
+    await withOperationTimeout(
+      `keyboard_type:${JSON.stringify(mapped)}`,
+      page.keyboard.press(mapped),
+      actionTimeoutMs
+    );
   }
   console.error(`[driver] key_type done bytes=${buffer.length}`);
   return '';
@@ -856,7 +878,7 @@ async function clickLocator(locator, label) {
   try {
     await withOperationTimeout(
       `click_button_wait:${label}`,
-      locator.waitFor({ state: 'visible', timeout: actionTimeoutMs }),
+      locator.waitFor({ state: 'attached', timeout: actionTimeoutMs }),
       actionTimeoutMs + 1000
     );
     await locator.scrollIntoViewIfNeeded().catch(() => {});
@@ -1050,23 +1072,40 @@ async function startPage(params) {
       console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} page acquired`
       );
+      const session = {
+        id: instanceId,
+        context,
+        page,
+        headless,
+        appUrl: targetUrl,
+        dataDir,
+        artifactDir,
+        consoleLog,
+        tracePath:
+          artifactDir && PLAYWRIGHT_TRACE_ENABLED
+            ? path.join(artifactDir, `${instanceId}-trace.zip`)
+            : null,
+        domState: normalizeDomState({ text: '', ids: [] }),
+        uiStateCache: null,
+        uiStateCacheJson: null,
+        renderHeartbeat: null
+      };
+      sessions.set(instanceId, session);
+
       page.on('console', (message) => {
         const text = message.text();
-        if (text.startsWith(UI_STATE_JSON_LOG_PREFIX) && sessions.has(instanceId)) {
+        if (text.startsWith(UI_STATE_JSON_LOG_PREFIX)) {
           const payload = text.slice(UI_STATE_JSON_LOG_PREFIX.length);
-          const session = sessions.get(instanceId);
-          if (session) {
-            session.uiStateCacheJson = payload;
-            try {
-              session.uiStateCache = JSON.parse(payload);
-            } catch {
-              session.uiStateCache = null;
-            }
+          session.uiStateCacheJson = payload;
+          try {
+            session.uiStateCache = JSON.parse(payload);
+          } catch {
+            session.uiStateCache = null;
           }
           consoleLog.push(`[${nowIso()}] ${message.type()}: ${UI_STATE_JSON_LOG_PREFIX}<json>`);
           return;
         }
-        if (text.startsWith(UI_STATE_LOG_PREFIX) && sessions.has(instanceId)) {
+        if (text.startsWith(UI_STATE_LOG_PREFIX)) {
           consoleLog.push(`[${nowIso()}] ${message.type()}: ${text}`);
           return;
         }
@@ -1083,13 +1122,8 @@ async function startPage(params) {
         );
       }
 
-      console.error(
-        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installUiStateObserver start`
-      );
-      await installUiStateObserver(page, sessions.get(instanceId));
-      console.error(
-        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installUiStateObserver done`
-      );
+      await installUiStateObserver(page, session);
+      installPageNavigationReset(session);
 
       console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} goto start url=${targetUrl}`
@@ -1141,29 +1175,10 @@ async function startPage(params) {
       console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installDomObserver start`
       );
-      const session = {
-        context,
-        page,
-        headless,
-        appUrl: targetUrl,
-        dataDir,
-        artifactDir,
-        consoleLog,
-        tracePath:
-          artifactDir && PLAYWRIGHT_TRACE_ENABLED
-            ? path.join(artifactDir, `${instanceId}-trace.zip`)
-            : null,
-        domState: normalizeDomState({ text: '', ids: [] }),
-        uiStateCache: null,
-        uiStateCacheJson: null,
-        renderHeartbeat: null
-      };
       await installDomObserver(page, session);
       console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installDomObserver done`
       );
-
-      sessions.set(instanceId, session);
 
       return {
         instance_id: instanceId,
@@ -1172,6 +1187,7 @@ async function startPage(params) {
         headless
       };
     } catch (error) {
+      sessions.delete(instanceId);
       console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} failed: ${
           error?.stack ?? error?.message ?? String(error)
@@ -1287,6 +1303,7 @@ async function uiState(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
   const recentConsole = consoleTailText(session, 8).replace(/\n/g, ' | ');
+  const recentConsoleLower = recentConsole.toLowerCase();
   console.error(
     `[driver] ui_state start instance=${instanceId} cache_type=${typeof session.uiStateCache} cache_json=${
       typeof session.uiStateCacheJson
@@ -1341,16 +1358,55 @@ async function uiState(params) {
     return null;
   };
 
+  const readStructuredUiStateWithNavigationRecovery = async (reason, timeoutMs = 1000) => {
+    try {
+      return await readStructuredUiState(reason, timeoutMs);
+    } catch (error) {
+      if (!isNavigationTransitionError(error)) {
+        throw error;
+      }
+      session.uiStateCache = null;
+      session.uiStateCacheJson = null;
+      console.error(
+        `[driver] ui_state structured_navigation_recovery instance=${instanceId} reason=${reason}`
+      );
+      await waitForPageNavigationStabilization(session, `structured_navigation_${reason}`);
+      await assertRootStructure(session, `ui_state_after_navigation_${reason}`);
+      return readStructuredUiState(`post_navigation_${reason}`, UI_STATE_TIMEOUT_MS);
+    }
+  };
+
   if (session.uiStateCache && typeof session.uiStateCache === 'object') {
     console.error(`[driver] ui_state cache_hit instance=${instanceId}`);
     const cached =
       typeof session.uiStateCacheJson === 'string'
         ? tryParseUiState(session.uiStateCacheJson)
         : session.uiStateCache;
+    const staleOnboardingCache =
+      cached &&
+      cached.screen === 'onboarding' &&
+      cached.readiness === 'loading' &&
+      (recentConsoleLower.includes('[web-onboarding] submit_account ok') ||
+        recentConsoleLower.includes('[web-import-device] accepted runtime_devices=') ||
+        recentConsoleLower.includes('[web-import-device] staged_reload') ||
+        recentConsoleLower.includes('[web-import-device] accepting_on_bound_runtime'));
+    if (staleOnboardingCache) {
+      console.error(`[driver] ui_state stale_onboarding_cache instance=${instanceId}`);
+      const refreshed = await readStructuredUiStateWithNavigationRecovery(
+        'post_onboarding_submit',
+        2000
+      );
+      if (refreshed) {
+        return refreshed;
+      }
+    }
     if (cached && !cachedUiStateConverged(session, cached)) {
       console.error(`[driver] ui_state cache_diverged instance=${instanceId}`);
       try {
-        const refreshed = await readStructuredUiState('cache_divergence', 2000);
+        const refreshed = await readStructuredUiStateWithNavigationRecovery(
+          'cache_divergence',
+          2000
+        );
         if (refreshed) {
           console.error(`[driver] ui_state cache_divergence_recovered instance=${instanceId}`);
           return refreshed;
@@ -1393,21 +1449,14 @@ async function uiState(params) {
 
   console.error(`[driver] ui_state cache_miss instance=${instanceId}`);
   try {
-    const recovered = await readStructuredUiState('recovery', UI_STATE_TIMEOUT_MS);
+    const recovered = await readStructuredUiStateWithNavigationRecovery(
+      'recovery',
+      UI_STATE_TIMEOUT_MS
+    );
     if (recovered) {
       return recovered;
     }
   } catch (error) {
-    if (isNavigationTransitionError(error)) {
-      session.uiStateCache = null;
-      session.uiStateCacheJson = null;
-      console.error(`[driver] ui_state structured_navigation_retry instance=${instanceId}`);
-      await waitForPageNavigationStabilization(session, 'ui_state_structured');
-      const recovered = await readStructuredUiState('post_navigation_recovery', UI_STATE_TIMEOUT_MS);
-      if (recovered) {
-        return recovered;
-      }
-    }
     throw new Error(
       `structured ui_state recovery failed for instance ${instanceId}: ${error}\nBrowser console tail:\n${consoleTailText(session)}`
     );
@@ -1451,7 +1500,7 @@ async function clickButton(params) {
         const locator = session.page.locator(selector).first();
         await withOperationTimeout(
           `click_button_wait:${selector}:attempt${attempt}`,
-          locator.waitFor({ state: 'visible', timeout: 3000 }),
+          locator.waitFor({ state: 'attached', timeout: 3000 }),
           4000
         );
         await locator.scrollIntoViewIfNeeded().catch(() => {});

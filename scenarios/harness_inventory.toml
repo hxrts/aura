@@ -78,10 +78,10 @@ notes = "Legacy moderator assignment scripted flow pending semantic replacement.
 [[scenario]]
 id = "quint-semantic-observation-smoke"
 path = "scenarios/harness/quint-semantic-observation-smoke.toml"
-classification = "shared"
+classification = "tui_only"
 migration_status = "converted"
 runtime_substrate = "real_runtime"
-notes = "Reference Quint-originated semantic flow."
+notes = "Reference Quint-originated semantic flow executed through the local/TUI harness lane."
 
 [[scenario]]
 id = "real-runtime-mixed-startup-smoke"

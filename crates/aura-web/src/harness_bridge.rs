@@ -16,6 +16,7 @@ thread_local! {
     static CONTROLLER: RefCell<Option<Arc<UiController>>> = const { RefCell::new(None) };
     static LAST_PUBLISHED_UI_STATE_JSON: RefCell<Option<String>> = const { RefCell::new(None) };
     static RENDER_SEQ: RefCell<u64> = const { RefCell::new(0) };
+    static UI_PUBLISH_SEQ: RefCell<u64> = const { RefCell::new(0) };
 }
 
 fn publish_ui_snapshot_now(
@@ -26,6 +27,19 @@ fn publish_ui_snapshot_now(
     modal: Option<aura_app::ui::contract::ModalId>,
     operation_count: usize,
 ) {
+    let should_publish = LAST_PUBLISHED_UI_STATE_JSON.with(|slot| {
+        let mut last = slot.borrow_mut();
+        if last.as_deref() == Some(json.as_str()) {
+            false
+        } else {
+            *last = Some(json.clone());
+            true
+        }
+    });
+    if !should_publish {
+        return;
+    }
+
     let _ = Reflect::set(
         window.as_ref(),
         &JsValue::from_str("__AURA_UI_STATE_CACHE__"),
@@ -48,17 +62,7 @@ fn publish_ui_snapshot_now(
         "driver_push"
     })
     .unwrap_or("console_only");
-
-    let should_log = LAST_PUBLISHED_UI_STATE_JSON.with(|slot| {
-        let mut last = slot.borrow_mut();
-        if last.as_deref() == Some(json.as_str()) {
-            false
-        } else {
-            *last = Some(json.clone());
-            true
-        }
-    });
-    if should_log {
+    if binding_mode == "console_only" {
         web_sys::console::log_1(&JsValue::from_str(&format!(
             "[aura-ui-publish]binding={binding_mode};screen={screen:?};modal={modal:?};ops={operation_count}",
         )));
@@ -123,6 +127,11 @@ pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
     let screen = snapshot.screen;
     let modal = snapshot.open_modal;
     let operation_count = snapshot.operations.len();
+    let publish_seq = UI_PUBLISH_SEQ.with(|slot| {
+        let mut seq = slot.borrow_mut();
+        *seq = seq.saturating_add(1);
+        *seq
+    });
 
     // Publish semantic state immediately so harness waits are not gated on
     // the browser reaching the next animation frame.
@@ -137,6 +146,10 @@ pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
 
     let raf_window = window.clone();
     let raf_callback = Closure::once_into_js(move || {
+        let is_latest_publish = UI_PUBLISH_SEQ.with(|slot| *slot.borrow() == publish_seq);
+        if !is_latest_publish {
+            return;
+        }
         let render_seq = RENDER_SEQ.with(|slot| {
             let mut seq = slot.borrow_mut();
             *seq = seq.saturating_add(1);

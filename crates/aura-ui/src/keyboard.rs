@@ -142,6 +142,7 @@ fn apply_char(model: &mut UiModel, ch: char, clipboard: &dyn ClipboardPort) {
     }
 
     match model.screen {
+        UiScreen::Onboarding => {}
         UiScreen::Chat => handle_chat_char(model, ch),
         UiScreen::Contacts => handle_contacts_char(model, ch),
         UiScreen::Neighborhood => handle_neighborhood_char(model, ch),
@@ -370,6 +371,7 @@ fn handle_enter(model: &mut UiModel, clipboard: &dyn ClipboardPort) {
     }
 
     match model.screen {
+        UiScreen::Onboarding => {}
         UiScreen::Neighborhood => {
             if matches!(model.neighborhood_mode, crate::model::NeighborhoodMode::Map) {
                 model.neighborhood_mode = crate::model::NeighborhoodMode::Detail;
@@ -1585,6 +1587,7 @@ fn toggle_mfa_selection(model: &mut UiModel) {
 
 fn cycle_screen(model: &mut UiModel) {
     let next = match model.screen {
+        UiScreen::Onboarding => UiScreen::Neighborhood,
         UiScreen::Neighborhood => UiScreen::Chat,
         UiScreen::Chat => UiScreen::Contacts,
         UiScreen::Contacts => UiScreen::Notifications,
@@ -1596,6 +1599,7 @@ fn cycle_screen(model: &mut UiModel) {
 
 fn cycle_screen_prev(model: &mut UiModel) {
     let next = match model.screen {
+        UiScreen::Onboarding => UiScreen::Settings,
         UiScreen::Neighborhood => UiScreen::Settings,
         UiScreen::Chat => UiScreen::Neighborhood,
         UiScreen::Contacts => UiScreen::Chat,
@@ -1607,6 +1611,7 @@ fn cycle_screen_prev(model: &mut UiModel) {
 
 fn move_selection(model: &mut UiModel, delta: i32) {
     match model.screen {
+        UiScreen::Onboarding => {}
         UiScreen::Settings => {
             let current = model.settings_section.index() as i32;
             let mut next = current + delta;
