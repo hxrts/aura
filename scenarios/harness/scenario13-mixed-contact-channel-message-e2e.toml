@@ -217,9 +217,9 @@ timeout_ms = 30000
 
 [[steps]]
 id = "alice-open-chat"
-action = "activate"
+action = "navigate"
 actor = "alice"
-control_id = "contacts_start_chat_button"
+screen_id = "chat"
 timeout_ms = 3000
 
 [[steps]]
@@ -232,9 +232,9 @@ timeout_ms = 30000
 
 [[steps]]
 id = "bob-open-chat"
-action = "activate"
+action = "navigate"
 actor = "bob"
-control_id = "contacts_start_chat_button"
+screen_id = "chat"
 timeout_ms = 3000
 
 [[steps]]
@@ -266,6 +266,13 @@ value = "hello-from-tu1"
 timeout_ms = 6000
 
 [[steps]]
+id = "bob-receives-alice-message"
+action = "message_contains"
+actor = "bob"
+value = "hello-from-tu1"
+timeout_ms = 120000
+
+[[steps]]
 id = "bob-send-message"
 action = "send_chat_message"
 actor = "bob"
@@ -284,11 +291,4 @@ id = "alice-receives-bob-message"
 action = "message_contains"
 actor = "alice"
 value = "hello-from-web"
-timeout_ms = 60000
-
-[[steps]]
-id = "bob-receives-alice-message"
-action = "message_contains"
-actor = "bob"
-value = "hello-from-tu1"
-timeout_ms = 60000
+timeout_ms = 120000

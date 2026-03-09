@@ -15,7 +15,7 @@ use dioxus_shadcn::components::card::{
 };
 use dioxus_shadcn::components::dialog::{
     DialogContent as LbDialogContent, DialogDescription as LbDialogDescription,
-    DialogRoot as LbDialogRoot, DialogTitle as LbDialogTitle,
+    DialogOverlay as LbDialogOverlay, DialogRoot as LbDialogRoot, DialogTitle as LbDialogTitle,
 };
 use dioxus_shadcn::components::input::Input as LbInput;
 use dioxus_shadcn::components::label::Label as LbLabel;
@@ -167,9 +167,9 @@ pub fn UiPill(label: String, tone: PillTone) -> Element {
 #[component]
 pub fn UiListItem(label: String, secondary: Option<String>, active: bool) -> Element {
     let class = if active {
-        "rounded-sm border border-primary/40 bg-primary/10 px-2.5 py-2 min-w-0 overflow-hidden"
+        "aura-list-item border-b border-primary/40 bg-primary/10 px-2.5 py-2.5 min-w-0 overflow-hidden"
     } else {
-        "rounded-sm border border-border bg-background/60 px-2.5 py-2 min-w-0 overflow-hidden"
+        "aura-list-item border-b border-border px-2.5 py-2.5 min-w-0 overflow-hidden"
     };
     rsx! {
         div {
@@ -189,7 +189,6 @@ pub fn UiModal(
     on_confirm: EventHandler<()>,
     on_input_change: EventHandler<String>,
 ) -> Element {
-    let mut open = use_signal(|| Some(true));
     let input_field_id = modal
         .input_field_id
         .and_then(FieldId::web_dom_id)
@@ -198,32 +197,29 @@ pub fn UiModal(
         .to_string();
 
     rsx! {
-        LbDialogRoot {
-            id: Some(modal.modal_id.web_dom_id().to_string()),
-            open,
-            on_open_change: move |is_open| {
-                open.set(Some(is_open));
-                if !is_open {
-                    on_cancel.call(());
-                }
-            },
-            LbDialogContent {
-                id: Some("aura-modal-content".to_string()),
-                class: Some("aura-modal-fade w-full max-w-xl bg-card text-card-foreground shadow-2xl p-0 overflow-hidden".to_string()),
+        div {
+            id: modal.modal_id.web_dom_id().to_string(),
+            class: "fixed inset-0 z-50 flex items-center justify-center bg-background/95 px-4 backdrop-blur-sm",
+            div {
+                id: "aura-modal-content",
+                role: "dialog",
+                aria_modal: "true",
+                aria_labelledby: "aura-modal-title",
+                class: "aura-modal-fade w-full max-w-xl overflow-hidden bg-card p-0 text-card-foreground shadow-2xl",
                 div {
                     class: "bg-card px-4 py-3 border-b border-border flex items-center justify-between gap-3",
-                    LbDialogTitle {
-                        id: Some("aura-modal-title".to_string()),
-                        class: Some("m-0 text-sm font-semibold text-card-foreground".to_string()),
+                    h2 {
+                        id: "aura-modal-title",
+                        class: "m-0 text-sm font-semibold text-card-foreground",
                         "{modal.title}"
                     }
                     span { class: "text-[0.66rem] uppercase tracking-[0.06em] text-muted-foreground", "Esc closes" }
                 }
                 div {
                     class: "bg-card px-4 py-3 space-y-2 text-sm text-card-foreground",
-                    LbDialogDescription {
-                        id: Some("aura-modal-description".to_string()),
-                        class: Some("sr-only".to_string()),
+                    p {
+                        id: "aura-modal-description",
+                        class: "sr-only",
                         "Aura modal dialog"
                     }
                     for line in modal.details {
@@ -236,7 +232,7 @@ pub fn UiModal(
                                 div {
                                     class: "flex items-center justify-between gap-3 px-3 py-2",
                                     kbd {
-                                        class: "rounded border border-border bg-muted px-2 py-1 text-[0.68rem] uppercase tracking-[0.08em] text-foreground whitespace-nowrap",
+                                        class: "rounded-sm border border-border bg-muted px-2 py-1 text-[0.68rem] uppercase tracking-[0.08em] text-foreground whitespace-nowrap",
                                         "{keys}"
                                     }
                                     span {
@@ -250,18 +246,16 @@ pub fn UiModal(
                     if let Some(input_label) = modal.input_label {
                         div {
                             class: "pt-1 space-y-1",
-                            LbLabel {
-                                for_id: Some(input_field_id.clone()),
-                                class: Some("text-[0.7rem] uppercase tracking-[0.06em] text-muted-foreground".to_string()),
+                            label {
+                                r#for: "{input_field_id}",
+                                class: "text-[0.7rem] uppercase tracking-[0.06em] text-muted-foreground",
                                 "{input_label}"
                             }
-                            LbInput {
-                                id: Some(input_field_id),
-                                value: modal.input_value.clone().unwrap_or_default(),
-                                readonly: false,
-                                full_width: true,
-                                class: Some("font-mono".to_string()),
-                                on_input: move |evt: FormEvent| {
+                            input {
+                                id: "{input_field_id}",
+                                class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring",
+                                value: "{modal.input_value.clone().unwrap_or_default()}",
+                                oninput: move |evt: FormEvent| {
                                     on_input_change.call(evt.value());
                                 },
                             }
@@ -352,6 +346,9 @@ pub fn UiDeviceEnrollmentModal(
                     on_cancel.call(());
                 }
             },
+            LbDialogOverlay {
+                class: Some("bg-background/95 backdrop-blur-sm".to_string()),
+            }
             LbDialogContent {
                 id: Some("aura-device-enrollment-modal-content".to_string()),
                 class: Some("aura-modal-fade w-full max-w-2xl bg-card text-card-foreground shadow-2xl p-0 overflow-hidden".to_string()),
@@ -517,6 +514,9 @@ pub fn UiAuthorityPickerModal(
                     on_cancel.call(());
                 }
             },
+            LbDialogOverlay {
+                class: Some("bg-background/95 backdrop-blur-sm".to_string()),
+            }
             LbDialogContent {
                 id: Some("aura-authority-picker-modal-content".to_string()),
                 class: Some("aura-modal-fade w-full max-w-2xl bg-card text-card-foreground shadow-2xl p-0 overflow-hidden".to_string()),
@@ -709,7 +709,7 @@ pub fn UiFooter(
 fn FooterStatusItem(label: &'static str, value: String) -> Element {
     rsx! {
         div {
-            class: "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-border bg-background/70 px-3",
+            class: "inline-flex shrink-0 items-center gap-1.5 px-1",
             span {
                 class: "text-[0.62rem] uppercase tracking-[0.08em] text-muted-foreground",
                 "{label}"

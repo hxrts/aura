@@ -294,12 +294,39 @@ function onboardingShellPresent(session) {
   return domStateHasId(session, 'aura-onboarding-root');
 }
 
+function domStateIdsByPrefix(session, prefix) {
+  return domStateIdList(session).filter((id) => id.startsWith(prefix));
+}
+
+function domStateAlignedWithState(session, state) {
+  const screenDomId = expectedScreenDomId(state);
+  const screenIds = domStateIdsByPrefix(session, 'aura-screen-');
+  if (screenIds.length > 0 && screenDomId && !screenIds.includes(screenDomId)) {
+    return false;
+  }
+
+  const modalDomId = expectedModalDomId(state);
+  const modalIds = domStateIdsByPrefix(session, 'aura-modal-');
+  if (modalIds.length > 0) {
+    if (modalDomId) {
+      if (!modalIds.includes(modalDomId)) {
+        return false;
+      }
+    } else {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 async function ensureUiStateRenderConvergence(session, state, reason, timeoutMs = 1500) {
   if (onboardingShellPresent(session)) {
     return;
   }
   const heartbeat = session.renderHeartbeat;
   if (
+    domStateAlignedWithState(session, state) &&
     heartbeat &&
     contractEnumKey(state?.screen) === heartbeat.screen &&
     contractEnumKey(state?.open_modal) === heartbeat.open_modal
@@ -358,6 +385,7 @@ function cachedUiStateConverged(session, state) {
   }
   const heartbeat = session.renderHeartbeat;
   if (
+    domStateAlignedWithState(session, state) &&
     heartbeat &&
     contractEnumKey(state?.screen) === heartbeat.screen &&
     contractEnumKey(state?.open_modal) === heartbeat.open_modal
@@ -531,6 +559,40 @@ async function installUiStateObserver(page, session) {
   });
   await page.exposeFunction('__AURA_DRIVER_PUSH_CLIPBOARD', (payload) => {
     session.clipboardCache = String(payload ?? '');
+  });
+}
+
+async function installHarnessMutationQueue(page) {
+  await page.evaluate(() => {
+    if (window.__AURA_DRIVER_MUTATION_QUEUE_INSTALLED) {
+      return;
+    }
+
+    window.__AURA_DRIVER_PENDING_NAV_SCREEN__ = null;
+
+    const drain = () => {
+      try {
+        const pendingNav = window.__AURA_DRIVER_PENDING_NAV_SCREEN__;
+        const harness = window.__AURA_HARNESS__;
+        if (
+          pendingNav &&
+          harness &&
+          typeof harness.navigate_screen === 'function'
+        ) {
+          window.__AURA_DRIVER_PENDING_NAV_SCREEN__ = null;
+          try {
+            harness.navigate_screen(pendingNav);
+          } catch {
+            window.__AURA_DRIVER_PENDING_NAV_SCREEN__ = pendingNav;
+          }
+        }
+      } finally {
+        window.requestAnimationFrame(drain);
+      }
+    };
+
+    window.__AURA_DRIVER_MUTATION_QUEUE_INSTALLED = true;
+    window.requestAnimationFrame(drain);
   });
 }
 
@@ -976,9 +1038,8 @@ async function clickByLabelText(page, label, session) {
       hasText: new RegExp(`^${escapeRegex(normalizedLabel)}$`, 'i')
     })
   ];
-  const maxAttempts = 3;
+  const maxAttempts = 2;
   let lastError = null;
-  await focusAuraPageSafe(page, session.id, `label_start:${normalizedLabel}`);
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     for (const candidate of candidates) {
@@ -986,8 +1047,8 @@ async function clickByLabelText(page, label, session) {
       try {
         await withOperationTimeout(
           `click_label_wait_${context}`,
-          candidate.first().waitFor({ state: 'visible', timeout: 2500 }),
-          2900
+          candidate.first().waitFor({ state: 'visible', timeout: 900 }),
+          1200
         );
         return await clickLocatorWithDiagnostics(candidate.first(), context);
       } catch (error) {
@@ -1004,6 +1065,10 @@ async function clickByLabelText(page, label, session) {
   }
 
   throw new Error(`label_click_failed label=${normalizedLabel} ${normalizeClickError(lastError)}`);
+}
+
+function isNavigationSelector(selector) {
+  return String(selector ?? '').trim().startsWith('#aura-nav-');
 }
 
 function mapPlaywrightKey(key) {
@@ -1650,6 +1715,13 @@ async function startPage(params) {
         );
       }
       console.error(
+        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installHarnessMutationQueue start`
+      );
+      await installHarnessMutationQueue(page);
+      console.error(
+        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installHarnessMutationQueue done`
+      );
+      console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installDomObserver start`
       );
       await installDomObserver(page, session);
@@ -1786,6 +1858,30 @@ async function sendKey(params) {
   }
 
   return { status: 'sent' };
+}
+
+async function navigateScreen(params) {
+  const instanceId = normalizeInstanceId(params);
+  const screen = String(params?.screen ?? '').trim();
+  if (!screen) {
+    throw new Error('screen is required');
+  }
+  const session = getSession(instanceId);
+  const result = await withOperationTimeout(
+    `navigate_screen:${instanceId}:${screen}`,
+    session.page.evaluate((targetScreen) => {
+      if (!window.__AURA_DRIVER_MUTATION_QUEUE_INSTALLED) {
+        return { ok: false, reason: 'mutation_queue_missing' };
+      }
+      window.__AURA_DRIVER_PENDING_NAV_SCREEN__ = targetScreen;
+      return { ok: true };
+    }, screen),
+    1000
+  );
+  if (!result?.ok) {
+    throw new Error(`navigate_screen_failed screen=${screen} reason=${result?.reason ?? 'unknown'}`);
+  }
+  return { status: 'navigated', screen };
 }
 
 async function snapshot(params) {
@@ -2041,6 +2137,24 @@ async function clickButton(params) {
   console.error(`[driver] click_button start instance=${instanceId} selector=${selector || '-'} label=${label || '-'}`);
 
   if (selector) {
+    if (effectiveLabel && isNavigationSelector(selector)) {
+      const fallbackLabel = normalizeClickTarget(effectiveLabel);
+      console.error(
+        `[driver] click_button nav_label_first instance=${instanceId} selector=${selector} label=${fallbackLabel}`
+      );
+      try {
+        await clickByLabelText(session.page, fallbackLabel, session);
+        console.error(
+          `[driver] click_button done instance=${instanceId} selector=${selector} via=nav_label_first fallbackLabel=${fallbackLabel}`
+        );
+        return { status: 'clicked' };
+      } catch (fallbackError) {
+        console.error(
+          `[driver] click_button nav_label_first_failed instance=${instanceId} selector=${selector} label=${fallbackLabel} error=${fallbackError?.message ?? String(fallbackError)}`
+        );
+      }
+    }
+
     let selectorError = null;
     try {
       await clickByCssSelector(session.page, selector, session);
@@ -2310,6 +2424,8 @@ async function dispatch(method, params) {
       return sendKeys(params);
     case 'send_key':
       return sendKey(params);
+    case 'navigate_screen':
+      return navigateScreen(params);
     case 'click_button':
       return clickButton(params);
     case 'fill_input':
