@@ -39,6 +39,7 @@ portable-pty = "0.9"
 vt100 = "0.15"
 regex = "1.11"
 nix = "0.26"
+which = "6"
 hex = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }

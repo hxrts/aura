@@ -1979,6 +1979,14 @@ impl UiController {
             .unwrap_or_else(|| UiSnapshot::loading(UiScreen::Neighborhood))
     }
 
+    pub fn semantic_model_snapshot(&self) -> UiSnapshot {
+        self.model
+            .read()
+            .ok()
+            .map(|model| model.semantic_snapshot())
+            .unwrap_or_else(|| UiSnapshot::loading(UiScreen::Neighborhood))
+    }
+
     pub fn set_ui_snapshot_override(&self, snapshot: UiSnapshot) {
         if let Ok(mut slot) = self.ui_snapshot_override.write() {
             *slot = Some(snapshot);

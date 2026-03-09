@@ -37,7 +37,7 @@ use aura_app::ui::workflows::{
     access as access_workflows, contacts as contacts_workflows, context as context_workflows,
     invitation as invitation_workflows, messaging as messaging_workflows,
     network as network_workflows, query as query_workflows, recovery as recovery_workflows,
-    settings as settings_workflows, time as time_workflows,
+    runtime as runtime_workflows, settings as settings_workflows, time as time_workflows,
 };
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, CeremonyId};
@@ -1247,9 +1247,9 @@ fn submit_runtime_modal_action(
                         harness_log("accept_invitation runtime_accept start");
                         let accepted = match invitation.invitation_type {
                             InvitationBridgeType::DeviceEnrollment { .. } => {
-                                invitation_workflows::accept_invitation(
+                                invitation_workflows::accept_device_enrollment_invitation(
                                     &app_core,
-                                    &invitation.invitation_id,
+                                    &invitation,
                                 )
                                 .await
                             }
@@ -1421,12 +1421,27 @@ fn submit_runtime_modal_action(
                             return;
                         }
 
-                        match invitation_workflows::accept_invitation(
+                        if let Ok(runtime) = runtime_workflows::require_runtime(&app_core).await {
+                            for _ in 0..8 {
+                                runtime_workflows::converge_runtime(&runtime).await;
+                                if runtime_workflows::ensure_runtime_peer_connectivity(
+                                    &runtime,
+                                    "device_enrollment_accept",
+                                )
+                                .await
+                                .is_ok()
+                                {
+                                    break;
+                                }
+                                let _ = time_workflows::sleep_ms(&app_core, 250).await;
+                            }
+                        }
+
+                        match invitation_workflows::accept_device_enrollment_invitation(
                             &app_core,
-                            &invitation.invitation_id,
+                            &invitation,
                         )
-                        .await
-                        {
+                        .await {
                             Ok(()) => {
                                 let _ =
                                     settings_workflows::refresh_settings_from_runtime(&app_core)

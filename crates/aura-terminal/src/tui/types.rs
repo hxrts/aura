@@ -668,6 +668,28 @@ impl SettingsSection {
             Self::Observability => Self::Authority,
         }
     }
+
+    pub fn index(self) -> usize {
+        match self {
+            Self::Profile => 0,
+            Self::Threshold => 1,
+            Self::Recovery => 2,
+            Self::Devices => 3,
+            Self::Authority => 4,
+            Self::Observability => 5,
+        }
+    }
+
+    pub fn from_index(index: usize) -> Self {
+        match index % Self::all().len() {
+            0 => Self::Profile,
+            1 => Self::Threshold,
+            2 => Self::Recovery,
+            3 => Self::Devices,
+            4 => Self::Authority,
+            _ => Self::Observability,
+        }
+    }
 }
 
 /// Authority information for display

@@ -36,13 +36,15 @@ use aura_core::threshold::{
     AgreementMode, ApprovalContext, ParticipantIdentity, SignableOperation, SigningContext,
     ThresholdConfig, ThresholdSignature, ThresholdState,
 };
-use aura_core::tree::{AttestedOp, TreeOp};
+use aura_core::tree::metadata::DeviceLeafMetadata;
+use aura_core::tree::{AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp};
 use aura_core::{
     effects::{PhysicalTimeEffects, ThresholdSigningEffects},
     threshold::{ConvergenceCert, ReversionFact},
     AuraError, ContextId, Epoch, Hash32,
 };
 use aura_effects::RuntimeCapabilityHandler;
+use aura_protocol::effects::TreeEffects;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -228,6 +230,70 @@ impl ThresholdSigningService {
 
     fn transcript_store(&self) -> StorageTranscriptStore<AuraEffectSystem> {
         StorageTranscriptStore::new_default(self.effects.clone())
+    }
+
+    async fn ensure_bootstrap_device_leaf(
+        &self,
+        authority: &AuthorityId,
+        public_key_package: &[u8],
+    ) -> Result<(), AuraError> {
+        let current_device_id = self.effects.device_id();
+        let tree_state = self.effects.get_current_state().await?;
+
+        let current_exists = tree_state
+            .leaves
+            .values()
+            .any(|leaf| leaf.role == LeafRole::Device && leaf.device_id == current_device_id);
+        if current_exists {
+            return Ok(());
+        }
+
+        let next_leaf_id = tree_state
+            .leaves
+            .keys()
+            .map(|leaf_id| leaf_id.0)
+            .max()
+            .unwrap_or(0)
+            + 1;
+
+        let leaf_metadata = DeviceLeafMetadata::new()
+            .with_enrolled_at_ms(self.effects.physical_time().await?.ts_ms)
+            .encode()?;
+
+        let verifying_key = SingleSignerPublicKeyPackage::from_bytes(public_key_package)
+            .map_err(|e| {
+                AuraError::internal(format!(
+                    "Failed to decode single-signer public key package for bootstrap leaf: {e}"
+                ))
+            })?
+            .verifying_key
+            .clone();
+
+        let leaf = LeafNode::new(
+            LeafId(next_leaf_id),
+            current_device_id,
+            LeafRole::Device,
+            verifying_key,
+            leaf_metadata,
+        )?;
+
+        let op_kind = self.effects.add_leaf(leaf, NodeIndex(0)).await?;
+        let op = TreeOp {
+            parent_epoch: tree_state.epoch,
+            parent_commitment: tree_state.root_commitment,
+            op: op_kind,
+            version: 1,
+        };
+
+        let signature = self.sign(SigningContext::self_tree_op(*authority, op.clone())).await?;
+        let attested = AttestedOp {
+            op,
+            agg_sig: signature.signature,
+            signer_count: signature.signer_count,
+        };
+
+        self.effects.apply_attested_op(attested).await?;
+        Ok(())
     }
 
     fn capability_ref(key: &str) -> String {
@@ -717,6 +783,9 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             |state_map| state_map.validate(),
         )
         .await;
+
+        self.ensure_bootstrap_device_leaf(authority, &key_result.public_key_package)
+            .await?;
 
         Ok(key_result.public_key_package)
     }
@@ -1397,9 +1466,12 @@ impl RuntimeService for ThresholdSigningService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::AgentConfig;
+    use crate::runtime::AuraEffectSystem;
     use aura_core::threshold::SigningContext;
     use aura_core::tree::{TreeOp, TreeOpKind};
     use aura_core::Epoch;
+    use std::sync::Arc;
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
@@ -1428,5 +1500,31 @@ mod tests {
         let op = SignableOperation::TreeOp(test_tree_op());
         let result = ThresholdSigningService::serialize_operation(&op);
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn bootstrap_authority_seeds_initial_device_leaf_in_tree_ops() {
+        let config = AgentConfig::default();
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let service = ThresholdSigningService::new(effects.clone());
+        let authority = test_authority();
+
+        service.bootstrap_authority(&authority).await.unwrap();
+
+        let ops = effects.export_tree_ops().await.unwrap();
+        assert!(
+            !ops.is_empty(),
+            "bootstrapped authority should export a non-empty baseline tree oplog"
+        );
+
+        let state = effects.get_current_state().await.unwrap();
+        let current_device = effects.device_id();
+        assert!(
+            state
+                .leaves
+                .values()
+                .any(|leaf| leaf.role == LeafRole::Device && leaf.device_id == current_device),
+            "bootstrapped authority should persist the current device as a real tree leaf"
+        );
     }
 }

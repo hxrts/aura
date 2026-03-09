@@ -138,6 +138,12 @@ harness-migration-audit:
 harness-boundary-check:
     bash scripts/check/harness-boundary-policy.sh
 
+harness-scenario-inventory-check:
+    bash scripts/check/harness-scenario-inventory.sh
+
+harness-shared-scenario-contract-check:
+    bash scripts/check/harness-shared-scenario-contract.sh
+
 harness-flake-metrics root="artifacts/harness":
     bash scripts/check/harness-flake-metrics.sh {{root}}
 

@@ -926,15 +926,40 @@ pub struct UiParityMismatch {
     pub tui: String,
 }
 
+fn normalize_parity_item_id(list_id: ListId, item_id: &str) -> Option<String> {
+    match list_id {
+        ListId::SettingsSections => match item_id.replace('_', "-").as_str() {
+            "appearance" | "observability" => None,
+            normalized => Some(normalized.to_string()),
+        },
+        _ => Some(item_id.to_string()),
+    }
+}
+
+fn parity_relevant_lists(screen: ScreenId) -> &'static [ListId] {
+    match screen {
+        ScreenId::Neighborhood => &[ListId::Navigation, ListId::Homes, ListId::NeighborhoodMembers],
+        ScreenId::Chat => &[ListId::Navigation, ListId::Channels],
+        ScreenId::Contacts => &[ListId::Navigation, ListId::Contacts],
+        ScreenId::Notifications => &[ListId::Navigation, ListId::Notifications],
+        ScreenId::Settings => &[ListId::Navigation, ListId::SettingsSections],
+    }
+}
+
 fn parity_list_signature(snapshot: &UiSnapshot) -> Vec<(ListId, Vec<(String, bool, ConfirmationState)>)> {
+    let relevant_lists = parity_relevant_lists(snapshot.screen);
     let mut lists = snapshot
         .lists
         .iter()
+        .filter(|list| relevant_lists.contains(&list.id))
         .map(|list| {
             let mut items = list
                 .items
                 .iter()
-                .map(|item| (item.id.clone(), item.selected, item.confirmation))
+                .filter_map(|item| {
+                    normalize_parity_item_id(list.id, &item.id)
+                        .map(|normalized| (normalized, item.selected, item.confirmation))
+                })
                 .collect::<Vec<_>>();
             items.sort_by(|left, right| {
                 left.0
@@ -950,10 +975,15 @@ fn parity_list_signature(snapshot: &UiSnapshot) -> Vec<(ListId, Vec<(String, boo
 }
 
 fn parity_selection_signature(snapshot: &UiSnapshot) -> Vec<(ListId, String)> {
+    let relevant_lists = parity_relevant_lists(snapshot.screen);
     let mut selections = snapshot
         .selections
         .iter()
-        .map(|selection| (selection.list, selection.item_id.clone()))
+        .filter(|selection| relevant_lists.contains(&selection.list))
+        .filter_map(|selection| {
+            normalize_parity_item_id(selection.list, &selection.item_id)
+                .map(|normalized| (selection.list, normalized))
+        })
         .collect::<Vec<_>>();
     selections.sort_by(|left, right| {
         left.0
@@ -1395,5 +1425,125 @@ mod tests {
                 tui_path.display()
             );
         }
+    }
+
+    #[test]
+    fn parity_ignores_non_active_screen_lists_and_normalizes_settings_sections() {
+        let web = UiSnapshot {
+            screen: ScreenId::Settings,
+            focused_control: Some(ControlId::Screen(ScreenId::Settings)),
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            selections: vec![
+                SelectionSnapshot {
+                    list: ListId::Navigation,
+                    item_id: "settings".to_string(),
+                },
+                SelectionSnapshot {
+                    list: ListId::SettingsSections,
+                    item_id: "guardian-threshold".to_string(),
+                },
+                SelectionSnapshot {
+                    list: ListId::Homes,
+                    item_id: "stale-home".to_string(),
+                },
+            ],
+            lists: vec![
+                ListSnapshot {
+                    id: ListId::Navigation,
+                    items: vec![ListItemSnapshot {
+                        id: "settings".to_string(),
+                        selected: true,
+                        confirmation: ConfirmationState::Confirmed,
+                    }],
+                },
+                ListSnapshot {
+                    id: ListId::SettingsSections,
+                    items: vec![
+                        ListItemSnapshot {
+                            id: "guardian-threshold".to_string(),
+                            selected: true,
+                            confirmation: ConfirmationState::Confirmed,
+                        },
+                        ListItemSnapshot {
+                            id: "appearance".to_string(),
+                            selected: false,
+                            confirmation: ConfirmationState::Confirmed,
+                        },
+                    ],
+                },
+                ListSnapshot {
+                    id: ListId::Homes,
+                    items: vec![ListItemSnapshot {
+                        id: "stale-home".to_string(),
+                        selected: true,
+                        confirmation: ConfirmationState::Confirmed,
+                    }],
+                },
+            ],
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+        let tui = UiSnapshot {
+            screen: ScreenId::Settings,
+            focused_control: Some(ControlId::Screen(ScreenId::Settings)),
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            selections: vec![
+                SelectionSnapshot {
+                    list: ListId::Navigation,
+                    item_id: "settings".to_string(),
+                },
+                SelectionSnapshot {
+                    list: ListId::SettingsSections,
+                    item_id: "guardian_threshold".to_string(),
+                },
+                SelectionSnapshot {
+                    list: ListId::NeighborhoodMembers,
+                    item_id: "stale-member".to_string(),
+                },
+            ],
+            lists: vec![
+                ListSnapshot {
+                    id: ListId::Navigation,
+                    items: vec![ListItemSnapshot {
+                        id: "settings".to_string(),
+                        selected: true,
+                        confirmation: ConfirmationState::Confirmed,
+                    }],
+                },
+                ListSnapshot {
+                    id: ListId::SettingsSections,
+                    items: vec![
+                        ListItemSnapshot {
+                            id: "guardian_threshold".to_string(),
+                            selected: true,
+                            confirmation: ConfirmationState::Confirmed,
+                        },
+                        ListItemSnapshot {
+                            id: "observability".to_string(),
+                            selected: false,
+                            confirmation: ConfirmationState::Confirmed,
+                        },
+                    ],
+                },
+                ListSnapshot {
+                    id: ListId::NeighborhoodMembers,
+                    items: vec![ListItemSnapshot {
+                        id: "stale-member".to_string(),
+                        selected: true,
+                        confirmation: ConfirmationState::Confirmed,
+                    }],
+                },
+            ],
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+
+        assert!(compare_ui_snapshots_for_parity(&web, &tui).is_empty());
     }
 }

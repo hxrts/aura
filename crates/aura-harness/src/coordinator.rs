@@ -29,7 +29,7 @@ const BACKEND_HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const BACKEND_READY_TIMEOUT: Duration = Duration::from_secs(120);
 const BACKEND_TEARDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 const BACKEND_POLL_INTERVAL: Duration = Duration::from_millis(100);
-const WEB_SERVER_READY_TIMEOUT: Duration = Duration::from_secs(180);
+const WEB_SERVER_READY_TIMEOUT: Duration = Duration::from_secs(600);
 const WEB_SERVER_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 struct OwnedWebServer {
@@ -110,7 +110,7 @@ impl HarnessCoordinator {
             wait_for_owned_web_server(
                 self.owned_web_server_log_path.as_deref(),
                 server,
-                WEB_SERVER_READY_TIMEOUT,
+                owned_web_server_ready_timeout(),
             )?;
             self.events.push(
                 "lifecycle",
@@ -841,6 +841,14 @@ fn browser_app_url_from_env(instance: &crate::config::InstanceConfig) -> Option<
             .then(|| value.trim().to_string())
             .filter(|value| !value.is_empty())
     })
+}
+
+fn owned_web_server_ready_timeout() -> Duration {
+    std::env::var("AURA_HARNESS_WEB_SERVER_READY_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(WEB_SERVER_READY_TIMEOUT)
 }
 
 fn wait_for_owned_web_server(

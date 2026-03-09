@@ -262,6 +262,20 @@ impl<'a> EnrollmentHandler<'a> {
             }
         };
         let ceremony_id = CeremonyId::new(ceremony_id.clone());
+        tracing::info!(
+            ceremony_id = %ceremony_id,
+            acceptor_device_id = %acceptor_device_id,
+            source = %envelope.source,
+            destination = %envelope.destination,
+            "Processing device enrollment acceptance envelope"
+        );
+        eprintln!(
+            "[device-enrollment-acceptance] ceremony_id={};acceptor_device_id={};source={};destination={}",
+            ceremony_id,
+            acceptor_device_id,
+            envelope.source,
+            envelope.destination,
+        );
 
         let participant = aura_core::threshold::ParticipantIdentity::device(acceptor_device_id);
         let threshold_reached = match self
@@ -281,19 +295,40 @@ impl<'a> EnrollmentHandler<'a> {
             }
         };
 
+        tracing::info!(
+            ceremony_id = %ceremony_id,
+            acceptor_device_id = %acceptor_device_id,
+            threshold_reached,
+            "Recorded device enrollment acceptance"
+        );
+        eprintln!(
+            "[device-enrollment-acceptance-recorded] ceremony_id={};acceptor_device_id={};threshold_reached={}",
+            ceremony_id,
+            acceptor_device_id,
+            threshold_reached,
+        );
+
         if threshold_reached {
-            if let Err(e) = self.finalize_enrollment(&ceremony_id).await {
+            let attested_leaf_op = match self.finalize_enrollment(&ceremony_id).await {
+                Ok(attested) => attested,
+                Err(e) => {
+                    tracing::warn!(
+                        ceremony_id = %ceremony_id,
+                        error = %e,
+                        "Failed to finalize device enrollment locally"
+                    );
+                    return ProcessResult::Skip;
+                }
+            };
+            self.commit_enrollment_rotation(&ceremony_id).await;
+            // When threshold is reached, send commit to all participants
+            if let Err(e) = self
+                .send_commit_to_participants(&ceremony_id, attested_leaf_op.as_ref())
+                .await
+            {
                 tracing::warn!(
                     ceremony_id = %ceremony_id,
                     error = %e,
-                    "Failed to finalize device enrollment locally"
-                );
-            }
-            // When threshold is reached, send commit to all participants
-            if let Err(e) = self.send_commit_to_participants(&ceremony_id).await {
-                tracing::error!(
-                    ceremony_id = %ceremony_id,
-                    error = ?e,
                     "Failed to send enrollment commit messages"
                 );
             }
@@ -302,7 +337,10 @@ impl<'a> EnrollmentHandler<'a> {
         ProcessResult::Processed
     }
 
-    async fn finalize_enrollment(&self, ceremony_id: &CeremonyId) -> Result<(), String> {
+    async fn finalize_enrollment(
+        &self,
+        ceremony_id: &CeremonyId,
+    ) -> Result<Option<AttestedOp>, String> {
         let ceremony_state = self
             .ceremony_tracker
             .get(ceremony_id)
@@ -310,7 +348,7 @@ impl<'a> EnrollmentHandler<'a> {
             .map_err(|e| format!("Failed to load ceremony state: {e}"))?;
 
         let Some(device_id) = ceremony_state.enrollment_device_id else {
-            return Ok(());
+            return Ok(None);
         };
 
         let tree_state = self
@@ -330,6 +368,7 @@ impl<'a> EnrollmentHandler<'a> {
                 device_id = %device_id,
                 "Enrollment leaf already present; skipping add-leaf op"
             );
+            return Ok(None);
         } else {
             use aura_core::crypto::tree_signing::{
                 public_key_package_from_bytes, share_from_key_package_bytes,
@@ -437,10 +476,28 @@ impl<'a> EnrollmentHandler<'a> {
             };
 
             self.effects
-                .apply_attested_op(attested)
+                .apply_attested_op(attested.clone())
                 .await
                 .map_err(|e| format!("Failed to apply device leaf op: {e}"))?;
+            return Ok(Some(attested));
         }
+    }
+
+    async fn commit_enrollment_rotation(&self, ceremony_id: &CeremonyId) {
+        let ceremony_state = match self.ceremony_tracker.get(ceremony_id).await {
+            Ok(state) => state,
+            Err(e) => {
+                tracing::warn!(
+                    ceremony_id = %ceremony_id,
+                    error = %e,
+                    "Failed to load ceremony state for rotation commit"
+                );
+                return;
+            }
+        };
+        let Some(device_id) = ceremony_state.enrollment_device_id else {
+            return;
+        };
 
         // Commit key rotation locally for the initiator device.
         if let Err(e) = self
@@ -476,7 +533,7 @@ impl<'a> EnrollmentHandler<'a> {
                     error = %e,
                     "failed to derive device authority for delegation"
                 );
-                return Ok(());
+                return;
             }
         };
 
@@ -503,12 +560,14 @@ impl<'a> EnrollmentHandler<'a> {
                 "device migration delegation failed after enrollment commit"
             );
         }
-
-        Ok(())
     }
 
     /// Send commit messages to all ceremony participants
-    async fn send_commit_to_participants(&self, ceremony_id: &CeremonyId) -> Result<(), String> {
+    async fn send_commit_to_participants(
+        &self,
+        ceremony_id: &CeremonyId,
+        attested_leaf_op: Option<&AttestedOp>,
+    ) -> Result<(), String> {
         use aura_core::effects::TransportEffects;
 
         let ceremony_state = self
@@ -546,11 +605,17 @@ impl<'a> EnrollmentHandler<'a> {
                 device_id.to_string(),
             );
 
+            let payload = match attested_leaf_op {
+                Some(attested) => aura_core::util::serialization::to_vec(attested)
+                    .map_err(|e| format!("Failed to encode enrollment commit op: {e}"))?,
+                None => Vec::new(),
+            };
+
             let commit_envelope = aura_core::effects::TransportEnvelope {
                 destination: self.authority_id,
                 source: self.authority_id,
                 context: ceremony_context,
-                payload: Vec::new(),
+                payload,
                 metadata,
                 receipt: None,
             };
@@ -561,6 +626,25 @@ impl<'a> EnrollmentHandler<'a> {
                     device_id = %device_id,
                     error = %e,
                     "Failed to send enrollment commit to device"
+                );
+                eprintln!(
+                    "[device-enrollment-commit-send-failed] ceremony_id={};device_id={};error={}",
+                    ceremony_id,
+                    device_id,
+                    e,
+                );
+            } else {
+                tracing::info!(
+                    ceremony_id = %ceremony_id,
+                    device_id = %device_id,
+                    has_leaf_op = attested_leaf_op.is_some(),
+                    "Sent enrollment commit to device"
+                );
+                eprintln!(
+                    "[device-enrollment-commit-sent] ceremony_id={};device_id={};has_leaf_op={}",
+                    ceremony_id,
+                    device_id,
+                    attested_leaf_op.is_some(),
                 );
             }
         }

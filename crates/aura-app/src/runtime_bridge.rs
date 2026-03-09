@@ -548,6 +548,12 @@ pub trait RuntimeBridge: Send + Sync {
     /// Trigger sync with peers (if sync service is available)
     async fn trigger_sync(&self) -> Result<(), IntentError>;
 
+    /// Process any pending ceremony envelopes/messages.
+    ///
+    /// This is required for flows like device enrollment where the invitee must
+    /// ingest ceremony commit messages before signal-backed state can converge.
+    async fn process_ceremony_messages(&self) -> Result<(), IntentError>;
+
     /// Sync with a specific peer by ID
     ///
     /// Initiates targeted synchronization with the specified peer.
@@ -1164,6 +1170,12 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     async fn trigger_sync(&self) -> Result<(), IntentError> {
         Err(IntentError::no_agent("Sync not available in offline mode"))
+    }
+
+    async fn process_ceremony_messages(&self) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Ceremony processing not available in offline mode",
+        ))
     }
 
     async fn sync_with_peer(&self, _peer_id: &str) -> Result<(), IntentError> {

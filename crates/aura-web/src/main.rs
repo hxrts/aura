@@ -17,11 +17,15 @@ cfg_if! {
         use aura_app::{AppConfig, AppCore};
         use aura_app::ui::workflows::account as account_workflows;
         use aura_app::ui::workflows::invitation as invitation_workflows;
+        use aura_app::ui::workflows::runtime as runtime_workflows;
         use aura_app::ui::workflows::settings as settings_workflows;
         use aura_app::ui::workflows::time as time_workflows;
         use aura_app::ui::types::InvitationBridgeType;
-        use aura_core::identifiers::AuthorityId;
-        use aura_app::ui::contract::{ControlId, FieldId};
+        use aura_core::{identifiers::AuthorityId, DeviceId};
+        use aura_app::ui::contract::{
+            ControlId, FieldId, OperationId, OperationInstanceId, OperationSnapshot,
+            OperationState, ScreenId, UiReadiness, UiSnapshot,
+        };
         use aura_ui::{AuraUiRoot, UiController};
         use dioxus::prelude::*;
         use std::sync::Arc;
@@ -32,6 +36,14 @@ cfg_if! {
 
         fn selected_authority_key(storage_prefix: &str) -> String {
             format!("{storage_prefix}selected_authority")
+        }
+
+        fn selected_device_key(storage_prefix: &str) -> String {
+            format!("{storage_prefix}selected_device")
+        }
+
+        fn pending_device_enrollment_code_key(storage_prefix: &str) -> String {
+            format!("{storage_prefix}pending_device_enrollment_code")
         }
 
         fn sanitize_storage_segment(raw: &str) -> String {
@@ -93,6 +105,13 @@ cfg_if! {
             raw.parse::<AuthorityId>().ok()
         }
 
+        fn load_selected_device(storage_key: &str) -> Option<DeviceId> {
+            let window = web_sys::window()?;
+            let storage = window.local_storage().ok().flatten()?;
+            let raw = storage.get_item(storage_key).ok().flatten()?;
+            raw.parse::<DeviceId>().ok()
+        }
+
         fn persist_selected_authority(
             storage_key: &str,
             authority_id: &AuthorityId,
@@ -105,6 +124,51 @@ cfg_if! {
             storage
                 .set_item(storage_key, &authority_id.to_string())
                 .map_err(|error| format!("failed to persist selected authority: {:?}", error))
+        }
+
+        fn persist_selected_device(
+            storage_key: &str,
+            device_id: &DeviceId,
+        ) -> Result<(), String> {
+            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
+            let storage = window
+                .local_storage()
+                .map_err(|error| format!("localStorage unavailable: {:?}", error))?
+                .ok_or_else(|| "localStorage unavailable".to_string())?;
+            storage
+                .set_item(storage_key, &device_id.to_string())
+                .map_err(|error| format!("failed to persist selected device: {:?}", error))
+        }
+
+        fn load_pending_device_enrollment_code(storage_key: &str) -> Option<String> {
+            let window = web_sys::window()?;
+            let storage = window.local_storage().ok().flatten()?;
+            storage.get_item(storage_key).ok().flatten()
+        }
+
+        fn persist_pending_device_enrollment_code(
+            storage_key: &str,
+            code: &str,
+        ) -> Result<(), String> {
+            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
+            let storage = window
+                .local_storage()
+                .map_err(|error| format!("localStorage unavailable: {:?}", error))?
+                .ok_or_else(|| "localStorage unavailable".to_string())?;
+            storage
+                .set_item(storage_key, code)
+                .map_err(|error| format!("failed to persist pending device enrollment code: {:?}", error))
+        }
+
+        fn clear_pending_device_enrollment_code(storage_key: &str) -> Result<(), String> {
+            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
+            let storage = window
+                .local_storage()
+                .map_err(|error| format!("localStorage unavailable: {:?}", error))?
+                .ok_or_else(|| "localStorage unavailable".to_string())?;
+            storage
+                .remove_item(storage_key)
+                .map_err(|error| format!("failed to clear pending device enrollment code: {:?}", error))
         }
 
         fn reload_page() -> Result<(), String> {
@@ -124,11 +188,29 @@ cfg_if! {
         async fn bootstrap_controller() -> Result<BootstrapState, String> {
             let storage_prefix = active_storage_prefix();
             let authority_storage_key = selected_authority_key(&storage_prefix);
+            let device_storage_key = selected_device_key(&storage_prefix);
             let selected_authority = load_selected_authority(&authority_storage_key);
+            let selected_device = load_selected_device(&device_storage_key);
+            web_sys::console::log_1(
+                &format!(
+                    "[web-bootstrap] storage_prefix={storage_prefix};selected_authority={:?};selected_device={:?}",
+                    selected_authority, selected_device
+                )
+                .into(),
+            );
             let harness_instance = harness_instance_id();
             let builder = AgentBuilder::web().storage_prefix(&storage_prefix);
             let builder = if let Some(authority_id) = selected_authority {
                 builder.authority(authority_id)
+            } else {
+                builder
+            };
+            let builder = if let Some(device_id) = selected_device {
+                let config = aura_agent::core::AgentConfig {
+                    device_id,
+                    ..Default::default()
+                };
+                builder.with_config(config)
             } else {
                 builder
             };
@@ -138,6 +220,14 @@ cfg_if! {
                     .build()
                     .await
                     .map_err(|error| format!("failed to build web runtime: {error}"))?,
+            );
+            web_sys::console::log_1(
+                &format!(
+                    "[web-bootstrap] runtime_authority={};runtime_device={}",
+                    agent.authority_id(),
+                    agent.runtime().device_id()
+                )
+                .into(),
             );
             let account_ready = agent
                 .clone()
@@ -155,9 +245,22 @@ cfg_if! {
             }
 
             let app_core = Arc::new(RwLock::new(
-                AppCore::with_runtime(AppConfig::default(), agent.as_runtime_bridge())
+                AppCore::with_runtime(AppConfig::default(), agent.clone().as_runtime_bridge())
                     .map_err(|error| format!("failed to initialize AppCore: {error}"))?,
             ));
+
+            let ceremony_agent = agent.clone();
+            let ceremony_app_core = app_core.clone();
+            spawn(async move {
+                loop {
+                    let _ = time_workflows::sleep_ms(&ceremony_app_core, 500).await;
+                    if let Err(error) = ceremony_agent.process_ceremony_acceptances().await {
+                        web_sys::console::debug_1(
+                            &format!("process_ceremony_acceptances error: {error}").into(),
+                        );
+                    }
+                }
+            });
 
             AppCore::init_signals_with_hooks(&app_core)
                 .await
@@ -195,6 +298,55 @@ cfg_if! {
                 web_sys::console::error_1(
                     &format!("failed to install harness API: {error:?}").into(),
                 );
+            }
+
+            if account_ready {
+                if let Err(error) = settings_workflows::refresh_settings_from_runtime(
+                    controller.app_core(),
+                )
+                .await
+                {
+                    web_sys::console::warn_1(
+                        &format!("failed to seed settings signal during bootstrap: {error}")
+                            .into(),
+                        );
+                }
+                match runtime_workflows::require_runtime(controller.app_core()).await {
+                    Ok(runtime) => {
+                        let runtime_devices = runtime.list_devices().await;
+                        match settings_workflows::get_settings(controller.app_core()).await {
+                            Ok(settings) => web_sys::console::log_1(
+                                &format!(
+                                    "[web-bootstrap] settings_seeded runtime_devices={:?};settings_devices={:?}",
+                                    runtime_devices
+                                        .iter()
+                                        .map(|device| device.id.to_string())
+                                        .collect::<Vec<_>>(),
+                                    settings
+                                        .devices
+                                        .iter()
+                                        .map(|device| device.id.clone())
+                                        .collect::<Vec<_>>()
+                                )
+                                .into(),
+                            ),
+                            Err(error) => web_sys::console::warn_1(
+                                &format!(
+                                    "[web-bootstrap] settings_seeded runtime_devices={:?};settings_error={error}",
+                                    runtime_devices
+                                        .iter()
+                                        .map(|device| device.id.to_string())
+                                        .collect::<Vec<_>>()
+                                )
+                                .into(),
+                            ),
+                        }
+                    }
+                    Err(error) => web_sys::console::warn_1(
+                        &format!("[web-bootstrap] failed to inspect runtime devices: {error}")
+                            .into(),
+                    ),
+                }
             }
 
             controller.push_log("runtime bootstrap enabled in web shell");
@@ -275,6 +427,42 @@ cfg_if! {
             let mut import_code = use_signal(String::new);
             let mut import_error = use_signal(|| Option::<String>::None);
             let importing_code = use_signal(|| false);
+            let mut auto_import_started = use_signal(|| false);
+
+            let publish_onboarding_snapshot = {
+                let controller = controller.clone();
+                move || {
+                    let base = controller.semantic_model_snapshot();
+                    let mut operations = base.operations;
+                    if creating_account()
+                        && !operations
+                            .iter()
+                            .any(|operation| operation.id.0 == "account_bootstrap")
+                    {
+                        operations.push(OperationSnapshot {
+                            id: OperationId("account_bootstrap".to_string()),
+                            instance_id: OperationInstanceId("account-bootstrap".to_string()),
+                            state: OperationState::Submitting,
+                        });
+                    }
+                    controller.set_ui_snapshot(UiSnapshot {
+                        screen: ScreenId::Neighborhood,
+                        focused_control: Some(ControlId::OnboardingRoot),
+                        open_modal: None,
+                        readiness: if account_ready() {
+                            UiReadiness::Ready
+                        } else {
+                            UiReadiness::Loading
+                        },
+                        selections: Vec::new(),
+                        lists: Vec::new(),
+                        messages: Vec::new(),
+                        operations,
+                        toasts: base.toasts,
+                        runtime_events: base.runtime_events,
+                    });
+                }
+            };
 
             if account_ready() && !sync_loop_started() {
                 sync_loop_started.set(true);
@@ -298,6 +486,203 @@ cfg_if! {
                         controller: controller.clone(),
                     }
                 };
+            }
+
+            publish_onboarding_snapshot();
+
+            let run_import: Arc<dyn Fn(String)> = Arc::new({
+                let controller = controller.clone();
+                let import_error = import_error.clone();
+                let importing_code = importing_code.clone();
+                let account_ready = account_ready.clone();
+                move |code: String| {
+                    let mut import_error = import_error.clone();
+                    let mut importing_code = importing_code.clone();
+                    let mut account_ready = account_ready.clone();
+                    if importing_code() {
+                        return;
+                    }
+
+                    let storage_prefix = active_storage_prefix();
+                    let authority_storage_key = selected_authority_key(&storage_prefix);
+                    let device_storage_key = selected_device_key(&storage_prefix);
+                    let pending_code_storage_key =
+                        pending_device_enrollment_code_key(&storage_prefix);
+                    importing_code.set(true);
+                    import_error.set(None);
+                    controller.start_runtime_operation(OperationId::device_enrollment());
+
+                    let controller = controller.clone();
+                    spawn(async move {
+                        let app_core = controller.app_core().clone();
+                        let result = async {
+                            let invitation =
+                                invitation_workflows::import_invitation_details(&app_core, &code)
+                                    .await?;
+                            let InvitationBridgeType::DeviceEnrollment {
+                                subject_authority,
+                                device_id,
+                                ..
+                            } = invitation.invitation_type.clone()
+                            else {
+                                return Err(aura_core::AuraError::invalid(
+                                    "Code is not a device enrollment invitation",
+                                ));
+                            };
+
+                            let runtime = runtime_workflows::require_runtime(&app_core).await?;
+                            let current_authority = runtime.authority_id();
+                            let selected_device = load_selected_device(&device_storage_key);
+                            if current_authority != subject_authority
+                                || selected_device.as_ref() != Some(&device_id)
+                            {
+                                web_sys::console::log_1(
+                                    &format!(
+                                        "[web-import-device] staging_reload current_authority={};subject_authority={};selected_device={:?};invited_device={}",
+                                        current_authority,
+                                        subject_authority,
+                                        selected_device,
+                                        device_id
+                                    )
+                                    .into(),
+                                );
+                                persist_pending_device_enrollment_code(
+                                    &pending_code_storage_key,
+                                    &code,
+                                )
+                                .map_err(aura_core::AuraError::agent)?;
+                                persist_selected_authority(
+                                    &authority_storage_key,
+                                    &subject_authority,
+                                )
+                                .map_err(aura_core::AuraError::agent)?;
+                                persist_selected_device(&device_storage_key, &device_id)
+                                    .map_err(aura_core::AuraError::agent)?;
+                                web_sys::console::log_1(
+                                    &format!(
+                                        "[web-import-device] staged_reload subject_authority={};device_id={}",
+                                        subject_authority, device_id
+                                    )
+                                    .into(),
+                                );
+                                reload_page().map_err(aura_core::AuraError::agent)?;
+                                return Ok(());
+                            }
+
+                            let _ = clear_pending_device_enrollment_code(&pending_code_storage_key);
+                            web_sys::console::log_1(
+                                &format!(
+                                    "[web-import-device] accepting_on_bound_runtime authority={};selected_device={:?};invited_device={}",
+                                    current_authority,
+                                    selected_device,
+                                    device_id
+                                )
+                                .into(),
+                            );
+
+                            for _ in 0..8 {
+                                runtime_workflows::converge_runtime(&runtime).await;
+                                if runtime_workflows::ensure_runtime_peer_connectivity(
+                                    &runtime,
+                                    "device_enrollment_accept",
+                                )
+                                .await
+                                .is_ok()
+                                {
+                                    break;
+                                }
+                                time_workflows::sleep_ms(&app_core, 250).await?;
+                            }
+
+                            invitation_workflows::accept_device_enrollment_invitation(
+                                &app_core,
+                                &invitation,
+                            )
+                            .await?;
+                            let runtime_devices_after_accept = runtime.list_devices().await;
+                            web_sys::console::log_1(
+                                &format!(
+                                    "[web-import-device] accepted runtime_devices={:?}",
+                                    runtime_devices_after_accept
+                                        .iter()
+                                        .map(|device| device.id.to_string())
+                                        .collect::<Vec<_>>()
+                                )
+                                .into(),
+                            );
+                            let settings = settings_workflows::get_settings(&app_core).await?;
+                            web_sys::console::log_1(
+                                &format!(
+                                    "[web-import-device] accepted settings_devices={:?}",
+                                    settings
+                                        .devices
+                                        .iter()
+                                        .map(|device| device.id.clone())
+                                        .collect::<Vec<_>>()
+                                )
+                                .into(),
+                            );
+                            let nickname = settings.nickname_suggestion.trim();
+                            let bootstrap_name = if nickname.is_empty() {
+                                "Aura User".to_string()
+                            } else {
+                                nickname.to_string()
+                            };
+                            account_workflows::initialize_runtime_account(
+                                &app_core,
+                                bootstrap_name,
+                            )
+                            .await?;
+                            reload_page().map_err(aura_core::AuraError::agent)?;
+                            Ok(())
+                        }
+                        .await;
+
+                        match result {
+                            Ok(()) => {
+                                controller.finish_runtime_operation(
+                                    OperationId::device_enrollment(),
+                                    OperationState::Succeeded,
+                                );
+                                controller.info_toast("Device enrollment complete");
+                                controller.set_account_setup_state(true, "", None);
+                                account_ready.set(true);
+                                importing_code.set(false);
+                            }
+                            Err(error) => {
+                                let _ = clear_pending_device_enrollment_code(
+                                    &pending_code_storage_key,
+                                );
+                                controller.finish_runtime_operation(
+                                    OperationId::device_enrollment(),
+                                    OperationState::Failed,
+                                );
+                                let message = error.to_string();
+                                controller.set_account_setup_state(
+                                    false,
+                                    "",
+                                    Some(message.clone()),
+                                );
+                                import_error.set(Some(message));
+                                importing_code.set(false);
+                            }
+                        }
+                    });
+                }
+            });
+
+            let pending_code_storage_key =
+                pending_device_enrollment_code_key(&active_storage_prefix());
+            if !auto_import_started() {
+                if let Some(pending_code) =
+                    load_pending_device_enrollment_code(&pending_code_storage_key)
+                {
+                    if !pending_code.is_empty() {
+                        auto_import_started.set(true);
+                        import_code.set(pending_code.clone());
+                        run_import(pending_code);
+                    }
+                }
             }
 
             let submit_account = {
@@ -345,76 +730,11 @@ cfg_if! {
             };
 
             let submit_import = {
-                let controller = controller.clone();
                 let import_code = import_code.clone();
-                let mut import_error = import_error.clone();
-                let mut importing_code = importing_code.clone();
-                let mut account_ready = account_ready.clone();
+                let run_import = run_import.clone();
                 move |_| {
-                    if importing_code() {
-                        return;
-                    }
-
                     let code = import_code();
-                    importing_code.set(true);
-                    import_error.set(None);
-
-                    let controller = controller.clone();
-                    spawn(async move {
-                        let app_core = controller.app_core().clone();
-                        let result = async {
-                            let invitation =
-                                invitation_workflows::import_invitation_details(&app_core, &code)
-                                    .await?;
-                            if !matches!(
-                                invitation.invitation_type,
-                                InvitationBridgeType::DeviceEnrollment { .. }
-                            ) {
-                                return Err(aura_core::AuraError::invalid(
-                                    "Code is not a device enrollment invitation",
-                                ));
-                            }
-
-                            invitation_workflows::accept_invitation(
-                                &app_core,
-                                &invitation.invitation_id,
-                            )
-                            .await?;
-                            settings_workflows::refresh_settings_from_runtime(&app_core).await?;
-                            let settings = settings_workflows::get_settings(&app_core).await?;
-                            let nickname = settings.nickname_suggestion.trim();
-                            let bootstrap_name = if nickname.is_empty() {
-                                "Aura User".to_string()
-                            } else {
-                                nickname.to_string()
-                            };
-                            account_workflows::initialize_runtime_account(
-                                &app_core,
-                                bootstrap_name,
-                            )
-                            .await
-                        }
-                        .await;
-
-                        match result {
-                            Ok(()) => {
-                                controller.info_toast("Device enrollment complete");
-                                controller.set_account_setup_state(true, "", None);
-                                account_ready.set(true);
-                                importing_code.set(false);
-                            }
-                            Err(error) => {
-                                let message = error.to_string();
-                                controller.set_account_setup_state(
-                                    false,
-                                    "",
-                                    Some(message.clone()),
-                                );
-                                import_error.set(Some(message));
-                                importing_code.set(false);
-                            }
-                        }
-                    });
+                    run_import(code);
                 }
             };
 

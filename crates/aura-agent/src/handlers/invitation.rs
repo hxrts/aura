@@ -715,6 +715,21 @@ impl InvitationHandler {
             .resolve_device_enrollment_invitation(effects.as_ref(), invitation_id)
             .await?
         {
+            if !enrollment.baseline_tree_ops.is_empty() {
+                let baseline_ops = enrollment
+                    .baseline_tree_ops
+                    .iter()
+                    .map(|bytes| {
+                        aura_core::util::serialization::from_slice(bytes).map_err(|e| {
+                            crate::core::AgentError::internal(format!(
+                                "decode device enrollment baseline tree op: {e}"
+                            ))
+                        })
+                    })
+                    .collect::<Result<Vec<aura_core::AttestedOp>, _>>()?;
+                effects.import_tree_ops(&baseline_ops).await?;
+            }
+
             let participant =
                 aura_core::threshold::ParticipantIdentity::device(enrollment.device_id);
             let location = SecureStorageLocation::with_sub_key(
@@ -1199,6 +1214,22 @@ impl InvitationHandler {
                 websocket_hint_count,
                 "import_invitation_code cached direct descriptor"
             );
+        } else if let Some(manager) = effects.rendezvous_manager() {
+            if let Some(peer) = manager.get_lan_discovered_peer(shareable.sender_id).await {
+                let _ = manager.cache_descriptor(peer.descriptor.clone()).await;
+                let websocket_hint_count = peer
+                    .descriptor
+                    .transport_hints
+                    .iter()
+                    .filter(|hint| matches!(hint, TransportHint::WebSocketDirect { .. }))
+                    .count();
+                tracing::info!(
+                    invitation_id = %shareable.invitation_id,
+                    sender = %shareable.sender_id,
+                    websocket_hint_count,
+                    "import_invitation_code cached discovered peer descriptor"
+                );
+            }
         }
         let context_id = match &shareable.invitation_type {
             InvitationType::Channel { .. } => shareable
@@ -1852,6 +1883,7 @@ struct DeviceEnrollmentInvitation {
     key_package: Vec<u8>,
     threshold_config: Vec<u8>,
     public_key_package: Vec<u8>,
+    baseline_tree_ops: Vec<Vec<u8>>,
 }
 
 // =============================================================================
@@ -2385,7 +2417,8 @@ mod tests {
     use crate::core::AgentConfig;
     use crate::runtime::effects::AuraEffectSystem;
     use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
-    use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
+    use aura_core::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
+    use aura_core::DeviceId;
     use aura_invitation::guards::{EffectCommand, GuardOutcome};
     use aura_journal::fact::{FactContent, RelationalFact};
     use aura_journal::DomainFact;
@@ -3850,6 +3883,71 @@ mod tests {
                 bootstrap: _,
             } => {
                 assert_eq!(home_id, ChannelId::from_bytes([21u8; 32]));
+            }
+            _ => panic!("wrong invitation type"),
+        }
+    }
+
+    #[test]
+    fn shareable_invitation_roundtrip_device_enrollment_preserves_baseline_tree_ops() {
+        let sender_id = AuthorityId::new_from_entropy([145u8; 32]);
+        let subject_authority = AuthorityId::new_from_entropy([146u8; 32]);
+        let context_id = ContextId::new_from_entropy([147u8; 32]);
+        let initiator_device_id = DeviceId::new_from_entropy([148u8; 32]);
+        let device_id = DeviceId::new_from_entropy([149u8; 32]);
+        let ceremony_id = CeremonyId::new("ceremony:test-device-enrollment");
+        let baseline_tree_ops = vec![vec![1, 2, 3], vec![4, 5, 6, 7]];
+        let threshold_config = vec![9, 8, 7];
+        let public_key_package = vec![6, 5, 4, 3];
+        let key_package = vec![3, 4, 5];
+
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: InvitationId::new("inv-device-enrollment"),
+            sender_id,
+            context_id: Some(context_id),
+            invitation_type: InvitationType::DeviceEnrollment {
+                subject_authority,
+                initiator_device_id,
+                device_id,
+                nickname_suggestion: Some("WebApp".to_string()),
+                ceremony_id: ceremony_id.clone(),
+                pending_epoch: 1,
+                key_package: key_package.clone(),
+                threshold_config: threshold_config.clone(),
+                public_key_package: public_key_package.clone(),
+                baseline_tree_ops: baseline_tree_ops.clone(),
+            },
+            expires_at: None,
+            message: None,
+        };
+
+        let code = shareable.to_code();
+        let decoded = ShareableInvitation::from_code(&code).unwrap();
+
+        match decoded.invitation_type {
+            InvitationType::DeviceEnrollment {
+                subject_authority: decoded_subject_authority,
+                initiator_device_id: decoded_initiator_device_id,
+                device_id: decoded_device_id,
+                nickname_suggestion,
+                ceremony_id: decoded_ceremony_id,
+                pending_epoch,
+                key_package: decoded_key_package,
+                threshold_config: decoded_threshold_config,
+                public_key_package: decoded_public_key_package,
+                baseline_tree_ops: decoded_baseline_tree_ops,
+            } => {
+                assert_eq!(decoded_subject_authority, subject_authority);
+                assert_eq!(decoded_initiator_device_id, initiator_device_id);
+                assert_eq!(decoded_device_id, device_id);
+                assert_eq!(nickname_suggestion.as_deref(), Some("WebApp"));
+                assert_eq!(decoded_ceremony_id, ceremony_id);
+                assert_eq!(pending_epoch, 1);
+                assert_eq!(decoded_key_package, key_package);
+                assert_eq!(decoded_threshold_config, threshold_config);
+                assert_eq!(decoded_public_key_package, public_key_package);
+                assert_eq!(decoded_baseline_tree_ops, baseline_tree_ops);
             }
             _ => panic!("wrong invitation type"),
         }

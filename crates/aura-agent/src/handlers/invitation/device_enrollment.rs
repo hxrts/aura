@@ -45,6 +45,7 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
                 key_package,
                 threshold_config,
                 public_key_package,
+                baseline_tree_ops,
             } = &inv.invitation_type
             {
                 return Ok(Some(DeviceEnrollmentInvitation {
@@ -56,6 +57,7 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
                     key_package: key_package.clone(),
                     threshold_config: threshold_config.clone(),
                     public_key_package: public_key_package.clone(),
+                    baseline_tree_ops: baseline_tree_ops.clone(),
                 }));
             }
         }
@@ -73,6 +75,7 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
                 key_package,
                 threshold_config,
                 public_key_package,
+                baseline_tree_ops,
             } = shareable.invitation_type
             {
                 return Ok(Some(DeviceEnrollmentInvitation {
@@ -84,6 +87,7 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
                     key_package,
                     threshold_config,
                     public_key_package,
+                    baseline_tree_ops,
                 }));
             }
         }

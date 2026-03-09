@@ -43,11 +43,15 @@ impl TransportEffects for AuraEffectSystem {
         }
 
         let self_device_id = self.config.device_id.to_string();
-        let is_local = envelope.destination == self.authority_id
-            || envelope
-                .metadata
-                .get("aura-destination-device-id")
-                .is_some_and(|dst| dst == &self_device_id);
+        let destination_device_id = envelope.metadata.get("aura-destination-device-id");
+        let is_local = if envelope.destination == self.authority_id {
+            match destination_device_id {
+                Some(dst) => dst == &self_device_id,
+                None => true,
+            }
+        } else {
+            destination_device_id.is_some_and(|dst| dst == &self_device_id)
+        };
         if is_local {
             self.queue_runtime_envelope(envelope);
             self.transport.record_send(payload_len);

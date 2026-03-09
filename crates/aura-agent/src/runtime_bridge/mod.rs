@@ -6,7 +6,6 @@
 
 use crate::core::AuraAgent;
 use crate::handlers::shared::context_commitment_from_journal;
-use crate::handlers::InvitationServiceApi;
 use crate::runtime::consensus::build_consensus_params;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
@@ -1074,6 +1073,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
         } else {
             Err(service_unavailable("sync_service"))
         }
+    }
+
+    async fn process_ceremony_messages(&self) -> Result<(), IntentError> {
+        self.agent
+            .process_ceremony_acceptances()
+            .await
+            .map(|_| ())
+            .map_err(|e| {
+                IntentError::internal_error(format!(
+                    "Failed to process ceremony messages: {e}"
+                ))
+            })
     }
 
     async fn sync_with_peer(&self, peer_id: &str) -> Result<(), IntentError> {
@@ -2237,6 +2248,19 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
         let receiver_id = invitee_authority_id.unwrap_or(authority_id);
+        let baseline_tree_ops = effects
+            .export_tree_ops()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Export baseline tree ops: {e}")))?
+            .into_iter()
+            .map(|op| {
+                aura_core::util::serialization::to_vec(&op).map_err(|e| {
+                    IntentError::internal_error(format!(
+                        "Serialize baseline tree op for device enrollment: {e}"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         let invitation = invitation_service
             .invite_device_enrollment(
@@ -2250,13 +2274,23 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 invited_key_package,
                 threshold_config.clone(),
                 public_key_package.clone(),
+                baseline_tree_ops,
                 None,
             )
             .await
             .map_err(|e| IntentError::internal_error(format!("Create device invite: {e}")))?;
 
+        tracing::info!(
+            authority = %authority_id,
+            websocket_addrs = ?effects
+                .lan_transport()
+                .map(|transport| transport.websocket_addrs().to_vec())
+                .unwrap_or_default(),
+            "device enrollment export transport state"
+        );
+
         // Use compile-time safe export since we already have the invitation
-        let enrollment_code = InvitationServiceApi::export_invitation(&invitation);
+        let enrollment_code = invitation_service.export_invitation_with_sender_hint(&invitation);
 
         Ok(aura_app::runtime_bridge::DeviceEnrollmentStart {
             ceremony_id: ceremony_id.clone(),
@@ -2451,7 +2485,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
         .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
         let op_hash = aura_core::Hash32(hash(&op_input));
 
-        if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg {
+        let consensus_required = signing_service
+            .threshold_state(&authority_id)
+            .await
+            .map(|state| state.threshold > 1 || state.total_participants > 1)
+            .unwrap_or(true);
+
+        if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg
+            && consensus_required
+        {
             // For guardian addition, use authority's own context
             let guardian_add_context =
                 aura_core::ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
@@ -2475,6 +2517,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 op_hash,
             )
             .await?;
+        } else if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg
+            && !consensus_required
+        {
+            tracing::info!(
+                ceremony = "device_removal",
+                "Skipping consensus DKG transcript (single-signer authority)"
+            );
         }
 
         let nonce_bytes = effects.random_bytes(8).await;
@@ -2609,7 +2658,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
             })?;
         }
 
-        if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg {
+        if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg
+            && consensus_required
+        {
             let context_id = default_context_id_for_authority(authority_id);
             let has_commit = effects
                 .has_dkg_transcript_commit(authority_id, context_id, pending_epoch.value())

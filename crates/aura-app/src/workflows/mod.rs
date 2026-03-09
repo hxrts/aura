@@ -90,7 +90,7 @@ pub mod query;
 #[cfg(feature = "signals")]
 pub mod recovery;
 pub mod recovery_cli;
-pub(crate) mod runtime;
+pub mod runtime;
 pub mod settings;
 pub mod signals;
 pub mod snapshot;

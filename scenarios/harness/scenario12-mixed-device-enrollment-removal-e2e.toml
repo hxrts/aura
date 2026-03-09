@@ -57,12 +57,11 @@ screen_id = "settings"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-open-devices-section"
-action = "activate_list_item"
+id = "tui-settings-visible"
+action = "screen_is"
 actor = "tui"
-list_id = "settings_sections"
-item_id = "devices"
-timeout_ms = 3000
+screen_id = "settings"
+timeout_ms = 8000
 
 [[steps]]
 id = "tui-open-add-device-modal"
@@ -131,11 +130,17 @@ control_id = "onboarding_import_device_button"
 timeout_ms = 4000
 
 [[steps]]
-id = "web-device-import-succeeded"
-action = "operation_state_is"
+id = "web-neighborhood-visible-after-import"
+action = "screen_is"
 actor = "web"
-operation_id = "device_enrollment"
-operation_state = "succeeded"
+screen_id = "neighborhood"
+timeout_ms = 30000
+
+[[steps]]
+id = "web-neighborhood-ready-after-import"
+action = "readiness_is"
+actor = "web"
+readiness = "ready"
 timeout_ms = 30000
 
 [[steps]]
@@ -146,6 +151,13 @@ screen_id = "settings"
 timeout_ms = 3000
 
 [[steps]]
+id = "web-settings-visible"
+action = "screen_is"
+actor = "web"
+screen_id = "settings"
+timeout_ms = 8000
+
+[[steps]]
 id = "web-open-devices-section"
 action = "activate_list_item"
 actor = "web"
@@ -154,34 +166,20 @@ item_id = "devices"
 timeout_ms = 3000
 
 [[steps]]
+id = "web-devices-section-selected"
+action = "selection_is"
+actor = "web"
+list_id = "settings_sections"
+item_id = "devices"
+timeout_ms = 8000
+
+[[steps]]
 id = "web-devices-count-two"
 action = "list_count_is"
 actor = "web"
 list_id = "devices"
 count = 2
 timeout_ms = 20000
-
-[[steps]]
-id = "tui-still-submitting"
-action = "operation_state_is"
-actor = "tui"
-operation_id = "device_enrollment"
-operation_state = "submitting"
-timeout_ms = 10000
-
-[[steps]]
-id = "tui-cancel-pending-enrollment"
-action = "activate"
-actor = "tui"
-control_id = "modal_cancel_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "tui-back-on-settings"
-action = "screen_is"
-actor = "tui"
-screen_id = "settings"
-timeout_ms = 10000
 
 [[steps]]
 id = "web-open-remove-device"

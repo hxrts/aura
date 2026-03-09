@@ -313,6 +313,12 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
                 .web_dom_id()
                 .unwrap_or("aura-app-root")
         );
+        let onboarding_root_selector = format!(
+            "#{}",
+            aura_app::ui::contract::ControlId::OnboardingRoot
+                .web_dom_id()
+                .unwrap_or("aura-onboarding-root")
+        );
         let modal_region_selector = format!(
             "#{}",
             aura_app::ui::contract::ControlId::ModalRegion
@@ -342,6 +348,11 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
             .ok()
             .map(|nodes| nodes.length())
             .unwrap_or(0);
+        let onboarding_root_count = document
+            .query_selector_all(&onboarding_root_selector)
+            .ok()
+            .map(|nodes| nodes.length())
+            .unwrap_or(0);
         let toast_region_count = document
             .query_selector_all(&toast_region_selector)
             .ok()
@@ -367,6 +378,11 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
             &payload,
             &JsValue::from_str("modal_region_count"),
             &JsValue::from_f64(f64::from(modal_region_count)),
+        );
+        let _ = Reflect::set(
+            &payload,
+            &JsValue::from_str("onboarding_root_count"),
+            &JsValue::from_f64(f64::from(onboarding_root_count)),
         );
         let _ = Reflect::set(
             &payload,

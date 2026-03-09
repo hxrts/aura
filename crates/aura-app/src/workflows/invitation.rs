@@ -141,6 +141,8 @@ use crate::signal_defs::INVITATIONS_SIGNAL;
 use crate::workflows::runtime::{
     converge_runtime, ensure_runtime_peer_connectivity, require_runtime,
 };
+use crate::workflows::settings;
+use crate::workflows::time;
 #[cfg(feature = "signals")]
 use crate::workflows::signals::read_signal;
 use crate::workflows::signals::read_signal_or_default;
@@ -326,6 +328,108 @@ pub async fn accept_invitation(
         );
     }
 
+    Ok(())
+}
+
+/// Accept a device-enrollment invitation and wait for the imported device list
+/// to converge far enough that the enrolled peer is visible in settings.
+pub async fn accept_device_enrollment_invitation(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation: &InvitationInfo,
+) -> Result<(), AuraError> {
+    let InvitationBridgeType::DeviceEnrollment {
+        ..
+    } = &invitation.invitation_type
+    else {
+        return Err(AuraError::invalid(
+            "accept_device_enrollment_invitation requires a device enrollment invitation",
+        ));
+    };
+
+    let runtime = require_runtime(app_core).await?;
+
+    runtime
+        .accept_invitation(invitation.invitation_id.as_str())
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {e}")))?;
+
+    let expected_min_devices = 2_usize;
+
+    for attempt in 0..16 {
+        #[cfg(not(feature = "instrumented"))]
+        let _ = attempt;
+        if let Err(_error) = runtime.process_ceremony_messages().await {
+            #[cfg(feature = "instrumented")]
+            tracing::info!(
+                invitation_id = %invitation.invitation_id,
+                attempt,
+                error = %_error,
+                "device enrollment process_ceremony_messages failed during convergence"
+            );
+        }
+        converge_runtime(&runtime).await;
+        settings::refresh_settings_from_runtime(app_core).await?;
+
+        let runtime_device_count = runtime.list_devices().await.len();
+        let settings_device_count = settings::get_settings(app_core).await?.devices.len();
+        #[cfg(feature = "instrumented")]
+        tracing::info!(
+            invitation_id = %invitation.invitation_id,
+            attempt,
+            runtime_device_count,
+            settings_device_count,
+            expected_min_devices,
+            "device enrollment convergence poll"
+        );
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(
+            &format!(
+                "[device-enrollment-convergence] invitation_id={};attempt={};runtime_devices={};settings_devices={};expected_min_devices={}",
+                invitation.invitation_id,
+                attempt,
+                runtime_device_count,
+                settings_device_count,
+                expected_min_devices
+            )
+            .into(),
+        );
+
+        if runtime_device_count >= expected_min_devices
+            || settings_device_count >= expected_min_devices
+        {
+            settings::refresh_settings_from_runtime(app_core).await?;
+            if let Err(_error) =
+                ensure_runtime_peer_connectivity(&runtime, "device_enrollment_accept").await
+            {
+                #[cfg(feature = "instrumented")]
+                tracing::warn!(
+                    error = %_error,
+                    invitation_id = %invitation.invitation_id,
+                    "device enrollment acceptance completed without reachable peers"
+                );
+            }
+
+            return Ok(());
+        }
+
+        let _ = time::sleep_ms(app_core, 250).await;
+    }
+
+    #[cfg(feature = "instrumented")]
+    tracing::warn!(
+        invitation_id = %invitation.invitation_id,
+        expected_min_devices,
+        "device enrollment acceptance completed before local device list convergence"
+    );
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::warn_1(
+        &format!(
+            "[device-enrollment-convergence] invitation_id={};status=non_converged;expected_min_devices={}",
+            invitation.invitation_id,
+            expected_min_devices
+        )
+        .into(),
+    );
     Ok(())
 }
 

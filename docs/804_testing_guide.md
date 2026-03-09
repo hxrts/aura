@@ -14,18 +14,33 @@ Aura tests follow four principles:
 
 ### Harness Policy
 
-Aura's runtime harness is the primary end-to-end validation lane. Default harness runs should exercise the real Aura runtime and the real TUI and web frontends. The goal of the harness is to catch integration failures in the actual product, not just prove a model or a simulated approximation.
+Aura's runtime harness is the primary end-to-end validation lane.
+Default harness runs exercise the real Aura runtime with real TUI and webfront ends.
+The goal is to catch integration failures in the actual product, not just prove a model.
 
-Real-runtime harness runs should still be engineered for deterministic startup, observation, and teardown. "Real runtime" is not an excuse for flaky orchestration. Simulator-backed harness runs are a complementary lane for controlled fault injection, timing control, and hard-to-reproduce distributed conditions.
+Quint and other verification tools generate models, traces, and invariants.
+They are not a replacement for real frontends.
 
-Quint and other verification tools generate traces and invariants. They do not replace real-runtime harness validation.
+`aura-app` owns the shared semantic scenario and UI contracts.
+`aura-harness` consumes those contracts and drives real frontends.
+`aura-simulator` is the separate alternate runtime substrate.
 
-The shared semantic UI and scenario contracts live in `aura-app`. `aura-harness`
-consumes those contracts to drive real frontends. `aura-simulator` is a
-selectable alternate runtime substrate. Quint remains a model and trace
-generation system rather than a frontend executor.
+Use this lane matrix when selecting harness mode.
 
-`aura-app::ui_contract` is also the authoritative home for shared flow support declarations including `SharedFlowId`, `SHARED_FLOW_SUPPORT`, and `SHARED_FLOW_SCENARIO_COVERAGE`. It defines structured `UiSnapshot`, semantic parity comparison through `compare_ui_snapshots_for_parity`, and transient operation identity through `OperationInstanceId`. Typed runtime diagnostics events use `RuntimeEventSnapshot`.
+| Lane | Backend | Command |
+|------|---------|---------|
+| Local deterministic | `mock` | `just harness-run -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/local-discovery-smoke.toml` |
+| Patchbay relay realism | `patchbay` | `just harness-run -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/scenario2-social-topology-e2e.toml --network-backend patchbay` |
+| Patchbay-vm relay realism | `patchbay-vm` | `just harness-run -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/scenario2-social-topology-e2e.toml --network-backend patchbay-vm` |
+| Browser | Playwright | `just harness-run-browser scenarios/harness/local-discovery-smoke.toml` |
+
+All shared flows should use typed scenario primitives and structured snapshot waits.
+
+`aura-app::ui_contract` is the canonical module for shared flow support.
+It defines `SharedFlowId`, `SHARED_FLOW_SUPPORT`, `SHARED_FLOW_SCENARIO_COVERAGE`,
+`UiSnapshot`, `compare_ui_snapshots_for_parity`, `OperationInstanceId`, and
+`RuntimeEventSnapshot`.
+Use semantic readiness and state assertions before using fallback text matching.
 
 Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or `Uuid::new_v4()` is forbidden. These operations must flow through effect traits instead.
 
@@ -475,11 +490,25 @@ Harness writes backend resolution details to:
 artifacts/harness/<run>/network_backend_preflight.json
 ```
 
-Patchbay is the authoritative NAT-realism backend for holepunch validation. Use native `patchbay` on Linux CI and Linux developer machines when capabilities are available. Use `patchbay-vm` on macOS and as Linux fallback to run the same scenarios in a Linux VM. Keep deterministic non-network logic in `mock` backend tests to preserve fast feedback.
+Patchbay is the authoritative NAT-realism backend for holepunch validation.
+Use native `patchbay` on Linux CI and Linux developers when capabilities are available.
+Use `patchbay-vm` on macOS and as Linux fallback to run the same scenarios in a Linux VM.
+Keep deterministic non-network logic in `mock` backend tests to preserve fast feedback.
 
-Implementation follows three tiers. Tier 1 covers deterministic and property tests in `aura-testkit` for retry and path-selection invariants. Tier 2 covers Patchbay integration scenarios in `aura-harness` for PR gating. Tier 3 covers Patchbay stress and flake detection suites on scheduled CI.
+Implementation follows three tiers.
+Tier 1 covers deterministic and property tests in `aura-testkit` for retry and path-selection invariants.
+Tier 2 covers Patchbay integration scenarios in `aura-harness` for PR gating.
+Tier 3 covers Patchbay stress and flake detection suites on scheduled CI.
 
-When a scenario fails, triage artifacts in this order. Check `network_backend_preflight.json` to confirm selected backend and fallback reason. Check `startup_summary.json` and `scenario_report.json` for run context and failing step. Check `events.json` and backend timeline artifacts for event ordering. Check namespace and network dumps and pcap files for packet and routing diagnosis. Check agent logs for authority-local failures and retry state transitions.
+When a scenario fails, triage artifacts in this order.
+1. Check `network_backend_preflight.json` to confirm selected backend and fallback reason.
+2. Check `startup_summary.json` and `scenario_report.json` for run context and failing step.
+3. Check `events.json` and backend timeline artifacts for event ordering.
+4. Check namespace and network dumps and pcap files for packet and routing diagnosis.
+5. Check agent logs for authority-local failures and retry state transitions.
+
+For harness-specific state debugging, treat `timeout_diagnostics.json` as the first failure bundle.
+It includes semantic state snapshots, render readiness, and runtime event history.
 
 ## 14. Browser Harness Workflow (WASM + Playwright)
 

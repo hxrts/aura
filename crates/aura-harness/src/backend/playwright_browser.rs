@@ -746,15 +746,37 @@ impl InstanceBackend for PlaywrightBrowserBackend {
 
     fn wait_until_ready(&self, timeout: Duration) -> Result<()> {
         let deadline = Instant::now() + timeout;
+        let mut last_error: Option<String> = None;
         loop {
-            if self.ui_snapshot().is_ok() {
-                return Ok(());
+            match self.ui_snapshot() {
+                Ok(_) => return Ok(()),
+                Err(error) => {
+                    last_error = Some(error.to_string());
+                }
             }
             if Instant::now() >= deadline {
+                let stderr_tail = self
+                    .stderr_log
+                    .blocking_lock()
+                    .iter()
+                    .rev()
+                    .take(40)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>();
+                let stderr_block = if stderr_tail.is_empty() {
+                    "none".to_string()
+                } else {
+                    stderr_tail.join("\n")
+                };
                 bail!(
-                    "browser instance {} did not reach semantic readiness within {:?}",
+                    "browser instance {} did not reach semantic readiness within {:?} (last_error={}, stderr_tail=\n{})",
                     self.config.id,
-                    timeout
+                    timeout,
+                    last_error.unwrap_or_else(|| "none".to_string()),
+                    stderr_block,
                 );
             }
             thread::sleep(Duration::from_millis(100));

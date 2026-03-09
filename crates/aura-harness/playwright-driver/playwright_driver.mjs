@@ -190,7 +190,14 @@ function expectedModalDomId(state) {
   return MODAL_DOM_IDS[contractEnumKey(state?.open_modal)] ?? null;
 }
 
+function onboardingShellPresent(session) {
+  return domStateHasId(session, 'aura-onboarding-root');
+}
+
 async function ensureUiStateRenderConvergence(session, state, reason, timeoutMs = 1500) {
+  if (onboardingShellPresent(session)) {
+    return;
+  }
   const heartbeat = session.renderHeartbeat;
   if (
     heartbeat &&
@@ -240,6 +247,9 @@ async function ensureUiStateRenderConvergence(session, state, reason, timeoutMs 
 }
 
 function cachedUiStateConverged(session, state) {
+  if (onboardingShellPresent(session)) {
+    return true;
+  }
   const heartbeat = session.renderHeartbeat;
   if (
     heartbeat &&
@@ -432,7 +442,7 @@ async function installUiStateObserver(page, session) {
 }
 
 async function assertRootStructure(session, reason) {
-  const structure = await withOperationTimeout(
+  let structure = await withOperationTimeout(
     `root_structure_${reason}`,
     session.page.evaluate(() => {
       if (typeof window.__AURA_HARNESS__?.root_structure === 'function') {
@@ -444,13 +454,45 @@ async function assertRootStructure(session, reason) {
   );
 
   if (!structure || typeof structure !== 'object') {
+    const expectedScreen =
+      contractEnumKey(session.renderHeartbeat?.screen) ??
+      contractEnumKey(session.uiStateCache?.screen);
+    const expectedScreenDomId = expectedScreen ? SCREEN_DOM_IDS[expectedScreen] ?? null : null;
+    structure = await withOperationTimeout(
+      `root_structure_dom_fallback_${reason}`,
+      session.page.evaluate((screenDomId) => {
+        const count = (selector) =>
+          document.querySelectorAll(selector).length;
+        return {
+          app_root_count: count('#aura-app-root'),
+          modal_region_count: count('#aura-modal-region'),
+          onboarding_root_count: count('#aura-onboarding-root'),
+          toast_region_count: count('#aura-toast-region'),
+          active_screen_root_count: screenDomId ? count(`#${screenDomId}`) : 0
+        };
+      }, expectedScreenDomId),
+      2000
+    );
+  }
+
+  if (!structure || typeof structure !== 'object') {
     throw new Error(`root structure export unavailable during ${reason}`);
   }
 
   const appRootCount = Number(structure.app_root_count ?? 0);
+  const onboardingRootCount = Number(structure.onboarding_root_count ?? 0);
   const modalRegionCount = Number(structure.modal_region_count ?? 0);
   const toastRegionCount = Number(structure.toast_region_count ?? 0);
   const activeScreenRootCount = Number(structure.active_screen_root_count ?? 0);
+  const onboardingShellValid =
+    onboardingRootCount === 1 &&
+    appRootCount === 0 &&
+    modalRegionCount === 0 &&
+    toastRegionCount === 0 &&
+    activeScreenRootCount === 0;
+  if (onboardingShellValid) {
+    return;
+  }
   if (
     appRootCount !== 1 ||
     modalRegionCount !== 1 ||
@@ -461,6 +503,35 @@ async function assertRootStructure(session, reason) {
       `invalid root structure during ${reason}: ${JSON.stringify(structure)}`
     );
   }
+}
+
+function isNavigationTransitionError(error) {
+  const message = String(error?.message ?? error ?? '');
+  return (
+    message.includes('Execution context was destroyed') ||
+    message.includes('most likely because of a navigation') ||
+    message.includes('Target page, context or browser has been closed')
+  );
+}
+
+async function waitForPageNavigationStabilization(session, reason) {
+  console.error(`[driver] navigation_wait start instance=${session.id} reason=${reason}`);
+  try {
+    await withOperationTimeout(
+      `navigation_wait_load_${reason}`,
+      session.page.waitForLoadState('load', { timeout: 5000 }),
+      6000
+    );
+  } catch {}
+  try {
+    await withOperationTimeout(
+      `navigation_wait_domcontentloaded_${reason}`,
+      session.page.waitForLoadState('domcontentloaded', { timeout: 5000 }),
+      6000
+    );
+  } catch {}
+  await delay(300);
+  console.error(`[driver] navigation_wait done instance=${session.id} reason=${reason}`);
 }
 
 async function focusAuraPage(page) {
@@ -1270,7 +1341,6 @@ async function uiState(params) {
     return null;
   };
 
-  await assertRootStructure(session, 'ui_state');
   if (session.uiStateCache && typeof session.uiStateCache === 'object') {
     console.error(`[driver] ui_state cache_hit instance=${instanceId}`);
     const cached =
@@ -1278,6 +1348,22 @@ async function uiState(params) {
         ? tryParseUiState(session.uiStateCacheJson)
         : session.uiStateCache;
     if (cached && !cachedUiStateConverged(session, cached)) {
+      console.error(`[driver] ui_state cache_diverged instance=${instanceId}`);
+      try {
+        const refreshed = await readStructuredUiState('cache_divergence', 2000);
+        if (refreshed) {
+          console.error(`[driver] ui_state cache_divergence_recovered instance=${instanceId}`);
+          return refreshed;
+        }
+      } catch (error) {
+        throw new Error(
+          `ui_state cache diverged from committed render instance=${instanceId} screen=${cached?.screen ?? 'unknown'} modal=${
+            cached?.open_modal ?? 'none'
+          } heartbeat=${JSON.stringify(session.renderHeartbeat)} current_ids=${JSON.stringify(domStateIdList(session))} text_snippet=${JSON.stringify(
+            session?.domState?.text ?? ''
+          )} refresh_error=${error?.message ?? String(error)}`
+        );
+      }
       throw new Error(
         `ui_state cache diverged from committed render instance=${instanceId} screen=${cached?.screen ?? 'unknown'} modal=${
           cached?.open_modal ?? 'none'
@@ -1292,6 +1378,19 @@ async function uiState(params) {
     }
   }
 
+  try {
+    await assertRootStructure(session, 'ui_state');
+  } catch (error) {
+    if (!isNavigationTransitionError(error)) {
+      throw error;
+    }
+    session.uiStateCache = null;
+    session.uiStateCacheJson = null;
+    console.error(`[driver] ui_state navigation_retry instance=${instanceId}`);
+    await waitForPageNavigationStabilization(session, 'ui_state_root_structure');
+    await assertRootStructure(session, 'ui_state_after_navigation');
+  }
+
   console.error(`[driver] ui_state cache_miss instance=${instanceId}`);
   try {
     const recovered = await readStructuredUiState('recovery', UI_STATE_TIMEOUT_MS);
@@ -1299,6 +1398,16 @@ async function uiState(params) {
       return recovered;
     }
   } catch (error) {
+    if (isNavigationTransitionError(error)) {
+      session.uiStateCache = null;
+      session.uiStateCacheJson = null;
+      console.error(`[driver] ui_state structured_navigation_retry instance=${instanceId}`);
+      await waitForPageNavigationStabilization(session, 'ui_state_structured');
+      const recovered = await readStructuredUiState('post_navigation_recovery', UI_STATE_TIMEOUT_MS);
+      if (recovered) {
+        return recovered;
+      }
+    }
     throw new Error(
       `structured ui_state recovery failed for instance ${instanceId}: ${error}\nBrowser console tail:\n${consoleTailText(session)}`
     );
@@ -1336,48 +1445,63 @@ async function clickButton(params) {
   console.error(`[driver] click_button start instance=${instanceId} selector=${selector || '-'} label=${label || '-'}`);
 
   if (selector) {
-    try {
-      const locator = session.page.locator(selector).first();
-      await withOperationTimeout(
-        `click_button_wait:${selector}`,
-        locator.waitFor({ state: 'visible', timeout: 3000 }),
-        4000
-      );
-      await locator.scrollIntoViewIfNeeded().catch(() => {});
-      await withOperationTimeout(
-        `click_button_force:${selector}`,
-        locator.click({
-          timeout: 3000,
-          force: true,
-          noWaitAfter: true
-        }),
-        4000
-      );
-    } catch (locatorError) {
-      await withOperationTimeout(
-        `click_button_dom:${selector}`,
-        session.page.evaluate((targetSelector) => {
-          const element = document.querySelector(targetSelector);
-          if (!(element instanceof HTMLElement)) {
-            throw new Error(`element not found for selector ${targetSelector}`);
-          }
-          if (element.hasAttribute('disabled')) {
-            throw new Error(`element disabled for selector ${targetSelector}`);
-          }
-          element.click();
-          return true;
-        }, selector),
-        5000
-      ).catch((domError) => {
-        throw new Error(
-          `locator_click_error=${locatorError?.message ?? String(locatorError)} dom_click_error=${
-            domError?.message ?? String(domError)
-          }`
+    let lastClickError = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const locator = session.page.locator(selector).first();
+        await withOperationTimeout(
+          `click_button_wait:${selector}:attempt${attempt}`,
+          locator.waitFor({ state: 'visible', timeout: 3000 }),
+          4000
         );
-      });
+        await locator.scrollIntoViewIfNeeded().catch(() => {});
+        await withOperationTimeout(
+          `click_button_force:${selector}:attempt${attempt}`,
+          locator.click({
+            timeout: 3000,
+            force: true,
+            noWaitAfter: true
+          }),
+          4000
+        );
+        console.error(`[driver] click_button done instance=${instanceId} selector=${selector} attempt=${attempt}`);
+        return { status: 'clicked' };
+      } catch (locatorError) {
+        lastClickError = locatorError;
+        try {
+          await withOperationTimeout(
+            `click_button_dom:${selector}:attempt${attempt}`,
+            session.page.evaluate((targetSelector) => {
+              const element = document.querySelector(targetSelector);
+              if (!(element instanceof HTMLElement)) {
+                throw new Error(`element not found for selector ${targetSelector}`);
+              }
+              if (element.hasAttribute('disabled')) {
+                throw new Error(`element disabled for selector ${targetSelector}`);
+              }
+              element.click();
+              return true;
+            }, selector),
+            5000
+          );
+          console.error(`[driver] click_button done instance=${instanceId} selector=${selector} attempt=${attempt} via=dom`);
+          return { status: 'clicked' };
+        } catch (domError) {
+          lastClickError = new Error(
+            `locator_click_error=${locatorError?.message ?? String(locatorError)} dom_click_error=${
+              domError?.message ?? String(domError)
+            }`
+          );
+          console.error(
+            `[driver] click_button retry instance=${instanceId} selector=${selector} attempt=${attempt} error=${
+              lastClickError.message
+            }`
+          );
+          await waitForPageNavigationStabilization(session, `click_button_${selector}_attempt_${attempt}`);
+        }
+      }
     }
-    console.error(`[driver] click_button done instance=${instanceId} selector=${selector}`);
-    return { status: 'clicked' };
+    throw lastClickError ?? new Error(`failed to click selector ${selector}`);
   }
 
   if (!label) {

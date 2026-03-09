@@ -439,6 +439,8 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 - Scenario definition and replay capabilities
 - Artifact synchronization and determinism validation
 - Screen normalization and VT100 terminal emulation for TUI testing
+- Shared semantic contracts from `aura-app` for scenario actions and UI snapshots
+- Backend selection for `mock`, `patchbay`, and `patchbay-vm` holepunch lanes
 - Resource guards and capability checking
 
 **Key characteristics**: Mock handlers in `aura-testkit` are allowed to be stateful (using `Arc<Mutex<>>`, etc.) since they need controllable, deterministic state for testing. This maintains the stateless principle for production handlers in `aura-effects` while enabling comprehensive testing.

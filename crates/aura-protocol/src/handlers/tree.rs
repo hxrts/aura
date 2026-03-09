@@ -170,6 +170,70 @@ impl PersistentTreeHandler {
         Ok(())
     }
 
+    /// Export the current ordered OpLog.
+    pub async fn export_ops(&self) -> Result<Vec<AttestedOp>, AuraError> {
+        self.ensure_initialized().await?;
+        let ops = self
+            .ops_cache
+            .read()
+            .expect("PersistentTreeHandler lock poisoned")
+            .clone();
+        Ok(ops)
+    }
+
+    /// Merge imported operations into the local OpLog, preserving existing order
+    /// and appending only previously unseen operations.
+    pub async fn import_ops(&self, imported_ops: &[AttestedOp]) -> Result<(), AuraError> {
+        self.ensure_initialized().await?;
+
+        let (added, hashes) = {
+            let mut cache = self
+                .ops_cache
+                .write()
+                .expect("PersistentTreeHandler lock poisoned");
+
+            let mut existing_hashes = std::collections::BTreeSet::new();
+            for op in cache.iter() {
+                existing_hashes.insert(tree_storage::op_hash(op)?);
+            }
+
+            let mut added = Vec::new();
+            for op in imported_ops {
+                let op_hash = tree_storage::op_hash(op)?;
+                if existing_hashes.insert(op_hash) {
+                    cache.push(op.clone());
+                    added.push((op.clone(), op_hash));
+                }
+            }
+
+            let hashes = cache
+                .iter()
+                .map(tree_storage::op_hash)
+                .collect::<Result<Vec<_>, _>>()?;
+            (added, hashes)
+        };
+
+        if added.is_empty() {
+            return Ok(());
+        }
+
+        for (op, op_hash) in &added {
+            let key = tree_storage::op_key(*op_hash);
+            let op_bytes = tree_storage::serialize_op(op)?;
+            self.storage.store(&key, op_bytes).await.map_err(|e| {
+                AuraError::storage(format!("Failed to import tree op {key}: {e}"))
+            })?;
+        }
+
+        let index_bytes = tree_storage::serialize_op_index(&hashes)?;
+        self.storage
+            .store(tree_storage::TREE_OPS_INDEX_KEY, index_bytes)
+            .await
+            .map_err(|e| AuraError::storage(format!("Failed to store ops index: {e}")))?;
+
+        Ok(())
+    }
+
     /// Reduce the current operations to tree state.
     async fn reduce_state(
         &self,

@@ -481,6 +481,10 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(())
     }
 
+    async fn process_ceremony_messages(&self) -> Result<(), IntentError> {
+        Ok(())
+    }
+
     async fn sync_with_peer(&self, _peer_id: &str) -> Result<(), IntentError> {
         Ok(())
     }

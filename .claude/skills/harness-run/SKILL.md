@@ -24,7 +24,7 @@ contract.
 ```
 /harness-run <scenario>              # Run scenario in local mode
 /harness-run --browser <scenario>    # Run in browser mode
-/harness-run --patchbay <scenario>   # Run via Patchbay relay
+/harness-run --patchbay <scenario>   # Run via Patchbay relay using `patchbay` backend
 ```
 
 ## Scenario Locations
@@ -64,8 +64,8 @@ just harness-run-browser scenarios/harness/local-discovery-smoke.toml
 For testing through the relay service:
 
 ```bash
-just harness-run-patchbay scenarios/harness/relay-test.toml
-```
+just harness-run -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/scenario2-social-topology-e2e.toml --network-backend patchbay
+``` 
 
 ## Debugging Failures
 

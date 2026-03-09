@@ -445,10 +445,9 @@ pub fn semantic_ui_snapshot(
         .collect::<Vec<_>>();
     let settings_items = SettingsSection::all()
         .iter()
-        .enumerate()
-        .map(|(idx, section)| ListItemSnapshot {
+        .map(|section| ListItemSnapshot {
             id: section.title().to_ascii_lowercase().replace(' ', "_"),
-            selected: idx == state.settings.selected_index,
+            selected: *section == state.settings.section,
             confirmation: ConfirmationState::Confirmed,
         })
         .collect::<Vec<_>>();
@@ -457,7 +456,9 @@ pub fn semantic_ui_snapshot(
         &mut selections,
         ListId::SettingsSections,
         settings_items,
-        selected_by_index(&settings_section_ids, state.settings.selected_index),
+        settings_section_ids
+            .get(state.settings.section.index())
+            .cloned(),
     );
 
     let toasts = state

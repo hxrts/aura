@@ -11,6 +11,9 @@ fail() {
 
 bash scripts/check/harness-core-scenario-mechanics.sh
 bash scripts/check/ui-parity-contract.sh
+# Inventory and converted shared-scenario contract
+bash scripts/check/harness-scenario-inventory.sh
+bash scripts/check/harness-shared-scenario-contract.sh
 
 cargo test -p aura-app shared_flow_support_contract_is_consistent --quiet
 cargo test -p aura-harness --lib browser_driver_maps_shared_controls_to_selectors --quiet

@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
+use aura_app::ui::contract::{ControlId, FieldId, ListId, ScreenId, UiSnapshot};
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
@@ -40,6 +40,14 @@ pub struct LocalPtyBackend {
 }
 
 impl LocalPtyBackend {
+    fn is_cargo_program(program: &str) -> bool {
+        std::path::Path::new(program)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name == "cargo")
+            .unwrap_or(false)
+    }
+
     fn uses_default_aura_command(&self) -> bool {
         self.config.command.is_none()
     }
@@ -60,22 +68,7 @@ impl LocalPtyBackend {
     }
 
     fn default_command(&self) -> (String, Vec<String>) {
-        let program = std::env::var("AURA_HARNESS_AURA_BIN")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .map(PathBuf::from)
-            .map(Self::absolutize_path)
-            .or_else(|| {
-                std::env::current_dir()
-                    .ok()
-                    .map(|cwd| cwd.join("target/debug/aura"))
-            })
-            .filter(|candidate| candidate.exists())
-            .unwrap_or_else(|| PathBuf::from("aura"))
-            .to_string_lossy()
-            .to_string();
-
-        let mut args = vec![
+        let mut aura_args = vec![
             "tui".to_string(),
             "--data-dir".to_string(),
             Self::absolutize_path(self.config.data_dir.clone())
@@ -85,13 +78,50 @@ impl LocalPtyBackend {
             self.config.bind_address.clone(),
         ];
         if let Some(device_id) = self.config.device_id.as_deref() {
-            args.push("--device-id".to_string());
-            args.push(device_id.to_string());
+            aura_args.push("--device-id".to_string());
+            aura_args.push(device_id.to_string());
         }
         if self.config.demo_mode {
-            args.push("--demo".to_string());
+            aura_args.push("--demo".to_string());
+            return self.default_command_with_args(aura_args);
         }
-        (program, args)
+        self.default_command_with_args(aura_args)
+    }
+
+    fn default_command_with_args(&self, aura_args: Vec<String>) -> (String, Vec<String>) {
+        if let Some(explicit) = std::env::var("AURA_HARNESS_AURA_BIN")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+        {
+            let explicit_path = Self::absolutize_path(PathBuf::from(explicit));
+            if explicit_path.exists() {
+                return (explicit_path.to_string_lossy().to_string(), aura_args);
+            }
+        }
+
+        if let Ok(cargo) = which::which("cargo") {
+            let mut args = vec![
+                "run".to_string(),
+                "-q".to_string(),
+                "-p".to_string(),
+                "aura-terminal".to_string(),
+                "--bin".to_string(),
+                "aura".to_string(),
+                "--".to_string(),
+            ];
+            args.extend(aura_args);
+            return (cargo.to_string_lossy().to_string(), args);
+        }
+
+        if let Some(candidate) = std::env::current_dir()
+            .ok()
+            .map(|cwd| cwd.join("target/debug/aura"))
+            .filter(|candidate| candidate.exists())
+        {
+            return (candidate.to_string_lossy().to_string(), aura_args);
+        }
+
+        ("aura".to_string(), aura_args)
     }
 
     fn command_spec(&self) -> (String, Vec<String>) {
@@ -179,11 +209,18 @@ impl InstanceBackend for LocalPtyBackend {
             .with_context(|| format!("failed to allocate PTY for {}", self.config.id))?;
 
         let (program, args) = self.command_spec();
+        let use_workspace_cwd = Self::is_cargo_program(&program);
         let mut command = CommandBuilder::new(program);
         for arg in args {
             command.arg(arg);
         }
-        command.cwd(&self.config.data_dir);
+        if use_workspace_cwd {
+            if let Ok(cwd) = std::env::current_dir() {
+                command.cwd(cwd);
+            }
+        } else {
+            command.cwd(&self.config.data_dir);
+        }
         command.env("TERM", "xterm-256color");
         command.env("LANG", "C.UTF-8");
 
@@ -220,6 +257,22 @@ impl InstanceBackend for LocalPtyBackend {
                 }
                 command.env(key.trim(), value.trim());
             }
+        }
+
+        if let Some(lan) = &self.config.lan_discovery {
+            command.env(
+                "AURA_HARNESS_LAN_DISCOVERY_ENABLED",
+                if lan.enabled { "true" } else { "false" },
+            );
+            command.env("AURA_HARNESS_LAN_DISCOVERY_BIND_ADDR", &lan.bind_addr);
+            command.env(
+                "AURA_HARNESS_LAN_DISCOVERY_BROADCAST_ADDR",
+                &lan.broadcast_addr,
+            );
+            command.env(
+                "AURA_HARNESS_LAN_DISCOVERY_PORT",
+                lan.port.to_string(),
+            );
         }
 
         fs::create_dir_all(&self.config.data_dir).with_context(|| {
@@ -359,6 +412,23 @@ impl InstanceBackend for LocalPtyBackend {
     }
 
     fn activate_control(&mut self, control_id: ControlId) -> Result<()> {
+        match control_id {
+            ControlId::SettingsAddDeviceButton | ControlId::SettingsRemoveDeviceButton => {
+                let snapshot = self.ui_snapshot()?;
+                if snapshot.screen == aura_app::ui::contract::ScreenId::Settings {
+                    let needs_devices_section = snapshot
+                        .selections
+                        .iter()
+                        .find(|selection| selection.list == ListId::SettingsSections)
+                        .map(|selection| selection.item_id.as_str() != "devices")
+                        .unwrap_or(true);
+                    if needs_devices_section {
+                        self.activate_list_item(ListId::SettingsSections, "devices")?;
+                    }
+                }
+            }
+            _ => {}
+        }
         let sequence = match control_id {
             ControlId::NavNeighborhood => "1",
             ControlId::NavChat => "2",
@@ -395,7 +465,14 @@ impl InstanceBackend for LocalPtyBackend {
     }
 
     fn activate_list_item(&mut self, list_id: ListId, item_id: &str) -> Result<()> {
-        let snapshot = self.ui_snapshot()?;
+        let mut snapshot = self.ui_snapshot()?;
+        if matches!(list_id, ListId::SettingsSections)
+            && matches!(snapshot.focused_control, Some(ControlId::Screen(ScreenId::Settings)))
+        {
+            self.send_keys("\u{1b}[B")?;
+            thread::sleep(Duration::from_millis(80));
+            snapshot = self.ui_snapshot()?;
+        }
         let list = snapshot
             .lists
             .iter()
@@ -413,6 +490,15 @@ impl InstanceBackend for LocalPtyBackend {
             .iter()
             .position(|item| item.selected)
             .unwrap_or(0);
+        eprintln!(
+            "[local_pty activate_list_item] instance={} list={:?} item_id={} current_index={} target_index={} focused_control={:?}",
+            self.config.id,
+            list_id,
+            item_id,
+            current_index,
+            target_index,
+            snapshot.focused_control
+        );
         if matches!(list_id, ListId::InvitationTypes) {
             match snapshot.focused_control {
                 Some(ControlId::Field(FieldId::InvitationType)) => {}
@@ -443,7 +529,6 @@ impl InstanceBackend for LocalPtyBackend {
             }
             return Ok(());
         }
-        let delta = target_index as isize - current_index as isize;
         if matches!(list_id, ListId::Navigation) {
             let list_len = list.items.len();
             if list_len == 0 {
@@ -457,9 +542,80 @@ impl InstanceBackend for LocalPtyBackend {
             }
             return Ok(());
         }
-        let sequence = if delta < 0 { "\u{1b}[A" } else { "\u{1b}[B" };
+        if matches!(list_id, ListId::SettingsSections) {
+            let max_attempts = list.items.len().saturating_mul(2).max(1);
+            for attempt in 0..max_attempts {
+                let current_snapshot = self.ui_snapshot()?;
+                let current_list = current_snapshot
+                    .lists
+                    .iter()
+                    .find(|candidate| candidate.id == list_id)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "list {list_id:?} is not visible in the current TUI snapshot"
+                        )
+                    })?;
+                let current_index = current_list
+                    .items
+                    .iter()
+                    .position(|item| item.selected)
+                    .unwrap_or(0);
+                if current_list
+                    .items
+                    .get(current_index)
+                    .map(|item| item.id.as_str() == item_id)
+                    .unwrap_or(false)
+                {
+                    return Ok(());
+                }
+                let sequence = if current_index > target_index {
+                    "\u{1b}[A"
+                } else {
+                    "\u{1b}[B"
+                };
+                eprintln!(
+                    "[local_pty activate_list_item stepwise] instance={} list={:?} item_id={} attempt={} current_index={} target_index={} sequence={}",
+                    self.config.id,
+                    list_id,
+                    item_id,
+                    attempt,
+                    current_index,
+                    target_index,
+                    sequence
+                );
+                self.send_keys(sequence)?;
+                thread::sleep(Duration::from_millis(80));
+            }
+            let final_snapshot = self.ui_snapshot()?;
+            let final_selected = final_snapshot
+                .lists
+                .iter()
+                .find(|candidate| candidate.id == list_id)
+                .and_then(|candidate| candidate.items.iter().find(|item| item.selected))
+                .map(|item| item.id.clone())
+                .unwrap_or_else(|| "<none>".to_string());
+            anyhow::bail!(
+                "failed to select item {item_id} in list {list_id:?}; final selection was {final_selected}"
+            );
+        }
+        let delta = target_index as isize - current_index as isize;
+        let sequence = if matches!(list_id, ListId::SettingsSections) {
+            if delta < 0 { "\u{1b}[A" } else { "\u{1b}[B" }
+        } else if delta < 0 {
+            "k"
+        } else {
+            "j"
+        };
         for _ in 0..delta.unsigned_abs() {
+            eprintln!(
+                "[local_pty activate_list_item send] instance={} list={:?} item_id={} sequence={}",
+                self.config.id,
+                list_id,
+                item_id,
+                sequence
+            );
             self.send_keys(sequence)?;
+            thread::sleep(Duration::from_millis(60));
         }
         Ok(())
     }
@@ -736,9 +892,24 @@ mod tests {
         let (program, args) = backend.command_spec();
 
         assert!(
-            program.ends_with("aura"),
-            "default program must target aura binary, got: {program}"
+            program.ends_with("cargo") || program.ends_with("aura"),
+            "default program must target cargo or aura binary, got: {program}"
         );
+        if program.ends_with("cargo") {
+            assert!(
+                args.windows(2)
+                    .any(|window| window == ["-p", "aura-terminal"]),
+                "cargo launch must target aura-terminal package: {args:?}"
+            );
+            assert!(
+                args.windows(2).any(|window| window == ["--bin", "aura"]),
+                "cargo launch must target aura binary: {args:?}"
+            );
+            assert!(
+                args.contains(&"--".to_string()),
+                "cargo launch must separate cargo args from aura args: {args:?}"
+            );
+        }
         assert!(
             args.iter().any(|arg| arg == "tui"),
             "default args must include tui subcommand: {args:?}"

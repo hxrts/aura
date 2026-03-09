@@ -416,6 +416,7 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 state.settings.focus = state.settings.focus.toggle();
             }
             state.settings.section = state.settings.section.prev();
+            state.settings.selected_index = state.settings.section.index();
         }
         KeyCode::Down | KeyCode::Char('j') => {
             // Always allow section navigation with Up/Down
@@ -424,6 +425,7 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 state.settings.focus = state.settings.focus.toggle();
             }
             state.settings.section = state.settings.section.next();
+            state.settings.selected_index = state.settings.section.index();
         }
         KeyCode::Char('m') => {
             if state.settings.section == SettingsSection::Authority {

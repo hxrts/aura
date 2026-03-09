@@ -9,9 +9,11 @@ use crate::runtime::effects::AuraEffectSystem;
 use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyRunner};
 use crate::runtime::services::{CeremonyTracker, ReconfigurationManager};
 use crate::ThresholdSigningService;
+use aura_core::util::serialization::from_slice;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::ThresholdSigningEffects;
-use aura_core::AuthorityId;
+use aura_core::{AttestedOp, AuthorityId};
+use aura_protocol::effects::TreeEffects;
 
 /// Handles device commit messages
 pub struct CommitHandler<'a> {
@@ -73,6 +75,52 @@ impl<'a> CommitHandler<'a> {
         };
 
         let authority_id = envelope.destination;
+
+        if content_type == "application/aura-device-enrollment-commit" && !envelope.payload.is_empty()
+        {
+            let attested: AttestedOp = match from_slice(&envelope.payload) {
+                Ok(attested) => attested,
+                Err(e) => {
+                    tracing::warn!(
+                        content_type = %content_type,
+                        error = %e,
+                        "Failed to decode enrollment commit op"
+                    );
+                    return ProcessResult::Skip;
+                }
+            };
+
+            if let Err(e) = self.effects.apply_attested_op(attested).await {
+                tracing::warn!(
+                    content_type = %content_type,
+                    error = %e,
+                    "Failed to apply enrollment commit op"
+                );
+                return ProcessResult::Skip;
+            }
+
+            tracing::info!(
+                content_type = %content_type,
+                authority_id = %authority_id,
+                "Applied enrollment commit op"
+            );
+            eprintln!(
+                "[device-enrollment-commit-applied] authority_id={};content_type={}",
+                authority_id,
+                content_type,
+            );
+        } else if content_type == "application/aura-device-enrollment-commit" {
+            tracing::info!(
+                content_type = %content_type,
+                authority_id = %authority_id,
+                "Received enrollment commit without leaf op payload"
+            );
+            eprintln!(
+                "[device-enrollment-commit-empty] authority_id={};content_type={}",
+                authority_id,
+                content_type,
+            );
+        }
 
         // Commit key rotation via effects
         if let Err(e) = self

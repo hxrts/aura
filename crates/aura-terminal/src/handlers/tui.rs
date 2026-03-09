@@ -192,6 +192,30 @@ fn create_placeholder_ids(device_id_str: &str) -> (AuthorityId, ContextId) {
     )
 }
 
+fn harness_lan_discovery_override(
+    current: &mut aura_agent::core::config::AgentConfig,
+) {
+    let enabled = std::env::var("AURA_HARNESS_LAN_DISCOVERY_ENABLED")
+        .ok()
+        .and_then(|value| value.parse::<bool>().ok());
+    let Some(enabled) = enabled else {
+        return;
+    };
+    let bind_addr = std::env::var("AURA_HARNESS_LAN_DISCOVERY_BIND_ADDR")
+        .unwrap_or_else(|_| "0.0.0.0".to_string());
+    let broadcast_addr = std::env::var("AURA_HARNESS_LAN_DISCOVERY_BROADCAST_ADDR")
+        .unwrap_or_else(|_| "255.255.255.255".to_string());
+    let port = std::env::var("AURA_HARNESS_LAN_DISCOVERY_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(current.lan_discovery.port);
+
+    current.lan_discovery.enabled = enabled;
+    current.lan_discovery.bind_addr = bind_addr;
+    current.lan_discovery.broadcast_addr = broadcast_addr;
+    current.lan_discovery.port = port;
+}
+
 async fn persist_account_config(
     storage: &impl StorageCoreEffects,
     time: &impl PhysicalTimeEffects,
@@ -695,7 +719,7 @@ async fn handle_tui_launch(
                 }
             };
 
-        let agent_config = AgentConfig {
+        let mut agent_config = AgentConfig {
             device_id: device_id.clone(),
             storage: StorageConfig {
                 base_path: base_path.clone(),
@@ -707,6 +731,7 @@ async fn handle_tui_launch(
             },
             ..AgentConfig::default()
         };
+        harness_lan_discovery_override(&mut agent_config);
 
         let execution_mode = match mode {
             TuiMode::Production => aura_core::effects::ExecutionMode::Production,
@@ -742,6 +767,7 @@ async fn handle_tui_launch(
                 .with_config(agent_config)
                 .with_authority(authority_id)
                 .with_sync_config(sync_config.clone())
+                .with_rendezvous()
                 .build_production(&effect_ctx)
                 .await
                 .map_err(|e| AuraError::internal(format!("Failed to create agent: {e}")))?,

@@ -6,7 +6,7 @@ use aura_agent::{
     AgentBuilder, AgentConfig, AuraAgent, EffectContext, ExecutionMode, RendezvousManagerConfig,
     SyncManagerConfig,
 };
-use aura_app::runtime_bridge::InvitationBridgeType;
+use aura_app::runtime_bridge::{InvitationBridgeType, RuntimeBridge};
 use aura_app::ui::signals::{CHAT_SIGNAL, CONTACTS_SIGNAL};
 use aura_app::ui::workflows::{
     context as context_workflow, invitation as invitation_workflow,
@@ -144,6 +144,36 @@ async fn wait_for_envelope(
     })
     .await
     .map_err(|_| aura_core::effects::TransportError::NoMessage)?
+}
+
+#[tokio::test]
+async fn test_device_enrollment_export_includes_sender_hint() -> TestResult {
+    let _guard = lock_lan_test().await;
+    let lan_port = next_lan_port();
+    let agent = create_lan_agent(0x51, lan_port).await?;
+
+    let start = agent
+        .clone()
+        .as_runtime_bridge()
+        .initiate_device_enrollment_ceremony("WebApp".to_string(), None)
+        .await?;
+
+    let sender_hint = aura_agent::handlers::invitation::ShareableInvitation::sender_addr_from_code(
+        &start.enrollment_code,
+    );
+
+    assert!(
+        sender_hint.is_some(),
+        "device enrollment export should include a sender websocket hint"
+    );
+    assert!(
+        sender_hint
+            .as_deref()
+            .is_some_and(|addr| addr.starts_with("ws://") || addr.starts_with("wss://")),
+        "sender hint should be a websocket address: {sender_hint:?}"
+    );
+
+    Ok(())
 }
 
 async fn wait_for_chat_fact(

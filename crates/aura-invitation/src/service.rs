@@ -149,6 +149,11 @@ pub enum InvitationType {
         threshold_config: Vec<u8>,
         /// Public key package for the pending epoch
         public_key_package: Vec<u8>,
+        /// Baseline attested tree operations for the current authority state.
+        ///
+        /// Fresh invitees need these ops to materialize the pre-enrollment
+        /// authority tree before applying the enrollment commit.
+        baseline_tree_ops: Vec<Vec<u8>>,
     },
 }
 

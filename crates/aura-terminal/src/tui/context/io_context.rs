@@ -35,7 +35,7 @@ use aura_app::ui::signals::{
     SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
 };
 use aura_app::ui::types::InvitationBridgeType;
-use aura_app::ui::workflows::invitation::{accept_invitation, import_invitation_details};
+use aura_app::ui::workflows::invitation::import_invitation_details;
 use aura_app::ui::workflows::{
     context as context_workflows, settings as settings_workflows, system as system_workflows,
 };
@@ -892,7 +892,10 @@ impl IoContext {
             ));
         }
 
-        accept_invitation(app_core, &invitation.invitation_id)
+        aura_app::ui::workflows::invitation::accept_device_enrollment_invitation(
+            app_core,
+            &invitation,
+        )
             .await
             .map_err(|e| {
                 TerminalError::Operation(format!(

@@ -235,6 +235,7 @@ impl InvitationServiceApi {
         key_package: Vec<u8>,
         threshold_config: Vec<u8>,
         public_key_package: Vec<u8>,
+        baseline_tree_ops: Vec<Vec<u8>>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
         let invitation = self
@@ -252,6 +253,7 @@ impl InvitationServiceApi {
                     key_package,
                     threshold_config,
                     public_key_package,
+                    baseline_tree_ops,
                 },
                 None,
                 expires_in_ms,
@@ -395,6 +397,37 @@ impl InvitationServiceApi {
     // Sharing Methods (Out-of-Band Transfer)
     // =========================================================================
 
+    fn append_sender_hint(&self, mut code: String) -> String {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+        // Only publish a browser-direct hint when we have an actual websocket
+        // listener address. Falling back to the raw bind address poisons the
+        // receiver cache with the TCP envelope port, which is not a websocket
+        // endpoint.
+        let sender_addr = self
+            .effects
+            .lan_transport()
+            .and_then(|transport| transport.websocket_addrs().first().cloned());
+        let sender_hint = sender_addr.as_deref().map(|addr| {
+            if addr.starts_with("ws://") || addr.starts_with("wss://") {
+                addr.to_string()
+            } else {
+                format!("ws://{addr}")
+            }
+        });
+        tracing::info!(
+            sender_addr = ?sender_addr,
+            sender_hint = ?sender_hint,
+            "export invitation sender websocket hint"
+        );
+        if let Some(sender_hint) = sender_hint {
+            let encoded_addr = URL_SAFE_NO_PAD.encode(sender_hint.as_bytes());
+            code = format!("{code}:{encoded_addr}");
+        }
+
+        code
+    }
+
     /// Export an invitation as a shareable code string (compile-time safe)
     ///
     /// This is the preferred method when you already have the `Invitation` object.
@@ -408,6 +441,14 @@ impl InvitationServiceApi {
     pub fn export_invitation(invitation: &Invitation) -> String {
         let shareable = ShareableInvitation::from(invitation);
         shareable.to_code()
+    }
+
+    /// Export an invitation as a shareable code string with transport metadata.
+    ///
+    /// This should be used for codes that will be imported by another runtime
+    /// and may need a direct sender websocket hint for the first return path.
+    pub fn export_invitation_with_sender_hint(&self, invitation: &Invitation) -> String {
+        self.append_sender_hint(Self::export_invitation(invitation))
     }
 
     /// Export an invitation by ID as a shareable code string
@@ -427,8 +468,6 @@ impl InvitationServiceApi {
     /// # Errors
     /// Returns an error if the invitation is not found
     pub async fn export_code(&self, invitation_id: &InvitationId) -> AgentResult<String> {
-        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-
         let invitation = self
             .handler
             .get_invitation_with_storage(&self.effects, invitation_id)
@@ -436,34 +475,11 @@ impl InvitationServiceApi {
             .ok_or_else(|| {
                 aura_core::AuraError::not_found(format!("Invitation not found: {}", invitation_id))
             })?;
-        let mut code = Self::export_invitation(&invitation);
-        // Only publish a browser-direct hint when we have an actual websocket
-        // listener address. Falling back to the raw bind address poisons the
-        // receiver cache with the TCP envelope port, which is not a websocket
-        // endpoint.
-        let sender_addr = self
-            .effects
-            .lan_transport()
-            .and_then(|transport| transport.websocket_addrs().first().cloned());
-        let sender_hint = sender_addr.as_deref().map(|addr| {
-            if addr.starts_with("ws://") || addr.starts_with("wss://") {
-                addr.to_string()
-            } else {
-                format!("ws://{addr}")
-            }
-        });
         tracing::info!(
             invitation_id = %invitation_id,
-            sender_addr = ?sender_addr,
-            sender_hint = ?sender_hint,
             "export invitation sender websocket hint"
         );
-        if let Some(sender_hint) = sender_hint {
-            let encoded_addr = URL_SAFE_NO_PAD.encode(sender_hint.as_bytes());
-            code = format!("{code}:{encoded_addr}");
-        }
-
-        Ok(code)
+        Ok(self.export_invitation_with_sender_hint(&invitation))
     }
 
     /// Import an invitation from a shareable code string

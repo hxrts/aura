@@ -491,6 +491,23 @@ impl AuraEffectSystem {
         self.reactive_handler.clone()
     }
 
+    pub async fn export_tree_ops(&self) -> Result<Vec<aura_core::AttestedOp>, crate::core::AgentError> {
+        self.tree_handler
+            .export_ops()
+            .await
+            .map_err(|error| crate::core::AgentError::effects(error.to_string()))
+    }
+
+    pub async fn import_tree_ops(
+        &self,
+        ops: &[aura_core::AttestedOp],
+    ) -> Result<(), crate::core::AgentError> {
+        self.tree_handler
+            .import_ops(ops)
+            .await
+            .map_err(|error| crate::core::AgentError::effects(error.to_string()))
+    }
+
     /// Attach a fact sink for reactive scheduling (facts → scheduler ingestion).
     ///
     /// This is called during runtime startup when the ReactivePipeline is started.
