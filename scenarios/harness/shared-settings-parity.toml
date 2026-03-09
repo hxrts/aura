@@ -1,5 +1,22 @@
+# Shared settings parity test:
+#
+# Phase 1 - Account setup:
+# 1. Launch alice and bob actors.
+# 2. Both fill account names and create accounts.
+# 3. Both wait for ready state.
+#
+# Phase 2 - Settings navigation:
+# 1. Both navigate to settings screen.
+# 2. Verify settings screen is visible for both.
+#
+# Phase 3 - Parity verification:
+# 1. Compare bob's semantic state with alice's.
+#
+# Success criteria: both actors reach identical settings state,
+# parity check passes across frontend bindings.
+
 id = "shared-settings-parity"
-goal = "Execute the same shared Settings flow in web and TUI and compare semantic results."
+goal = "Execute the same shared Settings flow for two actors and compare semantic results."
 
 [[steps]]
 id = "launch"
@@ -7,94 +24,94 @@ action = "launch_actors"
 timeout_ms = 20000
 
 [[steps]]
-id = "tui-onboarding-visible"
+id = "alice-onboarding-visible"
 action = "control_visible"
-actor = "tui"
+actor = "alice"
 control_id = "onboarding_root"
 timeout_ms = 30000
 
 [[steps]]
-id = "web-onboarding-visible"
+id = "bob-onboarding-visible"
 action = "control_visible"
-actor = "web"
+actor = "bob"
 control_id = "onboarding_root"
 timeout_ms = 60000
 
 [[steps]]
-id = "tui-fill-account-name"
+id = "alice-fill-account-name"
 action = "fill"
-actor = "tui"
+actor = "alice"
 field_id = "account_name"
-value = "TuiUser"
+value = "AliceUser"
 timeout_ms = 4000
 
 [[steps]]
-id = "web-fill-account-name"
+id = "bob-fill-account-name"
 action = "fill"
-actor = "web"
+actor = "bob"
 field_id = "account_name"
-value = "WebUser"
+value = "BobUser"
 timeout_ms = 4000
 
 [[steps]]
-id = "tui-create-account"
+id = "alice-create-account"
 action = "activate"
-actor = "tui"
+actor = "alice"
 control_id = "onboarding_create_account_button"
 timeout_ms = 4000
 
 [[steps]]
-id = "web-create-account"
+id = "bob-create-account"
 action = "activate"
-actor = "web"
+actor = "bob"
 control_id = "onboarding_create_account_button"
 timeout_ms = 4000
 
 [[steps]]
-id = "tui-ready"
+id = "alice-ready"
 action = "readiness_is"
-actor = "tui"
+actor = "alice"
 readiness = "ready"
 timeout_ms = 120000
 
 [[steps]]
-id = "web-ready"
+id = "bob-ready"
 action = "readiness_is"
-actor = "web"
+actor = "bob"
 readiness = "ready"
 timeout_ms = 120000
 
 [[steps]]
-id = "tui-open-settings"
+id = "alice-open-settings"
 action = "navigate"
-actor = "tui"
+actor = "alice"
 screen_id = "settings"
 timeout_ms = 4000
 
 [[steps]]
-id = "web-open-settings"
+id = "bob-open-settings"
 action = "navigate"
-actor = "web"
+actor = "bob"
 screen_id = "settings"
 timeout_ms = 4000
 
 [[steps]]
-id = "tui-settings-visible"
+id = "alice-settings-visible"
 action = "screen_is"
-actor = "tui"
+actor = "alice"
 screen_id = "settings"
 timeout_ms = 30000
 
 [[steps]]
-id = "web-settings-visible"
+id = "bob-settings-visible"
 action = "screen_is"
-actor = "web"
+actor = "bob"
 screen_id = "settings"
 timeout_ms = 30000
 
 [[steps]]
-id = "web-matches-tui-settings"
+id = "bob-matches-alice-settings"
 action = "parity_with_actor"
-actor = "web"
-peer_actor = "tui"
+actor = "bob"
+peer_actor = "alice"
 timeout_ms = 5000

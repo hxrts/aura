@@ -1,3 +1,15 @@
+# Quint-originated semantic observation smoke test:
+#
+# 1. Launch alice actor.
+# 2. Wait for onboarding control visibility.
+# 3. Fill account name and submit.
+# 4. Wait for neighborhood screen and ready state.
+# 5. Navigate to settings via semantic nav action.
+# 6. Verify settings screen is visible.
+#
+# Success criteria: Quint-originated scenario executes through
+# aura-harness with semantic observation.
+
 id = "quint-semantic-observation-smoke"
 goal = "Execute a Quint-originated semantic observation flow through aura-harness."
 

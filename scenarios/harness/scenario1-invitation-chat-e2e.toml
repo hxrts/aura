@@ -4,20 +4,24 @@ goal = "Complete work/scenario.md invitation, shared channel, and bidirectional 
 execution_mode = "scripted"
 required_capabilities = ["local"]
 
-# User flow reference (from work/scenario.md):
+# Chat invitation and message channel end-to-end:
+#
 # Phase 1 - Out-of-band invitation:
-# 1) Alice opens Contacts, creates invitation, copies code.
-# 2) Bob opens Contacts, imports invitation code, submits.
-# 3) Both sides confirm connected contact state.
+# 1. Alice opens Contacts, creates invitation, copies code.
+# 2. Bob opens Contacts, imports invitation code, submits.
+# 3. Both sides confirm connected contact state.
+#
 # Phase 2 - Chat channel setup:
-# 1) Alice opens Chat and creates channel with Bob selected.
-# 2) Bob opens Chat and selects the same channel.
+# 1. Alice opens Chat and creates channel with Bob selected.
+# 2. Bob opens Chat and selects the same channel.
+#
 # Phase 3 - Bidirectional messaging:
-# 1) Alice sends deterministic token messages.
-# 2) Bob sends deterministic token messages.
-# 3) Verify both directions deliver in order.
-# Success criteria: invitation accepted, shared channel visible on both sides,
-# and deterministic bidirectional messages are delivered.
+# 1. Alice sends deterministic token messages.
+# 2. Bob sends deterministic token messages.
+# 3. Verify both directions deliver in order.
+#
+# Success criteria: invitation accepted, shared channel visible on
+# both sides, and deterministic bidirectional messages are delivered.
 
 [[steps]]
 id = "launch"

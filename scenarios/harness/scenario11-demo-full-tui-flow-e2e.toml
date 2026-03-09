@@ -1,15 +1,32 @@
+# Demo full TUI flow end-to-end:
+#
+# Phase 1 - Demo mode setup:
+# 1. Bob runs in demo mode.
+# 2. Import alice and carol as contacts via demo shortcuts.
+#
+# Phase 2 - Channel messaging:
+# 1. Bob creates a shared chat channel.
+# 2. Bob invites alice and carol.
+# 3. Bob sends a message and receives both replies.
+#
+# Phase 3 - Home formation:
+# 1. Bob creates a home.
+# 2. Bob invites alice and carol to join.
+# 3. Wait for propagation.
+#
+# Phase 4 - Neighborhood join:
+# 1. Bob selects the pre-seeded "Tri-Neighborhood Demo".
+# 2. Bob adds the trio home.
+# 3. Demo auto-accept confirms neighborhood join acceptance.
+#
+# Success criteria: demo mode completes full TUI flow with contacts,
+# channel messaging, home formation, and neighborhood join.
+
 schema_version = 1
 id = "scenario11-demo-full-tui-flow-e2e"
 goal = "Run the end-to-end TUI demo flow: add Alice/Carol contacts, channel messaging, home formation, and neighborhood join."
 execution_mode = "scripted"
 required_capabilities = ["local"]
-
-# User flow:
-# 1) Bob runs in demo mode, imports Alice and Carol as contacts via demo shortcuts.
-# 2) Bob creates a shared chat channel, invites Alice/Carol, sends a message, and receives both replies.
-# 3) Bob creates a home, invites Alice/Carol to join it, then waits for propagation.
-# 4) Bob selects the pre-seeded "Tri-Neighborhood Demo" and adds the trio home.
-# 5) Demo auto-accept should confirm neighborhood join acceptance from existing homes.
 
 [[steps]]
 id = "launch"

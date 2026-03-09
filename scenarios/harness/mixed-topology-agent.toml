@@ -1,3 +1,11 @@
+# Mixed topology agent mode test:
+#
+# 1. Launch instances with local and ssh-dry-run topology in agent mode.
+# 2. Inject a tunnel drop fault.
+# 3. Send and wait for test message on local instance.
+#
+# Success criteria: agent mode execution completes across mixed topology.
+
 schema_version = 1
 id = "mixed-topology-agent"
 goal = "Run the same state-machine path using agent mode."

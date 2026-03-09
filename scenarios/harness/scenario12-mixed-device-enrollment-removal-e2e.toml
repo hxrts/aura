@@ -1,5 +1,28 @@
+# Mixed device enrollment and removal end-to-end:
+#
+# Phase 1 - Account creation:
+# 1. Launch alice and bob actors.
+# 2. Alice creates account (AliceOwner).
+# 3. Alice waits for neighborhood ready state.
+#
+# Phase 2 - Device enrollment:
+# 1. Alice opens Settings and add-device modal.
+# 2. Alice enters device name (BobApp) and submits.
+# 3. Alice copies device enrollment code.
+# 4. Bob imports device code and completes enrollment.
+#
+# Phase 3 - Device verification and removal:
+# 1. Bob navigates to Settings devices section.
+# 2. Verify device count is 2.
+# 3. Bob opens remove-device modal and selects device.
+# 4. Bob confirms device removal.
+# 5. Verify device count is 1.
+#
+# Success criteria: device enrollment via out-of-band code succeeds,
+# device removal completes with correct count updates.
+
 id = "scenario12-mixed-device-enrollment-removal-e2e"
-goal = "Use one TUI and one web instance to exercise out-of-band add-device acceptance and mirrored device removal completion on both sides."
+goal = "Use two actors to exercise out-of-band add-device acceptance and mirrored device removal completion across supported frontend bindings."
 
 [[steps]]
 id = "launch"
@@ -7,219 +30,219 @@ action = "launch_actors"
 timeout_ms = 15000
 
 [[steps]]
-id = "tui-onboarding-visible"
+id = "alice-onboarding-visible"
 action = "control_visible"
-actor = "tui"
+actor = "alice"
 control_id = "onboarding_root"
 timeout_ms = 60000
 
 [[steps]]
-id = "web-onboarding-visible"
+id = "bob-onboarding-visible"
 action = "control_visible"
-actor = "web"
+actor = "bob"
 control_id = "onboarding_root"
 timeout_ms = 60000
 
 [[steps]]
-id = "tui-fill-account-name"
+id = "alice-fill-account-name"
 action = "fill"
-actor = "tui"
+actor = "alice"
 field_id = "account_name"
-value = "TuiOwner"
+value = "AliceOwner"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-create-account"
+id = "alice-create-account"
 action = "activate"
-actor = "tui"
+actor = "alice"
 control_id = "onboarding_create_account_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-neighborhood-visible"
+id = "alice-neighborhood-visible"
 action = "screen_is"
-actor = "tui"
+actor = "alice"
 screen_id = "neighborhood"
 timeout_ms = 120000
 
 [[steps]]
-id = "tui-neighborhood-ready"
+id = "alice-neighborhood-ready"
 action = "readiness_is"
-actor = "tui"
+actor = "alice"
 readiness = "ready"
 timeout_ms = 120000
 
 [[steps]]
-id = "tui-open-settings"
+id = "alice-open-settings"
 action = "navigate"
-actor = "tui"
+actor = "alice"
 screen_id = "settings"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-settings-visible"
+id = "alice-settings-visible"
 action = "screen_is"
-actor = "tui"
+actor = "alice"
 screen_id = "settings"
 timeout_ms = 8000
 
 [[steps]]
-id = "tui-open-add-device-modal"
+id = "alice-open-add-device-modal"
 action = "activate"
-actor = "tui"
+actor = "alice"
 control_id = "settings_add_device_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-add-device-modal-open"
+id = "alice-add-device-modal-open"
 action = "modal_open"
-actor = "tui"
+actor = "alice"
 modal_id = "add_device"
 timeout_ms = 8000
 
 [[steps]]
-id = "tui-fill-device-name"
+id = "alice-fill-device-name"
 action = "fill"
-actor = "tui"
+actor = "alice"
 field_id = "device_name"
-value = "WebApp"
+value = "BobApp"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-submit-add-device"
+id = "alice-submit-add-device"
 action = "activate"
-actor = "tui"
+actor = "alice"
 control_id = "modal_confirm_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-device-enrollment-submitting"
+id = "alice-device-enrollment-submitting"
 action = "operation_state_is"
-actor = "tui"
+actor = "alice"
 operation_id = "device_enrollment"
 operation_state = "submitting"
 timeout_ms = 15000
 
 [[steps]]
-id = "tui-copy-device-code"
+id = "alice-copy-device-code"
 action = "activate"
-actor = "tui"
+actor = "alice"
 control_id = "modal_copy_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-read-device-code"
+id = "alice-read-device-code"
 action = "read_clipboard"
-actor = "tui"
+actor = "alice"
 name = "device_code"
 timeout_ms = 12000
 
 [[steps]]
-id = "web-fill-device-code"
+id = "bob-fill-device-code"
 action = "fill"
-actor = "web"
+actor = "bob"
 field_id = "device_import_code"
 value = "${device_code}"
 timeout_ms = 12000
 
 [[steps]]
-id = "web-import-device-code"
+id = "bob-import-device-code"
 action = "activate"
-actor = "web"
+actor = "bob"
 control_id = "onboarding_import_device_button"
 timeout_ms = 4000
 
 [[steps]]
-id = "web-neighborhood-visible-after-import"
+id = "bob-neighborhood-visible-after-import"
 action = "screen_is"
-actor = "web"
+actor = "bob"
 screen_id = "neighborhood"
 timeout_ms = 30000
 
 [[steps]]
-id = "web-neighborhood-ready-after-import"
+id = "bob-neighborhood-ready-after-import"
 action = "readiness_is"
-actor = "web"
+actor = "bob"
 readiness = "ready"
 timeout_ms = 30000
 
 [[steps]]
-id = "web-open-settings"
+id = "bob-open-settings"
 action = "navigate"
-actor = "web"
+actor = "bob"
 screen_id = "settings"
 timeout_ms = 3000
 
 [[steps]]
-id = "web-settings-visible"
+id = "bob-settings-visible"
 action = "screen_is"
-actor = "web"
+actor = "bob"
 screen_id = "settings"
 timeout_ms = 8000
 
 [[steps]]
-id = "web-open-devices-section"
+id = "bob-open-devices-section"
 action = "activate_list_item"
-actor = "web"
+actor = "bob"
 list_id = "settings_sections"
 item_id = "devices"
 timeout_ms = 3000
 
 [[steps]]
-id = "web-devices-section-selected"
+id = "bob-devices-section-selected"
 action = "selection_is"
-actor = "web"
+actor = "bob"
 list_id = "settings_sections"
 item_id = "devices"
 timeout_ms = 8000
 
 [[steps]]
-id = "web-devices-count-two"
+id = "bob-devices-count-two"
 action = "list_count_is"
-actor = "web"
+actor = "bob"
 list_id = "devices"
 count = 2
 timeout_ms = 20000
 
 [[steps]]
-id = "web-open-remove-device"
+id = "bob-open-remove-device"
 action = "activate"
-actor = "web"
+actor = "bob"
 control_id = "settings_remove_device_button"
 timeout_ms = 4000
 
 [[steps]]
-id = "web-device-select-modal-open"
+id = "bob-device-select-modal-open"
 action = "modal_open"
-actor = "web"
+actor = "bob"
 modal_id = "select_device_to_remove"
 timeout_ms = 10000
 
 [[steps]]
-id = "web-choose-device"
+id = "bob-choose-device"
 action = "activate"
-actor = "web"
+actor = "bob"
 control_id = "modal_confirm_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "web-confirm-remove-modal-open"
+id = "bob-confirm-remove-modal-open"
 action = "modal_open"
-actor = "web"
+actor = "bob"
 modal_id = "confirm_remove_device"
 timeout_ms = 10000
 
 [[steps]]
-id = "web-confirm-remove-device"
+id = "bob-confirm-remove-device"
 action = "activate"
-actor = "web"
+actor = "bob"
 control_id = "modal_confirm_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "web-devices-count-one"
+id = "bob-devices-count-one"
 action = "list_count_is"
-actor = "web"
+actor = "bob"
 list_id = "devices"
 count = 1
 timeout_ms = 30000

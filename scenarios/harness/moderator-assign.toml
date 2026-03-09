@@ -1,3 +1,23 @@
+# Moderator assignment and kick flow:
+#
+# Phase 1 - Setup:
+# 1. Launch three instances (alice, bob, carol).
+# 2. Create accounts and establish contacts between all parties.
+# 3. Alice creates neighborhood and home, invites bob and carol.
+#
+# Phase 2 - Channel and invitations:
+# 1. Alice creates mod-lab channel and joins.
+# 2. Alice sends home invites to bob and carol.
+# 3. Bob and carol accept home invites and join channel.
+#
+# Phase 3 - Moderator enforcement:
+# 1. Alice attempts to op bob (should fail, only Members allowed).
+# 2. Bob attempts to kick carol (should fail, not a moderator).
+# 3. Alice kicks carol (should succeed as channel owner).
+#
+# Success criteria: moderator designation rejects non-Members,
+# non-moderators cannot kick, owners can kick.
+
 schema_version = 1
 id = "moderator-assign-flow"
 goal = "Verify moderator designation enforces Member-only targets and moderator kick flow."

@@ -1,3 +1,13 @@
+# Home roles terminology verification:
+#
+# 1. Launch alice instance and create account.
+# 2. Wait for neighborhood map to be ready.
+# 3. Navigate into home detail view.
+# 4. Verify "Members & Participants" section is displayed.
+# 5. Verify "Member" role label is used.
+#
+# Success criteria: home role labels use Member terminology.
+
 schema_version = 1
 id = "home-roles-flow"
 goal = "Verify home role labels use Member terminology and not legacy creator-tier semantics."

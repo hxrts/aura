@@ -1,22 +1,36 @@
+# Moderation and modal coverage:
+#
+# Phase 1 - Setup:
+# 1. Launch alice, bob, and carol, create accounts.
+# 2. Establish alice-bob contact via invitation exchange.
+#
+# Phase 2 - Channel setup:
+# 1. Alice and bob join channel.
+# 2. Alice invites bob as needed.
+#
+# Phase 3 - Moderator commands:
+# 1. Alice runs /op and verifies moderator-granted result.
+# 2. Alice runs /kick on bob and verifies moderation success.
+# 3. Re-invite and rejoin bob to preserve contact coverage.
+#
+# Phase 4 - Home detail and modals:
+# 1. Alice enters Neighborhood home detail view at Full depth.
+# 2. Open Access Override modal, toggle level, submit, verify preview toast.
+# 3. Open Capability Config modal, set Full/Partial/Limited fields, submit.
+# 4. Verify saved toast appears.
+#
+# Phase 5 - Assign moderator:
+# 1. Open Assign Moderator modal with bob as target.
+# 2. Submit and verify policy denial for non-member designation.
+#
+# Success criteria: moderator success paths work correctly,
+# neighborhood modals submit with proper terminology.
+
 schema_version = 1
 id = "moderation-and-modal-coverage"
 goal = "Cover moderator success paths and neighborhood modal submit flows for terminology changes."
 execution_mode = "scripted"
 required_capabilities = ["local"]
-
-# User flow reference (from work/runtime_harness_gap_coverage_flow.md):
-# 1) Launch Alice/Bob/Carol and create accounts.
-# 2) Establish Alice<->Bob contact via invitation exchange.
-# 3) In chat, Alice and Bob join channel; Alice invites Bob as needed.
-# 4) Alice runs /op <alice_id> and verifies moderator-granted result.
-# 5) Alice runs /kick <bob_id> and verifies moderation success.
-# 6) Re-invite and rejoin Bob to preserve neighborhood contact coverage.
-# 7) Alice enters Neighborhood home detail view at Full depth.
-# 8) Open Access Override modal, toggle level, submit, verify preview toast.
-# 9) Open Capability Config modal, set Full/Partial/Limited fields, submit,
-#    and verify saved toast.
-# 10) Open Assign Moderator modal, submit on Bob target, verify policy denial
-#     for non-member designation.
 
 [[steps]]
 id = "launch"

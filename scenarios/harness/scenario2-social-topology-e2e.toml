@@ -1,22 +1,36 @@
+# Social topology end-to-end:
+#
+# Phase 1 - Bootstrap relationship and naming precedence:
+# 1. Launch alice and bob instances.
+# 2. Exchange invitations and link contacts.
+# 3. Verify effective-name ordering checks.
+#
+# Phase 2 - Create homes and home messages:
+# 1. Each actor creates one home.
+# 2. Each actor posts one message in a home channel.
+#
+# Phase 3 - Form neighborhood:
+# 1. Form neighborhood between homes.
+# 2. Verify storage allocation and accounting effects.
+#
+# Phase 4 - Access-level behavior:
+# 1. Verify access-level-gated visibility.
+# 2. Verify access transitions work correctly.
+#
+# Phase 5 - Discovery and relay fallback:
+# 1. Validate message delivery across fallback routing layers.
+#
+# Phase 6 - Capability-gated governance:
+# 1. Verify denied action without capability.
+# 2. Verify allowed action after grant.
+#
+# Success criteria: topology and access behavior are policy-consistent end-to-end.
+
 schema_version = 1
 id = "scenario2-social-topology-e2e"
 goal = "Complete work/scenario2.md social topology flow with stable harness assertions."
 execution_mode = "scripted"
 required_capabilities = ["local"]
-
-# User flow reference (from work/scenario2.md):
-# Phase 1 - Bootstrap relationship and naming precedence:
-# invitation exchange, contact linkage, and effective-name ordering checks.
-# Phase 2 - Create homes and home messages:
-# each actor creates one home and posts one message in a home channel.
-# Phase 3 - Form a neighborhood and verify storage allocation/accounting effects.
-# Phase 4 - Access-level behavior:
-# verify access-level-gated visibility and access transitions.
-# Phase 5 - Discovery and relay fallback:
-# validate message delivery across fallback routing layers.
-# Phase 6 - Capability-gated governance:
-# denied action without capability, then allowed action after grant.
-# Success criteria: topology and access behavior are policy-consistent end-to-end.
 
 [[steps]]
 id = "launch"

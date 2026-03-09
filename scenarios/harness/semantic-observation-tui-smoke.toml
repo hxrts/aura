@@ -1,3 +1,15 @@
+# Semantic observation TUI smoke test:
+#
+# 1. Launch alice actor via PTY harness.
+# 2. Wait for onboarding control visibility.
+# 3. Fill account name and submit.
+# 4. Wait for neighborhood screen and ready state.
+# 5. Navigate to settings via semantic nav action.
+# 6. Verify settings screen is visible.
+#
+# Success criteria: PTY harness semantic observation works for
+# screens, controls, and readiness states.
+
 id = "semantic-observation-tui-smoke"
 goal = "Validate PTY harness structured observation using semantic waits for screens and modals."
 

@@ -1,3 +1,12 @@
+# Mixed topology smoke test (local + SSH):
+#
+# 1. Launch instances with local and ssh-dry-run topology.
+# 2. Introduce a fault delay to simulate network conditions.
+# 3. Restart the SSH instance (bob).
+# 4. Send and wait for test message on local instance.
+#
+# Success criteria: scripted execution completes across mixed topology.
+
 schema_version = 1
 id = "mixed-topology-smoke"
 goal = "Exercise local plus ssh-dry-run topology with state-machine execution."

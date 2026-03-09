@@ -1,3 +1,15 @@
+# Semantic observation browser smoke test:
+#
+# 1. Launch alice actor via browser harness.
+# 2. Wait for onboarding control visibility.
+# 3. Fill account name and submit.
+# 4. Wait for neighborhood screen and ready state.
+# 5. Navigate to settings via semantic nav action.
+# 6. Verify settings screen is visible.
+#
+# Success criteria: browser harness semantic observation works for
+# onboarding, screens, and navigation.
+
 id = "semantic-observation-browser-smoke"
 goal = "Validate browser harness structured observation using semantic waits for onboarding, screens, and modals."
 

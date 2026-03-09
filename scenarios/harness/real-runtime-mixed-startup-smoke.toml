@@ -1,5 +1,14 @@
+# Real runtime mixed startup smoke test:
+#
+# 1. Launch alice and bob actors with real runtime.
+# 2. Wait for alice onboarding control visibility.
+# 3. Wait for bob onboarding control visibility.
+#
+# Success criteria: real runtime starts and reaches onboarding
+# state for two actors under any frontend binding.
+
 id = "real-runtime-mixed-startup-smoke"
-goal = "Validate mixed real-runtime startup, readiness, and teardown for one TUI and one browser instance."
+goal = "Validate real-runtime startup, readiness, and teardown for two actors under any supported frontend binding."
 
 [[steps]]
 id = "launch"
@@ -7,15 +16,15 @@ action = "launch_actors"
 timeout_ms = 20000
 
 [[steps]]
-id = "tui-onboarding-visible"
+id = "alice-onboarding-visible"
 action = "control_visible"
-actor = "tui"
+actor = "alice"
 control_id = "onboarding_root"
 timeout_ms = 30000
 
 [[steps]]
-id = "web-onboarding-visible"
+id = "bob-onboarding-visible"
 action = "control_visible"
-actor = "web"
+actor = "bob"
 control_id = "onboarding_root"
 timeout_ms = 60000

@@ -1,15 +1,29 @@
+# Contacts LAN and lifecycle end-to-end:
+#
+# Phase 1 - Setup:
+# 1. Launch alice and bob, create accounts.
+# 2. Link bob as a contact via invitation flow.
+#
+# Phase 2 - LAN key paths:
+# 1. Exercise 'd' key for LAN rescan.
+# 2. Exercise 'p' key for focus-toggle/no-peer guard.
+#
+# Phase 3 - Contact actions:
+# 1. Exercise Enter on contacts list to view detail.
+# 2. Exercise 'c' key to start chat from selected contact.
+#
+# Phase 4 - Contact removal:
+# 1. Exercise 'r' key to remove contact.
+# 2. Confirm contact count transitions from 1 to 0.
+#
+# Success criteria: LAN rescan, focus behavior, start-chat,
+# and remove-contact lifecycle work correctly.
+
 schema_version = 1
 id = "scenario6-contacts-lan-and-contact-lifecycle-e2e"
 goal = "Cover contacts screen LAN rescan/focus behavior plus start-chat and remove-contact lifecycle."
 execution_mode = "scripted"
 required_capabilities = ["local"]
-
-# Flow:
-# 1) Launch Alice/Bob and create accounts.
-# 2) Link Bob as a contact via invitation flow.
-# 3) In Contacts, exercise LAN key paths: d (rescan) and p (focus-toggle/no-peer guard).
-# 4) Exercise Enter on contacts list detail path and c (start chat from selected contact).
-# 5) Exercise r (remove contact) and confirm contact count transitions from 1 -> 0.
 
 [[steps]]
 id = "launch"

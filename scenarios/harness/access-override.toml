@@ -1,3 +1,22 @@
+# Access override modal flow:
+#
+# Phase 1 - Setup:
+# 1. Launch three instances (alice, bob, carol).
+# 2. Alice creates account and home (OverrideHome).
+# 3. Alice establishes contact with bob.
+#
+# Phase 2 - Home navigation:
+# 1. Alice navigates to neighborhood view.
+# 2. Alice enters home detail view.
+#
+# Phase 3 - Access override:
+# 1. Alice opens access override modal.
+# 2. Verify modal displays correctly.
+# 3. Alice closes the modal.
+#
+# Success criteria: access override modal opens and displays
+# bounded Partial/Limited override options.
+
 schema_version = 1
 id = "access-override-flow"
 goal = "Verify access override modal supports bounded Partial/Limited override operations."

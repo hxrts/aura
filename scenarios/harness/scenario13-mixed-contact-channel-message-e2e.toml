@@ -1,5 +1,33 @@
+# Mixed contact, channel, and message end-to-end:
+#
+# Phase 1 - Account setup:
+# 1. Launch alice and bob actors.
+# 2. Both create accounts and wait for neighborhood ready state.
+#
+# Phase 2 - Contact establishment:
+# 1. Both navigate to contacts screen.
+# 2. Capture authority IDs for both actors.
+# 3. Bob creates invitation for alice.
+# 4. Alice accepts invitation via code.
+# 5. Verify contact linked.
+#
+# Phase 3 - Home and channel setup:
+# 1. Alice creates BridgeHome13 home.
+# 2. Alice creates channel invitation for bob.
+# 3. Bob accepts home invitation.
+# 4. Both join amp-bridge channel.
+#
+# Phase 4 - Bidirectional messaging:
+# 1. Alice sends message (hello-from-tu1).
+# 2. Verify bob receives alice's message.
+# 3. Bob sends message (hello-from-web).
+# 4. Verify alice receives bob's message.
+#
+# Success criteria: contact established, channel joined,
+# bidirectional messages delivered across frontend bindings.
+
 id = "scenario13-mixed-contact-channel-message-e2e"
-goal = "Use one TUI and one web instance as distinct users: accept a contact invite, join a shared channel, and verify bidirectional message delivery."
+goal = "Use two actors as distinct users: accept a contact invite, join a shared channel, and verify bidirectional message delivery across supported frontend bindings."
 
 [[steps]]
 id = "launch"
@@ -7,419 +35,419 @@ action = "launch_actors"
 timeout_ms = 15000
 
 [[steps]]
-id = "tui-onboarding-visible"
+id = "alice-onboarding-visible"
 action = "control_visible"
-actor = "tui"
+actor = "alice"
 control_id = "onboarding_root"
 timeout_ms = 60000
 
 [[steps]]
-id = "web-onboarding-visible"
+id = "bob-onboarding-visible"
 action = "control_visible"
-actor = "web"
+actor = "bob"
 control_id = "onboarding_root"
 timeout_ms = 60000
 
 [[steps]]
-id = "tui-fill-account-name"
+id = "alice-fill-account-name"
 action = "fill"
-actor = "tui"
+actor = "alice"
 field_id = "account_name"
-value = "TuiUser"
+value = "AliceUser"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-create-account"
+id = "alice-create-account"
 action = "activate"
-actor = "tui"
+actor = "alice"
 control_id = "onboarding_create_account_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "web-fill-account-name"
+id = "bob-fill-account-name"
 action = "fill"
-actor = "web"
+actor = "bob"
 field_id = "account_name"
-value = "WebUser"
+value = "BobUser"
 timeout_ms = 4000
 
 [[steps]]
-id = "web-create-account"
+id = "bob-create-account"
 action = "activate"
-actor = "web"
+actor = "bob"
 control_id = "onboarding_create_account_button"
 timeout_ms = 4000
 
 [[steps]]
-id = "tui-neighborhood-visible"
+id = "alice-neighborhood-visible"
 action = "screen_is"
-actor = "tui"
+actor = "alice"
 screen_id = "neighborhood"
 timeout_ms = 120000
 
 [[steps]]
-id = "tui-neighborhood-ready"
+id = "alice-neighborhood-ready"
 action = "readiness_is"
-actor = "tui"
+actor = "alice"
 readiness = "ready"
 timeout_ms = 120000
 
 [[steps]]
-id = "web-neighborhood-visible"
+id = "bob-neighborhood-visible"
 action = "screen_is"
-actor = "web"
+actor = "bob"
 screen_id = "neighborhood"
 timeout_ms = 120000
 
 [[steps]]
-id = "web-neighborhood-ready"
+id = "bob-neighborhood-ready"
 action = "readiness_is"
-actor = "web"
+actor = "bob"
 readiness = "ready"
 timeout_ms = 120000
 
 [[steps]]
-id = "tui-open-contacts"
+id = "alice-open-contacts"
 action = "navigate"
-actor = "tui"
+actor = "alice"
 screen_id = "contacts"
 timeout_ms = 3000
 
 [[steps]]
-id = "web-open-contacts"
+id = "bob-open-contacts"
 action = "navigate"
-actor = "web"
+actor = "bob"
 screen_id = "contacts"
 timeout_ms = 3000
 
 [[steps]]
-id = "capture-tui-authority-id"
+id = "capture-alice-authority-id"
 action = "capture_current_authority_id"
-actor = "tui"
-name = "tui_authority_id"
+actor = "alice"
+name = "alice_authority_id"
 timeout_ms = 3000
 
 [[steps]]
-id = "capture-web-authority-id"
+id = "capture-bob-authority-id"
 action = "capture_current_authority_id"
-actor = "web"
-name = "web_authority_id"
+actor = "bob"
+name = "bob_authority_id"
 timeout_ms = 3000
 
 [[steps]]
-id = "web-open-invite-modal"
+id = "bob-open-invite-modal"
 action = "activate"
-actor = "web"
+actor = "bob"
 control_id = "contacts_create_invitation_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "web-create-invite-modal-open"
+id = "bob-create-invite-modal-open"
 action = "modal_open"
-actor = "web"
+actor = "bob"
 modal_id = "create_invitation"
 timeout_ms = 12000
 
 [[steps]]
-id = "web-fill-invite-receiver"
+id = "bob-fill-invite-receiver"
 action = "fill"
-actor = "web"
+actor = "bob"
 field_id = "invitation_receiver"
-value = "${tui_authority_id}"
+value = "${alice_authority_id}"
 timeout_ms = 3000
 
 [[steps]]
-id = "web-create-invite"
+id = "bob-create-invite"
 action = "activate"
-actor = "web"
+actor = "bob"
 control_id = "modal_confirm_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "web-invite-created"
+id = "bob-invite-created"
 action = "operation_state_is"
-actor = "web"
+actor = "bob"
 operation_id = "invitation_create"
 operation_state = "succeeded"
 timeout_ms = 30000
 
 [[steps]]
-id = "web-read-invite-code"
+id = "bob-read-invite-code"
 action = "read_clipboard"
-actor = "web"
+actor = "bob"
 name = "invite_code"
 timeout_ms = 12000
 
 [[steps]]
-id = "tui-open-accept-modal"
+id = "alice-open-accept-modal"
 action = "activate"
-actor = "tui"
+actor = "alice"
 control_id = "contacts_accept_invitation_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-accept-modal-open"
+id = "alice-accept-modal-open"
 action = "modal_open"
-actor = "tui"
+actor = "alice"
 modal_id = "accept_invitation"
 timeout_ms = 8000
 
 [[steps]]
-id = "tui-fill-invite-code"
+id = "alice-fill-invite-code"
 action = "fill"
-actor = "tui"
+actor = "alice"
 field_id = "invitation_code"
 value = "${invite_code}"
 timeout_ms = 12000
 
 [[steps]]
-id = "tui-submit-invite"
+id = "alice-submit-invite"
 action = "activate"
-actor = "tui"
+actor = "alice"
 control_id = "modal_confirm_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-contact-count-one"
+id = "alice-contact-count-one"
 action = "list_count_is"
-actor = "tui"
+actor = "alice"
 list_id = "contacts"
 count = 1
 timeout_ms = 30000
 
 [[steps]]
-id = "tui-open-neighborhood"
+id = "alice-open-neighborhood"
 action = "navigate"
-actor = "tui"
+actor = "alice"
 screen_id = "neighborhood"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-open-create-home-modal"
+id = "alice-open-create-home-modal"
 action = "activate"
-actor = "tui"
+actor = "alice"
 control_id = "neighborhood_new_home_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-create-home-modal-open"
+id = "alice-create-home-modal-open"
 action = "modal_open"
-actor = "tui"
+actor = "alice"
 modal_id = "create_home"
 timeout_ms = 8000
 
 [[steps]]
-id = "tui-fill-home-name"
+id = "alice-fill-home-name"
 action = "fill"
-actor = "tui"
+actor = "alice"
 field_id = "home_name"
 value = "BridgeHome13"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-submit-home"
+id = "alice-submit-home"
 action = "activate"
-actor = "tui"
+actor = "alice"
 control_id = "modal_confirm_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-home-count-one"
+id = "alice-home-count-one"
 action = "list_count_is"
-actor = "tui"
+actor = "alice"
 list_id = "homes"
 count = 1
 timeout_ms = 12000
 
 [[steps]]
-id = "tui-dismiss-home-created-toast"
+id = "alice-dismiss-home-created-toast"
 action = "dismiss_transient"
-actor = "tui"
+actor = "alice"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-open-chat"
+id = "alice-open-chat"
 action = "navigate"
-actor = "tui"
+actor = "alice"
 screen_id = "chat"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-open-contacts-for-home-invite"
+id = "alice-open-contacts-for-home-invite"
 action = "navigate"
-actor = "tui"
+actor = "alice"
 screen_id = "contacts"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-open-create-home-invite-modal"
+id = "alice-open-create-home-invite-modal"
 action = "activate"
-actor = "tui"
+actor = "alice"
 control_id = "contacts_create_invitation_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-create-home-invite-modal-open"
+id = "alice-create-home-invite-modal-open"
 action = "modal_open"
-actor = "tui"
+actor = "alice"
 modal_id = "create_invitation"
 timeout_ms = 8000
 
 [[steps]]
-id = "tui-select-channel-invitation-kind"
+id = "alice-select-channel-invitation-kind"
 action = "activate_list_item"
-actor = "tui"
+actor = "alice"
 list_id = "invitation_types"
 item_id = "channel"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-submit-home-invite"
+id = "alice-submit-home-invite"
 action = "activate"
-actor = "tui"
+actor = "alice"
 control_id = "modal_confirm_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-home-invite-code-open"
+id = "alice-home-invite-code-open"
 action = "modal_open"
-actor = "tui"
+actor = "alice"
 modal_id = "invitation_code"
 timeout_ms = 12000
 
 [[steps]]
-id = "tui-copy-home-invite-code"
+id = "alice-copy-home-invite-code"
 action = "activate"
-actor = "tui"
+actor = "alice"
 control_id = "modal_copy_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-read-home-invite-code"
+id = "alice-read-home-invite-code"
 action = "read_clipboard"
-actor = "tui"
+actor = "alice"
 name = "home_invite_code"
 timeout_ms = 12000
 
 [[steps]]
-id = "tui-close-home-invite-code-modal"
+id = "alice-close-home-invite-code-modal"
 action = "activate"
-actor = "tui"
+actor = "alice"
 control_id = "modal_cancel_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "tui-return-to-chat-after-home-invite"
+id = "alice-return-to-chat-after-home-invite"
 action = "navigate"
-actor = "tui"
+actor = "alice"
 screen_id = "chat"
 timeout_ms = 3000
 
 [[steps]]
-id = "web-open-contacts-before-home-invite-modal"
+id = "bob-open-contacts-before-home-invite-modal"
 action = "navigate"
-actor = "web"
+actor = "bob"
 screen_id = "contacts"
 timeout_ms = 3000
 
 [[steps]]
-id = "web-open-contacts-accept-home-invite-modal"
+id = "bob-open-contacts-accept-home-invite-modal"
 action = "activate"
-actor = "web"
+actor = "bob"
 control_id = "contacts_accept_invitation_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "web-accept-home-invite-modal-open"
+id = "bob-accept-home-invite-modal-open"
 action = "modal_open"
-actor = "web"
+actor = "bob"
 modal_id = "accept_invitation"
 timeout_ms = 12000
 
 [[steps]]
-id = "web-fill-home-invite-code"
+id = "bob-fill-home-invite-code"
 action = "fill"
-actor = "web"
+actor = "bob"
 field_id = "invitation_code"
 value = "${home_invite_code}"
 timeout_ms = 12000
 
 [[steps]]
-id = "web-submit-home-invite"
+id = "bob-submit-home-invite"
 action = "activate"
-actor = "web"
+actor = "bob"
 control_id = "modal_confirm_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "web-home-invite-accepted"
+id = "bob-home-invite-accepted"
 action = "operation_state_is"
-actor = "web"
+actor = "bob"
 operation_id = "invitation_accept"
 operation_state = "succeeded"
 timeout_ms = 30000
 
 [[steps]]
-id = "tui-join-channel"
+id = "alice-join-channel"
 action = "send_chat_command"
-actor = "tui"
+actor = "alice"
 value = "/join amp-bridge"
 timeout_ms = 6000
 
 [[steps]]
-id = "web-join-channel"
+id = "bob-join-channel"
 action = "send_chat_command"
-actor = "web"
+actor = "bob"
 value = "/join amp-bridge"
 timeout_ms = 6000
 
 [[steps]]
-id = "tui-channel-present"
+id = "alice-channel-present"
 action = "list_count_is"
-actor = "tui"
+actor = "alice"
 list_id = "channels"
 count = 1
 timeout_ms = 12000
 
 [[steps]]
-id = "web-channel-present"
+id = "bob-channel-present"
 action = "list_count_is"
-actor = "web"
+actor = "bob"
 list_id = "channels"
 count = 1
 timeout_ms = 12000
 
 [[steps]]
-id = "tui-send-message"
+id = "alice-send-message"
 action = "send_chat_message"
-actor = "tui"
+actor = "alice"
 value = "hello-from-tu1"
 timeout_ms = 4000
 
 [[steps]]
-id = "web-receives-tui-message"
+id = "bob-receives-alice-message"
 action = "message_contains"
-actor = "web"
+actor = "bob"
 value = "hello-from-tu1"
 timeout_ms = 12000
 
 [[steps]]
-id = "web-send-message"
+id = "bob-send-message"
 action = "send_chat_message"
-actor = "web"
+actor = "bob"
 value = "hello-from-web"
 timeout_ms = 4000
 
 [[steps]]
-id = "tui-still-on-chat"
+id = "alice-still-on-chat"
 action = "screen_is"
-actor = "tui"
+actor = "alice"
 screen_id = "chat"
 timeout_ms = 12000
 
 [[steps]]
-id = "tui-receives-web-message"
+id = "alice-receives-bob-message"
 action = "message_contains"
-actor = "tui"
+actor = "alice"
 value = "hello-from-web"
 timeout_ms = 12000

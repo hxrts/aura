@@ -1,3 +1,23 @@
+# Cross-authority contact establishment flow:
+#
+# Phase 1 - User-to-user contact:
+# 1. Launch alice and bob instances, create accounts.
+# 2. Alice creates invitation, bob accepts via clipboard.
+# 3. Verify contact linked between alice and bob.
+#
+# Phase 2 - Neighborhood and home setup:
+# 1. Alice creates TerminologyNet neighborhood.
+# 2. Alice adds home to neighborhood.
+# 3. Alice joins cross-lab channel.
+#
+# Phase 3 - Home-to-home authority:
+# 1. Alice sends home invite to bob.
+# 2. Bob accepts home invitation.
+# 3. Bob adds home to neighborhood.
+#
+# Success criteria: contact establishment works across user/user
+# and home/neighborhood authority boundaries.
+
 schema_version = 1
 id = "cross-authority-contact-flow"
 goal = "Verify contact establishment spans user/user and home/neighborhood authority workflows."

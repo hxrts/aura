@@ -1,15 +1,27 @@
+# Guardian and MFA ceremonies end-to-end:
+#
+# Phase 1 - Setup:
+# 1. Launch alice and bob, create accounts.
+# 2. Establish bob as a contact for alice via invitation flow.
+#
+# Phase 2 - Guardian setup modal:
+# 1. Open Settings and navigate to Guardian Threshold.
+# 2. Open Guardian Setup modal.
+# 3. Assert guardian setup copy is visible.
+# 4. Cancel back to Settings.
+#
+# Phase 3 - MFA setup:
+# 1. Navigate to Authority section.
+# 2. Trigger MFA setup guard path.
+#
+# Success criteria: guardian setup modal opens and cancels correctly,
+# MFA setup guard path triggers from Settings.
+
 schema_version = 1
 id = "scenario9-guardian-and-mfa-ceremonies-e2e"
 goal = "Cover guardian setup modal opening/cancel flow plus MFA setup guard path from Settings."
 execution_mode = "scripted"
 required_capabilities = ["local"]
-
-# Flow:
-# 1) Launch Alice/Bob and create accounts.
-# 2) Establish one contact (Bob) for Alice via invitation flow.
-# 3) Open Settings -> Guardian Threshold and open Guardian Setup modal.
-# 4) Assert guardian setup copy is visible, then cancel back to Settings.
-# 5) Navigate to Authority and trigger MFA setup guard path.
 
 [[steps]]
 id = "launch"

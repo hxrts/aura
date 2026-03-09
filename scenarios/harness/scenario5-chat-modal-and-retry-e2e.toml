@@ -1,15 +1,31 @@
+# Chat modal and retry flow end-to-end:
+#
+# Phase 1 - Setup:
+# 1. Launch alice and bob, complete account setup.
+# 2. Link contacts via invitation exchange.
+# 3. Establish shared chat context.
+#
+# Phase 2 - Chat create wizard:
+# 1. Open chat create wizard via 'n' key.
+# 2. Complete details, members, and threshold steps.
+# 3. Submit and verify channel created.
+#
+# Phase 3 - Topic and info modals:
+# 1. Open topic modal via 't' and update topic.
+# 2. Verify updated topic in channel info via 'o'.
+#
+# Phase 4 - Message retry:
+# 1. Focus on Messages and trigger retry via 'r'.
+# 2. Assert retry toast appears.
+#
+# Success criteria: chat create wizard, topic modal, info modal,
+# and message retry key paths work correctly.
+
 schema_version = 1
 id = "scenario5-chat-modal-and-retry-e2e"
 goal = "Cover chat key-path modals (create/topic/info) and message retry key flow."
 execution_mode = "scripted"
 required_capabilities = ["local"]
-
-# Flow:
-# 1) Launch Alice/Bob and complete account setup.
-# 2) Link contacts via invitation exchange and establish shared chat context.
-# 3) Exercise chat create wizard via 'n' (details -> members -> threshold -> submit).
-# 4) Exercise topic modal via 't' and verify updated topic in channel info via 'o'.
-# 5) Exercise retry key path via 'r' from Messages focus and assert retry toast.
 
 [[steps]]
 id = "launch"

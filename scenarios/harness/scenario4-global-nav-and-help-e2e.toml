@@ -1,14 +1,19 @@
+# Global navigation and help modal end-to-end:
+#
+# 1. Boot two local instances and complete account setup.
+# 2. Validate numeric navigation across core screens.
+# 3. Validate Tab/BackTab cycling between screens.
+# 4. Validate help modal open/close from global '?' hotkey.
+# 5. Trigger slash-help toast and dismiss it with Esc.
+#
+# Success criteria: global navigation hotkeys, help modal, and toast
+# dismissal work correctly.
+
 schema_version = 1
 id = "scenario4-global-nav-and-help-e2e"
 goal = "Validate global navigation hotkeys, help modal behavior, and toast dismissal flow."
 execution_mode = "scripted"
 required_capabilities = ["local"]
-
-# Flow:
-# 1) Boot two local instances and complete account setup.
-# 2) Validate numeric navigation and Tab/BackTab cycling across core screens.
-# 3) Validate help modal open/close from global '?' hotkey.
-# 4) Trigger slash-help toast and dismiss it with Esc.
 
 [[steps]]
 id = "launch"
