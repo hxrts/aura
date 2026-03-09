@@ -53,11 +53,12 @@ lane_match() {
   esac
 }
 
-config_for_class() {
-  case "$1" in
-    shared) echo "configs/harness/mixed-web-tui-loopback.toml" ;;
-    tui_only) echo "configs/harness/local-loopback.toml" ;;
-    web_only) echo "configs/harness/browser-loopback.toml" ;;
+config_for_run() {
+  local scenario_class="$1"
+  local selected_lane="$2"
+  case "$selected_lane:$scenario_class" in
+    tui:shared|tui:tui_only) echo "configs/harness/local-loopback.toml" ;;
+    web:shared|web:web_only) echo "configs/harness/browser-loopback.toml" ;;
     *) return 1 ;;
   esac
 }
@@ -70,6 +71,16 @@ scenario_id_requested() {
     [[ "$requested" == "$scenario_id" ]] && return 0
   done
   return 1
+}
+
+run_scenario() {
+  local config="$1"
+  local scenario_path="$2"
+  if [[ -n "${AURA_HARNESS_BIN:-}" ]]; then
+    "$AURA_HARNESS_BIN" run --config "$config" --scenario "$scenario_path"
+  else
+    cargo run -q -p aura-harness --bin aura-harness -- run --config "$config" --scenario "$scenario_path"
+  fi
 }
 
 run_lane() {
@@ -89,14 +100,14 @@ run_lane() {
     [[ "$migration_status" == "converted" ]] || continue
     scenario_id_requested "$scenario_id" || continue
 
-    config="$(config_for_class "$scenario_class")" || fail "no config for classification: $scenario_class"
+    config="$(config_for_run "$scenario_class" "$selected_lane")" || fail "no config for classification $scenario_class on lane $selected_lane"
     count=$((count + 1))
 
     echo "[harness-matrix] lane=$selected_lane scenario=$scenario_id class=$scenario_class config=$config"
     if [[ $dry_run -eq 0 ]]; then
       (
         cd "$repo_root"
-        cargo run -q -p aura-harness --bin aura-harness -- run --config "$config" --scenario "$scenario_path"
+        run_scenario "$config" "$scenario_path"
       )
     fi
   done < <(

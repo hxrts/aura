@@ -26,6 +26,7 @@ use crate::tui::callbacks::{
 };
 use crate::tui::chat_scope::{active_home_scope_id, scoped_channels};
 use crate::tui::components::{ListPanel, MessageInput, MessagePanel};
+use crate::tui::harness_state::publish_messages_override;
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::ChatViewProps;
@@ -297,6 +298,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 .with_finalized(m.is_finalized)
         })
         .collect();
+    publish_messages_override(&messages);
 
     let empty_message = if channels.is_empty() {
         "No channels available for this block.".to_string()

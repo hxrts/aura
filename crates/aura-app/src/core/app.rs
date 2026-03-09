@@ -132,6 +132,8 @@ pub struct AppCore {
 
     /// Whether the contacts refresh hook has been installed.
     contacts_refresh_hook_installed: bool,
+    /// Whether the chat refresh hook has been installed.
+    chat_refresh_hook_installed: bool,
 }
 
 impl AppCore {
@@ -159,6 +161,7 @@ impl AppCore {
             #[cfg(feature = "callbacks")]
             observer_registry: crate::bridge::callback::ObserverRegistry::new(),
             contacts_refresh_hook_installed: false,
+            chat_refresh_hook_installed: false,
         })
     }
 
@@ -222,6 +225,7 @@ impl AppCore {
             #[cfg(feature = "callbacks")]
             observer_registry: crate::bridge::callback::ObserverRegistry::new(),
             contacts_refresh_hook_installed: false,
+            chat_refresh_hook_installed: false,
         })
     }
 
@@ -235,6 +239,15 @@ impl AppCore {
             false
         } else {
             self.contacts_refresh_hook_installed = true;
+            true
+        }
+    }
+
+    pub(crate) fn mark_chat_refresh_hook_installed(&mut self) -> bool {
+        if self.chat_refresh_hook_installed {
+            false
+        } else {
+            self.chat_refresh_hook_installed = true;
             true
         }
     }
@@ -334,6 +347,9 @@ impl AppCore {
         }
 
         crate::workflows::system::install_contacts_refresh_hook(app_core)
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to install hooks: {e}")))?;
+        crate::workflows::system::install_chat_refresh_hook(app_core)
             .await
             .map_err(|e| IntentError::internal_error(format!("Failed to install hooks: {e}")))?;
 

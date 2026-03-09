@@ -4,6 +4,8 @@
 //! enabling the dependency inversion where `aura-app` defines the trait and
 //! `aura-agent` provides the implementation.
 
+use std::future::Future;
+
 use crate::core::AuraAgent;
 use crate::handlers::shared::context_commitment_from_journal;
 use crate::runtime::consensus::build_consensus_params;
@@ -57,7 +59,6 @@ use futures::{SinkExt, StreamExt};
 #[cfg(target_arch = "wasm32")]
 use gloo_net::websocket::{futures::WebSocket, Message};
 use std::collections::{BTreeSet, HashSet};
-use std::future::Future;
 use std::sync::Arc;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local;

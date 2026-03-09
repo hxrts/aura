@@ -90,13 +90,16 @@ pub fn UiCard(
         LbCard {
             class: Some(card_class),
             LbCardHeader {
-                class: Some("gap-1 border-b border-border pb-4".to_string()),
+                class: Some("gap-1 border-b border-border pb-4 min-w-0 overflow-hidden".to_string()),
                 LbCardTitle {
-                    class: Some("text-xs font-semibold uppercase tracking-[0.08em]".to_string()),
+                    class: Some("text-xs font-semibold uppercase tracking-[0.08em] truncate".to_string()),
                     "{title}"
                 }
                 if let Some(subtitle) = subtitle {
-                    LbCardDescription { "{subtitle}" }
+                    LbCardDescription {
+                        class: Some("truncate".to_string()),
+                        "{subtitle}"
+                    }
                 }
             }
             LbCardContent {
@@ -164,16 +167,16 @@ pub fn UiPill(label: String, tone: PillTone) -> Element {
 #[component]
 pub fn UiListItem(label: String, secondary: Option<String>, active: bool) -> Element {
     let class = if active {
-        "rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-2"
+        "rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-2 min-w-0 overflow-hidden"
     } else {
-        "rounded-lg border border-border bg-background/60 px-2.5 py-2"
+        "rounded-lg border border-border bg-background/60 px-2.5 py-2 min-w-0 overflow-hidden"
     };
     rsx! {
         div {
             class: "{class}",
-            p { class: "m-0 text-sm text-foreground", "{label}" }
+            p { class: "m-0 text-sm text-foreground truncate", "{label}" }
             if let Some(secondary) = secondary {
-                p { class: "m-0 mt-1 text-xs text-muted-foreground whitespace-pre-wrap break-words", "{secondary}" }
+                p { class: "m-0 mt-1 text-xs text-muted-foreground truncate", "{secondary}" }
             }
         }
     }

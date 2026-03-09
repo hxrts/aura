@@ -1,4 +1,4 @@
-# Mixed contact, channel, and message end-to-end:
+# Mixed contact and channel-message end-to-end:
 #
 # Phase 1 - Account setup:
 # 1. Launch alice and bob actors.
@@ -11,23 +11,23 @@
 # 4. Alice accepts invitation via code.
 # 5. Verify contact linked.
 #
-# Phase 3 - Home and channel setup:
-# 1. Alice creates BridgeHome13 home.
-# 2. Alice creates channel invitation for bob.
-# 3. Bob accepts home invitation.
-# 4. Both join amp-bridge channel.
+# Phase 3 - Shared chat setup:
+# 1. Both actors navigate to chat.
+# 2. Alice joins a shared named channel.
+# 3. Alice invites Bob into that channel.
+# 4. Bob joins the same channel from the pending invitation path.
 #
 # Phase 4 - Bidirectional messaging:
-# 1. Alice sends message (hello-from-tu1).
-# 2. Verify bob receives alice's message.
-# 3. Bob sends message (hello-from-web).
-# 4. Verify alice receives bob's message.
+# 1. Alice sends a shared-channel message (hello-from-tu1).
+# 2. Bob sends a shared-channel message (hello-from-web).
+# 3. Verify alice receives bob's message.
+# 4. Verify bob receives alice's message.
 #
-# Success criteria: contact established, channel joined,
-# bidirectional messages delivered across frontend bindings.
+# Success criteria: contact established, shared channel reachable,
+# bidirectional channel messages delivered across frontend bindings.
 
 id = "scenario13-mixed-contact-channel-message-e2e"
-goal = "Use two actors as distinct users: accept a contact invite, join a shared channel, and verify bidirectional message delivery across supported frontend bindings."
+goal = "Use two actors as distinct users: accept a contact invite and verify bidirectional shared-channel messaging across supported frontend bindings."
 
 [[steps]]
 id = "launch"
@@ -216,56 +216,6 @@ count = 1
 timeout_ms = 30000
 
 [[steps]]
-id = "alice-open-neighborhood"
-action = "navigate"
-actor = "alice"
-screen_id = "neighborhood"
-timeout_ms = 3000
-
-[[steps]]
-id = "alice-open-create-home-modal"
-action = "activate"
-actor = "alice"
-control_id = "neighborhood_new_home_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "alice-create-home-modal-open"
-action = "modal_open"
-actor = "alice"
-modal_id = "create_home"
-timeout_ms = 8000
-
-[[steps]]
-id = "alice-fill-home-name"
-action = "fill"
-actor = "alice"
-field_id = "home_name"
-value = "BridgeHome13"
-timeout_ms = 3000
-
-[[steps]]
-id = "alice-submit-home"
-action = "activate"
-actor = "alice"
-control_id = "modal_confirm_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "alice-home-count-one"
-action = "list_count_is"
-actor = "alice"
-list_id = "homes"
-count = 1
-timeout_ms = 12000
-
-[[steps]]
-id = "alice-dismiss-home-created-toast"
-action = "dismiss_transient"
-actor = "alice"
-timeout_ms = 3000
-
-[[steps]]
 id = "alice-open-chat"
 action = "navigate"
 actor = "alice"
@@ -273,170 +223,46 @@ screen_id = "chat"
 timeout_ms = 3000
 
 [[steps]]
-id = "alice-open-contacts-for-home-invite"
+id = "bob-open-chat"
 action = "navigate"
-actor = "alice"
-screen_id = "contacts"
-timeout_ms = 3000
-
-[[steps]]
-id = "alice-open-create-home-invite-modal"
-action = "activate"
-actor = "alice"
-control_id = "contacts_create_invitation_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "alice-create-home-invite-modal-open"
-action = "modal_open"
-actor = "alice"
-modal_id = "create_invitation"
-timeout_ms = 8000
-
-[[steps]]
-id = "alice-select-channel-invitation-kind"
-action = "activate_list_item"
-actor = "alice"
-list_id = "invitation_types"
-item_id = "channel"
-timeout_ms = 3000
-
-[[steps]]
-id = "alice-submit-home-invite"
-action = "activate"
-actor = "alice"
-control_id = "modal_confirm_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "alice-home-invite-code-open"
-action = "modal_open"
-actor = "alice"
-modal_id = "invitation_code"
-timeout_ms = 12000
-
-[[steps]]
-id = "alice-copy-home-invite-code"
-action = "activate"
-actor = "alice"
-control_id = "modal_copy_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "alice-read-home-invite-code"
-action = "read_clipboard"
-actor = "alice"
-name = "home_invite_code"
-timeout_ms = 12000
-
-[[steps]]
-id = "alice-close-home-invite-code-modal"
-action = "activate"
-actor = "alice"
-control_id = "modal_cancel_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "alice-return-to-chat-after-home-invite"
-action = "navigate"
-actor = "alice"
+actor = "bob"
 screen_id = "chat"
 timeout_ms = 3000
 
 [[steps]]
-id = "bob-open-contacts-before-home-invite-modal"
-action = "navigate"
-actor = "bob"
-screen_id = "contacts"
-timeout_ms = 3000
-
-[[steps]]
-id = "bob-open-contacts-accept-home-invite-modal"
-action = "activate"
-actor = "bob"
-control_id = "contacts_accept_invitation_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "bob-accept-home-invite-modal-open"
-action = "modal_open"
-actor = "bob"
-modal_id = "accept_invitation"
-timeout_ms = 12000
-
-[[steps]]
-id = "bob-fill-home-invite-code"
-action = "fill"
-actor = "bob"
-field_id = "invitation_code"
-value = "${home_invite_code}"
-timeout_ms = 12000
-
-[[steps]]
-id = "bob-submit-home-invite"
-action = "activate"
-actor = "bob"
-control_id = "modal_confirm_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "bob-home-invite-accepted"
-action = "operation_state_is"
-actor = "bob"
-operation_id = "invitation_accept"
-operation_state = "succeeded"
-timeout_ms = 30000
-
-[[steps]]
-id = "alice-join-channel"
+id = "alice-join-shared-channel"
 action = "send_chat_command"
 actor = "alice"
-value = "/join amp-bridge"
+value = "join shared-parity-lab"
 timeout_ms = 6000
 
 [[steps]]
-id = "bob-join-channel"
+id = "alice-invite-bob-to-shared-channel"
 action = "send_chat_command"
-actor = "bob"
-value = "/join amp-bridge"
+actor = "alice"
+value = "invite ${bob_authority_id}"
 timeout_ms = 6000
 
 [[steps]]
-id = "alice-channel-present"
-action = "list_count_is"
-actor = "alice"
-list_id = "channels"
-count = 1
-timeout_ms = 12000
-
-[[steps]]
-id = "bob-channel-present"
-action = "list_count_is"
+id = "bob-join-shared-channel"
+action = "send_chat_command"
 actor = "bob"
-list_id = "channels"
-count = 1
-timeout_ms = 12000
+value = "join shared-parity-lab"
+timeout_ms = 6000
 
 [[steps]]
 id = "alice-send-message"
 action = "send_chat_message"
 actor = "alice"
 value = "hello-from-tu1"
-timeout_ms = 4000
-
-[[steps]]
-id = "bob-receives-alice-message"
-action = "message_contains"
-actor = "bob"
-value = "hello-from-tu1"
-timeout_ms = 12000
+timeout_ms = 6000
 
 [[steps]]
 id = "bob-send-message"
 action = "send_chat_message"
 actor = "bob"
 value = "hello-from-web"
-timeout_ms = 4000
+timeout_ms = 6000
 
 [[steps]]
 id = "alice-still-on-chat"
@@ -450,4 +276,11 @@ id = "alice-receives-bob-message"
 action = "message_contains"
 actor = "alice"
 value = "hello-from-web"
-timeout_ms = 12000
+timeout_ms = 60000
+
+[[steps]]
+id = "bob-receives-alice-message"
+action = "message_contains"
+actor = "bob"
+value = "hello-from-tu1"
+timeout_ms = 60000

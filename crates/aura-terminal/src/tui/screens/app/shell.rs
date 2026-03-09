@@ -22,6 +22,7 @@ use super::modal_overlays::{
     GlobalModalProps,
 };
 
+use crate::tui::components::copy_to_clipboard;
 use iocraft::prelude::*;
 use std::sync::Arc;
 
@@ -1051,12 +1052,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
                         UiUpdate::InvitationExported { code } => {
                             tui.with_mut(|state| {
+                                let copied = copy_to_clipboard(&code).is_ok();
                                 state
                                     .modal_queue
                                     .enqueue(crate::tui::state_machine::QueuedModal::ContactsCode(
-                                        crate::tui::state_machine::InvitationCodeModalState::for_code(
-                                            code,
-                                        ),
+                                        {
+                                            let mut modal =
+                                                crate::tui::state_machine::InvitationCodeModalState::for_code(code);
+                                            if copied {
+                                                modal.set_copied();
+                                            }
+                                            modal
+                                        },
                                     ));
                             });
                         }

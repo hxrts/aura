@@ -45,6 +45,8 @@ use std::sync::Arc;
 static MESSAGE_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const CHAT_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
+const CHAT_FACT_CONNECTIVITY_ATTEMPTS: usize = 6;
+const CHAT_FACT_CONNECTIVITY_BACKOFF_MS: u64 = 75;
 const AMP_SEND_RETRY_ATTEMPTS: usize = 6;
 const AMP_SEND_RETRY_BACKOFF_MS: u64 = 75;
 
@@ -1386,6 +1388,20 @@ pub async fn send_message_ref(
                 return Err(AuraError::agent(format!(
                     "Missing sync prerequisite for channel {channel_id}: no recipient peers resolved"
                 )));
+            }
+            if !recipients.is_empty() {
+                for attempt in 0..CHAT_FACT_CONNECTIVITY_ATTEMPTS {
+                    if ensure_runtime_peer_connectivity(&runtime, "send_message_ref").await.is_ok()
+                    {
+                        break;
+                    }
+                    if attempt + 1 < CHAT_FACT_CONNECTIVITY_ATTEMPTS {
+                        converge_runtime(&runtime).await;
+                        runtime
+                            .sleep_ms(CHAT_FACT_CONNECTIVITY_BACKOFF_MS)
+                            .await;
+                    }
+                }
             }
             for peer in recipients {
                 attempted_fanout = attempted_fanout.saturating_add(1);

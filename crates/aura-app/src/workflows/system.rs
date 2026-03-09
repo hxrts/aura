@@ -12,9 +12,10 @@
 
 use crate::runtime_bridge::SyncStatus as RuntimeSyncStatus;
 use crate::signal_defs::{
-    ConnectionStatus, NetworkStatus, CONNECTION_STATUS_SIGNAL, CONNECTION_STATUS_SIGNAL_NAME,
-    CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME, NETWORK_STATUS_SIGNAL, NETWORK_STATUS_SIGNAL_NAME,
-    TRANSPORT_PEERS_SIGNAL, TRANSPORT_PEERS_SIGNAL_NAME,
+    ConnectionStatus, NetworkStatus, CHAT_SIGNAL, CHAT_SIGNAL_NAME, CONNECTION_STATUS_SIGNAL,
+    CONNECTION_STATUS_SIGNAL_NAME, CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME, NETWORK_STATUS_SIGNAL,
+    NETWORK_STATUS_SIGNAL_NAME, SYNC_STATUS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
+    TRANSPORT_PEERS_SIGNAL_NAME,
 };
 use crate::workflows::signals::{emit_signal, read_signal};
 use crate::workflows::snapshot_policy::contacts_snapshot;
@@ -217,6 +218,11 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
     Ok(())
 }
 
+async fn emit_chat_snapshot_signal(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
+    let chat = app_core.read().await.snapshot().chat;
+    emit_signal(app_core, &*CHAT_SIGNAL, chat, CHAT_SIGNAL_NAME).await
+}
+
 /// Refresh connection + network status derived from CONTACTS_SIGNAL.
 pub async fn refresh_connection_status_from_contacts(
     app_core: &Arc<RwLock<AppCore>>,
@@ -362,6 +368,69 @@ pub async fn install_contacts_refresh_hook(
                 refresh_spawner.spawn(Box::pin(async move {
                     loop {
                         let _ = refresh_connection_status_from_contacts(&refresh_app_core).await;
+
+                        if refresh_pending.swap(false, Ordering::SeqCst) {
+                            continue;
+                        }
+
+                        refresh_in_flight.store(false, Ordering::SeqCst);
+                        break;
+                    }
+                }));
+            }
+        }),
+        spawner.cancellation_token(),
+    );
+
+    Ok(())
+}
+
+/// Install a background hook that republishes the current chat snapshot when sync status moves.
+///
+/// Remote fact ingestion can converge through view state before all CHAT_SIGNAL subscribers see the
+/// latest state. Republishing the snapshot on sync transitions keeps TUI/web chat observers aligned
+/// with the real runtime without adding frontend-specific refresh logic.
+pub async fn install_chat_refresh_hook(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
+    let (reactive, spawner, should_install) = {
+        let mut core = app_core.write().await;
+        let should_install = core.mark_chat_refresh_hook_installed();
+        let reactive = core.reactive().clone();
+        let spawner = core.runtime().and_then(|runtime| runtime.task_spawner());
+        (reactive, spawner, should_install)
+    };
+
+    if !should_install {
+        return Ok(());
+    }
+
+    let Some(spawner) = spawner else {
+        return Ok(());
+    };
+
+    let app_core = Arc::clone(app_core);
+    let refresh_in_flight = Arc::new(AtomicBool::new(false));
+    let refresh_pending = Arc::new(AtomicBool::new(false));
+    let refresh_spawner = spawner.clone();
+
+    spawner.spawn_cancellable(
+        Box::pin(async move {
+            let mut stream = reactive.subscribe(&*SYNC_STATUS_SIGNAL);
+            loop {
+                let Ok(_) = stream.recv().await else {
+                    break;
+                };
+
+                if refresh_in_flight.swap(true, Ordering::SeqCst) {
+                    refresh_pending.store(true, Ordering::SeqCst);
+                    continue;
+                }
+
+                let refresh_app_core = app_core.clone();
+                let refresh_in_flight = refresh_in_flight.clone();
+                let refresh_pending = refresh_pending.clone();
+                refresh_spawner.spawn(Box::pin(async move {
+                    loop {
+                        let _ = emit_chat_snapshot_signal(&refresh_app_core).await;
 
                         if refresh_pending.swap(false, Ordering::SeqCst) {
                             continue;

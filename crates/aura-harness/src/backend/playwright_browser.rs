@@ -622,6 +622,23 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 
     fn activate_control(&mut self, control_id: ControlId) -> Result<()> {
+        if matches!(
+            control_id,
+            ControlId::SettingsAddDeviceButton | ControlId::SettingsRemoveDeviceButton
+        ) {
+            let snapshot = self.ui_snapshot()?;
+            if snapshot.screen == aura_app::ui::contract::ScreenId::Settings {
+                let needs_devices_section = snapshot
+                    .selections
+                    .iter()
+                    .find(|selection| selection.list == ListId::SettingsSections)
+                    .map(|selection| selection.item_id.as_str() != "devices")
+                    .unwrap_or(true);
+                if needs_devices_section {
+                    self.activate_list_item(ListId::SettingsSections, "devices")?;
+                }
+            }
+        }
         let selector = control_selector(control_id)?;
         let is_navigation_control = matches!(
             control_id,

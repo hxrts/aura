@@ -11,6 +11,28 @@ use crate::runtime_bridge::RuntimeBridge;
 use crate::AppCore;
 use aura_core::AuraError;
 
+const DEFAULT_HARNESS_CONVERGENCE_ROUNDS: usize = 8;
+const DEFAULT_HARNESS_CONVERGENCE_BACKOFF_MS: u64 = 150;
+
+fn harness_mode_enabled() -> bool {
+    std::env::var_os("AURA_HARNESS_MODE").is_some()
+}
+
+fn harness_convergence_rounds() -> usize {
+    std::env::var("AURA_HARNESS_CONVERGENCE_ROUNDS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|rounds| *rounds > 0)
+        .unwrap_or(DEFAULT_HARNESS_CONVERGENCE_ROUNDS)
+}
+
+fn harness_convergence_backoff_ms() -> u64 {
+    std::env::var("AURA_HARNESS_CONVERGENCE_BACKOFF_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_HARNESS_CONVERGENCE_BACKOFF_MS)
+}
+
 /// Get the runtime bridge or return a consistent error.
 pub async fn require_runtime(
     app_core: &Arc<RwLock<AppCore>>,
@@ -45,8 +67,25 @@ pub async fn cooperative_yield() {
 /// Ask the runtime to perform a bounded convergence pass suitable for harness-mode real-runtime
 /// execution. The runtime bridge owns the actual harness profile policy.
 pub async fn converge_runtime(runtime: &Arc<dyn RuntimeBridge>) {
-    let _ = runtime.trigger_sync().await;
-    cooperative_yield().await;
+    let rounds = if harness_mode_enabled() {
+        harness_convergence_rounds()
+    } else {
+        1
+    };
+    let backoff_ms = harness_convergence_backoff_ms();
+
+    for round in 0..rounds {
+        if harness_mode_enabled() {
+            let _ = runtime.trigger_discovery().await;
+            let _ = runtime.process_ceremony_messages().await;
+        }
+        let _ = runtime.trigger_sync().await;
+        cooperative_yield().await;
+
+        if round + 1 < rounds && harness_mode_enabled() && backoff_ms > 0 {
+            runtime.sleep_ms(backoff_ms).await;
+        }
+    }
 }
 
 /// Validate that the runtime has at least one viable connectivity path before a

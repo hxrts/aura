@@ -19,6 +19,7 @@ use aura_app::ui::types::ChatState;
 use aura_core::AuthorityId;
 
 use crate::tui::chat_scope::{active_home_scope_id, is_dm_like_channel, scoped_channels};
+use crate::tui::harness_state::{publish_devices_list_override, publish_messages_override};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::types::{Channel, Contact, Device, Invitation, Message, PendingRequest};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
@@ -350,6 +351,7 @@ pub fn use_devices_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -> 
                     .collect();
                 if let Ok(mut guard) = devices.write() {
                     *guard = list;
+                    publish_devices_list_override(&guard);
                 }
             })
             .await;
@@ -429,6 +431,7 @@ pub fn use_messages_subscription(
 
                 if let Ok(mut guard) = messages.write() {
                     *guard = message_list;
+                    publish_messages_override(&guard);
                 }
             })
             .await;

@@ -4,8 +4,9 @@ use crate::tui::screens::Screen;
 use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::state::toast::ToastLevel;
 use crate::tui::state::CreateInvitationField;
-use crate::tui::types::Contact as TuiContact;
-use crate::tui::types::SettingsSection;
+use crate::tui::types::{
+    Contact as TuiContact, Device as TuiDevice, Message as TuiMessage, SettingsSection,
+};
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
     ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId,
@@ -23,6 +24,8 @@ const UI_STATE_FILE_ENV: &str = "AURA_TUI_UI_STATE_FILE";
 static UI_STATE_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
 static LAST_WRITTEN_SNAPSHOT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static CONTACTS_OVERRIDE: OnceLock<Mutex<Option<Vec<TuiContact>>>> = OnceLock::new();
+static DEVICES_OVERRIDE: OnceLock<Mutex<Option<Vec<TuiDevice>>>> = OnceLock::new();
+static MESSAGES_OVERRIDE: OnceLock<Mutex<Option<Vec<TuiMessage>>>> = OnceLock::new();
 
 fn configured_ui_state_file() -> Option<&'static PathBuf> {
     UI_STATE_FILE
@@ -36,6 +39,14 @@ fn last_written_snapshot() -> &'static Mutex<Option<String>> {
 
 fn contacts_override() -> &'static Mutex<Option<Vec<TuiContact>>> {
     CONTACTS_OVERRIDE.get_or_init(|| Mutex::new(None))
+}
+
+fn devices_override() -> &'static Mutex<Option<Vec<TuiDevice>>> {
+    DEVICES_OVERRIDE.get_or_init(|| Mutex::new(None))
+}
+
+fn messages_override() -> &'static Mutex<Option<Vec<TuiMessage>>> {
+    MESSAGES_OVERRIDE.get_or_init(|| Mutex::new(None))
 }
 
 fn map_screen(screen: Screen) -> ScreenId {
@@ -464,6 +475,29 @@ pub fn semantic_ui_snapshot(
             .cloned(),
     );
 
+    let effective_devices = devices_override()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+        .unwrap_or_default();
+    if state.settings.section == SettingsSection::Devices {
+        let device_items = effective_devices
+            .iter()
+            .map(|device| ListItemSnapshot {
+                id: device.id.clone(),
+                selected: false,
+                confirmation: ConfirmationState::Confirmed,
+            })
+            .collect::<Vec<_>>();
+        push_list(
+            &mut lists,
+            &mut selections,
+            ListId::Devices,
+            device_items,
+            None,
+        );
+    }
+
     let toasts = state
         .toast_queue
         .current()
@@ -476,29 +510,52 @@ pub fn semantic_ui_snapshot(
         })
         .unwrap_or_default();
 
-    let selected_channel_id = channel_ids.get(state.chat.selected_channel).cloned();
-    let messages = selected_channel_id
-        .as_ref()
-        .and_then(|channel_id| {
-            app_snapshot
-                .chat
-                .all_channels()
-                .find(|channel| channel.id.to_string() == *channel_id)
-                .map(|channel| {
-                    app_snapshot
-                        .chat
-                        .messages_for_channel(&channel.id)
-                        .iter()
-                        .map(|message| MessageSnapshot {
-                            id: message.id.clone(),
-                            content: message.content.clone(),
-                        })
-                        .collect::<Vec<_>>()
-                })
-        })
+    let effective_messages = messages_override()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
         .unwrap_or_default();
+    let selected_channel_id = channel_ids.get(state.chat.selected_channel).cloned();
+    let messages = if !effective_messages.is_empty() {
+        effective_messages
+            .iter()
+            .map(|message| MessageSnapshot {
+                id: message.id.clone(),
+                content: message.content.clone(),
+            })
+            .collect::<Vec<_>>()
+    } else {
+        selected_channel_id
+            .as_ref()
+            .and_then(|channel_id| {
+                app_snapshot
+                    .chat
+                    .all_channels()
+                    .find(|channel| channel.id.to_string() == *channel_id)
+                    .map(|channel| {
+                        app_snapshot
+                            .chat
+                            .messages_for_channel(&channel.id)
+                            .iter()
+                            .map(|message| MessageSnapshot {
+                                id: message.id.clone(),
+                                content: message.content.clone(),
+                            })
+                            .collect::<Vec<_>>()
+                    })
+            })
+            .unwrap_or_default()
+    };
 
     let mut operations = state.exported_operation_snapshots();
+    if matches!(state.modal_queue.current(), Some(QueuedModal::ContactsCode(_))) {
+        operations.retain(|operation| operation.id != OperationId::invitation_create());
+        operations.push(OperationSnapshot {
+            id: OperationId::invitation_create(),
+            instance_id: OperationInstanceId("tui-invitation-create".to_string()),
+            state: OperationState::Succeeded,
+        });
+    }
     if let Some(QueuedModal::SettingsDeviceEnrollment(modal_state)) = state.modal_queue.current() {
         let operation_state = if modal_state.ceremony.has_failed {
             OperationState::Failed
@@ -594,6 +651,84 @@ pub fn publish_contacts_list_override(contacts: &[TuiContact], selected_index: u
             list: ListId::Contacts,
             item_id,
         });
+    }
+
+    let Ok(snapshot_json) = serde_json::to_string_pretty(&snapshot) else {
+        return;
+    };
+
+    let mut last_written = last_written_snapshot()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if write_snapshot_file(path, &snapshot_json).is_ok() {
+        *last_written = Some(snapshot_json);
+    }
+}
+
+pub fn publish_devices_list_override(devices: &[TuiDevice]) {
+    let Some(path) = configured_ui_state_file() else {
+        return;
+    };
+    *devices_override()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(devices.to_vec());
+    let Some(mut snapshot) = cached_snapshot(path) else {
+        return;
+    };
+
+    snapshot.lists.retain(|list| list.id != ListId::Devices);
+    if snapshot
+        .selections
+        .iter()
+        .any(|selection| selection.list == ListId::SettingsSections && selection.item_id == "devices")
+    {
+        let items = devices
+            .iter()
+            .map(|device| ListItemSnapshot {
+                id: device.id.clone(),
+                selected: false,
+                confirmation: ConfirmationState::Confirmed,
+            })
+            .collect::<Vec<_>>();
+        if !items.is_empty() {
+            snapshot.lists.push(ListSnapshot {
+                id: ListId::Devices,
+                items,
+            });
+        }
+    }
+
+    let Ok(snapshot_json) = serde_json::to_string_pretty(&snapshot) else {
+        return;
+    };
+
+    let mut last_written = last_written_snapshot()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if write_snapshot_file(path, &snapshot_json).is_ok() {
+        *last_written = Some(snapshot_json);
+    }
+}
+
+pub fn publish_messages_override(messages: &[TuiMessage]) {
+    let Some(path) = configured_ui_state_file() else {
+        return;
+    };
+    *messages_override()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(messages.to_vec());
+    let Some(mut snapshot) = cached_snapshot(path) else {
+        return;
+    };
+
+    if snapshot.screen == ScreenId::Chat {
+        snapshot.messages = messages
+            .iter()
+            .map(|message| MessageSnapshot {
+                id: message.id.clone(),
+                content: message.content.clone(),
+            })
+            .collect::<Vec<_>>();
     }
 
     let Ok(snapshot_json) = serde_json::to_string_pretty(&snapshot) else {

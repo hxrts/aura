@@ -3592,19 +3592,19 @@ fn NeighborhoodScreen(
                             div {
                                 class: "grid flex-1 min-h-0 gap-3 md:grid-cols-2",
                                 div {
-                                    class: "flex min-h-0 flex-col rounded-lg border border-border bg-background/60 px-3 py-3",
+                                    class: "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-background/60 px-3 py-3",
                                     p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Channels" }
                                     div {
-                                        class: "mt-3 flex-1 min-h-0 overflow-y-auto pr-1",
+                                        class: "mt-3 flex-1 min-h-0 min-w-0 overflow-y-auto pr-1",
                                         if display_channels.is_empty() {
                                             p { class: "m-0 text-sm text-muted-foreground", "No channels" }
                                         } else {
-                                            div { class: "space-y-2",
+                                            div { class: "space-y-2 min-w-0",
                                 for (channel_name, channel_topic, is_selected) in &display_channels {
                                                     button {
                                                         r#type: "button",
                                                         id: list_item_dom_id(ListId::Channels, channel_name),
-                                                        class: "block w-full text-left",
+                                                        class: "block w-full min-w-0 text-left",
                                                         onclick: {
                                                             let controller = controller.clone();
                                                             let channel_name = channel_name.clone();
@@ -4084,7 +4084,7 @@ fn ChatScreen(
                         class: "flex min-h-full flex-col justify-end gap-3",
                         if runtime.messages.is_empty() {
                             Empty {
-                                class: Some("min-h-full border-border bg-background/40".to_string()),
+                                class: Some("h-full flex-1 border-solid border-border bg-background/40".to_string()),
                                 EmptyHeader {
                                     EmptyTitle { "No messages yet" }
                                     EmptyDescription { "Send one from input mode." }
@@ -4098,88 +4098,84 @@ fn ChatScreen(
                     }
                 }
                 div {
-                    class: "mt-3 flex items-end gap-3 rounded-xl border border-border bg-background/80 px-3 py-3",
+                    class: "mt-3 flex flex-col gap-2 rounded-xl border border-border bg-background/80 px-3 py-3",
                     div {
-                        class: "flex min-w-0 flex-1 flex-col gap-1",
-                        div {
-                            class: "flex items-center justify-between gap-2",
-                            p { class: "m-0 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground", "Message" }
-                            p { class: "m-0 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground", "Mode: {mode}" }
-                        }
-                        div {
-                            class: "min-h-[4.5rem] rounded-lg border border-border bg-muted/30 px-3 py-2",
-                            onclick: move |_| {
+                        class: "min-h-[4.5rem] rounded-lg border border-border bg-muted/30 px-3 py-2",
+                        onclick: move |_| {
+                            if !is_input_mode {
+                                composer_container_focus_controller.send_action_keys("i");
+                                render_tick.set(render_tick() + 1);
+                            }
+                        },
+                        textarea {
+                            id: FieldId::ChatInput
+                                .web_dom_id()
+                                .expect("FieldId::ChatInput must define a web DOM id"),
+                            class: "h-full min-h-[4.5rem] w-full resize-none border-0 bg-transparent p-0 text-sm text-foreground outline-none placeholder:text-muted-foreground",
+                            value: "{composer_value}",
+                            readonly: !is_input_mode,
+                            placeholder: if is_input_mode {
+                                "Type a message and press Enter to send"
+                            } else {
+                                "Press i to start typing"
+                            },
+                            onfocus: move |_| {
                                 if !is_input_mode {
-                                    composer_container_focus_controller.send_action_keys("i");
+                                    composer_field_focus_controller.send_action_keys("i");
                                     render_tick.set(render_tick() + 1);
                                 }
                             },
-                            textarea {
-                                id: FieldId::ChatInput
-                                    .web_dom_id()
-                                    .expect("FieldId::ChatInput must define a web DOM id"),
-                                class: "h-full min-h-[4.5rem] w-full resize-none border-0 bg-transparent p-0 text-sm text-foreground outline-none placeholder:text-muted-foreground",
-                                value: "{composer_value}",
-                                readonly: !is_input_mode,
-                                placeholder: if is_input_mode {
-                                    "Type a message and press Enter to send"
-                                } else {
-                                    "Press i to start typing"
-                                },
-                                onfocus: move |_| {
-                                    if !is_input_mode {
-                                        composer_field_focus_controller.send_action_keys("i");
-                                        render_tick.set(render_tick() + 1);
-                                    }
-                                },
-                                oninput: move |event| {
-                                    composer_input_controller.set_input_buffer(event.value());
-                                },
-                                onkeydown: move |event| {
-                                    event.stop_propagation();
-                                    if matches!(event.data().key(), Key::Enter)
-                                        && !event.data().modifiers().contains(Modifiers::SHIFT)
-                                    {
-                                        event.prevent_default();
-                                        let _ = submit_runtime_chat_input(
-                                            composer_keydown_controller.clone(),
-                                            composer_active_channel.clone(),
-                                            composer_submit_text.clone(),
-                                            schedule_update(),
-                                        );
-                                        render_tick.set(render_tick() + 1);
-                                        return;
-                                    }
-                                    if matches!(event.data().key(), Key::Escape) {
-                                        event.prevent_default();
-                                        composer_keydown_controller.send_key_named("esc", 1);
-                                        render_tick.set(render_tick() + 1);
-                                    }
-                                },
-                            }
+                            oninput: move |event| {
+                                composer_input_controller.set_input_buffer(event.value());
+                            },
+                            onkeydown: move |event| {
+                                event.stop_propagation();
+                                if matches!(event.data().key(), Key::Enter)
+                                    && !event.data().modifiers().contains(Modifiers::SHIFT)
+                                {
+                                    event.prevent_default();
+                                    let _ = submit_runtime_chat_input(
+                                        composer_keydown_controller.clone(),
+                                        composer_active_channel.clone(),
+                                        composer_submit_text.clone(),
+                                        schedule_update(),
+                                    );
+                                    render_tick.set(render_tick() + 1);
+                                    return;
+                                }
+                                if matches!(event.data().key(), Key::Escape) {
+                                    event.prevent_default();
+                                    composer_keydown_controller.send_key_named("esc", 1);
+                                    render_tick.set(render_tick() + 1);
+                                }
+                            },
                         }
                     }
-                    UiButton {
-                                id: Some(
-                                    ControlId::ChatSendMessageButton
-                                        .web_dom_id()
-                                        .expect("ControlId::ChatSendMessageButton must define a web DOM id")
-                                        .to_string()
-                                ),
-                        label: if is_input_mode { "Send".to_string() } else { "Reply".to_string() },
-                        variant: ButtonVariant::Primary,
-                        onclick: move |_| {
-                            if is_input_mode {
-                                let _ = submit_runtime_chat_input(
-                                    send_message_controller.clone(),
-                                    active_channel.clone(),
-                                    composer_text.clone(),
-                                    schedule_update(),
-                                );
-                            } else {
-                                send_message_controller.send_action_keys("i");
+                    div {
+                        class: "flex items-center justify-between gap-2",
+                        p { class: "m-0 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground", "Mode: {mode}" }
+                        UiButton {
+                            id: Some(
+                                ControlId::ChatSendMessageButton
+                                    .web_dom_id()
+                                    .expect("ControlId::ChatSendMessageButton must define a web DOM id")
+                                    .to_string()
+                            ),
+                            label: if is_input_mode { "Send".to_string() } else { "Reply".to_string() },
+                            variant: ButtonVariant::Primary,
+                            onclick: move |_| {
+                                if is_input_mode {
+                                    let _ = submit_runtime_chat_input(
+                                        send_message_controller.clone(),
+                                        active_channel.clone(),
+                                        composer_text.clone(),
+                                        schedule_update(),
+                                    );
+                                } else {
+                                    send_message_controller.send_action_keys("i");
+                                }
+                                render_tick.set(render_tick() + 1);
                             }
-                            render_tick.set(render_tick() + 1);
                         }
                     }
                 }
@@ -4208,9 +4204,9 @@ fn render_chat_message_bubble(message: ChatRuntimeMessage) -> Element {
                 }
                 div {
                     class: if message.is_own {
-                        "rounded-[1.75rem] bg-primary px-5 py-3 text-sm text-primary-foreground shadow-sm"
+                        "rounded-[1.75rem] bg-primary px-4 py-2 text-sm text-primary-foreground shadow-sm"
                     } else {
-                        "rounded-[1.75rem] border border-border bg-muted px-5 py-3 text-sm text-foreground shadow-sm"
+                        "rounded-[1.75rem] border border-border bg-muted px-4 py-2 text-sm text-foreground shadow-sm"
                     },
                     p {
                         class: "m-0 whitespace-pre-wrap break-words leading-relaxed",

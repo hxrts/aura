@@ -7,10 +7,10 @@ pty_cols = 120
 artifact_dir = "artifacts/harness/mixed-web-tui-loopback"
 
 [[instances]]
-id = "tui"
+id = "alice"
 mode = "local"
-data_dir = "artifacts/harness/state/mixed-web-tui-loopback/tui"
-device_id = "tui-local-01"
+data_dir = "artifacts/harness/state/mixed-web-tui-loopback/alice"
+device_id = "alice-local-01"
 bind_address = "127.0.0.1:43011"
 demo_mode = false
 
@@ -21,10 +21,10 @@ broadcast_addr = "127.0.0.1"
 port = 19543
 
 [[instances]]
-id = "web"
+id = "bob"
 mode = "browser"
-data_dir = ".tmp/harness-browser/mixed-web-tui-loopback/web"
-device_id = "web-browser-11"
+data_dir = ".tmp/harness-browser/mixed-web-tui-loopback/bob"
+device_id = "bob-browser-11"
 bind_address = "127.0.0.1:53011"
 demo_mode = false
 env = [

@@ -31,6 +31,9 @@ pub struct GlobalModalProps {
     // Account setup modal
     pub account_setup_visible: bool,
     pub account_setup_nickname_suggestion: String,
+    pub account_setup_device_import_code: String,
+    pub account_setup_name_focused: bool,
+    pub account_setup_import_code_focused: bool,
     pub account_setup_creating: bool,
     pub account_setup_show_spinner: bool,
     pub account_setup_success: bool,
@@ -78,7 +81,9 @@ pub fn render_account_setup_modal(global: &GlobalModalProps) -> Option<AnyElemen
                     AccountSetupModal(
                         visible: true,
                         nickname_suggestion: global.account_setup_nickname_suggestion.clone(),
-                        focused: true,
+                        device_import_code: global.account_setup_device_import_code.clone(),
+                        name_focused: global.account_setup_name_focused,
+                        import_code_focused: global.account_setup_import_code_focused,
                         creating: global.account_setup_creating,
                         show_spinner: global.account_setup_show_spinner,
                         success: global.account_setup_success,

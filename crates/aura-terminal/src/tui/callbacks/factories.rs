@@ -1304,9 +1304,13 @@ impl SettingsCallbacks {
         Arc::new(move |code: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
+            let should_complete_onboarding = !ctx.has_account();
             spawn_ctx(ctx.clone(), async move {
                 match ctx.import_device_enrollment_code(&code).await {
                     Ok(()) => {
+                        if should_complete_onboarding {
+                            let _ = tx.try_send(UiUpdate::AccountCreated);
+                        }
                         let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
                             "devices",
                             "Device enrollment invitation accepted",

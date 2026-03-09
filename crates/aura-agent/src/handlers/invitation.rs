@@ -804,47 +804,67 @@ impl InvitationHandler {
                     })?;
             }
 
-            // Send an acceptance envelope to the initiator device.
-            let context_entropy = {
-                let mut h = aura_core::hash::hasher();
-                h.update(b"DEVICE_ENROLLMENT_CONTEXT");
-                h.update(&enrollment.subject_authority.to_bytes());
-                h.update(enrollment.ceremony_id.as_str().as_bytes());
-                h.finalize()
-            };
-            let ceremony_context =
-                aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
+            if let Some(invitation) = self
+                .load_invitation_for_choreography(effects.as_ref(), invitation_id)
+                .await
+            {
+                if invitation.receiver_id == invitation.sender_id {
+                    // Legacy self-addressed device enrollment still relies on a direct
+                    // acceptance envelope because there is no cross-authority invitee
+                    // choreography to drive the response.
+                    let context_entropy = {
+                        let mut h = aura_core::hash::hasher();
+                        h.update(b"DEVICE_ENROLLMENT_CONTEXT");
+                        h.update(&enrollment.subject_authority.to_bytes());
+                        h.update(enrollment.ceremony_id.as_str().as_bytes());
+                        h.finalize()
+                    };
+                    let ceremony_context =
+                        aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
 
-            let mut metadata = std::collections::HashMap::new();
-            metadata.insert(
-                "content-type".to_string(),
-                "application/aura-device-enrollment-acceptance".to_string(),
-            );
-            metadata.insert(
-                "ceremony-id".to_string(),
-                enrollment.ceremony_id.to_string(),
-            );
-            metadata.insert(
-                "acceptor-device-id".to_string(),
-                enrollment.device_id.to_string(),
-            );
-            metadata.insert(
-                "aura-destination-device-id".to_string(),
-                enrollment.initiator_device_id.to_string(),
-            );
+                    let mut metadata = std::collections::HashMap::new();
+                    metadata.insert(
+                        "content-type".to_string(),
+                        "application/aura-device-enrollment-acceptance".to_string(),
+                    );
+                    metadata.insert(
+                        "ceremony-id".to_string(),
+                        enrollment.ceremony_id.to_string(),
+                    );
+                    metadata.insert(
+                        "acceptor-device-id".to_string(),
+                        enrollment.device_id.to_string(),
+                    );
+                    metadata.insert(
+                        "aura-destination-device-id".to_string(),
+                        enrollment.initiator_device_id.to_string(),
+                    );
 
-            let envelope = aura_core::effects::TransportEnvelope {
-                destination: enrollment.subject_authority,
-                source: self.context.authority.authority_id(),
-                context: ceremony_context,
-                payload: Vec::new(),
-                metadata,
-                receipt: None,
-            };
+                    let envelope = aura_core::effects::TransportEnvelope {
+                        destination: enrollment.subject_authority,
+                        source: self.context.authority.authority_id(),
+                        context: ceremony_context,
+                        payload: Vec::new(),
+                        metadata,
+                        receipt: None,
+                    };
 
-            effects.send_envelope(envelope).await.map_err(|e| {
-                crate::core::AgentError::effects(format!("send device enrollment acceptance: {e}"))
-            })?;
+                    if let Err(error) = effects.send_envelope(envelope).await {
+                        tracing::warn!(
+                            invitation_id = %invitation_id,
+                            error = %error,
+                            "Device enrollment acceptance envelope send failed; continuing with convergence path"
+                        );
+                    }
+                } else {
+                    tracing::debug!(
+                        invitation_id = %invitation_id,
+                        receiver_id = %invitation.receiver_id,
+                        sender_id = %invitation.sender_id,
+                        "Skipping legacy direct device enrollment acceptance envelope for addressed invitation"
+                    );
+                }
+            }
         }
 
         // Update cache if we have this invitation

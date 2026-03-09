@@ -667,32 +667,38 @@ pub async fn accept_pending_home_invitation(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<InvitationId, AuraError> {
     let runtime = require_runtime(app_core).await?;
-
-    // Get pending invitations
-    let pending = runtime.list_pending_invitations().await;
-
-    // Find a channel invitation that we received (sender is not us)
     let our_authority = runtime.authority_id();
-    let home_invitation = pending.iter().find(|inv| {
-        matches!(inv.invitation_type, InvitationBridgeType::Channel { .. })
-            && inv.sender_id != our_authority
-    });
+    const HOME_ACCEPT_ATTEMPTS: usize = 8;
+    const HOME_ACCEPT_BACKOFF_MS: u64 = 150;
 
-    if let Some(inv) = home_invitation {
-        match runtime.accept_invitation(inv.invitation_id.as_str()).await {
-            Ok(()) => return Ok(inv.invitation_id.clone()),
-            Err(e) => {
-                let message = e.to_string();
-                let lowered = message.to_lowercase();
-                // Channel invites may be auto-accepted by the inbound envelope pipeline.
-                // Treat these races as idempotent success for `/homeaccept`.
-                if lowered.contains("already accepted") || lowered.contains("not pending") {
-                    return Ok(inv.invitation_id.clone());
+    for attempt in 0..HOME_ACCEPT_ATTEMPTS {
+        let pending = runtime.list_pending_invitations().await;
+        let home_invitation = pending.iter().find(|inv| {
+            matches!(inv.invitation_type, InvitationBridgeType::Channel { .. })
+                && inv.sender_id != our_authority
+        });
+
+        if let Some(inv) = home_invitation {
+            match runtime.accept_invitation(inv.invitation_id.as_str()).await {
+                Ok(()) => return Ok(inv.invitation_id.clone()),
+                Err(e) => {
+                    let message = e.to_string();
+                    let lowered = message.to_lowercase();
+                    // Channel invites may be auto-accepted by the inbound envelope pipeline.
+                    // Treat these races as idempotent success for `/homeaccept`.
+                    if lowered.contains("already accepted") || lowered.contains("not pending") {
+                        return Ok(inv.invitation_id.clone());
+                    }
+                    return Err(AuraError::agent(format!(
+                        "Failed to accept invitation: {message}"
+                    )));
                 }
-                return Err(AuraError::agent(format!(
-                    "Failed to accept invitation: {message}"
-                )));
             }
+        }
+
+        if attempt + 1 < HOME_ACCEPT_ATTEMPTS {
+            converge_runtime(&runtime).await;
+            runtime.sleep_ms(HOME_ACCEPT_BACKOFF_MS).await;
         }
     }
 

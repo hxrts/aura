@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use aura_app::ui::contract::{ControlId, FieldId, ListId, ScreenId, UiSnapshot};
+use aura_app::ui::contract::{ControlId, FieldId, ListId, ModalId, ScreenId, UiSnapshot};
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
@@ -46,10 +46,6 @@ impl LocalPtyBackend {
             .and_then(|name| name.to_str())
             .map(|name| name == "cargo")
             .unwrap_or(false)
-    }
-
-    fn uses_default_aura_command(&self) -> bool {
-        self.config.command.is_none()
     }
 
     fn ui_state_file(&self) -> PathBuf {
@@ -433,7 +429,14 @@ impl InstanceBackend for LocalPtyBackend {
     }
 
     fn fill_field(&mut self, field_id: FieldId, value: &str) -> Result<()> {
-        if matches!(field_id, FieldId::InvitationCode) {
+        if matches!(field_id, FieldId::DeviceImportCode) {
+            let snapshot = self.ui_snapshot()?;
+            if snapshot.screen == ScreenId::Onboarding {
+                self.send_keys("\t")?;
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+        if matches!(field_id, FieldId::InvitationCode | FieldId::DeviceImportCode) {
             for ch in value.chars() {
                 let mut buf = [0u8; 4];
                 let s = ch.encode_utf8(&mut buf);
@@ -711,6 +714,15 @@ impl InstanceBackend for LocalPtyBackend {
         }
         if text.is_empty() {
             anyhow::bail!("clipboard for instance {} is empty", self.config.id);
+        }
+        if self
+            .ui_snapshot()
+            .ok()
+            .and_then(|snapshot| snapshot.open_modal)
+            == Some(ModalId::InvitationCode)
+        {
+            self.send_keys("\r")?;
+            thread::sleep(Duration::from_millis(40));
         }
         Ok(text)
     }

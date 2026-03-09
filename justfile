@@ -321,8 +321,15 @@ ci-harness-replay:
 ci-harness-browser:
     ./scripts/ci/harness-browser.sh
 
+ci-harness-matrix-tui:
+    ./scripts/ci/harness-matrix-tui.sh
+
+ci-harness-matrix-web:
+    ./scripts/ci/harness-matrix-web.sh
+
 ci-harness-matrix:
-    just harness-matrix-all
+    just ci-harness-matrix-tui
+    just ci-harness-matrix-web
 
 # LAN smoke lane for workspace-fast coverage
 ci-lan-smoke:

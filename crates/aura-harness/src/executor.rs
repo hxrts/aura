@@ -572,6 +572,7 @@ fn execute_step(
             )?;
             // Browser harness can remain in insert mode after command submit; if so,
             // normalize back to navigation mode so subsequent digit keys switch tabs.
+            let snapshot = fetch_ui_snapshot(tool_api, &instance_id).ok();
             if snapshot
                 .as_ref()
                 .and_then(|snapshot| snapshot.focused_control)
@@ -854,6 +855,27 @@ fn execute_step(
         }
         ScenarioAction::WaitFor | ScenarioAction::MessageContains => {
             let instance_id = resolve_required_instance(step, context)?;
+            if matches!(step.action, ScenarioAction::MessageContains)
+                && tool_api.backend_kind(&instance_id).unwrap_or("unknown") == "local_pty"
+            {
+                let pattern = resolve_required_field(
+                    step,
+                    "value",
+                    step.value.as_deref().or(step.expect.as_deref()),
+                    context,
+                )?;
+                dispatch(
+                    tool_api,
+                    ToolRequest::WaitFor {
+                        instance_id,
+                        pattern,
+                        timeout_ms: step.timeout_ms.unwrap_or(step_budget_ms),
+                        screen_source: ScreenSource::Default,
+                        selector: None,
+                    },
+                )?;
+                return Ok(());
+            }
             if matches!(step.action, ScenarioAction::MessageContains)
                 || step.screen_id.is_some()
                 || step.control_id.is_some()
@@ -1500,6 +1522,24 @@ fn fetch_ui_snapshot(tool_api: &mut ToolApi, instance_id: &str) -> Result<UiSnap
     serde_json::from_value(payload).map_err(Into::into)
 }
 
+fn fetch_screen_text(
+    tool_api: &mut ToolApi,
+    instance_id: &str,
+    screen_source: ScreenSource,
+) -> Result<String> {
+    let payload = dispatch_payload(
+        tool_api,
+        ToolRequest::Screen {
+            instance_id: instance_id.to_string(),
+            screen_source,
+        },
+    )?;
+    Ok(payload
+        .as_str()
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| payload.to_string()))
+}
+
 fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
     if matches!(step.action, ScenarioAction::MessageContains) {
         let Some(expected_contains) = step.value.as_deref().or(step.expect.as_deref()) else {
@@ -1620,6 +1660,25 @@ fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
     true
 }
 
+fn semantic_wait_matches_screen_fallback(
+    step: &ScenarioStep,
+    snapshot: &UiSnapshot,
+    screen_text: Option<&str>,
+) -> bool {
+    if semantic_wait_matches(step, snapshot) {
+        return true;
+    }
+    if !matches!(step.action, ScenarioAction::MessageContains) {
+        return false;
+    }
+    let Some(expected_contains) = step.value.as_deref().or(step.expect.as_deref()) else {
+        return false;
+    };
+    screen_text
+        .map(|screen| screen.contains(expected_contains))
+        .unwrap_or(false)
+}
+
 fn semantic_wait_description(step: &ScenarioStep) -> String {
     if matches!(step.action, ScenarioAction::MessageContains) {
         if let Some(value) = step.value.as_deref().or(step.expect.as_deref()) {
@@ -1707,7 +1766,18 @@ fn wait_for_semantic_state(
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let backend_kind = tool_api.backend_kind(instance_id).unwrap_or("unknown");
     let mut last_snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
-    if semantic_wait_matches(step, &last_snapshot) {
+    let last_screen = if backend_kind == "local_pty"
+        && matches!(step.action, ScenarioAction::MessageContains)
+    {
+        Some(fetch_screen_text(
+            tool_api,
+            instance_id,
+            ScreenSource::Default,
+        )?)
+    } else {
+        None
+    };
+    if semantic_wait_matches_screen_fallback(step, &last_snapshot, last_screen.as_deref()) {
         return Ok(());
     }
     let mut browser_version = None;
@@ -1717,18 +1787,37 @@ fn wait_for_semantic_state(
         }
         let snapshot = if backend_kind == "playwright_browser" {
             let remaining = deadline.saturating_duration_since(Instant::now());
-            let Some((snapshot, version)) =
-                tool_api.wait_for_ui_snapshot_event(instance_id, remaining, browser_version)?
-            else {
-                fetch_ui_snapshot(tool_api, instance_id)?
-            };
-            browser_version = Some(version);
-            snapshot
+            match tool_api.wait_for_ui_snapshot_event(instance_id, remaining, browser_version) {
+                Ok(Some((snapshot, version))) => {
+                    browser_version = Some(version);
+                    snapshot
+                }
+                Ok(None) => fetch_ui_snapshot(tool_api, instance_id)?,
+                Err(error)
+                    if error
+                        .to_string()
+                        .contains("wait_for_ui_state timed out") =>
+                {
+                    fetch_ui_snapshot(tool_api, instance_id)?
+                }
+                Err(error) => return Err(error),
+            }
         } else {
             std::thread::sleep(Duration::from_millis(40));
             fetch_ui_snapshot(tool_api, instance_id)?
         };
-        if semantic_wait_matches(step, &snapshot) {
+        let screen_text = if backend_kind == "local_pty"
+            && matches!(step.action, ScenarioAction::MessageContains)
+        {
+            Some(fetch_screen_text(
+                tool_api,
+                instance_id,
+                ScreenSource::Default,
+            )?)
+        } else {
+            None
+        };
+        if semantic_wait_matches_screen_fallback(step, &snapshot, screen_text.as_deref()) {
             return Ok(());
         }
         last_snapshot = snapshot;

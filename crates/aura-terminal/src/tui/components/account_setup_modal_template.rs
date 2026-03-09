@@ -15,8 +15,12 @@ pub struct AccountSetupModalProps {
     pub visible: bool,
     /// Current nickname suggestion input
     pub nickname_suggestion: String,
+    /// Current device import code input
+    pub device_import_code: String,
     /// Whether the input is focused
-    pub focused: bool,
+    pub name_focused: bool,
+    /// Whether the import code input is focused
+    pub import_code_focused: bool,
     /// Whether account creation is in progress
     pub creating: bool,
     /// Whether to show the spinner (debounced - only after 300ms)
@@ -38,6 +42,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
     }
 
     let nickname_suggestion = props.nickname_suggestion.clone();
+    let device_import_code = props.device_import_code.clone();
     let creating = props.creating;
     let success = props.success;
     let has_error = !props.error.is_empty();
@@ -98,12 +103,17 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
     // The spinner is debounced - only shows after 300ms to avoid flicker for fast operations.
 
     // Show input form (default state, or creating state with inline spinner)
-    let can_submit = !nickname_suggestion.is_empty() && !creating;
+    let can_create = !nickname_suggestion.is_empty() && !creating;
+    let can_import = !device_import_code.trim().is_empty() && !creating;
 
     // Input field props
     let input_props = LabeledInputProps::new("Display Name *", "Enter your name...")
         .with_value(nickname_suggestion)
-        .with_focused(props.focused);
+        .with_focused(props.name_focused);
+    let import_props =
+        LabeledInputProps::new("Device Enrollment Code", "Paste the device enrollment code...")
+            .with_value(device_import_code)
+            .with_focused(props.import_code_focused);
 
     element! {
         ModalContent(
@@ -147,7 +157,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 // Description
                 View(width: 100pct, align_items: AlignItems::Center) {
                     Text(
-                        content: "Create single device account.",
+                        content: "Create a new account or import an existing device enrollment.",
                         color: Theme::TEXT_MUTED,
                     )
                 }
@@ -155,6 +165,11 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 // Display name input
                 View(margin_top: Spacing::SM) {
                     #(Some(labeled_input(&input_props).into()))
+                }
+
+                // Device import input
+                View(margin_top: Spacing::SM) {
+                    #(Some(labeled_input(&import_props).into()))
                 }
             }
 
@@ -175,7 +190,13 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                     padding_left: Spacing::SM,
                     padding_right: Spacing::SM,
                     border_style: Borders::PRIMARY,
-                    border_color: if creating { Theme::SECONDARY } else if can_submit { Theme::PRIMARY } else { Theme::BORDER },
+                    border_color: if creating {
+                        Theme::SECONDARY
+                    } else if can_create || can_import {
+                        Theme::PRIMARY
+                    } else {
+                        Theme::BORDER
+                    },
                 ) {
                     #(if creating && props.show_spinner {
                         // Show spinner (debounced - only after 300ms)
@@ -201,8 +222,18 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                             View(flex_direction: FlexDirection::Row) {
                                 Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
                                 Text(
-                                    content: " to Create Account",
-                                    color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED },
+                                    content: if props.import_code_focused {
+                                        " to Import Device"
+                                    } else {
+                                        " to Create Account"
+                                    },
+                                    color: if props.import_code_focused {
+                                        if can_import { Theme::PRIMARY } else { Theme::TEXT_MUTED }
+                                    } else if can_create {
+                                        Theme::PRIMARY
+                                    } else {
+                                        Theme::TEXT_MUTED
+                                    },
                                 )
                             }
                         })
@@ -211,7 +242,13 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 // Hint about settings
                 View(margin_top: 1) {
                     Text(
-                        content: "Add devices and configure Multifactor Auth in Settings.",
+                        content: "Tab switches between account creation and device import.",
+                        color: Theme::TEXT_MUTED,
+                    )
+                }
+                View(margin_top: 1) {
+                    Text(
+                        content: "Use Display Name for a new account or Device Enrollment Code to join an existing one.",
                         color: Theme::TEXT_MUTED,
                     )
                 }

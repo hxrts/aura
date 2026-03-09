@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::state::views::AccountSetupField;
 
 pub(super) fn build_global_modals(
     current_screen: Screen,
@@ -12,6 +13,11 @@ pub(super) fn build_global_modals(
             QueuedModal::AccountSetup(state) => {
                 global_modals.account_setup_visible = true;
                 global_modals.account_setup_nickname_suggestion = state.nickname_suggestion.clone();
+                global_modals.account_setup_device_import_code = state.device_import_code.clone();
+                global_modals.account_setup_name_focused =
+                    matches!(state.active_field, AccountSetupField::AccountName);
+                global_modals.account_setup_import_code_focused =
+                    matches!(state.active_field, AccountSetupField::DeviceImportCode);
                 global_modals.account_setup_creating = state.creating;
                 global_modals.account_setup_show_spinner = state.should_show_spinner();
                 global_modals.account_setup_success = state.success;

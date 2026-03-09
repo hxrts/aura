@@ -105,3 +105,46 @@ jobs:
         with:
           name: harness-deep
           replay-command: nix develop --command just ci-harness-browser
+
+  matrix-tui:
+    name: Harness Matrix TUI
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: harness-matrix-tui
+      - run: nix develop --command just ci-harness-matrix-tui
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: harness-deep
+          replay-command: nix develop --command just ci-harness-matrix-tui
+
+  matrix-web:
+    name: Harness Matrix Web
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: harness-matrix-web
+      - run: nix develop --command just ci-harness-matrix-web
+        env:
+          PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS: "1"
+      - name: Upload browser harness artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-matrix-web-${{ github.run_id }}
+          path: artifacts/harness/browser
+          if-no-files-found: warn
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: harness-deep
+          replay-command: nix develop --command just ci-harness-matrix-web

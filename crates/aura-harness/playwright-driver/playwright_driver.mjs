@@ -309,6 +309,9 @@ async function ensureUiStateRenderConvergence(session, state, reason, timeoutMs 
 
   const screenDomId = expectedScreenDomId(state);
   if (screenDomId) {
+    if (domStateHasId(session, screenDomId)) {
+      return;
+    }
     try {
       await withOperationTimeout(
         `ui_state_converge_screen_${reason}`,
@@ -328,6 +331,9 @@ async function ensureUiStateRenderConvergence(session, state, reason, timeoutMs 
 
   const modalDomId = expectedModalDomId(state);
   if (modalDomId) {
+    if (domStateHasId(session, modalDomId)) {
+      return;
+    }
     try {
       await withOperationTimeout(
         `ui_state_converge_modal_${reason}`,
@@ -1650,10 +1656,7 @@ async function startPage(params) {
         console.error(
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} semantic_ready start`
         );
-        await readStructuredUiStateWithNavigationRecovery(
-          'startup',
-          Math.min(harnessReadyTimeoutMs, UI_STATE_TIMEOUT_MS)
-        );
+        await uiState({ instance_id: instanceId });
         console.error(
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} semantic_ready done`
         );
