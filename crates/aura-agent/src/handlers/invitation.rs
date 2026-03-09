@@ -2813,7 +2813,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut found = None::<ContactFact>;
+        let mut found = false;
         for fact in committed {
             let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
             else {
@@ -2824,23 +2824,24 @@ mod tests {
                 continue;
             }
 
-            found = ContactFact::from_envelope(&envelope);
-        }
-
-        let fact = found.expect("Expected ContactFact from acceptance processing");
-        match fact {
-            ContactFact::Added {
+            let Some(ContactFact::Added {
                 owner_id,
                 contact_id,
                 nickname,
                 ..
-            } => {
-                assert_eq!(owner_id, sender_id);
-                assert_eq!(contact_id, receiver_id);
-                assert_eq!(nickname, receiver_id.to_string());
+            }) = ContactFact::from_envelope(&envelope)
+            else {
+                continue;
+            };
+            if owner_id == sender_id
+                && contact_id == receiver_id
+                && nickname == receiver_id.to_string()
+            {
+                found = true;
+                break;
             }
-            other => panic!("Expected ContactFact::Added, got {:?}", other),
         }
+        assert!(found, "expected sender-side ContactFact::Added for receiver");
     }
 
     #[tokio::test]

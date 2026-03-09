@@ -43,16 +43,14 @@ bind_address = "127.0.0.1:47001"
 
     fs::write(
         &scenario_path,
-        r#"schema_version = 1
-id = "bad-instance"
+        r#"id = "bad-instance"
 goal = "lint should fail"
-execution_mode = "scripted"
 
 [[steps]]
 id = "s1"
-action = "wait_for"
-instance = "ghost"
-expect = "never"
+action = "message_contains"
+actor = "ghost"
+value = "never"
 timeout_ms = 10
 "#,
     )
@@ -107,16 +105,14 @@ args = ["-lc", "cat"]
 
     fs::write(
         &scenario_path,
-        r#"schema_version = 1
-id = "timeout-case"
+        r#"id = "timeout-case"
 goal = "force timeout"
-execution_mode = "scripted"
 
 [[steps]]
 id = "wait-never"
-action = "wait_for"
-instance = "alice"
-expect = "this-pattern-will-not-appear"
+action = "message_contains"
+actor = "alice"
+value = "this-pattern-will-not-appear"
 timeout_ms = 10
 "#,
     )

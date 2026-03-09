@@ -102,6 +102,12 @@ const fn default_true() -> bool {
     true
 }
 
+fn is_harness_env_entry(entry: &str) -> bool {
+    entry
+        .split_once('=')
+        .is_some_and(|(key, _)| key.starts_with("AURA_HARNESS_"))
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LanDiscoveryConfig {
@@ -1036,12 +1042,15 @@ impl RunConfig {
                             instance.id
                         );
                     }
-                    if instance.command.is_some()
-                        || !instance.args.is_empty()
-                        || !instance.env.is_empty()
-                    {
+                    if instance.command.is_some() || !instance.args.is_empty() {
                         bail!(
-                            "ssh instance {} must not set local command/args/env",
+                            "ssh instance {} must not set local command/args",
+                            instance.id
+                        );
+                    }
+                    if instance.env.iter().any(|entry| !is_harness_env_entry(entry)) {
+                        bail!(
+                            "ssh instance {} must not set non-harness env entries",
                             instance.id
                         );
                     }

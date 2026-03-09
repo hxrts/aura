@@ -56,10 +56,6 @@ ssh_fingerprint = "SHA256:test"
 ssh_require_fingerprint = true
 ssh_dry_run = true
 remote_workdir = "/home/dev/aura"
-
-[instances.tunnel]
-type = "ssh"
-local_forward = ["62102:127.0.0.1:52002"]
 "#,
         temp.path().join("alice-data").display(),
         temp.path().join("bob-data").display(),
@@ -68,14 +64,12 @@ local_forward = ["62102:127.0.0.1:52002"]
         panic!("failed writing run config: {error}");
     }
 
-    let scenario_body = r#"schema_version = 1
-id = "phase5-regression"
+    let scenario_body = r#"id = "phase5-regression"
 goal = "validate phase 5 hardening artifacts"
-execution_mode = "scripted"
 
 [[steps]]
-id = "noop"
-action = "noop"
+id = "launch"
+action = "launch_actors"
 "#;
     if let Err(error) = fs::write(&scenario_path, scenario_body) {
         panic!("failed writing scenario config: {error}");

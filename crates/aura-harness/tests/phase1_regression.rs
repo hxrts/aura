@@ -139,13 +139,12 @@ args = ["-lc", "cat"]
         panic!("failed writing run config: {error}");
     }
 
-    let scenario_toml = r#"schema_version = 1
-id = "phase1-artifacts"
+    let scenario_toml = r#"id = "phase1-artifacts"
 goal = "validate artifact generation"
 
 [[steps]]
-id = "noop"
-action = "noop"
+id = "launch"
+action = "launch_actors"
 "#;
     if let Err(error) = fs::write(&scenario_path, scenario_toml) {
         panic!("failed writing scenario file: {error}");
