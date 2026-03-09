@@ -7,7 +7,6 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -280,7 +279,6 @@ fn validate_browser_runtime(browser_instances: &[&crate::config::InstanceConfig]
         }
     }
 
-    validate_playwright_chromium_available()?;
     Ok(())
 }
 
@@ -375,26 +373,6 @@ fn parse_http_host_port(app_url: &str) -> Result<(String, u16)> {
     }
 
     Ok((authority.to_string(), default_port))
-}
-
-fn validate_playwright_chromium_available() -> Result<()> {
-    let script = "const { chromium } = require('playwright'); const p = chromium.executablePath(); if (!p) process.exit(2); process.stdout.write(p);";
-    let mut command = Command::new("node");
-    command.args(["-e", script]);
-    if let Ok(cwd) = std::env::current_dir() {
-        command.current_dir(cwd.join("crates/aura-harness/playwright-driver"));
-    }
-    let output = command
-        .output()
-        .context("failed to execute node check for Playwright chromium")?;
-    if output.status.success() {
-        return Ok(());
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    bail!(
-        "Playwright chromium is unavailable (run npm ci and npm run install-browsers in crates/aura-harness/playwright-driver): {}",
-        stderr.trim()
-    )
 }
 
 fn normalize_bind_address(raw: &str) -> Result<String> {

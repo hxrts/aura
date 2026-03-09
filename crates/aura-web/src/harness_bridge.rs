@@ -3,7 +3,8 @@
 //! Exposes the UiController to JavaScript via window.harness, enabling the test
 //! harness to send keys, capture screenshots, and query UI state from Playwright.
 
-use aura_app::ui::contract::{RenderHeartbeat, UiSnapshot};
+use aura_app::ui::contract::{RenderHeartbeat, ScreenId, UiSnapshot};
+use aura_ui::UiScreen;
 use aura_ui::UiController;
 use js_sys::{Array, Function, Object, Reflect, JSON};
 use serde_wasm_bindgen::to_value;
@@ -219,6 +220,30 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
     )?;
     send_key.forget();
 
+    let navigate_controller = controller.clone();
+    let navigate_screen = Closure::wrap(Box::new(move |screen: JsValue| -> JsValue {
+        let Some(screen_name) = screen.as_string() else {
+            return JsValue::FALSE;
+        };
+        let target = match screen_name.as_str() {
+            "onboarding" => UiScreen::Onboarding,
+            "neighborhood" => UiScreen::Neighborhood,
+            "chat" => UiScreen::Chat,
+            "contacts" => UiScreen::Contacts,
+            "notifications" => UiScreen::Notifications,
+            "settings" => UiScreen::Settings,
+            _ => return JsValue::FALSE,
+        };
+        navigate_controller.set_screen(target);
+        JsValue::TRUE
+    }) as Box<dyn FnMut(JsValue) -> JsValue>);
+    Reflect::set(
+        &harness,
+        &JsValue::from_str("navigate_screen"),
+        navigate_screen.as_ref().unchecked_ref(),
+    )?;
+    navigate_screen.forget();
+
     let snapshot_controller = controller.clone();
     let snapshot = Closure::wrap(Box::new(move || -> JsValue {
         let rendered = snapshot_controller.snapshot();
@@ -324,31 +349,31 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
             "#{}",
             aura_app::ui::contract::ControlId::AppRoot
                 .web_dom_id()
-                .unwrap_or("aura-app-root")
+                .expect("ControlId::AppRoot must define a web DOM id")
         );
         let onboarding_root_selector = format!(
             "#{}",
             aura_app::ui::contract::ControlId::OnboardingRoot
                 .web_dom_id()
-                .unwrap_or("aura-onboarding-root")
+                .expect("ControlId::OnboardingRoot must define a web DOM id")
         );
         let modal_region_selector = format!(
             "#{}",
             aura_app::ui::contract::ControlId::ModalRegion
                 .web_dom_id()
-                .unwrap_or("aura-modal-region")
+                .expect("ControlId::ModalRegion must define a web DOM id")
         );
         let toast_region_selector = format!(
             "#{}",
             aura_app::ui::contract::ControlId::ToastRegion
                 .web_dom_id()
-                .unwrap_or("aura-toast-region")
+                .expect("ControlId::ToastRegion must define a web DOM id")
         );
         let screen_selector = format!(
             "#{}",
             aura_app::ui::contract::ControlId::Screen(snapshot.screen)
                 .web_dom_id()
-                .unwrap_or("missing-screen-id")
+                .expect("ControlId::Screen(snapshot.screen) must define a web DOM id")
         );
 
         let app_root_count = document

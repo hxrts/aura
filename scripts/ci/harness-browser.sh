@@ -5,14 +5,14 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 mkdir -p artifacts/harness/browser
-just web-check
 
 (
   cd crates/aura-harness/playwright-driver
   npm ci
   npm run install-browsers
-  npm test
 )
+
+bash scripts/check/harness-browser-install.sh
 
 ./scripts/web/serve-static.sh 4173 > artifacts/harness/browser/web-serve.log 2>&1 &
 server_pid=$!

@@ -10,6 +10,7 @@ fail() {
 }
 
 bash scripts/check/harness-core-scenario-mechanics.sh
+bash scripts/check/harness-ui-state-evented.sh
 bash scripts/check/ui-parity-contract.sh
 # Inventory and converted shared-scenario contract
 bash scripts/check/harness-scenario-inventory.sh

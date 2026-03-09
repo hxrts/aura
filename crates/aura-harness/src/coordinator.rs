@@ -12,6 +12,7 @@ use std::net::TcpStream;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::thread;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
@@ -120,7 +121,21 @@ impl HarnessCoordinator {
             );
         }
         self.runtime_substrate_controller.start()?;
+        let browser_ids = self
+            .instance_order
+            .iter()
+            .filter(|instance_id| {
+                self.instance_modes
+                    .get(*instance_id)
+                    .is_some_and(|mode| matches!(mode, InstanceMode::Browser))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let browser_start_kinds = self.start_browser_backends_parallel(&browser_ids)?;
         for id in self.instance_order.clone() {
+            if browser_start_kinds.contains_key(&id) {
+                continue;
+            }
             let backend_kind = {
                 let backend = self
                     .backends
@@ -155,6 +170,18 @@ impl HarnessCoordinator {
                 Some(id.clone()),
                 serde_json::json!({ "timeout_ms": BACKEND_HEALTH_TIMEOUT.as_millis() }),
             );
+            if backend_kind == "playwright_browser" {
+                self.events.push(
+                    "lifecycle",
+                    "ready_ok",
+                    Some(id.clone()),
+                    serde_json::json!({
+                        "timeout_ms": BACKEND_READY_TIMEOUT.as_millis(),
+                        "source": "playwright_startup_semantic_ready"
+                    }),
+                );
+                continue;
+            }
             eprintln!(
                 "[harness] startup phase=ready_check begin instance={id} backend={backend_kind}"
             );
@@ -171,6 +198,37 @@ impl HarnessCoordinator {
                 "ready_ok",
                 Some(id.clone()),
                 serde_json::json!({ "timeout_ms": BACKEND_READY_TIMEOUT.as_millis() }),
+            );
+        }
+        for id in browser_ids {
+            let backend_kind = browser_start_kinds
+                .get(&id)
+                .copied()
+                .ok_or_else(|| anyhow!("missing browser startup result for instance {id}"))?;
+            self.events.push(
+                "lifecycle",
+                "start",
+                Some(id.clone()),
+                serde_json::json!({ "backend": backend_kind, "startup_mode": "parallel" }),
+            );
+            self.events.push(
+                "lifecycle",
+                "health_ok",
+                Some(id.clone()),
+                serde_json::json!({
+                    "timeout_ms": BACKEND_HEALTH_TIMEOUT.as_millis(),
+                    "startup_mode": "parallel"
+                }),
+            );
+            self.events.push(
+                "lifecycle",
+                "ready_ok",
+                Some(id.clone()),
+                serde_json::json!({
+                    "timeout_ms": BACKEND_READY_TIMEOUT.as_millis(),
+                    "source": "playwright_startup_semantic_ready",
+                    "startup_mode": "parallel"
+                }),
             );
         }
         Ok(())
@@ -191,6 +249,93 @@ impl HarnessCoordinator {
             }
             std::thread::sleep(BACKEND_POLL_INTERVAL);
         }
+    }
+
+    fn start_browser_backends_parallel(
+        &mut self,
+        browser_ids: &[String],
+    ) -> Result<HashMap<String, &'static str>> {
+        let mut handles = Vec::new();
+        for id in browser_ids {
+            let backend = self
+                .backends
+                .remove(id)
+                .ok_or_else(|| anyhow!("unknown instance_id: {id}"))?;
+            let instance_id = id.clone();
+            handles.push((
+                instance_id.clone(),
+                thread::spawn(move || {
+                    let mut backend = backend;
+                    let backend_kind = backend.as_trait().backend_kind();
+                    let result = (|| -> Result<()> {
+                        eprintln!(
+                            "[harness] startup phase=backend_start begin instance={} backend={}",
+                            instance_id, backend_kind
+                        );
+                        backend.as_trait_mut().start()?;
+                        eprintln!(
+                            "[harness] startup phase=backend_start done instance={} backend={}",
+                            instance_id, backend_kind
+                        );
+                        eprintln!(
+                            "[harness] startup phase=health_check begin instance={} backend={}",
+                            instance_id, backend_kind
+                        );
+                        let deadline = Instant::now() + BACKEND_HEALTH_TIMEOUT;
+                        loop {
+                            if backend.as_trait().health_check()? {
+                                break;
+                            }
+                            if Instant::now() >= deadline {
+                                bail!(
+                                    "instance {instance_id} failed startup health gate within {:?}",
+                                    BACKEND_HEALTH_TIMEOUT
+                                );
+                            }
+                            std::thread::sleep(BACKEND_POLL_INTERVAL);
+                        }
+                        eprintln!(
+                            "[harness] startup phase=health_check done instance={} backend={}",
+                            instance_id, backend_kind
+                        );
+                        Ok(())
+                    })();
+                    match result {
+                        Ok(()) => Ok((backend, backend_kind)),
+                        Err(error) => Err((backend, error)),
+                    }
+                }),
+            ));
+        }
+
+        let mut kinds = HashMap::new();
+        let mut first_error = None;
+        for (id, handle) in handles {
+            match handle.join() {
+                Ok(Ok((backend, backend_kind))) => {
+                    self.backends.insert(id.clone(), backend);
+                    kinds.insert(id, backend_kind);
+                }
+                Ok(Err((backend, error))) => {
+                    self.backends.insert(id.clone(), backend);
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+                Err(_) => {
+                    if first_error.is_none() {
+                        first_error =
+                            Some(anyhow!("browser startup thread panicked for instance {id}"));
+                    }
+                }
+            }
+        }
+
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+
+        Ok(kinds)
     }
 
     fn clear_stale_local_state(&mut self) -> Result<()> {
@@ -344,6 +489,39 @@ impl HarnessCoordinator {
             }),
         );
         Ok(snapshot)
+    }
+
+    pub fn wait_for_ui_snapshot_event(
+        &self,
+        instance_id: &str,
+        timeout: Duration,
+        after_version: Option<u64>,
+    ) -> Result<Option<crate::backend::UiSnapshotEvent>> {
+        let backend = self
+            .backends
+            .get(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        let Some(event) = backend
+            .as_trait()
+            .wait_for_ui_snapshot_event(timeout, after_version)
+        else {
+            return Ok(None);
+        };
+        let event = event?;
+        self.events.push(
+            "observation",
+            "ui_snapshot_event",
+            Some(instance_id.to_string()),
+            serde_json::json!({
+                "version": event.version,
+                "screen": format!("{:?}", event.snapshot.screen).to_ascii_lowercase(),
+                "open_modal": event
+                    .snapshot
+                    .open_modal
+                    .map(|modal| format!("{modal:?}").to_ascii_lowercase()),
+            }),
+        );
+        Ok(Some(event))
     }
 
     pub fn backend_kind(&self, instance_id: &str) -> Result<&'static str> {

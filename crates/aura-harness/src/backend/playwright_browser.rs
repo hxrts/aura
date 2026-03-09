@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
-use crate::backend::InstanceBackend;
+use crate::backend::{InstanceBackend, UiSnapshotEvent};
 use crate::config::InstanceConfig;
 use crate::tool_api::ToolKey;
 
@@ -502,6 +502,39 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         })
     }
 
+    fn wait_for_ui_snapshot_event(
+        &self,
+        timeout: Duration,
+        after_version: Option<u64>,
+    ) -> Option<Result<UiSnapshotEvent>> {
+        Some(self.with_session(|session| {
+            let payload = session.rpc_call_with_timeout(
+                "wait_for_ui_state",
+                json!({
+                    "instance_id": self.config.id,
+                    "timeout_ms": timeout.as_millis(),
+                    "after_version": after_version,
+                }),
+                timeout
+                    .as_millis()
+                    .clamp(1, u128::from(u64::MAX))
+                    .try_into()
+                    .unwrap_or(u64::MAX)
+                    .saturating_add(WAIT_RPC_TIMEOUT_MARGIN_MS),
+            )?;
+            let version = payload
+                .get("version")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| anyhow!("browser ui event missing version for {}", self.config.id))?;
+            let snapshot = payload
+                .get("snapshot")
+                .cloned()
+                .ok_or_else(|| anyhow!("browser ui event missing snapshot for {}", self.config.id))
+                .and_then(|value| serde_json::from_value(value).map_err(Into::into))?;
+            Ok(UiSnapshotEvent { snapshot, version })
+        }))
+    }
+
     fn wait_for_dom_patterns(
         &self,
         patterns: &[String],
@@ -589,36 +622,39 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 
     fn activate_control(&mut self, control_id: ControlId) -> Result<()> {
-        if let Some(keys) = control_id.activation_key() {
-            let key_error = self.send_keys(keys).map_err(|error| {
-                anyhow::anyhow!("preferred key activation failed for {control_id:?}: {error}")
-            });
-            if key_error.is_ok() {
-                return Ok(());
-            }
-
-            if let Ok(selector) = control_selector(control_id) {
-                let click_error = self.click_target(&selector).map_err(|error| {
-                    anyhow::anyhow!(
-                        "preferred key activation failed for {control_id:?} and fallback selector activation failed: {error}"
-                    )
-                });
-                if click_error.is_ok() {
-                    return Ok(());
-                }
-
-                return Err(anyhow::anyhow!(
-                    "control activation fallback also failed for {control_id:?}: key={key_error:?}, click={click_error:?}"
-                ));
-            }
-
-            return Err(anyhow::anyhow!(
-                "control activation key fallback failed for {control_id:?} without selector: key={key_error:?}"
-            ));
-        }
-
         let selector = control_selector(control_id)?;
-        self.click_target(&selector)
+        let is_navigation_control = matches!(
+            control_id,
+            ControlId::NavNeighborhood
+                | ControlId::NavChat
+                | ControlId::NavContacts
+                | ControlId::NavNotifications
+                | ControlId::NavSettings,
+        );
+        let click_result = self.click_target(&selector);
+        if click_result.is_ok() {
+            return Ok(());
+        }
+        if is_navigation_control && control_id.activation_key().is_none() {
+            return Err(click_result
+                .err()
+                .unwrap_or_else(|| anyhow::anyhow!("control click failed")));
+        }
+        let click_error = click_result
+            .err()
+            .unwrap_or_else(|| anyhow::anyhow!("control click failed"));
+        if let Some(fallback_key) = control_id.activation_key() {
+            self.send_keys(fallback_key).map_err(|send_error| {
+                anyhow::anyhow!(
+                    "preferred click failed for {control_id:?} via {selector}: {click_error}; \
+                     fallback key '{fallback_key}' failed: {send_error}"
+                )
+            })?;
+            return Ok(());
+        }
+        return Err(anyhow::anyhow!(
+            "control activation failed for {control_id:?} via {selector}: {click_error}"
+        ));
     }
 
     fn click_target(&mut self, selector: &str) -> Result<()> {
@@ -779,7 +815,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             match self.ui_snapshot() {
                 Ok(_) => return Ok(()),
                 Err(error) => {
-                    last_error = Some(error.to_string());
+                    last_error.replace(error.to_string());
                 }
             }
             if Instant::now() >= deadline {
@@ -803,7 +839,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                     "browser instance {} did not reach semantic readiness within {:?} (last_error={}, stderr_tail=\n{})",
                     self.config.id,
                     timeout,
-                    last_error.unwrap_or_else(|| "none".to_string()),
+                    last_error.as_deref().unwrap_or("none"),
                     stderr_block,
                 );
             }

@@ -14,6 +14,7 @@ use crate::introspection::{
     extract_toast,
 };
 use crate::screen_normalization::{authoritative_screen, normalize_screen};
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -219,6 +220,17 @@ impl ToolApi {
 
     pub fn supports_ui_snapshot(&self, instance_id: &str) -> anyhow::Result<bool> {
         self.coordinator.supports_ui_snapshot(instance_id)
+    }
+
+    pub fn wait_for_ui_snapshot_event(
+        &mut self,
+        instance_id: &str,
+        timeout: Duration,
+        after_version: Option<u64>,
+    ) -> anyhow::Result<Option<(UiSnapshot, u64)>> {
+        self.coordinator
+            .wait_for_ui_snapshot_event(instance_id, timeout, after_version)
+            .map(|event| event.map(|event| (event.snapshot, event.version)))
     }
 
     pub fn apply_fault_delay(&mut self, actor: &str, delay_ms: u64) -> anyhow::Result<()> {

@@ -122,7 +122,9 @@ impl FieldId {
             Self::DeviceImportCode => Some("aura-account-import-code-input"),
             Self::InvitationCode => Some("aura-field-invitation-code"),
             Self::InvitationReceiver => Some("aura-field-invitation-receiver"),
-            Self::InvitationType | Self::InvitationMessage | Self::InvitationTtl => None,
+            Self::InvitationType => Some("aura-field-invitation-type"),
+            Self::InvitationMessage => Some("aura-field-invitation-message"),
+            Self::InvitationTtl => Some("aura-field-invitation-ttl"),
             Self::ChatInput => Some("aura-field-chat-input"),
             Self::HomeName => Some("aura-field-home-name"),
             Self::CreateChannelName => Some("aura-field-create-channel-name"),
@@ -185,6 +187,22 @@ impl ListId {
             Self::SettingsSections => "settings-sections",
         }
     }
+
+    #[must_use]
+    pub const fn web_dom_id(self) -> &'static str {
+        match self {
+            Self::Navigation => "aura-list-navigation",
+            Self::Channels => "aura-list-channels",
+            Self::Contacts => "aura-list-contacts",
+            Self::Notifications => "aura-list-notifications",
+            Self::InvitationTypes => "aura-list-invitation-types",
+            Self::Homes => "aura-list-homes",
+            Self::NeighborhoodMembers => "aura-list-neighborhood-members",
+            Self::Devices => "aura-list-devices",
+            Self::Authorities => "aura-list-authorities",
+            Self::SettingsSections => "aura-list-settings-sections",
+        }
+    }
 }
 
 #[must_use]
@@ -220,6 +238,22 @@ pub enum ControlId {
     NeighborhoodNewHomeButton,
     NeighborhoodAcceptInvitationButton,
     ContactsCreateInvitationButton,
+    ContactsEditNicknameButton,
+    ContactsRemoveContactButton,
+    NeighborhoodEnterAsButton,
+    ChatNewGroupButton,
+    ContactsStartChatButton,
+    SettingsEditNicknameButton,
+    SettingsConfigureThresholdButton,
+    SettingsRequestRecoveryButton,
+    SettingsImportDeviceCodeButton,
+    SettingsSwitchAuthorityButton,
+    SettingsConfigureMfaButton,
+    SettingsToggleThemeButton,
+    DeviceEnrollmentCancelButton,
+    DeviceEnrollmentPrimaryButton,
+    AuthorityPickerCancelButton,
+    AuthorityPickerConfirmButton,
     Screen(ScreenId),
     Field(FieldId),
     List(ListId),
@@ -227,6 +261,7 @@ pub enum ControlId {
     ModalConfirmButton,
     ModalCancelButton,
     ContactsAcceptInvitationButton,
+    ModalInput,
     SettingsAddDeviceButton,
     SettingsRemoveDeviceButton,
     ChatSendMessageButton,
@@ -252,8 +287,25 @@ impl ControlId {
             Self::NeighborhoodNewHomeButton => Some("aura-neighborhood-new-home"),
             Self::NeighborhoodAcceptInvitationButton => Some("aura-neighborhood-accept-invitation"),
             Self::ContactsCreateInvitationButton => Some("aura-contacts-create-invitation"),
+            Self::ContactsEditNicknameButton => Some("aura-contacts-edit-nickname"),
+            Self::ContactsRemoveContactButton => Some("aura-contacts-remove-contact"),
+            Self::NeighborhoodEnterAsButton => Some("aura-neighborhood-enter-as"),
+            Self::ChatNewGroupButton => Some("aura-chat-new-group"),
+            Self::ContactsStartChatButton => Some("aura-contacts-start-chat"),
+            Self::SettingsEditNicknameButton => Some("aura-settings-edit-nickname"),
+            Self::SettingsConfigureThresholdButton => Some("aura-settings-configure-threshold"),
+            Self::SettingsRequestRecoveryButton => Some("aura-settings-request-recovery"),
+            Self::SettingsImportDeviceCodeButton => Some("aura-settings-import-device-code"),
+            Self::SettingsSwitchAuthorityButton => Some("aura-settings-switch-authority"),
+            Self::SettingsConfigureMfaButton => Some("aura-settings-configure-mfa"),
+            Self::SettingsToggleThemeButton => Some("aura-settings-toggle-theme"),
+            Self::DeviceEnrollmentCancelButton => Some("aura-device-enrollment-cancel-button"),
+            Self::DeviceEnrollmentPrimaryButton => Some("aura-device-enrollment-primary-button"),
+            Self::AuthorityPickerCancelButton => Some("aura-authority-picker-cancel-button"),
+            Self::AuthorityPickerConfirmButton => Some("aura-authority-picker-confirm-button"),
             Self::ModalConfirmButton => Some("aura-modal-confirm-button"),
             Self::ModalCancelButton => Some("aura-modal-cancel-button"),
+            Self::ModalInput => Some("aura-modal-input"),
             Self::ContactsAcceptInvitationButton => Some("aura-contacts-accept-invitation"),
             Self::SettingsAddDeviceButton => Some("aura-settings-add-device"),
             Self::SettingsRemoveDeviceButton => Some("aura-settings-remove-device"),
@@ -264,7 +316,9 @@ impl ControlId {
             Self::Screen(ScreenId::Contacts) => Some("aura-screen-contacts"),
             Self::Screen(ScreenId::Notifications) => Some("aura-screen-notifications"),
             Self::Screen(ScreenId::Settings) => Some("aura-screen-settings"),
-            Self::Field(_) | Self::List(_) | Self::Modal(_) => None,
+            Self::Field(field_id) => field_id.web_dom_id(),
+            Self::List(list_id) => Some(list_id.web_dom_id()),
+            Self::Modal(modal_id) => Some(modal_id.web_dom_id()),
         }
     }
 
@@ -286,6 +340,21 @@ impl ControlId {
             Self::NeighborhoodNewHomeButton => Some("n"),
             Self::NeighborhoodAcceptInvitationButton => Some("a"),
             Self::ContactsCreateInvitationButton => Some("n"),
+            Self::NeighborhoodEnterAsButton => Some("d"),
+            Self::ChatNewGroupButton => Some("n"),
+            Self::ContactsStartChatButton => None,
+            Self::SettingsEditNicknameButton => Some("e"),
+            Self::SettingsConfigureThresholdButton => Some("t"),
+            Self::SettingsRequestRecoveryButton => Some("s"),
+            Self::SettingsImportDeviceCodeButton => Some("i"),
+            Self::SettingsSwitchAuthorityButton => Some("s"),
+            Self::SettingsConfigureMfaButton => Some("m"),
+            Self::ContactsEditNicknameButton => Some("e"),
+            Self::ContactsRemoveContactButton => Some("r"),
+            Self::DeviceEnrollmentCancelButton => Some("\x1b"),
+            Self::DeviceEnrollmentPrimaryButton => None,
+            Self::AuthorityPickerCancelButton => Some("\x1b"),
+            Self::AuthorityPickerConfirmButton => Some("\r"),
             Self::ContactsAcceptInvitationButton => Some("a"),
             Self::ModalConfirmButton => Some("\r"),
             Self::ModalCancelButton => Some("\x1b"),
@@ -1212,6 +1281,42 @@ mod tests {
             ControlId::ModalConfirmButton.web_selector().as_deref(),
             Some("#aura-modal-confirm-button")
         );
+        assert_eq!(
+            ControlId::NeighborhoodEnterAsButton.web_dom_id(),
+            Some("aura-neighborhood-enter-as")
+        );
+        assert_eq!(
+            ControlId::ChatNewGroupButton.web_dom_id(),
+            Some("aura-chat-new-group")
+        );
+        assert_eq!(
+            ControlId::ContactsStartChatButton.web_dom_id(),
+            Some("aura-contacts-start-chat")
+        );
+        assert_eq!(
+            ControlId::SettingsToggleThemeButton.web_dom_id(),
+            Some("aura-settings-toggle-theme")
+        );
+        assert_eq!(
+            ControlId::AuthorityPickerCancelButton.web_dom_id(),
+            Some("aura-authority-picker-cancel-button")
+        );
+        assert_eq!(
+            ControlId::DeviceEnrollmentPrimaryButton.web_dom_id(),
+            Some("aura-device-enrollment-primary-button")
+        );
+        assert_eq!(
+            ControlId::ContactsEditNicknameButton.web_dom_id(),
+            Some("aura-contacts-edit-nickname")
+        );
+        assert_eq!(
+            ControlId::ContactsRemoveContactButton.web_dom_id(),
+            Some("aura-contacts-remove-contact")
+        );
+        assert_eq!(
+            ControlId::ModalInput.web_dom_id(),
+            Some("aura-modal-input")
+        );
     }
 
     #[test]
@@ -1223,6 +1328,137 @@ mod tests {
         assert_eq!(
             FieldId::InvitationCode.web_selector().as_deref(),
             Some("#aura-field-invitation-code")
+        );
+        assert_eq!(
+            FieldId::InvitationType.web_dom_id(),
+            Some("aura-field-invitation-type")
+        );
+        assert_eq!(
+            FieldId::InvitationMessage.web_dom_id(),
+            Some("aura-field-invitation-message")
+        );
+        assert_eq!(FieldId::InvitationTtl.web_dom_id(), Some("aura-field-invitation-ttl"));
+    }
+
+    #[test]
+    fn web_dom_ids_are_present_for_wrappers() {
+        assert_eq!(
+            ControlId::Field(FieldId::InvitationType).web_dom_id(),
+            FieldId::InvitationType.web_dom_id()
+        );
+        assert_eq!(
+            ControlId::List(ListId::Contacts).web_dom_id(),
+            Some("aura-list-contacts")
+        );
+        assert_eq!(
+            ControlId::Modal(ModalId::CreateInvitation).web_dom_id(),
+            Some("aura-modal-create-invitation")
+        );
+    }
+
+    #[test]
+    fn all_contract_control_ids_have_web_dom_id() {
+        let controls = [
+            ControlId::AppRoot,
+            ControlId::OnboardingRoot,
+            ControlId::ModalRegion,
+            ControlId::ToastRegion,
+            ControlId::OnboardingCreateAccountButton,
+            ControlId::OnboardingImportDeviceButton,
+            ControlId::ModalCopyButton,
+            ControlId::NavRoot,
+            ControlId::NavNeighborhood,
+            ControlId::NavChat,
+            ControlId::NavContacts,
+            ControlId::NavNotifications,
+            ControlId::NavSettings,
+            ControlId::NeighborhoodNewHomeButton,
+            ControlId::NeighborhoodAcceptInvitationButton,
+            ControlId::ContactsCreateInvitationButton,
+            ControlId::NeighborhoodEnterAsButton,
+            ControlId::ChatNewGroupButton,
+            ControlId::ContactsStartChatButton,
+            ControlId::SettingsEditNicknameButton,
+            ControlId::SettingsConfigureThresholdButton,
+            ControlId::SettingsRequestRecoveryButton,
+            ControlId::SettingsImportDeviceCodeButton,
+            ControlId::SettingsSwitchAuthorityButton,
+            ControlId::SettingsConfigureMfaButton,
+            ControlId::SettingsToggleThemeButton,
+            ControlId::DeviceEnrollmentCancelButton,
+            ControlId::DeviceEnrollmentPrimaryButton,
+            ControlId::AuthorityPickerCancelButton,
+            ControlId::AuthorityPickerConfirmButton,
+            ControlId::ModalConfirmButton,
+            ControlId::ModalCancelButton,
+            ControlId::ContactsAcceptInvitationButton,
+            ControlId::SettingsAddDeviceButton,
+            ControlId::SettingsRemoveDeviceButton,
+            ControlId::ChatSendMessageButton,
+            ControlId::ContactsEditNicknameButton,
+            ControlId::ContactsRemoveContactButton,
+            ControlId::Screen(ScreenId::Onboarding),
+            ControlId::Screen(ScreenId::Neighborhood),
+            ControlId::Screen(ScreenId::Chat),
+            ControlId::Screen(ScreenId::Contacts),
+            ControlId::Screen(ScreenId::Notifications),
+            ControlId::Screen(ScreenId::Settings),
+            ControlId::Field(FieldId::AccountName),
+            ControlId::Field(FieldId::InvitationCode),
+            ControlId::Field(FieldId::InvitationReceiver),
+            ControlId::Field(FieldId::InvitationType),
+            ControlId::Field(FieldId::InvitationMessage),
+            ControlId::Field(FieldId::InvitationTtl),
+            ControlId::Field(FieldId::ChatInput),
+            ControlId::Field(FieldId::HomeName),
+            ControlId::Field(FieldId::CreateChannelName),
+            ControlId::Field(FieldId::CreateChannelTopic),
+            ControlId::Field(FieldId::ThresholdInput),
+            ControlId::Field(FieldId::Nickname),
+            ControlId::Field(FieldId::DeviceName),
+            ControlId::Field(FieldId::DeviceImportCode),
+            ControlId::Field(FieldId::CapabilityFull),
+            ControlId::Field(FieldId::CapabilityPartial),
+            ControlId::Field(FieldId::CapabilityLimited),
+            ControlId::ModalInput,
+            ControlId::List(ListId::Navigation),
+            ControlId::List(ListId::Channels),
+            ControlId::List(ListId::Contacts),
+            ControlId::List(ListId::Notifications),
+            ControlId::List(ListId::InvitationTypes),
+            ControlId::List(ListId::Homes),
+            ControlId::List(ListId::NeighborhoodMembers),
+            ControlId::List(ListId::Devices),
+            ControlId::List(ListId::Authorities),
+            ControlId::List(ListId::SettingsSections),
+            ControlId::Modal(ModalId::Help),
+            ControlId::Modal(ModalId::CreateInvitation),
+            ControlId::Modal(ModalId::InvitationCode),
+            ControlId::Modal(ModalId::AcceptInvitation),
+            ControlId::Modal(ModalId::CreateHome),
+            ControlId::Modal(ModalId::CreateChannel),
+            ControlId::Modal(ModalId::SetChannelTopic),
+            ControlId::Modal(ModalId::ChannelInfo),
+            ControlId::Modal(ModalId::EditNickname),
+            ControlId::Modal(ModalId::RemoveContact),
+            ControlId::Modal(ModalId::GuardianSetup),
+            ControlId::Modal(ModalId::RequestRecovery),
+            ControlId::Modal(ModalId::AddDevice),
+            ControlId::Modal(ModalId::ImportDeviceEnrollmentCode),
+            ControlId::Modal(ModalId::SelectDeviceToRemove),
+            ControlId::Modal(ModalId::ConfirmRemoveDevice),
+            ControlId::Modal(ModalId::MfaSetup),
+            ControlId::Modal(ModalId::AssignModerator),
+            ControlId::Modal(ModalId::SwitchAuthority),
+            ControlId::Modal(ModalId::AccessOverride),
+            ControlId::Modal(ModalId::CapabilityConfig),
+        ];
+
+        assert!(
+            controls
+                .iter()
+                .all(|control| control.web_dom_id().is_some()),
+            "all contract controls must be addressable"
         );
     }
 

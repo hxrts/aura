@@ -9,6 +9,12 @@ use std::time::Duration;
 use crate::config::{InstanceConfig, InstanceMode};
 use crate::tool_api::ToolKey;
 
+#[derive(Debug, Clone)]
+pub struct UiSnapshotEvent {
+    pub snapshot: UiSnapshot,
+    pub version: u64,
+}
+
 pub trait InstanceBackend {
     fn id(&self) -> &str;
     fn backend_kind(&self) -> &'static str;
@@ -26,6 +32,13 @@ pub trait InstanceBackend {
             "structured UI snapshots are not supported by backend {}",
             self.backend_kind()
         )
+    }
+    fn wait_for_ui_snapshot_event(
+        &self,
+        _timeout: Duration,
+        _after_version: Option<u64>,
+    ) -> Option<Result<UiSnapshotEvent>> {
+        None
     }
     fn wait_for_dom_patterns(
         &self,

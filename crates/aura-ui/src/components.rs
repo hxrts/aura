@@ -190,7 +190,8 @@ pub fn UiModal(
     let input_field_id = modal
         .input_field_id
         .and_then(FieldId::web_dom_id)
-        .unwrap_or("aura-modal-input")
+        .or_else(|| ControlId::ModalInput.web_dom_id())
+        .expect("modal input field identifier must be defined")
         .to_string();
 
     rsx! {
@@ -270,7 +271,7 @@ pub fn UiModal(
                         id: Some(
                             ControlId::ModalCancelButton
                                 .web_dom_id()
-                                .unwrap_or("aura-modal-cancel-button")
+                                .expect("ControlId::ModalCancelButton must define a web DOM id")
                                 .to_string(),
                         ),
                         label: "Cancel".to_string(),
@@ -281,7 +282,7 @@ pub fn UiModal(
                         id: Some(
                             ControlId::ModalConfirmButton
                                 .web_dom_id()
-                                .unwrap_or("aura-modal-confirm-button")
+                                .expect("ControlId::ModalConfirmButton must define a web DOM id")
                                 .to_string(),
                         ),
                         label: modal.enter_label.clone(),
@@ -432,7 +433,14 @@ pub fn UiDeviceEnrollmentModal(
                     div {
                         class: "flex items-center gap-2",
                         UiButton {
-                            id: Some("aura-device-enrollment-cancel-button".to_string()),
+                            id: Some(
+                                ControlId::DeviceEnrollmentCancelButton
+                                    .web_dom_id()
+                                    .expect(
+                                        "ControlId::DeviceEnrollmentCancelButton must define a web DOM id",
+                                    )
+                                    .to_string(),
+                            ),
                             label: if is_complete || has_failed {
                                 "Close".to_string()
                             } else {
@@ -445,7 +453,7 @@ pub fn UiDeviceEnrollmentModal(
                             id: Some(
                                 ControlId::ModalCopyButton
                                     .web_dom_id()
-                                    .unwrap_or("aura-modal-copy-button")
+                                    .expect("ControlId::ModalCopyButton must define a web DOM id")
                                     .to_string(),
                             ),
                             label: if copied {
@@ -457,7 +465,14 @@ pub fn UiDeviceEnrollmentModal(
                             onclick: move |_| on_copy.call(()),
                         }
                         UiButton {
-                            id: Some("aura-device-enrollment-primary-button".to_string()),
+                            id: Some(
+                                ControlId::DeviceEnrollmentPrimaryButton
+                                    .web_dom_id()
+                                    .expect(
+                                        "ControlId::DeviceEnrollmentPrimaryButton must define a web DOM id",
+                                    )
+                                    .to_string(),
+                            ),
                             label: primary_label,
                             variant: ButtonVariant::Primary,
                             onclick: move |_| on_primary.call(()),
@@ -631,13 +646,27 @@ pub fn UiAuthorityPickerModal(
                     div {
                         class: "flex items-center gap-2",
                         UiButton {
-                            id: Some("aura-authority-picker-cancel-button".to_string()),
+                            id: Some(
+                                ControlId::AuthorityPickerCancelButton
+                                    .web_dom_id()
+                                    .expect(
+                                        "ControlId::AuthorityPickerCancelButton must define a web DOM id",
+                                    )
+                                    .to_string(),
+                            ),
                             label: "Cancel".to_string(),
                             variant: ButtonVariant::Secondary,
                             onclick: move |_| on_cancel.call(()),
                         }
                         UiButton {
-                            id: Some("aura-authority-picker-confirm-button".to_string()),
+                            id: Some(
+                                ControlId::AuthorityPickerConfirmButton
+                                    .web_dom_id()
+                                    .expect(
+                                        "ControlId::AuthorityPickerConfirmButton must define a web DOM id",
+                                    )
+                                    .to_string(),
+                            ),
                             label: "Switch".to_string(),
                             variant: ButtonVariant::Primary,
                             onclick: move |_| on_confirm.call(()),

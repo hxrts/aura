@@ -52,6 +52,105 @@ function writeResponse(response) {
   process.stdout.write(`${JSON.stringify(response)}\n`);
 }
 
+function removeUiStateWaiter(session, waiter) {
+  if (!Array.isArray(session.uiStateWaiters)) {
+    return;
+  }
+  const index = session.uiStateWaiters.indexOf(waiter);
+  if (index >= 0) {
+    session.uiStateWaiters.splice(index, 1);
+  }
+}
+
+function trySerializeUiState(value) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
+}
+
+function notifyUiStateWaiters(session) {
+  if (!session.uiStateCache || !Array.isArray(session.uiStateWaiters) || session.uiStateWaiters.length === 0) {
+    return;
+  }
+  const ready = session.uiStateWaiters.filter(
+    (waiter) => session.uiStateVersion > waiter.afterVersion
+  );
+  for (const waiter of ready) {
+    removeUiStateWaiter(session, waiter);
+    clearTimeout(waiter.timer);
+    waiter.resolve({
+      snapshot: session.uiStateCache,
+      version: session.uiStateVersion
+    });
+  }
+}
+
+function storeUiState(session, payload) {
+  const parsed =
+    typeof payload === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(payload);
+          } catch {
+            return null;
+          }
+        })()
+      : payload && typeof payload === 'object'
+        ? payload
+        : null;
+  if (!parsed || typeof parsed !== 'object') {
+    return false;
+  }
+
+  const nextJson = trySerializeUiState(parsed);
+  const changed = nextJson !== session.uiStateCacheJson;
+  session.uiStateCache = parsed;
+  session.uiStateCacheJson = nextJson;
+  if (changed) {
+    session.uiStateVersion = (session.uiStateVersion ?? 0) + 1;
+    notifyUiStateWaiters(session);
+  }
+  return true;
+}
+
+function waitForUiStateVersion(session, afterVersion, timeoutMs) {
+  if (
+    session.uiStateCache &&
+    typeof session.uiStateCache === 'object' &&
+    session.uiStateVersion > afterVersion
+  ) {
+    return Promise.resolve({
+      snapshot: session.uiStateCache,
+      version: session.uiStateVersion
+    });
+  }
+
+  return new Promise((resolve, reject) => {
+    const waiter = {
+      afterVersion,
+      resolve,
+      reject,
+      timer: null
+    };
+    waiter.timer = setTimeout(() => {
+      removeUiStateWaiter(session, waiter);
+      reject(
+        new Error(
+          `wait_for_ui_state timed out after ${timeoutMs}ms after_version=${afterVersion} current_version=${
+            session.uiStateVersion ?? 0
+          }`
+        )
+      );
+    }, timeoutMs);
+    session.uiStateWaiters.push(waiter);
+  });
+}
+
 function normalizeInstanceId(params) {
   const instanceId = params?.instance_id;
   if (!instanceId || typeof instanceId !== 'string') {
@@ -411,23 +510,7 @@ async function installDomObserver(page, session) {
 
 async function installUiStateObserver(page, session) {
   await page.exposeFunction('__AURA_DRIVER_PUSH_UI_STATE', (payload) => {
-    if (typeof payload === 'string') {
-      session.uiStateCacheJson = payload;
-      try {
-        session.uiStateCache = JSON.parse(payload);
-      } catch {
-        session.uiStateCache = null;
-      }
-      return;
-    }
-    if (payload && typeof payload === 'object') {
-      session.uiStateCache = payload;
-      try {
-        session.uiStateCacheJson = JSON.stringify(payload);
-      } catch {
-        session.uiStateCacheJson = null;
-      }
-    }
+    storeUiState(session, payload);
   });
   await page.exposeFunction('__AURA_DRIVER_PUSH_RENDER_HEARTBEAT', (payload) => {
     if (typeof payload === 'string') {
@@ -552,12 +635,11 @@ async function waitForPageNavigationStabilization(session, reason) {
 
 async function focusAuraPage(page) {
   try {
-    await withOperationTimeout('focus_page', page.bringToFront(), 3000);
-    return true;
+    await withOperationTimeout('focus_page_bring_to_front', page.bringToFront(), 1500);
   } catch (error) {
-    console.error(`[driver] focus_page skipped instance=unknown reason=${normalizeClickError(error)}`);
-    return false;
+    console.error(`[driver] focus_page_bring_to_front_skipped reason=${normalizeClickError(error)}`);
   }
+  return true;
 }
 
 async function focusAuraPageSafe(page, instanceId, context) {
@@ -599,6 +681,114 @@ function selectorToFallbackLabel(selector) {
 
 function normalizeClickError(error) {
   return error?.message || String(error || 'unknown');
+}
+
+function keydownEventData(key) {
+  const meta = {
+    Backspace: { code: 'Backspace', keyCode: 8, which: 8 },
+    Delete: { code: 'Delete', keyCode: 46, which: 46 },
+    Enter: { code: 'Enter', keyCode: 13, which: 13 },
+    Escape: { code: 'Escape', keyCode: 27, which: 27 },
+    Tab: { code: 'Tab', keyCode: 9, which: 9 },
+    ArrowUp: { code: 'ArrowUp', keyCode: 38, which: 38 },
+    ArrowDown: { code: 'ArrowDown', keyCode: 40, which: 40 },
+    ArrowLeft: { code: 'ArrowLeft', keyCode: 37, which: 37 },
+    ArrowRight: { code: 'ArrowRight', keyCode: 39, which: 39 },
+    Home: { code: 'Home', keyCode: 36, which: 36 },
+    End: { code: 'End', keyCode: 35, which: 35 },
+    PageUp: { code: 'PageUp', keyCode: 33, which: 33 },
+    PageDown: { code: 'PageDown', keyCode: 34, which: 34 }
+  };
+  return meta[key] ?? null;
+}
+
+async function dispatchHarnessKey(page, rawKey, repeat = 1) {
+  return page.evaluate(
+    ({ key, repeatCount }) => {
+      const harness = window.__AURA_HARNESS__;
+      if (!harness) {
+        return { ok: false, reason: 'harness_missing' };
+      }
+      if (key.length === 1 && typeof harness.send_keys === 'function') {
+        for (let index = 0; index < repeatCount; index += 1) {
+          harness.send_keys(key);
+        }
+        return { ok: true, mode: 'send_keys' };
+      }
+      if (typeof harness.send_key === 'function') {
+        harness.send_key(key, repeatCount);
+        return { ok: true, mode: 'send_key' };
+      }
+      return { ok: false, reason: 'harness_send_key_missing' };
+    },
+    { key: rawKey, repeatCount: repeat }
+  );
+}
+
+async function dispatchHarnessKeysText(page, text) {
+  return page.evaluate((value) => {
+    const harness = window.__AURA_HARNESS__;
+    if (!harness || typeof harness.send_keys !== 'function') {
+      return { ok: false, reason: 'harness_send_keys_missing' };
+    }
+    harness.send_keys(value);
+    return { ok: true, mode: 'send_keys' };
+  }, text);
+}
+
+async function fallbackKeyboardPress(page, rawKey) {
+  const mapped = mapPlaywrightKey(rawKey);
+  const keyData = keydownEventData(mapped) || {
+    code: mapped,
+    keyCode: 0,
+    which: 0
+  };
+  return page.evaluate(
+    ({ targetKey, targetCode, keyCode, which, rawKey }) => {
+      const active = document.activeElement || document.body;
+      if (!active) {
+        return { ok: false, reason: 'no_active_element' };
+      }
+
+      const eventInit = {
+        key: targetKey,
+        code: targetCode,
+        keyCode,
+        which,
+        bubbles: true,
+        cancelable: true
+      };
+
+      const down = new KeyboardEvent('keydown', eventInit);
+      const up = new KeyboardEvent('keyup', eventInit);
+      active.dispatchEvent(down);
+      if (targetKey === 'Enter' || targetKey === 'Tab' || targetKey === 'Escape') {
+        const press = new KeyboardEvent('keypress', eventInit);
+        active.dispatchEvent(press);
+      }
+      active.dispatchEvent(up);
+
+      const editableField =
+        active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
+      if (rawKey && rawKey.length === 1 && editableField) {
+        const isEditable = targetKey.length === 1 && !(active.readOnly || active.disabled);
+        if (isEditable) {
+          const value = active.value || '';
+          active.value = `${value}${targetKey}`;
+          active.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }
+
+      return { ok: true, key: targetKey, activeTag: active.tagName };
+    },
+    {
+      targetKey: mapped,
+      targetCode: keyData.code,
+      keyCode: keyData.keyCode,
+      which: keyData.which,
+      rawKey
+    }
+  );
 }
 
 async function clickLocatorWithDiagnostics(locator, context) {
@@ -705,11 +895,10 @@ async function clickLocatorBySelectorFallback(page, selector, session) {
 
 async function clickByCssSelector(page, selector, session) {
   const normalizedSelector = String(selector || '').trim();
-  const maxAttempts = 3;
+  const maxAttempts = 2;
   let lastError = null;
   const navShortcut = navigationShortcutForSelector(normalizedSelector);
 
-  await focusAuraPageSafe(page, session.id, `css_start:${normalizedSelector}`);
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const attemptContext = `css:${normalizedSelector}:attempt${attempt}`;
     try {
@@ -717,8 +906,8 @@ async function clickByCssSelector(page, selector, session) {
 
       await withOperationTimeout(
         `click_wait_${attemptContext}`,
-        locator.waitFor({ state: 'attached', timeout: 1200 }),
-        1500
+        locator.waitFor({ state: 'attached', timeout: 600 }),
+        800
       );
 
       return await clickLocatorWithDiagnostics(locator, attemptContext);
@@ -731,20 +920,17 @@ async function clickByCssSelector(page, selector, session) {
       if (isNavigationTransitionError(error)) {
         await waitForPageNavigationStabilization(session, attemptContext);
       }
-      if (
-        message.includes('locator.waitFor') ||
-        message.includes('timed out') ||
-        message.includes('Timeout') ||
-        message.includes('500ms')
-      ) {
-        try {
-          return clickLocatorBySelectorFallback(page, normalizedSelector, session);
-        } catch (fallbackError) {
-          lastError = fallbackError;
-        }
+      try {
+        return await withOperationTimeout(
+          `css_fallback_${attemptContext}`,
+          clickLocatorBySelectorFallback(page, normalizedSelector, session),
+          900
+        );
+      } catch (fallbackError) {
+        lastError = fallbackError;
       }
       if (attempt + 1 < maxAttempts) {
-        await delay(150);
+        await delay(80);
         continue;
       }
     }
@@ -757,14 +943,9 @@ async function clickByCssSelector(page, selector, session) {
         `[driver] click_button css fallback_key instance=${session.id} selector=${normalizedSelector} key=${navShortcut} reason=${shortcutReason}`
       );
       await withOperationTimeout(
-        `css_nav_escape_${shortcutReason}`,
-        page.keyboard.press('Escape'),
-        1200
-      );
-      await withOperationTimeout(
         `css_nav_shortcut_${shortcutReason}`,
-        page.keyboard.press(navShortcut),
-        1200
+        dispatchHarnessKey(page, navShortcut, 1),
+        2000
       );
       return { ok: true, id: normalizedSelector, text: `shortcut:${navShortcut}` };
     } catch (fallbackError) {
@@ -817,6 +998,10 @@ async function clickByLabelText(page, label, session) {
 }
 
 function mapPlaywrightKey(key) {
+  if (key.length === 1) {
+    return key;
+  }
+
   switch (String(key ?? '').trim().toLowerCase()) {
     case 'enter':
       return 'Enter';
@@ -854,9 +1039,35 @@ function mapPlaywrightKey(key) {
 
 async function pressMappedKey(page, key) {
   const mapped = mapPlaywrightKey(key);
-  const actionTimeoutMs = 10000;
+  const actionTimeoutMs = 1200;
   console.error(`[driver] key_press start key=${key} mapped=${mapped}`);
-  await withOperationTimeout(`key_press:${mapped}`, page.keyboard.press(mapped), actionTimeoutMs);
+  try {
+    await withOperationTimeout(`key_press:${mapped}`, page.keyboard.press(mapped), actionTimeoutMs);
+    console.error(`[driver] key_press done key=${key} mapped=${mapped}`);
+    return;
+  } catch (error) {
+    console.error(
+      `[driver] key_press_failed key=${key} mapped=${mapped} error=${normalizeClickError(error)}`
+    );
+  }
+
+  const fallback = await withOperationTimeout(
+    `key_press_fallback_${mapped}`,
+    dispatchHarnessKey(page, key, 1),
+    700
+  );
+  if (!fallback?.ok) {
+    const domFallback = await withOperationTimeout(
+      `key_press_dom_fallback_${mapped}`,
+      fallbackKeyboardPress(page, key),
+      1200
+    );
+    if (!domFallback?.ok) {
+      throw new Error(
+        `keyboard press failed for ${mapped}: harness=${JSON.stringify(fallback)} dom=${JSON.stringify(domFallback)}`
+      );
+    }
+  }
   console.error(`[driver] key_press done key=${key} mapped=${mapped}`);
 }
 
@@ -1042,17 +1253,27 @@ async function waitForDomPatterns(params) {
   const deadline = Date.now() + timeoutMs;
   let lastText = '';
   while (Date.now() < deadline) {
-    try {
-      const snapshot = await withOperationTimeout('wait_for_dom_patterns_snapshot', readDomSnapshot(session.page), 2000);
-      const text = normalizeScreenText(snapshot?.authoritative_screen ?? snapshot?.screen ?? '');
-      lastText = text || lastText;
-      if (patterns.some((pattern) => text.includes(pattern))) {
-        return parseSnapshotPayload(snapshot);
-      }
-    } catch (error) {
-      lastText = `${lastText}\n[dom-read-error] ${error.message}`.trim();
+    const text = session.domState?.text ?? '';
+    lastText = text || lastText;
+    if (patterns.some((pattern) => text.includes(pattern))) {
+      return parseSnapshotPayload(domSnapshotFromCache(session));
     }
-    await delay(100);
+    await delay(50);
+  }
+
+  try {
+    const snapshot = await withOperationTimeout(
+      'wait_for_dom_patterns_snapshot_final',
+      readDomSnapshot(session.page),
+      2000
+    );
+    const text = normalizeScreenText(snapshot?.authoritative_screen ?? snapshot?.screen ?? '');
+    lastText = text || lastText;
+    if (patterns.some((pattern) => text.includes(pattern))) {
+      return parseSnapshotPayload(snapshot);
+    }
+  } catch (error) {
+    lastText = `${lastText}\n[dom-read-error] ${error.message}`.trim();
   }
   throw new Error(
     `wait_for_dom_patterns timed out after ${timeoutMs}ms patterns=${JSON.stringify(
@@ -1080,6 +1301,16 @@ async function waitForSelector(params) {
     console.error(
       `[driver] wait_for_selector cache_miss instance=${instanceId} selector=${selector}; falling back to playwright`
     );
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (session.domState?.ids?.has(selector.slice(1))) {
+        console.error(
+          `[driver] wait_for_selector done instance=${instanceId} selector=${selector} source=cache_poll`
+        );
+        return parseSnapshotPayload(domSnapshotFromCache(session));
+      }
+      await delay(50);
+    }
   }
   try {
     await withOperationTimeout(
@@ -1230,6 +1461,10 @@ function requestTimeoutMs(method, params) {
       const timeoutMs = Number(params?.timeout_ms ?? 30000);
       return Math.max(1000, timeoutMs + 5000);
     }
+    case 'wait_for_ui_state': {
+      const timeoutMs = Number(params?.timeout_ms ?? UI_STATE_TIMEOUT_MS);
+      return Math.max(1000, timeoutMs + 5000);
+    }
     case 'click_button':
     case 'fill_input':
       return 30000;
@@ -1318,6 +1553,8 @@ async function startPage(params) {
         domState: normalizeDomState({ text: '', ids: [] }),
         uiStateCache: null,
         uiStateCacheJson: null,
+        uiStateVersion: 0,
+        uiStateWaiters: [],
         renderHeartbeat: null
       };
       sessions.set(instanceId, session);
@@ -1388,10 +1625,10 @@ async function startPage(params) {
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensureHarnessWithTimeout start`
         );
         await ensureHarnessWithTimeout(page, Math.min(harnessReadyTimeoutMs, 5000));
-        console.error(
-          `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensureHarnessWithTimeout done`
-        );
-        await assertRootStructure({ page }, 'startup');
+      console.error(
+        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensureHarnessWithTimeout done`
+      );
+      await assertRootStructure({ page }, 'startup');
       } catch (error) {
         consoleLog.push(
           `[${nowIso()}] harness bridge not ready after startup: ${error?.message ?? String(error)}`
@@ -1409,6 +1646,25 @@ async function startPage(params) {
       console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installDomObserver done`
       );
+      try {
+        console.error(
+          `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} semantic_ready start`
+        );
+        await readStructuredUiStateWithNavigationRecovery(
+          'startup',
+          Math.min(harnessReadyTimeoutMs, UI_STATE_TIMEOUT_MS)
+        );
+        console.error(
+          `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} semantic_ready done`
+        );
+      } catch (error) {
+        console.error(
+          `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} semantic_ready failed: ${
+            error?.message ?? String(error)
+          }`
+        );
+        throw error;
+      }
 
       return {
         instance_id: instanceId,
@@ -1463,6 +1719,23 @@ async function sendKeys(params) {
   const session = getSession(instanceId);
 
   console.error(`[driver] send_keys start instance=${instanceId} bytes=${keys.length}`);
+  try {
+    const harnessResult = await withOperationTimeout(
+      `send_keys_harness:${instanceId}`,
+      dispatchHarnessKeysText(session.page, keys),
+      2000
+    );
+    if (harnessResult?.ok) {
+      console.error(
+        `[driver] send_keys done instance=${instanceId} mode=${harnessResult.mode ?? 'harness'}`
+      );
+      return { status: 'sent', bytes: keys.length, mode: harnessResult.mode ?? 'harness' };
+    }
+  } catch (error) {
+    console.error(
+      `[driver] send_keys harness_path_failed instance=${instanceId} error=${normalizeClickError(error)}`
+    );
+  }
   console.error(`[driver] send_keys focus start instance=${instanceId}`);
   await focusAuraPageSafe(session.page, instanceId, 'send_keys');
   console.error(`[driver] send_keys focus done instance=${instanceId}`);
@@ -1484,6 +1757,21 @@ async function sendKey(params) {
   const repeat = Number(params?.repeat ?? 1);
   const session = getSession(instanceId);
   const count = Number.isFinite(repeat) ? Math.max(1, Math.floor(repeat)) : 1;
+
+  try {
+    const harnessResult = await withOperationTimeout(
+      `send_key_harness:${instanceId}`,
+      dispatchHarnessKey(session.page, key, count),
+      2000
+    );
+    if (harnessResult?.ok) {
+      return { status: 'sent', mode: harnessResult.mode ?? 'harness' };
+    }
+  } catch (error) {
+    console.error(
+      `[driver] send_key harness_path_failed instance=${instanceId} key=${key} error=${normalizeClickError(error)}`
+    );
+  }
 
   await focusAuraPageSafe(session.page, instanceId, 'send_key');
   for (let index = 0; index < count; index += 1) {
@@ -1571,12 +1859,7 @@ async function uiState(params) {
     const parsed = tryParseUiState(payload);
     if (parsed && typeof parsed === 'object') {
       await ensureUiStateRenderConvergence(session, parsed, reason);
-      session.uiStateCache = parsed;
-      try {
-        session.uiStateCacheJson = JSON.stringify(parsed);
-      } catch {
-        session.uiStateCacheJson = null;
-      }
+      storeUiState(session, parsed);
       console.error(
         `[driver] ui_state structured_read done instance=${instanceId} reason=${reason}`
       );
@@ -1699,6 +1982,31 @@ async function uiState(params) {
   );
 }
 
+async function waitForUiState(params) {
+  const instanceId = normalizeInstanceId(params);
+  const session = getSession(instanceId);
+  const timeoutMs = Number(params?.timeout_ms ?? UI_STATE_TIMEOUT_MS);
+  const rawAfterVersion = params?.after_version;
+  const afterVersion =
+    rawAfterVersion == null ? null : Number.isFinite(rawAfterVersion) ? Number(rawAfterVersion) : 0;
+
+  if (afterVersion == null) {
+    const snapshot = await uiState({ instance_id: instanceId });
+    return {
+      snapshot,
+      version: session.uiStateVersion ?? 0
+    };
+  }
+
+  if (!session.uiStateCache || typeof session.uiStateCache !== 'object') {
+    await uiState({ instance_id: instanceId });
+  }
+
+  const result = await waitForUiStateVersion(session, afterVersion, timeoutMs);
+  await ensureUiStateRenderConvergence(session, result.snapshot, 'event_wait');
+  return result;
+}
+
 async function domSnapshot(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
@@ -1789,42 +2097,33 @@ async function fillInput(params) {
   console.error(`[driver] fill_input start instance=${instanceId} selector=${selector}`);
   const locator = session.page.locator(selector).first();
   const domCacheHasSelector = selector.startsWith('#') && domStateHasId(session, selector.slice(1));
+  const attachTimeoutMs = domCacheHasSelector ? 2000 : 8000;
+  const focusTimeoutMs = domCacheHasSelector ? 1500 : 3000;
+  const fillTimeoutMs = domCacheHasSelector ? 2000 : 3000;
   console.error(
     `[driver] fill_input dom_cache instance=${instanceId} selector=${selector} present=${domCacheHasSelector}`
   );
   try {
+    await focusAuraPageSafe(session.page, instanceId, `fill_input_start:${selector}`);
     console.error(`[driver] fill_input attach_wait start instance=${instanceId} selector=${selector}`);
     await withOperationTimeout(
       `fill_input_attach:${selector}`,
-      locator.waitFor({ state: 'attached', timeout: 8000 }),
-      9000
+      locator.waitFor({ state: 'attached', timeout: attachTimeoutMs }),
+      attachTimeoutMs + 1000
     );
     console.error(`[driver] fill_input attach_wait done instance=${instanceId} selector=${selector}`);
     console.error(`[driver] fill_input focus start instance=${instanceId} selector=${selector}`);
     await withOperationTimeout(
       `fill_input_focus:${selector}`,
-      locator.focus({ timeout: 3000 }),
-      4000
+      locator.focus({ timeout: focusTimeoutMs }),
+      focusTimeoutMs + 1000
     );
     console.error(`[driver] fill_input focus done instance=${instanceId} selector=${selector}`);
-    console.error(`[driver] fill_input ready_wait start instance=${instanceId} selector=${selector}`);
-    await withOperationTimeout(
-      `fill_input_ready:${selector}`,
-      session.page.waitForFunction((targetSelector) => {
-        const element = document.querySelector(targetSelector);
-        if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
-          return false;
-        }
-        return !element.readOnly && !element.disabled;
-      }, selector),
-      3000
-    ).catch(() => null);
-    console.error(`[driver] fill_input ready_wait done instance=${instanceId} selector=${selector}`);
     console.error(`[driver] fill_input playwright_fill start instance=${instanceId} selector=${selector}`);
     await withOperationTimeout(
       `fill_input_fill:${selector}`,
-      locator.fill(value, { timeout: 3000 }),
-      5000
+      locator.fill(value, { timeout: fillTimeoutMs }),
+      fillTimeoutMs + 2000
     );
     console.error(`[driver] fill_input playwright_fill done instance=${instanceId} selector=${selector}`);
   } catch (error) {
@@ -1953,6 +2252,11 @@ async function stop(params) {
   }
 
   try {
+    for (const waiter of session.uiStateWaiters ?? []) {
+      clearTimeout(waiter.timer);
+      waiter.reject(new Error(`session stopped for ${instanceId}`));
+    }
+    session.uiStateWaiters = [];
     if (session.tracePath) {
       ensureDir(path.dirname(session.tracePath));
       await session.context.tracing.stop({ path: session.tracePath });
@@ -1997,6 +2301,8 @@ async function dispatch(method, params) {
       return snapshot(params);
     case 'ui_state':
       return uiState(params);
+    case 'wait_for_ui_state':
+      return waitForUiState(params);
     case 'dom_snapshot':
       return domSnapshot(params);
     case 'wait_for_dom_patterns':

@@ -123,6 +123,9 @@ web-static port="4173":
 browser-driver-smoke:
     cd crates/aura-harness/playwright-driver && npm test
 
+harness-browser-install-check:
+    bash scripts/check/harness-browser-install.sh
+
 # Run harness scenario against browser backend config
 harness-run-browser scenario config="configs/harness/browser-loopback.toml" artifacts_dir="artifacts/harness/browser":
     just harness-run -- --config {{config}} --scenario {{scenario}} --artifacts-dir {{artifacts_dir}}
@@ -143,6 +146,9 @@ harness-scenario-inventory-check:
 
 harness-shared-scenario-contract-check:
     bash scripts/check/harness-shared-scenario-contract.sh
+
+harness-ui-state-evented-check:
+    bash scripts/check/harness-ui-state-evented.sh
 
 harness-flake-metrics root="artifacts/harness":
     bash scripts/check/harness-flake-metrics.sh {{root}}
@@ -300,6 +306,10 @@ ci-harness-build:
 ci-harness-contract:
     cargo test -p aura-harness --test contract_local_loopback -q
     cargo test -p aura-harness --test contract_suite -q
+
+# Harness browser UiSnapshot evented policy
+ci-harness-ui-state-evented:
+    bash scripts/check/harness-ui-state-evented.sh
 
 # Harness replay regression (nightly mixed-topology lane)
 ci-harness-replay:
@@ -647,6 +657,7 @@ ci-dry-run profile="push":
         # Harness workflow lanes that run on push
         run_step "Harness Build"         "just ci-harness-build"
         run_step "Harness Contract"      "just ci-harness-contract"
+        run_step "Harness UI Evented"    "just ci-harness-ui-state-evented"
         run_step "Harness Browser"       "just ci-harness-browser"
         run_step "LAN Smoke"             "just ci-lan-smoke"
 

@@ -1705,16 +1705,34 @@ fn wait_for_semantic_state(
     timeout_ms: u64,
 ) -> Result<()> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-    let last_snapshot = loop {
-        let snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
+    let backend_kind = tool_api.backend_kind(instance_id).unwrap_or("unknown");
+    let mut last_snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
+    if semantic_wait_matches(step, &last_snapshot) {
+        return Ok(());
+    }
+    let mut browser_version = None;
+    loop {
+        if Instant::now() >= deadline {
+            break;
+        }
+        let snapshot = if backend_kind == "playwright_browser" {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let Some((snapshot, version)) =
+                tool_api.wait_for_ui_snapshot_event(instance_id, remaining, browser_version)?
+            else {
+                fetch_ui_snapshot(tool_api, instance_id)?
+            };
+            browser_version = Some(version);
+            snapshot
+        } else {
+            std::thread::sleep(Duration::from_millis(40));
+            fetch_ui_snapshot(tool_api, instance_id)?
+        };
         if semantic_wait_matches(step, &snapshot) {
             return Ok(());
         }
-        if Instant::now() >= deadline {
-            break snapshot;
-        }
-        std::thread::sleep(Duration::from_millis(40));
-    };
+        last_snapshot = snapshot;
+    }
     bail!(
         "step {} semantic wait timed out on instance {} ({}) last_snapshot={:?}",
         step.id,
@@ -1732,9 +1750,14 @@ fn wait_for_parity(
     timeout_ms: u64,
 ) -> Result<()> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let local_backend_kind = tool_api.backend_kind(instance_id).unwrap_or("unknown");
+    let peer_backend_kind = tool_api.backend_kind(peer_instance).unwrap_or("unknown");
+    let mut local = fetch_ui_snapshot(tool_api, instance_id)?;
+    let mut peer = fetch_ui_snapshot(tool_api, peer_instance)?;
+    let mut local_version = None;
+    let mut peer_version = None;
+    let mut wait_local_next = true;
     let (last_local, last_peer, last_mismatches) = loop {
-        let local = fetch_ui_snapshot(tool_api, instance_id)?;
-        let peer = fetch_ui_snapshot(tool_api, peer_instance)?;
         let mismatches = compare_ui_snapshots_for_parity(&local, &peer);
         if mismatches.is_empty() {
             return Ok(());
@@ -1742,7 +1765,39 @@ fn wait_for_parity(
         if Instant::now() >= deadline {
             break (local, peer, mismatches);
         }
-        std::thread::sleep(Duration::from_millis(40));
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if wait_local_next && local_backend_kind == "playwright_browser" {
+            if let Some((snapshot, version)) =
+                tool_api.wait_for_ui_snapshot_event(instance_id, remaining, local_version)?
+            {
+                local = snapshot;
+                local_version = Some(version);
+            } else {
+                std::thread::sleep(Duration::from_millis(40));
+                local = fetch_ui_snapshot(tool_api, instance_id)?;
+            }
+        } else if !wait_local_next && peer_backend_kind == "playwright_browser" {
+            if let Some((snapshot, version)) =
+                tool_api.wait_for_ui_snapshot_event(peer_instance, remaining, peer_version)?
+            {
+                peer = snapshot;
+                peer_version = Some(version);
+            } else {
+                std::thread::sleep(Duration::from_millis(40));
+                peer = fetch_ui_snapshot(tool_api, peer_instance)?;
+            }
+        } else {
+            std::thread::sleep(Duration::from_millis(40));
+            local = fetch_ui_snapshot(tool_api, instance_id)?;
+            peer = fetch_ui_snapshot(tool_api, peer_instance)?;
+        }
+        if local_backend_kind != "playwright_browser" || !wait_local_next {
+            local = fetch_ui_snapshot(tool_api, instance_id)?;
+        }
+        if peer_backend_kind != "playwright_browser" || wait_local_next {
+            peer = fetch_ui_snapshot(tool_api, peer_instance)?;
+        }
+        wait_local_next = !wait_local_next;
     };
     bail!(
         "step {} parity wait timed out on {} vs {} mismatches={:?} local={:?} peer={:?}",

@@ -48,6 +48,22 @@ jobs:
           name: harness-deep
           replay-command: nix develop --command just ci-harness-contract
 
+  ui-state-evented:
+    name: Harness UI Evented
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: harness-ui-state-evented
+      - run: nix develop --command just ci-harness-ui-state-evented
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: harness-deep
+          replay-command: nix develop --command just ci-harness-ui-state-evented
+
   replay:
     name: Harness Replay
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

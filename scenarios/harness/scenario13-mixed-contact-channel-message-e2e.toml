@@ -316,17 +316,17 @@ screen_id = "chat"
 timeout_ms = 3000
 
 [[steps]]
-id = "web-open-accept-home-invite-modal"
+id = "web-open-contacts-before-home-invite-modal"
 action = "navigate"
 actor = "web"
-screen_id = "neighborhood"
+screen_id = "contacts"
 timeout_ms = 3000
 
 [[steps]]
-id = "web-open-neighborhood-accept-home-invite-modal"
+id = "web-open-contacts-accept-home-invite-modal"
 action = "activate"
 actor = "web"
-control_id = "neighborhood_accept_invitation_button"
+control_id = "contacts_accept_invitation_button"
 timeout_ms = 3000
 
 [[steps]]

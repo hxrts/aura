@@ -2497,7 +2497,7 @@ pub fn AuraUiRoot(controller: Arc<UiController>) -> Element {
             div {
                 id: ControlId::ToastRegion
                     .web_dom_id()
-                    .unwrap_or("aura-toast-region"),
+                    .expect("ToastRegion must define a web DOM id"),
                 style: "--normal-bg: var(--popover); --normal-text: var(--popover-foreground); --normal-border: var(--border);",
                 ToastProvider {
                     default_duration: Duration::from_secs(5),
@@ -2890,7 +2890,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         main {
             id: ControlId::AppRoot
                 .web_dom_id()
-                .unwrap_or("aura-app-root"),
+                .expect("AppRoot must define a web DOM id"),
             "data-render-tick": "{render_tick_value}",
             class: "relative flex h-[100dvh] min-h-[100dvh] flex-col overflow-hidden bg-background text-foreground font-mono outline-none",
             tabindex: 0,
@@ -2966,10 +2966,10 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                     render_tick.set(render_tick() + 1);
                 }
             },
-            nav {
+                nav {
                 id: ControlId::NavRoot
                     .web_dom_id()
-                    .unwrap_or("aura-nav-root"),
+                    .expect("NavRoot must define a web DOM id"),
                 class: "border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80",
                 div {
                     class: "relative flex items-center px-4 py-3 sm:px-6",
@@ -3031,7 +3031,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
             div {
                 id: ControlId::ModalRegion
                     .web_dom_id()
-                    .unwrap_or("aura-modal-region"),
+                    .expect("ModalRegion must define a web DOM id"),
                 class: "contents",
                 if let Some(modal) = modal {
                     if let Some(add_device_state) = model.add_device_modal() {
@@ -3855,7 +3855,7 @@ fn NeighborhoodScreen(
                                 }
                             }
                             UiButton {
-                                id: Some("aura-neighborhood-new-home".to_string()),
+                                id: Some(ControlId::NeighborhoodNewHomeButton.web_dom_id().expect("ControlId::NeighborhoodNewHomeButton must define a web DOM id").to_string()),
                                 label: "New Home".to_string(),
                                 variant: ButtonVariant::Primary,
                                 onclick: move |_| {
@@ -3864,7 +3864,12 @@ fn NeighborhoodScreen(
                                 }
                             }
                             UiButton {
-                                id: Some("aura-neighborhood-accept-invitation".to_string()),
+                                id: Some(
+                                    ControlId::NeighborhoodAcceptInvitationButton
+                                        .web_dom_id()
+                                        .expect("ControlId::NeighborhoodAcceptInvitationButton must define a web DOM id")
+                                        .to_string(),
+                                ),
                                 label: "Accept Invitation".to_string(),
                                 variant: ButtonVariant::Secondary,
                                 onclick: move |_| {
@@ -3873,7 +3878,12 @@ fn NeighborhoodScreen(
                                 }
                             }
                             UiButton {
-                                id: Some("aura-neighborhood-enter-as".to_string()),
+                                id: Some(
+                                    ControlId::NeighborhoodEnterAsButton
+                                        .web_dom_id()
+                                        .expect("ControlId::NeighborhoodEnterAsButton must define a web DOM id")
+                                        .to_string(),
+                                ),
                                 label: format!("Enter As: {access_label}"),
                                 variant: ButtonVariant::Secondary,
                                 onclick: move |_| {
@@ -4048,7 +4058,12 @@ fn ChatScreen(
                 }
                 div { class: "flex gap-2 pt-1",
                     UiButton {
-                        id: Some("aura-chat-new-group".to_string()),
+                        id: Some(
+                            ControlId::ChatNewGroupButton
+                                .web_dom_id()
+                                .expect("ControlId::ChatNewGroupButton must define a web DOM id")
+                                .to_string(),
+                        ),
                         label: "New Group".to_string(),
                         variant: ButtonVariant::Primary,
                         onclick: move |_| {
@@ -4102,7 +4117,7 @@ fn ChatScreen(
                             textarea {
                                 id: FieldId::ChatInput
                                     .web_dom_id()
-                                    .unwrap_or("aura-field-chat-input"),
+                                    .expect("FieldId::ChatInput must define a web DOM id"),
                                 class: "h-full min-h-[4.5rem] w-full resize-none border-0 bg-transparent p-0 text-sm text-foreground outline-none placeholder:text-muted-foreground",
                                 value: "{composer_value}",
                                 readonly: !is_input_mode,
@@ -4145,12 +4160,12 @@ fn ChatScreen(
                         }
                     }
                     UiButton {
-                        id: Some(
-                            ControlId::ChatSendMessageButton
-                                .web_dom_id()
-                                .unwrap_or("aura-chat-send-message")
-                                .to_string()
-                        ),
+                                id: Some(
+                                    ControlId::ChatSendMessageButton
+                                        .web_dom_id()
+                                        .expect("ControlId::ChatSendMessageButton must define a web DOM id")
+                                        .to_string()
+                                ),
                         label: if is_input_mode { "Send".to_string() } else { "Reply".to_string() },
                         variant: ButtonVariant::Primary,
                         onclick: move |_| {
@@ -4378,13 +4393,13 @@ fn ContactsScreen(
                     }
                 }
                 div { class: "flex gap-2 pt-1",
-                    UiButton {
-                        id: Some(
-                            ControlId::ContactsAcceptInvitationButton
-                                .web_dom_id()
-                                .unwrap_or("aura-contacts-accept-invitation")
-                                .to_string(),
-                        ),
+                            UiButton {
+                                id: Some(
+                                    ControlId::ContactsAcceptInvitationButton
+                                        .web_dom_id()
+                                        .expect("ControlId::ContactsAcceptInvitationButton must define a web DOM id")
+                                        .to_string(),
+                                ),
                         label: "Accept Invitation".to_string(),
                         variant: ButtonVariant::Secondary,
                         onclick: move |_| {
@@ -4392,13 +4407,13 @@ fn ContactsScreen(
                             render_tick.set(render_tick() + 1);
                         }
                     }
-                    UiButton {
-                        id: Some(
-                            ControlId::ContactsCreateInvitationButton
-                                .web_dom_id()
-                                .unwrap_or("aura-contacts-create-invitation")
-                                .to_string(),
-                        ),
+                            UiButton {
+                                id: Some(
+                                    ControlId::ContactsCreateInvitationButton
+                                        .web_dom_id()
+                                        .expect("ControlId::ContactsCreateInvitationButton must define a web DOM id")
+                                        .to_string(),
+                                ),
                         label: "Invite".to_string(),
                         variant: ButtonVariant::Primary,
                         onclick: {
@@ -4452,7 +4467,12 @@ fn ContactsScreen(
                         div {
                             class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
                             UiButton {
-                                id: Some("aura-contacts-start-chat".to_string()),
+                                id: Some(
+                                    ControlId::ContactsStartChatButton
+                                        .web_dom_id()
+                                        .expect("ControlId::ContactsStartChatButton must define a web DOM id")
+                                        .to_string(),
+                                ),
                                 label: "Start Chat".to_string(),
                                 variant: ButtonVariant::Primary,
                                 onclick: {
@@ -4485,6 +4505,14 @@ fn ContactsScreen(
                                 }
                             }
                             UiButton {
+                                id: Some(
+                                    ControlId::ContactsEditNicknameButton
+                                        .web_dom_id()
+                                        .expect(
+                                            "ControlId::ContactsEditNicknameButton must define a web DOM id",
+                                        )
+                                        .to_string(),
+                                ),
                                 label: "Edit Nickname".to_string(),
                                 variant: ButtonVariant::Secondary,
                                 onclick: move |_| {
@@ -4493,6 +4521,14 @@ fn ContactsScreen(
                                 }
                             }
                             UiButton {
+                                id: Some(
+                                    ControlId::ContactsRemoveContactButton
+                                        .web_dom_id()
+                                        .expect(
+                                            "ControlId::ContactsRemoveContactButton must define a web DOM id",
+                                        )
+                                        .to_string(),
+                                ),
                                 label: "Remove Contact".to_string(),
                                 variant: ButtonVariant::Secondary,
                                 onclick: move |_| {
@@ -4766,7 +4802,14 @@ fn SettingsScreen(
                         div {
                             class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
                             UiButton {
-                                id: Some("aura-settings-edit-nickname".to_string()),
+                                id: Some(
+                                    ControlId::SettingsEditNicknameButton
+                                        .web_dom_id()
+                                        .expect(
+                                            "ControlId::SettingsEditNicknameButton must define a web DOM id"
+                                        )
+                                        .to_string(),
+                                ),
                                 label: "Edit Nickname".to_string(),
                                 variant: ButtonVariant::Primary,
                                 onclick: {
@@ -4797,7 +4840,14 @@ fn SettingsScreen(
                         div {
                             class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
                             UiButton {
-                                id: Some("aura-settings-configure-threshold".to_string()),
+                                id: Some(
+                                    ControlId::SettingsConfigureThresholdButton
+                                        .web_dom_id()
+                                        .expect(
+                                            "ControlId::SettingsConfigureThresholdButton must define a web DOM id"
+                                        )
+                                        .to_string(),
+                                ),
                                 label: "Configure Threshold".to_string(),
                                 variant: ButtonVariant::Primary,
                                 onclick: {
@@ -4828,7 +4878,14 @@ fn SettingsScreen(
                         div {
                             class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
                             UiButton {
-                                id: Some("aura-settings-request-recovery".to_string()),
+                                id: Some(
+                                    ControlId::SettingsRequestRecoveryButton
+                                        .web_dom_id()
+                                        .expect(
+                                            "ControlId::SettingsRequestRecoveryButton must define a web DOM id"
+                                        )
+                                        .to_string(),
+                                ),
                                 label: "Request Recovery".to_string(),
                                 variant: ButtonVariant::Primary,
                                 onclick: {
@@ -4872,7 +4929,7 @@ fn SettingsScreen(
                                 id: Some(
                                     ControlId::SettingsAddDeviceButton
                                         .web_dom_id()
-                                        .unwrap_or("aura-settings-add-device")
+                                        .expect("ControlId::SettingsAddDeviceButton must define a web DOM id")
                                         .to_string(),
                                 ),
                                 label: "Add Device".to_string(),
@@ -4887,7 +4944,12 @@ fn SettingsScreen(
                                 }
                             }
                             UiButton {
-                                id: Some("aura-settings-import-device-code".to_string()),
+                                id: Some(
+                                    ControlId::SettingsImportDeviceCodeButton
+                                        .web_dom_id()
+                                        .expect("ControlId::SettingsImportDeviceCodeButton must define a web DOM id")
+                                        .to_string(),
+                                ),
                                 label: "Import Code".to_string(),
                                 variant: ButtonVariant::Secondary,
                                 onclick: {
@@ -4903,7 +4965,7 @@ fn SettingsScreen(
                                 id: Some(
                                     ControlId::SettingsRemoveDeviceButton
                                         .web_dom_id()
-                                        .unwrap_or("aura-settings-remove-device")
+                                        .expect("ControlId::SettingsRemoveDeviceButton must define a web DOM id")
                                         .to_string(),
                                 ),
                                 label: "Remove Device".to_string(),
@@ -4956,7 +5018,14 @@ fn SettingsScreen(
                         div {
                             class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
                             UiButton {
-                                id: Some("aura-settings-switch-authority".to_string()),
+                                id: Some(
+                                    ControlId::SettingsSwitchAuthorityButton
+                                        .web_dom_id()
+                                        .expect(
+                                            "ControlId::SettingsSwitchAuthorityButton must define a web DOM id"
+                                        )
+                                        .to_string(),
+                                ),
                                 label: "Switch Authority".to_string(),
                                 variant: ButtonVariant::Primary,
                                 onclick: {
@@ -4969,7 +5038,14 @@ fn SettingsScreen(
                                 }
                             }
                             UiButton {
-                                id: Some("aura-settings-configure-mfa".to_string()),
+                                id: Some(
+                                    ControlId::SettingsConfigureMfaButton
+                                        .web_dom_id()
+                                        .expect(
+                                            "ControlId::SettingsConfigureMfaButton must define a web DOM id"
+                                        )
+                                        .to_string(),
+                                ),
                                 label: "Configure MFA".to_string(),
                                 variant: ButtonVariant::Secondary,
                                 onclick: {
@@ -5006,7 +5082,14 @@ fn SettingsScreen(
                         div {
                             class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
                             UiButton {
-                                id: Some("aura-settings-toggle-theme".to_string()),
+                                id: Some(
+                                    ControlId::SettingsToggleThemeButton
+                                        .web_dom_id()
+                                        .expect(
+                                            "ControlId::SettingsToggleThemeButton must define a web DOM id"
+                                        )
+                                        .to_string(),
+                                ),
                                 label: match resolved_scheme {
                                     ColorScheme::Light => "Switch to Dark".to_string(),
                                     _ => "Switch to Light".to_string(),
@@ -5048,20 +5131,22 @@ fn nav_button_id(screen: UiScreen) -> &'static str {
     match screen {
         UiScreen::Onboarding => ControlId::OnboardingRoot
             .web_dom_id()
-            .unwrap_or("aura-onboarding-root"),
+            .expect("OnboardingRoot must define a web DOM id"),
         UiScreen::Neighborhood => ControlId::NavNeighborhood
             .web_dom_id()
-            .unwrap_or("aura-nav-neighborhood"),
-        UiScreen::Chat => ControlId::NavChat.web_dom_id().unwrap_or("aura-nav-chat"),
+            .expect("NavNeighborhood must define a web DOM id"),
+        UiScreen::Chat => ControlId::NavChat
+            .web_dom_id()
+            .expect("NavChat must define a web DOM id"),
         UiScreen::Contacts => ControlId::NavContacts
             .web_dom_id()
-            .unwrap_or("aura-nav-contacts"),
+            .expect("NavContacts must define a web DOM id"),
         UiScreen::Notifications => ControlId::NavNotifications
             .web_dom_id()
-            .unwrap_or("aura-nav-notifications"),
+            .expect("NavNotifications must define a web DOM id"),
         UiScreen::Settings => ControlId::NavSettings
             .web_dom_id()
-            .unwrap_or("aura-nav-settings"),
+            .expect("NavSettings must define a web DOM id"),
     }
 }
 
@@ -5105,7 +5190,7 @@ fn render_screen_content(
             div {
                 id: ControlId::Screen(ContractScreenId::Onboarding)
                     .web_dom_id()
-                    .unwrap_or("aura-screen-onboarding"),
+                    .expect("Screen(Onboarding) must define a web DOM id"),
                 class: "h-full min-h-0 w-full",
             }
         },
@@ -5113,7 +5198,7 @@ fn render_screen_content(
             div {
                 id: ControlId::Screen(ContractScreenId::Neighborhood)
                     .web_dom_id()
-                    .unwrap_or("aura-screen-neighborhood"),
+                    .expect("Screen(Neighborhood) must define a web DOM id"),
                 class: "h-full min-h-0 w-full",
                 {NeighborhoodScreen(model, neighborhood_runtime, controller, render_tick)}
             }
@@ -5122,7 +5207,7 @@ fn render_screen_content(
             div {
                 id: ControlId::Screen(ContractScreenId::Chat)
                     .web_dom_id()
-                    .unwrap_or("aura-screen-chat"),
+                    .expect("Screen(Chat) must define a web DOM id"),
                 class: "h-full min-h-0 w-full",
                 {ChatScreen(model, chat_runtime, controller, render_tick)}
             }
@@ -5131,7 +5216,7 @@ fn render_screen_content(
             div {
                 id: ControlId::Screen(ContractScreenId::Contacts)
                     .web_dom_id()
-                    .unwrap_or("aura-screen-contacts"),
+                    .expect("Screen(Contacts) must define a web DOM id"),
                 class: "h-full min-h-0 w-full",
                 {ContactsScreen(model, contacts_runtime, controller, render_tick)}
             }
@@ -5140,7 +5225,7 @@ fn render_screen_content(
             div {
                 id: ControlId::Screen(ContractScreenId::Notifications)
                     .web_dom_id()
-                    .unwrap_or("aura-screen-notifications"),
+                    .expect("Screen(Notifications) must define a web DOM id"),
                 class: "h-full min-h-0 w-full",
                 {NotificationsScreen(model, notifications_runtime, controller, render_tick)}
             }
@@ -5149,7 +5234,7 @@ fn render_screen_content(
             div {
                 id: ControlId::Screen(ContractScreenId::Settings)
                     .web_dom_id()
-                    .unwrap_or("aura-screen-settings"),
+                    .expect("Screen(Settings) must define a web DOM id"),
                 class: "h-full min-h-0 w-full",
                 {SettingsScreen(
                     model,
