@@ -420,15 +420,15 @@ impl ScenarioStep {
                 ))),
                 None => None,
             },
-            ScenarioAction::AssertParity => Some(SemanticAction::Expect(
-                Expectation::ParityWithActor {
+            ScenarioAction::AssertParity => {
+                Some(SemanticAction::Expect(Expectation::ParityWithActor {
                     actor: ActorId(required_field(
                         self.peer_instance.clone(),
                         "peer_instance",
                         self.action,
                     )?),
-                },
-            )),
+                }))
+            }
             ScenarioAction::WaitFor => expectation_from_step(self)?,
             ScenarioAction::MessageContains => {
                 Some(SemanticAction::Expect(Expectation::MessageContains {

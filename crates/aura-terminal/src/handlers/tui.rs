@@ -192,9 +192,7 @@ fn create_placeholder_ids(device_id_str: &str) -> (AuthorityId, ContextId) {
     )
 }
 
-fn harness_lan_discovery_override(
-    current: &mut aura_agent::core::config::AgentConfig,
-) {
+fn harness_lan_discovery_override(current: &mut aura_agent::core::config::AgentConfig) {
     let enabled = std::env::var("AURA_HARNESS_LAN_DISCOVERY_ENABLED")
         .ok()
         .and_then(|value| value.parse::<bool>().ok());

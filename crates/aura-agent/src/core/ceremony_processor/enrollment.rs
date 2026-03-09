@@ -629,9 +629,7 @@ impl<'a> EnrollmentHandler<'a> {
                 );
                 eprintln!(
                     "[device-enrollment-commit-send-failed] ceremony_id={};device_id={};error={}",
-                    ceremony_id,
-                    device_id,
-                    e,
+                    ceremony_id, device_id, e,
                 );
             } else {
                 tracing::info!(

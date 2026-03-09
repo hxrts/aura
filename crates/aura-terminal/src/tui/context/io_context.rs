@@ -896,12 +896,12 @@ impl IoContext {
             app_core,
             &invitation,
         )
-            .await
-            .map_err(|e| {
-                TerminalError::Operation(format!(
-                    "Failed to accept device enrollment invitation: {e}"
-                ))
-            })
+        .await
+        .map_err(|e| {
+            TerminalError::Operation(format!(
+                "Failed to accept device enrollment invitation: {e}"
+            ))
+        })
     }
 
     pub async fn dispatch_send_message(

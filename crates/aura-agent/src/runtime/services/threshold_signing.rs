@@ -285,7 +285,9 @@ impl ThresholdSigningService {
             version: 1,
         };
 
-        let signature = self.sign(SigningContext::self_tree_op(*authority, op.clone())).await?;
+        let signature = self
+            .sign(SigningContext::self_tree_op(*authority, op.clone()))
+            .await?;
         let attested = AttestedOp {
             op,
             agg_sig: signature.signature,

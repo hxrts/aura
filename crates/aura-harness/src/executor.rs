@@ -282,7 +282,11 @@ impl ScenarioExecutor {
             })?;
             step_metrics.push(StepMetricRecord {
                 step_id: state.id.clone(),
-                actor: state.step.instance.clone().unwrap_or_else(|| "-".to_string()),
+                actor: state
+                    .step
+                    .instance
+                    .clone()
+                    .unwrap_or_else(|| "-".to_string()),
                 action: state.step.action.to_string(),
                 duration_ms: step_started.elapsed().as_millis() as u64,
             });

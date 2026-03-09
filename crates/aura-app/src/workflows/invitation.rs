@@ -142,10 +142,10 @@ use crate::workflows::runtime::{
     converge_runtime, ensure_runtime_peer_connectivity, require_runtime,
 };
 use crate::workflows::settings;
-use crate::workflows::time;
 #[cfg(feature = "signals")]
 use crate::workflows::signals::read_signal;
 use crate::workflows::signals::read_signal_or_default;
+use crate::workflows::time;
 use crate::{views::invitations::InvitationsState, AppCore};
 use async_lock::RwLock;
 use aura_core::effects::amp::ChannelBootstrapPackage;
@@ -337,10 +337,7 @@ pub async fn accept_device_enrollment_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     invitation: &InvitationInfo,
 ) -> Result<(), AuraError> {
-    let InvitationBridgeType::DeviceEnrollment {
-        ..
-    } = &invitation.invitation_type
-    else {
+    let InvitationBridgeType::DeviceEnrollment { .. } = &invitation.invitation_type else {
         return Err(AuraError::invalid(
             "accept_device_enrollment_invitation requires a device enrollment invitation",
         ));

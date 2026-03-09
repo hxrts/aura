@@ -589,6 +589,34 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 
     fn activate_control(&mut self, control_id: ControlId) -> Result<()> {
+        if let Some(keys) = control_id.activation_key() {
+            let key_error = self.send_keys(keys).map_err(|error| {
+                anyhow::anyhow!("preferred key activation failed for {control_id:?}: {error}")
+            });
+            if key_error.is_ok() {
+                return Ok(());
+            }
+
+            if let Ok(selector) = control_selector(control_id) {
+                let click_error = self.click_target(&selector).map_err(|error| {
+                    anyhow::anyhow!(
+                        "preferred key activation failed for {control_id:?} and fallback selector activation failed: {error}"
+                    )
+                });
+                if click_error.is_ok() {
+                    return Ok(());
+                }
+
+                return Err(anyhow::anyhow!(
+                    "control activation fallback also failed for {control_id:?}: key={key_error:?}, click={click_error:?}"
+                ));
+            }
+
+            return Err(anyhow::anyhow!(
+                "control activation key fallback failed for {control_id:?} without selector: key={key_error:?}"
+            ));
+        }
+
         let selector = control_selector(control_id)?;
         self.click_target(&selector)
     }

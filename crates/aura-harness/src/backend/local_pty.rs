@@ -269,10 +269,7 @@ impl InstanceBackend for LocalPtyBackend {
                 "AURA_HARNESS_LAN_DISCOVERY_BROADCAST_ADDR",
                 &lan.broadcast_addr,
             );
-            command.env(
-                "AURA_HARNESS_LAN_DISCOVERY_PORT",
-                lan.port.to_string(),
-            );
+            command.env("AURA_HARNESS_LAN_DISCOVERY_PORT", lan.port.to_string());
         }
 
         fs::create_dir_all(&self.config.data_dir).with_context(|| {
@@ -429,24 +426,9 @@ impl InstanceBackend for LocalPtyBackend {
             }
             _ => {}
         }
-        let sequence = match control_id {
-            ControlId::NavNeighborhood => "1",
-            ControlId::NavChat => "2",
-            ControlId::NavContacts => "3",
-            ControlId::NavNotifications => "4",
-            ControlId::NavSettings => "5",
-            ControlId::OnboardingCreateAccountButton => "\r",
-            ControlId::ModalCopyButton => "c",
-            ControlId::NeighborhoodNewHomeButton => "n",
-            ControlId::NeighborhoodAcceptInvitationButton => "a",
-            ControlId::ContactsCreateInvitationButton => "n",
-            ControlId::ContactsAcceptInvitationButton => "a",
-            ControlId::ModalConfirmButton => "\r",
-            ControlId::ModalCancelButton => "\x1b",
-            ControlId::SettingsAddDeviceButton => "a",
-            ControlId::SettingsRemoveDeviceButton => "r",
-            _ => anyhow::bail!("control {control_id:?} does not have a PTY activation mapping"),
-        };
+        let sequence = control_id.activation_key().ok_or_else(|| {
+            anyhow::anyhow!("control {control_id:?} does not have a PTY activation mapping")
+        })?;
         self.send_keys(sequence)
     }
 
@@ -467,7 +449,10 @@ impl InstanceBackend for LocalPtyBackend {
     fn activate_list_item(&mut self, list_id: ListId, item_id: &str) -> Result<()> {
         let mut snapshot = self.ui_snapshot()?;
         if matches!(list_id, ListId::SettingsSections)
-            && matches!(snapshot.focused_control, Some(ControlId::Screen(ScreenId::Settings)))
+            && matches!(
+                snapshot.focused_control,
+                Some(ControlId::Screen(ScreenId::Settings))
+            )
         {
             self.send_keys("\u{1b}[B")?;
             thread::sleep(Duration::from_millis(80));
@@ -600,7 +585,11 @@ impl InstanceBackend for LocalPtyBackend {
         }
         let delta = target_index as isize - current_index as isize;
         let sequence = if matches!(list_id, ListId::SettingsSections) {
-            if delta < 0 { "\u{1b}[A" } else { "\u{1b}[B" }
+            if delta < 0 {
+                "\u{1b}[A"
+            } else {
+                "\u{1b}[B"
+            }
         } else if delta < 0 {
             "k"
         } else {
@@ -609,10 +598,7 @@ impl InstanceBackend for LocalPtyBackend {
         for _ in 0..delta.unsigned_abs() {
             eprintln!(
                 "[local_pty activate_list_item send] instance={} list={:?} item_id={} sequence={}",
-                self.config.id,
-                list_id,
-                item_id,
-                sequence
+                self.config.id, list_id, item_id, sequence
             );
             self.send_keys(sequence)?;
             thread::sleep(Duration::from_millis(60));

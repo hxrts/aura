@@ -1440,7 +1440,8 @@ fn submit_runtime_modal_action(
                             &app_core,
                             &invitation,
                         )
-                        .await {
+                        .await
+                        {
                             Ok(()) => {
                                 let _ =
                                     settings_workflows::refresh_settings_from_runtime(&app_core)
@@ -5924,8 +5925,14 @@ fn help_modal_content(screen: UiScreen) -> (Vec<String>, Vec<(String, String)>) 
 
     let keybind_rows = match screen {
         UiScreen::Onboarding => vec![
-            ("type".to_string(), "Enter account name or import code".to_string()),
-            ("enter".to_string(), "Submit the active onboarding form".to_string()),
+            (
+                "type".to_string(),
+                "Enter account name or import code".to_string(),
+            ),
+            (
+                "enter".to_string(),
+                "Submit the active onboarding form".to_string(),
+            ),
         ],
         UiScreen::Neighborhood => vec![
             ("1-5".to_string(), "Switch screens".to_string()),

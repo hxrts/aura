@@ -9,9 +9,9 @@ use crate::runtime::effects::AuraEffectSystem;
 use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyRunner};
 use crate::runtime::services::{CeremonyTracker, ReconfigurationManager};
 use crate::ThresholdSigningService;
-use aura_core::util::serialization::from_slice;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::ThresholdSigningEffects;
+use aura_core::util::serialization::from_slice;
 use aura_core::{AttestedOp, AuthorityId};
 use aura_protocol::effects::TreeEffects;
 
@@ -76,7 +76,8 @@ impl<'a> CommitHandler<'a> {
 
         let authority_id = envelope.destination;
 
-        if content_type == "application/aura-device-enrollment-commit" && !envelope.payload.is_empty()
+        if content_type == "application/aura-device-enrollment-commit"
+            && !envelope.payload.is_empty()
         {
             let attested: AttestedOp = match from_slice(&envelope.payload) {
                 Ok(attested) => attested,
@@ -106,8 +107,7 @@ impl<'a> CommitHandler<'a> {
             );
             eprintln!(
                 "[device-enrollment-commit-applied] authority_id={};content_type={}",
-                authority_id,
-                content_type,
+                authority_id, content_type,
             );
         } else if content_type == "application/aura-device-enrollment-commit" {
             tracing::info!(
@@ -117,8 +117,7 @@ impl<'a> CommitHandler<'a> {
             );
             eprintln!(
                 "[device-enrollment-commit-empty] authority_id={};content_type={}",
-                authority_id,
-                content_type,
+                authority_id, content_type,
             );
         }
 

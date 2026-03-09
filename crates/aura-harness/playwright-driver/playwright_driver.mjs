@@ -551,11 +551,269 @@ async function waitForPageNavigationStabilization(session, reason) {
 }
 
 async function focusAuraPage(page) {
-  await withOperationTimeout('focus_page', page.bringToFront(), 3000);
+  try {
+    await withOperationTimeout('focus_page', page.bringToFront(), 3000);
+    return true;
+  } catch (error) {
+    console.error(`[driver] focus_page skipped instance=unknown reason=${normalizeClickError(error)}`);
+    return false;
+  }
+}
+
+async function focusAuraPageSafe(page, instanceId, context) {
+  try {
+    return await focusAuraPage(page);
+  } catch (error) {
+    console.error(
+      `[driver] focus_page skipped instance=${instanceId ?? 'unknown'} context=${context} reason=${normalizeClickError(
+        error
+      )}`
+    );
+    return false;
+  }
 }
 
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function selectorToFallbackLabel(selector) {
+  const raw = String(selector ?? '').trim();
+  if (!raw.startsWith('#')) {
+    return '';
+  }
+  let label = raw.slice(1);
+  if (!label.startsWith('aura-')) {
+    return '';
+  }
+  label = label.replace(/^aura-/, '');
+  label = label.replace(/^-/, '').replace(/-button$/, '');
+  label = label.replace(/^nav-/, '');
+  label = label.replace(/(?:^|[-_])(?:button|btn|input|field)$/g, '').trim();
+  label = label.replace(/[\-_]+/g, ' ').trim();
+  if (!label) {
+    return '';
+  }
+  return label.charAt(0).toUpperCase() + label.slice(1).toLowerCase();
+}
+
+function normalizeClickError(error) {
+  return error?.message || String(error || 'unknown');
+}
+
+async function clickLocatorWithDiagnostics(locator, context) {
+  const actionTimeoutMs = 2800;
+  const result = await locator.evaluate((element) => {
+    if (!(element instanceof HTMLElement)) {
+      return { ok: false, reason: 'not_html_element' };
+    }
+    const style = window.getComputedStyle(element);
+    if (style.display === 'none' || style.visibility === 'hidden') {
+      return { ok: false, reason: 'not_visible' };
+    }
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return { ok: false, reason: 'zero_size' };
+    }
+    if (element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true') {
+      return { ok: false, reason: 'disabled' };
+    }
+    return {
+      ok: true,
+      id: element.id || null,
+      text: String(element.textContent ?? '').replace(/\s+/g, ' ').trim()
+    };
+  });
+  if (!result || result.ok !== true) {
+    throw new Error(`${context} precheck_failed ${JSON.stringify(result ?? {})}`);
+  }
+
+  try {
+    await locator.scrollIntoViewIfNeeded();
+  } catch {
+    // Non-fatal: some hidden or detached controls are still best-effort actionable.
+  }
+
+  try {
+    await withOperationTimeout(
+      `locator_click:${context}`,
+      locator.click({
+        timeout: actionTimeoutMs,
+        noWaitAfter: true
+      }),
+      actionTimeoutMs + 200
+    );
+  } catch (error) {
+    if (String(error?.message ?? error).includes('Timeout')) {
+      throw error;
+    }
+    await withOperationTimeout(
+      `locator_click_force:${context}`,
+      locator.click({
+        timeout: actionTimeoutMs,
+        force: true,
+        noWaitAfter: true
+      }),
+      actionTimeoutMs + 200
+    ).catch(() => {
+      throw error;
+    });
+  }
+
+  return result;
+}
+
+async function clickLocatorBySelectorFallback(page, selector, session) {
+  const normalizedSelector = String(selector || '').trim();
+  try {
+    const fallback = await page.evaluate(({ targetSelector }) => {
+      const element = document.querySelector(targetSelector);
+      if (!element) {
+        return { ok: false, reason: 'element_not_found' };
+      }
+      if (
+        !(element instanceof HTMLElement) ||
+        element.hasAttribute('disabled') ||
+        element.getAttribute('aria-disabled') === 'true'
+      ) {
+        return { ok: false, reason: 'not_clickable' };
+      }
+      element.focus();
+      element.click();
+      return {
+        ok: true,
+        id: String(element.id ?? ''),
+        text: String(element.textContent ?? '').replace(/\s+/g, ' ').trim()
+      };
+    }, { targetSelector: normalizedSelector });
+    if (fallback.ok) {
+      console.error(
+        `[driver] click_button js_fallback_ok instance=${session.id} selector=${normalizedSelector}`
+      );
+      return fallback;
+    }
+    throw new Error(`js_fallback_failed reason=${fallback.reason}`);
+  } catch (error) {
+    console.error(
+      `[driver] click_button js_fallback_failed instance=${session.id} selector=${normalizedSelector} error=${normalizeClickError(
+        error
+      )}`
+    );
+    throw error;
+  }
+}
+
+async function clickByCssSelector(page, selector, session) {
+  const normalizedSelector = String(selector || '').trim();
+  const maxAttempts = 3;
+  let lastError = null;
+  const navShortcut = navigationShortcutForSelector(normalizedSelector);
+
+  await focusAuraPageSafe(page, session.id, `css_start:${normalizedSelector}`);
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const attemptContext = `css:${normalizedSelector}:attempt${attempt}`;
+    try {
+      const locator = page.locator(normalizedSelector).first();
+
+      await withOperationTimeout(
+        `click_wait_${attemptContext}`,
+        locator.waitFor({ state: 'attached', timeout: 1200 }),
+        1500
+      );
+
+      return await clickLocatorWithDiagnostics(locator, attemptContext);
+    } catch (error) {
+      lastError = error;
+      const message = normalizeClickError(error);
+      console.error(
+        `[driver] click_button css attempt_failed instance=${session.id} selector=${normalizedSelector} attempt=${attempt} error=${message}`
+      );
+      if (isNavigationTransitionError(error)) {
+        await waitForPageNavigationStabilization(session, attemptContext);
+      }
+      if (
+        message.includes('locator.waitFor') ||
+        message.includes('timed out') ||
+        message.includes('Timeout') ||
+        message.includes('500ms')
+      ) {
+        try {
+          return clickLocatorBySelectorFallback(page, normalizedSelector, session);
+        } catch (fallbackError) {
+          lastError = fallbackError;
+        }
+      }
+      if (attempt + 1 < maxAttempts) {
+        await delay(150);
+        continue;
+      }
+    }
+  }
+
+  if (navShortcut) {
+    const shortcutReason = `css_fallback_${normalizedSelector}`;
+    try {
+      console.error(
+        `[driver] click_button css fallback_key instance=${session.id} selector=${normalizedSelector} key=${navShortcut} reason=${shortcutReason}`
+      );
+      await withOperationTimeout(
+        `css_nav_escape_${shortcutReason}`,
+        page.keyboard.press('Escape'),
+        1200
+      );
+      await withOperationTimeout(
+        `css_nav_shortcut_${shortcutReason}`,
+        page.keyboard.press(navShortcut),
+        1200
+      );
+      return { ok: true, id: normalizedSelector, text: `shortcut:${navShortcut}` };
+    } catch (fallbackError) {
+      console.error(
+        `[driver] click_button css fallback_key_failed instance=${session.id} selector=${normalizedSelector} key=${navShortcut} error=${normalizeClickError(fallbackError)}`
+      );
+    }
+  }
+
+  throw new Error(`css_click_retries_exhausted selector=${normalizedSelector} ${normalizeClickError(lastError)}`);
+}
+
+async function clickByLabelText(page, label, session) {
+  const normalizedLabel = normalizeClickTarget(label);
+  const candidates = [
+    page.getByRole('button', { name: normalizedLabel, exact: true }),
+    page.getByRole('link', { name: normalizedLabel, exact: true }),
+    page.locator('button, a, [role="button"], [role="link"]').filter({
+      hasText: new RegExp(`^${escapeRegex(normalizedLabel)}$`, 'i')
+    })
+  ];
+  const maxAttempts = 3;
+  let lastError = null;
+  await focusAuraPageSafe(page, session.id, `label_start:${normalizedLabel}`);
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    for (const candidate of candidates) {
+      const context = `label:${normalizedLabel}:attempt${attempt}`;
+      try {
+        await withOperationTimeout(
+          `click_label_wait_${context}`,
+          candidate.first().waitFor({ state: 'visible', timeout: 2500 }),
+          2900
+        );
+        return await clickLocatorWithDiagnostics(candidate.first(), context);
+      } catch (error) {
+        lastError = error;
+        if (isNavigationTransitionError(error)) {
+          await waitForPageNavigationStabilization(session, context);
+          continue;
+        }
+      }
+    }
+    if (attempt + 1 < maxAttempts) {
+      await delay(175);
+    }
+  }
+
+  throw new Error(`label_click_failed label=${normalizedLabel} ${normalizeClickError(lastError)}`);
 }
 
 function mapPlaywrightKey(key) {
@@ -873,62 +1131,34 @@ function appRootLocator(page) {
   return page.locator('main').last();
 }
 
-async function clickLocator(locator, label) {
-  const actionTimeoutMs = 10000;
-  try {
-    await withOperationTimeout(
-      `click_button_wait:${label}`,
-      locator.waitFor({ state: 'attached', timeout: actionTimeoutMs }),
-      actionTimeoutMs + 1000
-    );
-    await locator.scrollIntoViewIfNeeded().catch(() => {});
-    await withOperationTimeout(
-      `click_button:${label}`,
-      locator.click({
-        timeout: actionTimeoutMs,
-        noWaitAfter: true
-      }),
-      actionTimeoutMs + 1000
-    );
-    return;
-  } catch (primaryError) {
-    try {
-      await withOperationTimeout(
-        `click_button_force:${label}`,
-        locator.click({
-          timeout: actionTimeoutMs,
-          force: true,
-          noWaitAfter: true
-        }),
-        actionTimeoutMs + 1000
-      );
-      return;
-    } catch (forceError) {
-      const diagnostics = await Promise.allSettled([
-        locator.count(),
-        locator.isVisible().catch(() => false),
-        locator.isEnabled().catch(() => false),
-        locator.evaluate((element) => element.textContent ?? '').catch(() => ''),
-        locator.page().evaluate(() => {
-          const root =
-            document.getElementById('aura-app-root') ??
-            document.querySelector('main:last-of-type') ??
-            document.body;
-          return String(root?.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 1600);
-        })
-      ]);
-      const [count, visible, enabled, text, pageText] = diagnostics.map((result) =>
-        result.status === 'fulfilled' ? result.value : null
-      );
-      throw new Error(
-        `${forceError.message} locator_count=${JSON.stringify(count)} visible=${JSON.stringify(
-          visible
-        )} enabled=${JSON.stringify(enabled)} locator_text=${JSON.stringify(
-          text
-        )} page_text=${JSON.stringify(pageText)} primary_error=${primaryError.message}`
-      );
-    }
+function normalizeClickTarget(label) {
+  return String(label || '')
+    .trim()
+    .replace(/^\(|^\"|^'|^\[|^\{|^</g, '')
+    .replace(/\)|\"|\'|\]|\}|>$|:$|\.$/g, '')
+    .trim();
+}
+
+function navigationShortcutForSelector(selector) {
+  if (!selector) {
+    return null;
   }
+  if (selector.includes('aura-nav-neighborhood')) {
+    return '1';
+  }
+  if (selector.includes('aura-nav-chat')) {
+    return '2';
+  }
+  if (selector.includes('aura-nav-contacts')) {
+    return '3';
+  }
+  if (selector.includes('aura-nav-notifications')) {
+    return '4';
+  }
+  if (selector.includes('aura-nav-settings')) {
+    return '5';
+  }
+  return null;
 }
 
 function parseBoundedInt(params, key, fallback, min, max) {
@@ -1234,7 +1464,7 @@ async function sendKeys(params) {
 
   console.error(`[driver] send_keys start instance=${instanceId} bytes=${keys.length}`);
   console.error(`[driver] send_keys focus start instance=${instanceId}`);
-  await focusAuraPage(session.page);
+  await focusAuraPageSafe(session.page, instanceId, 'send_keys');
   console.error(`[driver] send_keys focus done instance=${instanceId}`);
   console.error(`[driver] send_keys type start instance=${instanceId}`);
   await withOperationTimeout(
@@ -1255,7 +1485,7 @@ async function sendKey(params) {
   const session = getSession(instanceId);
   const count = Number.isFinite(repeat) ? Math.max(1, Math.floor(repeat)) : 1;
 
-  await focusAuraPage(session.page);
+  await focusAuraPageSafe(session.page, instanceId, 'send_key');
   for (let index = 0; index < count; index += 1) {
     await pressMappedKey(session.page, key);
   }
@@ -1490,94 +1720,60 @@ async function clickButton(params) {
   const instanceId = normalizeInstanceId(params);
   const selector = String(params?.selector ?? '').trim();
   const label = String(params?.label ?? '').trim();
+  const labelFromSelector = selectorToFallbackLabel(selector);
+  const effectiveLabel = label || labelFromSelector;
   const session = getSession(instanceId);
   console.error(`[driver] click_button start instance=${instanceId} selector=${selector || '-'} label=${label || '-'}`);
 
   if (selector) {
-    let lastClickError = null;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    let selectorError = null;
+    try {
+      await clickByCssSelector(session.page, selector, session);
+      console.error(
+        `[driver] click_button done instance=${instanceId} selector=${selector} via=css`
+      );
+      return { status: 'clicked' };
+    } catch (selectorError) {
+      console.error(
+        `[driver] click_button selector_failed instance=${instanceId} selector=${selector} error=${selectorError?.message ?? String(selectorError)}`
+      );
+    }
+
+    if (effectiveLabel) {
+      const fallbackLabel = normalizeClickTarget(effectiveLabel);
+      console.error(
+        `[driver] click_button selector failed, trying fallback label instance=${instanceId} selector=${selector} label=${fallbackLabel}`
+      );
       try {
-        const locator = session.page.locator(selector).first();
-        await withOperationTimeout(
-          `click_button_wait:${selector}:attempt${attempt}`,
-          locator.waitFor({ state: 'attached', timeout: 3000 }),
-          4000
+        await clickByLabelText(session.page, fallbackLabel, session);
+        console.error(
+          `[driver] click_button done instance=${instanceId} selector=${selector} via=label fallbackLabel=${fallbackLabel}`
         );
-        await locator.scrollIntoViewIfNeeded().catch(() => {});
-        await withOperationTimeout(
-          `click_button_force:${selector}:attempt${attempt}`,
-          locator.click({
-            timeout: 3000,
-            force: true,
-            noWaitAfter: true
-          }),
-          4000
-        );
-        console.error(`[driver] click_button done instance=${instanceId} selector=${selector} attempt=${attempt}`);
         return { status: 'clicked' };
-      } catch (locatorError) {
-        lastClickError = locatorError;
-        try {
-          await withOperationTimeout(
-            `click_button_dom:${selector}:attempt${attempt}`,
-            session.page.evaluate((targetSelector) => {
-              const element = document.querySelector(targetSelector);
-              if (!(element instanceof HTMLElement)) {
-                throw new Error(`element not found for selector ${targetSelector}`);
-              }
-              if (element.hasAttribute('disabled')) {
-                throw new Error(`element disabled for selector ${targetSelector}`);
-              }
-              element.click();
-              return true;
-            }, selector),
-            5000
-          );
-          console.error(`[driver] click_button done instance=${instanceId} selector=${selector} attempt=${attempt} via=dom`);
-          return { status: 'clicked' };
-        } catch (domError) {
-          lastClickError = new Error(
-            `locator_click_error=${locatorError?.message ?? String(locatorError)} dom_click_error=${
-              domError?.message ?? String(domError)
-            }`
-          );
-          console.error(
-            `[driver] click_button retry instance=${instanceId} selector=${selector} attempt=${attempt} error=${
-              lastClickError.message
-            }`
-          );
-          await waitForPageNavigationStabilization(session, `click_button_${selector}_attempt_${attempt}`);
-        }
+      } catch (fallbackError) {
+        console.error(
+          `[driver] click_button fallback_failed instance=${instanceId} selector=${selector} label=${fallbackLabel} error=${fallbackError?.message ?? String(fallbackError)}`
+        );
       }
     }
-    throw lastClickError ?? new Error(`failed to click selector ${selector}`);
+
+    throw new Error(
+      `click_button failed selector=${selector} label=${effectiveLabel || '-'} dom_error=${selectorError?.message ?? 'unknown'}`
+    );
   }
 
-  if (!label) {
+  if (!label && !effectiveLabel) {
     throw new Error('label is required');
   }
-  const labelPattern = new RegExp(`^${escapeRegex(label)}$`, 'i');
+  const activeLabel = effectiveLabel || label;
 
   try {
-    await clickLocator(
-      session.page.getByRole('button', { name: label, exact: true }).first(),
-      label
-    );
+    await clickByLabelText(session.page, activeLabel, session);
   } catch {
-    try {
-      await clickLocator(
-        session.page.getByRole('button', { name: labelPattern }).first(),
-        label
-      );
-    } catch {
-      await clickLocator(
-        session.page.locator('button').filter({ hasText: labelPattern }).first(),
-        label
-      );
-    }
+    await clickByLabelText(session.page, activeLabel, session);
   }
 
-  console.error(`[driver] click_button done instance=${instanceId} label=${label}`);
+  console.error(`[driver] click_button done instance=${instanceId} label=${activeLabel}`);
 
   return { status: 'clicked' };
 }

@@ -148,7 +148,10 @@ pub fn semantic_ui_snapshot(
     app_snapshot: &StateSnapshot,
     contacts_override_input: Option<&[TuiContact]>,
 ) -> UiSnapshot {
-    let onboarding_active = matches!(state.modal_queue.current(), Some(QueuedModal::AccountSetup(_)));
+    let onboarding_active = matches!(
+        state.modal_queue.current(),
+        Some(QueuedModal::AccountSetup(_))
+    );
     let screen = if onboarding_active {
         ScreenId::Onboarding
     } else {

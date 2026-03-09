@@ -134,7 +134,9 @@ timeout_ms = 10
 
     let run_dir = artifacts_path.join("harness").join("timeout-diagnostics");
     assert!(run_dir.join("failure_diagnostics.json").exists());
-    assert!(run_dir.join("failure_diagnostics__wait-never.json").exists());
+    assert!(run_dir
+        .join("failure_diagnostics__wait-never.json")
+        .exists());
     let diagnostics = fs::read_to_string(run_dir.join("failure_diagnostics.json"))
         .unwrap_or_else(|error| panic!("failed to read diagnostics bundle: {error}"));
     assert!(diagnostics.contains("\"failing_step\": \"wait-never\""));

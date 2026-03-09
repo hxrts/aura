@@ -57,10 +57,9 @@ pub fn handle_mouse_event(
                     if state.settings.selected_index > 0 {
                         state.settings.selected_index =
                             state.settings.selected_index.saturating_sub(1);
-                        state.settings.section =
-                            crate::tui::types::SettingsSection::from_index(
-                                state.settings.selected_index,
-                            );
+                        state.settings.section = crate::tui::types::SettingsSection::from_index(
+                            state.settings.selected_index,
+                        );
                     }
                 }
                 _ => {}

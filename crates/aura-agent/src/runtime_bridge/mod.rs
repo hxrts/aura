@@ -1081,9 +1081,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
             .map(|_| ())
             .map_err(|e| {
-                IntentError::internal_error(format!(
-                    "Failed to process ceremony messages: {e}"
-                ))
+                IntentError::internal_error(format!("Failed to process ceremony messages: {e}"))
             })
     }
 

@@ -220,9 +220,10 @@ impl PersistentTreeHandler {
         for (op, op_hash) in &added {
             let key = tree_storage::op_key(*op_hash);
             let op_bytes = tree_storage::serialize_op(op)?;
-            self.storage.store(&key, op_bytes).await.map_err(|e| {
-                AuraError::storage(format!("Failed to import tree op {key}: {e}"))
-            })?;
+            self.storage
+                .store(&key, op_bytes)
+                .await
+                .map_err(|e| AuraError::storage(format!("Failed to import tree op {key}: {e}")))?;
         }
 
         let index_bytes = tree_storage::serialize_op_index(&hashes)?;

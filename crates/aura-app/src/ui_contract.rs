@@ -272,6 +272,28 @@ impl ControlId {
     pub fn web_selector(self) -> Option<String> {
         self.web_dom_id().map(|id| format!("#{id}"))
     }
+
+    #[must_use]
+    pub const fn activation_key(self) -> Option<&'static str> {
+        match self {
+            Self::NavNeighborhood => Some("1"),
+            Self::NavChat => Some("2"),
+            Self::NavContacts => Some("3"),
+            Self::NavNotifications => Some("4"),
+            Self::NavSettings => Some("5"),
+            Self::OnboardingCreateAccountButton => Some("\r"),
+            Self::ModalCopyButton => Some("c"),
+            Self::NeighborhoodNewHomeButton => Some("n"),
+            Self::NeighborhoodAcceptInvitationButton => Some("a"),
+            Self::ContactsCreateInvitationButton => Some("n"),
+            Self::ContactsAcceptInvitationButton => Some("a"),
+            Self::ModalConfirmButton => Some("\r"),
+            Self::ModalCancelButton => Some("\x1b"),
+            Self::SettingsAddDeviceButton => Some("a"),
+            Self::SettingsRemoveDeviceButton => Some("r"),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -954,7 +976,11 @@ fn normalize_parity_item_id(list_id: ListId, item_id: &str) -> Option<String> {
 fn parity_relevant_lists(screen: ScreenId) -> &'static [ListId] {
     match screen {
         ScreenId::Onboarding => &[],
-        ScreenId::Neighborhood => &[ListId::Navigation, ListId::Homes, ListId::NeighborhoodMembers],
+        ScreenId::Neighborhood => &[
+            ListId::Navigation,
+            ListId::Homes,
+            ListId::NeighborhoodMembers,
+        ],
         ScreenId::Chat => &[ListId::Navigation, ListId::Channels],
         ScreenId::Contacts => &[ListId::Navigation, ListId::Contacts],
         ScreenId::Notifications => &[ListId::Navigation, ListId::Notifications],
@@ -962,7 +988,9 @@ fn parity_relevant_lists(screen: ScreenId) -> &'static [ListId] {
     }
 }
 
-fn parity_list_signature(snapshot: &UiSnapshot) -> Vec<(ListId, Vec<(String, bool, ConfirmationState)>)> {
+fn parity_list_signature(
+    snapshot: &UiSnapshot,
+) -> Vec<(ListId, Vec<(String, bool, ConfirmationState)>)> {
     let relevant_lists = parity_relevant_lists(snapshot.screen);
     let mut lists = snapshot
         .lists
@@ -1114,10 +1142,9 @@ mod tests {
         shared_screen_module_map, shared_screen_support, ConfirmationState, ControlId, FieldId,
         FlowAvailability, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId,
         OperationId, OperationInstanceId, OperationSnapshot, OperationState, ParityException,
-        RenderHeartbeat, ScreenId, SelectionSnapshot, SharedFlowId, UiParityMismatch,
-        UiReadiness, UiSnapshot, ALL_SHARED_FLOW_IDS, SHARED_FLOW_SCENARIO_COVERAGE,
-        SHARED_FLOW_SUPPORT, SHARED_LIST_SUPPORT, SHARED_MODAL_SUPPORT,
-        SHARED_SCREEN_MODULE_MAP, SHARED_SCREEN_SUPPORT,
+        RenderHeartbeat, ScreenId, SelectionSnapshot, SharedFlowId, UiParityMismatch, UiReadiness,
+        UiSnapshot, ALL_SHARED_FLOW_IDS, SHARED_FLOW_SCENARIO_COVERAGE, SHARED_FLOW_SUPPORT,
+        SHARED_LIST_SUPPORT, SHARED_MODAL_SUPPORT, SHARED_SCREEN_MODULE_MAP, SHARED_SCREEN_SUPPORT,
     };
     use std::collections::HashSet;
     use std::path::Path;
@@ -1348,7 +1375,9 @@ mod tests {
         assert_eq!(chat.web_symbol, "ChatScreen");
         assert_eq!(chat.tui_symbol, "ChatScreen");
         assert!(chat.web_path.ends_with("crates/aura-ui/src/app.rs"));
-        assert!(chat.tui_path.ends_with("crates/aura-terminal/src/tui/screens/chat/screen.rs"));
+        assert!(chat
+            .tui_path
+            .ends_with("crates/aura-terminal/src/tui/screens/chat/screen.rs"));
     }
 
     #[test]

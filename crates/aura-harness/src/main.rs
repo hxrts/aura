@@ -226,15 +226,19 @@ fn run_with_artifacts(
                     .get("failing_step")
                     .and_then(serde_json::Value::as_str)
                 {
-                    let file_name =
-                        format!("failure_diagnostics__{}.json", sanitize_artifact_component(step_id));
+                    let file_name = format!(
+                        "failure_diagnostics__{}.json",
+                        sanitize_artifact_component(step_id)
+                    );
                     artifact_bundle.write_json(&file_name, &diagnostics)?;
                 }
                 if error.to_string().to_ascii_lowercase().contains("timeout") {
                     artifact_bundle.write_json("timeout_diagnostics.json", &diagnostics)?;
                 }
-                artifact_bundle
-                    .write_json("failure_attribution.json", &attribute_failure(&error.to_string()))?;
+                artifact_bundle.write_json(
+                    "failure_attribution.json",
+                    &attribute_failure(&error.to_string()),
+                )?;
                 return Err(error);
             }
         }
@@ -433,11 +437,14 @@ fn recent_artifact_paths(dir: &str) -> Vec<String> {
         .filter_map(|entry| {
             let path = entry.path();
             let metadata = entry.metadata().ok()?;
-            metadata.is_file().then_some((metadata.modified().ok(), path))
+            metadata
+                .is_file()
+                .then_some((metadata.modified().ok(), path))
         })
         .collect();
     files.sort_by_key(|(modified, _)| *modified);
-    files.into_iter()
+    files
+        .into_iter()
         .rev()
         .take(8)
         .map(|(_, path)| path.display().to_string())
@@ -447,7 +454,13 @@ fn recent_artifact_paths(dir: &str) -> Vec<String> {
 fn sanitize_artifact_component(value: &str) -> String {
     let sanitized: String = value
         .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' { ch } else { '_' })
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
         .collect();
     sanitized.trim_matches('_').to_string()
 }

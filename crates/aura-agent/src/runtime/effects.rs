@@ -491,7 +491,9 @@ impl AuraEffectSystem {
         self.reactive_handler.clone()
     }
 
-    pub async fn export_tree_ops(&self) -> Result<Vec<aura_core::AttestedOp>, crate::core::AgentError> {
+    pub async fn export_tree_ops(
+        &self,
+    ) -> Result<Vec<aura_core::AttestedOp>, crate::core::AgentError> {
         self.tree_handler
             .export_ops()
             .await
