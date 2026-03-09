@@ -529,6 +529,9 @@ async function installUiStateObserver(page, session) {
     }
     session.renderHeartbeat = normalizeRenderHeartbeat(payload);
   });
+  await page.exposeFunction('__AURA_DRIVER_PUSH_CLIPBOARD', (payload) => {
+    session.clipboardCache = String(payload ?? '');
+  });
 }
 
 function installPageNavigationReset(session) {
@@ -669,6 +672,9 @@ function selectorToFallbackLabel(selector) {
   const raw = String(selector ?? '').trim();
   if (!raw.startsWith('#')) {
     return '';
+  }
+  if (raw === '#aura-contacts-start-chat') {
+    return 'Start Chat';
   }
   let label = raw.slice(1);
   if (!label.startsWith('aura-')) {
@@ -948,11 +954,8 @@ async function clickByCssSelector(page, selector, session) {
       console.error(
         `[driver] click_button css fallback_key instance=${session.id} selector=${normalizedSelector} key=${navShortcut} reason=${shortcutReason}`
       );
-      await withOperationTimeout(
-        `css_nav_shortcut_${shortcutReason}`,
-        dispatchHarnessKey(page, navShortcut, 1),
-        2000
-      );
+      await focusAuraPageSafe(page, session.id, shortcutReason);
+      await withOperationTimeout(`css_nav_shortcut_${shortcutReason}`, pressMappedKey(page, navShortcut), 2500);
       return { ok: true, id: normalizedSelector, text: `shortcut:${navShortcut}` };
     } catch (fallbackError) {
       console.error(
@@ -1561,7 +1564,8 @@ async function startPage(params) {
         uiStateCacheJson: null,
         uiStateVersion: 0,
         uiStateWaiters: [],
-        renderHeartbeat: null
+        renderHeartbeat: null,
+        clipboardCache: ''
       };
       sessions.set(instanceId, session);
 
@@ -2185,38 +2189,16 @@ async function fillInput(params) {
 async function readClipboard(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
-  let lastText = '';
+  let lastText = String(session.clipboardCache ?? '');
+  if (lastText.trim().length > 0) {
+    return { text: lastText };
+  }
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    const text = await withOperationTimeout(
-      `read_clipboard_eval_${attempt + 1}`,
-      session.page.evaluate(() => {
-        const globalText = String(window.__AURA_HARNESS_CLIPBOARD__ ?? '');
-        if (globalText.trim().length > 0) {
-          return globalText;
-        }
-        const harnessText =
-          typeof window.__AURA_HARNESS__?.read_clipboard === 'function'
-            ? String(window.__AURA_HARNESS__.read_clipboard() ?? '')
-            : '';
-        if (harnessText.trim().length > 0) {
-          return harnessText;
-        }
-        const clipboard = window.navigator?.clipboard;
-        if (clipboard && typeof clipboard.readText === 'function') {
-          return clipboard
-            .readText()
-            .then((value) => String(value ?? ''))
-            .catch(() => '');
-        }
-        return '';
-      }),
-      1000
-    );
-    lastText = String(text ?? '');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    lastText = String(session.clipboardCache ?? '');
     if (lastText.trim().length > 0) {
       return { text: lastText };
     }
-    await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return { text: lastText };
 }

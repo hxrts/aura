@@ -6,6 +6,7 @@
 use aura_ui::ClipboardPort;
 use js_sys::Reflect;
 use std::sync::RwLock;
+use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::{spawn_local, JsFuture};
 
@@ -26,6 +27,14 @@ impl ClipboardPort for WebClipboardAdapter {
                 &JsValue::from_str("__AURA_HARNESS_CLIPBOARD__"),
                 &JsValue::from_str(text),
             );
+            if let Ok(push) = Reflect::get(
+                window.as_ref(),
+                &JsValue::from_str("__AURA_DRIVER_PUSH_CLIPBOARD"),
+            ) {
+                if let Some(function) = push.dyn_ref::<js_sys::Function>() {
+                    let _ = function.call1(window.as_ref(), &JsValue::from_str(text));
+                }
+            }
         }
 
         if let Some(window) = web_sys::window() {

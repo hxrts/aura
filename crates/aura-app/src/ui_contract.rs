@@ -343,7 +343,7 @@ impl ControlId {
             Self::ContactsCreateInvitationButton => Some("n"),
             Self::NeighborhoodEnterAsButton => Some("d"),
             Self::ChatNewGroupButton => Some("n"),
-            Self::ContactsStartChatButton => None,
+            Self::ContactsStartChatButton => Some("c"),
             Self::SettingsEditNicknameButton => Some("e"),
             Self::SettingsConfigureThresholdButton => Some("t"),
             Self::SettingsRequestRecoveryButton => Some("s"),

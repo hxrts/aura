@@ -661,7 +661,18 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             .err()
             .unwrap_or_else(|| anyhow::anyhow!("control click failed"));
         if let Some(fallback_key) = control_id.activation_key() {
-            self.send_keys(fallback_key).map_err(|send_error| {
+            self.with_session(|session| {
+                session.rpc_call(
+                    "send_key",
+                    json!({
+                        "instance_id": self.config.id,
+                        "key": fallback_key,
+                        "repeat": 1,
+                    }),
+                )?;
+                Ok(())
+            })
+            .map_err(|send_error| {
                 anyhow::anyhow!(
                     "preferred click failed for {control_id:?} via {selector}: {click_error}; \
                      fallback key '{fallback_key}' failed: {send_error}"

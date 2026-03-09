@@ -883,7 +883,21 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             // Navigation/state machine owns selected index; cache selected ID
                             // so dispatch can still send when scoped channel snapshots lag.
                             if let Ok(mut selected_id) = selected_channel_id_for_updates.write() {
-                                *selected_id = Some(channel_id);
+                                *selected_id = Some(channel_id.clone());
+                            }
+                            let selected_idx = shared_channels_for_updates
+                                .read()
+                                .ok()
+                                .and_then(|channels| {
+                                    channels
+                                        .iter()
+                                        .position(|channel| channel.id == channel_id)
+                                });
+                            if let Some(idx) = selected_idx {
+                                tui.with_mut(|state| {
+                                    state.chat.selected_channel = idx;
+                                    state.chat.message_scroll = 0;
+                                });
                             }
                         }
                         UiUpdate::ChannelCreated(name) => {
@@ -921,6 +935,24 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     state.chat.selected_channel = idx;
                                     // Reset scroll when switching channels
                                     state.chat.message_scroll = 0;
+                                }
+
+                                let selected_channel_id = selected_channel_id_for_updates
+                                    .read()
+                                    .ok()
+                                    .and_then(|guard| guard.clone());
+                                if let Some(selected_channel_id) = selected_channel_id {
+                                    if let Ok(channels) = shared_channels_for_updates.read() {
+                                        if let Some(idx) = channels
+                                            .iter()
+                                            .position(|channel| channel.id == selected_channel_id)
+                                        {
+                                            if state.chat.selected_channel != idx {
+                                                state.chat.selected_channel = idx;
+                                                state.chat.message_scroll = 0;
+                                            }
+                                        }
+                                    }
                                 }
 
                                 // Sync the shared selection state so message subscription

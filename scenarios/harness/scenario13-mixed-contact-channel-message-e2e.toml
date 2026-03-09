@@ -217,16 +217,24 @@ timeout_ms = 30000
 
 [[steps]]
 id = "alice-open-chat"
-action = "navigate"
+action = "activate"
 actor = "alice"
-screen_id = "chat"
+control_id = "contacts_start_chat_button"
 timeout_ms = 3000
 
 [[steps]]
-id = "bob-open-chat"
-action = "navigate"
+id = "bob-contact-count-one"
+action = "list_count_is"
 actor = "bob"
-screen_id = "chat"
+list_id = "contacts"
+count = 1
+timeout_ms = 30000
+
+[[steps]]
+id = "bob-open-chat"
+action = "activate"
+actor = "bob"
+control_id = "contacts_start_chat_button"
 timeout_ms = 3000
 
 [[steps]]

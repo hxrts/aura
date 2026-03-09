@@ -240,6 +240,12 @@ impl ChatCallbacks {
                         .unwrap_or("/command")
                         .trim_start_matches('/')
                         .to_string();
+                    let joined_channel_name = match &parsed {
+                        aura_app::ui::workflows::strong_command::ParsedCommand::Join {
+                            channel,
+                        } => Some(channel.trim_start_matches('#').to_string()),
+                        _ => None,
+                    };
 
                     match parsed {
                         aura_app::ui::workflows::strong_command::ParsedCommand::Help {
@@ -349,6 +355,35 @@ impl ChatCallbacks {
                             .await
                             {
                                 Ok(result) => {
+                                    if let Some(channel_name) = joined_channel_name.as_deref() {
+                                        for _ in 0..40 {
+                                            if let Ok(chat) =
+                                                aura_app::ui::workflows::messaging::get_chat_state(
+                                                    ctx.app_core_raw(),
+                                                )
+                                                .await
+                                            {
+                                                if let Some(channel) = chat
+                                                    .all_channels()
+                                                    .find(|candidate| {
+                                                        candidate
+                                                            .name
+                                                            .eq_ignore_ascii_case(channel_name)
+                                                    })
+                                                {
+                                                    send_ui_update_reliable(
+                                                        &tx,
+                                                        UiUpdate::ChannelSelected(
+                                                            channel.id.to_string(),
+                                                        ),
+                                                    )
+                                                    .await;
+                                                    break;
+                                                }
+                                            }
+                                            tokio::time::sleep(Duration::from_millis(100)).await;
+                                        }
+                                    }
                                     let state_label = match result.consistency_state {
                                         aura_app::ui::workflows::strong_command::ConsistencyState::Accepted => "accepted",
                                         aura_app::ui::workflows::strong_command::ConsistencyState::Replicated => "replicated",
