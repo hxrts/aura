@@ -487,31 +487,7 @@ fn execute_step(
                     repeat: 1,
                 },
             );
-            let snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
-            if snapshot.screen != ScreenId::Chat {
-                dispatch(
-                    tool_api,
-                    ToolRequest::ActivateControl {
-                        instance_id: instance_id.clone(),
-                        control_id: ControlId::NavChat,
-                    },
-                )?;
-                let chat_enter_timeout = step.timeout_ms.unwrap_or(step_budget_ms).min(2_000);
-                let mut wait_step = step.clone();
-                wait_step.action = ScenarioAction::WaitFor;
-                wait_step.screen_id = Some(ScreenId::Chat);
-                wait_step.modal_id = None;
-                wait_step.list_id = None;
-                wait_step.item_id = None;
-                wait_step.operation_id = None;
-                wait_step.operation_state = None;
-                wait_for_semantic_state(
-                    &wait_step,
-                    tool_api,
-                    &instance_id,
-                        chat_enter_timeout,
-                    )?;
-            }
+            ensure_chat_screen(step, tool_api, &instance_id, backend_kind, step_budget_ms)?;
             if backend_kind == "playwright_browser" {
                 dispatch(
                     tool_api,
@@ -612,31 +588,7 @@ fn execute_step(
                         repeat: 1,
                     },
                 );
-                let snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
-                if snapshot.screen != ScreenId::Chat {
-                    dispatch(
-                        tool_api,
-                        ToolRequest::ActivateControl {
-                            instance_id: instance_id.clone(),
-                            control_id: ControlId::NavChat,
-                        },
-                    )?;
-                    let chat_enter_timeout = step.timeout_ms.unwrap_or(step_budget_ms).min(2_000);
-                    let mut wait_step = step.clone();
-                    wait_step.action = ScenarioAction::WaitFor;
-                    wait_step.screen_id = Some(ScreenId::Chat);
-                    wait_step.modal_id = None;
-                    wait_step.list_id = None;
-                    wait_step.item_id = None;
-                    wait_step.operation_id = None;
-                    wait_step.operation_state = None;
-                    wait_for_semantic_state(
-                        &wait_step,
-                        tool_api,
-                        &instance_id,
-                        chat_enter_timeout,
-                    )?;
-                }
+                ensure_chat_screen(step, tool_api, &instance_id, backend_kind, step_budget_ms)?;
                 dispatch(
                     tool_api,
                     ToolRequest::FillField {
@@ -732,16 +684,12 @@ fn execute_step(
                         instance_id: instance_id.clone(),
                     },
                 );
-                match attempt {
-                    Ok(payload) => {
-                        if let Some(text) = payload.get("text").and_then(serde_json::Value::as_str)
-                        {
-                            if !text.trim().is_empty() {
-                                break text.to_string();
-                            }
+                if let Ok(payload) = attempt {
+                    if let Some(text) = payload.get("text").and_then(serde_json::Value::as_str) {
+                        if !text.trim().is_empty() {
+                            break text.to_string();
                         }
                     }
-                    Err(_) => {}
                 }
 
                 if Instant::now() >= deadline {
@@ -1269,6 +1217,92 @@ fn execute_step(
     }
 }
 
+fn ensure_chat_screen(
+    step: &ScenarioStep,
+    tool_api: &mut ToolApi,
+    instance_id: &str,
+    backend_kind: &str,
+    step_budget_ms: u64,
+) -> Result<()> {
+    if !tool_api.supports_ui_snapshot(instance_id).unwrap_or(false) {
+        return ensure_chat_screen_without_ui_snapshot(
+            step,
+            tool_api,
+            instance_id,
+            backend_kind,
+            step_budget_ms,
+        );
+    }
+
+    match fetch_ui_snapshot(tool_api, instance_id) {
+        Ok(snapshot) => {
+            if snapshot.screen == ScreenId::Chat {
+                return Ok(());
+            }
+            dispatch(
+                tool_api,
+                ToolRequest::ActivateControl {
+                    instance_id: instance_id.to_string(),
+                    control_id: ControlId::NavChat,
+                },
+            )?;
+            let chat_enter_timeout = step.timeout_ms.unwrap_or(step_budget_ms).min(2_000);
+            let mut wait_step = step.clone();
+            wait_step.action = ScenarioAction::WaitFor;
+            wait_step.screen_id = Some(ScreenId::Chat);
+            wait_step.modal_id = None;
+            wait_step.list_id = None;
+            wait_step.item_id = None;
+            wait_step.operation_id = None;
+            wait_step.operation_state = None;
+            wait_for_semantic_state(&wait_step, tool_api, instance_id, chat_enter_timeout)
+        }
+        Err(error) if backend_kind == "local_pty" => {
+            let _ = error;
+            ensure_chat_screen_without_ui_snapshot(
+                step,
+                tool_api,
+                instance_id,
+                backend_kind,
+                step_budget_ms,
+            )
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn ensure_chat_screen_without_ui_snapshot(
+    step: &ScenarioStep,
+    tool_api: &mut ToolApi,
+    instance_id: &str,
+    backend_kind: &str,
+    step_budget_ms: u64,
+) -> Result<()> {
+    if backend_kind != "local_pty" {
+        bail!(
+            "backend {backend_kind} does not support structured UI snapshots for instance {instance_id}"
+        );
+    }
+    dispatch(
+        tool_api,
+        ToolRequest::SendKeys {
+            instance_id: instance_id.to_string(),
+            keys: "2".to_string(),
+        },
+    )?;
+    let _ = dispatch(
+        tool_api,
+        ToolRequest::WaitFor {
+            instance_id: instance_id.to_string(),
+            pattern: "Channels".to_string(),
+            timeout_ms: step.timeout_ms.unwrap_or(step_budget_ms).min(2_000),
+            screen_source: ScreenSource::default(),
+            selector: None,
+        },
+    );
+    Ok(())
+}
+
 fn enforce_request_order(step: &ScenarioStep, context: &mut ScenarioContext) -> Result<()> {
     let Some(request_id) = step.request_id else {
         return Ok(());
@@ -1509,12 +1543,8 @@ fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
                 Some(ToastLevel::Success) => {
                     toast.kind == aura_app::ui::contract::ToastKind::Success
                 }
-                Some(ToastLevel::Info) => {
-                    toast.kind == aura_app::ui::contract::ToastKind::Info
-                }
-                Some(ToastLevel::Error) => {
-                    toast.kind == aura_app::ui::contract::ToastKind::Error
-                }
+                Some(ToastLevel::Info) => toast.kind == aura_app::ui::contract::ToastKind::Info,
+                Some(ToastLevel::Error) => toast.kind == aura_app::ui::contract::ToastKind::Error,
                 None => true,
             };
             kind_matches && toast_contains_matches(expected_contains, &toast.message)
@@ -2067,12 +2097,12 @@ fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_app::ui::contract::{
-        ConfirmationState, ListId, ListItemSnapshot, ListSnapshot, OperationId,
-        OperationSnapshot, OperationState, ScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
-    };
     use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, ScenarioAction};
     use crate::coordinator::HarnessCoordinator;
+    use aura_app::ui::contract::{
+        ConfirmationState, ListId, ListItemSnapshot, ListSnapshot, OperationId, OperationSnapshot,
+        OperationState, ScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
+    };
 
     #[test]
     fn expected_consistency_accepts_stronger_observed_levels() {
@@ -2337,7 +2367,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+                runtime_substrate: crate::config::RuntimeSubstrate::default(),
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
@@ -2428,7 +2458,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+                runtime_substrate: crate::config::RuntimeSubstrate::default(),
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
@@ -2576,7 +2606,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+                runtime_substrate: crate::config::RuntimeSubstrate::default(),
             },
             instances: vec![
                 InstanceConfig {
@@ -2705,7 +2735,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+                runtime_substrate: crate::config::RuntimeSubstrate::default(),
             },
             instances: vec![
                 InstanceConfig {

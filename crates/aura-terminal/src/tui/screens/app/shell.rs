@@ -1372,10 +1372,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // reactivity, ensuring the component re-renders when state changes via tui.replace().
     // See TuiStateHandle and TuiStateSnapshot docs for the reactivity model.
     let tui_snapshot = tui.read_for_render();
-    let harness_contacts = shared_contacts
-        .read()
-        .ok()
-        .map(|contacts| contacts.clone());
+    let harness_contacts = shared_contacts.read().ok().map(|contacts| contacts.clone());
     maybe_export_ui_snapshot(
         &tui_snapshot,
         &app_ctx.snapshot(),

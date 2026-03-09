@@ -3,9 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::{bail, Result};
 use aura_core::AuraFault;
-use aura_simulator::async_host::{
-    AsyncHostRequest, AsyncHostResponse, AsyncSimulatorHostBridge,
-};
+use aura_simulator::async_host::{AsyncHostRequest, AsyncHostResponse, AsyncSimulatorHostBridge};
 use tokio::runtime::{Builder, Runtime};
 
 use crate::config::RuntimeSubstrate;
@@ -16,7 +14,7 @@ pub struct RuntimeSubstrateController {
 
 enum RuntimeSubstrateInner {
     Real,
-    Simulator(SimulatorRuntimeSubstrate),
+    Simulator(Box<SimulatorRuntimeSubstrate>),
 }
 
 struct SimulatorRuntimeSubstrate {
@@ -38,13 +36,13 @@ impl RuntimeSubstrateController {
             RuntimeSubstrate::Real => RuntimeSubstrateInner::Real,
             RuntimeSubstrate::Simulator => {
                 let runtime = Builder::new_current_thread().enable_all().build()?;
-                RuntimeSubstrateInner::Simulator(SimulatorRuntimeSubstrate {
+                RuntimeSubstrateInner::Simulator(Box::new(SimulatorRuntimeSubstrate {
                     runtime,
                     bridge: AsyncSimulatorHostBridge::new(seed),
                     participants,
                     artifact_dir,
                     started: false,
-                })
+                }))
             }
         };
         Ok(Self { inner })
@@ -63,11 +61,9 @@ impl RuntimeSubstrateController {
                 std::thread::sleep(std::time::Duration::from_millis(delay_ms));
                 Ok(())
             }
-            RuntimeSubstrateInner::Simulator(simulator) => simulator.apply_network_condition(
-                "delay",
-                vec![actor.to_string()],
-                delay_ms.max(1),
-            ),
+            RuntimeSubstrateInner::Simulator(simulator) => {
+                simulator.apply_network_condition("delay", vec![actor.to_string()], delay_ms.max(1))
+            }
         }
     }
 
@@ -134,7 +130,12 @@ impl SimulatorRuntimeSubstrate {
         })
     }
 
-    fn inject_fault(&mut self, actor: &str, behavior: &str, fault: Option<AuraFault>) -> Result<()> {
+    fn inject_fault(
+        &mut self,
+        actor: &str,
+        behavior: &str,
+        fault: Option<AuraFault>,
+    ) -> Result<()> {
         self.request(AsyncHostRequest::InjectFault {
             participant: actor.to_string(),
             behavior: behavior.to_string(),
@@ -162,7 +163,7 @@ impl SimulatorRuntimeSubstrate {
         match entry.response {
             AsyncHostResponse::Ack => Ok(()),
             AsyncHostResponse::Rejected { reason } => {
-                bail!("simulator substrate rejected request {:?}: {reason}", request)
+                bail!("simulator substrate rejected request {request:?}: {reason}")
             }
         }
     }
@@ -190,14 +191,15 @@ mod tests {
         controller
             .fault_delay("alice", 5)
             .unwrap_or_else(|error| panic!("{error}"));
-        controller.finish().unwrap_or_else(|error| panic!("{error}"));
+        controller
+            .finish()
+            .unwrap_or_else(|error| panic!("{error}"));
 
-        assert!(
-            tmp.path()
-                .join("runtime-substrate")
-                .join("simulator-transcript.json")
-                .exists()
-        );
+        assert!(tmp
+            .path()
+            .join("runtime-substrate")
+            .join("simulator-transcript.json")
+            .exists());
     }
 
     #[test]

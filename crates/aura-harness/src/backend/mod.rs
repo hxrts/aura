@@ -12,6 +12,9 @@ use crate::tool_api::ToolKey;
 pub trait InstanceBackend {
     fn id(&self) -> &str;
     fn backend_kind(&self) -> &'static str;
+    fn supports_ui_snapshot(&self) -> bool {
+        false
+    }
     fn start(&mut self) -> Result<()>;
     fn stop(&mut self) -> Result<()>;
     fn snapshot(&self) -> Result<String>;

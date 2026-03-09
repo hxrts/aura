@@ -5,17 +5,18 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::fs::File;
 use std::fs;
+use std::fs::File;
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
 use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
+use tokio::time::Instant;
 
 use crate::backend::BackendHandle;
 use crate::config::{InstanceMode, RunConfig, RuntimeSubstrate, ScreenSource};
@@ -127,13 +128,11 @@ impl HarnessCoordinator {
                     .ok_or_else(|| anyhow!("unknown instance_id: {id}"))?;
                 let backend_kind = backend.as_trait().backend_kind();
                 eprintln!(
-                    "[harness] startup phase=backend_start begin instance={} backend={}",
-                    id, backend_kind
+                    "[harness] startup phase=backend_start begin instance={id} backend={backend_kind}"
                 );
                 backend.as_trait_mut().start()?;
                 eprintln!(
-                    "[harness] startup phase=backend_start done instance={} backend={}",
-                    id, backend_kind
+                    "[harness] startup phase=backend_start done instance={id} backend={backend_kind}"
                 );
                 backend_kind
             };
@@ -144,13 +143,11 @@ impl HarnessCoordinator {
                 serde_json::json!({ "backend": backend_kind }),
             );
             eprintln!(
-                "[harness] startup phase=health_check begin instance={} backend={}",
-                id, backend_kind
+                "[harness] startup phase=health_check begin instance={id} backend={backend_kind}"
             );
             self.wait_for_backend_health(&id, BACKEND_HEALTH_TIMEOUT)?;
             eprintln!(
-                "[harness] startup phase=health_check done instance={} backend={}",
-                id, backend_kind
+                "[harness] startup phase=health_check done instance={id} backend={backend_kind}"
             );
             self.events.push(
                 "lifecycle",
@@ -159,8 +156,7 @@ impl HarnessCoordinator {
                 serde_json::json!({ "timeout_ms": BACKEND_HEALTH_TIMEOUT.as_millis() }),
             );
             eprintln!(
-                "[harness] startup phase=ready_check begin instance={} backend={}",
-                id, backend_kind
+                "[harness] startup phase=ready_check begin instance={id} backend={backend_kind}"
             );
             self.backends
                 .get(&id)
@@ -168,8 +164,7 @@ impl HarnessCoordinator {
                 .as_trait()
                 .wait_until_ready(BACKEND_READY_TIMEOUT)?;
             eprintln!(
-                "[harness] startup phase=ready_check done instance={} backend={}",
-                id, backend_kind
+                "[harness] startup phase=ready_check done instance={id} backend={backend_kind}"
             );
             self.events.push(
                 "lifecycle",
@@ -192,10 +187,7 @@ impl HarnessCoordinator {
                 return Ok(());
             }
             if Instant::now() >= deadline {
-                bail!(
-                    "instance {instance_id} failed startup health gate within {:?}",
-                    timeout
-                );
+                bail!("instance {instance_id} failed startup health gate within {timeout:?}");
             }
             std::thread::sleep(BACKEND_POLL_INTERVAL);
         }
@@ -264,7 +256,8 @@ impl HarnessCoordinator {
     }
 
     pub fn apply_fault_delay(&mut self, actor: &str, delay_ms: u64) -> Result<()> {
-        self.runtime_substrate_controller.fault_delay(actor, delay_ms)
+        self.runtime_substrate_controller
+            .fault_delay(actor, delay_ms)
     }
 
     pub fn apply_fault_loss(&mut self, actor: &str, loss_percent: u8) -> Result<()> {
@@ -287,10 +280,7 @@ impl HarnessCoordinator {
                 return Ok(());
             }
             if Instant::now() >= deadline {
-                bail!(
-                    "instance {instance_id} failed teardown health gate within {:?}",
-                    timeout
-                );
+                bail!("instance {instance_id} failed teardown health gate within {timeout:?}");
             }
             std::thread::sleep(BACKEND_POLL_INTERVAL);
         }
@@ -310,9 +300,7 @@ impl HarnessCoordinator {
             return Ok(());
         }
         let listener = TcpListener::bind(&bind_address).map_err(|error| {
-            anyhow!(
-                "instance {instance_id} did not release bind address {bind_address}: {error}"
-            )
+            anyhow!("instance {instance_id} did not release bind address {bind_address}: {error}")
         })?;
         drop(listener);
         Ok(())
@@ -364,6 +352,14 @@ impl HarnessCoordinator {
             .get(instance_id)
             .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
         Ok(backend.as_trait().backend_kind())
+    }
+
+    pub fn supports_ui_snapshot(&self, instance_id: &str) -> Result<bool> {
+        let backend = self
+            .backends
+            .get(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        Ok(backend.as_trait().supports_ui_snapshot())
     }
 
     pub fn send_keys(&mut self, instance_id: &str, keys: &str) -> Result<()> {
@@ -773,7 +769,7 @@ struct BrowserAppUrlProvision {
 
 fn owned_web_server_log_tail(log_path: Option<&Path>) -> Option<String> {
     let log_path = log_path?;
-    let contents = fs::read_to_string(&log_path).ok()?;
+    let contents = fs::read_to_string(log_path).ok()?;
     let mut lines = contents.lines().rev().take(80).collect::<Vec<_>>();
     lines.reverse();
     Some(lines.join("\n"))
@@ -792,11 +788,7 @@ fn provision_browser_app_url(config: &RunConfig) -> Result<BrowserAppUrlProvisio
         });
     }
 
-    if let Some(existing) = config
-        .instances
-        .iter()
-        .find_map(|instance| browser_app_url_from_env(instance))
-    {
+    if let Some(existing) = config.instances.iter().find_map(browser_app_url_from_env) {
         return Ok(BrowserAppUrlProvision {
             url: existing,
             server: None,
@@ -821,7 +813,12 @@ fn provision_browser_app_url(config: &RunConfig) -> Result<BrowserAppUrlProvisio
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(log_file_err))
         .spawn()
-        .map_err(|error| anyhow!("failed to spawn owned web server {}: {error}", script.display()))?;
+        .map_err(|error| {
+            anyhow!(
+                "failed to spawn owned web server {}: {error}",
+                script.display()
+            )
+        })?;
     Ok(BrowserAppUrlProvision {
         url: format!("http://127.0.0.1:{port}"),
         server: Some(OwnedWebServer {
@@ -1117,7 +1114,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+                runtime_substrate: crate::config::RuntimeSubstrate::default(),
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
@@ -1185,7 +1182,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+                runtime_substrate: crate::config::RuntimeSubstrate::default(),
             },
             instances: vec![
                 InstanceConfig {
@@ -1247,8 +1244,7 @@ mod tests {
 
     #[test]
     fn verify_bind_address_released_detects_busy_port() {
-        let listener =
-            TcpListener::bind("127.0.0.1:0").unwrap_or_else(|error| panic!("{error}"));
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap_or_else(|error| panic!("{error}"));
         let bind_address = listener
             .local_addr()
             .unwrap_or_else(|error| panic!("{error}"))
@@ -1267,14 +1263,14 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+                runtime_substrate: crate::config::RuntimeSubstrate::default(),
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
                 mode: InstanceMode::Local,
                 data_dir: PathBuf::from("/tmp/aura-harness-busy-port"),
                 device_id: None,
-                bind_address: bind_address.clone(),
+                bind_address,
                 demo_mode: false,
                 command: Some("bash".to_string()),
                 args: vec!["-lc".to_string(), "cat".to_string()],

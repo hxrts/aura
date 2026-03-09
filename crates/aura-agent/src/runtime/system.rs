@@ -26,6 +26,8 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::util::serialization::from_slice;
 use aura_core::DeviceId;
 #[cfg(not(target_arch = "wasm32"))]
+use aura_guards::GuardContextProvider;
+#[cfg(not(target_arch = "wasm32"))]
 use aura_journal::fact::{FactContent, RelationalFact};
 #[cfg(not(target_arch = "wasm32"))]
 use aura_journal::DomainFact;
@@ -40,8 +42,6 @@ use std::time::Duration;
 use tokio::io::AsyncReadExt;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_tungstenite::accept_async;
-#[cfg(not(target_arch = "wasm32"))]
-use aura_guards::GuardContextProvider;
 
 const MIN_SYNC_PEER_RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_SYNC_PEER_RECONCILE_INTERVAL: Duration = Duration::from_secs(30);

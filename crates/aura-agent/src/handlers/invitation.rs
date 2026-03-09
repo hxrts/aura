@@ -476,6 +476,37 @@ impl InvitationHandler {
             message,
         };
 
+        if let InvitationType::Contact { .. } = invitation.invitation_type {
+            if !Self::sender_contact_exists(
+                effects.as_ref(),
+                invitation.sender_id,
+                invitation.receiver_id,
+            )
+            .await
+            {
+                let contact_fact = ContactFact::Added {
+                    context_id: invitation.context_id,
+                    owner_id: invitation.sender_id,
+                    contact_id: invitation.receiver_id,
+                    nickname: invitation.receiver_id.to_string(),
+                    added_at: PhysicalTime {
+                        ts_ms: current_time,
+                        uncertainty: None,
+                    },
+                };
+
+                effects
+                    .commit_generic_fact_bytes(
+                        invitation.context_id,
+                        CONTACT_FACT_TYPE_ID.into(),
+                        contact_fact.to_bytes(),
+                    )
+                    .await
+                    .map_err(|e| AgentError::effects(format!("commit contact fact: {e}")))?;
+                effects.await_next_view_update().await;
+            }
+        }
+
         // Persist the invitation to storage (so it survives service recreation)
         Self::persist_created_invitation(
             effects.as_ref(),

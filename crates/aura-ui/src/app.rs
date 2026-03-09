@@ -15,15 +15,15 @@ use crate::model::{
     DEFAULT_CAPABILITY_PARTIAL,
 };
 use aura_app::signal_defs::{DiscoveredPeersState, SettingsState};
-use aura_app::ui::signals::{
-    DiscoveredPeerMethod, NetworkStatus, CHAT_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL,
-    ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL,
-    RECOVERY_SIGNAL, SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
-};
 use aura_app::ui::contract::{
     list_item_dom_id, ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot,
     ListSnapshot, MessageSnapshot, OperationId, OperationSnapshot, OperationState,
     ScreenId as ContractScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
+};
+use aura_app::ui::signals::{
+    DiscoveredPeerMethod, NetworkStatus, CHAT_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL,
+    ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL,
+    RECOVERY_SIGNAL, SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
 };
 use aura_app::ui::types::{
     all_command_help, command_help, format_network_status_with_severity, parse_chat_command,
@@ -1290,9 +1290,10 @@ fn submit_runtime_modal_action(
                                         controller_for_import.set_selected_contact_authority_id(
                                             invitation.sender_id,
                                         );
-                                        controller_for_import.complete_runtime_invitation_operation(
-                                            OperationState::Succeeded,
-                                        );
+                                        controller_for_import
+                                            .complete_runtime_invitation_operation(
+                                                OperationState::Succeeded,
+                                            );
                                         controller_for_import
                                             .push_log("accept_invitation complete generic");
                                         harness_log("accept_invitation complete generic");
@@ -1303,9 +1304,7 @@ fn submit_runtime_modal_action(
                                             controller_for_import.push_log(
                                                 "accept_invitation refresh_contacts start",
                                             );
-                                            harness_log(
-                                                "accept_invitation refresh_contacts start",
-                                            );
+                                            harness_log("accept_invitation refresh_contacts start");
                                             let _ = load_contacts_runtime_view(
                                                 controller_for_import.clone(),
                                             )
@@ -1313,9 +1312,7 @@ fn submit_runtime_modal_action(
                                             controller_for_import.push_log(
                                                 "accept_invitation refresh_contacts done",
                                             );
-                                            harness_log(
-                                                "accept_invitation refresh_contacts done",
-                                            );
+                                            harness_log("accept_invitation refresh_contacts done");
                                         }
                                         InvitationBridgeType::Channel { .. } => {
                                             controller_for_import.set_screen(UiScreen::Chat);
@@ -1349,7 +1346,7 @@ fn submit_runtime_modal_action(
                                     OperationId::invitation_accept(),
                                     OperationState::Failed,
                                 );
-                                controller.runtime_error_toast(error.to_string())
+                                controller.runtime_error_toast(error.to_string());
                             }
                         }
                     }
@@ -1361,7 +1358,7 @@ fn submit_runtime_modal_action(
                             OperationId::invitation_accept(),
                             OperationState::Failed,
                         );
-                        controller.runtime_error_toast(error.to_string())
+                        controller.runtime_error_toast(error.to_string());
                     }
                 }
                 rerender_for_import();
@@ -2114,8 +2111,7 @@ fn submit_runtime_chat_input(
                         .map(|_| {
                             controller_for_task.select_channel_by_name(&channel_for_selection);
                             controller_for_task.push_log(&format!(
-                                "chat_join: success channel={} selected={}",
-                                channel_for_selection, channel_for_selection
+                                "chat_join: success channel={channel_for_selection} selected={channel_for_selection}"
                             ));
                             Some(format!("joined #{}", channel.trim_start_matches('#')))
                         })
@@ -2832,7 +2828,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         &settings_runtime_snapshot,
         &notifications_runtime_snapshot,
     );
-    controller.set_ui_snapshot(semantic_snapshot.clone());
+    controller.set_ui_snapshot(semantic_snapshot);
     rsx! {
         main {
             id: ControlId::AppRoot
@@ -5100,7 +5096,9 @@ fn upsert_snapshot_list(
     selected_item_id: Option<String>,
 ) {
     snapshot.lists.retain(|list| list.id != list_id);
-    snapshot.selections.retain(|selection| selection.list != list_id);
+    snapshot
+        .selections
+        .retain(|selection| selection.list != list_id);
     if items.is_empty() {
         return;
     }
@@ -5118,7 +5116,9 @@ fn upsert_snapshot_operation(
     operation_id: OperationId,
     state: OperationState,
 ) {
-    snapshot.operations.retain(|operation| operation.id != operation_id);
+    snapshot
+        .operations
+        .retain(|operation| operation.id != operation_id);
     snapshot.operations.push(OperationSnapshot {
         id: operation_id,
         state,
@@ -5233,7 +5233,9 @@ fn runtime_semantic_snapshot(
             .iter()
             .map(|channel| ListItemSnapshot {
                 id: channel.id.clone(),
-                selected: channel.name.eq_ignore_ascii_case(&chat_runtime.active_channel),
+                selected: channel
+                    .name
+                    .eq_ignore_ascii_case(&chat_runtime.active_channel),
                 confirmation: ConfirmationState::Confirmed,
             })
             .collect::<Vec<_>>()
@@ -5244,7 +5246,11 @@ fn runtime_semantic_snapshot(
         chat_runtime
             .channels
             .iter()
-            .find(|channel| channel.name.eq_ignore_ascii_case(&chat_runtime.active_channel))
+            .find(|channel| {
+                channel
+                    .name
+                    .eq_ignore_ascii_case(&chat_runtime.active_channel)
+            })
             .map(|channel| channel.id.clone())
     } else {
         None
@@ -5275,7 +5281,9 @@ fn runtime_semantic_snapshot(
             &mut snapshot,
             ListId::Contacts,
             contacts,
-            model.selected_contact_authority_id().map(|id| id.to_string()),
+            model
+                .selected_contact_authority_id()
+                .map(|id| id.to_string()),
         );
     }
 
@@ -5322,7 +5330,10 @@ fn runtime_semantic_snapshot(
             &mut snapshot,
             ListId::Notifications,
             notifications,
-            model.selected_notification_id.as_ref().map(|id| id.0.clone()),
+            model
+                .selected_notification_id
+                .as_ref()
+                .map(|id| id.0.clone()),
         );
     }
 

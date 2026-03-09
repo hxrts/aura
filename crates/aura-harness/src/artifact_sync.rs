@@ -177,7 +177,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: true,
-                runtime_substrate: Default::default(),
+                runtime_substrate: crate::config::RuntimeSubstrate::default(),
             },
             instances: vec![InstanceConfig {
                 id: "remote-1".to_string(),

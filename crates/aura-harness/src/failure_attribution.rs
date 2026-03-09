@@ -72,7 +72,11 @@ pub fn attribute_failure(message: &str) -> FailureAttribution {
             "failed to build web runtime",
         ],
     ) {
-        (FailureLayer::Startup, FailurePhase::Startup, "startup/readiness")
+        (
+            FailureLayer::Startup,
+            FailurePhase::Startup,
+            "startup/readiness",
+        )
     } else if contains_any(
         &normalized,
         &[
@@ -82,7 +86,11 @@ pub fn attribute_failure(message: &str) -> FailureAttribution {
             "backend rpc",
         ],
     ) {
-        (FailureLayer::BackendRpc, FailurePhase::Interaction, "backend rpc")
+        (
+            FailureLayer::BackendRpc,
+            FailurePhase::Interaction,
+            "backend rpc",
+        )
     } else if contains_any(
         &normalized,
         &[
@@ -124,7 +132,11 @@ pub fn attribute_failure(message: &str) -> FailureAttribution {
             "holepunch",
         ],
     ) {
-        (FailureLayer::Transport, FailurePhase::Execution, "transport/runtime network")
+        (
+            FailureLayer::Transport,
+            FailurePhase::Execution,
+            "transport/runtime network",
+        )
     } else if contains_any(
         &normalized,
         &[
@@ -145,10 +157,18 @@ pub fn attribute_failure(message: &str) -> FailureAttribution {
             "remote artifact sync",
         ],
     ) {
-        (FailureLayer::Cleanup, FailurePhase::Cleanup, "cleanup/teardown")
+        (
+            FailureLayer::Cleanup,
+            FailurePhase::Cleanup,
+            "cleanup/teardown",
+        )
     } else if contains_any(
         &normalized,
-        &["scenario execution failed", "scenario lint failed", "step timed out"],
+        &[
+            "scenario execution failed",
+            "scenario lint failed",
+            "step timed out",
+        ],
     ) {
         (
             FailureLayer::ScenarioExecution,
@@ -156,7 +176,11 @@ pub fn attribute_failure(message: &str) -> FailureAttribution {
             "scenario execution",
         )
     } else if normalized.contains("artifact") && normalized.contains("sync") {
-        (FailureLayer::Harness, FailurePhase::ArtifactSync, "artifact sync")
+        (
+            FailureLayer::Harness,
+            FailurePhase::ArtifactSync,
+            "artifact sync",
+        )
     } else {
         (FailureLayer::Unknown, FailurePhase::Unknown, "unclassified")
     };

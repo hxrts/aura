@@ -15,8 +15,8 @@ use aura_app::scenario_contract::{
     SemanticScenarioFile, UiAction, VariableAction,
 };
 use aura_app::ui::contract::{
-    ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState,
-    ScreenId, ToastKind, UiReadiness,
+    ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState, ScreenId,
+    ToastKind, UiReadiness,
 };
 use serde::{Deserialize, Serialize};
 
@@ -320,13 +320,11 @@ impl ScenarioStep {
                     self.action,
                 )?,
             })),
-            ScenarioAction::CaptureCurrentAuthorityId => {
-                Some(SemanticAction::Variables(
-                    VariableAction::CaptureCurrentAuthorityId {
-                        name: required_field(self.var.clone(), "var", self.action)?,
-                    },
-                ))
-            }
+            ScenarioAction::CaptureCurrentAuthorityId => Some(SemanticAction::Variables(
+                VariableAction::CaptureCurrentAuthorityId {
+                    name: required_field(self.var.clone(), "var", self.action)?,
+                },
+            )),
             ScenarioAction::CaptureSelection => Some(SemanticAction::Variables(
                 VariableAction::CaptureSelection {
                     name: required_field(self.var.clone(), "var", self.action)?,
@@ -353,14 +351,12 @@ impl ScenarioStep {
             ScenarioAction::SendClipboard => Some(SemanticAction::Ui(UiAction::PasteClipboard {
                 source_actor: self.source_instance.clone().map(ActorId),
             })),
-            ScenarioAction::ReadClipboard => {
-                Some(SemanticAction::Ui(UiAction::ReadClipboard {
-                    name: required_field(self.var.clone(), "var", self.action)?,
-                }))
+            ScenarioAction::ReadClipboard => Some(SemanticAction::Ui(UiAction::ReadClipboard {
+                name: required_field(self.var.clone(), "var", self.action)?,
+            })),
+            ScenarioAction::DismissTransient => {
+                Some(SemanticAction::Ui(UiAction::DismissTransient))
             }
-            ScenarioAction::DismissTransient => Some(SemanticAction::Ui(
-                UiAction::DismissTransient,
-            )),
             ScenarioAction::SendKey => Some(SemanticAction::Ui(UiAction::PressKey(
                 parse_input_key(self.key.as_deref().unwrap_or_default())?,
                 self.repeat.unwrap_or(1).max(1),
@@ -382,8 +378,7 @@ impl ScenarioStep {
             ScenarioAction::ClickButton => {
                 if let Some(control_id) = self.control_id {
                     Some(SemanticAction::Ui(UiAction::Activate(control_id)))
-                } else if let (Some(list_id), Some(item_id)) =
-                    (self.list_id, self.item_id.clone())
+                } else if let (Some(list_id), Some(item_id)) = (self.list_id, self.item_id.clone())
                 {
                     Some(SemanticAction::Ui(UiAction::ActivateListItem {
                         list: list_id,
@@ -668,7 +663,12 @@ impl TryFrom<SemanticStep> for ScenarioStep {
                 step.var = Some(name);
                 step.list_id = Some(list);
             }
-            SemanticAction::Variables(VariableAction::Extract { name, regex, group, from }) => {
+            SemanticAction::Variables(VariableAction::Extract {
+                name,
+                regex,
+                group,
+                from,
+            }) => {
                 step.action = ScenarioAction::ExtractVar;
                 step.var = Some(name);
                 step.regex = Some(regex);
@@ -814,10 +814,12 @@ fn expectation_from_step(step: &ScenarioStep) -> Result<Option<SemanticAction>> 
         ))));
     }
     if let (Some(operation_id), Some(state)) = (step.operation_id.clone(), step.operation_state) {
-        return Ok(Some(SemanticAction::Expect(Expectation::OperationStateIs {
-            operation_id,
-            state,
-        })));
+        return Ok(Some(SemanticAction::Expect(
+            Expectation::OperationStateIs {
+                operation_id,
+                state,
+            },
+        )));
     }
     if let (Some(list_id), Some(item_id)) = (step.list_id, step.item_id.clone()) {
         if let Some(confirmation) = step.confirmation {
@@ -915,9 +917,7 @@ impl RunConfig {
                 .iter()
                 .any(|instance| !matches!(instance.mode, InstanceMode::Local))
         {
-            bail!(
-                "run.runtime_substrate = \"simulator\" currently supports local instances only"
-            );
+            bail!("run.runtime_substrate = \"simulator\" currently supports local instances only");
         }
 
         let mut instance_ids = HashSet::new();
@@ -1193,7 +1193,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+                runtime_substrate: crate::config::RuntimeSubstrate::default(),
             },
             instances: vec![
                 InstanceConfig {
@@ -1505,7 +1505,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+                runtime_substrate: crate::config::RuntimeSubstrate::default(),
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
@@ -1555,7 +1555,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+                runtime_substrate: crate::config::RuntimeSubstrate::default(),
             },
             instances: vec![
                 InstanceConfig {
@@ -1611,7 +1611,9 @@ mod tests {
             .validate()
             .err()
             .unwrap_or_else(|| panic!("duplicate explicit bind addresses must fail"));
-        assert!(error.to_string().contains("duplicate explicit bind_address"));
+        assert!(error
+            .to_string()
+            .contains("duplicate explicit bind_address"));
     }
 
     #[test]

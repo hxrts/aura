@@ -217,6 +217,10 @@ impl ToolApi {
         self.coordinator.backend_kind(instance_id)
     }
 
+    pub fn supports_ui_snapshot(&self, instance_id: &str) -> anyhow::Result<bool> {
+        self.coordinator.supports_ui_snapshot(instance_id)
+    }
+
     pub fn apply_fault_delay(&mut self, actor: &str, delay_ms: u64) -> anyhow::Result<()> {
         self.coordinator.apply_fault_delay(actor, delay_ms)
     }

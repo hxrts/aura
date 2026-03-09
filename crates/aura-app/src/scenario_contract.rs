@@ -6,8 +6,8 @@
 #![allow(missing_docs)] // Shared semantic contract - expanded incrementally during migration.
 
 use crate::ui_contract::{
-    ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState,
-    ScreenId, ToastKind, UiReadiness,
+    ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState, ScreenId,
+    ToastKind, UiReadiness,
 };
 use serde::{Deserialize, Serialize};
 
@@ -312,27 +312,17 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                 "value",
                 value.action,
             )?)),
-            SemanticActionKind::DismissTransient => {
-                ScenarioAction::Ui(UiAction::DismissTransient)
-            }
+            SemanticActionKind::DismissTransient => ScenarioAction::Ui(UiAction::DismissTransient),
             SemanticActionKind::PressKey => ScenarioAction::Ui(UiAction::PressKey(
                 required(value.key, "key", value.action)?,
                 value.repeat.unwrap_or(1).max(1),
             )),
-            SemanticActionKind::SendChatCommand => {
-                ScenarioAction::Ui(UiAction::SendChatCommand(required(
-                    value.value,
-                    "value",
-                    value.action,
-                )?))
-            }
-            SemanticActionKind::SendChatMessage => {
-                ScenarioAction::Ui(UiAction::SendChatMessage(required(
-                    value.value,
-                    "value",
-                    value.action,
-                )?))
-            }
+            SemanticActionKind::SendChatCommand => ScenarioAction::Ui(UiAction::SendChatCommand(
+                required(value.value, "value", value.action)?,
+            )),
+            SemanticActionKind::SendChatMessage => ScenarioAction::Ui(UiAction::SendChatMessage(
+                required(value.value, "value", value.action)?,
+            )),
             SemanticActionKind::PasteClipboard => ScenarioAction::Ui(UiAction::PasteClipboard {
                 source_actor: value.source_actor,
             }),

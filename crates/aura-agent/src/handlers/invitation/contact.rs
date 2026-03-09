@@ -60,15 +60,13 @@ impl<'a> InvitationContactHandler<'a> {
         let acceptor_addr = effects
             .lan_transport()
             .and_then(|transport| transport.websocket_addrs().first().cloned());
-        let acceptor_hint = acceptor_addr
-            .as_deref()
-            .map(|addr| {
-                if addr.starts_with("ws://") || addr.starts_with("wss://") {
-                    addr.to_string()
-                } else {
-                    format!("ws://{addr}")
-                }
-            });
+        let acceptor_hint = acceptor_addr.as_deref().map(|addr| {
+            if addr.starts_with("ws://") || addr.starts_with("wss://") {
+                addr.to_string()
+            } else {
+                format!("ws://{addr}")
+            }
+        });
         tracing::info!(
             invitation_id = %invitation.invitation_id,
             acceptor_id = %acceptor_id,

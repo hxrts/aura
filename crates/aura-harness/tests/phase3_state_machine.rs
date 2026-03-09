@@ -97,7 +97,7 @@ fn sample_mixed_run_config() -> aura_harness::config::RunConfig {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+            runtime_substrate: aura_harness::config::RuntimeSubstrate::default(),
         },
         instances: vec![
             InstanceConfig {
@@ -156,8 +156,7 @@ fn sample_scripted_scenario() -> aura_harness::config::ScenarioConfig {
     ScenarioConfig {
         schema_version: 1,
         id: "mixed-topology-smoke".to_string(),
-        goal: "Exercise local plus ssh-dry-run topology with state-machine execution."
-            .to_string(),
+        goal: "Exercise local plus ssh-dry-run topology with state-machine execution.".to_string(),
         execution_mode: Some("scripted".to_string()),
         required_capabilities: vec!["local".to_string(), "ssh".to_string()],
         steps: vec![

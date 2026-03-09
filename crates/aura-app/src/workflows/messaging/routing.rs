@@ -1,7 +1,7 @@
 use super::*;
 use crate::signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME};
-use crate::workflows::signals::read_signal;
 use crate::workflows::channel_ref::ChannelSelector;
+use crate::workflows::signals::read_signal;
 
 pub(super) fn parse_channel_ref(channel: &str) -> Result<ChannelSelector, AuraError> {
     ChannelSelector::parse(channel)

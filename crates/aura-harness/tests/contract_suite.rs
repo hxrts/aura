@@ -136,14 +136,12 @@ args = ["-lc", "cat"]
         panic!("write config failed: {error}");
     }
 
-    let scenario_body = r#"schema_version = 1
-id = "contract-artifacts"
+    let scenario_body = r#"id = "contract-artifacts"
 goal = "emit artifacts"
-execution_mode = "scripted"
 
 [[steps]]
-id = "noop"
-action = "noop"
+id = "launch"
+action = "launch_actors"
 "#;
     if let Err(error) = std::fs::write(&scenario_path, scenario_body) {
         panic!("write scenario failed: {error}");
@@ -188,7 +186,7 @@ fn local_run_config(name: &str, port: u16) -> RunConfig {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+            runtime_substrate: aura_harness::config::RuntimeSubstrate::default(),
         },
         instances: vec![InstanceConfig {
             id: "alice".to_string(),
@@ -231,7 +229,7 @@ fn mixed_run_config(name: &str, local_port: u16, ssh_port: u16) -> RunConfig {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+            runtime_substrate: aura_harness::config::RuntimeSubstrate::default(),
         },
         instances: vec![
             InstanceConfig {

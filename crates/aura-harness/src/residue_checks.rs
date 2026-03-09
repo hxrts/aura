@@ -67,9 +67,8 @@ fn verify_bind_address_available(bind_address: &str) -> Result<()> {
     if bind_address.trim().ends_with(":0") {
         return Ok(());
     }
-    let listener = TcpListener::bind(bind_address).map_err(|error| {
-        anyhow!("bind address {bind_address} is still in use: {error}")
-    })?;
+    let listener = TcpListener::bind(bind_address)
+        .map_err(|error| anyhow!("bind address {bind_address} is still in use: {error}"))?;
     drop(listener);
     Ok(())
 }
@@ -112,7 +111,10 @@ fn collect_named_artifacts(root: &Path, names: &[&str], results: &mut Vec<PathBu
         let path = entry.path();
         let file_name = entry.file_name();
         let file_name = file_name.to_string_lossy();
-        if names.iter().any(|name| file_name == *name || file_name.ends_with(name)) {
+        if names
+            .iter()
+            .any(|name| file_name == *name || file_name.ends_with(name))
+        {
             results.push(path.clone());
         }
         if path.is_dir() {
@@ -172,7 +174,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+                runtime_substrate: crate::config::RuntimeSubstrate::default(),
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),

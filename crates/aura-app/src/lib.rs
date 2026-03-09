@@ -168,8 +168,8 @@ pub use crate::scenario_contract::{
 };
 pub use crate::ui_contract::{
     ConfirmationState, ControlId, FieldId, ListId, MessageSnapshot, ModalId, OperationId,
-    OperationSnapshot, OperationState, ScreenId, SelectionSnapshot as UiSelectionSnapshot,
-    ToastId, ToastKind, ToastSnapshot as UiToastSnapshot, UiReadiness, UiSnapshot,
+    OperationSnapshot, OperationState, ScreenId, SelectionSnapshot as UiSelectionSnapshot, ToastId,
+    ToastKind, ToastSnapshot as UiToastSnapshot, UiReadiness, UiSnapshot,
 };
 pub use crate::views::{
     Channel, ChannelType, ChatState, ContactsState, HomeState, InvitationsState, Message,

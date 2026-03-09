@@ -4,13 +4,13 @@ use crate::tui::screens::Screen;
 use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::state::toast::ToastLevel;
 use crate::tui::state::CreateInvitationField;
-use crate::tui::types::SettingsSection;
 use crate::tui::types::Contact as TuiContact;
+use crate::tui::types::SettingsSection;
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
-    ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot,
-    ModalId, OperationId, OperationSnapshot, OperationState, ScreenId, SelectionSnapshot,
-    ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
+    ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId,
+    OperationId, OperationSnapshot, OperationState, ScreenId, SelectionSnapshot, ToastId,
+    ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::types::StateSnapshot;
 use std::fs;
@@ -570,7 +570,9 @@ pub fn publish_contacts_list_override(contacts: &[TuiContact], selected_index: u
         })
         .collect::<Vec<_>>();
 
-    let selected_id = contacts.get(selected_index).map(|contact| contact.id.clone());
+    let selected_id = contacts
+        .get(selected_index)
+        .map(|contact| contact.id.clone());
     snapshot.lists.retain(|list| list.id != ListId::Contacts);
     if !items.is_empty() {
         snapshot.lists.push(ListSnapshot {
@@ -578,7 +580,9 @@ pub fn publish_contacts_list_override(contacts: &[TuiContact], selected_index: u
             items,
         });
     }
-    snapshot.selections.retain(|selection| selection.list != ListId::Contacts);
+    snapshot
+        .selections
+        .retain(|selection| selection.list != ListId::Contacts);
     if let Some(item_id) = selected_id {
         snapshot.selections.push(SelectionSnapshot {
             list: ListId::Contacts,
@@ -655,12 +659,12 @@ mod tests {
         state.show_modal(QueuedModal::SettingsDeviceEnrollment(modal));
 
         let snapshot = semantic_ui_snapshot(&state, &StateSnapshot::default(), None);
-        let operation = snapshot
+        let operation_state = snapshot
             .operations
             .iter()
             .find(|operation| operation.id == OperationId::device_enrollment())
-            .expect("device enrollment operation should be present");
+            .map(|operation| operation.state);
 
-        assert_eq!(operation.state, OperationState::Submitting);
+        assert_eq!(operation_state, Some(OperationState::Submitting));
     }
 }

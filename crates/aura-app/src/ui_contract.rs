@@ -415,9 +415,18 @@ mod tests {
             Some("aura-onboarding-create-account-button")
         );
         assert_eq!(ControlId::AppRoot.web_dom_id(), Some("aura-app-root"));
-        assert_eq!(ControlId::ModalRegion.web_dom_id(), Some("aura-modal-region"));
-        assert_eq!(ControlId::ToastRegion.web_dom_id(), Some("aura-toast-region"));
-        assert_eq!(ControlId::NavContacts.web_dom_id(), Some("aura-nav-contacts"));
+        assert_eq!(
+            ControlId::ModalRegion.web_dom_id(),
+            Some("aura-modal-region")
+        );
+        assert_eq!(
+            ControlId::ToastRegion.web_dom_id(),
+            Some("aura-toast-region")
+        );
+        assert_eq!(
+            ControlId::NavContacts.web_dom_id(),
+            Some("aura-nav-contacts")
+        );
         assert_eq!(
             ControlId::Screen(ScreenId::Settings).web_dom_id(),
             Some("aura-screen-settings")
@@ -430,7 +439,10 @@ mod tests {
 
     #[test]
     fn web_dom_ids_are_stable_for_shared_fields() {
-        assert_eq!(FieldId::AccountName.web_dom_id(), Some("aura-account-name-input"));
+        assert_eq!(
+            FieldId::AccountName.web_dom_id(),
+            Some("aura-account-name-input")
+        );
         assert_eq!(
             FieldId::InvitationCode.web_selector().as_deref(),
             Some("#aura-field-invitation-code")
