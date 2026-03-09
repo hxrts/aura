@@ -9,6 +9,7 @@
 use async_trait::async_trait;
 use aura_core::effects::{StorageCoreEffects, StorageError, StorageExtendedEffects, StorageStats};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::fs;
 use tokio::fs::DirEntry;
 
@@ -21,6 +22,8 @@ pub struct FilesystemStorageHandler {
     /// Base directory for storage files
     base_path: PathBuf,
 }
+
+static NEXT_TEMP_WRITE_ID: AtomicU64 = AtomicU64::new(0);
 
 impl FilesystemStorageHandler {
     /// Create a new filesystem storage handler
@@ -49,15 +52,42 @@ impl StorageCoreEffects for FilesystemStorageHandler {
         }
 
         let file_path = self.base_path.join(format!("{key}.dat"));
+        let temp_file_path = self.base_path.join(format!(
+            "{key}.dat.tmp-{}",
+            NEXT_TEMP_WRITE_ID.fetch_add(1, Ordering::Relaxed)
+        ));
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).await.map_err(|e| {
                 StorageError::WriteFailed(format!("Failed to create directory: {e}"))
             })?;
         }
 
-        fs::write(&file_path, value)
+        // Write via a sibling temp file so concurrent readers never observe
+        // truncated ciphertext or partially-updated journal blobs.
+        fs::write(&temp_file_path, value)
             .await
-            .map_err(|e| StorageError::WriteFailed(format!("Failed to write file: {e}")))?;
+            .map_err(|e| StorageError::WriteFailed(format!("Failed to write temp file: {e}")))?;
+
+        if let Err(err) = fs::rename(&temp_file_path, &file_path).await {
+            if file_path.exists() {
+                fs::remove_file(&file_path).await.map_err(|remove_err| {
+                    StorageError::WriteFailed(format!(
+                        "Failed to replace existing file after rename error ({err}): {remove_err}"
+                    ))
+                })?;
+                fs::rename(&temp_file_path, &file_path)
+                    .await
+                    .map_err(|rename_err| {
+                        StorageError::WriteFailed(format!(
+                        "Failed to finalize atomic write after removing existing file: {rename_err}"
+                    ))
+                    })?;
+            } else {
+                return Err(StorageError::WriteFailed(format!(
+                    "Failed to rename temp file into place: {err}"
+                )));
+            }
+        }
 
         Ok(())
     }

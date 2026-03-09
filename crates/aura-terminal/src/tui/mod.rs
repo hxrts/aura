@@ -41,8 +41,8 @@
 pub mod components;
 pub mod context;
 pub(crate) mod fullscreen_stdio;
-pub mod hooks;
 pub(crate) mod harness_state;
+pub mod hooks;
 pub mod iocraft_adapter;
 pub mod layout;
 pub mod props;

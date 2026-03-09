@@ -8,8 +8,11 @@
 
 use crate::core::{AgentError, AgentResult};
 use crate::handlers::shared::context_commitment_from_journal;
-use crate::runtime::choreography_adapter::AuraProtocolAdapter;
 use crate::runtime::consensus::build_consensus_params;
+use crate::runtime::vm_host_bridge::{
+    advance_host_bridged_vm_round, close_and_reap_vm_session, handle_standard_vm_round,
+    open_manifest_vm_session_admitted, AuraVmRoundDisposition,
+};
 use crate::runtime::AuraEffectSystem;
 use aura_chat::guards::{EffectCommand, GuardOutcome, GuardSnapshot};
 use aura_chat::types::{ChatMember, ChatRole};
@@ -25,18 +28,18 @@ use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::time::{OrderingPolicy, PhysicalTime, TimeOrdering, TimeStamp};
+use aura_core::util::serialization::to_vec;
 use aura_core::{Hash32, Prestate};
 use aura_guards::{types::CapabilityId, GuardContextProvider};
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
 use aura_journal::DomainFact;
-use aura_protocol::amp::amp_runners::{execute_as as amp_execute_as, AmpTransportRole};
 use aura_protocol::amp::{
     commit_bump_with_consensus, emit_proposed_bump, get_channel_state, AmpChannelCoordinator,
     AmpJournalEffects,
 };
 use aura_protocol::amp::{AmpMessage, AmpReceipt};
 use aura_protocol::effects::TreeEffects;
-use std::collections::HashMap;
+use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, RoleIndex};
 use uuid::Uuid;
 
 /// Chat service API for the agent layer.
@@ -83,6 +86,84 @@ impl ChatServiceApi {
     /// The coordinator handles AMP channel lifecycle and encryption.
     fn amp_coordinator(&self) -> AmpChannelCoordinator<std::sync::Arc<AuraEffectSystem>> {
         AmpChannelCoordinator::new(self.effects.clone())
+    }
+
+    fn amp_role(authority_id: AuthorityId) -> ChoreographicRole {
+        ChoreographicRole::new(
+            aura_core::DeviceId::from_uuid(authority_id.0),
+            RoleIndex::new(0).expect("role index"),
+        )
+    }
+
+    async fn run_amp_transport_vm(
+        &self,
+        session_uuid: Uuid,
+        roles: Vec<ChoreographicRole>,
+        peer_roles: std::collections::BTreeMap<String, ChoreographicRole>,
+        active_role: &str,
+        initial_payloads: Vec<Vec<u8>>,
+    ) -> AgentResult<()> {
+        self.effects
+            .start_session(session_uuid, roles)
+            .await
+            .map_err(|error| {
+                AgentError::internal(format!("AMP VM session start failed: {error}"))
+            })?;
+
+        let result = async {
+            let manifest =
+                aura_protocol::amp::choreography::telltale_session_types_amp_transport::vm_artifacts::composition_manifest();
+            let global_type =
+                aura_protocol::amp::choreography::telltale_session_types_amp_transport::vm_artifacts::global_type();
+            let local_types =
+                aura_protocol::amp::choreography::telltale_session_types_amp_transport::vm_artifacts::local_types();
+            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+                self.effects.as_ref(),
+                &manifest,
+                active_role,
+                &global_type,
+                &local_types,
+                crate::runtime::AuraVmSchedulerSignals::default(),
+            )
+            .await
+            .map_err(AgentError::internal)?;
+
+            for payload in initial_payloads {
+                handler.push_send_bytes(payload);
+            }
+
+            let loop_result = loop {
+                let round = advance_host_bridged_vm_round(
+                    self.effects.as_ref(),
+                    &mut engine,
+                    handler.as_ref(),
+                    vm_sid,
+                    active_role,
+                    &peer_roles,
+                )
+                    .await
+                    .map_err(AgentError::internal)?;
+
+                match handle_standard_vm_round(
+                    &mut engine,
+                    vm_sid,
+                    round,
+                    &format!("AMP {active_role} VM"),
+                )
+                .map_err(AgentError::internal)?
+                {
+                    AuraVmRoundDisposition::Continue => {}
+                    AuraVmRoundDisposition::Complete => break Ok(()),
+                }
+            };
+
+            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            loop_result
+        }
+        .await;
+
+        let _ = self.effects.end_session().await;
+        result
     }
 
     async fn build_amp_prestate(
@@ -924,38 +1005,20 @@ impl ChatServiceApi {
         context_id: ContextId,
         message: AmpMessage,
     ) -> AgentResult<()> {
-        let mut role_map = HashMap::new();
-        role_map.insert(AmpTransportRole::Sender, sender_id);
-        role_map.insert(AmpTransportRole::Receiver, receiver_id);
-
-        let message_type = std::any::type_name::<AmpMessage>();
-        let message_clone = message.clone();
-
-        let mut adapter = AuraProtocolAdapter::new(
-            self.effects.clone(),
-            sender_id,
-            AmpTransportRole::Sender,
-            role_map,
-        )
-        .with_message_provider(move |req_ctx, _received| {
-            if req_ctx.type_name == message_type {
-                return Some(Box::new(message_clone.clone()) as Box<dyn std::any::Any + Send>);
-            }
-            None
-        });
-
         let session_uuid = amp_session_uuid(&context_id, &sender_id, &receiver_id);
-        adapter
-            .start_session(session_uuid)
-            .await
-            .map_err(|e| AgentError::internal(format!("AMP transport start failed: {e}")))?;
-
-        amp_execute_as(AmpTransportRole::Sender, &mut adapter)
-            .await
-            .map_err(|e| AgentError::internal(format!("AMP transport failed: {e}")))?;
-
-        let _ = adapter.end_session().await;
-        Ok(())
+        self.run_amp_transport_vm(
+            session_uuid,
+            vec![Self::amp_role(sender_id), Self::amp_role(receiver_id)],
+            std::collections::BTreeMap::from([(
+                "Receiver".to_string(),
+                Self::amp_role(receiver_id),
+            )]),
+            "Sender",
+            vec![to_vec(&message).map_err(|error| {
+                AgentError::internal(format!("AMP message encode failed: {error}"))
+            })?],
+        )
+        .await
     }
 
     /// Execute AmpTransport choreography as the Receiver role.
@@ -981,43 +1044,23 @@ impl ChatServiceApi {
         chan_epoch: u64,
         ratchet_gen: u64,
     ) -> AgentResult<()> {
-        let mut role_map = HashMap::new();
-        role_map.insert(AmpTransportRole::Sender, sender_id);
-        role_map.insert(AmpTransportRole::Receiver, receiver_id);
-
-        let receipt_type = std::any::type_name::<AmpReceipt>();
         let receipt = AmpReceipt {
             context: context_id,
             channel: channel_id,
             chan_epoch,
             ratchet_gen,
         };
-
-        let mut adapter = AuraProtocolAdapter::new(
-            self.effects.clone(),
-            receiver_id,
-            AmpTransportRole::Receiver,
-            role_map,
-        )
-        .with_message_provider(move |req_ctx, _received| {
-            if req_ctx.type_name == receipt_type {
-                return Some(Box::new(receipt) as Box<dyn std::any::Any + Send>);
-            }
-            None
-        });
-
         let session_uuid = amp_session_uuid(&context_id, &sender_id, &receiver_id);
-        adapter
-            .start_session(session_uuid)
-            .await
-            .map_err(|e| AgentError::internal(format!("AMP transport start failed: {e}")))?;
-
-        amp_execute_as(AmpTransportRole::Receiver, &mut adapter)
-            .await
-            .map_err(|e| AgentError::internal(format!("AMP transport failed: {e}")))?;
-
-        let _ = adapter.end_session().await;
-        Ok(())
+        self.run_amp_transport_vm(
+            session_uuid,
+            vec![Self::amp_role(sender_id), Self::amp_role(receiver_id)],
+            std::collections::BTreeMap::from([("Sender".to_string(), Self::amp_role(sender_id))]),
+            "Receiver",
+            vec![to_vec(&receipt).map_err(|error| {
+                AgentError::internal(format!("AMP receipt encode failed: {error}"))
+            })?],
+        )
+        .await
     }
 }
 

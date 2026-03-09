@@ -14,7 +14,14 @@
 use crate::BiscuitError;
 use aura_core::scope::{AuthorizationOp, ResourceScope};
 use aura_core::{hash::hash, identifiers::AuthorityId};
-use biscuit_auth::{macros::*, Biscuit, PublicKey};
+use biscuit_auth::{macros::*, AuthorizerLimits, Biscuit, PublicKey};
+use std::time::Duration;
+
+const AURA_BISCUIT_LIMITS: AuthorizerLimits = AuthorizerLimits {
+    max_facts: 10_000,
+    max_iterations: 1_000,
+    max_time: Duration::from_millis(50),
+};
 
 // ============================================================================
 // Biscuit Authorization Bridge
@@ -194,7 +201,7 @@ impl BiscuitAuthorizationBridge {
         }
 
         // Phase 4: Run Datalog evaluation
-        let authorization_result = authorizer.authorize();
+        let authorization_result = authorizer.authorize_with_limits(AURA_BISCUIT_LIMITS);
 
         let authorized = match authorization_result {
             Ok(_) => true,

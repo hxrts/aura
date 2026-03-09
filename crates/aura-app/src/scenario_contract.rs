@@ -6,8 +6,8 @@
 #![allow(missing_docs)] // Shared semantic contract - expanded incrementally during migration.
 
 use crate::ui_contract::{
-    ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState,
-    ScreenId, ToastKind, UiReadiness,
+    ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState, ScreenId,
+    ToastKind, UiReadiness,
 };
 use serde::{Deserialize, Serialize};
 
@@ -102,7 +102,7 @@ pub enum VariableAction {
     Extract {
         name: String,
         regex: String,
-        group: usize,
+        group: u32,
         from: ExtractSource,
     },
 }
@@ -186,7 +186,7 @@ pub struct SemanticScenarioFileStep {
     pub confirmation: Option<ConfirmationState>,
     pub name: Option<String>,
     pub regex: Option<String>,
-    pub group: Option<usize>,
+    pub group: Option<u32>,
     pub from: Option<ExtractSource>,
 }
 
@@ -312,27 +312,17 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                 "value",
                 value.action,
             )?)),
-            SemanticActionKind::DismissTransient => {
-                ScenarioAction::Ui(UiAction::DismissTransient)
-            }
+            SemanticActionKind::DismissTransient => ScenarioAction::Ui(UiAction::DismissTransient),
             SemanticActionKind::PressKey => ScenarioAction::Ui(UiAction::PressKey(
                 required(value.key, "key", value.action)?,
                 value.repeat.unwrap_or(1).max(1),
             )),
-            SemanticActionKind::SendChatCommand => {
-                ScenarioAction::Ui(UiAction::SendChatCommand(required(
-                    value.value,
-                    "value",
-                    value.action,
-                )?))
-            }
-            SemanticActionKind::SendChatMessage => {
-                ScenarioAction::Ui(UiAction::SendChatMessage(required(
-                    value.value,
-                    "value",
-                    value.action,
-                )?))
-            }
+            SemanticActionKind::SendChatCommand => ScenarioAction::Ui(UiAction::SendChatCommand(
+                required(value.value, "value", value.action)?,
+            )),
+            SemanticActionKind::SendChatMessage => ScenarioAction::Ui(UiAction::SendChatMessage(
+                required(value.value, "value", value.action)?,
+            )),
             SemanticActionKind::PasteClipboard => ScenarioAction::Ui(UiAction::PasteClipboard {
                 source_actor: value.source_actor,
             }),
@@ -424,7 +414,7 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
 }
 
 fn required<T>(value: Option<T>, field: &str, action: SemanticActionKind) -> Result<T, String> {
-    value.ok_or_else(|| format!("semantic action {:?} requires {field}", action))
+    value.ok_or_else(|| format!("semantic action {action:?} requires {field}"))
 }
 
 #[cfg(test)]
@@ -456,9 +446,11 @@ mod tests {
                     repeat: None,
                     source_actor: None,
                     kind: None,
+                    count: None,
                     readiness: None,
                     operation_id: None,
                     operation_state: None,
+                    confirmation: None,
                     name: None,
                     regex: None,
                     group: None,
@@ -480,9 +472,11 @@ mod tests {
                     repeat: None,
                     source_actor: None,
                     kind: None,
+                    count: None,
                     readiness: None,
                     operation_id: None,
                     operation_state: None,
+                    confirmation: None,
                     name: None,
                     regex: None,
                     group: None,
@@ -528,9 +522,11 @@ mod tests {
             repeat: None,
             source_actor: None,
             kind: None,
+            count: None,
             readiness: None,
             operation_id: None,
             operation_state: None,
+            confirmation: None,
             name: None,
             regex: None,
             group: None,
@@ -539,7 +535,7 @@ mod tests {
 
         let error = ScenarioStep::try_from(step)
             .expect_err("screen expectation without screen_id must fail");
-        assert!(error.to_string().contains("screen_id"));
+        assert!(error.contains("screen_id"));
     }
 
     #[test]

@@ -297,6 +297,7 @@ pub mod device_enrollment {
     //
     // Note: The new device must create its own authority first, making it
     // addressable before the enrollment choreography can proceed.
+    // The generated manifest carries device-migration link metadata for reconfiguration.
     choreography!(include_str!("src/protocol.device_enrollment.choreo"));
 }
 
@@ -456,6 +457,24 @@ mod tests {
 
         assert_eq!(restored.invitation_id.as_str(), "inv-123");
         assert!(restored.accepted);
+    }
+
+    #[test]
+    fn invitation_exchange_manifest_includes_protocol_metadata() {
+        let manifest =
+            exchange::telltale_session_types_invitation::vm_artifacts::composition_manifest();
+
+        assert_eq!(manifest.protocol_name, "InvitationExchange");
+        assert_eq!(manifest.protocol_namespace.as_deref(), Some("invitation"));
+        assert_eq!(
+            manifest.protocol_qualified_name,
+            "invitation.InvitationExchange"
+        );
+        assert_eq!(manifest.protocol_id, "aura.invitation.exchange");
+        assert_eq!(manifest.role_names, vec!["Sender", "Receiver"]);
+        assert!(manifest.required_capabilities.is_empty());
+        assert!(manifest.link_specs.is_empty());
+        assert!(manifest.delegation_constraints.is_empty());
     }
 
     #[test]

@@ -5,7 +5,7 @@
 
 use aura_app::ui::contract::UiSnapshot;
 use aura_ui::UiController;
-use js_sys::{Array, Function, JSON, Object, Reflect};
+use js_sys::{Array, Function, Object, Reflect, JSON};
 use serde_wasm_bindgen::to_value;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -36,15 +36,17 @@ fn publish_ui_snapshot_now(
         &JsValue::from_str(&json),
     );
 
-    let binding_mode =
-        Reflect::get(window.as_ref(), &JsValue::from_str("__AURA_DRIVER_PUSH_UI_STATE"))
-            .ok()
-            .and_then(|candidate| candidate.dyn_into::<Function>().ok())
-            .map(|function| {
-                let _ = function.call1(window.as_ref(), &JsValue::from_str(&json));
-                "driver_push"
-            })
-            .unwrap_or("console_only");
+    let binding_mode = Reflect::get(
+        window.as_ref(),
+        &JsValue::from_str("__AURA_DRIVER_PUSH_UI_STATE"),
+    )
+    .ok()
+    .and_then(|candidate| candidate.dyn_into::<Function>().ok())
+    .map(|function| {
+        let _ = function.call1(window.as_ref(), &JsValue::from_str(&json));
+        "driver_push"
+    })
+    .unwrap_or("console_only");
 
     let should_log = LAST_PUBLISHED_UI_STATE_JSON.with(|slot| {
         let mut last = slot.borrow_mut();

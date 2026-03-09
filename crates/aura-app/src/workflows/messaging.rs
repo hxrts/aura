@@ -625,9 +625,7 @@ async fn recipient_peers_for_channel(
                 .into_iter()
                 .filter(|peer| *peer != self_authority)
                 .collect();
-            if channel.is_dm {
-                recipients.extend(discovered);
-            } else if discovered.len() == 1 {
+            if channel.is_dm || discovered.len() == 1 {
                 recipients.extend(discovered);
             }
         }

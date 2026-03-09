@@ -7,7 +7,7 @@ This document describes the journal architecture and state reduction system in A
 Aura’s journal state is a composite of:
 - **Fact Journal**: the canonical, namespaced CRDT of immutable facts.
 - **Capability Frontier**: the current capability lattice for the namespace.
-- **JournalState**: a composite view used by effects/runtime to carry both together.
+- **Composite journal view**: the runtime carries facts and capabilities together when evaluating effects.
 
 The fact journal is stored and merged as a semilattice. Capabilities are refined via meet. The runtime always treats these as orthogonal dimensions of state.
 

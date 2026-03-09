@@ -21,7 +21,8 @@ use syn::{
 };
 use telltale_choreography::{
     ast::{
-        choreography_to_global, Choreography, GlobalTypeCore, MessageType, PayloadSort, Protocol,
+        choreography_to_global, local_to_local_r, Choreography, GlobalTypeCore, MessageType,
+        PayloadSort, Protocol,
     },
     compiler::{codegen::generate_choreography_code, parse_choreography_str, project},
 };
@@ -518,6 +519,159 @@ fn generate_helpers(messages: &[MessageType]) -> TokenStream {
         #(#message_structs)*
         type Channel = Bidirectional<UnboundedSender<Label>, UnboundedReceiver<Label>>;
     }
+}
+
+fn generate_vm_projection_artifacts(
+    choreography: &Choreography,
+    namespace: Option<&str>,
+    annotations: &[AuraEffect],
+    local_types: &[(
+        telltale_choreography::ast::Role,
+        telltale_choreography::ast::LocalType,
+    )],
+) -> Result<TokenStream, syn::Error> {
+    let global_type = choreography_to_global(choreography).map_err(|error| {
+        syn::Error::new(
+            proc_macro2::Span::call_site(),
+            format!("failed to derive VM global type: {error}"),
+        )
+    })?;
+
+    let mut local_type_map = BTreeMap::new();
+    for (role, local_type) in local_types {
+        let local_type_r = local_to_local_r(local_type).map_err(|error| {
+            syn::Error::new(
+                proc_macro2::Span::call_site(),
+                format!(
+                    "failed to derive VM local type for role {}: {error}",
+                    role.name()
+                ),
+            )
+        })?;
+        local_type_map.insert(role.name().to_string(), local_type_r);
+    }
+
+    let global_json = serde_json::to_string(&global_type).map_err(|error| {
+        syn::Error::new(
+            proc_macro2::Span::call_site(),
+            format!("failed to encode VM global type artifact: {error}"),
+        )
+    })?;
+    let local_types_json = serde_json::to_string(&local_type_map).map_err(|error| {
+        syn::Error::new(
+            proc_macro2::Span::call_site(),
+            format!("failed to encode VM local-type artifacts: {error}"),
+        )
+    })?;
+    let protocol_name = choreography.name.to_string();
+    let qualified_name = aura_mpst::CompositionManifest::qualified_name(namespace, &protocol_name);
+    let startup_defaults = aura_mpst::startup_defaults_for_qualified_name(&qualified_name);
+    let manifest = aura_mpst::CompositionManifest {
+        protocol_name,
+        protocol_namespace: namespace.map(str::to_string),
+        protocol_qualified_name: qualified_name.clone(),
+        protocol_id: startup_defaults
+            .protocol_id
+            .unwrap_or(qualified_name.as_str())
+            .to_string(),
+        role_names: choreography
+            .roles
+            .iter()
+            .map(|role| role.name().to_string())
+            .collect(),
+        required_capabilities: startup_defaults
+            .required_capabilities
+            .iter()
+            .map(|capability| (*capability).to_string())
+            .collect(),
+        determinism_policy_ref: Some(startup_defaults.determinism_policy_ref.to_string()),
+        link_specs: annotations
+            .iter()
+            .filter_map(|annotation| match annotation {
+                AuraEffect::Link { directive, role } => Some(aura_mpst::CompositionLinkSpec {
+                    role: role.as_str().to_string(),
+                    bundle_id: directive.bundle_id.clone(),
+                    exports: directive.exports.clone(),
+                    imports: directive.imports.clone(),
+                }),
+                _ => None,
+            })
+            .collect(),
+        delegation_constraints: Vec::new(),
+    };
+    let manifest_json = serde_json::to_string(&manifest).map_err(|error| {
+        syn::Error::new(
+            proc_macro2::Span::call_site(),
+            format!("failed to encode composition manifest artifact: {error}"),
+        )
+    })?;
+
+    let global_json_lit = LitStr::new(&global_json, proc_macro2::Span::call_site());
+    let local_types_json_lit = LitStr::new(&local_types_json, proc_macro2::Span::call_site());
+    let manifest_json_lit = LitStr::new(&manifest_json, proc_macro2::Span::call_site());
+    let role_names = choreography.roles.iter().map(|role| {
+        let name = role.name().to_string();
+        LitStr::new(&name, proc_macro2::Span::call_site())
+    });
+
+    Ok(quote! {
+        /// VM projection artifacts derived from the authoritative choreography source.
+        pub mod vm_artifacts {
+            use std::collections::BTreeMap;
+            use std::sync::OnceLock;
+
+            fn decode_global_type() -> &'static ::aura_mpst::telltale_types::GlobalType {
+                static GLOBAL_TYPE: OnceLock<::aura_mpst::telltale_types::GlobalType> =
+                    OnceLock::new();
+                GLOBAL_TYPE.get_or_init(|| {
+                    ::aura_mpst::serde_json::from_str(#global_json_lit)
+                        .expect("macro-generated VM global type must decode")
+                })
+            }
+
+            fn decode_local_types(
+            ) -> &'static BTreeMap<String, ::aura_mpst::telltale_types::LocalTypeR> {
+                static LOCAL_TYPES: OnceLock<
+                    BTreeMap<String, ::aura_mpst::telltale_types::LocalTypeR>,
+                > = OnceLock::new();
+                LOCAL_TYPES.get_or_init(|| {
+                    ::aura_mpst::serde_json::from_str(#local_types_json_lit)
+                        .expect("macro-generated VM local types must decode")
+                })
+            }
+
+            fn decode_composition_manifest() -> &'static ::aura_mpst::CompositionManifest {
+                static COMPOSITION_MANIFEST: OnceLock<::aura_mpst::CompositionManifest> =
+                    OnceLock::new();
+                COMPOSITION_MANIFEST.get_or_init(|| {
+                    ::aura_mpst::serde_json::from_str(#manifest_json_lit)
+                        .expect("macro-generated composition manifest must decode")
+                })
+            }
+
+            pub fn role_names() -> &'static [&'static str] {
+                &[#(#role_names),*]
+            }
+
+            pub fn global_type() -> ::aura_mpst::telltale_types::GlobalType {
+                decode_global_type().clone()
+            }
+
+            pub fn local_types() -> BTreeMap<String, ::aura_mpst::telltale_types::LocalTypeR> {
+                decode_local_types().clone()
+            }
+
+            pub fn local_type(
+                role: &str,
+            ) -> Option<::aura_mpst::telltale_types::LocalTypeR> {
+                decode_local_types().get(role).cloned()
+            }
+
+            pub fn composition_manifest() -> ::aura_mpst::CompositionManifest {
+                decode_composition_manifest().clone()
+            }
+        }
+    })
 }
 
 fn hoist_choice_blocks(tokens: TokenStream) -> TokenStream {
@@ -1372,14 +1526,18 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
 
     // Generate the Telltale choreography using namespace-aware functions
     let message_type_names = extract_message_type_names(&parsed_input.choreography);
-    let telltale_output =
-        choreography_impl_namespace_aware(&parsed_input.choreography, &message_type_names)
-            .map_err(|err| {
-                syn::Error::new(
-                    proc_macro2::Span::call_site(),
-                    format!("Telltale generation failed: {err}"),
-                )
-            })?;
+    let telltale_output = choreography_impl_namespace_aware(
+        &parsed_input.choreography,
+        parsed_input.namespace.as_deref(),
+        &parsed_input.aura_annotations,
+        &message_type_names,
+    )
+    .map_err(|err| {
+        syn::Error::new(
+            proc_macro2::Span::call_site(),
+            format!("Telltale generation failed: {err}"),
+        )
+    })?;
 
     // Generate the Aura wrapper module with namespace support
     let namespace = parsed_input.namespace.clone();
@@ -2098,6 +2256,8 @@ fn generate_aura_wrapper(
 /// Uses namespace-aware generation to avoid module conflicts.
 fn choreography_impl_namespace_aware(
     choreography: &Choreography,
+    namespace: Option<&str>,
+    annotations: &[AuraEffect],
     message_type_names: &[String],
 ) -> Result<TokenStream, syn::Error> {
     // Project to local types
@@ -2120,6 +2280,8 @@ fn choreography_impl_namespace_aware(
     collect_messages(&choreography.protocol, &mut message_map);
     let messages: Vec<_> = message_map.into_values().collect();
     let helpers = generate_helpers(&messages);
+    let vm_projection_artifacts =
+        generate_vm_projection_artifacts(choreography, namespace, annotations, &local_types)?;
 
     // Generate code and hoist inline choice enums (choices need item-level definitions)
     let generated_code = generate_choreography_code(
@@ -2200,6 +2362,7 @@ fn choreography_impl_namespace_aware(
             #imports
             #helpers
             #generated_code
+            #vm_projection_artifacts
             #message_wrapper_module
         }
     })
@@ -2409,10 +2572,10 @@ module simple_choice exposing (SimpleChoice)
 
 protocol SimpleChoice =
   roles A, B
-  case choose A of
-    Accept ->
+  choice at A
+    | Accept ->
       A -> B : AcceptMsg
-    Reject ->
+    | Reject ->
       A -> B : RejectMsg
 "#;
         let choreography = parse_test_choreography(dsl);
@@ -2437,10 +2600,10 @@ module loop_proto exposing (LoopProto)
 protocol LoopProto =
   roles Coordinator, Peer
   loop decide by Coordinator
-    case choose Coordinator of
-      Continue ->
+    choice at Coordinator
+      | Continue ->
         Coordinator -> Peer : Tick
-      Stop ->
+      | Stop ->
         Coordinator -> Peer : Stop
 "#;
         let choreography = parse_test_choreography(dsl);
@@ -2499,10 +2662,10 @@ module subset_proto exposing (SubsetProto)
 
 protocol SubsetProto =
   roles A, B
-  case choose A of
-    Accept ->
+  choice at A
+    | Accept ->
       A -> B : AcceptMsg
-    Reject ->
+    | Reject ->
       A -> B : RejectMsg
 "#;
         let choreography = parse_test_choreography(dsl);

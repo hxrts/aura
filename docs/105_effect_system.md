@@ -181,6 +181,14 @@ The pure transition core requires identical outputs given the same input stream.
 
 Conformance lanes compare logical steps rather than wall-clock timing. Tests must not depend on execution speed. Time-dependent behavior uses simulated time through effect handlers. Conformance artifacts use canonical encoding with deterministic field ordering.
 
+## Session-Local VM Bridge Effects
+
+Production choreography execution uses a narrow synchronous bridge trait at the Aura and Telltale boundary. `VmBridgeEffects` in `aura-core` exposes only immediate session-local queue and snapshot operations. It does not expose async transport, storage, or journal methods.
+
+This split exists because Telltale host callbacks are synchronous. The callback path may enqueue outbound payloads, record blocked receive edges, consume branch choices, and snapshot scheduler signals. It must not perform network I/O or journal work directly.
+
+Async host work resumes outside the VM step boundary in Layer 6 runtime services. `vm_host_bridge` observes `VmBridgeEffects` state, performs transport and guard-chain work, and injects completed results back into the VM. This preserves deterministic VM progression while keeping Aura's runtime async.
+
 ## Layer Placement
 
 The effect system spans several crates with strict dependency boundaries. `aura-core` defines effect traits, identifiers, and core data structures. It contains no implementations.

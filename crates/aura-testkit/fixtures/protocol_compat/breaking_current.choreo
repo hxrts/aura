@@ -2,5 +2,7 @@ module break_current exposing (BreakCurrent)
 
 protocol BreakCurrent =
   roles A, B
+
+  -- Breaking change: Ping -> Ping2
   A -> B : Ping2
   B -> A : Pong

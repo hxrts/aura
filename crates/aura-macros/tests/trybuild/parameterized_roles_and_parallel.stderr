@@ -6,8 +6,8 @@ error: Telltale generation failed: Projection failed for role Auditors: dynamic 
  5 | |
  6 | | protocol ParameterizedRolesAndParallel =
 ...  |
-19 | |       Coordinator -> Auditors[*] : AbortNotice
-20 | | "#);
+17 | |       Coordinator -> Auditors[*] : AbortNotice
+18 | | "#);
    | |___^
    |
    = note: this error originates in the macro `choreography` (in Nightly builds, run with -Z macro-backtrace for more info)

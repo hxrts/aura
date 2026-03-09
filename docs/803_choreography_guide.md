@@ -87,25 +87,24 @@ Select the narrowest `TimeStamp` domain for each time field. See [Effect System]
 Create the protocol implementation:
 
 ```rust
-use aura_agent::AuraProtocolAdapter;
+use aura_agent::runtime::open_manifest_vm_session_admitted;
 
-// Create adapter with effect system
-let mut adapter = AuraProtocolAdapter::new(
-    authority_id,
-    context_id,
-    effect_system,
-    guard_chain,
-);
-
-// Execute as specific role
-let result = runners::execute_as(
-    &mut adapter,
-    MyProtocolRole::Initiator,
-    protocol_params,
+let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
+    &my_protocol::COMPOSITION_MANIFEST,
+    "Initiator",
+    &my_protocol::global_type(),
+    &my_protocol::local_types(),
+    scheduler_signals,
 ).await?;
+
+let status = engine.run_to_completion(vm_sid)?;
 ```
 
-Register with the runtime and integrate with the guard chain. Category C operations must follow the ceremony contract.
+This wiring opens an admitted VM session from generated choreography metadata. The runtime source of truth is the composition manifest, not an ad hoc adapter. Register the service with the runtime and integrate it with the guard chain. Category C operations must follow the ceremony contract.
+
+Production services should treat the admitted unit as a VM fragment. If the manifest declares link bundles, each linked bundle becomes its own ownership unit. Runtime transfer must use `ReconfigurationManager`. Do not bypass fragment ownership through service-local state.
+
+The runtime also derives execution mode from admitted policy. Cooperative protocols stay on the canonical VM path. Replay-deterministic and envelope-bounded protocols select the threaded path only through the admission and hardening surface. Service code should not construct ad hoc threaded runtimes.
 
 ### Phase 4: Status and Testing
 
@@ -122,6 +121,9 @@ pub fn ceremony_status(facts: &[InvitationFact]) -> CeremonyStatus {
 - [ ] Facts defined with reducer and schema version
 - [ ] Choreography specified with roles/messages documented
 - [ ] Runtime wiring added (role runners + registration)
+- [ ] Fragment ownership uses manifest admission and runtime ownership APIs
+- [ ] `delegate` and `link` flows use `ReconfigurationManager`
+- [ ] Threaded or envelope-bounded execution uses admitted policy only
 - [ ] Category C uses ceremony runner and emits standard facts
 - [ ] Status output implemented
 - [ ] Shared-bus integration test added

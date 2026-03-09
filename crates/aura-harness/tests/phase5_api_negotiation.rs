@@ -78,7 +78,7 @@ fn one_local_run(name: &str) -> RunConfig {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+            runtime_substrate: aura_harness::config::RuntimeSubstrate::default(),
         },
         instances: vec![InstanceConfig {
             id: "alice".to_string(),

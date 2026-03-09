@@ -6,14 +6,31 @@
 
 pub mod facts;
 pub mod gc;
+pub mod policy;
+pub mod release;
+pub mod scope;
 
 pub use facts::{
-    maintenance_fact_type_id, AdminReplacement, CacheInvalidated, CacheKey, IdentityEpochFence,
-    MaintenanceEpoch, MaintenanceFact, MaintenanceFactDelta, MaintenanceFactKey,
-    MaintenanceFactReducer, SnapshotCompleted, SnapshotProposed, UpgradeActivated,
+    maintenance_fact_type_id, AdminReplacement, AuraUpgradeFailure, AuraUpgradeFailureClass,
+    CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceEpoch, MaintenanceFact,
+    MaintenanceFactDelta, MaintenanceFactKey, MaintenanceFactReducer, ReleaseDistributionFact,
+    ReleasePolicyFact, SnapshotCompleted, SnapshotProposed, UpgradeActivated, UpgradeExecutionFact,
     UpgradeProposalMetadata, MAINTENANCE_FACT_SCHEMA_VERSION, MAINTENANCE_FACT_TYPE_ID,
 };
 pub use gc::{plan_dkg_transcript_gc, TranscriptGcPlan};
+pub use policy::{
+    AuraActivationTrustPolicy, AuraActivationWindow, AuraReleaseActivationPolicy,
+    AuraReleaseDiscoveryPolicy, AuraReleaseSharingPolicy, AuraRollbackPreference,
+    AuthoritySelector, ContextSelector, PinPolicy, RecommendationPolicy,
+};
+pub use release::{
+    AuraActivationProfile, AuraArtifactDescriptor, AuraArtifactKind, AuraArtifactPackaging,
+    AuraCompatibilityClass, AuraCompatibilityManifest, AuraDataMigration,
+    AuraDeterministicBuildCertificate, AuraHealthGate, AuraLauncherEntrypoint, AuraReleaseId,
+    AuraReleaseManifest, AuraReleaseProvenance, AuraReleaseSeriesId, AuraRollbackRequirement,
+    AuraTargetPlatform, AuraTeeAttestation,
+};
+pub use scope::{AuraActivationScope, AuraPolicyScope, ReleaseResidency, TransitionState};
 
 /// Operation category for maintenance gating and review.
 ///
@@ -60,6 +77,12 @@ pub enum MaintenanceOperation {
     UpgradeActivated,
     /// Admin authority replacement
     AdminReplacement,
+    /// Release distribution and certification publication
+    ReleaseDistribution,
+    /// OTA discovery, sharing, and activation policy publication
+    ReleasePolicy,
+    /// Scoped OTA execution and outcome recording
+    UpgradeExecution,
 }
 
 impl MaintenanceOperation {
@@ -77,6 +100,9 @@ impl MaintenanceOperation {
             MaintenanceOperation::CacheInvalidated => OperationCategory::A,
             MaintenanceOperation::UpgradeActivated => OperationCategory::C,
             MaintenanceOperation::AdminReplacement => OperationCategory::C,
+            MaintenanceOperation::ReleaseDistribution => OperationCategory::B,
+            MaintenanceOperation::ReleasePolicy => OperationCategory::C,
+            MaintenanceOperation::UpgradeExecution => OperationCategory::C,
         }
     }
 
@@ -88,6 +114,9 @@ impl MaintenanceOperation {
             MaintenanceOperation::CacheInvalidated => "maintenance:cache-invalidated",
             MaintenanceOperation::UpgradeActivated => "maintenance:upgrade-activated",
             MaintenanceOperation::AdminReplacement => "maintenance:admin-replacement",
+            MaintenanceOperation::ReleaseDistribution => "maintenance:release-distribution",
+            MaintenanceOperation::ReleasePolicy => "maintenance:release-policy",
+            MaintenanceOperation::UpgradeExecution => "maintenance:upgrade-execution",
         }
     }
 
@@ -100,6 +129,9 @@ impl MaintenanceOperation {
             "maintenance:cache-invalidated" => Some(MaintenanceOperation::CacheInvalidated),
             "maintenance:upgrade-activated" => Some(MaintenanceOperation::UpgradeActivated),
             "maintenance:admin-replacement" => Some(MaintenanceOperation::AdminReplacement),
+            "maintenance:release-distribution" => Some(MaintenanceOperation::ReleaseDistribution),
+            "maintenance:release-policy" => Some(MaintenanceOperation::ReleasePolicy),
+            "maintenance:upgrade-execution" => Some(MaintenanceOperation::UpgradeExecution),
             _ => None,
         }
     }
@@ -112,6 +144,9 @@ impl MaintenanceOperation {
             MaintenanceOperation::CacheInvalidated,
             MaintenanceOperation::UpgradeActivated,
             MaintenanceOperation::AdminReplacement,
+            MaintenanceOperation::ReleaseDistribution,
+            MaintenanceOperation::ReleasePolicy,
+            MaintenanceOperation::UpgradeExecution,
         ]
         .into_iter()
     }
@@ -134,6 +169,9 @@ pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
     ("maintenance:cache-invalidated", "A"),
     ("maintenance:upgrade-activated", "C"),
     ("maintenance:admin-replacement", "C"),
+    ("maintenance:release-distribution", "B"),
+    ("maintenance:release-policy", "C"),
+    ("maintenance:upgrade-execution", "C"),
 ];
 
 /// Lookup the operation category (A/B/C) for a given maintenance operation.
@@ -181,6 +219,18 @@ mod tests {
         );
         assert_eq!(
             MaintenanceOperation::AdminReplacement.category(),
+            OperationCategory::C
+        );
+        assert_eq!(
+            MaintenanceOperation::ReleaseDistribution.category(),
+            OperationCategory::B
+        );
+        assert_eq!(
+            MaintenanceOperation::ReleasePolicy.category(),
+            OperationCategory::C
+        );
+        assert_eq!(
+            MaintenanceOperation::UpgradeExecution.category(),
             OperationCategory::C
         );
     }

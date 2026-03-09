@@ -83,6 +83,7 @@ pub mod time;
 pub mod trace;
 pub mod transport;
 pub mod tree; // Commitment tree operations
+pub mod vm_bridge; // Session-local sync bridge state for VM host callbacks
 
 // Simulation/testing effect traits (feature-gated)
 cfg_if::cfg_if! {
@@ -229,6 +230,10 @@ pub use time::{
 pub use trace::{TraceEffects, TraceEvent, TraceSpanId};
 pub use transport::{
     TransportEffects, TransportEnvelope, TransportError, TransportReceipt, TransportStats,
+};
+pub use vm_bridge::{
+    VmBridgeBlockedEdge, VmBridgeEffects, VmBridgeLeaseMetadataSnapshot, VmBridgePendingSend,
+    VmBridgeSchedulerSignals, VmBridgeTransferMetadataSnapshot,
 };
 
 // Re-export protocol coordination effect traits

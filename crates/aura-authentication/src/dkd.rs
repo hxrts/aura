@@ -1078,4 +1078,21 @@ mod tests {
         assert_eq!(result.agreement_mode, AgreementMode::CoordinatorSoftSafe);
         assert!(result.reversion_risk);
     }
+
+    #[test]
+    fn dkd_manifest_includes_runtime_startup_defaults() {
+        let manifest = telltale_session_types_dkd_protocol::vm_artifacts::composition_manifest();
+
+        assert_eq!(manifest.protocol_name, "DkdChoreography");
+        assert_eq!(manifest.protocol_namespace.as_deref(), Some("dkd_protocol"));
+        assert_eq!(manifest.protocol_id, "aura.dkg.ceremony");
+        assert_eq!(
+            manifest.required_capabilities,
+            vec!["byzantine_envelope", "termination_bounded"]
+        );
+        assert_eq!(
+            manifest.determinism_policy_ref.as_deref(),
+            Some("aura.vm.dkg_ceremony.prod")
+        );
+    }
 }

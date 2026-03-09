@@ -216,6 +216,7 @@ mod tests {
             commit: None,
             async_host_transcript_entries: None,
             async_host_transcript_digest_hex: None,
+            vm_determinism_profile: None,
         });
         artifact.insert_surface(
             ConformanceSurfaceName::Observable,

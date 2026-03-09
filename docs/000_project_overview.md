@@ -98,7 +98,7 @@ The documents below cover theory, technical components, implementation guidance,
 
 ### 4. Project Meta
 
-[UX Flow Coverage](997_ux_flow_coverage.md) tracks UI and scenario coverage for user-facing flows.
+[UX Flow Coverage Report](997_ux_flow_coverage.md) tracks harness and scenario coverage for user-visible flows.
 
 [Verification Coverage Report](998_verification_coverage.md) tracks formal verification status across Quint specs and Lean proofs.
 

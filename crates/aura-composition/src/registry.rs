@@ -10,7 +10,8 @@ use crate::adapters::{
 };
 use async_trait::async_trait;
 use aura_core::{
-    hash, AuthorityId, ContextId, ContextSnapshot, EffectType, ExecutionMode, SessionId,
+    hash, AuthorityId, ContextId, ContextSnapshot, EffectType, ExecutionMode, OperationSessionId,
+    SessionId,
 };
 use aura_effects::{
     console::RealConsoleHandler, crypto::RealCryptoHandler, random::RealRandomHandler,
@@ -86,7 +87,7 @@ pub struct HandlerContext {
     pub authority_id: AuthorityId,
     pub context_id: ContextId,
     pub execution_mode: ExecutionMode,
-    pub session_id: SessionId,
+    pub session_id: OperationSessionId,
     pub operation_id: Uuid,
     pub metadata: HashMap<MetadataKey, String>,
 }
@@ -118,7 +119,7 @@ impl HandlerContext {
         authority_id: AuthorityId,
         context_id: ContextId,
         execution_mode: ExecutionMode,
-    ) -> SessionId {
+    ) -> OperationSessionId {
         let mut seed = Vec::with_capacity(41);
         seed.extend_from_slice(b"aura-session");
         seed.extend_from_slice(&authority_id.to_bytes());
@@ -131,7 +132,7 @@ impl HandlerContext {
                 seed.extend_from_slice(&sim_seed.to_le_bytes());
             }
         }
-        SessionId::new_from_entropy(hash::hash(&seed))
+        OperationSessionId::new(SessionId::new_from_entropy(hash::hash(&seed)))
     }
 
     // Registry helper
@@ -171,7 +172,7 @@ impl HandlerContext {
     }
 
     /// Set session ID
-    pub fn with_session_id(mut self, session_id: SessionId) -> Self {
+    pub fn with_session_id(mut self, session_id: OperationSessionId) -> Self {
         self.session_id = session_id;
         self
     }

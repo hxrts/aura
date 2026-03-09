@@ -9,8 +9,6 @@ use crate::handlers::shared::context_commitment_from_journal;
 use crate::handlers::InvitationServiceApi;
 use crate::runtime::consensus::build_consensus_params;
 use async_trait::async_trait;
-#[cfg(target_arch = "wasm32")]
-use futures::{SinkExt, StreamExt};
 use aura_app::runtime_bridge::{
     BridgeAuthorityInfo, BridgeDeviceInfo, InvitationInfo, LanPeerInfo, RendezvousStatus,
     RuntimeBridge, SettingsBridgeState, SyncStatus,
@@ -40,11 +38,11 @@ use aura_core::DeviceId;
 use aura_core::EffectContext;
 use aura_core::Hash32;
 use aura_core::Prestate;
-#[cfg(target_arch = "wasm32")]
-use aura_journal::fact::{Fact as TypedFact, FactContent};
 use aura_journal::fact::{
     ChannelBootstrap, ChannelBumpReason, FactOptions, ProposedChannelEpochBump, RelationalFact,
 };
+#[cfg(target_arch = "wasm32")]
+use aura_journal::fact::{Fact as TypedFact, FactContent};
 use aura_journal::DomainFact;
 use aura_journal::ProtocolRelationalFact;
 use aura_protocol::amp::{commit_bump_with_consensus, emit_proposed_bump, AmpJournalEffects};
@@ -53,15 +51,17 @@ use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
 use aura_social::moderation::{
     HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
 };
-use std::collections::BTreeSet;
-use std::collections::HashSet;
-use std::sync::Arc;
-#[cfg(target_arch = "wasm32")]
-use gloo_net::websocket::{futures::WebSocket, Message};
 #[cfg(target_arch = "wasm32")]
 use futures::channel::oneshot;
 #[cfg(target_arch = "wasm32")]
+use futures::{SinkExt, StreamExt};
+#[cfg(target_arch = "wasm32")]
+use gloo_net::websocket::{futures::WebSocket, Message};
+use std::collections::BTreeSet;
+use std::collections::HashSet;
+#[cfg(target_arch = "wasm32")]
 use std::future::Future;
+use std::sync::Arc;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local;
 
@@ -119,10 +119,7 @@ impl AgentRuntimeBridge {
     }
 
     #[cfg(target_arch = "wasm32")]
-    async fn pull_remote_relational_facts(
-        &self,
-        peer: AuthorityId,
-    ) -> Result<usize, IntentError> {
+    async fn pull_remote_relational_facts(&self, peer: AuthorityId) -> Result<usize, IntentError> {
         tracing::info!(peer = %peer, "pull_remote_relational_facts start");
         let Some(rendezvous) = self.agent.runtime().rendezvous() else {
             tracing::info!(peer = %peer, "pull_remote_relational_facts skipped: no rendezvous");
@@ -131,14 +128,12 @@ impl AgentRuntimeBridge {
 
         let context = default_context_id_for_authority(peer);
         let mut descriptor = rendezvous.get_descriptor(context, peer).await;
-        if descriptor
-            .as_ref()
-            .is_none_or(|descriptor| {
-                !descriptor.transport_hints.iter().any(|hint| {
-                    matches!(hint, aura_rendezvous::TransportHint::WebSocketDirect { .. })
-                })
-            })
-        {
+        if descriptor.as_ref().is_none_or(|descriptor| {
+            !descriptor
+                .transport_hints
+                .iter()
+                .any(|hint| matches!(hint, aura_rendezvous::TransportHint::WebSocketDirect { .. }))
+        }) {
             let lan_descriptor = rendezvous
                 .list_lan_discovered_peers()
                 .await
@@ -154,12 +149,15 @@ impl AgentRuntimeBridge {
             return Ok(0);
         };
 
-        let addr: Option<String> = descriptor.transport_hints.iter().find_map(|hint| match hint {
-            aura_rendezvous::TransportHint::WebSocketDirect { addr, .. } => {
-                Some(addr.to_string())
-            }
-            _ => None,
-        });
+        let addr: Option<String> = descriptor
+            .transport_hints
+            .iter()
+            .find_map(|hint| match hint {
+                aura_rendezvous::TransportHint::WebSocketDirect { addr, .. } => {
+                    Some(addr.to_string())
+                }
+                _ => None,
+            });
         let Some(addr) = addr else {
             tracing::info!(peer = %peer, "pull_remote_relational_facts skipped: no websocket direct hint");
             return Ok(0);
@@ -189,18 +187,14 @@ impl AgentRuntimeBridge {
 
         let remote_facts: Vec<RelationalFact> = run_local_ws(move || async move {
             let mut socket = WebSocket::open(&url).map_err(|e| {
-                IntentError::network_error(format!(
-                    "Failed to open fact sync websocket {url}: {e}"
-                ))
+                IntentError::network_error(format!("Failed to open fact sync websocket {url}: {e}"))
             })?;
             socket.send(Message::Bytes(bytes)).await.map_err(|e| {
                 IntentError::network_error(format!("Failed to send fact sync request: {e}"))
             })?;
 
             let response = socket.next().await.ok_or_else(|| {
-                IntentError::network_error(
-                    "Fact sync websocket closed before response".to_string(),
-                )
+                IntentError::network_error("Fact sync websocket closed before response".to_string())
             })?;
             let payload = match response.map_err(|e| {
                 IntentError::network_error(format!("Fact sync websocket read failed: {e}"))
@@ -213,11 +207,9 @@ impl AgentRuntimeBridge {
                 }
             };
 
-            let envelope: TransportEnvelope =
-                aura_core::util::serialization::from_slice(&payload).map_err(|e| {
-                    IntentError::internal_error(format!(
-                        "Failed to decode fact sync response: {e}"
-                    ))
+            let envelope: TransportEnvelope = aura_core::util::serialization::from_slice(&payload)
+                .map_err(|e| {
+                    IntentError::internal_error(format!("Failed to decode fact sync response: {e}"))
                 })?;
 
             if envelope
@@ -280,7 +272,9 @@ impl AgentRuntimeBridge {
         effects
             .commit_relational_facts(new_facts.clone())
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to merge synced facts: {e}")))?;
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to merge synced facts: {e}"))
+            })?;
         effects.await_next_view_update().await;
 
         tracing::info!(

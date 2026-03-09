@@ -217,6 +217,10 @@ impl ToolApi {
         self.coordinator.backend_kind(instance_id)
     }
 
+    pub fn supports_ui_snapshot(&self, instance_id: &str) -> anyhow::Result<bool> {
+        self.coordinator.supports_ui_snapshot(instance_id)
+    }
+
     pub fn apply_fault_delay(&mut self, actor: &str, delay_ms: u64) -> anyhow::Result<()> {
         self.coordinator.apply_fault_delay(actor, delay_ms)
     }
@@ -262,7 +266,9 @@ impl ToolApi {
             ToolRequest::UiState { instance_id } => self
                 .coordinator
                 .ui_snapshot(&instance_id)
-                .and_then(|snapshot: UiSnapshot| serde_json::to_value(snapshot).map_err(Into::into)),
+                .and_then(|snapshot: UiSnapshot| {
+                    serde_json::to_value(snapshot).map_err(Into::into)
+                }),
             ToolRequest::SendKeys { instance_id, keys } => self
                 .coordinator
                 .send_keys(&instance_id, &keys)

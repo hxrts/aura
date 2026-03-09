@@ -154,6 +154,7 @@ mod tests {
             commit: None,
             async_host_transcript_entries: None,
             async_host_transcript_digest_hex: None,
+            vm_determinism_profile: None,
         });
         for surface in ConformanceSurfaceName::REQUIRED {
             artifact.insert_surface(
@@ -181,6 +182,7 @@ mod tests {
             commit: None,
             async_host_transcript_entries: None,
             async_host_transcript_digest_hex: None,
+            vm_determinism_profile: None,
         });
         for surface in ConformanceSurfaceName::REQUIRED {
             artifact.insert_surface(

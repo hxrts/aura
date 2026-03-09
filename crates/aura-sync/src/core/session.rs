@@ -203,11 +203,11 @@ pub struct SessionConfig {
     /// Session timeout duration
     pub timeout: Duration,
     /// Maximum number of participants per session
-    pub max_participants: usize,
+    pub max_participants: u32,
     /// Cleanup interval for stale sessions
     pub cleanup_interval: Duration,
     /// Maximum concurrent sessions
-    pub max_concurrent_sessions: usize,
+    pub max_concurrent_sessions: u32,
     /// Session resource limits
     pub resource_limits: SessionResourceLimits,
 }
@@ -230,7 +230,7 @@ impl From<&SyncConfig> for SessionConfig {
             timeout: sync_config.network.sync_timeout,
             max_participants: 10, // Could be configurable
             cleanup_interval: sync_config.network.cleanup_interval,
-            max_concurrent_sessions: sync_config.peer_management.max_concurrent_syncs as usize,
+            max_concurrent_sessions: sync_config.peer_management.max_concurrent_syncs,
             resource_limits: SessionResourceLimits::from(&sync_config.performance),
         }
     }
@@ -240,11 +240,11 @@ impl From<&SyncConfig> for SessionConfig {
 #[derive(Debug, Clone)]
 pub struct SessionResourceLimits {
     /// Maximum memory usage per session in bytes
-    pub max_memory_per_session: usize,
+    pub max_memory_per_session: u64,
     /// Maximum duration a session can be active
     pub max_session_duration: Duration,
     /// Maximum number of operations per session
-    pub max_operations_per_session: usize,
+    pub max_operations_per_session: u32,
 }
 
 impl Default for SessionResourceLimits {
@@ -260,8 +260,8 @@ impl Default for SessionResourceLimits {
 impl From<&crate::core::PerformanceConfig> for SessionResourceLimits {
     fn from(perf_config: &crate::core::PerformanceConfig) -> Self {
         Self {
-            max_memory_per_session: (perf_config.memory_limit / 10) as usize, // 1/10th of total limit
-            max_session_duration: Duration::from_secs(3600),                  // 1 hour
+            max_memory_per_session: perf_config.memory_limit / 10, // 1/10th of total limit
+            max_session_duration: Duration::from_secs(3600),       // 1 hour
             max_operations_per_session: 10000,
         }
     }
@@ -355,7 +355,7 @@ where
         now: &PhysicalTime,
     ) -> SyncResult<SessionId> {
         // Validate participant count
-        if participants.len() > self.config.max_participants {
+        if participants.len() > self.config.max_participants as usize {
             return Err(sync_validation_error(format!(
                 "Too many participants: {} > {}",
                 participants.len(),
@@ -365,11 +365,11 @@ where
 
         // Check concurrent session limit
         let active_count = self.count_active_sessions();
-        if active_count >= self.config.max_concurrent_sessions {
+        if active_count >= self.config.max_concurrent_sessions as usize {
             return Err(sync_resource_with_limit(
                 "concurrent_sessions",
                 "Maximum concurrent sessions exceeded",
-                self.config.max_concurrent_sessions as u64,
+                u64::from(self.config.max_concurrent_sessions),
             ));
         }
 

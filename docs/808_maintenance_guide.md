@@ -4,12 +4,12 @@ This guide covers practical workflows for the Maintenance and OTA (Over-the-Air)
 
 For the maintenance architecture specification, see [Distributed Maintenance Architecture](115_maintenance.md).
 
-## Core Maintenance Philosophy
+## Maintenance Philosophy
 
 The maintenance system is built on three key principles:
 
-1. **Coordinated Operations** - All maintenance actions require threshold approval from M-of-N authorities
-2. **Epoch Fencing** - Hard fork upgrades are gated by identity epochs for safe coordination
+1. **Coordinated Operations** - Threshold approval is used where the chosen maintenance scope actually has a quorum or authority set that can approve
+2. **Epoch Fencing** - Hard fork upgrades may use identity epochs for safe coordination, but only inside scopes that own that fence
 3. **Journal-Based Facts** - All maintenance events are replicated through the journal CRDT
 
 The system supports snapshots for garbage collection, cache management, and both soft and hard fork upgrades.
@@ -20,7 +20,7 @@ The maintenance service publishes events to the journal as facts. These events a
 
 ### Event Types
 
-The system defines five event types:
+The system defines several event families:
 
 **SnapshotProposed** marks the beginning of a snapshot operation. It contains the proposal identifier, proposer authority, target epoch, and state digest of the candidate snapshot.
 
@@ -28,7 +28,11 @@ The system defines five event types:
 
 **CacheInvalidated** signals cache invalidation. It specifies which cache keys must be refreshed and the earliest identity epoch the cache entry remains valid for.
 
-**UpgradeActivated** announces an activated upgrade. It contains the package identifier, target version, and identity epoch fence where the upgrade becomes mandatory.
+**ReleaseDistribution** facts announce release declarations, build certificates, and artifact availability.
+
+**ReleasePolicy** facts announce discovery, sharing, and activation policy publications.
+
+**UpgradeExecution** facts announce scoped staging, residency changes, transition changes, cutover results, partition outcomes, and rollback execution.
 
 **AdminReplacement** announces an administrator change. This allows users to fork away from a malicious admin by tracking previous and new administrators with activation epoch.
 
@@ -181,185 +185,111 @@ Commitment publishes `SnapshotCompleted` fact to the journal. All devices determ
 
 ## OTA (Over-the-Air) Upgrade Protocol
 
-The OTA protocol coordinates distributed upgrades with support for both soft and hard forks. Soft forks are backward compatible and require only majority device readiness. Hard forks require coordinated activation at a specific identity epoch.
+Aura OTA is split into two layers:
+
+- release distribution: manifests, artifacts, and build certificates spread through Aura storage and anti-entropy
+- scoped activation: each device, authority, context, or managed quorum decides when a staged release may activate
+
+There is no network-wide authoritative cutover phase for the whole Aura network. Hard cutover is valid only inside a scope that actually has agreement or a legitimate fence.
 
 ### Upgrade Types
 
-**Soft Fork** upgrades are backward compatible. Old and new code can interoperate. Soft forks activate immediately once threshold devices are ready.
+**Soft Fork** upgrades are compatibility-preserving. Old and new code can interoperate while one scope is in `ReleaseResidency::Coexisting`.
 
-**Hard Fork** upgrades are incompatible. All devices must upgrade by the activation epoch. Hard forks are gated by identity epoch fences to ensure coordinated activation.
+**Hard Fork** upgrades are scope-bound incompatibility transitions. They reject incompatible new sessions after local cutover and require explicit in-flight handling for old sessions. A hard fork may use threshold approval or epoch fencing, but only if the chosen scope actually owns that mechanism.
 
 ### Basic Upgrade Operation
 
 ```rust
-use aura_sync::services::{MaintenanceService, MaintenanceServiceConfig};
-use aura_sync::protocols::UpgradeKind;
-use aura_core::SemanticVersion;
-use uuid::Uuid;
+use aura_maintenance::AuraReleaseActivationPolicy;
+use aura_sync::services::{ActivationCandidate, OtaPolicyEvaluator};
 
-async fn propose_soft_fork(
-    service: &MaintenanceService,
-    package_id: Uuid,
-    version: SemanticVersion,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Propose soft fork upgrade
-    let proposal = service.propose_upgrade(
-        package_id,
-        version.clone(),
-        UpgradeKind::SoftFork,
-        None,  // No activation fence for soft fork
-    ).await?;
-    
-    // Collect readiness declarations from devices
-    // Soft fork activates when threshold devices are ready
-    
-    Ok(())
+async fn evaluate_activation(
+    policy: &AuraReleaseActivationPolicy,
+    candidate: &ActivationCandidate<'_>,
+) {
+    // Activation is local or scope-bound.
+    // Discovery and sharing do not imply activation.
+    // The evaluator checks trust, compatibility, staged artifacts,
+    // health gates, threshold approval, and scope-owned fences.
+    let _decision = OtaPolicyEvaluator::new().evaluate_activation(policy, candidate);
 }
 ```
 
-Soft forks are simpler than hard forks. They activate immediately when enough devices report readiness.
+If policy enables it, `suggested_activation_time_unix_ms` acts only as a local "not before" hint against the local clock. It is advisory metadata, not a global synchronization fence.
 
 ### Soft Fork Workflow
 
 ```rust
-use aura_sync::services::MaintenanceService;
-use aura_sync::protocols::{ReadinessStatus, UpgradeKind};
+use aura_agent::runtime::services::OtaManager;
+use aura_maintenance::{AuraActivationScope, AuraCompatibilityClass};
+use aura_sync::services::InFlightIncompatibilityAction;
 
 async fn soft_fork_workflow(
-    service: &MaintenanceService,
+    manager: &OtaManager,
+    scope: AuraActivationScope,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Receive upgrade proposal (soft fork)
-    let proposal = service.pending_upgrades().await?
-        .into_iter()
-        .find(|p| p.kind == UpgradeKind::SoftFork)
-        .unwrap();
-    
-    // Check readiness locally
-    if service.is_ready_for_upgrade(&proposal).await? {
-        // Declare readiness
-        service.declare_readiness(
-            &proposal.proposal_id,
-            ReadinessStatus::Ready,
-        ).await?;
-    }
-    
-    // Once threshold devices are ready, upgrade activates
-    
+    let plan = manager
+        .begin_scoped_cutover(&scope, InFlightIncompatibilityAction::Drain, false)
+        .await?;
+    assert!(!plan.partition_required);
     Ok(())
 }
 ```
 
-Each device independently evaluates readiness and declares status. The protocol activates the upgrade once M-of-N devices are ready.
+Soft forks do not require a globally shared instant. Each scope moves from legacy-only residency to coexistence and then to target-only residency based on its own evidence and policy.
 
 ### Hard Fork Workflow
 
 ```rust
-use aura_sync::services::{MaintenanceService, MaintenanceServiceConfig};
-use aura_sync::protocols::UpgradeKind;
-use aura_core::{SemanticVersion, Epoch, AccountId};
-use uuid::Uuid;
+use aura_agent::runtime::services::OtaManager;
+use aura_maintenance::AuraActivationScope;
+use aura_sync::services::InFlightIncompatibilityAction;
 
-async fn propose_hard_fork(
-    service: &MaintenanceService,
-    package_id: Uuid,
-    version: SemanticVersion,
-    activation_epoch: Epoch,
+async fn execute_managed_quorum_cutover(
+    manager: &OtaManager,
+    scope: AuraActivationScope,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Propose hard fork with epoch fence
-    let proposal = service.propose_upgrade(
-        package_id,
-        version,
-        UpgradeKind::HardFork,
-        Some(activation_epoch),
-    ).await?;
-    
-    // All devices must upgrade by activation epoch
-    // Protocol enforces fence at epoch boundary
-    
+    let plan = manager
+        .begin_scoped_cutover(&scope, InFlightIncompatibilityAction::Delegate, true)
+        .await?;
+    assert!(plan.partition_required || plan.in_flight == InFlightIncompatibilityAction::Delegate);
     Ok(())
 }
 ```
 
-Hard forks require an identity epoch fence. The upgrade becomes mandatory at the specified epoch. This ensures all devices coordinate activation at a specific point in time.
+For hard forks, the operator must define:
 
-### Activation Fence
+- the activation scope
+- the compatibility class
+- how incompatible in-flight sessions are handled: drain, abort, or delegate
+- whether threshold approval or an epoch fence is actually available in that scope
 
-The activation fence gates hard fork upgrades. It specifies the account and identity epoch where the upgrade becomes mandatory.
+If post-cutover checks fail, rollback is explicit and deterministic.
 
-```rust
-use aura_sync::services::MaintenanceService;
-use aura_sync::services::IdentityEpochFence;
-use aura_core::{Epoch, AccountId};
+### Managed Quorum Approval Runbook
 
-async fn enforce_hard_fork(
-    service: &MaintenanceService,
-    account_id: AccountId,
-    upgrade_epoch: Epoch,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Create epoch fence for upgrade
-    let fence = IdentityEpochFence::new(account_id, upgrade_epoch);
-    
-    // All operations after upgrade_epoch must use new protocol version
-    // Old version is no longer accepted
-    
-    // If device hasn't upgraded by epoch, it cannot participate
-    if service.current_epoch() >= upgrade_epoch {
-        if !service.has_upgraded().await? {
-            // Cannot continue - must upgrade
-            service.enforce_upgrade().await?;
-        }
-    }
-    
-    Ok(())
-}
-```
+Use managed quorum cutover only when the scope has an explicit participant set. Record approval from every participant in the quorum before starting cutover. Reject approval from authorities that are not members of that scope.
 
-Epoch fences are enforced at epoch boundaries. Devices that have not upgraded by the fence epoch are blocked from participating.
+If one participant has not approved, keep the scope waiting for cutover evidence. Do not begin launcher activation for that scope. Resolve membership or policy disagreement before retrying.
 
-### Readiness Declarations
+### Failed Rollout Runbook
 
-```rust
-use aura_sync::services::MaintenanceService;
-use aura_sync::protocols::ReadinessStatus;
+Check the failure classification before acting. `AuraUpgradeFailureClass::HealthGateFailed` means the new release started and failed local verification. `AuraUpgradeFailureClass::LauncherActivationFailed` means the launcher handoff failed before healthy activation.
 
-async fn declare_upgrade_readiness(
-    service: &MaintenanceService,
-    proposal_id: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Check if upgrade artifacts are available
-    let artifacts = service.fetch_upgrade_artifacts(proposal_id).await?;
-    
-    // Verify artifact hash
-    if !service.verify_artifact(&artifacts).await? {
-        service.declare_readiness(
-            proposal_id,
-            ReadinessStatus::Rejected {
-                reason: "Invalid artifact hash".to_string(),
-            },
-        ).await?;
-        return Ok(());
-    }
-    
-    // Check if local system can support upgrade
-    if service.supports_upgrade(&artifacts).await? {
-        service.declare_readiness(
-            proposal_id,
-            ReadinessStatus::Ready,
-        ).await?;
-    } else {
-        service.declare_readiness(
-            proposal_id,
-            ReadinessStatus::NotReady {
-                reason: "Insufficient resources".to_string(),
-            },
-        ).await?;
-    }
-    
-    Ok(())
-}
-```
+If policy uses `AuraRollbackPreference::Automatic`, allow the queued rollback to execute and confirm the scope returns to legacy-only residency with an idle transition state. If policy uses `AuraRollbackPreference::ManualApproval`, keep the scope failed and require operator approval before rollback.
 
-Readiness declarations are self-contained. Each device verifies artifacts and evaluates its own readiness. The protocol does not require coordination for readiness checks.
+### Revoked Release Runbook
+
+Treat a revoked staged release differently from a revoked active release. If the target release is only staged, cancel the staged scope and remove it from activation consideration. Do not proceed to cutover for that scope.
+
+If the revoked release is already active, follow the configured rollback preference. Automatic rollback should queue a rollback to the prior staged release. Manual rollback should leave the scope failed until an operator approves the revert path.
+
+### Partition Response Runbook
+
+If `SessionCompatibilityPlan.partition_required` is true, assume incompatible peers may separate cleanly rather than interoperate. Stop admitting incompatible new sessions in that scope. Drain, abort, or delegate in-flight sessions according to the recorded incompatibility action.
+
+Record partition observations with the associated failure classification and scope. This keeps rollback and peer-partition handling auditable.
 
 ## Cache Management
 
@@ -441,7 +371,7 @@ fn create_maintenance_service() -> Result<MaintenanceService, Box<dyn std::error
 }
 ```
 
-Configuration controls timeouts, limits, and behavior. Snapshot timeouts should be shorter than OTA timeouts since snapshots are more frequent.
+Configuration controls timeouts, limits, and behavior. Snapshot timeouts should be shorter than OTA staging and activation timeouts since snapshots are more frequent. OTA policies should separately configure discovery, sharing, and activation rather than bundling them into one setting.
 
 ### Snapshot Best Practices
 
@@ -451,11 +381,11 @@ Always verify state digest before approving. Use canonical serialization for dig
 
 ### Upgrade Best Practices
 
-Plan upgrades carefully. Soft forks can be deployed flexibly. Hard forks require scheduling and announcement.
+Plan upgrades carefully. Soft forks can be deployed flexibly inside one scope. Hard forks require a clear activation scope, an explicit compatibility class, and an operator decision about whether in-flight incompatible sessions drain, abort, or delegate.
 
-Always test upgrades in simulation before deployment. Use epoch fences with sufficient advance notice (at least 7 days for production).
+Always test upgrades in simulation before deployment. Use threshold approval or epoch fences only in scopes that actually own those mechanisms. Treat `suggested_activation_time_unix_ms` as advisory rollout metadata, not as a coordination primitive.
 
-Include rollback procedures for hard forks. Document migration paths for state format changes.
+Include rollback procedures for hard forks. Document migration paths for state format changes and keep launcher activation/rollback steps separate from the running runtime.
 
 ### Cache Best Practices
 
@@ -517,7 +447,7 @@ The maintenance service publishes events as facts. Choreography protocols subscr
 
 ## Summary
 
-The Maintenance and OTA system provides coordinated maintenance operations with threshold approval and epoch fencing. Snapshots enable garbage collection with writer fencing. Soft forks activate flexibly while hard forks coordinate activation at specific epochs. Cache invalidation is replicated through the journal for consistency.
+The Maintenance and OTA system provides coordinated maintenance operations with threshold approval and epoch fencing where those mechanisms actually exist. Snapshots enable garbage collection with writer fencing. OTA release distribution is eventual, while activation is local or scope-bound. Cache invalidation is replicated through the journal for consistency.
 
 Use snapshots regularly for garbage collection. Plan upgrades carefully with sufficient notice for hard forks. Test all upgrades in simulation. Monitor snapshot and upgrade cycles to ensure system health.
 

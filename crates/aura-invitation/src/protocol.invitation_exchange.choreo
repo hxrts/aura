@@ -3,8 +3,20 @@ module invitation exposing (InvitationExchange)
 protocol InvitationExchange =
   roles Sender, Receiver
 
-  Sender[guard_capability = "invitation:send", flow_cost = 1, journal_facts = "InvitationFact::Sent"] -> Receiver : InvitationOffer(crate::InvitationOffer)
+  -- Phase 1: Send invitation offer
+  Sender { guard_capability = "invitation:send"
+         , flow_cost = 1
+         , journal_facts = "InvitationFact::Sent" }
+    -> Receiver : InvitationOffer of crate.InvitationOffer
 
-  Receiver[guard_capability = "invitation:accept", flow_cost = 1, journal_facts = "InvitationFact::Responded"] -> Sender : InvitationResponse(crate::InvitationResponse)
+  -- Phase 2: Receiver responds
+  Receiver { guard_capability = "invitation:accept"
+           , flow_cost = 1
+           , journal_facts = "InvitationFact::Responded" }
+    -> Sender : InvitationResponse of crate.InvitationResponse
 
-  Sender[guard_capability = "invitation:send", flow_cost = 1, journal_facts = "InvitationFact::Acknowledged"] -> Receiver : InvitationAck(crate::InvitationAck)
+  -- Phase 3: Sender acknowledges
+  Sender { guard_capability = "invitation:send"
+         , flow_cost = 1
+         , journal_facts = "InvitationFact::Acknowledged" }
+    -> Receiver : InvitationAck of crate.InvitationAck

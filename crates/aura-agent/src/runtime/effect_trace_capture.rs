@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use aura_core::AuraFault;
+use aura_core::AuraVmDeterminismProfileV1;
 use serde::{Deserialize, Serialize};
 use telltale_vm::{canonical_effect_trace, EffectTraceCaptureMode, EffectTraceEntry, VMConfig};
 
@@ -123,6 +124,9 @@ pub struct EffectTraceBundle {
     /// Serialized injected faults for replay.
     #[serde(default)]
     pub faults: Vec<AuraFault>,
+    /// Optional determinism profile metadata active for the captured run.
+    #[serde(default)]
+    pub vm_determinism_profile: Option<AuraVmDeterminismProfileV1>,
 }
 
 impl Default for EffectTraceCapture {
@@ -237,10 +241,12 @@ impl EffectTraceCapture {
         &self,
         trace: &[EffectTraceEntry],
         faults: &[AuraFault],
+        vm_determinism_profile: Option<AuraVmDeterminismProfileV1>,
     ) -> Result<Vec<u8>, EffectTraceCaptureError> {
         let bundle = EffectTraceBundle {
             entries: self.capture_entries(trace),
             faults: faults.to_vec(),
+            vm_determinism_profile,
         };
         match self.options.encoding {
             AuraEffectTraceEncoding::Json => serde_json::to_vec(&bundle)
@@ -312,9 +318,10 @@ impl EffectTraceCapture {
         path: impl AsRef<Path>,
         trace: &[EffectTraceEntry],
         faults: &[AuraFault],
+        vm_determinism_profile: Option<AuraVmDeterminismProfileV1>,
     ) -> Result<(), EffectTraceCaptureError> {
         let path_ref = path.as_ref();
-        let payload = self.serialize_bundle(trace, faults)?;
+        let payload = self.serialize_bundle(trace, faults, vm_determinism_profile)?;
         fs::write(path_ref, payload).map_err(|source| EffectTraceCaptureError::Io {
             path: path_ref.display().to_string(),
             source,
@@ -417,12 +424,46 @@ mod tests {
         })];
 
         let payload = capture
-            .serialize_bundle(&trace, &faults)
+            .serialize_bundle(&trace, &faults, None)
             .expect("serialize bundle");
         let decoded = capture
             .deserialize_bundle(&payload)
             .expect("deserialize bundle");
         assert_eq!(decoded.entries, trace);
         assert_eq!(decoded.faults, faults);
+        assert_eq!(decoded.vm_determinism_profile, None);
+    }
+
+    #[test]
+    fn bundle_roundtrip_preserves_determinism_profile() {
+        let capture = EffectTraceCapture::default();
+        let trace = vec![sample_entry(1, "handle_recv")];
+        let payload = capture
+            .serialize_bundle(
+                &trace,
+                &[],
+                Some(AuraVmDeterminismProfileV1 {
+                    policy_ref: "aura.vm.recovery_grant.prod".to_string(),
+                    protocol_class: "aura.recovery.grant".to_string(),
+                    runtime_mode: "cooperative".to_string(),
+                    scheduler_envelope_class: "exact".to_string(),
+                    declared_wave_width_bound: Some(1),
+                    determinism_mode: "full".to_string(),
+                    effect_determinism_tier: "strict_deterministic".to_string(),
+                    communication_replay_mode: "off".to_string(),
+                }),
+            )
+            .expect("serialize bundle");
+        let decoded = capture
+            .deserialize_bundle(&payload)
+            .expect("deserialize bundle");
+
+        assert_eq!(
+            decoded
+                .vm_determinism_profile
+                .as_ref()
+                .map(|profile| profile.policy_ref.as_str()),
+            Some("aura.vm.recovery_grant.prod")
+        );
     }
 }

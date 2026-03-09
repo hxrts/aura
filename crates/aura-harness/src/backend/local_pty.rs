@@ -4,12 +4,13 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use tokio::sync::Mutex;
+use tokio::time::Instant;
 
 use crate::backend::InstanceBackend;
 use crate::config::InstanceConfig;
@@ -137,6 +138,10 @@ impl LocalPtyBackend {
 
         cached.clone().unwrap_or(current_authoritative)
     }
+
+    fn requires_tui_readiness(&self) -> bool {
+        self.config.command.is_none()
+    }
 }
 
 impl InstanceBackend for LocalPtyBackend {
@@ -146,6 +151,10 @@ impl InstanceBackend for LocalPtyBackend {
 
     fn backend_kind(&self) -> &'static str {
         "local_pty"
+    }
+
+    fn supports_ui_snapshot(&self) -> bool {
+        self.requires_tui_readiness()
     }
 
     fn start(&mut self) -> Result<()> {
@@ -362,10 +371,7 @@ impl InstanceBackend for LocalPtyBackend {
             ControlId::ModalCancelButton => "\x1b",
             ControlId::SettingsAddDeviceButton => "a",
             ControlId::SettingsRemoveDeviceButton => "r",
-            _ => anyhow::bail!(
-                "control {:?} does not have a PTY activation mapping",
-                control_id
-            ),
+            _ => anyhow::bail!("control {control_id:?} does not have a PTY activation mapping"),
         };
         self.send_keys(sequence)
     }
@@ -390,7 +396,9 @@ impl InstanceBackend for LocalPtyBackend {
             .lists
             .iter()
             .find(|candidate| candidate.id == list_id)
-            .ok_or_else(|| anyhow::anyhow!("list {list_id:?} is not visible in the current TUI snapshot"))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("list {list_id:?} is not visible in the current TUI snapshot")
+            })?;
         let target_index = list
             .items
             .iter()
@@ -407,8 +415,7 @@ impl InstanceBackend for LocalPtyBackend {
                 Some(ControlId::Field(FieldId::InvitationMessage)) => self.send_keys("\u{1b}[A")?,
                 Some(ControlId::Field(FieldId::InvitationTtl)) => self.send_keys("\u{1b}[B")?,
                 Some(other) => anyhow::bail!(
-                    "invitation type selector is visible but focus is on incompatible control {:?}",
-                    other
+                    "invitation type selector is visible but focus is on incompatible control {other:?}"
                 ),
                 None => anyhow::bail!(
                     "invitation type selector is visible but the TUI snapshot has no focused control"
@@ -446,11 +453,7 @@ impl InstanceBackend for LocalPtyBackend {
             }
             return Ok(());
         }
-        let sequence = if delta < 0 {
-            "\u{1b}[A"
-        } else {
-            "\u{1b}[B"
-        };
+        let sequence = if delta < 0 { "\u{1b}[A" } else { "\u{1b}[B" };
         for _ in 0..delta.unsigned_abs() {
             self.send_keys(sequence)?;
         }
@@ -571,6 +574,23 @@ impl InstanceBackend for LocalPtyBackend {
     }
 
     fn wait_until_ready(&self, timeout: Duration) -> Result<()> {
+        if !self.requires_tui_readiness() {
+            let deadline = Instant::now() + timeout;
+            loop {
+                if self.health_check()? {
+                    return Ok(());
+                }
+                if Instant::now() >= deadline {
+                    anyhow::bail!(
+                        "local PTY instance {} did not reach health readiness within {:?}",
+                        self.config.id,
+                        timeout
+                    );
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+
         let deadline = Instant::now() + timeout;
         loop {
             if self.ui_snapshot().is_ok() {

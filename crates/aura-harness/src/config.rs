@@ -15,8 +15,8 @@ use aura_app::scenario_contract::{
     SemanticScenarioFile, UiAction, VariableAction,
 };
 use aura_app::ui::contract::{
-    ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState,
-    ScreenId, ToastKind, UiReadiness,
+    ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState, ScreenId,
+    ToastKind, UiReadiness,
 };
 use serde::{Deserialize, Serialize};
 
@@ -100,6 +100,12 @@ pub struct InstanceConfig {
 
 const fn default_true() -> bool {
     true
+}
+
+fn is_harness_env_entry(entry: &str) -> bool {
+    entry
+        .split_once('=')
+        .is_some_and(|(key, _)| key.starts_with("AURA_HARNESS_"))
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -276,7 +282,7 @@ pub struct ScenarioStep {
     /// Regular expression for `extract_var`.
     pub regex: Option<String>,
     /// Capture group index for `extract_var`.
-    pub group: Option<usize>,
+    pub group: Option<u32>,
     /// Source field for `extract_var`: `screen`, `raw_screen`, `authoritative_screen`, or `normalized_screen`.
     pub from: Option<String>,
     /// Substring expectation for typed assertion actions.
@@ -320,13 +326,11 @@ impl ScenarioStep {
                     self.action,
                 )?,
             })),
-            ScenarioAction::CaptureCurrentAuthorityId => {
-                Some(SemanticAction::Variables(
-                    VariableAction::CaptureCurrentAuthorityId {
-                        name: required_field(self.var.clone(), "var", self.action)?,
-                    },
-                ))
-            }
+            ScenarioAction::CaptureCurrentAuthorityId => Some(SemanticAction::Variables(
+                VariableAction::CaptureCurrentAuthorityId {
+                    name: required_field(self.var.clone(), "var", self.action)?,
+                },
+            )),
             ScenarioAction::CaptureSelection => Some(SemanticAction::Variables(
                 VariableAction::CaptureSelection {
                     name: required_field(self.var.clone(), "var", self.action)?,
@@ -353,14 +357,12 @@ impl ScenarioStep {
             ScenarioAction::SendClipboard => Some(SemanticAction::Ui(UiAction::PasteClipboard {
                 source_actor: self.source_instance.clone().map(ActorId),
             })),
-            ScenarioAction::ReadClipboard => {
-                Some(SemanticAction::Ui(UiAction::ReadClipboard {
-                    name: required_field(self.var.clone(), "var", self.action)?,
-                }))
+            ScenarioAction::ReadClipboard => Some(SemanticAction::Ui(UiAction::ReadClipboard {
+                name: required_field(self.var.clone(), "var", self.action)?,
+            })),
+            ScenarioAction::DismissTransient => {
+                Some(SemanticAction::Ui(UiAction::DismissTransient))
             }
-            ScenarioAction::DismissTransient => Some(SemanticAction::Ui(
-                UiAction::DismissTransient,
-            )),
             ScenarioAction::SendKey => Some(SemanticAction::Ui(UiAction::PressKey(
                 parse_input_key(self.key.as_deref().unwrap_or_default())?,
                 self.repeat.unwrap_or(1).max(1),
@@ -382,8 +384,7 @@ impl ScenarioStep {
             ScenarioAction::ClickButton => {
                 if let Some(control_id) = self.control_id {
                     Some(SemanticAction::Ui(UiAction::Activate(control_id)))
-                } else if let (Some(list_id), Some(item_id)) =
-                    (self.list_id, self.item_id.clone())
+                } else if let (Some(list_id), Some(item_id)) = (self.list_id, self.item_id.clone())
                 {
                     Some(SemanticAction::Ui(UiAction::ActivateListItem {
                         list: list_id,
@@ -668,7 +669,12 @@ impl TryFrom<SemanticStep> for ScenarioStep {
                 step.var = Some(name);
                 step.list_id = Some(list);
             }
-            SemanticAction::Variables(VariableAction::Extract { name, regex, group, from }) => {
+            SemanticAction::Variables(VariableAction::Extract {
+                name,
+                regex,
+                group,
+                from,
+            }) => {
                 step.action = ScenarioAction::ExtractVar;
                 step.var = Some(name);
                 step.regex = Some(regex);
@@ -682,7 +688,7 @@ impl TryFrom<SemanticStep> for ScenarioStep {
 }
 
 fn required_field(value: Option<String>, field: &str, action: ScenarioAction) -> Result<String> {
-    value.ok_or_else(|| anyhow!("action {} requires {field}", action))
+    value.ok_or_else(|| anyhow!("action {action} requires {field}"))
 }
 
 fn nav_control_id_for_screen(screen_id: ScreenId) -> ControlId {
@@ -814,10 +820,12 @@ fn expectation_from_step(step: &ScenarioStep) -> Result<Option<SemanticAction>> 
         ))));
     }
     if let (Some(operation_id), Some(state)) = (step.operation_id.clone(), step.operation_state) {
-        return Ok(Some(SemanticAction::Expect(Expectation::OperationStateIs {
-            operation_id,
-            state,
-        })));
+        return Ok(Some(SemanticAction::Expect(
+            Expectation::OperationStateIs {
+                operation_id,
+                state,
+            },
+        )));
     }
     if let (Some(list_id), Some(item_id)) = (step.list_id, step.item_id.clone()) {
         if let Some(confirmation) = step.confirmation {
@@ -915,9 +923,7 @@ impl RunConfig {
                 .iter()
                 .any(|instance| !matches!(instance.mode, InstanceMode::Local))
         {
-            bail!(
-                "run.runtime_substrate = \"simulator\" currently supports local instances only"
-            );
+            bail!("run.runtime_substrate = \"simulator\" currently supports local instances only");
         }
 
         let mut instance_ids = HashSet::new();
@@ -1036,12 +1042,15 @@ impl RunConfig {
                             instance.id
                         );
                     }
-                    if instance.command.is_some()
-                        || !instance.args.is_empty()
-                        || !instance.env.is_empty()
-                    {
+                    if instance.command.is_some() || !instance.args.is_empty() {
                         bail!(
-                            "ssh instance {} must not set local command/args/env",
+                            "ssh instance {} must not set local command/args",
+                            instance.id
+                        );
+                    }
+                    if instance.env.iter().any(|entry| !is_harness_env_entry(entry)) {
+                        bail!(
+                            "ssh instance {} must not set non-harness env entries",
                             instance.id
                         );
                     }
@@ -1193,7 +1202,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+                runtime_substrate: crate::config::RuntimeSubstrate::default(),
             },
             instances: vec![
                 InstanceConfig {
@@ -1392,9 +1401,7 @@ mod tests {
             ..ScenarioStep::default()
         };
 
-        let error = step
-            .to_semantic_step()
-            .expect_err("fill input without value must fail");
+        let error = step.to_semantic_step().unwrap_err();
         assert!(error
             .to_string()
             .contains("action fill_input requires value"));
@@ -1413,7 +1420,7 @@ mod tests {
         let semantic = step
             .to_semantic_step()
             .unwrap_or_else(|error| panic!("toast semantic translation failed: {error}"))
-            .expect("toast step should map");
+            .unwrap_or_else(|| panic!("toast step should map"));
 
         assert!(matches!(
             semantic.action,
@@ -1507,7 +1514,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+                runtime_substrate: crate::config::RuntimeSubstrate::default(),
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
@@ -1557,7 +1564,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+                runtime_substrate: crate::config::RuntimeSubstrate::default(),
             },
             instances: vec![
                 InstanceConfig {
@@ -1613,7 +1620,9 @@ mod tests {
             .validate()
             .err()
             .unwrap_or_else(|| panic!("duplicate explicit bind addresses must fail"));
-        assert!(error.to_string().contains("duplicate explicit bind_address"));
+        assert!(error
+            .to_string()
+            .contains("duplicate explicit bind_address"));
     }
 
     #[test]

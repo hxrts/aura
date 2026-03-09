@@ -57,6 +57,7 @@ pub mod system;
 pub mod terminal;
 pub mod time;
 pub mod transport;
+pub mod vm_bridge;
 
 // Re-export commonly used stateful handlers
 pub use authorization::MockAuthorizationHandler;
@@ -76,3 +77,4 @@ pub use terminal::{
 };
 pub use time::SimulatedTimeHandler;
 pub use transport::InMemoryTransportHandler;
+pub use vm_bridge::MockVmBridgeEffects;

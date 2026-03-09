@@ -154,10 +154,10 @@ pub use semilattice::{
 pub use conformance::{
     assert_effect_kinds_classified, envelope_law_class, AuraConformanceArtifactV1,
     AuraConformanceRunMetadataV1, AuraConformanceSurfaceV1, AuraEnvelopeLawClass,
-    ConformanceSurfaceName, ConformanceValidationError, AURA_CONFORMANCE_SCHEMA_VERSION,
-    AURA_EFFECT_ENVELOPE_CLASSIFICATIONS,
+    AuraVmDeterminismProfileV1, ConformanceSurfaceName, ConformanceValidationError,
+    AURA_CONFORMANCE_SCHEMA_VERSION, AURA_EFFECT_ENVELOPE_CLASSIFICATIONS,
 };
-pub use context::{ContextSnapshot, EffectContext};
+pub use context::{ContextSnapshot, EffectContext, OperationSessionId};
 pub use reconfiguration::{
     ComposedBundle, DelegationReceipt, SessionFootprint, RECONFIGURATION_SCHEMA_V1,
 };

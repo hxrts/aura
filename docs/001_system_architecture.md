@@ -325,7 +325,7 @@ The namespace attribute scopes the protocol. Annotations compile into guard requ
 
 Projection extracts each role's local view from the global type. The local view specifies what messages the role sends and receives. Execution interprets the local view against the effect system.
 
-Adapter mode uses `AuraProtocolAdapter` with generated runners. VM mode uses `AuraChoreoEngine` with effect handlers. Both modes enforce guards before each message send. See [MPST and Choreography](108_mpst_and_choreography.md) for projection rules and execution models.
+Production execution uses `AuraChoreoEngine` with the Telltale VM and the host bridge in Layer 6. Startup is manifest-driven and admitted by construction. Generated runner surfaces still exist for testing and migration support, but they are not the production execution model. See [MPST and Choreography](108_mpst_and_choreography.md) for projection rules and runtime details.
 
 ### 6.3 Annotation effects
 

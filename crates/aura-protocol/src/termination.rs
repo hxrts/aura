@@ -75,7 +75,18 @@ impl TerminationProtocolClass {
             "aura.consensus.fast_path" => Some(Self::ConsensusFastPath),
             "aura.sync.epoch_rotation" | "aura.sync.anti_entropy" => Some(Self::SyncAntiEntropy),
             "aura.dkg.ceremony" => Some(Self::DkgCeremony),
-            "aura.recovery.grant" => Some(Self::RecoveryGrant),
+            "aura.recovery.grant"
+            | "aura.amp.transport"
+            | "aura.authentication.guardian_auth_relational"
+            | "aura.invitation.exchange"
+            | "aura.invitation.guardian"
+            | "aura.invitation.device_enrollment"
+            | "aura.rendezvous.exchange"
+            | "aura.rendezvous.relay"
+            | "aura.recovery.guardian_ceremony"
+            | "aura.recovery.guardian_setup"
+            | "aura.recovery.guardian_membership_change"
+            | "aura.session.coordination" => Some(Self::RecoveryGrant),
             _ => None,
         }
     }

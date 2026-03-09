@@ -376,6 +376,84 @@ check_effects() {
   app_impls=$(grep -R "impl.*\($app_effects\)" crates/aura-effects/src 2>/dev/null | grep -v "test" || true)
   emit_hits "Application effects in aura-effects (should be in domain crates)" "$app_impls"
 
+  # Explicit session-id domain crossings only through dedicated bridge APIs
+  local session_from_uuid_hits session_uuid_hits
+  session_from_uuid_hits=$(rg --no-heading -n "\bSessionId::from_uuid\(" crates/aura-agent/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/runtime/subsystems/choreography.rs" || true)
+  session_from_uuid_hits=$(filter_test_modules "$session_from_uuid_hits")
+  emit_hits "Implicit runtime-to-domain session-id crossings (use RuntimeChoreographySessionId bridge APIs)" "$session_from_uuid_hits"
+
+  session_uuid_hits=$(rg --no-heading -n "session_id\.uuid\(" crates/aura-agent/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/runtime/subsystems/choreography.rs" || true)
+  session_uuid_hits=$(filter_test_modules "$session_uuid_hits")
+  emit_hits "Implicit domain-to-runtime session-id crossings (use RuntimeChoreographySessionId bridge APIs)" "$session_uuid_hits"
+
+  section "VM composition admission — production starts must stay manifest-driven"
+
+  local vm_non_admitted_hits vm_manifest_bypass_hits vm_direct_admitted_hits
+  vm_non_admitted_hits=$(rg --no-heading -n "\.open_session\(" crates/aura-agent/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/runtime/choreo_engine.rs" \
+    | grep -v "crates/aura-agent/src/runtime/vm_host_bridge.rs" || true)
+  vm_non_admitted_hits=$(filter_test_modules "$vm_non_admitted_hits")
+  emit_hits "Non-admitted VM session starts in production code (use open_manifest_vm_session_admitted)" "$vm_non_admitted_hits"
+
+  vm_manifest_bypass_hits=$(rg --no-heading -n "\bopen_role_scoped_vm_session_admitted\(" crates/aura-agent/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/runtime/vm_host_bridge.rs" || true)
+  vm_manifest_bypass_hits=$(filter_test_modules "$vm_manifest_bypass_hits")
+  emit_hits "Manifest-bypass VM startup in production code (use open_manifest_vm_session_admitted)" "$vm_manifest_bypass_hits"
+
+  vm_direct_admitted_hits=$(rg --no-heading -n "\.open_session_admitted\(" crates/aura-agent/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/runtime/choreo_engine.rs" \
+    | grep -v "crates/aura-agent/src/runtime/vm_host_bridge.rs" || true)
+  vm_direct_admitted_hits=$(filter_test_modules "$vm_direct_admitted_hits")
+  emit_hits "Direct admitted VM startup bypasses manifest metadata (use open_manifest_vm_session_admitted)" "$vm_direct_admitted_hits"
+
+  section "VM bridge discipline — bridge state and ownership stay centralized"
+
+  local ad_hoc_vm_bridge_hits direct_fragment_registry_hits unreviewed_envelope_mode_hits
+  ad_hoc_vm_bridge_hits=$(rg --no-heading -n "Mutex<.*VmBridgePendingSend|Mutex<.*VmBridgeBlockedEdge|Mutex<.*VmBridgeSchedulerSignals|VecDeque<.*VmBridgePendingSend|VecDeque<.*VmBridgeBlockedEdge|VecDeque<.*VmBridgeSchedulerSignals" \
+    crates/aura-agent/src crates/aura-testkit/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/runtime/subsystems/vm_bridge.rs" \
+    | grep -v "crates/aura-testkit/src/stateful_effects/vm_bridge.rs" || true)
+  ad_hoc_vm_bridge_hits=$(filter_test_modules "$ad_hoc_vm_bridge_hits")
+  emit_hits "Ad hoc VM bridge queue/state storage outside VmBridgeEffects implementations" "$ad_hoc_vm_bridge_hits"
+
+  direct_fragment_registry_hits=$(rg --no-heading -n "\bVmFragmentRegistry\b|\.claim_manifest\(|\.transfer_session\(|\.release_session\(" \
+    crates/aura-agent/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/runtime/effects.rs" \
+    | grep -v "crates/aura-agent/src/runtime/subsystems/vm_fragment.rs" \
+    | grep -v "crates/aura-agent/src/runtime/subsystems/mod.rs" || true)
+  direct_fragment_registry_hits=$(filter_test_modules "$direct_fragment_registry_hits")
+  emit_hits "Direct fragment ownership registry usage bypasses AuraEffectSystem APIs" "$direct_fragment_registry_hits"
+
+  unreviewed_envelope_mode_hits=$(rg --no-heading -n "ThreadedVM::with_workers|AuraVmRuntimeMode::ThreadedReplayDeterministic|AuraVmRuntimeMode::ThreadedEnvelopeBounded" \
+    crates/aura-agent/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/runtime/choreo_engine.rs" \
+    | grep -v "crates/aura-agent/src/runtime/vm_hardening.rs" || true)
+  unreviewed_envelope_mode_hits=$(filter_test_modules "$unreviewed_envelope_mode_hits")
+  emit_hits "Unreviewed threaded or envelope runtime selection outside hardening/engine paths" "$unreviewed_envelope_mode_hits"
+
+  section "Reconfiguration discipline — delegate/link only through runtime manager"
+
+  local direct_reconfig_controller_hits
+  direct_reconfig_controller_hits=$(rg --no-heading -n "ReconfigurationController" crates/aura-agent/src -g "*.rs" \
+    | grep -v "crates/aura-agent/src/lib.rs" \
+    | grep -v "crates/aura-agent/src/reconfiguration.rs" \
+    | grep -v "crates/aura-agent/src/runtime/services/reconfiguration_manager.rs" || true)
+  direct_reconfig_controller_hits=$(filter_test_modules "$direct_reconfig_controller_hits")
+  emit_hits "Direct ReconfigurationController usage in production code (use ReconfigurationManager)" "$direct_reconfig_controller_hits"
+
+  section "OTA scope model — no network-wide authoritative cutover in code"
+
+  local ota_global_cutover_hits
+  ota_global_cutover_hits=$(rg --no-heading -n "GlobalNetwork|NetworkWide|network-wide authoritative cutover|global cutover|whole Aura network.*cutover" \
+    crates/aura-maintenance/src \
+    crates/aura-sync/src/services \
+    crates/aura-agent/src/runtime/services/ota_manager.rs \
+    -g "*.rs" || true)
+  ota_global_cutover_hits=$(filter_test_modules "$ota_global_cutover_hits")
+  emit_hits "OTA code assumes a network-wide authoritative cutover model" "$ota_global_cutover_hits"
+
   # ─── Direct OS operations ───
   section "Direct OS operations — use effect traits instead"
 
@@ -1136,7 +1214,7 @@ check_serialization() {
   # SessionId::new outside tests
   section "Identifier invariants — SessionId::new() is test-only"
   local session_hits
-  session_hits=$(rg --no-heading "SessionId::new\\(" crates -g "*.rs" \
+  session_hits=$(rg --no-heading "\\bSessionId::new\\(" crates -g "*.rs" \
     | grep -Ev "/tests/|/benches/|/examples/|cfg(test)|cfg\\(test\\)" || true)
   emit_hits "SessionId::new() outside tests" "$session_hits"
 

@@ -347,7 +347,7 @@ pub enum ApprovalContext {
 }
 ```
 
-The `SignableOperation` enum defines what is being signed. The `ApprovalContext` enum provides context for audit and display purposes.
+The `SignableOperation` enum defines what is being signed. Its OTA activation variant should be interpreted as scoped activation approval evidence. `activation_epoch` is meaningful only when the chosen scope actually owns an epoch fence. The `ApprovalContext` enum provides context for audit and display purposes.
 
 The service implementation lives in `aura-agent/src/runtime/services/threshold_signing.rs`. `ThresholdSigningService` manages per-authority signing state and key storage using `SecureStorageEffects` for key material persistence.
 

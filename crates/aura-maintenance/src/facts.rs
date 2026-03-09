@@ -9,10 +9,15 @@ use aura_core::hash::hash;
 use aura_core::time::ProvenancedTime;
 use aura_core::types::facts::{FactDelta, FactDeltaReducer, FactError};
 use aura_core::types::Epoch;
-use aura_core::{AccountId, AuthorityId, ContextId, Hash32, SemanticVersion};
+use aura_core::{AccountId, AuthorityId, ContextId, Hash32, SemanticVersion, TimeStamp};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use uuid::Uuid;
+
+use crate::{
+    AuraActivationScope, AuraPolicyScope, AuraReleaseId, AuraReleaseSeriesId, ReleaseResidency,
+    TransitionState,
+};
 
 aura_core::define_fact_type_id!(maintenance, "maintenance", 1);
 
@@ -194,6 +199,309 @@ impl UpgradeActivated {
     }
 }
 
+/// Release distribution and certification facts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum ReleaseDistributionFact {
+    /// A release series has been declared.
+    SeriesDeclared {
+        /// Authority publishing the declaration.
+        authority_id: AuthorityId,
+        /// Declared release series.
+        series_id: AuraReleaseSeriesId,
+        /// Human-readable series name.
+        name: String,
+        /// Declaration time carried in the fact.
+        declared_at: TimeStamp,
+    },
+    /// A specific release manifest has been declared.
+    ReleaseDeclared {
+        /// Authority publishing the declaration.
+        authority_id: AuthorityId,
+        /// Release series containing this release.
+        series_id: AuraReleaseSeriesId,
+        /// Declared release identifier.
+        release_id: AuraReleaseId,
+        /// Content hash of the signed manifest.
+        manifest_hash: Hash32,
+        /// Semantic version carried by the release.
+        version: SemanticVersion,
+        /// Declaration time carried in the fact.
+        declared_at: TimeStamp,
+    },
+    /// A deterministic build certificate has been published.
+    BuildCertified {
+        /// Builder authority publishing the certificate.
+        authority_id: AuthorityId,
+        /// Release series containing this release.
+        series_id: AuraReleaseSeriesId,
+        /// Certified release identifier.
+        release_id: AuraReleaseId,
+        /// Content hash of the build certificate.
+        certificate_hash: Hash32,
+        /// Output hash attested by the certificate.
+        output_hash: Hash32,
+        /// Certification time carried in the fact.
+        certified_at: TimeStamp,
+    },
+    /// A release artifact has become available for replication.
+    ArtifactAvailable {
+        /// Authority pinning or serving the artifact.
+        authority_id: AuthorityId,
+        /// Release to which the artifact belongs.
+        release_id: AuraReleaseId,
+        /// Content hash of the available artifact.
+        artifact_hash: Hash32,
+        /// Availability publication time.
+        published_at: TimeStamp,
+    },
+    /// An upgrade offer has been published into distribution scope.
+    UpgradeOfferPublished {
+        /// Authority publishing the offer.
+        authority_id: AuthorityId,
+        /// Release being offered.
+        release_id: AuraReleaseId,
+        /// Policy or offer descriptor hash.
+        policy_hash: Hash32,
+        /// Publication time carried in the fact.
+        published_at: TimeStamp,
+    },
+}
+
+impl ReleaseDistributionFact {
+    /// Authority associated with this distribution fact.
+    pub fn authority_id(&self) -> AuthorityId {
+        match self {
+            Self::SeriesDeclared { authority_id, .. }
+            | Self::ReleaseDeclared { authority_id, .. }
+            | Self::BuildCertified { authority_id, .. }
+            | Self::ArtifactAvailable { authority_id, .. }
+            | Self::UpgradeOfferPublished { authority_id, .. } => *authority_id,
+        }
+    }
+}
+
+/// OTA discovery, sharing, and activation policy facts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum ReleasePolicyFact {
+    /// Discovery policy was published for a scope.
+    DiscoveryPolicyPublished {
+        /// Authority publishing the policy.
+        authority_id: AuthorityId,
+        /// Scope governed by the policy.
+        scope: AuraPolicyScope,
+        /// Canonical policy hash.
+        policy_hash: Hash32,
+        /// Publication time carried in the fact.
+        published_at: TimeStamp,
+    },
+    /// Sharing policy was published for a scope.
+    SharingPolicyPublished {
+        /// Authority publishing the policy.
+        authority_id: AuthorityId,
+        /// Scope governed by the policy.
+        scope: AuraPolicyScope,
+        /// Canonical policy hash.
+        policy_hash: Hash32,
+        /// Publication time carried in the fact.
+        published_at: TimeStamp,
+    },
+    /// Activation policy was published for a scope.
+    ActivationPolicyPublished {
+        /// Authority publishing the policy.
+        authority_id: AuthorityId,
+        /// Scope governed by the policy.
+        scope: AuraPolicyScope,
+        /// Canonical policy hash.
+        policy_hash: Hash32,
+        /// Publication time carried in the fact.
+        published_at: TimeStamp,
+    },
+    /// A release recommendation was published for a scope.
+    RecommendationPublished {
+        /// Authority publishing the recommendation.
+        authority_id: AuthorityId,
+        /// Release being recommended.
+        release_id: AuraReleaseId,
+        /// Scope receiving the recommendation.
+        scope: AuraPolicyScope,
+        /// Publication time carried in the fact.
+        published_at: TimeStamp,
+    },
+}
+
+impl ReleasePolicyFact {
+    /// Authority associated with this policy fact.
+    pub fn authority_id(&self) -> AuthorityId {
+        match self {
+            Self::DiscoveryPolicyPublished { authority_id, .. }
+            | Self::SharingPolicyPublished { authority_id, .. }
+            | Self::ActivationPolicyPublished { authority_id, .. }
+            | Self::RecommendationPublished { authority_id, .. } => *authority_id,
+        }
+    }
+}
+
+/// Structured failure class for scoped OTA execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AuraUpgradeFailureClass {
+    /// Post-activation health validation failed.
+    HealthGateFailed,
+    /// The release was revoked after staging or activation.
+    ReleaseRevoked,
+    /// Explicit partition handling was required for incompatibility.
+    PartitionRequired,
+    /// Launcher handoff or activation execution failed.
+    LauncherActivationFailed,
+    /// An operator or policy explicitly requested rollback.
+    ManualRollbackRequested,
+}
+
+/// Structured failure payload for rollback and partition execution facts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuraUpgradeFailure {
+    /// Stable classification for the failure.
+    pub class: AuraUpgradeFailureClass,
+    /// Human-readable detail for operator audit.
+    pub detail: String,
+}
+
+impl AuraUpgradeFailure {
+    /// Build a structured scoped-upgrade failure.
+    pub fn new(class: AuraUpgradeFailureClass, detail: impl Into<String>) -> Self {
+        Self {
+            class,
+            detail: detail.into(),
+        }
+    }
+}
+
+/// Scoped OTA execution and outcome facts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum UpgradeExecutionFact {
+    /// A release was staged for a scope.
+    ReleaseStaged {
+        /// Authority recording the event.
+        authority_id: AuthorityId,
+        /// Scope entering staged state.
+        scope: AuraActivationScope,
+        /// Prior release in the scope.
+        from_release_id: AuraReleaseId,
+        /// Target release in the scope.
+        to_release_id: AuraReleaseId,
+        /// Staging time carried in the fact.
+        staged_at: TimeStamp,
+    },
+    /// A scope explicitly entered execution tracking for a release.
+    ScopeEntered {
+        /// Authority recording the event.
+        authority_id: AuthorityId,
+        /// Scope entering upgrade tracking.
+        scope: AuraActivationScope,
+        /// Release entering the scope state machine.
+        release_id: AuraReleaseId,
+        /// Entry time carried in the fact.
+        entered_at: TimeStamp,
+    },
+    /// The release residency changed inside a scope.
+    ReleaseResidencyChanged {
+        /// Authority recording the event.
+        authority_id: AuthorityId,
+        /// Scope whose residency changed.
+        scope: AuraActivationScope,
+        /// Release referenced by the change.
+        release_id: AuraReleaseId,
+        /// New residency value.
+        residency: ReleaseResidency,
+        /// Transition time carried in the fact.
+        entered_at: TimeStamp,
+    },
+    /// The transition state changed inside a scope.
+    ReleaseTransitionChanged {
+        /// Authority recording the event.
+        authority_id: AuthorityId,
+        /// Scope whose transition state changed.
+        scope: AuraActivationScope,
+        /// Release referenced by the change.
+        release_id: AuraReleaseId,
+        /// New transition state.
+        transition: TransitionState,
+        /// Transition time carried in the fact.
+        entered_at: TimeStamp,
+    },
+    /// A scoped cutover was approved.
+    CutoverApproved {
+        /// Authority recording the approval.
+        authority_id: AuthorityId,
+        /// Scope whose cutover was approved.
+        scope: AuraActivationScope,
+        /// Prior release in the scope.
+        from_release_id: AuraReleaseId,
+        /// Target release in the scope.
+        to_release_id: AuraReleaseId,
+        /// Approval time carried in the fact.
+        approved_at: TimeStamp,
+    },
+    /// A scoped cutover completed.
+    CutoverCompleted {
+        /// Authority recording the completion.
+        authority_id: AuthorityId,
+        /// Scope whose cutover completed.
+        scope: AuraActivationScope,
+        /// Activated target release.
+        to_release_id: AuraReleaseId,
+        /// Completion time carried in the fact.
+        completed_at: TimeStamp,
+    },
+    /// A scoped rollback executed.
+    RollbackExecuted {
+        /// Authority recording the rollback.
+        authority_id: AuthorityId,
+        /// Scope whose rollback executed.
+        scope: AuraActivationScope,
+        /// Release being rolled back from.
+        from_release_id: AuraReleaseId,
+        /// Release being restored.
+        to_release_id: AuraReleaseId,
+        /// Structured failure that caused rollback.
+        failure: AuraUpgradeFailure,
+        /// Rollback time carried in the fact.
+        rolled_back_at: TimeStamp,
+    },
+    /// A mixed-version partition or incompatibility outcome was observed.
+    PartitionObserved {
+        /// Authority recording the observation.
+        authority_id: AuthorityId,
+        /// Scope in which the partition was observed.
+        scope: AuraActivationScope,
+        /// Release associated with the partition.
+        release_id: AuraReleaseId,
+        /// Structured failure that caused the partition observation.
+        failure: AuraUpgradeFailure,
+        /// Observation time carried in the fact.
+        observed_at: TimeStamp,
+    },
+}
+
+impl UpgradeExecutionFact {
+    /// Authority associated with this execution fact.
+    pub fn authority_id(&self) -> AuthorityId {
+        match self {
+            Self::ReleaseStaged { authority_id, .. }
+            | Self::ScopeEntered { authority_id, .. }
+            | Self::ReleaseResidencyChanged { authority_id, .. }
+            | Self::ReleaseTransitionChanged { authority_id, .. }
+            | Self::CutoverApproved { authority_id, .. }
+            | Self::CutoverCompleted { authority_id, .. }
+            | Self::RollbackExecuted { authority_id, .. }
+            | Self::PartitionObserved { authority_id, .. } => *authority_id,
+        }
+    }
+}
+
 /// Admin replacement fact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -237,6 +545,12 @@ pub enum MaintenanceFact {
     CacheInvalidated(CacheInvalidated),
     /// Upgrade activation fact.
     UpgradeActivated(UpgradeActivated),
+    /// Release distribution and certification fact.
+    ReleaseDistribution(ReleaseDistributionFact),
+    /// OTA policy publication fact.
+    ReleasePolicy(ReleasePolicyFact),
+    /// Scoped OTA execution fact.
+    UpgradeExecution(UpgradeExecutionFact),
     /// Admin replacement fact.
     AdminReplacement(AdminReplacement),
 }
@@ -249,6 +563,9 @@ impl MaintenanceFact {
             MaintenanceFact::SnapshotCompleted(fact) => fact.authority_id,
             MaintenanceFact::CacheInvalidated(fact) => fact.authority_id,
             MaintenanceFact::UpgradeActivated(fact) => fact.authority_id,
+            MaintenanceFact::ReleaseDistribution(fact) => fact.authority_id(),
+            MaintenanceFact::ReleasePolicy(fact) => fact.authority_id(),
+            MaintenanceFact::UpgradeExecution(fact) => fact.authority_id(),
             MaintenanceFact::AdminReplacement(fact) => fact.authority_id,
         }
     }
@@ -266,6 +583,9 @@ impl MaintenanceFact {
             MaintenanceFact::SnapshotCompleted(_) => "snapshot-completed",
             MaintenanceFact::CacheInvalidated(_) => "cache-invalidated",
             MaintenanceFact::UpgradeActivated(_) => "upgrade-activated",
+            MaintenanceFact::ReleaseDistribution(_) => "release-distribution",
+            MaintenanceFact::ReleasePolicy(_) => "release-policy",
+            MaintenanceFact::UpgradeExecution(_) => "upgrade-execution",
             MaintenanceFact::AdminReplacement(_) => "admin-replacement",
         }
     }
@@ -280,6 +600,11 @@ impl MaintenanceFact {
             MaintenanceFact::SnapshotCompleted(_) => crate::MaintenanceOperation::SnapshotCompleted,
             MaintenanceFact::CacheInvalidated(_) => crate::MaintenanceOperation::CacheInvalidated,
             MaintenanceFact::UpgradeActivated(_) => crate::MaintenanceOperation::UpgradeActivated,
+            MaintenanceFact::ReleaseDistribution(_) => {
+                crate::MaintenanceOperation::ReleaseDistribution
+            }
+            MaintenanceFact::ReleasePolicy(_) => crate::MaintenanceOperation::ReleasePolicy,
+            MaintenanceFact::UpgradeExecution(_) => crate::MaintenanceOperation::UpgradeExecution,
             MaintenanceFact::AdminReplacement(_) => crate::MaintenanceOperation::AdminReplacement,
         }
     }
@@ -307,6 +632,80 @@ impl MaintenanceFact {
                 "upgrade-activated",
                 aura_core::util::serialization::to_vec(&fact.package_id).unwrap_or_default(),
             ),
+            MaintenanceFact::ReleaseDistribution(fact) => match fact {
+                ReleaseDistributionFact::SeriesDeclared { series_id, .. } => (
+                    "release-distribution",
+                    aura_core::util::serialization::to_vec(series_id).unwrap_or_default(),
+                ),
+                ReleaseDistributionFact::ReleaseDeclared { release_id, .. }
+                | ReleaseDistributionFact::BuildCertified { release_id, .. }
+                | ReleaseDistributionFact::ArtifactAvailable { release_id, .. }
+                | ReleaseDistributionFact::UpgradeOfferPublished { release_id, .. } => (
+                    "release-distribution",
+                    aura_core::util::serialization::to_vec(release_id).unwrap_or_default(),
+                ),
+            },
+            MaintenanceFact::ReleasePolicy(fact) => match fact {
+                ReleasePolicyFact::DiscoveryPolicyPublished { scope, .. }
+                | ReleasePolicyFact::SharingPolicyPublished { scope, .. }
+                | ReleasePolicyFact::ActivationPolicyPublished { scope, .. } => (
+                    "release-policy",
+                    aura_core::util::serialization::to_vec(scope).unwrap_or_default(),
+                ),
+                ReleasePolicyFact::RecommendationPublished {
+                    scope, release_id, ..
+                } => (
+                    "release-policy",
+                    aura_core::util::serialization::to_vec(&(scope, release_id))
+                        .unwrap_or_default(),
+                ),
+            },
+            MaintenanceFact::UpgradeExecution(fact) => match fact {
+                UpgradeExecutionFact::ReleaseStaged {
+                    scope,
+                    to_release_id,
+                    ..
+                }
+                | UpgradeExecutionFact::CutoverApproved {
+                    scope,
+                    to_release_id,
+                    ..
+                }
+                | UpgradeExecutionFact::RollbackExecuted {
+                    scope,
+                    to_release_id,
+                    ..
+                } => (
+                    "upgrade-execution",
+                    aura_core::util::serialization::to_vec(&(scope, to_release_id))
+                        .unwrap_or_default(),
+                ),
+                UpgradeExecutionFact::ScopeEntered {
+                    scope, release_id, ..
+                }
+                | UpgradeExecutionFact::ReleaseResidencyChanged {
+                    scope, release_id, ..
+                }
+                | UpgradeExecutionFact::ReleaseTransitionChanged {
+                    scope, release_id, ..
+                }
+                | UpgradeExecutionFact::PartitionObserved {
+                    scope, release_id, ..
+                } => (
+                    "upgrade-execution",
+                    aura_core::util::serialization::to_vec(&(scope, release_id))
+                        .unwrap_or_default(),
+                ),
+                UpgradeExecutionFact::CutoverCompleted {
+                    scope,
+                    to_release_id,
+                    ..
+                } => (
+                    "upgrade-execution",
+                    aura_core::util::serialization::to_vec(&(scope, to_release_id))
+                        .unwrap_or_default(),
+                ),
+            },
             MaintenanceFact::AdminReplacement(fact) => (
                 "admin-replacement",
                 aura_core::util::serialization::to_vec(&fact.new_admin).unwrap_or_default(),
@@ -393,6 +792,73 @@ impl MaintenanceFact {
                 "upgrade_activated:{}:{}",
                 fact.authority_id, fact.activation_fence.epoch
             ),
+            MaintenanceFact::ReleaseDistribution(fact) => match fact {
+                ReleaseDistributionFact::SeriesDeclared { authority_id, .. } => {
+                    format!("release_series_declared:{authority_id}")
+                }
+                ReleaseDistributionFact::ReleaseDeclared {
+                    authority_id,
+                    release_id,
+                    ..
+                } => format!("release_declared:{authority_id}:{release_id:?}"),
+                ReleaseDistributionFact::BuildCertified {
+                    authority_id,
+                    release_id,
+                    ..
+                } => format!("build_certified:{authority_id}:{release_id:?}"),
+                ReleaseDistributionFact::ArtifactAvailable {
+                    authority_id,
+                    release_id,
+                    ..
+                } => format!("artifact_available:{authority_id}:{release_id:?}"),
+                ReleaseDistributionFact::UpgradeOfferPublished {
+                    authority_id,
+                    release_id,
+                    ..
+                } => format!("upgrade_offer:{authority_id}:{release_id:?}"),
+            },
+            MaintenanceFact::ReleasePolicy(fact) => match fact {
+                ReleasePolicyFact::DiscoveryPolicyPublished { authority_id, .. } => {
+                    format!("discovery_policy:{authority_id}")
+                }
+                ReleasePolicyFact::SharingPolicyPublished { authority_id, .. } => {
+                    format!("sharing_policy:{authority_id}")
+                }
+                ReleasePolicyFact::ActivationPolicyPublished { authority_id, .. } => {
+                    format!("activation_policy:{authority_id}")
+                }
+                ReleasePolicyFact::RecommendationPublished {
+                    authority_id,
+                    release_id,
+                    ..
+                } => format!("release_recommendation:{authority_id}:{release_id:?}"),
+            },
+            MaintenanceFact::UpgradeExecution(fact) => match fact {
+                UpgradeExecutionFact::ReleaseStaged { authority_id, .. } => {
+                    format!("release_staged:{authority_id}")
+                }
+                UpgradeExecutionFact::ScopeEntered { authority_id, .. } => {
+                    format!("scope_entered:{authority_id}")
+                }
+                UpgradeExecutionFact::ReleaseResidencyChanged { authority_id, .. } => {
+                    format!("residency_changed:{authority_id}")
+                }
+                UpgradeExecutionFact::ReleaseTransitionChanged { authority_id, .. } => {
+                    format!("transition_changed:{authority_id}")
+                }
+                UpgradeExecutionFact::CutoverApproved { authority_id, .. } => {
+                    format!("cutover_approved:{authority_id}")
+                }
+                UpgradeExecutionFact::CutoverCompleted { authority_id, .. } => {
+                    format!("cutover_completed:{authority_id}")
+                }
+                UpgradeExecutionFact::RollbackExecuted { authority_id, .. } => {
+                    format!("rollback_executed:{authority_id}")
+                }
+                UpgradeExecutionFact::PartitionObserved { authority_id, .. } => {
+                    format!("partition_observed:{authority_id}")
+                }
+            },
             MaintenanceFact::AdminReplacement(fact) => format!(
                 "admin_replacement:{}:{}",
                 fact.old_admin, fact.activation_epoch
@@ -423,6 +889,12 @@ pub struct MaintenanceFactDelta {
     pub cache_keys_invalidated: u64,
     /// Count of upgrade activations.
     pub upgrades_activated: u64,
+    /// Count of release distribution and certification facts.
+    pub release_distribution_events: u64,
+    /// Count of release policy publication facts.
+    pub release_policy_events: u64,
+    /// Count of scoped OTA execution facts.
+    pub upgrade_execution_events: u64,
     /// Count of admin replacements.
     pub admin_replacements: u64,
 }
@@ -434,6 +906,9 @@ impl FactDelta for MaintenanceFactDelta {
         self.cache_invalidations += other.cache_invalidations;
         self.cache_keys_invalidated += other.cache_keys_invalidated;
         self.upgrades_activated += other.upgrades_activated;
+        self.release_distribution_events += other.release_distribution_events;
+        self.release_policy_events += other.release_policy_events;
+        self.upgrade_execution_events += other.upgrade_execution_events;
         self.admin_replacements += other.admin_replacements;
     }
 }
@@ -453,6 +928,9 @@ impl FactDeltaReducer<MaintenanceFact, MaintenanceFactDelta> for MaintenanceFact
                 delta.cache_keys_invalidated += fact.keys.len() as u64;
             }
             MaintenanceFact::UpgradeActivated(_) => delta.upgrades_activated += 1,
+            MaintenanceFact::ReleaseDistribution(_) => delta.release_distribution_events += 1,
+            MaintenanceFact::ReleasePolicy(_) => delta.release_policy_events += 1,
+            MaintenanceFact::UpgradeExecution(_) => delta.upgrade_execution_events += 1,
             MaintenanceFact::AdminReplacement(_) => delta.admin_replacements += 1,
         }
         delta
@@ -473,9 +951,21 @@ pub struct SnapshotReceipt {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+    use aura_core::time::PhysicalTime;
 
     fn authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn release_id(seed: u8) -> AuraReleaseId {
+        AuraReleaseId::new(Hash32([seed; 32]))
+    }
+
+    fn ts(ms: u64) -> TimeStamp {
+        TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: ms,
+            uncertainty: Some(10),
+        })
     }
 
     #[test]
@@ -485,6 +975,23 @@ mod tests {
             vec![CacheKey("key".to_string())],
             Epoch::new(2),
         ));
+        let bytes = fact.to_bytes().expect("encoding should succeed");
+        let restored = MaintenanceFact::from_bytes(&bytes).expect("decoding should succeed");
+        assert_eq!(fact, restored);
+    }
+
+    #[test]
+    fn ota_fact_round_trip() {
+        let fact =
+            MaintenanceFact::UpgradeExecution(UpgradeExecutionFact::ReleaseTransitionChanged {
+                authority_id: authority(3),
+                scope: AuraActivationScope::AuthorityLocal {
+                    authority_id: authority(3),
+                },
+                release_id: release_id(9),
+                transition: TransitionState::AwaitingCutover,
+                entered_at: ts(42),
+            });
         let bytes = fact.to_bytes().expect("encoding should succeed");
         let restored = MaintenanceFact::from_bytes(&bytes).expect("decoding should succeed");
         assert_eq!(fact, restored);
@@ -501,6 +1008,21 @@ mod tests {
         ));
         let delta = reducer.apply(&fact);
         assert_eq!(delta.snapshot_proposals, 1);
+    }
+
+    #[test]
+    fn reducer_tracks_ota_event_counts() {
+        let reducer = MaintenanceFactReducer;
+        let fact = MaintenanceFact::ReleasePolicy(ReleasePolicyFact::ActivationPolicyPublished {
+            authority_id: authority(4),
+            scope: AuraPolicyScope::Authority {
+                authority_id: authority(4),
+            },
+            policy_hash: Hash32([7u8; 32]),
+            published_at: ts(100),
+        });
+        let delta = reducer.apply(&fact);
+        assert_eq!(delta.release_policy_events, 1);
     }
 }
 
@@ -521,6 +1043,9 @@ mod proptest_semilattice {
             0u64..1000,
             0u64..1000,
             0u64..1000,
+            0u64..1000,
+            0u64..1000,
+            0u64..1000,
         )
             .prop_map(
                 |(
@@ -529,6 +1054,9 @@ mod proptest_semilattice {
                     cache_invalidations,
                     cache_keys_invalidated,
                     upgrades_activated,
+                    release_distribution_events,
+                    release_policy_events,
+                    upgrade_execution_events,
                     admin_replacements,
                 )| {
                     MaintenanceFactDelta {
@@ -537,6 +1065,9 @@ mod proptest_semilattice {
                         cache_invalidations,
                         cache_keys_invalidated,
                         upgrades_activated,
+                        release_distribution_events,
+                        release_policy_events,
+                        upgrade_execution_events,
                         admin_replacements,
                     }
                 },
@@ -550,6 +1081,9 @@ mod proptest_semilattice {
             && a.cache_invalidations == b.cache_invalidations
             && a.cache_keys_invalidated == b.cache_keys_invalidated
             && a.upgrades_activated == b.upgrades_activated
+            && a.release_distribution_events == b.release_distribution_events
+            && a.release_policy_events == b.release_policy_events
+            && a.upgrade_execution_events == b.upgrade_execution_events
             && a.admin_replacements == b.admin_replacements
     }
 

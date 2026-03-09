@@ -10,6 +10,11 @@ run_pair() {
   cargo run -q -p aura-testkit --example protocol_compat -- "$baseline" "$current"
 }
 
+has_dynamic_roles() {
+  local file="$1"
+  rg -q '\[\*\]' "$file"
+}
+
 run_fixture_compatible() {
   local base="crates/aura-testkit/fixtures/protocol_compat/compatible_baseline.choreo"
   local curr="crates/aura-testkit/fixtures/protocol_compat/compatible_current.choreo"
@@ -82,6 +87,11 @@ for file in $changed_choreo; do
   echo "checking protocol compatibility: $file"
   baseline_tmp="$(mktemp)"
   git show "${BASE_REF}:${file}" > "$baseline_tmp"
+  if has_dynamic_roles "$baseline_tmp" || has_dynamic_roles "$file"; then
+    echo "skipping dynamic-role choreography without static projection support: $file"
+    rm -f "$baseline_tmp"
+    continue
+  fi
   if ! run_pair "$baseline_tmp" "$file"; then
     status=1
   fi

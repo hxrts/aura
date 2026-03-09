@@ -97,7 +97,7 @@ fn sample_mixed_run_config() -> aura_harness::config::RunConfig {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+            runtime_substrate: aura_harness::config::RuntimeSubstrate::default(),
         },
         instances: vec![
             InstanceConfig {
@@ -105,7 +105,7 @@ fn sample_mixed_run_config() -> aura_harness::config::RunConfig {
                 mode: InstanceMode::Local,
                 data_dir: PathBuf::from("artifacts/harness/state/test-mixed/alice"),
                 device_id: None,
-                bind_address: "127.0.0.1:45111".to_string(),
+                bind_address: "127.0.0.1:0".to_string(),
                 demo_mode: false,
                 command: Some("bash".to_string()),
                 args: vec!["-lc".to_string(), "cat".to_string()],
@@ -128,7 +128,7 @@ fn sample_mixed_run_config() -> aura_harness::config::RunConfig {
                 mode: InstanceMode::Local,
                 data_dir: PathBuf::from("artifacts/harness/state/test-mixed/bob"),
                 device_id: None,
-                bind_address: "127.0.0.1:45112".to_string(),
+                bind_address: "127.0.0.1:0".to_string(),
                 demo_mode: false,
                 command: Some("bash".to_string()),
                 args: vec!["-lc".to_string(), "cat".to_string()],
@@ -156,8 +156,7 @@ fn sample_scripted_scenario() -> aura_harness::config::ScenarioConfig {
     ScenarioConfig {
         schema_version: 1,
         id: "mixed-topology-smoke".to_string(),
-        goal: "Exercise local plus ssh-dry-run topology with state-machine execution."
-            .to_string(),
+        goal: "Exercise local plus ssh-dry-run topology with state-machine execution.".to_string(),
         execution_mode: Some("scripted".to_string()),
         required_capabilities: vec!["local".to_string(), "ssh".to_string()],
         steps: vec![
@@ -170,6 +169,7 @@ fn sample_scripted_scenario() -> aura_harness::config::ScenarioConfig {
             ScenarioStep {
                 id: "fault-delay".to_string(),
                 action: ScenarioAction::FaultDelay,
+                instance: Some("bob".to_string()),
                 timeout_ms: Some(50),
                 ..Default::default()
             },
@@ -217,8 +217,9 @@ fn sample_agent_scenario() -> aura_harness::config::ScenarioConfig {
                 ..Default::default()
             },
             ScenarioStep {
-                id: "fault-tunnel-drop".to_string(),
-                action: ScenarioAction::FaultTunnelDrop,
+                id: "fault-delay".to_string(),
+                action: ScenarioAction::FaultDelay,
+                instance: Some("bob".to_string()),
                 timeout_ms: Some(50),
                 ..Default::default()
             },

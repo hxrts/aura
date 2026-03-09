@@ -44,9 +44,6 @@ DOC_SOURCES=(
     "docs"
 )
 
-# Add .claude/ if it exists (it's gitignored, so won't be present in CI)
-[[ -d ".claude" ]] && DOC_SOURCES+=(".claude")
-
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'

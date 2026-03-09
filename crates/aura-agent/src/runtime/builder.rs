@@ -19,7 +19,7 @@ use super::services::{
 };
 use super::shared_transport::SharedTransport;
 use super::system::RuntimeSystem;
-use super::{ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager};
+use super::{EffectContext, EffectExecutor, LifecycleManager};
 use crate::core::{AgentConfig, AuthorityContext};
 use crate::handlers::RendezvousHandler;
 use aura_core::identifiers::AuthorityId;
@@ -203,9 +203,6 @@ impl EffectSystemBuilder {
             None => ReceiptManager::new(&config),
         };
 
-        // Create choreography adapter
-        let choreography_adapter = ChoreographyAdapter::new(authority_id);
-
         // Create optional sync service manager with indexed journal for Merkle verification
         let sync_manager = self.sync_config.map(|sync_config| {
             super::services::SyncServiceManager::with_indexed_journal(
@@ -293,7 +290,6 @@ impl EffectSystemBuilder {
             authority_manager,
             flow_budget_manager,
             receipt_manager,
-            choreography_adapter,
             lifecycle_manager,
             sync_manager,
             rendezvous_manager,

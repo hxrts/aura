@@ -846,7 +846,12 @@ impl InvitationsCallbacks {
                 spawn_ctx(ctx.clone(), async move {
                     match tokio::time::timeout(
                         Duration::from_secs(8),
-                        ctx.create_invitation_code(receiver_id, &invitation_type, message, ttl_secs),
+                        ctx.create_invitation_code(
+                            receiver_id,
+                            &invitation_type,
+                            message,
+                            ttl_secs,
+                        ),
                     )
                     .await
                     {

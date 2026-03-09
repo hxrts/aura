@@ -6,14 +6,19 @@
 use std::sync::Arc;
 
 use aura_agent::{
-    aura_output_predicate_allow_list, build_vm_config, AuraChoreoEngine, AuraChoreoEngineError,
-    AuraVmEffectHandler, AuraVmHardeningProfile, AuraVmParityProfile,
+    apply_protocol_execution_policy, apply_scheduler_execution_policy,
+    aura_output_predicate_allow_list, build_vm_config, configured_guard_capacity,
+    policy_for_protocol, scheduler_control_input_for_image, scheduler_policy_for_input,
+    AuraChoreoEngine, AuraChoreoEngineError, AuraVmEffectHandler, AuraVmHardeningProfile,
+    AuraVmParityProfile, AuraVmRuntimeSelector, AuraVmSchedulerSignals,
+    AURA_VM_SCHED_PRIORITY_AGING, AURA_VM_SCHED_PROGRESS_AWARE,
 };
 use telltale_types::{GlobalType, Label};
 use telltale_vm::effect::EffectHandler;
 use telltale_vm::effect::TopologyPerturbation;
 use telltale_vm::loader::CodeImage;
 use telltale_vm::output_condition::OutputConditionHint;
+use telltale_vm::runtime_contracts::RuntimeContracts;
 use telltale_vm::vm::{ObsEvent, RunStatus};
 use telltale_vm::{SessionId, Value};
 
@@ -184,6 +189,45 @@ async fn admission_fails_deterministically_when_byzantine_capability_missing() {
     );
 }
 
+#[tokio::test]
+async fn envelope_bounded_admission_fails_closed_when_runtime_capability_missing() {
+    let policy = policy_for_protocol("aura.sync.epoch_rotation", None).expect("policy");
+    let selector = AuraVmRuntimeSelector::for_policy(policy);
+    let mut config = build_vm_config(
+        AuraVmHardeningProfile::Ci,
+        AuraVmParityProfile::RuntimeDefault,
+    );
+    apply_protocol_execution_policy(&mut config, policy);
+    let image = simple_send_image();
+    let scheduler_input = scheduler_control_input_for_image(
+        &image,
+        policy.protocol_class,
+        configured_guard_capacity(&config),
+        AuraVmSchedulerSignals::default(),
+    );
+    let scheduler_policy = scheduler_policy_for_input(scheduler_input);
+    apply_scheduler_execution_policy(&mut config, &scheduler_policy);
+
+    let mut contracts = RuntimeContracts::full();
+    contracts.determinism_artifacts.full = false;
+    let mut engine = AuraChoreoEngine::new_with_contracts_and_selector(
+        config,
+        Arc::new(AuraVmEffectHandler::default()),
+        Some(contracts),
+        selector,
+    )
+    .expect("engine");
+
+    let err = engine
+        .open_session_admitted(&image, "aura.sync.epoch_rotation", None, &[])
+        .await
+        .expect_err("admission must fail without derived envelope capability");
+    assert!(matches!(
+        err,
+        AuraChoreoEngineError::MissingRuntimeCapability { .. }
+    ));
+}
+
 #[test]
 fn run_emits_bound_exceeded_when_step_budget_is_exhausted() {
     let config = build_vm_config(
@@ -244,4 +288,72 @@ fn prod_profile_topology_only_capture_records_topology_events() {
         )),
         "expected scheduled topology crash to appear in trace"
     );
+}
+
+#[tokio::test]
+async fn admitted_sync_sessions_select_progress_aware_scheduler() {
+    let image = simple_send_image();
+    let handler = Arc::new(AuraVmEffectHandler::default());
+    let policy = policy_for_protocol("aura.sync.epoch_rotation", None).expect("policy");
+    let mut config = build_vm_config(
+        AuraVmHardeningProfile::Prod,
+        AuraVmParityProfile::RuntimeDefault,
+    );
+    apply_protocol_execution_policy(&mut config, policy);
+    let scheduler_input = scheduler_control_input_for_image(
+        &image,
+        policy.protocol_class,
+        configured_guard_capacity(&config),
+        AuraVmSchedulerSignals::default(),
+    );
+    let scheduler_policy = scheduler_policy_for_input(scheduler_input);
+    assert_eq!(scheduler_policy.policy_ref, AURA_VM_SCHED_PROGRESS_AWARE);
+    apply_scheduler_execution_policy(&mut config, &scheduler_policy);
+
+    let mut engine =
+        AuraChoreoEngine::new_with_contracts(config, handler, Some(RuntimeContracts::full()))
+            .expect("engine with admitted scheduler policy");
+    engine
+        .open_session_admitted(&image, "aura.sync.epoch_rotation", None, &[])
+        .await
+        .expect("admitted session should open");
+
+    assert_eq!(
+        engine.vm_config().sched_policy,
+        scheduler_policy.sched_policy
+    );
+}
+
+#[tokio::test]
+async fn admission_rejects_scheduler_drift_under_budget_pressure() {
+    let image = simple_send_image();
+    let handler = Arc::new(AuraVmEffectHandler::default());
+    handler.set_scheduler_signals(AuraVmSchedulerSignals {
+        guard_contention_events: 0,
+        flow_budget_pressure_bps: 8_200,
+        leakage_budget_pressure_bps: 0,
+    });
+
+    let policy = policy_for_protocol("aura.recovery.grant", None).expect("policy");
+    let mut config = build_vm_config(
+        AuraVmHardeningProfile::Prod,
+        AuraVmParityProfile::RuntimeDefault,
+    );
+    apply_protocol_execution_policy(&mut config, policy);
+
+    let mut engine =
+        AuraChoreoEngine::new_with_contracts(config, handler, Some(RuntimeContracts::full()))
+            .expect("engine should admit base config");
+    let err = engine
+        .open_session_admitted(&image, "aura.recovery.grant", None, &[])
+        .await
+        .expect_err("scheduler mismatch must fail admission");
+
+    match err {
+        AuraChoreoEngineError::Interpreter { message } => {
+            assert!(message.contains("unsupported VM scheduler profile"));
+            assert!(message.contains(AURA_VM_SCHED_PRIORITY_AGING));
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
 }

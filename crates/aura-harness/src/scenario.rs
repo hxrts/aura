@@ -7,7 +7,9 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::config::{load_execution_scenario_config, require_existing_file, RunConfig, ScenarioConfig};
+use crate::config::{
+    load_execution_scenario_config, require_existing_file, RunConfig, ScenarioConfig,
+};
 
 pub struct ScenarioRunner;
 

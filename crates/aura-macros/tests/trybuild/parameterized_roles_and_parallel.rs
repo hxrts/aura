@@ -6,16 +6,14 @@ module parameterized_roles_and_parallel exposing (ParameterizedRolesAndParallel)
 protocol ParameterizedRolesAndParallel =
   roles Coordinator, Workers[N], Auditors[*]
 
-  @parallel
-  Coordinator -> Workers[*] : WorkAssigned
+  Coordinator { parallel = true } -> Workers[*] : WorkAssigned
 
   Workers[0..quorum] -> Coordinator : WorkAck
 
-  case choose Coordinator of
-    Commit ->
-      @parallel
-      Coordinator -> Auditors[*] : CommitNotice
-    Abort ->
+  choice at Coordinator
+    | Commit ->
+      Coordinator { parallel = true } -> Auditors[*] : CommitNotice
+    | Abort ->
       Coordinator -> Auditors[*] : AbortNotice
 "#);
 

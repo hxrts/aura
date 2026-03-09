@@ -34,8 +34,8 @@ use crate::tui::components::{
     DetailPanel, DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState,
     InvitePeerCallback, KeyValue, ListPanel, StatusIndicator,
 };
-use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::harness_state::publish_contacts_list_override;
+use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::ContactsViewProps;
 use crate::tui::theme::{Spacing, Theme};

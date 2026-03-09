@@ -5,13 +5,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use aura_app::ui::contract::{list_item_selector, ControlId, FieldId, ListId, UiSnapshot};
 use nix::poll::{poll, PollFd, PollFlags};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
+use tokio::time::Instant;
 
 use crate::backend::InstanceBackend;
 use crate::config::InstanceConfig;
@@ -56,6 +57,7 @@ impl RunningSession {
             .collect()
     }
 
+    #[allow(clippy::disallowed_methods)]
     fn wait_for_response_ready(
         &mut self,
         method: &str,
@@ -111,6 +113,7 @@ impl RunningSession {
         ))
     }
 
+    #[allow(clippy::disallowed_methods)]
     fn rpc_call_with_timeout(
         &mut self,
         method: &str,
@@ -179,9 +182,7 @@ impl RunningSession {
             } else {
                 stderr_tail.join("\n")
             };
-            bail!(
-                "Playwright driver {method} failed: {error} (stderr_tail=\n{stderr_block})"
-            );
+            bail!("Playwright driver {method} failed: {error} (stderr_tail=\n{stderr_block})");
         }
     }
 
@@ -327,6 +328,10 @@ impl InstanceBackend for PlaywrightBrowserBackend {
 
     fn backend_kind(&self) -> &'static str {
         "playwright_browser"
+    }
+
+    fn supports_ui_snapshot(&self) -> bool {
+        true
     }
 
     fn start(&mut self) -> Result<()> {

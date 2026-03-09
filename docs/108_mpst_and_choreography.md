@@ -38,28 +38,30 @@ This example shows the projected type for role `A`. The type describes that `A` 
 
 ## 3. Runtime Integration
 
-Aura executes generated runners through Telltale’s `ChoreographicAdapter` API. Generated protocols expose `execute_as`, which runs a specific role with a supplied adapter. Aura provides a runtime adapter in `crates/aura-agent/src/runtime/choreography_adapter.rs` and a VM engine in `crates/aura-agent/src/runtime/choreo_engine.rs`.
+Aura executes production choreographies through the Telltale VM. The `choreography!` macro emits the global type, projected local types, role metadata, and composition metadata that the runtime uses to build VM code images. `AuraChoreoEngine` in `crates/aura-agent/src/runtime/choreo_engine.rs` is the production runtime surface.
 
-```rust
-#[async_trait]
-pub trait ChoreographicAdapter: Send {
-    type Error;
-    type Role: RoleId;
+Generated runners still expose role-specific execution helpers. Aura keeps those helpers for tests, focused migration utilities, and narrow tooling paths. They are not the production execution boundary.
 
-    async fn send<M: Message>(&mut self, to: Self::Role, msg: M) -> Result<(), Self::Error>;
-    async fn recv<M: Message>(&mut self, from: Self::Role) -> Result<M, Self::Error>;
-}
-```
-
-Generated runners also call:
+Generated runtime artifacts also carry the data that production startup needs:
 - `provide_message` for outbound payloads
 - `select_branch` for choice decisions
+- protocol id and determinism policy reference
+- required capability keys
+- link and delegation constraints
+- operational-envelope selection inputs
 
-These are sourced from runtime state (params, journal facts, UI inputs).
+These values are sourced from runtime state such as params, journal facts, UI inputs, and manifest-driven admission state.
 
-Aura currently supports two execution backends with the same guard/effect boundary:
-- Adapter backend (`AuraProtocolAdapter`) for direct generated-runner execution.
-- VM backend (`AuraChoreoEngine`) for Telltale VM execution, replay, and parity checks.
+Aura has one production choreography backend:
+- VM backend (`AuraChoreoEngine`) for admitted Telltale VM execution, replay, and parity checks.
+
+Direct generated-runner execution is test and migration support only.
+
+Production runtime ownership is fragment-scoped. The admitted unit is one VM fragment derived from the generated `CompositionManifest`. A manifest without `link` metadata yields one protocol fragment. A manifest with `link` metadata yields one fragment per linked bundle.
+
+`delegate` and `link` define how ownership moves. Local runtime services claim fragment ownership through `AuraEffectSystem`. Runtime transfer goes through `ReconfigurationManager`. The runtime rejects ambiguous local ownership before a transfer reaches the VM.
+
+`VmBridgeEffects` is the synchronous host boundary for one fragment. VM callbacks use it for session-local payload queues, blocked receive snapshots, and scheduler signals. Async transport, journal, and storage work stay outside the callback path in the host bridge loop.
 
 ## 4. Choreography Annotations and Effect Commands
 
@@ -92,20 +94,9 @@ A[leak: External] -> B: PublicMsg;
 
 ### Protocol Artifact Requirements
 
-Aura binds choreography bundles to runtime capability requirements through `aura-protocol::admission` and adapter/VM admission hooks.
+Aura binds choreography bundles to runtime capability requirements through generated `CompositionManifest` metadata and `aura-protocol::admission`. Production startup uses `open_manifest_vm_session_admitted(...)` so protocol id, capability requirements, determinism policy reference, and link constraints come from one canonical manifest.
 
-```rust
-use aura_protocol::admission::{required_capability_keys, PROTOCOL_AURA_CONSENSUS};
-use aura_effects::RuntimeCapabilityHandler;
-
-let required = required_capability_keys(PROTOCOL_AURA_CONSENSUS);
-let capability_handler = std::sync::Arc::new(RuntimeCapabilityHandler::from_pairs(
-    required.iter().map(|capability| (capability.as_str(), true)),
-));
-
-let adapter = AuraProtocolAdapter::new(effects, authority_id, role, role_map)
-    .with_runtime_capability_admission(capability_handler, required);
-```
+Admission also resolves the runtime execution envelope. Cooperative protocols stay on the canonical VM path. Replay-deterministic and envelope-bounded protocols select the threaded runtime path only when the required runtime capabilities and envelope artifacts are present.
 
 Current registry mappings:
 
@@ -114,7 +105,7 @@ Current registry mappings:
 - `aura.dkg.ceremony` -> `byzantine_envelope` + `termination_bounded`
 - `aura.recovery.grant` -> `termination_bounded`
 
-For VM-backed execution, use `AuraChoreoEngine::open_session_admitted(...)` with the required artifact keys before stepping/running the session.
+For lower-level VM tests, `AuraChoreoEngine::open_session_admitted(...)` remains available. Production services should use `open_manifest_vm_session_admitted(...)` instead.
 
 ### Dynamic Reconfiguration (`@link` + delegation)
 
@@ -125,6 +116,8 @@ Aura treats protocol reconfiguration as a first-class choreography concern. Stat
 - Delegation writes a `SessionDelegationFact` audit record to the relational journal.
 
 This model is used by device migration and guardian handoff flows: session ownership moves without restarting the full choreography, while invariants remain checkable from persisted facts.
+
+The runtime now treats linked composition metadata as an ownership boundary as well as a composition boundary. Fragment keys derive from protocol id or link bundle id. This keeps runtime ownership aligned with Telltale's composition model.
 
 ### Protocol Evolution Compatibility Policy
 
@@ -266,15 +259,9 @@ let result = execute_guarded_choreography(
 
 ## 6. Execution Modes
 
-Aura supports multiple execution modes for choreographies. In-memory execution uses mock handlers. Production execution uses real network and storage effects. Simulation execution uses deterministic time and fault injection.
+Aura supports multiple execution environments for the same choreography definitions. Production execution uses admitted VM sessions with real effect handlers. Simulation execution uses deterministic time and fault injection. Test utilities may use narrower runner surfaces when that improves isolation.
 
-Each mode implements the same handler interface. This ensures that protocol behavior remains consistent across environments. Choreography execution also captures conformance artifacts for native/WASM parity testing. See [Test Infrastructure Reference](117_testkit.md) for artifact surfaces and effect classification.
-
-```rust
-let mut adapter = AuraProtocolAdapter::for_testing(...)?;
-```
-
-This example shows the creation of an in-memory handler for testing.
+Each environment preserves the same protocol structure and admission semantics where applicable. Choreography execution also captures conformance artifacts for native/WASM parity testing. See [Test Infrastructure Reference](117_testkit.md) for artifact surfaces and effect classification.
 
 ## 7. Example Protocols
 
@@ -443,7 +430,7 @@ This section lists all choreographies in the codebase with their locations and p
 
 ## 10. Runtime Infrastructure
 
-The runtime provides choreographic execution through the `ChoreographicEffects` trait and `AuraProtocolAdapter`.
+The runtime provides production choreographic execution through manifest-driven Telltale VM sessions.
 
 ### 10.1 ChoreographicEffects Trait
 
@@ -455,14 +442,14 @@ The runtime provides choreographic execution through the `ChoreographicEffects` 
 | `start_session` | Initialize choreography session |
 | `end_session` | Terminate choreography session |
 
-The runtime adapter is located at `crates/aura-agent/src/runtime/choreography_adapter.rs`. It bridges `ChoreographicEffects` to the generated runners.
+`AuraVmEffectHandler` is the synchronous host boundary between the VM and Aura runtime services. `AuraQueuedVmBridgeHandler` provides queued outbound payloads and branch decisions for role-scoped VM sessions.
 
 ### 10.2 Wiring a Choreography
 
 1. Store the protocol in a `.choreo` file next to the Rust module that loads it.
-2. Use `choreography!(include_str!("..."))` to generate the protocol module and runners.
-3. Build an `AuraProtocolAdapter` and call `Protocol::execute_as(role, &mut adapter, params)` from the runtime bridge/service.
-4. Provide decision sources for `provide_message` and `select_branch` callbacks.
+2. Use `choreography!(include_str!("..."))` to generate the protocol module, VM artifacts, and composition metadata.
+3. Open the session with `open_manifest_vm_session_admitted(...)` from the runtime bridge or service layer.
+4. Provide decision sources for `provide_message` and `select_branch` through the VM host bridge.
 
 ### 10.3 Decision Sourcing
 
@@ -477,7 +464,7 @@ Generated runners call `provide_message` for outbound payloads and `select_branc
 
 ### 10.4 Integration Features
 
-The runtime provides guard chain integration (CapGuard → FlowGuard → JournalCoupler), transport effects for message passing, and session lifecycle management with metrics.
+The runtime provides guard chain integration (CapGuard → FlowGuard → JournalCoupler), transport effects for message passing, manifest-driven admission, determinism policy enforcement, typed link and delegation checks, and session lifecycle management with metrics.
 
 ### 10.5 Output and Flow Policy Integration Points
 
