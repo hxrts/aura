@@ -1376,7 +1376,7 @@ pub async fn send_message_ref(
                 .await
                 .map_err(|e| AuraError::agent(format!("Failed to persist message: {e}")))?;
 
-            let recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
+            let mut recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
             let mut attempted_fanout = 0usize;
             let mut failed_fanout = Vec::new();
             let channel_requires_remote_delivery = chat_snapshot(app_core)
@@ -1385,21 +1385,32 @@ pub async fn send_message_ref(
                 .map(|channel| channel.is_dm || channel.member_count > 1)
                 .unwrap_or(false);
             if recipients.is_empty() && channel_requires_remote_delivery {
-                return Err(AuraError::agent(format!(
-                    "Missing sync prerequisite for channel {channel_id}: no recipient peers resolved"
-                )));
+                for attempt in 0..CHAT_FACT_CONNECTIVITY_ATTEMPTS {
+                    let _ = ensure_runtime_peer_connectivity(&runtime, "send_message_ref").await;
+                    converge_runtime(&runtime).await;
+                    runtime.sleep_ms(CHAT_FACT_CONNECTIVITY_BACKOFF_MS).await;
+                    recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
+                    if !recipients.is_empty() {
+                        break;
+                    }
+                    if attempt + 1 >= CHAT_FACT_CONNECTIVITY_ATTEMPTS {
+                        return Err(AuraError::agent(format!(
+                            "Missing sync prerequisite for channel {channel_id}: no recipient peers resolved"
+                        )));
+                    }
+                }
             }
             if !recipients.is_empty() {
                 for attempt in 0..CHAT_FACT_CONNECTIVITY_ATTEMPTS {
-                    if ensure_runtime_peer_connectivity(&runtime, "send_message_ref").await.is_ok()
+                    if ensure_runtime_peer_connectivity(&runtime, "send_message_ref")
+                        .await
+                        .is_ok()
                     {
                         break;
                     }
                     if attempt + 1 < CHAT_FACT_CONNECTIVITY_ATTEMPTS {
                         converge_runtime(&runtime).await;
-                        runtime
-                            .sleep_ms(CHAT_FACT_CONNECTIVITY_BACKOFF_MS)
-                            .await;
+                        runtime.sleep_ms(CHAT_FACT_CONNECTIVITY_BACKOFF_MS).await;
                     }
                 }
             }

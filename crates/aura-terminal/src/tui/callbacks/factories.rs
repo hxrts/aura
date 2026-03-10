@@ -363,9 +363,8 @@ impl ChatCallbacks {
                                                 )
                                                 .await
                                             {
-                                                if let Some(channel) = chat
-                                                    .all_channels()
-                                                    .find(|candidate| {
+                                                if let Some(channel) =
+                                                    chat.all_channels().find(|candidate| {
                                                         candidate
                                                             .name
                                                             .eq_ignore_ascii_case(channel_name)
@@ -637,9 +636,9 @@ impl ChatCallbacks {
 pub struct ContactsCallbacks {
     pub on_update_nickname: UpdateNicknameCallback,
     pub on_start_chat: StartChatCallback,
+    pub on_invite_to_channel: TwoStringCallback,
     pub on_import_invitation: ImportInvitationCallback,
     pub on_invite_lan_peer: Arc<dyn Fn(String, String) + Send + Sync>,
-    pub on_refresh_lan_peers: NoArgCallback,
     pub on_remove_contact: IdCallback,
 }
 
@@ -649,9 +648,9 @@ impl ContactsCallbacks {
         Self {
             on_update_nickname: Self::make_update_nickname(ctx.clone(), tx.clone()),
             on_start_chat: Self::make_start_chat(ctx.clone(), tx.clone()),
+            on_invite_to_channel: Self::make_invite_to_channel(ctx.clone(), tx.clone()),
             on_import_invitation: Self::make_import_invitation(ctx.clone(), tx.clone()),
             on_invite_lan_peer: Self::make_invite_lan_peer(ctx.clone(), tx.clone()),
-            on_refresh_lan_peers: Self::make_refresh_lan_peers(ctx.clone(), tx.clone()),
             on_remove_contact: Self::make_remove_contact(ctx, tx),
         }
     }
@@ -729,6 +728,33 @@ impl ContactsCallbacks {
         })
     }
 
+    fn make_invite_to_channel(ctx: Arc<IoContext>, tx: UiUpdateSender) -> TwoStringCallback {
+        Arc::new(move |contact_id: String, channel: String| {
+            let ctx = ctx.clone();
+            let tx = tx.clone();
+            let cmd = EffectCommand::InviteUser {
+                target: contact_id,
+                channel,
+            };
+            spawn_ctx(ctx.clone(), async move {
+                match ctx.dispatch(cmd).await {
+                    Ok(_) => {
+                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
+                            "invite",
+                            "channel invitation sent",
+                        )));
+                    }
+                    Err(error) => {
+                        let _ = tx.try_send(UiUpdate::operation_failed(
+                            "InviteUserToChannel",
+                            error.to_string(),
+                        ));
+                    }
+                }
+            });
+        })
+    }
+
     fn make_remove_contact(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdCallback {
         Arc::new(move |contact_id: String| {
             let ctx = ctx.clone();
@@ -774,16 +800,6 @@ impl ContactsCallbacks {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
                     }
                 }
-            });
-        })
-    }
-
-    fn make_refresh_lan_peers(ctx: Arc<IoContext>, _tx: UiUpdateSender) -> NoArgCallback {
-        Arc::new(move || {
-            let ctx = ctx.clone();
-            let cmd = EffectCommand::ListLanPeers;
-            spawn_ctx(ctx.clone(), async move {
-                let _ = ctx.dispatch(cmd).await;
             });
         })
     }
@@ -1631,13 +1647,16 @@ impl NeighborhoodCallbacks {
 #[derive(Clone)]
 pub struct AppCallbacks {
     pub on_create_account: CreateAccountCallback,
+    pub on_import_device_enrollment_during_onboarding: ImportDeviceEnrollmentCallback,
 }
 
 impl AppCallbacks {
     #[must_use]
     pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
         Self {
-            on_create_account: Self::make_create_account(ctx, tx),
+            on_create_account: Self::make_create_account(ctx.clone(), tx.clone()),
+            on_import_device_enrollment_during_onboarding:
+                Self::make_import_device_enrollment_during_onboarding(ctx, tx),
         }
     }
 
@@ -1682,6 +1701,33 @@ impl AppCallbacks {
                             operation: "CreateAccount".to_string(),
                             error: e.to_string(),
                         });
+                    }
+                }
+            });
+        })
+    }
+
+    fn make_import_device_enrollment_during_onboarding(
+        ctx: Arc<IoContext>,
+        tx: UiUpdateSender,
+    ) -> ImportDeviceEnrollmentCallback {
+        Arc::new(move |code: String| {
+            let ctx = ctx.clone();
+            let tx = tx.clone();
+            spawn_ctx(ctx.clone(), async move {
+                match ctx.import_device_enrollment_code(&code).await {
+                    Ok(()) => {
+                        let _ = tx.try_send(UiUpdate::AccountCreated);
+                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
+                            "devices",
+                            "Device enrollment invitation accepted",
+                        )));
+                    }
+                    Err(e) => {
+                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                            "devices",
+                            e.to_string(),
+                        )));
                     }
                 }
             });

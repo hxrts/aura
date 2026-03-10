@@ -525,7 +525,9 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             let version = payload
                 .get("version")
                 .and_then(Value::as_u64)
-                .ok_or_else(|| anyhow!("browser ui event missing version for {}", self.config.id))?;
+                .ok_or_else(|| {
+                    anyhow!("browser ui event missing version for {}", self.config.id)
+                })?;
             let snapshot = payload
                 .get("snapshot")
                 .cloned()
@@ -648,6 +650,31 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                 | ControlId::NavNotifications
                 | ControlId::NavSettings,
         );
+        if is_navigation_control {
+            let target_screen = match control_id {
+                ControlId::NavNeighborhood => Some("neighborhood"),
+                ControlId::NavChat => Some("chat"),
+                ControlId::NavContacts => Some("contacts"),
+                ControlId::NavNotifications => Some("notifications"),
+                ControlId::NavSettings => Some("settings"),
+                _ => None,
+            };
+            if let Some(target_screen) = target_screen {
+                let navigate_result = self.with_session(|session| {
+                    session.rpc_call(
+                        "navigate_screen",
+                        json!({
+                            "instance_id": self.config.id,
+                            "screen": target_screen,
+                        }),
+                    )?;
+                    Ok(())
+                });
+                if navigate_result.is_ok() {
+                    return Ok(());
+                }
+            }
+        }
         let click_result = self.click_target(&selector);
         if click_result.is_ok() {
             return Ok(());
@@ -725,6 +752,31 @@ impl InstanceBackend for PlaywrightBrowserBackend {
 
         let selector = list_item_selector(list_id, item_id);
         self.click_target(&selector)
+    }
+
+    fn create_contact_invitation(&mut self, receiver_authority_id: &str) -> Result<String> {
+        self.with_session(|session| {
+            let payload = session.rpc_call(
+                "create_contact_invitation",
+                json!({
+                    "instance_id": self.config.id,
+                    "receiver_authority_id": receiver_authority_id,
+                }),
+            )?;
+            let code = payload
+                .get("code")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim_end_matches(['\n', '\r'])
+                .to_string();
+            if code.trim().is_empty() {
+                bail!(
+                    "contact invitation code for browser instance {} is empty",
+                    self.config.id
+                );
+            }
+            Ok(code)
+        })
     }
 
     fn tail_log(&self, lines: usize) -> Result<Vec<String>> {

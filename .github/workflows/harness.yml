@@ -64,6 +64,22 @@ jobs:
           name: harness-deep
           replay-command: nix develop --command just ci-harness-ui-state-evented
 
+  shared-intent:
+    name: Harness Shared Intent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: harness-shared-intent
+      - run: nix develop --command just ci-harness-shared-intent-contract
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: harness-deep
+          replay-command: nix develop --command just ci-harness-shared-intent-contract
+
   replay:
     name: Harness Replay
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

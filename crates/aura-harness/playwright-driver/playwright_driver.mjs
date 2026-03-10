@@ -1541,6 +1541,7 @@ function requestTimeoutMs(method, params) {
     }
     case 'click_button':
     case 'fill_input':
+    case 'create_contact_invitation':
       return 30000;
     case 'start_page': {
       const pageGotoTimeoutMs = Number(params?.page_goto_timeout_ms ?? DEFAULT_PAGE_GOTO_TIMEOUT_MS);
@@ -2317,6 +2318,24 @@ async function readClipboard(params) {
   return { text: lastText };
 }
 
+async function createContactInvitation(params) {
+  const instanceId = normalizeInstanceId(params);
+  const session = getSession(instanceId);
+  const receiverAuthorityId = String(params?.receiver_authority_id ?? '').trim();
+  if (receiverAuthorityId.length === 0) {
+    throw new Error('receiver_authority_id is required');
+  }
+  const code = await session.page.evaluate(async (receiver) => {
+    if (typeof window.__AURA_HARNESS__?.create_contact_invitation !== 'function') {
+      throw new Error('window.__AURA_HARNESS__.create_contact_invitation is unavailable');
+    }
+    return await window.__AURA_HARNESS__.create_contact_invitation(receiver);
+  }, receiverAuthorityId);
+  const normalized = String(code ?? '').trim();
+  session.clipboardCache = normalized;
+  return { code: normalized };
+}
+
 async function getAuthorityId(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
@@ -2444,6 +2463,8 @@ async function dispatch(method, params) {
       return waitForSelector(params);
     case 'read_clipboard':
       return readClipboard(params);
+    case 'create_contact_invitation':
+      return createContactInvitation(params);
     case 'get_authority_id':
       return getAuthorityId(params);
     case 'tail_log':

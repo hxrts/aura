@@ -100,6 +100,13 @@ pub trait InstanceBackend {
             self.backend_kind()
         )
     }
+    fn create_contact_invitation(&mut self, receiver_authority_id: &str) -> Result<String> {
+        let _ = receiver_authority_id;
+        bail!(
+            "semantic contact invitation creation is not supported by backend {}",
+            self.backend_kind()
+        )
+    }
     fn tail_log(&self, lines: usize) -> Result<Vec<String>>;
     fn inject_message(&mut self, _message: &str) -> Result<()> {
         Ok(())

@@ -3,27 +3,51 @@
 @tailwind utilities;
 
 @layer base {
+  /* Dark mode (default) */
   :root {
-    --background: oklch(0.145 0 0);
+    --background: oklch(0.205 0 0);
     --foreground: oklch(0.985 0 0);
-    --card: oklch(0.145 0 0);
+    --card: oklch(0.205 0 0);
     --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.145 0 0);
+    --popover: oklch(0.205 0 0);
     --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.985 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
+    --primary: oklch(0.75 0 0);
+    --primary-foreground: oklch(0.145 0 0);
+    --secondary: oklch(0.30 0 0);
     --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
+    --muted: oklch(0.30 0 0);
     --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
+    --accent: oklch(0.30 0 0);
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.577 0.245 27.325);
     --destructive-foreground: oklch(0.985 0 0);
-    --border: oklch(0.269 0 0);
-    --input: oklch(0.269 0 0);
-    --ring: oklch(0.439 0 0);
-    --radius: 0.5rem;
+    --border: oklch(0.35 0 0);
+    --input: oklch(0.30 0 0);
+    --ring: oklch(0.50 0 0);
+    --radius: 3px;
+  }
+
+  /* Light mode */
+  .light {
+    --background: oklch(0.985 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(0.985 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(0.985 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.35 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.90 0 0);
+    --secondary-foreground: oklch(0.145 0 0);
+    --muted: oklch(0.90 0 0);
+    --muted-foreground: oklch(0.45 0 0);
+    --accent: oklch(0.90 0 0);
+    --accent-foreground: oklch(0.145 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --destructive-foreground: oklch(0.985 0 0);
+    --border: oklch(0.85 0 0);
+    --input: oklch(0.90 0 0);
+    --ring: oklch(0.65 0 0);
   }
 
   * {
@@ -96,4 +120,26 @@
     --tw-exit-translate-x: 0;
     --tw-exit-translate-y: 0;
   }
+
+  /* Override default border radius utilities to 3px */
+  .rounded,
+  .rounded-sm,
+  .rounded-md,
+  .rounded-lg,
+  .rounded-xl {
+    border-radius: 3px !important;
+  }
+}
+
+/* These rules are outside @layer to ensure they come after all Tailwind utilities */
+
+/* Remove bottom border from last list item in flex column containers */
+div.aura-list > button:last-child > div.aura-list-item,
+div.aura-list > div.aura-list-item:last-child {
+  border-bottom: 0 !important;
+}
+
+/* For 2-column grid layouts, remove borders from last row (last 2 items) */
+div.aura-list.grid > div.aura-list-item:nth-last-child(-n+2) {
+  border-bottom: 0 !important;
 }

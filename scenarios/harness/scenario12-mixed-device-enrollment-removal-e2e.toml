@@ -31,31 +31,23 @@ timeout_ms = 15000
 
 [[steps]]
 id = "alice-onboarding-visible"
-action = "control_visible"
+action = "screen_is"
 actor = "alice"
-control_id = "onboarding_root"
+screen_id = "onboarding"
 timeout_ms = 60000
 
 [[steps]]
 id = "bob-onboarding-visible"
-action = "control_visible"
+action = "screen_is"
 actor = "bob"
-control_id = "onboarding_root"
+screen_id = "onboarding"
 timeout_ms = 60000
 
 [[steps]]
-id = "alice-fill-account-name"
-action = "fill"
-actor = "alice"
-field_id = "account_name"
-value = "AliceOwner"
-timeout_ms = 3000
-
-[[steps]]
 id = "alice-create-account"
-action = "activate"
+action = "create_account"
 actor = "alice"
-control_id = "onboarding_create_account_button"
+value = "AliceOwner"
 timeout_ms = 3000
 
 [[steps]]
@@ -74,7 +66,7 @@ timeout_ms = 120000
 
 [[steps]]
 id = "alice-open-settings"
-action = "navigate"
+action = "open_screen"
 actor = "alice"
 screen_id = "settings"
 timeout_ms = 3000
@@ -87,69 +79,25 @@ screen_id = "settings"
 timeout_ms = 8000
 
 [[steps]]
-id = "alice-open-add-device-modal"
-action = "activate"
+id = "alice-start-device-enrollment"
+action = "start_device_enrollment"
 actor = "alice"
-control_id = "settings_add_device_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "alice-add-device-modal-open"
-action = "modal_open"
-actor = "alice"
-modal_id = "add_device"
-timeout_ms = 8000
-
-[[steps]]
-id = "alice-fill-device-name"
-action = "fill"
-actor = "alice"
-field_id = "device_name"
 value = "BobApp"
-timeout_ms = 3000
-
-[[steps]]
-id = "alice-submit-add-device"
-action = "activate"
-actor = "alice"
-control_id = "modal_confirm_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "alice-device-enrollment-submitting"
-action = "operation_state_is"
-actor = "alice"
-operation_id = "device_enrollment"
-operation_state = "submitting"
-timeout_ms = 15000
-
-[[steps]]
-id = "alice-copy-device-code"
-action = "activate"
-actor = "alice"
-control_id = "modal_copy_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "alice-read-device-code"
-action = "read_clipboard"
-actor = "alice"
 name = "device_code"
 timeout_ms = 12000
 
 [[steps]]
-id = "bob-fill-device-code"
-action = "fill"
-actor = "bob"
-field_id = "device_import_code"
-value = "${device_code}"
+id = "alice-device-code-ready"
+action = "runtime_event_occurred"
+actor = "alice"
+runtime_event_kind = "device_enrollment_code_ready"
 timeout_ms = 12000
 
 [[steps]]
 id = "bob-import-device-code"
-action = "activate"
+action = "import_device_enrollment_code"
 actor = "bob"
-control_id = "onboarding_import_device_button"
+value = "${device_code}"
 timeout_ms = 4000
 
 [[steps]]
@@ -168,7 +116,7 @@ timeout_ms = 30000
 
 [[steps]]
 id = "bob-open-settings"
-action = "navigate"
+action = "open_screen"
 actor = "bob"
 screen_id = "settings"
 timeout_ms = 3000
@@ -182,10 +130,9 @@ timeout_ms = 8000
 
 [[steps]]
 id = "bob-open-devices-section"
-action = "activate_list_item"
+action = "open_settings_section"
 actor = "bob"
-list_id = "settings_sections"
-item_id = "devices"
+section = "devices"
 timeout_ms = 3000
 
 [[steps]]
@@ -205,39 +152,10 @@ count = 2
 timeout_ms = 20000
 
 [[steps]]
-id = "bob-open-remove-device"
-action = "activate"
+id = "bob-remove-selected-device"
+action = "remove_selected_device"
 actor = "bob"
-control_id = "settings_remove_device_button"
 timeout_ms = 4000
-
-[[steps]]
-id = "bob-device-select-modal-open"
-action = "modal_open"
-actor = "bob"
-modal_id = "select_device_to_remove"
-timeout_ms = 10000
-
-[[steps]]
-id = "bob-choose-device"
-action = "activate"
-actor = "bob"
-control_id = "modal_confirm_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "bob-confirm-remove-modal-open"
-action = "modal_open"
-actor = "bob"
-modal_id = "confirm_remove_device"
-timeout_ms = 10000
-
-[[steps]]
-id = "bob-confirm-remove-device"
-action = "activate"
-actor = "bob"
-control_id = "modal_confirm_button"
-timeout_ms = 3000
 
 [[steps]]
 id = "bob-devices-count-one"

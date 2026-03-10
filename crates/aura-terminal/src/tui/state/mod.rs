@@ -126,6 +126,9 @@ pub struct TuiState {
 
     /// Semantic operation states exported to the harness snapshot.
     pub operation_states: HashMap<OperationId, OperationState>,
+
+    /// Last exported invitation code for harness-visible semantic readiness.
+    pub last_exported_invitation_code: Option<String>,
 }
 
 impl TuiState {

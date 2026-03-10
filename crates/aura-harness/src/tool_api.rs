@@ -104,6 +104,10 @@ pub enum ToolRequest {
         list_id: ListId,
         item_id: String,
     },
+    CreateContactInvitation {
+        instance_id: String,
+        receiver_authority_id: String,
+    },
     ClickButton {
         instance_id: String,
         label: String,
@@ -308,6 +312,13 @@ impl ToolApi {
                 .coordinator
                 .activate_list_item(&instance_id, list_id, &item_id)
                 .map(|_| serde_json::json!({ "status": "activated" })),
+            ToolRequest::CreateContactInvitation {
+                instance_id,
+                receiver_authority_id,
+            } => self
+                .coordinator
+                .create_contact_invitation(&instance_id, &receiver_authority_id)
+                .map(|code| serde_json::json!({ "status": "created", "code": code })),
             ToolRequest::ClickButton {
                 instance_id,
                 label,

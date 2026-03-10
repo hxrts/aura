@@ -110,10 +110,12 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
     let input_props = LabeledInputProps::new("Display Name *", "Enter your name...")
         .with_value(nickname_suggestion)
         .with_focused(props.name_focused);
-    let import_props =
-        LabeledInputProps::new("Device Enrollment Code", "Paste the device enrollment code...")
-            .with_value(device_import_code)
-            .with_focused(props.import_code_focused);
+    let import_props = LabeledInputProps::new(
+        "Device Enrollment Code",
+        "Paste the device enrollment code...",
+    )
+    .with_value(device_import_code)
+    .with_focused(props.import_code_focused);
 
     element! {
         ModalContent(

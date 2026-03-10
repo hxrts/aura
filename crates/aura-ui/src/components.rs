@@ -9,16 +9,11 @@ use aura_app::ui::contract::{list_item_dom_id, ControlId, FieldId, ListId, Modal
 use aura_core::identifiers::AuthorityId;
 use dioxus::prelude::*;
 use dioxus_shadcn::components::badge::{Badge as LbBadge, BadgeVariant as LbBadgeVariant};
-use dioxus_shadcn::components::card::{
-    Card as LbCard, CardContent as LbCardContent, CardDescription as LbCardDescription,
-    CardHeader as LbCardHeader, CardTitle as LbCardTitle,
-};
+use dioxus_shadcn::components::card::Card as LbCard;
 use dioxus_shadcn::components::dialog::{
-    DialogContent as LbDialogContent, DialogDescription as LbDialogDescription,
-    DialogOverlay as LbDialogOverlay, DialogRoot as LbDialogRoot, DialogTitle as LbDialogTitle,
+    DialogContent as LbDialogContent, DialogOverlay as LbDialogOverlay, DialogRoot as LbDialogRoot,
+    DialogTitle as LbDialogTitle,
 };
-use dioxus_shadcn::components::input::Input as LbInput;
-use dioxus_shadcn::components::label::Label as LbLabel;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ButtonVariant {
@@ -34,14 +29,19 @@ pub enum PillTone {
 }
 
 #[derive(Clone, PartialEq)]
+pub struct ModalInputView {
+    pub label: String,
+    pub field_id: FieldId,
+    pub value: String,
+}
+
+#[derive(Clone, PartialEq)]
 pub struct ModalView {
     pub modal_id: ModalId,
     pub title: String,
     pub details: Vec<String>,
     pub keybind_rows: Vec<(String, String)>,
-    pub input_label: Option<String>,
-    pub input_field_id: Option<FieldId>,
-    pub input_value: Option<String>,
+    pub inputs: Vec<ModalInputView>,
     pub enter_label: String,
 }
 
@@ -56,10 +56,10 @@ pub struct AuthorityPickerItem {
 fn ui_button_class(variant: ButtonVariant) -> &'static str {
     match variant {
         ButtonVariant::Primary => {
-            "inline-flex h-8 items-center justify-center rounded-sm bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            "inline-flex h-8 shrink-0 items-center justify-center rounded-sm bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
         }
         ButtonVariant::Secondary => {
-            "inline-flex h-8 items-center justify-center rounded-sm border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            "inline-flex h-8 shrink-0 items-center justify-center rounded-sm border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
         }
     }
 }
@@ -81,31 +81,73 @@ pub fn UiCard(
 ) -> Element {
     let card_class = match extra_class {
         Some(extra_class) if !extra_class.is_empty() => {
-            format!("flex h-full min-h-0 flex-col rounded-sm {extra_class}")
+            format!(
+                "flex h-full min-h-0 flex-col gap-0 overflow-hidden rounded-sm py-0 {extra_class}"
+            )
         }
-        _ => "flex h-full min-h-0 flex-col rounded-sm".to_string(),
+        _ => "flex h-full min-h-0 flex-col gap-0 overflow-hidden rounded-sm py-0".to_string(),
     };
 
     rsx! {
         LbCard {
             class: Some(card_class),
-            LbCardHeader {
-                class: Some("gap-1 border-b border-border pb-4 min-w-0 overflow-hidden".to_string()),
-                LbCardTitle {
-                    class: Some("text-xs font-semibold uppercase tracking-[0.08em] truncate".to_string()),
-                    "{title}"
-                }
-                if let Some(subtitle) = subtitle {
-                    LbCardDescription {
-                        class: Some("truncate".to_string()),
-                        "{subtitle}"
+            div {
+                class: "flex h-[4.5rem] w-full shrink-0 flex-col items-start justify-center border-b-[1px] border-border px-6 py-3 text-left",
+                div {
+                    class: "flex w-full min-w-0 flex-col items-start text-left",
+                    div {
+                        class: "w-full text-left text-xs font-semibold uppercase tracking-[0.08em] truncate",
+                        "{title}"
+                    }
+                    if let Some(subtitle) = subtitle {
+                        div {
+                            class: "w-full text-left truncate text-sm text-muted-foreground",
+                            "{subtitle}"
+                        }
                     }
                 }
             }
-            LbCardContent {
-                class: Some("flex flex-1 min-h-0 flex-col gap-2 text-sm".to_string()),
+            div {
+                class: "flex flex-1 min-h-0 flex-col gap-2 px-6 py-6 text-sm",
                 {children}
             }
+        }
+    }
+}
+
+#[component]
+pub fn UiCardBody(id: Option<String>, extra_class: Option<String>, children: Element) -> Element {
+    let class = match extra_class {
+        Some(extra_class) if !extra_class.is_empty() => {
+            format!("flex flex-1 min-h-0 min-w-0 flex-col {extra_class}")
+        }
+        _ => "flex flex-1 min-h-0 min-w-0 flex-col".to_string(),
+    };
+
+    rsx! {
+        div {
+            id,
+            class: "{class}",
+            {children}
+        }
+    }
+}
+
+#[component]
+pub fn UiCardFooter(extra_class: Option<String>, children: Element) -> Element {
+    let class = match extra_class {
+        Some(extra_class) if !extra_class.is_empty() => {
+            format!(
+                "mt-auto -mx-6 -mb-6 flex h-[4.5rem] shrink-0 items-center overflow-hidden border-t-[1px] border-border bg-card px-6 py-3 {extra_class}"
+            )
+        }
+        _ => "mt-auto -mx-6 -mb-6 flex h-[4.5rem] shrink-0 items-center overflow-hidden border-t-[1px] border-border bg-card px-6 py-3".to_string(),
+    };
+
+    rsx! {
+        div {
+            class: "{class}",
+            {children}
         }
     }
 }
@@ -187,25 +229,21 @@ pub fn UiModal(
     modal: ModalView,
     on_cancel: EventHandler<()>,
     on_confirm: EventHandler<()>,
-    on_input_change: EventHandler<String>,
+    on_input_change: EventHandler<(FieldId, String)>,
+    on_input_focus: EventHandler<FieldId>,
 ) -> Element {
-    let input_field_id = modal
-        .input_field_id
-        .and_then(FieldId::web_dom_id)
-        .or_else(|| ControlId::ModalInput.web_dom_id())
-        .expect("modal input field identifier must be defined")
-        .to_string();
-
     rsx! {
         div {
             id: modal.modal_id.web_dom_id().to_string(),
             class: "fixed inset-0 z-50 flex items-center justify-center bg-background/95 px-4 backdrop-blur-sm",
+            onclick: move |_| on_cancel.call(()),
             div {
                 id: "aura-modal-content",
                 role: "dialog",
                 aria_modal: "true",
                 aria_labelledby: "aura-modal-title",
-                class: "aura-modal-fade w-full max-w-xl overflow-hidden bg-card p-0 text-card-foreground shadow-2xl",
+                class: "aura-modal-fade w-full max-w-xl overflow-hidden rounded-sm border border-border bg-card p-0 text-card-foreground shadow-2xl",
+                onclick: move |evt| evt.stop_propagation(),
                 div {
                     class: "bg-card px-4 py-3 border-b border-border flex items-center justify-between gap-3",
                     h2 {
@@ -213,7 +251,13 @@ pub fn UiModal(
                         class: "m-0 text-sm font-semibold text-card-foreground",
                         "{modal.title}"
                     }
-                    span { class: "text-[0.66rem] uppercase tracking-[0.06em] text-muted-foreground", "Esc closes" }
+                    button {
+                        r#type: "button",
+                        class: "inline-flex h-8 w-8 items-center justify-center rounded-sm text-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
+                        onclick: move |_| on_cancel.call(()),
+                        aria_label: "Close",
+                        "×"
+                    }
                 }
                 div {
                     class: "bg-card px-4 py-3 space-y-2 text-sm text-card-foreground",
@@ -243,21 +287,34 @@ pub fn UiModal(
                             }
                         }
                     }
-                    if let Some(input_label) = modal.input_label {
+                    if !modal.inputs.is_empty() {
                         div {
                             class: "pt-1 space-y-1",
-                            label {
-                                r#for: "{input_field_id}",
-                                class: "text-[0.7rem] uppercase tracking-[0.06em] text-muted-foreground",
-                                "{input_label}"
-                            }
-                            input {
-                                id: "{input_field_id}",
-                                class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring",
-                                value: "{modal.input_value.clone().unwrap_or_default()}",
-                                oninput: move |evt: FormEvent| {
-                                    on_input_change.call(evt.value());
-                                },
+                            for input_view in modal.inputs.clone() {
+                                div {
+                                    class: "space-y-1",
+                                    label {
+                                        r#for: "{input_view.field_id.web_dom_id().or_else(|| ControlId::ModalInput.web_dom_id()).expect(\"modal input field identifier must be defined\")}",
+                                        class: "text-[0.7rem] uppercase tracking-[0.06em] text-muted-foreground",
+                                        "{input_view.label}"
+                                    }
+                                    input {
+                                        id: "{input_view.field_id.web_dom_id().or_else(|| ControlId::ModalInput.web_dom_id()).expect(\"modal input field identifier must be defined\")}",
+                                        class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring",
+                                        autocomplete: "off",
+                                        value: "{input_view.value}",
+                                        onfocus: {
+                                            let field_id = input_view.field_id;
+                                            move |_| on_input_focus.call(field_id)
+                                        },
+                                        oninput: {
+                                            let field_id = input_view.field_id;
+                                            move |evt: FormEvent| {
+                                                on_input_change.call((field_id, evt.value()));
+                                            }
+                                        },
+                                    }
+                                }
                             }
                         }
                     }
@@ -351,11 +408,11 @@ pub fn UiDeviceEnrollmentModal(
             }
             LbDialogContent {
                 id: Some("aura-device-enrollment-modal-content".to_string()),
-                class: Some("aura-modal-fade w-full max-w-2xl bg-card text-card-foreground shadow-2xl p-0 overflow-hidden".to_string()),
+                class: Some("aura-modal-fade w-full max-w-2xl rounded-sm border border-border bg-card text-card-foreground shadow-2xl p-0 overflow-hidden".to_string()),
                 div {
                     class: "bg-card px-4 py-3 border-b border-border flex items-start justify-between gap-3",
                     div {
-                        class: "space-y-1",
+                        class: "flex-1 space-y-1",
                         LbDialogTitle {
                             id: Some("aura-device-enrollment-modal-title".to_string()),
                             class: Some("m-0 text-sm font-semibold text-card-foreground".to_string()),
@@ -366,10 +423,23 @@ pub fn UiDeviceEnrollmentModal(
                             "Out-of-band device enrollment ceremony"
                         }
                     }
-                    LbBadge {
-                        variant: status_tone,
-                        class: Some("h-6 rounded-full px-2 uppercase tracking-[0.08em] text-[0.62rem]".to_string()),
-                        "{status_label}"
+                    div {
+                        class: "flex items-center gap-2",
+                        LbBadge {
+                            variant: status_tone,
+                            class: Some("h-6 rounded-full px-2 uppercase tracking-[0.08em] text-[0.62rem]".to_string()),
+                            "{status_label}"
+                        }
+                        button {
+                            r#type: "button",
+                            class: "inline-flex h-8 w-8 items-center justify-center rounded-sm text-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
+                            onclick: move |_| {
+                                open.set(Some(false));
+                                on_cancel.call(());
+                            },
+                            aria_label: "Close",
+                            "×"
+                        }
                     }
                 }
                 div {
@@ -519,11 +589,11 @@ pub fn UiAuthorityPickerModal(
             }
             LbDialogContent {
                 id: Some("aura-authority-picker-modal-content".to_string()),
-                class: Some("aura-modal-fade w-full max-w-2xl bg-card text-card-foreground shadow-2xl p-0 overflow-hidden".to_string()),
+                class: Some("aura-modal-fade w-full max-w-2xl rounded-sm border border-border bg-card text-card-foreground shadow-2xl p-0 overflow-hidden".to_string()),
                 div {
                     class: "bg-card px-4 py-3 border-b border-border flex items-start justify-between gap-3",
                     div {
-                        class: "space-y-1",
+                        class: "flex-1 space-y-1",
                         LbDialogTitle {
                             id: Some("aura-authority-picker-modal-title".to_string()),
                             class: Some("m-0 text-sm font-semibold text-card-foreground".to_string()),
@@ -534,10 +604,23 @@ pub fn UiAuthorityPickerModal(
                             "Choose which local authority the web runtime should reload into."
                         }
                     }
-                    LbBadge {
-                        variant: LbBadgeVariant::Secondary,
-                        class: Some("h-6 rounded-full px-2 uppercase tracking-[0.08em] text-[0.62rem]".to_string()),
-                        "{authority_count} available"
+                    div {
+                        class: "flex items-center gap-2",
+                        LbBadge {
+                            variant: LbBadgeVariant::Secondary,
+                            class: Some("h-6 rounded-full px-2 uppercase tracking-[0.08em] text-[0.62rem]".to_string()),
+                            "{authority_count} available"
+                        }
+                        button {
+                            r#type: "button",
+                            class: "inline-flex h-8 w-8 items-center justify-center rounded-sm text-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
+                            onclick: move |_| {
+                                open.set(Some(false));
+                                on_cancel.call(());
+                            },
+                            aria_label: "Close",
+                            "×"
+                        }
                     }
                 }
                 div {
@@ -690,7 +773,7 @@ pub fn UiFooter(
 ) -> Element {
     rsx! {
         footer {
-            class: "shrink-0 overflow-hidden border-t border-border bg-background px-4 py-3 text-xs tracking-[0.02em] text-muted-foreground sm:px-6",
+            class: "shrink-0 overflow-hidden bg-background px-4 pt-0 pb-6 text-xs tracking-[0.02em] text-muted-foreground sm:px-6",
             div {
                 class: "flex h-9 min-w-0 items-center justify-between gap-3 overflow-hidden",
                 span { class: "min-w-0 truncate whitespace-nowrap text-card-foreground leading-none", "{left}" }

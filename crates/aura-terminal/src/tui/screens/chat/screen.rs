@@ -228,10 +228,22 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                     let scope = active_scope.read().ok().and_then(|g| g.clone());
                     let scoped = scoped_channels(&chat_state, scope.as_deref());
 
-                    // Get the selected channel index from shared state
-                    let selected_idx = shared_selected
-                        .as_ref()
-                        .and_then(|s| s.read().ok().map(|g| *g))
+                    let selected_channel_id = shared_selected_id.as_ref().and_then(|shared_id| {
+                        shared_id.read().ok().and_then(|guard| guard.clone())
+                    });
+
+                    let selected_idx = selected_channel_id
+                        .as_deref()
+                        .and_then(|channel_id| {
+                            scoped
+                                .iter()
+                                .position(|channel| channel.id.to_string() == channel_id)
+                        })
+                        .or_else(|| {
+                            shared_selected
+                                .as_ref()
+                                .and_then(|s| s.read().ok().map(|g| *g))
+                        })
                         .unwrap_or(0);
 
                     let selected_channel_message_count = scoped

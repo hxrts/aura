@@ -38,10 +38,12 @@ use aura_app::ui::workflows::ceremonies::{
     cancel_key_rotation_ceremony, monitor_key_rotation_ceremony, start_device_threshold_ceremony,
     start_guardian_ceremony,
 };
+use aura_app::ui::workflows::network as network_workflows;
 use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::CeremonyId;
 use aura_core::types::FrostThreshold;
+use aura_core::AuthorityId;
 
 use crate::tui::callbacks::CallbackRegistry;
 use crate::tui::components::{
@@ -334,6 +336,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         &app_ctx,
         shared_channels.clone(),
         tui_selected.clone(),
+        selected_channel_id.clone(),
     );
 
     // Clone for ChatScreen to compute per-channel message counts
@@ -489,6 +492,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 if should_tick {
                     tui.tick_active_toast_timer();
                 }
+            }
+        }
+    });
+
+    // =========================================================================
+    // Discovered Peers Auto-Refresh
+    //
+    // Keep LAN/rendezvous peer discovery fresh in the background so the
+    // Contacts screen can stay purely reactive.
+    // =========================================================================
+    hooks.use_future({
+        let app_core = app_ctx.app_core.raw().clone();
+        async move {
+            loop {
+                let _ = network_workflows::refresh_discovered_peers(&app_core).await;
+                tokio::time::sleep(network_workflows::DISCOVERED_PEERS_REFRESH_INTERVAL).await;
             }
         }
     });
@@ -1084,6 +1103,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
                         UiUpdate::InvitationExported { code } => {
                             tui.with_mut(|state| {
+                                state.set_operation_state(
+                                    OperationId::invitation_create(),
+                                    OperationState::Succeeded,
+                                );
+                                state.last_exported_invitation_code = Some(code.clone());
                                 let copied = copy_to_clipboard(&code).is_ok();
                                 state
                                     .modal_queue
@@ -1558,6 +1582,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::CreateAccount { name } => {
                                         (cb.app.on_create_account)(name);
                                     }
+                                    DispatchCommand::ImportDeviceEnrollmentDuringOnboarding {
+                                        code,
+                                    } => {
+                                        (cb.app.on_import_device_enrollment_during_onboarding)(
+                                            code,
+                                        );
+                                    }
                                     DispatchCommand::AddGuardian { contact_id } => {
                                         (cb.recovery.on_select_guardian)(contact_id.to_string());
                                     }
@@ -1952,31 +1983,21 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let idx = new_state.contacts.selected_index;
                                         if let Ok(guard) = shared_contacts_for_dispatch.read() {
                                             if let Some(contact) = guard.get(idx) {
-                                                let receiver_name = if !contact.nickname.is_empty()
-                                                {
-                                                    contact.nickname.clone()
-                                                } else if let Some(s) = &contact.nickname_suggestion {
-                                                    s.clone()
-                                                } else {
-                                                    let short = contact
-                                                        .id
-                                                        .chars()
-                                                        .take(8)
-                                                        .collect::<String>();
-                                                    format!("{short}...")
-                                                };
-
-                                                let mut modal_state =
-                                                    crate::tui::state_machine::CreateInvitationModalState::for_receiver(
-                                                        contact.id.clone(),
-                                                        receiver_name,
-                                                    );
-                                                modal_state.type_index = 1;
-                                                new_state
-                                                    .modal_queue
-                                                    .enqueue(crate::tui::state_machine::QueuedModal::ContactsCreate(
-                                                        modal_state,
-                                                    ));
+                                                match contact.id.parse::<AuthorityId>() {
+                                                    Ok(receiver_id) => {
+                                                        (cb.invitations.on_create)(
+                                                            receiver_id,
+                                                            "contact".to_string(),
+                                                            None,
+                                                            None,
+                                                        );
+                                                    }
+                                                    Err(error) => {
+                                                        new_state.toast_error(format!(
+                                                            "Invalid authority id: {error}"
+                                                        ));
+                                                    }
+                                                }
                                             } else {
                                                 if self_authority_id.is_none() {
                                                     new_state.toast_error("No active authority");
@@ -2025,9 +2046,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             new_state.toast_error("Failed to read LAN peers");
                                         }
                                     }
-                                    DispatchCommand::RefreshLanPeers => {
-                                        (cb.contacts.on_refresh_lan_peers)();
-                                    }
                                     DispatchCommand::StartChat => {
                                         let idx = new_state.contacts.selected_index;
                                         if let Ok(guard) = shared_contacts_for_dispatch.read() {
@@ -2042,6 +2060,30 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         } else {
                                             new_state.toast_error("Failed to read contacts");
                                         }
+                                    }
+                                    DispatchCommand::InviteSelectedContactToChannel => {
+                                        let contact_idx = new_state.contacts.selected_index;
+                                        let channel_idx = new_state.chat.selected_channel;
+                                        let contacts = match shared_contacts_for_dispatch.read() {
+                                            Ok(guard) => guard.clone(),
+                                            Err(poisoned) => poisoned.into_inner().clone(),
+                                        };
+                                        let channels = match shared_channels_for_dispatch.read() {
+                                            Ok(guard) => guard.clone(),
+                                            Err(poisoned) => poisoned.into_inner().clone(),
+                                        };
+                                        let Some(contact) = contacts.get(contact_idx) else {
+                                            new_state.toast_error("No contact selected");
+                                            continue;
+                                        };
+                                        let Some(channel) = channels.get(channel_idx) else {
+                                            new_state.toast_error("No channel selected");
+                                            continue;
+                                        };
+                                        (cb.contacts.on_invite_to_channel)(
+                                            contact.id.clone(),
+                                            channel.name.clone(),
+                                        );
                                     }
                                     DispatchCommand::RemoveContact { contact_id } => {
                                         (cb.contacts.on_remove_contact)(contact_id.to_string());

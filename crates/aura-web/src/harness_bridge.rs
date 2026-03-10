@@ -3,15 +3,18 @@
 //! Exposes the UiController to JavaScript via window.harness, enabling the test
 //! harness to send keys, capture screenshots, and query UI state from Playwright.
 
-use aura_app::ui::contract::{RenderHeartbeat, ScreenId, UiSnapshot};
-use aura_ui::UiScreen;
+use aura_app::ui::contract::{RenderHeartbeat, RuntimeEventKind, UiSnapshot};
+use aura_app::ui::workflows::invitation as invitation_workflows;
+use aura_core::AuthorityId;
 use aura_ui::UiController;
+use aura_ui::UiScreen;
 use js_sys::{Array, Function, Object, Reflect, JSON};
 use serde_wasm_bindgen::to_value;
 use std::cell::RefCell;
 use std::sync::Arc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen_futures::future_to_promise;
 
 thread_local! {
     static CONTROLLER: RefCell<Option<Arc<UiController>>> = const { RefCell::new(None) };
@@ -134,17 +137,6 @@ pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
         *seq
     });
 
-    // Publish semantic state immediately so harness waits are not gated on
-    // the browser reaching the next animation frame.
-    publish_ui_snapshot_now(
-        &window,
-        value.clone(),
-        json.clone(),
-        screen,
-        modal,
-        operation_count,
-    );
-
     let raf_window = window.clone();
     let raf_callback = Closure::once_into_js(move || {
         let is_latest_publish = UI_PUBLISH_SEQ.with(|slot| *slot.borrow() == publish_seq);
@@ -184,6 +176,19 @@ fn serialize_ui_snapshot(snapshot: &UiSnapshot) -> JsValue {
             JsValue::NULL
         }
     }
+}
+
+fn serialized_published_ui_snapshot(
+    window: &web_sys::Window,
+    controller: &UiController,
+) -> JsValue {
+    Reflect::get(
+        window.as_ref(),
+        &JsValue::from_str("__AURA_UI_STATE_JSON__"),
+    )
+    .ok()
+    .filter(|value| !value.is_null() && !value.is_undefined())
+    .unwrap_or_else(|| serialize_ui_snapshot(&controller.ui_snapshot()))
 }
 
 pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), JsValue> {
@@ -284,7 +289,10 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
 
     let ui_state_controller = controller.clone();
     let ui_state = Closure::wrap(Box::new(move || -> JsValue {
-        serialize_ui_snapshot(&ui_state_controller.ui_snapshot())
+        let Some(window) = web_sys::window() else {
+            return serialize_ui_snapshot(&ui_state_controller.ui_snapshot());
+        };
+        serialized_published_ui_snapshot(&window, &ui_state_controller)
     }) as Box<dyn FnMut() -> JsValue>);
     Reflect::set(
         &harness,
@@ -315,6 +323,46 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
         read_clipboard.as_ref().unchecked_ref(),
     )?;
     read_clipboard.forget();
+
+    let create_contact_invitation_controller = controller.clone();
+    let create_contact_invitation =
+        Closure::wrap(Box::new(move |receiver: JsValue| -> js_sys::Promise {
+            let controller = create_contact_invitation_controller.clone();
+            future_to_promise(async move {
+                let receiver = receiver
+                    .as_string()
+                    .ok_or_else(|| JsValue::from_str("receiver_authority_id must be a string"))?;
+                let authority_id = receiver.parse::<AuthorityId>().map_err(|error| {
+                    JsValue::from_str(&format!("invalid authority id: {error}"))
+                })?;
+                let app_core = controller.app_core().clone();
+                let invitation = invitation_workflows::create_contact_invitation(
+                    &app_core,
+                    authority_id,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+                let code =
+                    invitation_workflows::export_invitation(&app_core, &invitation.invitation_id)
+                        .await
+                        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+                controller.write_clipboard(&code);
+                controller.push_runtime_event(
+                    RuntimeEventKind::InvitationCodeReady,
+                    format!("receiver={authority_id}"),
+                );
+                Ok(JsValue::from_str(&code))
+            })
+        }) as Box<dyn FnMut(JsValue) -> js_sys::Promise>);
+    Reflect::set(
+        &harness,
+        &JsValue::from_str("create_contact_invitation"),
+        create_contact_invitation.as_ref().unchecked_ref(),
+    )?;
+    create_contact_invitation.forget();
 
     let authority_id_controller = controller.clone();
     let get_authority_id = Closure::wrap(Box::new(move || -> JsValue {
@@ -475,7 +523,10 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
     )?;
     let read_only_ui_state_controller = controller;
     let read_only_ui_state = Closure::wrap(Box::new(move || -> JsValue {
-        serialize_ui_snapshot(&read_only_ui_state_controller.ui_snapshot())
+        let Some(window) = web_sys::window() else {
+            return serialize_ui_snapshot(&read_only_ui_state_controller.ui_snapshot());
+        };
+        serialized_published_ui_snapshot(&window, &read_only_ui_state_controller)
     }) as Box<dyn FnMut() -> JsValue>);
     Reflect::set(
         window.as_ref(),

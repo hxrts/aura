@@ -4,8 +4,9 @@
 //! and toast notifications for the Aura web interface.
 
 use crate::components::{
-    AuthorityPickerItem, ButtonVariant, ModalView, PillTone, UiAuthorityPickerModal, UiButton,
-    UiCard, UiDeviceEnrollmentModal, UiFooter, UiListButton, UiListItem, UiModal, UiPill,
+    AuthorityPickerItem, ButtonVariant, ModalInputView, ModalView, PillTone,
+    UiAuthorityPickerModal, UiButton, UiCard, UiCardBody, UiCardFooter, UiDeviceEnrollmentModal,
+    UiFooter, UiListButton, UiListItem, UiModal, UiPill,
 };
 use crate::model::{
     AccessDepth, AccessOverrideLevel, ActiveModal, AddDeviceWizardStep, CapabilityTier,
@@ -17,8 +18,9 @@ use crate::model::{
 use aura_app::signal_defs::{DiscoveredPeersState, SettingsState};
 use aura_app::ui::contract::{
     list_item_dom_id, ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot,
-    ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot, OperationState,
-    RuntimeEventKind, ScreenId as ContractScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
+    ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
+    OperationState, RuntimeEventKind, ScreenId as ContractScreenId, SelectionSnapshot, UiReadiness,
+    UiSnapshot,
 };
 use aura_app::ui::signals::{
     DiscoveredPeerMethod, NetworkStatus, CHAT_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL,
@@ -506,6 +508,21 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
             runtime.messages.len()
         ),
     );
+    if let Some(channel) = runtime
+        .channels
+        .iter()
+        .find(|channel| channel.name.eq_ignore_ascii_case(&runtime.active_channel))
+    {
+        controller.push_runtime_event(
+            RuntimeEventKind::ChannelMembershipReady,
+            format!("channel={} members={}", channel.name, channel.member_count),
+        );
+        if channel.is_dm || channel.member_count > 1 {
+            let detail = format!("channel={} members={}", channel.name, channel.member_count);
+            controller.push_runtime_event(RuntimeEventKind::RecipientPeersResolved, detail.clone());
+            controller.push_runtime_event(RuntimeEventKind::MessageDeliveryReady, detail);
+        }
+    }
     runtime
 }
 
@@ -625,6 +642,12 @@ async fn load_contacts_runtime_view(controller: Arc<UiController>) -> ContactsRu
             runtime.lan_peers.len()
         ),
     );
+    if !runtime.contacts.is_empty() {
+        controller.push_runtime_event(
+            RuntimeEventKind::ContactLinkReady,
+            format!("contacts={}", runtime.contacts.len()),
+        );
+    }
     runtime
 }
 
@@ -908,6 +931,15 @@ async fn load_notifications_runtime_view(
         core.read(&*ERROR_SIGNAL).await.unwrap_or_default()
     };
     let runtime = build_notifications_runtime_view(invitations, recovery, error);
+    if runtime.items.iter().any(|item| {
+        matches!(item.action, NotificationRuntimeAction::ReceivedInvitation)
+            && (item.kind_label == "Home Invite" || item.kind_label == "Chat Invite")
+    }) {
+        controller.push_runtime_event(
+            RuntimeEventKind::PendingHomeInvitationReady,
+            "pending_home_invitation",
+        );
+    }
     controller.sync_runtime_notifications(
         runtime
             .items
@@ -1303,24 +1335,10 @@ fn submit_runtime_modal_action(
                                             .clone()
                                             .filter(|value| !value.trim().is_empty())
                                             .unwrap_or_else(|| invitation.sender_id.to_string());
-                                        controller_for_import.ensure_runtime_contact(
-                                            invitation.sender_id,
-                                            display_name,
-                                            false,
-                                        );
-                                        controller_for_import.push_runtime_event(
-                                            RuntimeEventKind::InvitationAccepted,
-                                            format!(
-                                                "kind=contact sender_id={}",
-                                                invitation.sender_id
-                                            ),
-                                        );
-                                        controller_for_import.set_selected_contact_authority_id(
-                                            invitation.sender_id,
-                                        );
                                         controller_for_import
-                                            .complete_runtime_invitation_operation(
-                                                OperationState::Succeeded,
+                                            .complete_runtime_contact_invitation_acceptance(
+                                                invitation.sender_id,
+                                                display_name,
                                             );
                                         controller_for_import
                                             .push_log("accept_invitation complete generic");
@@ -1483,7 +1501,6 @@ fn submit_runtime_modal_action(
             }
 
             let app_core = controller.app_core().clone();
-            let rerender_for_create = rerender.clone();
             controller.start_runtime_operation(OperationId::invitation_create());
             spawn(async move {
                 tracing::info!("create_invitation submit start");
@@ -1496,7 +1513,7 @@ fn submit_runtime_modal_action(
                             OperationState::Failed,
                         );
                         controller.runtime_error_toast(format!("Invalid authority id: {error}"));
-                        rerender_for_create();
+                        rerender();
                         return;
                     }
                 };
@@ -1523,14 +1540,15 @@ fn submit_runtime_modal_action(
                                 tracing::info!("create_invitation export_invitation ok");
                                 controller.write_clipboard(&code);
                                 tracing::info!("create_invitation write_clipboard ok");
-                                controller.finish_runtime_operation(
-                                    OperationId::invitation_create(),
-                                    OperationState::Succeeded,
+                                controller.push_runtime_event(
+                                    RuntimeEventKind::InvitationCodeReady,
+                                    format!("receiver={receiver_id}"),
                                 );
-                                tracing::info!("create_invitation operation succeeded");
-                                controller.complete_runtime_modal_success(
+                                controller.complete_runtime_modal_operation_success(
+                                    OperationId::invitation_create(),
                                     "Invitation code copied to clipboard",
                                 );
+                                tracing::info!("create_invitation operation succeeded");
                                 tracing::info!("create_invitation complete");
                             }
                             Err(error) => {
@@ -1553,7 +1571,6 @@ fn submit_runtime_modal_action(
                     }
                 }
                 tracing::info!("create_invitation rerender");
-                rerender_for_create();
             });
             true
         }
@@ -2473,17 +2490,6 @@ fn handle_runtime_character_shortcut(
             });
             true
         }
-        (UiScreen::Contacts, "d") => {
-            let app_core = controller.app_core().clone();
-            spawn(async move {
-                match network_workflows::refresh_discovered_peers(&app_core).await {
-                    Ok(()) => controller.info_toast("Peer discovery refreshed"),
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
-                }
-                rerender();
-            });
-            true
-        }
         _ => false,
     }
 }
@@ -2691,6 +2697,18 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
             }
         });
 
+        let controller_for_discovery_refresh = controller_for_runtime.clone();
+        spawn(async move {
+            let app_core = controller_for_discovery_refresh.app_core().clone();
+            loop {
+                if let Err(error) = network_workflows::refresh_discovered_peers(&app_core).await {
+                    controller_for_discovery_refresh
+                        .push_log(&format!("discovered_peers_refresh: error {error}"));
+                }
+                tokio::time::sleep(network_workflows::DISCOVERED_PEERS_REFRESH_INTERVAL).await;
+            }
+        });
+
         let mut runtime_for_chat = neighborhood_runtime;
         let controller_for_chat = controller_for_runtime.clone();
         spawn(async move {
@@ -2892,7 +2910,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                 .web_dom_id()
                 .expect("AppRoot must define a web DOM id"),
             "data-render-tick": "{render_tick_value}",
-            class: "relative flex h-[100dvh] min-h-[100dvh] flex-col overflow-hidden bg-background text-foreground font-mono outline-none",
+            class: "relative flex min-h-screen flex-col overflow-y-auto bg-background text-foreground font-mono outline-none lg:h-[100dvh] lg:min-h-[100dvh] lg:overflow-hidden",
             tabindex: 0,
             autofocus: true,
             onmounted: move |mounted| {
@@ -2966,15 +2984,15 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                     render_tick.set(render_tick() + 1);
                 }
             },
-                nav {
+            nav {
                 id: ControlId::NavRoot
                     .web_dom_id()
                     .expect("NavRoot must define a web DOM id"),
-                class: "border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80",
+                class: "bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80",
                 div {
-                    class: "relative flex items-center px-4 py-3 sm:px-6",
+                    class: "relative flex items-end px-4 pt-6 pb-0 sm:px-6",
                     div {
-                        class: "absolute left-4 top-1/2 z-10 flex -translate-y-1/2 items-center justify-start gap-3 sm:left-6",
+                        class: "absolute bottom-0 left-4 z-10 flex items-center justify-start gap-3 sm:left-6",
                         span { id: "aura-nav-brand", class: "inline-flex h-9 items-center text-xs font-bold uppercase tracking-[0.12em] text-foreground", "AURA" }
                     }
                     div {
@@ -3013,7 +3031,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                 }
             }
             div {
-                class: "flex-1 min-h-0 overflow-hidden px-4 py-4 sm:px-6 sm:py-5",
+                class: "flex-1 px-4 py-4 sm:px-6 sm:py-5 lg:min-h-0 lg:overflow-hidden",
                 {render_screen_content(
                     &model,
                     &runtime_snapshot,
@@ -3205,8 +3223,15 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                             },
                             on_input_change: {
                                 let controller = controller.clone();
-                                move |value: String| {
-                                    controller.set_modal_buffer(&value);
+                                move |(field_id, value): (FieldId, String)| {
+                                    controller.set_modal_field_value(field_id, &value);
+                                    render_tick.set(render_tick() + 1);
+                                }
+                            },
+                            on_input_focus: {
+                                let controller = controller.clone();
+                                move |field_id: FieldId| {
+                                    controller.set_modal_active_field(field_id);
                                     render_tick.set(render_tick() + 1);
                                 }
                             }
@@ -3354,8 +3379,15 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                         },
                         on_input_change: {
                             let controller = controller.clone();
-                            move |value: String| {
-                                controller.set_modal_buffer(&value);
+                            move |(field_id, value): (FieldId, String)| {
+                                controller.set_modal_field_value(field_id, &value);
+                                render_tick.set(render_tick() + 1);
+                            }
+                        },
+                        on_input_focus: {
+                            let controller = controller.clone();
+                            move |field_id: FieldId| {
+                                controller.set_modal_active_field(field_id);
                                 render_tick.set(render_tick() + 1);
                             }
                         }
@@ -3567,7 +3599,7 @@ fn NeighborhoodScreen(
 
     rsx! {
         div {
-            class: "grid h-full min-h-0 w-full gap-3 lg:grid-cols-12 lg:[grid-template-rows:minmax(0,1fr)]",
+            class: "grid w-full gap-3 lg:grid-cols-12 lg:h-full lg:min-h-0 lg:[grid-template-rows:minmax(0,1fr)]",
             UiCard {
                 title: if is_detail { "Home".to_string() } else { "Map".to_string() },
                 subtitle: Some(if is_detail {
@@ -3577,10 +3609,10 @@ fn NeighborhoodScreen(
                 }),
                 extra_class: Some("lg:col-span-4".to_string()),
                 if is_detail {
-                    div {
-                        class: "flex flex-1 min-h-0 flex-col gap-3",
+                    UiCardBody {
+                        extra_class: Some("gap-3".to_string()),
                         div {
-                            class: "rounded-sm border border-border bg-background/60 px-3 py-3",
+                            class: "rounded-sm bg-background/60 px-3 py-3",
                             p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Home" }
                             p { class: "m-0 mt-1 text-sm text-foreground", "Name: {selected_home}" }
                             p {
@@ -3590,16 +3622,16 @@ fn NeighborhoodScreen(
                         }
                         if show_detail_lists {
                             div {
-                                class: "grid flex-1 min-h-0 gap-3 md:grid-cols-2",
+                                class: "grid flex-1 lg:min-h-0 gap-3 md:grid-cols-2",
                                 div {
-                                    class: "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-sm border border-border bg-background/60 px-3 py-3",
+                                    class: "flex lg:min-h-0 min-w-0 flex-col overflow-hidden rounded-sm bg-background/60 px-3 py-3",
                                     p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Channels" }
                                     div {
-                                        class: "mt-3 flex-1 min-h-0 min-w-0 overflow-y-auto pr-1",
+                                        class: "mt-3 flex-1 lg:min-h-0 min-w-0 overflow-y-auto pr-1",
                                         if display_channels.is_empty() {
                                             p { class: "m-0 text-sm text-muted-foreground", "No channels" }
                                         } else {
-                                            div { class: "space-y-2 min-w-0",
+                                            div { class: "aura-list space-y-2 min-w-0",
                                 for (channel_name, channel_topic, is_selected) in &display_channels {
                                                     button {
                                                         r#type: "button",
@@ -3629,11 +3661,11 @@ fn NeighborhoodScreen(
                                     }
                                 }
                                 div {
-                                    class: "flex min-h-0 flex-col rounded-sm border border-border bg-background/60 px-3 py-3",
+                                    class: "flex lg:min-h-0 flex-col rounded-sm bg-background/60 px-3 py-3",
                                     p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Members & Participants" }
                                     div {
-                                        class: "mt-3 flex-1 min-h-0 overflow-y-auto pr-1",
-                                        div { class: "space-y-2",
+                                        class: "mt-3 flex-1 lg:min-h-0 overflow-y-auto pr-1",
+                                        div { class: "aura-list space-y-2",
                                             for (idx, member) in display_members.iter().enumerate() {
                                                 button {
                                                     r#type: "button",
@@ -3678,65 +3710,68 @@ fn NeighborhoodScreen(
                             }
                         } else {
                             div {
-                                class: "flex flex-1 items-center justify-center rounded-sm border border-border bg-background/40 px-4 py-6 text-center",
+                                class: "flex flex-1 items-center justify-center rounded-sm bg-background/40 px-4 py-6 text-center",
                                 p {
                                     class: "m-0 text-sm text-muted-foreground",
                                     "Partial/Limited view: full channel and membership details are hidden until Full access is active."
                                 }
                             }
                         }
-                        div { class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
-                            UiButton {
-                                label: "Back To Map".to_string(),
-                                variant: ButtonVariant::Secondary,
-                                onclick: move |_| {
-                                    detail_back_controller.send_key_named("esc", 1);
-                                    render_tick.set(render_tick() + 1);
-                                }
-                            }
-                            UiButton {
-                                label: format!("Enter As: {access_label}"),
-                                variant: ButtonVariant::Secondary,
-                                onclick: move |_| {
-                                    detail_depth_controller.send_action_keys("d");
-                                    render_tick.set(render_tick() + 1);
-                                }
-                            }
-                            if show_detail_lists {
+                        UiCardFooter {
+                            extra_class: None,
+                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
                                 UiButton {
-                                    label: if selected_runtime_member.as_ref().map(|member| member.is_moderator).unwrap_or(false) {
-                                        "Revoke Moderator".to_string()
-                                    } else {
-                                        "Assign Moderator".to_string()
-                                    },
+                                    label: "Back To Map".to_string(),
                                     variant: ButtonVariant::Secondary,
                                     onclick: move |_| {
-                                        detail_moderator_controller.send_action_keys("o");
+                                        detail_back_controller.send_key_named("esc", 1);
                                         render_tick.set(render_tick() + 1);
                                     }
                                 }
                                 UiButton {
-                                    label: "Access Override".to_string(),
+                                    label: format!("Enter As: {access_label}"),
                                     variant: ButtonVariant::Secondary,
                                     onclick: move |_| {
-                                        detail_access_override_controller.send_action_keys("x");
+                                        detail_depth_controller.send_action_keys("d");
                                         render_tick.set(render_tick() + 1);
                                     }
                                 }
-                                UiButton {
-                                    label: "Capability Config".to_string(),
-                                    variant: ButtonVariant::Secondary,
-                                    onclick: move |_| {
-                                        detail_capability_controller.send_action_keys("p");
-                                        render_tick.set(render_tick() + 1);
+                                if show_detail_lists {
+                                    UiButton {
+                                        label: if selected_runtime_member.as_ref().map(|member| member.is_moderator).unwrap_or(false) {
+                                            "Revoke Moderator".to_string()
+                                        } else {
+                                            "Assign Moderator".to_string()
+                                        },
+                                        variant: ButtonVariant::Secondary,
+                                        onclick: move |_| {
+                                            detail_moderator_controller.send_action_keys("o");
+                                            render_tick.set(render_tick() + 1);
+                                        }
+                                    }
+                                    UiButton {
+                                        label: "Access Override".to_string(),
+                                        variant: ButtonVariant::Secondary,
+                                        onclick: move |_| {
+                                            detail_access_override_controller.send_action_keys("x");
+                                            render_tick.set(render_tick() + 1);
+                                        }
+                                    }
+                                    UiButton {
+                                        label: "Capability Config".to_string(),
+                                        variant: ButtonVariant::Secondary,
+                                        onclick: move |_| {
+                                            detail_capability_controller.send_action_keys("p");
+                                            render_tick.set(render_tick() + 1);
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 } else {
-                    div {
-                        class: "flex flex-1 min-h-0 flex-col gap-3",
+                    UiCardBody {
+                        extra_class: Some("gap-3".to_string()),
                         div { class: "flex flex-wrap gap-2",
                             UiPill { label: format!("Access: {access_label}"), tone: access_tone }
                             UiPill {
@@ -3750,7 +3785,7 @@ fn NeighborhoodScreen(
                         }
                         if home_rows.is_empty() {
                             Empty {
-                                class: Some("flex-1 min-h-[16rem] border-border bg-background/40".to_string()),
+                                class: Some("flex-1 min-h-[16rem] border-0 bg-background/40".to_string()),
                                 EmptyHeader {
                                     EmptyTitle { "No home yet" }
                                     EmptyDescription { "Create a new home or accept an invitation to join an existing one." }
@@ -3758,8 +3793,8 @@ fn NeighborhoodScreen(
                             }
                         } else {
                             div {
-                                class: "flex-1 min-h-0 overflow-y-auto pr-1",
-                                div { class: "space-y-2",
+                                class: "flex-1 lg:min-h-0 overflow-y-auto pr-1",
+                                div { class: "aura-list space-y-2",
                                     for home in &home_rows {
                                         button {
                                             r#type: "button",
@@ -3797,7 +3832,7 @@ fn NeighborhoodScreen(
                             }
                         }
                         div {
-                            class: "rounded-sm border border-border bg-background/60 px-3 py-3",
+                            class: "rounded-sm bg-background/60 px-3 py-3",
                             p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Traversal" }
                             p {
                                 class: "m-0 mt-1 text-sm text-foreground",
@@ -3808,87 +3843,90 @@ fn NeighborhoodScreen(
                                 "Current depth is {access_label} ({hop_hint}). Select a home, then enter it."
                             }
                         }
-                        div { class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
-                            if can_enter_selected_home {
-                                UiButton {
-                                    label: "Enter Home".to_string(),
-                                    variant: ButtonVariant::Primary,
-                                    onclick: {
-                                        let controller = map_enter_controller;
-                                        let home_name = selected_home.clone();
-                                        let depth = model.access_depth;
-                                        let target_home_id = enter_target_home_id;
-                                        move |_| {
-                                            let Some(target_home_id) = target_home_id.clone() else {
-                                                controller.runtime_error_toast("No runtime home selected");
-                                                render_tick.set(render_tick() + 1);
-                                                return;
-                                            };
-                                            let controller = controller.clone();
-                                            let app_core = controller.app_core().clone();
-                                            let mut tick = render_tick;
-                                            let home_name = home_name.clone();
-                                            spawn(async move {
-                                                match context_workflows::move_position(
-                                                    &app_core,
-                                                    &target_home_id,
-                                                    depth.label(),
-                                                )
-                                                .await
-                                                {
-                                                    Ok(_) => {
-                                                        controller.complete_runtime_enter_home(
-                                                            &home_name,
-                                                            depth,
-                                                        );
+                        UiCardFooter {
+                            extra_class: None,
+                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
+                                if can_enter_selected_home {
+                                    UiButton {
+                                        label: "Enter Home".to_string(),
+                                        variant: ButtonVariant::Primary,
+                                        onclick: {
+                                            let controller = map_enter_controller;
+                                            let home_name = selected_home.clone();
+                                            let depth = model.access_depth;
+                                            let target_home_id = enter_target_home_id;
+                                            move |_| {
+                                                let Some(target_home_id) = target_home_id.clone() else {
+                                                    controller.runtime_error_toast("No runtime home selected");
+                                                    render_tick.set(render_tick() + 1);
+                                                    return;
+                                                };
+                                                let controller = controller.clone();
+                                                let app_core = controller.app_core().clone();
+                                                let mut tick = render_tick;
+                                                let home_name = home_name.clone();
+                                                spawn(async move {
+                                                    match context_workflows::move_position(
+                                                        &app_core,
+                                                        &target_home_id,
+                                                        depth.label(),
+                                                    )
+                                                    .await
+                                                    {
+                                                        Ok(_) => {
+                                                            controller.complete_runtime_enter_home(
+                                                                &home_name,
+                                                                depth,
+                                                            );
+                                                        }
+                                                        Err(error) => {
+                                                            controller.runtime_error_toast(
+                                                                error.to_string(),
+                                                            );
+                                                        }
                                                     }
-                                                    Err(error) => {
-                                                        controller.runtime_error_toast(
-                                                            error.to_string(),
-                                                        );
-                                                    }
-                                                }
-                                                tick.set(tick() + 1);
-                                            });
+                                                    tick.set(tick() + 1);
+                                                });
+                                            }
                                         }
                                     }
                                 }
-                            }
-                            UiButton {
-                                id: Some(ControlId::NeighborhoodNewHomeButton.web_dom_id().expect("ControlId::NeighborhoodNewHomeButton must define a web DOM id").to_string()),
-                                label: "New Home".to_string(),
-                                variant: ButtonVariant::Primary,
-                                onclick: move |_| {
-                                    map_new_home_controller.send_action_keys("n");
-                                    render_tick.set(render_tick() + 1);
+                                UiButton {
+                                    id: Some(ControlId::NeighborhoodNewHomeButton.web_dom_id().expect("ControlId::NeighborhoodNewHomeButton must define a web DOM id").to_string()),
+                                    label: "New Home".to_string(),
+                                    variant: ButtonVariant::Primary,
+                                    onclick: move |_| {
+                                        map_new_home_controller.send_action_keys("n");
+                                        render_tick.set(render_tick() + 1);
+                                    }
                                 }
-                            }
-                            UiButton {
-                                id: Some(
-                                    ControlId::NeighborhoodAcceptInvitationButton
-                                        .web_dom_id()
-                                        .expect("ControlId::NeighborhoodAcceptInvitationButton must define a web DOM id")
-                                        .to_string(),
-                                ),
-                                label: "Accept Invitation".to_string(),
-                                variant: ButtonVariant::Secondary,
-                                onclick: move |_| {
-                                    map_accept_invitation_controller.send_action_keys("a");
-                                    render_tick.set(render_tick() + 1);
+                                UiButton {
+                                    id: Some(
+                                        ControlId::NeighborhoodAcceptInvitationButton
+                                            .web_dom_id()
+                                            .expect("ControlId::NeighborhoodAcceptInvitationButton must define a web DOM id")
+                                            .to_string(),
+                                    ),
+                                    label: "Accept Invitation".to_string(),
+                                    variant: ButtonVariant::Secondary,
+                                    onclick: move |_| {
+                                        map_accept_invitation_controller.send_action_keys("a");
+                                        render_tick.set(render_tick() + 1);
+                                    }
                                 }
-                            }
-                            UiButton {
-                                id: Some(
-                                    ControlId::NeighborhoodEnterAsButton
-                                        .web_dom_id()
-                                        .expect("ControlId::NeighborhoodEnterAsButton must define a web DOM id")
-                                        .to_string(),
-                                ),
-                                label: format!("Enter As: {access_label}"),
-                                variant: ButtonVariant::Secondary,
-                                onclick: move |_| {
-                                    map_depth_controller.send_action_keys("d");
-                                    render_tick.set(render_tick() + 1);
+                                UiButton {
+                                    id: Some(
+                                        ControlId::NeighborhoodEnterAsButton
+                                            .web_dom_id()
+                                            .expect("ControlId::NeighborhoodEnterAsButton must define a web DOM id")
+                                            .to_string(),
+                                    ),
+                                    label: format!("Enter As: {access_label}"),
+                                    variant: ButtonVariant::Secondary,
+                                    onclick: move |_| {
+                                        map_depth_controller.send_action_keys("d");
+                                        render_tick.set(render_tick() + 1);
+                                    }
                                 }
                             }
                         }
@@ -3901,7 +3939,7 @@ fn NeighborhoodScreen(
                 subtitle: Some("Neighborhood status and scope".to_string()),
                 extra_class: Some("lg:col-span-8".to_string()),
                 div {
-                    class: "grid gap-2 md:grid-cols-2",
+                    class: "aura-list grid gap-2 md:grid-cols-2",
                     UiListItem {
                         label: format!("Neighborhood: {display_neighborhood_name}"),
                         secondary: Some(format!("Selected home: {selected_home}")),
@@ -4017,58 +4055,64 @@ fn ChatScreen(
 
     rsx! {
         div {
-            class: "grid h-full min-h-0 w-full gap-3 lg:grid-cols-12 lg:[grid-template-rows:minmax(0,1fr)]",
+            class: "grid w-full gap-3 lg:grid-cols-12 lg:h-full lg:min-h-0 lg:[grid-template-rows:minmax(0,1fr)]",
             UiCard {
                 title: "Channels".to_string(),
                 subtitle: Some(format!("Current: #{active_channel}")),
                 extra_class: Some("lg:col-span-4".to_string()),
-                ScrollArea {
-                    class: Some("flex-1 min-h-0 pr-1".to_string()),
-                    ScrollAreaViewport {
-                        class: Some("space-y-2".to_string()),
-                        for channel in &runtime_channels {
-                            button {
-                                r#type: "button",
-                                id: list_item_dom_id(ListId::Channels, &channel.id),
-                                class: "block w-full text-left",
-                                onclick: {
-                                    let controller = controller.clone();
-                                    let channel_name = channel.name.clone();
-                                    move |_| {
-                                        controller.select_channel_by_name(&channel_name);
-                                        render_tick.set(render_tick() + 1);
+                UiCardBody {
+                    extra_class: None,
+                    ScrollArea {
+                        class: Some("flex-1 lg:min-h-0 pr-1".to_string()),
+                        ScrollAreaViewport {
+                            class: Some("aura-list space-y-2".to_string()),
+                            for channel in &runtime_channels {
+                                button {
+                                    r#type: "button",
+                                    id: list_item_dom_id(ListId::Channels, &channel.id),
+                                    class: "block w-full text-left",
+                                    onclick: {
+                                        let controller = controller.clone();
+                                        let channel_name = channel.name.clone();
+                                        move |_| {
+                                            controller.select_channel_by_name(&channel_name);
+                                            render_tick.set(render_tick() + 1);
+                                        }
+                                    },
+                                    UiListItem {
+                                        label: format!("# {}", channel.name),
+                                        secondary: Some(
+                                            channel
+                                                .last_message
+                                                .clone()
+                                                .or_else(|| {
+                                                    (!channel.topic.is_empty()).then(|| channel.topic.clone())
+                                                })
+                                                .unwrap_or_else(|| "\u{00A0}".to_string())
+                                        ),
+                                        active: channel.name.eq_ignore_ascii_case(&active_channel),
                                     }
-                                },
-                                UiListItem {
-                                    label: format!("# {}", channel.name),
-                                    secondary: Some(
-                                        channel
-                                            .last_message
-                                            .clone()
-                                            .or_else(|| {
-                                                (!channel.topic.is_empty()).then(|| channel.topic.clone())
-                                            })
-                                            .unwrap_or_else(|| "\u{00A0}".to_string())
-                                    ),
-                                    active: channel.name.eq_ignore_ascii_case(&active_channel),
                                 }
                             }
                         }
                     }
-                }
-                div { class: "flex gap-2 pt-1",
-                    UiButton {
-                        id: Some(
-                            ControlId::ChatNewGroupButton
-                                .web_dom_id()
-                                .expect("ControlId::ChatNewGroupButton must define a web DOM id")
-                                .to_string(),
-                        ),
-                        label: "New Group".to_string(),
-                        variant: ButtonVariant::Primary,
-                        onclick: move |_| {
-                            new_group_controller.send_action_keys("n");
-                            render_tick.set(render_tick() + 1);
+                    UiCardFooter {
+                        extra_class: None,
+                        div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
+                            UiButton {
+                                id: Some(
+                                    ControlId::ChatNewGroupButton
+                                        .web_dom_id()
+                                        .expect("ControlId::ChatNewGroupButton must define a web DOM id")
+                                        .to_string(),
+                                ),
+                                label: "New Group".to_string(),
+                                variant: ButtonVariant::Primary,
+                                onclick: move |_| {
+                                    new_group_controller.send_action_keys("n");
+                                    render_tick.set(render_tick() + 1);
+                                }
+                            }
                         }
                     }
                 }
@@ -4078,103 +4122,112 @@ fn ChatScreen(
                 title: "Conversation".to_string(),
                 subtitle: Some(format!("Topic: {topic}")),
                 extra_class: Some("lg:col-span-8".to_string()),
-                div {
-                    class: "flex-1 min-h-0 overflow-y-auto pr-1",
+                UiCardBody {
+                    extra_class: None,
                     div {
-                        class: "flex min-h-full flex-col justify-end gap-3",
-                        if runtime.messages.is_empty() {
-                            Empty {
-                                class: Some("h-full flex-1 border-solid border-border bg-background/40".to_string()),
-                                EmptyHeader {
-                                    EmptyTitle { "No messages yet" }
-                                    EmptyDescription { "Send one from input mode." }
+                        class: "flex-1 lg:min-h-0 overflow-y-auto pr-1",
+                        div {
+                            class: "flex min-h-full flex-col justify-end gap-3",
+                            if runtime.messages.is_empty() {
+                                Empty {
+                                    class: Some("h-full flex-1 border-0 bg-background/40".to_string()),
+                                    EmptyHeader {
+                                        EmptyTitle { "No messages yet" }
+                                        EmptyDescription { "Send one from input mode." }
+                                    }
                                 }
-                            }
-                        } else {
-                            for message in &runtime.messages {
-                                {render_chat_message_bubble(message.clone())}
-                            }
-                        }
-                    }
-                }
-                div {
-                    class: "mt-3 flex flex-col gap-2 rounded-sm border border-border bg-background/80 px-3 py-3",
-                    div {
-                        class: "min-h-[4.5rem] rounded-sm border border-border bg-muted/30 px-3 py-2",
-                        onclick: move |_| {
-                            if !is_input_mode {
-                                composer_container_focus_controller.send_action_keys("i");
-                                render_tick.set(render_tick() + 1);
-                            }
-                        },
-                        textarea {
-                            id: FieldId::ChatInput
-                                .web_dom_id()
-                                .expect("FieldId::ChatInput must define a web DOM id"),
-                            class: "h-full min-h-[4.5rem] w-full resize-none border-0 bg-transparent p-0 text-sm text-foreground outline-none placeholder:text-muted-foreground",
-                            value: "{composer_value}",
-                            readonly: !is_input_mode,
-                            placeholder: if is_input_mode {
-                                "Type a message and press Enter to send"
                             } else {
-                                "Press i to start typing"
-                            },
-                            onfocus: move |_| {
-                                if !is_input_mode {
-                                    composer_field_focus_controller.send_action_keys("i");
-                                    render_tick.set(render_tick() + 1);
+                                for message in &runtime.messages {
+                                    {render_chat_message_bubble(message.clone())}
                                 }
-                            },
-                            oninput: move |event| {
-                                composer_input_controller.set_input_buffer(event.value());
-                            },
-                            onkeydown: move |event| {
-                                event.stop_propagation();
-                                if matches!(event.data().key(), Key::Enter)
-                                    && !event.data().modifiers().contains(Modifiers::SHIFT)
-                                {
-                                    event.prevent_default();
-                                    let _ = submit_runtime_chat_input(
-                                        composer_keydown_controller.clone(),
-                                        composer_active_channel.clone(),
-                                        composer_submit_text.clone(),
-                                        schedule_update(),
-                                    );
-                                    render_tick.set(render_tick() + 1);
-                                    return;
-                                }
-                                if matches!(event.data().key(), Key::Escape) {
-                                    event.prevent_default();
-                                    composer_keydown_controller.send_key_named("esc", 1);
-                                    render_tick.set(render_tick() + 1);
-                                }
-                            },
+                            }
                         }
                     }
-                    div {
-                        class: "flex items-center justify-between gap-2",
-                        p { class: "m-0 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground", "Mode: {mode}" }
-                        UiButton {
-                            id: Some(
-                                ControlId::ChatSendMessageButton
-                                    .web_dom_id()
-                                    .expect("ControlId::ChatSendMessageButton must define a web DOM id")
-                                    .to_string()
-                            ),
-                            label: if is_input_mode { "Send".to_string() } else { "Reply".to_string() },
-                            variant: ButtonVariant::Primary,
-                            onclick: move |_| {
-                                if is_input_mode {
-                                    let _ = submit_runtime_chat_input(
-                                        send_message_controller.clone(),
-                                        active_channel.clone(),
-                                        composer_text.clone(),
-                                        schedule_update(),
-                                    );
-                                } else {
-                                    send_message_controller.send_action_keys("i");
+                    UiCardFooter {
+                        extra_class: None,
+                        div {
+                            class: "grid h-full w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3",
+                            div {
+                                class: "flex h-full min-w-0 items-center rounded-sm bg-background/80 px-3",
+                                onclick: move |_| {
+                                    if !is_input_mode {
+                                        composer_container_focus_controller.send_action_keys("i");
+                                        render_tick.set(render_tick() + 1);
+                                    }
+                                },
+                                textarea {
+                                    id: FieldId::ChatInput
+                                        .web_dom_id()
+                                        .expect("FieldId::ChatInput must define a web DOM id"),
+                                    class: "h-full w-full resize-none overflow-hidden border-0 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground",
+                                    value: "{composer_value}",
+                                    readonly: !is_input_mode,
+                                    placeholder: if is_input_mode {
+                                        "Type a message and press Enter to send"
+                                    } else {
+                                        "Press i to start typing"
+                                    },
+                                    onfocus: move |_| {
+                                        if !is_input_mode {
+                                            composer_field_focus_controller.send_action_keys("i");
+                                            render_tick.set(render_tick() + 1);
+                                        }
+                                    },
+                                    oninput: move |event| {
+                                        composer_input_controller.set_input_buffer(event.value());
+                                    },
+                                    onkeydown: move |event| {
+                                        event.stop_propagation();
+                                        if matches!(event.data().key(), Key::Enter)
+                                            && !event.data().modifiers().contains(Modifiers::SHIFT)
+                                        {
+                                            event.prevent_default();
+                                            let _ = submit_runtime_chat_input(
+                                                composer_keydown_controller.clone(),
+                                                composer_active_channel.clone(),
+                                                composer_submit_text.clone(),
+                                                schedule_update(),
+                                            );
+                                            render_tick.set(render_tick() + 1);
+                                            return;
+                                        }
+                                        if matches!(event.data().key(), Key::Escape) {
+                                            event.prevent_default();
+                                            composer_keydown_controller.send_key_named("esc", 1);
+                                            render_tick.set(render_tick() + 1);
+                                        }
+                                    },
                                 }
-                                render_tick.set(render_tick() + 1);
+                            }
+                            div {
+                                class: "flex min-w-[7rem] flex-col items-end justify-center gap-1",
+                                p {
+                                    class: "m-0 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground",
+                                    "Mode: {mode}"
+                                }
+                                UiButton {
+                                    id: Some(
+                                        ControlId::ChatSendMessageButton
+                                            .web_dom_id()
+                                            .expect("ControlId::ChatSendMessageButton must define a web DOM id")
+                                            .to_string()
+                                    ),
+                                    label: "Send".to_string(),
+                                    variant: ButtonVariant::Primary,
+                                    onclick: move |_| {
+                                        if is_input_mode {
+                                            let _ = submit_runtime_chat_input(
+                                                send_message_controller.clone(),
+                                                active_channel.clone(),
+                                                composer_text.clone(),
+                                                schedule_update(),
+                                            );
+                                        } else {
+                                            send_message_controller.send_action_keys("i");
+                                        }
+                                        render_tick.set(render_tick() + 1);
+                                    }
+                                }
                             }
                         }
                     }
@@ -4248,39 +4301,26 @@ fn ContactsScreen(
     let invite_controller = controller.clone();
     let accept_invitation_controller = controller.clone();
     let start_chat_controller = controller.clone();
+    let invite_to_channel_controller = controller.clone();
     let edit_controller = controller.clone();
     let remove_controller = controller.clone();
-    let refresh_peers_controller = controller.clone();
-
     rsx! {
         div {
-            class: "grid h-full min-h-0 w-full gap-3 lg:grid-cols-12 lg:[grid-template-rows:minmax(0,1fr)]",
+            class: "grid w-full gap-3 lg:grid-cols-12 lg:h-full lg:min-h-0 lg:[grid-template-rows:minmax(0,1fr)]",
             UiCard {
                 title: format!("Contacts ({})", contacts.len()),
                 subtitle: Some("Contacts share relational context".to_string()),
                 extra_class: Some("lg:col-span-4".to_string()),
-                div {
-                    class: "flex flex-1 min-h-0 flex-col gap-3",
+                UiCardBody {
+                    extra_class: Some("gap-3".to_string()),
                     div {
-                        class: "rounded-sm border border-border bg-background/60 px-3 py-3",
+                        class: "rounded-sm bg-background/60 px-3 py-3",
                         div {
-                            class: "flex items-center justify-between gap-3",
+                            class: "flex items-center gap-3",
                             p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "LAN Peers" }
-                            UiButton {
-                                label: "Refresh".to_string(),
-                                variant: ButtonVariant::Secondary,
-                                onclick: move |_| {
-                                    let controller = refresh_peers_controller.clone();
-                                    let app_core = controller.app_core().clone();
-                                    let mut tick = render_tick;
-                                    spawn(async move {
-                                        match network_workflows::refresh_discovered_peers(&app_core).await {
-                                            Ok(()) => controller.info_toast("Peer discovery refreshed"),
-                                            Err(error) => controller.runtime_error_toast(error.to_string()),
-                                        }
-                                        tick.set(tick() + 1);
-                                    });
-                                }
+                            p {
+                                class: "m-0 text-xs text-muted-foreground",
+                                "updates automatically"
                             }
                         }
                         if runtime.lan_peers.is_empty() {
@@ -4331,10 +4371,10 @@ fn ContactsScreen(
                         }
                     }
                     div {
-                        class: "flex-1 min-h-0",
+                        class: "flex-1 lg:min-h-0",
                         if contacts.is_empty() {
                             Empty {
-                                class: Some("h-full border-border bg-background".to_string()),
+                                class: Some("h-full border-0 bg-background".to_string()),
                                 EmptyHeader {
                                     EmptyTitle { "No contacts yet" }
                                     EmptyDescription { "Use the invitation flow to add contacts." }
@@ -4344,7 +4384,7 @@ fn ContactsScreen(
                             ScrollArea {
                                 class: Some("h-full pr-1".to_string()),
                                 ScrollAreaViewport {
-                                    class: Some("space-y-2".to_string()),
+                                    class: Some("aura-list space-y-2".to_string()),
                                     for contact in contacts.iter() {
                                         button {
                                             r#type: "button",
@@ -4387,8 +4427,9 @@ fn ContactsScreen(
                             }
                         }
                     }
-                }
-                div { class: "flex gap-2 pt-1",
+                    UiCardFooter {
+                        extra_class: None,
+                        div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
                             UiButton {
                                 id: Some(
                                     ControlId::ContactsAcceptInvitationButton
@@ -4396,13 +4437,13 @@ fn ContactsScreen(
                                         .expect("ControlId::ContactsAcceptInvitationButton must define a web DOM id")
                                         .to_string(),
                                 ),
-                        label: "Accept Invitation".to_string(),
-                        variant: ButtonVariant::Secondary,
-                        onclick: move |_| {
-                            accept_invitation_controller.send_action_keys("a");
-                            render_tick.set(render_tick() + 1);
-                        }
-                    }
+                                label: "Accept Invitation".to_string(),
+                                variant: ButtonVariant::Secondary,
+                                onclick: move |_| {
+                                    accept_invitation_controller.send_action_keys("a");
+                                    render_tick.set(render_tick() + 1);
+                                }
+                            }
                             UiButton {
                                 id: Some(
                                     ControlId::ContactsCreateInvitationButton
@@ -4410,21 +4451,58 @@ fn ContactsScreen(
                                         .expect("ControlId::ContactsCreateInvitationButton must define a web DOM id")
                                         .to_string(),
                                 ),
-                        label: "Invite".to_string(),
-                        variant: ButtonVariant::Primary,
-                        onclick: {
-                            let controller = invite_controller;
-                            let selected_contact = selected_contact.clone();
-                            move |_| {
-                                if let Some(contact) = &selected_contact {
-                                    controller.open_create_invitation_modal(
-                                        Some(&contact.authority_id),
-                                        Some(&contact.name),
-                                    );
-                                } else {
-                                    controller.open_create_invitation_modal(None, Some("New contact"));
+                                label: "Invite".to_string(),
+                                variant: ButtonVariant::Primary,
+                                onclick: {
+                                    let controller = invite_controller;
+                                    let selected_contact = selected_contact.clone();
+                                    move |_| {
+                                        if let Some(contact) = &selected_contact {
+                                            let controller = controller.clone();
+                                            let app_core = controller.app_core().clone();
+                                            let authority_id = contact.authority_id;
+                                            spawn(async move {
+                                                match invitation_workflows::create_contact_invitation(
+                                                    &app_core,
+                                                    authority_id,
+                                                    None,
+                                                    None,
+                                                    None,
+                                                )
+                                                .await
+                                                {
+                                                    Ok(invitation) => {
+                                                        match invitation_workflows::export_invitation(
+                                                            &app_core,
+                                                            &invitation.invitation_id,
+                                                        )
+                                                        .await
+                                                        {
+                                                            Ok(code) => {
+                                                                controller.write_clipboard(&code);
+                                                                controller.push_runtime_event(
+                                                                    RuntimeEventKind::InvitationCodeReady,
+                                                                    format!("receiver={authority_id}"),
+                                                                );
+                                                                controller.info_toast(
+                                                                    "Invitation code copied to clipboard",
+                                                                );
+                                                            }
+                                                            Err(error) => controller
+                                                                .runtime_error_toast(error.to_string()),
+                                                        }
+                                                    }
+                                                    Err(error) => {
+                                                        controller.runtime_error_toast(error.to_string())
+                                                    }
+                                                }
+                                            });
+                                        } else {
+                                            controller.open_create_invitation_modal(None, Some("New contact"));
+                                        }
+                                        render_tick.set(render_tick() + 1);
+                                    }
                                 }
-                                render_tick.set(render_tick() + 1);
                             }
                         }
                     }
@@ -4436,9 +4514,9 @@ fn ContactsScreen(
                 subtitle: Some(format!("Selected: {selected_name}")),
                 extra_class: Some("lg:col-span-8".to_string()),
                 if let Some(contact) = selected_contact {
-                    div {
+                    UiCardBody {
+                        extra_class: Some("gap-2".to_string()),
                         id: format!("aura-contact-selected-{}", dom_slug(&contact.name)),
-                        class: "flex flex-1 min-h-0 flex-col gap-2",
                         UiListItem {
                             label: format!("Authority: {}", contact.authority_id),
                             secondary: Some("Relational identity".to_string()),
@@ -4460,83 +4538,129 @@ fn ContactsScreen(
                             }),
                             active: false,
                         }
-                        div {
-                            class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
-                            UiButton {
-                                id: Some(
-                                    ControlId::ContactsStartChatButton
-                                        .web_dom_id()
-                                        .expect("ControlId::ContactsStartChatButton must define a web DOM id")
-                                        .to_string(),
-                                ),
-                                label: "Start Chat".to_string(),
-                                variant: ButtonVariant::Primary,
-                                onclick: {
-                                    let authority_id = contact.authority_id;
-                                    move |_| {
-                                        let controller = start_chat_controller.clone();
-                                        let app_core = controller.app_core().clone();
-                                        spawn(async move {
-                                            let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
-                                                Ok(value) => value,
-                                                Err(error) => {
-                                                    controller.runtime_error_toast(error.to_string());
+                        UiCardFooter {
+                            extra_class: None,
+                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
+                                UiButton {
+                                    id: Some(
+                                        ControlId::ContactsStartChatButton
+                                            .web_dom_id()
+                                            .expect("ControlId::ContactsStartChatButton must define a web DOM id")
+                                            .to_string(),
+                                    ),
+                                    label: "Start Chat".to_string(),
+                                    variant: ButtonVariant::Primary,
+                                    onclick: {
+                                        let authority_id = contact.authority_id;
+                                        move |_| {
+                                            let controller = start_chat_controller.clone();
+                                            let app_core = controller.app_core().clone();
+                                            spawn(async move {
+                                                let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
+                                                    Ok(value) => value,
+                                                    Err(error) => {
+                                                        controller.runtime_error_toast(error.to_string());
+                                                        return;
+                                                    }
+                                                };
+                                                match messaging_workflows::start_direct_chat(
+                                                    &app_core,
+                                                    &authority_id.to_string(),
+                                                    timestamp_ms,
+                                                ).await {
+                                                    Ok(channel_id) => {
+                                                        controller.set_screen(UiScreen::Chat);
+                                                        controller.select_channel_by_name(&channel_id);
+                                                    }
+                                                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                                                }
+                                            });
+                                            render_tick.set(render_tick() + 1);
+                                        }
+                                    }
+                                }
+                                UiButton {
+                                    id: Some(
+                                        ControlId::ContactsInviteToChannelButton
+                                            .web_dom_id()
+                                            .expect(
+                                                "ControlId::ContactsInviteToChannelButton must define a web DOM id",
+                                            )
+                                            .to_string(),
+                                    ),
+                                    label: "Invite to Channel".to_string(),
+                                    variant: ButtonVariant::Secondary,
+                                    onclick: {
+                                        let authority_id = contact.authority_id;
+                                        move |_| {
+                                            let controller = invite_to_channel_controller.clone();
+                                            let app_core = controller.app_core().clone();
+                                            let selected_channel_name = controller
+                                                .ui_model()
+                                                .and_then(|model| {
+                                                    model
+                                                        .selected_channel_name()
+                                                        .map(str::to_string)
+                                                });
+                                            spawn(async move {
+                                                let Some(channel_name) = selected_channel_name else {
+                                                    controller.runtime_error_toast("Select a channel first");
                                                     return;
+                                                };
+                                                match messaging_workflows::invite_user_to_channel(
+                                                    &app_core,
+                                                    &authority_id.to_string(),
+                                                    &channel_name,
+                                                    None,
+                                                    None,
+                                                )
+                                                .await {
+                                                    Ok(_) => controller.info_toast("channel invitation sent"),
+                                                    Err(error) => controller.runtime_error_toast(error.to_string()),
                                                 }
-                                            };
-                                            match messaging_workflows::start_direct_chat(
-                                                &app_core,
-                                                &authority_id.to_string(),
-                                                timestamp_ms,
-                                            ).await {
-                                                Ok(channel_id) => {
-                                                    controller.set_screen(UiScreen::Chat);
-                                                    controller.select_channel_by_name(&channel_id);
-                                                }
-                                                Err(error) => controller.runtime_error_toast(error.to_string()),
-                                            }
-                                        });
+                                            });
+                                            render_tick.set(render_tick() + 1);
+                                        }
+                                    }
+                                }
+                                UiButton {
+                                    id: Some(
+                                        ControlId::ContactsEditNicknameButton
+                                            .web_dom_id()
+                                            .expect(
+                                                "ControlId::ContactsEditNicknameButton must define a web DOM id",
+                                            )
+                                            .to_string(),
+                                    ),
+                                    label: "Edit Nickname".to_string(),
+                                    variant: ButtonVariant::Secondary,
+                                    onclick: move |_| {
+                                        edit_controller.send_action_keys("e");
                                         render_tick.set(render_tick() + 1);
                                     }
                                 }
-                            }
-                            UiButton {
-                                id: Some(
-                                    ControlId::ContactsEditNicknameButton
-                                        .web_dom_id()
-                                        .expect(
-                                            "ControlId::ContactsEditNicknameButton must define a web DOM id",
-                                        )
-                                        .to_string(),
-                                ),
-                                label: "Edit Nickname".to_string(),
-                                variant: ButtonVariant::Secondary,
-                                onclick: move |_| {
-                                    edit_controller.send_action_keys("e");
-                                    render_tick.set(render_tick() + 1);
-                                }
-                            }
-                            UiButton {
-                                id: Some(
-                                    ControlId::ContactsRemoveContactButton
-                                        .web_dom_id()
-                                        .expect(
-                                            "ControlId::ContactsRemoveContactButton must define a web DOM id",
-                                        )
-                                        .to_string(),
-                                ),
-                                label: "Remove Contact".to_string(),
-                                variant: ButtonVariant::Secondary,
-                                onclick: move |_| {
-                                    remove_controller.send_action_keys("r");
-                                    render_tick.set(render_tick() + 1);
+                                UiButton {
+                                    id: Some(
+                                        ControlId::ContactsRemoveContactButton
+                                            .web_dom_id()
+                                            .expect(
+                                                "ControlId::ContactsRemoveContactButton must define a web DOM id",
+                                            )
+                                            .to_string(),
+                                    ),
+                                    label: "Remove Contact".to_string(),
+                                    variant: ButtonVariant::Secondary,
+                                    onclick: move |_| {
+                                        remove_controller.send_action_keys("r");
+                                        render_tick.set(render_tick() + 1);
+                                    }
                                 }
                             }
                         }
                     }
                 } else {
                     Empty {
-                        class: Some("h-full border-border bg-background".to_string()),
+                        class: Some("h-full border-0 bg-background".to_string()),
                         EmptyHeader {
                             EmptyTitle { "No contact selected" }
                             EmptyDescription { "Select a contact to inspect identity and relationship details." }
@@ -4561,14 +4685,14 @@ fn NotificationsScreen(
         .cloned();
     rsx! {
         div {
-            class: "grid h-full min-h-0 w-full gap-3 lg:grid-cols-12 lg:[grid-template-rows:minmax(0,1fr)]",
+            class: "grid w-full gap-3 lg:grid-cols-12 lg:h-full lg:min-h-0 lg:[grid-template-rows:minmax(0,1fr)]",
             UiCard {
                 title: "Notifications".to_string(),
                 subtitle: Some("Runtime events".to_string()),
                 extra_class: Some("lg:col-span-4".to_string()),
                 if runtime.items.is_empty() {
                     Empty {
-                        class: Some("h-full border-border bg-background".to_string()),
+                        class: Some("h-full border-0 bg-background".to_string()),
                         EmptyHeader {
                             EmptyTitle { "No notifications" }
                             EmptyDescription { "Runtime events will appear here." }
@@ -4576,9 +4700,9 @@ fn NotificationsScreen(
                     }
                 } else {
                     ScrollArea {
-                        class: Some("flex-1 min-h-0 pr-1".to_string()),
+                        class: Some("flex-1 lg:min-h-0 pr-1".to_string()),
                         ScrollAreaViewport {
-                            class: Some("space-y-2".to_string()),
+                            class: Some("aura-list space-y-2".to_string()),
                             for (idx, entry) in runtime.items.iter().enumerate() {
                                 button {
                                     r#type: "button",
@@ -4608,8 +4732,8 @@ fn NotificationsScreen(
                 subtitle: Some("Selected notification".to_string()),
                 extra_class: Some("lg:col-span-8".to_string()),
                 if let Some(item) = selected {
-                    div {
-                        class: "flex flex-1 min-h-0 flex-col gap-2",
+                    UiCardBody {
+                        extra_class: Some("gap-2".to_string()),
                         UiListItem {
                             label: item.kind_label,
                             secondary: Some(item.title),
@@ -4620,111 +4744,114 @@ fn NotificationsScreen(
                             secondary: Some(item.detail),
                             active: false,
                         }
-                        div {
-                            class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
-                            match item.action {
-                                NotificationRuntimeAction::ReceivedInvitation => {
-                                    let accept_controller = controller.clone();
-                                    let accept_invitation_id = item.id.clone();
-                                    let decline_invitation_id = item.id;
-                                    rsx! {
-                                    UiButton {
-                                        label: "Accept".to_string(),
-                                        variant: ButtonVariant::Primary,
-                                        onclick: {
-                                            move |_| {
-                                                let controller = accept_controller.clone();
-                                                let app_core = controller.app_core().clone();
-                                                let mut tick = render_tick;
-                                                let invitation_id = accept_invitation_id.clone();
-                                                spawn(async move {
-                                                    match invitation_workflows::accept_invitation_by_str(&app_core, &invitation_id).await {
-                                                        Ok(()) => controller.complete_runtime_modal_success("Invitation accepted"),
-                                                        Err(error) => controller.runtime_error_toast(error.to_string()),
-                                                    }
-                                                    tick.set(tick() + 1);
-                                                });
-                                            }
-                                        }
-                                    }
-                                    UiButton {
-                                        label: "Decline".to_string(),
-                                        variant: ButtonVariant::Secondary,
-                                        onclick: {
-                                            move |_| {
-                                                let controller = controller.clone();
-                                                let app_core = controller.app_core().clone();
-                                                let mut tick = render_tick;
-                                                let invitation_id = decline_invitation_id.clone();
-                                                spawn(async move {
-                                                    match invitation_workflows::decline_invitation_by_str(&app_core, &invitation_id).await {
-                                                        Ok(()) => controller.complete_runtime_modal_success("Invitation declined"),
-                                                        Err(error) => controller.runtime_error_toast(error.to_string()),
-                                                    }
-                                                    tick.set(tick() + 1);
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
-                                },
-                                NotificationRuntimeAction::SentInvitation => rsx! {
-                                    UiButton {
-                                        label: "Copy Code".to_string(),
-                                        variant: ButtonVariant::Primary,
-                                        onclick: {
-                                            let invitation_id = item.id;
-                                            move |_| {
-                                                let controller = controller.clone();
-                                                let app_core = controller.app_core().clone();
-                                                let mut tick = render_tick;
-                                                let invitation_id = invitation_id.clone();
-                                                spawn(async move {
-                                                    match invitation_workflows::export_invitation_by_str(&app_core, &invitation_id).await {
-                                                        Ok(code) => {
-                                                            controller.write_clipboard(&code);
-                                                            controller.complete_runtime_modal_success("Invitation code copied to clipboard");
+                        UiCardFooter {
+                            extra_class: None,
+                            div {
+                                class: "flex h-full w-full items-center gap-2 overflow-x-auto",
+                                match item.action {
+                                    NotificationRuntimeAction::ReceivedInvitation => {
+                                        let accept_controller = controller.clone();
+                                        let accept_invitation_id = item.id.clone();
+                                        let decline_invitation_id = item.id;
+                                        rsx! {
+                                        UiButton {
+                                            label: "Accept".to_string(),
+                                            variant: ButtonVariant::Primary,
+                                            onclick: {
+                                                move |_| {
+                                                    let controller = accept_controller.clone();
+                                                    let app_core = controller.app_core().clone();
+                                                    let mut tick = render_tick;
+                                                    let invitation_id = accept_invitation_id.clone();
+                                                    spawn(async move {
+                                                        match invitation_workflows::accept_invitation_by_str(&app_core, &invitation_id).await {
+                                                            Ok(()) => controller.complete_runtime_modal_success("Invitation accepted"),
+                                                            Err(error) => controller.runtime_error_toast(error.to_string()),
                                                         }
-                                                        Err(error) => controller.runtime_error_toast(error.to_string()),
-                                                    }
-                                                    tick.set(tick() + 1);
-                                                });
+                                                        tick.set(tick() + 1);
+                                                    });
+                                                }
+                                            }
+                                        }
+                                        UiButton {
+                                            label: "Decline".to_string(),
+                                            variant: ButtonVariant::Secondary,
+                                            onclick: {
+                                                move |_| {
+                                                    let controller = controller.clone();
+                                                    let app_core = controller.app_core().clone();
+                                                    let mut tick = render_tick;
+                                                    let invitation_id = decline_invitation_id.clone();
+                                                    spawn(async move {
+                                                        match invitation_workflows::decline_invitation_by_str(&app_core, &invitation_id).await {
+                                                            Ok(()) => controller.complete_runtime_modal_success("Invitation declined"),
+                                                            Err(error) => controller.runtime_error_toast(error.to_string()),
+                                                        }
+                                                        tick.set(tick() + 1);
+                                                    });
+                                                }
                                             }
                                         }
                                     }
-                                },
-                                NotificationRuntimeAction::RecoveryApproval => rsx! {
-                                    UiButton {
-                                        label: "Approve Recovery".to_string(),
-                                        variant: ButtonVariant::Primary,
-                                        onclick: {
-                                            let ceremony_id = item.id;
-                                            move |_| {
-                                                let controller = controller.clone();
-                                                let app_core = controller.app_core().clone();
-                                                let mut tick = render_tick;
-                                                let ceremony_id = ceremony_id.clone();
-                                                spawn(async move {
-                                                    match recovery_workflows::approve_recovery(
-                                                        &app_core,
-                                                        &CeremonyId::new(ceremony_id),
-                                                    ).await {
-                                                        Ok(()) => controller.complete_runtime_modal_success("Recovery approved"),
-                                                        Err(error) => controller.runtime_error_toast(error.to_string()),
-                                                    }
-                                                    tick.set(tick() + 1);
-                                                });
+                                    },
+                                    NotificationRuntimeAction::SentInvitation => rsx! {
+                                        UiButton {
+                                            label: "Copy Code".to_string(),
+                                            variant: ButtonVariant::Primary,
+                                            onclick: {
+                                                let invitation_id = item.id;
+                                                move |_| {
+                                                    let controller = controller.clone();
+                                                    let app_core = controller.app_core().clone();
+                                                    let mut tick = render_tick;
+                                                    let invitation_id = invitation_id.clone();
+                                                    spawn(async move {
+                                                        match invitation_workflows::export_invitation_by_str(&app_core, &invitation_id).await {
+                                                            Ok(code) => {
+                                                                controller.write_clipboard(&code);
+                                                                controller.complete_runtime_modal_success("Invitation code copied to clipboard");
+                                                            }
+                                                            Err(error) => controller.runtime_error_toast(error.to_string()),
+                                                        }
+                                                        tick.set(tick() + 1);
+                                                    });
+                                                }
                                             }
                                         }
-                                    }
-                                },
-                                NotificationRuntimeAction::None => rsx! {},
+                                    },
+                                    NotificationRuntimeAction::RecoveryApproval => rsx! {
+                                        UiButton {
+                                            label: "Approve Recovery".to_string(),
+                                            variant: ButtonVariant::Primary,
+                                            onclick: {
+                                                let ceremony_id = item.id;
+                                                move |_| {
+                                                    let controller = controller.clone();
+                                                    let app_core = controller.app_core().clone();
+                                                    let mut tick = render_tick;
+                                                    let ceremony_id = ceremony_id.clone();
+                                                    spawn(async move {
+                                                        match recovery_workflows::approve_recovery(
+                                                            &app_core,
+                                                            &CeremonyId::new(ceremony_id),
+                                                        ).await {
+                                                            Ok(()) => controller.complete_runtime_modal_success("Recovery approved"),
+                                                            Err(error) => controller.runtime_error_toast(error.to_string()),
+                                                        }
+                                                        tick.set(tick() + 1);
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    },
+                                    NotificationRuntimeAction::None => rsx! {},
+                                }
                             }
                         }
                     }
                 } else {
                     Empty {
-                        class: Some("h-full border-border bg-background".to_string()),
+                        class: Some("h-full border-0 bg-background".to_string()),
                         EmptyHeader {
                             EmptyTitle { "No notification selected" }
                             EmptyDescription { "Select an item from the list to inspect the latest invitation or recovery activity." }
@@ -4757,21 +4884,24 @@ fn SettingsScreen(
 ) -> Element {
     rsx! {
         div {
-            class: "grid h-full min-h-0 w-full gap-3 lg:grid-cols-12 lg:[grid-template-rows:minmax(0,1fr)]",
+            class: "grid w-full gap-3 lg:grid-cols-12 lg:h-full lg:min-h-0 lg:[grid-template-rows:minmax(0,1fr)]",
             UiCard {
                 title: "Settings".to_string(),
                 subtitle: Some("Storage: IndexedDB".to_string()),
                 extra_class: Some("lg:col-span-4".to_string()),
-                for section in SettingsSection::ALL {
-                    UiListButton {
-                        id: Some(list_item_dom_id(ListId::SettingsSections, section.dom_id())),
-                        label: section.title().to_string(),
-                        active: section == model.settings_section,
-                        onclick: {
-                            let controller = controller.clone();
-                            move |_| {
-                                controller.set_settings_section(section);
-                                render_tick.set(render_tick() + 1);
+                UiCardBody {
+                    extra_class: Some("gap-1".to_string()),
+                    for section in SettingsSection::ALL {
+                        UiListButton {
+                            id: Some(list_item_dom_id(ListId::SettingsSections, section.dom_id())),
+                            label: section.title().to_string(),
+                            active: section == model.settings_section,
+                            onclick: {
+                                let controller = controller.clone();
+                                move |_| {
+                                    controller.set_settings_section(section);
+                                    render_tick.set(render_tick() + 1);
+                                }
                             }
                         }
                     }
@@ -4783,20 +4913,24 @@ fn SettingsScreen(
                 subtitle: Some(model.settings_section.subtitle().to_string()),
                 extra_class: Some("lg:col-span-8".to_string()),
                 if matches!(model.settings_section, SettingsSection::Profile) {
-                    div {
-                        class: "flex flex-1 min-h-0 flex-col gap-2",
-                        UiListItem {
-                            label: format!("Nickname: {}", runtime.nickname),
-                            secondary: Some("Update display name for this authority".to_string()),
-                            active: false,
-                        }
-                        UiListItem {
-                            label: format!("Authority: {}", runtime.authority_id),
-                            secondary: Some("local".to_string()),
-                            active: false,
-                        }
+                    UiCardBody {
+                        extra_class: Some("gap-2".to_string()),
                         div {
-                            class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
+                            class: "aura-list flex flex-col gap-2",
+                            UiListItem {
+                                label: format!("Nickname: {}", runtime.nickname),
+                                secondary: Some("Update display name for this authority".to_string()),
+                                active: false,
+                            }
+                            UiListItem {
+                                label: format!("Authority: {}", runtime.authority_id),
+                                secondary: Some("local".to_string()),
+                                active: false,
+                            }
+                        }
+                        UiCardFooter {
+                            extra_class: None,
+                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
                             UiButton {
                                 id: Some(
                                     ControlId::SettingsEditNicknameButton
@@ -4817,24 +4951,29 @@ fn SettingsScreen(
                                     }
                                 }
                             }
+                            }
                         }
                     }
                 }
                 if matches!(model.settings_section, SettingsSection::GuardianThreshold) {
-                    div {
-                        class: "flex flex-1 min-h-0 flex-col gap-2",
-                        UiListItem {
-                            label: format!("Target threshold: {} of {}", runtime.threshold_k, runtime.threshold_n.max(runtime.guardian_count as u8)),
-                            secondary: Some(format!("Configured guardians: {}", runtime.guardian_count)),
-                            active: false,
-                        }
-                        UiListItem {
-                            label: format!("Recovery bindings: {}", runtime.guardian_binding_count),
-                            secondary: Some("Authorities for which this device can approve recovery".to_string()),
-                            active: false,
-                        }
+                    UiCardBody {
+                        extra_class: Some("gap-2".to_string()),
                         div {
-                            class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
+                            class: "aura-list flex flex-col gap-2",
+                            UiListItem {
+                                label: format!("Target threshold: {} of {}", runtime.threshold_k, runtime.threshold_n.max(runtime.guardian_count as u8)),
+                                secondary: Some(format!("Configured guardians: {}", runtime.guardian_count)),
+                                active: false,
+                            }
+                            UiListItem {
+                                label: format!("Recovery bindings: {}", runtime.guardian_binding_count),
+                                secondary: Some("Authorities for which this device can approve recovery".to_string()),
+                                active: false,
+                            }
+                        }
+                        UiCardFooter {
+                            extra_class: None,
+                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
                             UiButton {
                                 id: Some(
                                     ControlId::SettingsConfigureThresholdButton
@@ -4855,24 +4994,29 @@ fn SettingsScreen(
                                     }
                                 }
                             }
+                            }
                         }
                     }
                 }
                 if matches!(model.settings_section, SettingsSection::RequestRecovery) {
-                    div {
-                        class: "flex flex-1 min-h-0 flex-col gap-2",
-                        UiListItem {
-                            label: "Recovery request".to_string(),
-                            secondary: Some("Start guardian-assisted recovery flow".to_string()),
-                            active: false,
-                        }
-                        UiListItem {
-                            label: format!("Last status: {}", runtime.active_recovery_label),
-                            secondary: Some(format!("Pending approvals to review: {}", runtime.pending_recovery_requests)),
-                            active: false,
-                        }
+                    UiCardBody {
+                        extra_class: Some("gap-2".to_string()),
                         div {
-                            class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
+                            class: "aura-list flex flex-col gap-2",
+                            UiListItem {
+                                label: "Recovery request".to_string(),
+                                secondary: Some("Start guardian-assisted recovery flow".to_string()),
+                                active: false,
+                            }
+                            UiListItem {
+                                label: format!("Last status: {}", runtime.active_recovery_label),
+                                secondary: Some(format!("Pending approvals to review: {}", runtime.pending_recovery_requests)),
+                                active: false,
+                            }
+                        }
+                        UiCardFooter {
+                            extra_class: None,
+                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
                             UiButton {
                                 id: Some(
                                     ControlId::SettingsRequestRecoveryButton
@@ -4893,34 +5037,39 @@ fn SettingsScreen(
                                     }
                                 }
                             }
+                            }
                         }
                     }
                 }
                 if matches!(model.settings_section, SettingsSection::Devices) {
-                    div {
-                        class: "flex flex-1 min-h-0 flex-col gap-2",
-                        UiListItem {
-                            label: "Add device".to_string(),
-                            secondary: Some("Start device enrollment flow".to_string()),
-                            active: false,
-                        }
-                        for device in &runtime.devices {
+                    UiCardBody {
+                        extra_class: Some("gap-2".to_string()),
+                        div {
+                            class: "aura-list flex flex-col gap-2",
                             UiListItem {
-                                label: if device.is_current {
-                                    format!("{} (current)", device.name)
-                                } else {
-                                    device.name.clone()
-                                },
-                                secondary: Some(if device.is_current {
-                                    "Local device".to_string()
-                                } else {
-                                    "Removable secondary device".to_string()
-                                }),
+                                label: "Add device".to_string(),
+                                secondary: Some("Start device enrollment flow".to_string()),
                                 active: false,
                             }
+                            for device in &runtime.devices {
+                                UiListItem {
+                                    label: if device.is_current {
+                                        format!("{} (current)", device.name)
+                                    } else {
+                                        device.name.clone()
+                                    },
+                                    secondary: Some(if device.is_current {
+                                        "Local device".to_string()
+                                    } else {
+                                        "Removable secondary device".to_string()
+                                    }),
+                                    active: false,
+                                }
+                            }
                         }
-                        div {
-                            class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
+                        UiCardFooter {
+                            extra_class: None,
+                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
                             UiButton {
                                 id: Some(
                                     ControlId::SettingsAddDeviceButton
@@ -4975,44 +5124,49 @@ fn SettingsScreen(
                                     }
                                 }
                             }
+                            }
                         }
                     }
                 }
                 if matches!(model.settings_section, SettingsSection::Authority) {
-                    div {
-                        class: "flex flex-1 min-h-0 flex-col gap-2",
-                        UiListItem {
-                            label: format!("Authority ID: {}", runtime.authority_id),
-                            secondary: Some("Scope: local authority".to_string()),
-                            active: false,
-                        }
-                        for authority in runtime.authorities.clone() {
-                            UiListButton {
-                                label: if authority.is_current {
-                                    format!("{} (current)", authority.label)
-                                } else {
-                                    authority.label.clone()
-                                },
-                                active: authority.is_current,
-                                onclick: {
-                                    let controller = controller.clone();
-                                    let authority_id = authority.id;
-                                    move |_| {
-                                        if authority.is_current {
-                                            return;
+                    UiCardBody {
+                        extra_class: Some("gap-2".to_string()),
+                        div {
+                            class: "aura-list flex flex-col gap-2",
+                            UiListItem {
+                                label: format!("Authority ID: {}", runtime.authority_id),
+                                secondary: Some("Scope: local authority".to_string()),
+                                active: false,
+                            }
+                            for authority in runtime.authorities.clone() {
+                                UiListButton {
+                                    label: if authority.is_current {
+                                        format!("{} (current)", authority.label)
+                                    } else {
+                                        authority.label.clone()
+                                    },
+                                    active: authority.is_current,
+                                    onclick: {
+                                        let controller = controller.clone();
+                                        let authority_id = authority.id;
+                                        move |_| {
+                                            if authority.is_current {
+                                                return;
+                                            }
+                                            let _ = controller.request_authority_switch(authority_id);
                                         }
-                                        let _ = controller.request_authority_switch(authority_id);
                                     }
                                 }
                             }
+                            UiListItem {
+                                label: "Multifactor".to_string(),
+                                secondary: Some(format!("Policy: {}", runtime.mfa_policy)),
+                                active: false,
+                            }
                         }
-                        UiListItem {
-                            label: "Multifactor".to_string(),
-                            secondary: Some(format!("Policy: {}", runtime.mfa_policy)),
-                            active: false,
-                        }
-                        div {
-                            class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
+                        UiCardFooter {
+                            extra_class: None,
+                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
                             UiButton {
                                 id: Some(
                                     ControlId::SettingsSwitchAuthorityButton
@@ -5053,30 +5207,35 @@ fn SettingsScreen(
                                     }
                                 }
                             }
+                            }
                         }
                     }
                 }
                 if matches!(model.settings_section, SettingsSection::Appearance) {
-                    div {
-                        class: "flex flex-1 min-h-0 flex-col gap-2",
-                        UiListItem {
-                            label: format!(
-                                "Color mode: {}",
-                                match resolved_scheme {
-                                    ColorScheme::Light => "Light",
-                                    _ => "Dark",
-                                }
-                            ),
-                            secondary: Some("Switch the current web theme".to_string()),
-                            active: false,
-                        }
-                        UiListItem {
-                            label: "Palette".to_string(),
-                            secondary: Some("Aura uses the same neutral palette in both modes".to_string()),
-                            active: false,
-                        }
+                    UiCardBody {
+                        extra_class: Some("gap-2".to_string()),
                         div {
-                            class: "mt-auto flex flex-wrap gap-2 border-t border-border pt-4",
+                            class: "aura-list flex flex-col gap-2",
+                            UiListItem {
+                                label: format!(
+                                    "Color mode: {}",
+                                    match resolved_scheme {
+                                        ColorScheme::Light => "Light",
+                                        _ => "Dark",
+                                    }
+                                ),
+                                secondary: Some("Switch the current web theme".to_string()),
+                                active: false,
+                            }
+                            UiListItem {
+                                label: "Palette".to_string(),
+                                secondary: Some("Aura uses the same neutral palette in both modes".to_string()),
+                                active: false,
+                            }
+                        }
+                        UiCardFooter {
+                            extra_class: None,
+                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
                             UiButton {
                                 id: Some(
                                     ControlId::SettingsToggleThemeButton
@@ -5095,6 +5254,7 @@ fn SettingsScreen(
                                     theme.toggle_color_scheme();
                                     render_tick.set(render_tick() + 1);
                                 }
+                            }
                             }
                         }
                     }
@@ -5187,7 +5347,7 @@ fn render_screen_content(
                 id: ControlId::Screen(ContractScreenId::Onboarding)
                     .web_dom_id()
                     .expect("Screen(Onboarding) must define a web DOM id"),
-                class: "h-full min-h-0 w-full",
+                class: "w-full lg:h-full lg:min-h-0",
             }
         },
         UiScreen::Neighborhood => rsx! {
@@ -5195,7 +5355,7 @@ fn render_screen_content(
                 id: ControlId::Screen(ContractScreenId::Neighborhood)
                     .web_dom_id()
                     .expect("Screen(Neighborhood) must define a web DOM id"),
-                class: "h-full min-h-0 w-full",
+                class: "w-full lg:h-full lg:min-h-0",
                 {NeighborhoodScreen(model, neighborhood_runtime, controller, render_tick)}
             }
         },
@@ -5204,7 +5364,7 @@ fn render_screen_content(
                 id: ControlId::Screen(ContractScreenId::Chat)
                     .web_dom_id()
                     .expect("Screen(Chat) must define a web DOM id"),
-                class: "h-full min-h-0 w-full",
+                class: "w-full lg:h-full lg:min-h-0",
                 {ChatScreen(model, chat_runtime, controller, render_tick)}
             }
         },
@@ -5213,7 +5373,7 @@ fn render_screen_content(
                 id: ControlId::Screen(ContractScreenId::Contacts)
                     .web_dom_id()
                     .expect("Screen(Contacts) must define a web DOM id"),
-                class: "h-full min-h-0 w-full",
+                class: "w-full lg:h-full lg:min-h-0",
                 {ContactsScreen(model, contacts_runtime, controller, render_tick)}
             }
         },
@@ -5222,7 +5382,7 @@ fn render_screen_content(
                 id: ControlId::Screen(ContractScreenId::Notifications)
                     .web_dom_id()
                     .expect("Screen(Notifications) must define a web DOM id"),
-                class: "h-full min-h-0 w-full",
+                class: "w-full lg:h-full lg:min-h-0",
                 {NotificationsScreen(model, notifications_runtime, controller, render_tick)}
             }
         },
@@ -5231,7 +5391,7 @@ fn render_screen_content(
                 id: ControlId::Screen(ContractScreenId::Settings)
                     .web_dom_id()
                     .expect("Screen(Settings) must define a web DOM id"),
-                class: "h-full min-h-0 w-full",
+                class: "w-full lg:h-full lg:min-h-0",
                 {SettingsScreen(
                     model,
                     settings_runtime,
@@ -5284,25 +5444,19 @@ fn upsert_snapshot_operation(
 
 fn screen_readiness(
     screen: UiScreen,
-    neighborhood_runtime: &NeighborhoodRuntimeView,
-    chat_runtime: &ChatRuntimeView,
-    contacts_runtime: &ContactsRuntimeView,
-    settings_runtime: &SettingsRuntimeView,
-    notifications_runtime: &NotificationsRuntimeView,
+    _neighborhood_runtime: &NeighborhoodRuntimeView,
+    _chat_runtime: &ChatRuntimeView,
+    _contacts_runtime: &ContactsRuntimeView,
+    _settings_runtime: &SettingsRuntimeView,
+    _notifications_runtime: &NotificationsRuntimeView,
 ) -> UiReadiness {
-    let loaded = match screen {
-        UiScreen::Onboarding => false,
-        UiScreen::Neighborhood => neighborhood_runtime.loaded,
-        UiScreen::Chat => chat_runtime.loaded,
-        UiScreen::Contacts => contacts_runtime.loaded,
-        UiScreen::Notifications => notifications_runtime.loaded,
-        UiScreen::Settings => settings_runtime.loaded,
-    };
-
-    if loaded {
-        UiReadiness::Ready
-    } else {
-        UiReadiness::Loading
+    match screen {
+        UiScreen::Onboarding => UiReadiness::Loading,
+        UiScreen::Neighborhood
+        | UiScreen::Chat
+        | UiScreen::Contacts
+        | UiScreen::Notifications
+        | UiScreen::Settings => UiReadiness::Ready,
     }
 }
 
@@ -5545,8 +5699,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
     let title = active_modal_title(model).unwrap_or_else(|| "Modal".to_string());
     let mut details = Vec::new();
     let mut keybind_rows = Vec::new();
-    let mut input_label = None;
-    let mut input_field_id = None;
+    let mut inputs = Vec::new();
 
     match modal {
         ModalState::Help => {
@@ -5568,18 +5721,27 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                 details.push("Create an invitation code for a contact.".to_string());
                 details.push("Enter the target authority id, then press Enter to generate and copy the code.".to_string());
             }
-            input_label = Some("Receiver Authority ID".to_string());
-            input_field_id = model.modal_field_id();
+            inputs.push(ModalInputView {
+                label: "Receiver Authority ID".to_string(),
+                field_id: FieldId::InvitationReceiver,
+                value: model.modal_text_value().unwrap_or_default(),
+            });
         }
         ModalState::AcceptInvitation => {
             details.push("Paste an invitation code, then press Enter.".to_string());
-            input_label = Some("Invitation Code".to_string());
-            input_field_id = model.modal_field_id();
+            inputs.push(ModalInputView {
+                label: "Invitation Code".to_string(),
+                field_id: FieldId::InvitationCode,
+                value: model.modal_text_value().unwrap_or_default(),
+            });
         }
         ModalState::CreateHome => {
             details.push("Enter a new home name and press Enter.".to_string());
-            input_label = Some("Home Name".to_string());
-            input_field_id = model.modal_field_id();
+            inputs.push(ModalInputView {
+                label: "Home Name".to_string(),
+                field_id: FieldId::HomeName,
+                value: model.modal_text_value().unwrap_or_default(),
+            });
         }
         ModalState::CreateChannel => {
             if let Some(state) = model.create_channel_modal() {
@@ -5590,11 +5752,17 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                             CreateChannelDetailsField::Topic => "Topic",
                         };
                         details.push("Step 1 of 3: Configure group details.".to_string());
-                        details.push(format!("Group name: {}", state.name));
-                        details.push(format!("Topic: {}", state.topic));
                         details.push(format!("Active field: {active} (Tab to switch)"));
-                        input_label = Some(active.to_string());
-                        input_field_id = model.modal_field_id();
+                        inputs.push(ModalInputView {
+                            label: "Group Name".to_string(),
+                            field_id: FieldId::CreateChannelName,
+                            value: state.name.clone(),
+                        });
+                        inputs.push(ModalInputView {
+                            label: "Topic".to_string(),
+                            field_id: FieldId::CreateChannelTopic,
+                            value: state.topic.clone(),
+                        });
                     }
                     CreateChannelWizardStep::Members => {
                         details.push("Step 2 of 3: Select members to invite.".to_string());
@@ -5620,16 +5788,22 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                         details.push("Step 3 of 3: Set threshold.".to_string());
                         details.push(format!("Participants (including you): {participant_total}"));
                         details.push("Use ↑/↓ to adjust, Enter to create.".to_string());
-                        input_label = Some("Threshold".to_string());
-                        input_field_id = model.modal_field_id();
+                        inputs.push(ModalInputView {
+                            label: "Threshold".to_string(),
+                            field_id: FieldId::ThresholdInput,
+                            value: model.modal_text_value().unwrap_or_default(),
+                        });
                     }
                 }
             }
         }
         ModalState::SetChannelTopic => {
             details.push("Set a topic for the selected channel.".to_string());
-            input_label = Some("Channel Topic".to_string());
-            input_field_id = model.modal_field_id();
+            inputs.push(ModalInputView {
+                label: "Channel Topic".to_string(),
+                field_id: FieldId::CreateChannelTopic,
+                value: model.modal_text_value().unwrap_or_default(),
+            });
         }
         ModalState::ChannelInfo => {
             let active_channel = if chat_runtime.active_channel.is_empty() {
@@ -5676,8 +5850,11 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
         }
         ModalState::EditNickname => {
             details.push("Update the selected nickname and press Enter.".to_string());
-            input_label = Some("Nickname".to_string());
-            input_field_id = model.modal_field_id();
+            inputs.push(ModalInputView {
+                label: "Nickname".to_string(),
+                field_id: FieldId::Nickname,
+                value: model.modal_text_value().unwrap_or_default(),
+            });
         }
         ModalState::RemoveContact => {
             details.push("Remove the selected contact from this authority.".to_string());
@@ -5709,8 +5886,11 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                         details.push("Step 2 of 3: Choose threshold.".to_string());
                         details.push(format!("Selected guardians: {}", state.selected_count));
                         details.push("Enter k (approvals required).".to_string());
-                        input_label = Some("Threshold (k)".to_string());
-                        input_field_id = model.modal_field_id();
+                        inputs.push(ModalInputView {
+                            label: "Threshold (k)".to_string(),
+                            field_id: FieldId::ThresholdInput,
+                            value: model.modal_text_value().unwrap_or_default(),
+                        });
                     }
                     ThresholdWizardStep::Ceremony => {
                         details.push("Step 3 of 3: Ready to start ceremony.".to_string());
@@ -5740,8 +5920,11 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                         if !state.name_input.trim().is_empty() {
                             details.push(format!("Draft name: {}", state.name_input));
                         }
-                        input_label = Some("Device Name".to_string());
-                        input_field_id = model.modal_field_id();
+                        inputs.push(ModalInputView {
+                            label: "Device Name".to_string(),
+                            field_id: FieldId::DeviceName,
+                            value: model.modal_text_value().unwrap_or_default(),
+                        });
                     }
                     AddDeviceWizardStep::ShareCode => {
                         details.push(
@@ -5781,8 +5964,11 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
         }
         ModalState::ImportDeviceEnrollmentCode => {
             details.push("Import a device enrollment code and press Enter.".to_string());
-            input_label = Some("Enrollment Code".to_string());
-            input_field_id = model.modal_field_id();
+            inputs.push(ModalInputView {
+                label: "Enrollment Code".to_string(),
+                field_id: FieldId::DeviceImportCode,
+                value: model.modal_text_value().unwrap_or_default(),
+            });
         }
         ModalState::SelectDeviceToRemove => {
             details.push("Select the device to remove.".to_string());
@@ -5842,8 +6028,11 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                         details.push("Step 2 of 3: Configure signing threshold.".to_string());
                         details.push(format!("Selected devices: {}", state.selected_count));
                         details.push("Enter required signatures (k).".to_string());
-                        input_label = Some("Threshold (k)".to_string());
-                        input_field_id = model.modal_field_id();
+                        inputs.push(ModalInputView {
+                            label: "Threshold (k)".to_string(),
+                            field_id: FieldId::ThresholdInput,
+                            value: model.modal_text_value().unwrap_or_default(),
+                        });
                     }
                     ThresholdWizardStep::Ceremony => {
                         details.push("Step 3 of 3: Ready to start MFA ceremony.".to_string());
@@ -5918,16 +6107,21 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
             details.push(format!("Full: {full_caps}"));
             details.push(format!("Partial: {partial_caps}"));
             details.push(format!("Limited: {limited_caps}"));
-            input_label = Some(format!("{active} Capabilities"));
-            input_field_id = model.modal_field_id();
+            let field_id = match model
+                .capability_config_modal()
+                .map(|state| state.active_tier)
+            {
+                Some(CapabilityTier::Partial) => FieldId::CapabilityPartial,
+                Some(CapabilityTier::Limited) => FieldId::CapabilityLimited,
+                _ => FieldId::CapabilityFull,
+            };
+            inputs.push(ModalInputView {
+                label: format!("{active} Capabilities"),
+                field_id,
+                value: model.modal_text_value().unwrap_or_default(),
+            });
         }
     }
-
-    let input_value = if model.modal_accepts_text() {
-        model.modal_text_value()
-    } else {
-        None
-    };
 
     let enter_label = match modal {
         ModalState::Help | ModalState::ChannelInfo => "Close".to_string(),
@@ -5969,9 +6163,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
         title,
         details,
         keybind_rows,
-        input_label,
-        input_field_id,
-        input_value,
+        inputs,
         enter_label,
     })
 }
@@ -6050,6 +6242,10 @@ fn help_modal_content(screen: UiScreen) -> (Vec<String>, Vec<(String, String)>) 
             ),
             ("n".to_string(), "Create invitation".to_string()),
             ("a".to_string(), "Accept invitation".to_string()),
+            (
+                "i".to_string(),
+                "Invite selected contact to current channel".to_string(),
+            ),
             ("e".to_string(), "Edit nickname".to_string()),
             ("g".to_string(), "Configure guardians".to_string()),
             ("c".to_string(), "Open DM for selected contact".to_string()),

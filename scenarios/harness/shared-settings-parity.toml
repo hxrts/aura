@@ -25,46 +25,30 @@ timeout_ms = 20000
 
 [[steps]]
 id = "alice-onboarding-visible"
-action = "control_visible"
+action = "screen_is"
 actor = "alice"
-control_id = "onboarding_root"
+screen_id = "onboarding"
 timeout_ms = 30000
 
 [[steps]]
 id = "bob-onboarding-visible"
-action = "control_visible"
+action = "screen_is"
 actor = "bob"
-control_id = "onboarding_root"
+screen_id = "onboarding"
 timeout_ms = 60000
 
 [[steps]]
-id = "alice-fill-account-name"
-action = "fill"
+id = "alice-create-account"
+action = "create_account"
 actor = "alice"
-field_id = "account_name"
 value = "AliceUser"
 timeout_ms = 4000
 
 [[steps]]
-id = "bob-fill-account-name"
-action = "fill"
-actor = "bob"
-field_id = "account_name"
-value = "BobUser"
-timeout_ms = 4000
-
-[[steps]]
-id = "alice-create-account"
-action = "activate"
-actor = "alice"
-control_id = "onboarding_create_account_button"
-timeout_ms = 4000
-
-[[steps]]
 id = "bob-create-account"
-action = "activate"
+action = "create_account"
 actor = "bob"
-control_id = "onboarding_create_account_button"
+value = "BobUser"
 timeout_ms = 4000
 
 [[steps]]
@@ -83,14 +67,14 @@ timeout_ms = 120000
 
 [[steps]]
 id = "alice-open-settings"
-action = "navigate"
+action = "open_screen"
 actor = "alice"
 screen_id = "settings"
 timeout_ms = 4000
 
 [[steps]]
 id = "bob-open-settings"
-action = "navigate"
+action = "open_screen"
 actor = "bob"
 screen_id = "settings"
 timeout_ms = 4000

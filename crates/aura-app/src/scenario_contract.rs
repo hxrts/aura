@@ -6,8 +6,8 @@
 #![allow(missing_docs)] // Shared semantic contract - expanded incrementally during migration.
 
 use crate::ui_contract::{
-    ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState, ScreenId,
-    ToastKind, UiReadiness,
+    ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState,
+    RuntimeEventKind, ScreenId, ToastKind, UiReadiness,
 };
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +22,20 @@ pub struct ScenarioDefinition {
     pub steps: Vec<ScenarioStep>,
 }
 
+impl ScenarioDefinition {
+    pub fn validate_shared_intent_contract(&self) -> Result<(), String> {
+        for step in &self.steps {
+            if let ScenarioAction::Ui(action) = &step.action {
+                return Err(format!(
+                    "shared scenario {} step {} uses raw ui action {:?}; shared scenarios must use intent actions instead",
+                    self.id, step.id, action
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScenarioStep {
     pub id: String,
@@ -34,9 +48,51 @@ pub struct ScenarioStep {
 #[serde(rename_all = "snake_case")]
 pub enum ScenarioAction {
     Environment(EnvironmentAction),
+    Intent(IntentAction),
     Ui(UiAction),
     Expect(Expectation),
     Variables(VariableAction),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntentAction {
+    OpenScreen(ScreenId),
+    CreateAccount {
+        account_name: String,
+    },
+    StartDeviceEnrollment {
+        device_name: String,
+        code_name: String,
+    },
+    ImportDeviceEnrollmentCode {
+        code: String,
+    },
+    OpenSettingsSection(SettingsSection),
+    RemoveSelectedDevice,
+    CreateContactInvitation {
+        receiver_authority_id: String,
+        code_name: String,
+    },
+    AcceptContactInvitation {
+        code: String,
+    },
+    AcceptPendingChannelInvitation,
+    JoinChannel {
+        channel_name: String,
+    },
+    InviteActorToChannel {
+        authority_id: String,
+    },
+    SendChatMessage {
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingsSection {
+    Devices,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,7 +106,6 @@ pub enum UiAction {
     DismissTransient,
     PressKey(InputKey, u16),
     SendChatCommand(String),
-    SendChatMessage(String),
     PasteClipboard { source_actor: Option<ActorId> },
     ReadClipboard { name: String },
 }
@@ -147,6 +202,10 @@ pub enum Expectation {
         item_id: String,
     },
     ReadinessIs(UiReadiness),
+    RuntimeEventOccurred {
+        kind: RuntimeEventKind,
+        detail_contains: Option<String>,
+    },
     OperationStateIs {
         operation_id: OperationId,
         state: OperationState,
@@ -184,10 +243,12 @@ pub struct SemanticScenarioFileStep {
     pub source_actor: Option<ActorId>,
     pub kind: Option<ToastKind>,
     pub readiness: Option<UiReadiness>,
+    pub runtime_event_kind: Option<RuntimeEventKind>,
     pub operation_id: Option<OperationId>,
     pub operation_state: Option<OperationState>,
     pub peer_actor: Option<ActorId>,
     pub confirmation: Option<ConfirmationState>,
+    pub section: Option<SettingsSection>,
     pub name: Option<String>,
     pub regex: Option<String>,
     pub group: Option<u32>,
@@ -203,6 +264,21 @@ pub enum SemanticActionKind {
     FaultDelay,
     FaultLoss,
     FaultTunnelDrop,
+    OpenScreen,
+    CreateAccount,
+    StartDeviceEnrollment,
+    ImportDeviceEnrollmentCode,
+    OpenSettingsSection,
+    RemoveSelectedDevice,
+    CreateContactInvitation,
+    AcceptContactInvitation,
+    AcceptPendingChannelInvitation,
+    JoinChannel,
+    InviteActorToChannel,
+    SendChatCommand,
+    SendChatMessage,
+    PasteClipboard,
+    ReadClipboard,
     Navigate,
     Activate,
     ActivateListItem,
@@ -210,10 +286,6 @@ pub enum SemanticActionKind {
     InputText,
     DismissTransient,
     PressKey,
-    SendChatCommand,
-    SendChatMessage,
-    PasteClipboard,
-    ReadClipboard,
     ScreenIs,
     ControlVisible,
     ModalOpen,
@@ -224,6 +296,7 @@ pub enum SemanticActionKind {
     ListItemConfirmation,
     SelectionIs,
     ReadinessIs,
+    RuntimeEventOccurred,
     OperationStateIs,
     ParityWithActor,
     CaptureCurrentAuthorityId,
@@ -292,6 +365,57 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                     actor: required(value.actor, "actor", value.action)?,
                 })
             }
+            SemanticActionKind::OpenScreen => ScenarioAction::Intent(IntentAction::OpenScreen(
+                required(value.screen_id, "screen_id", value.action)?,
+            )),
+            SemanticActionKind::CreateAccount => {
+                ScenarioAction::Intent(IntentAction::CreateAccount {
+                    account_name: required(value.value, "value", value.action)?,
+                })
+            }
+            SemanticActionKind::StartDeviceEnrollment => {
+                ScenarioAction::Intent(IntentAction::StartDeviceEnrollment {
+                    device_name: required(value.value, "value", value.action)?,
+                    code_name: required(value.name, "name", value.action)?,
+                })
+            }
+            SemanticActionKind::ImportDeviceEnrollmentCode => {
+                ScenarioAction::Intent(IntentAction::ImportDeviceEnrollmentCode {
+                    code: required(value.value, "value", value.action)?,
+                })
+            }
+            SemanticActionKind::OpenSettingsSection => {
+                ScenarioAction::Intent(IntentAction::OpenSettingsSection(required(
+                    value.section,
+                    "section",
+                    value.action,
+                )?))
+            }
+            SemanticActionKind::RemoveSelectedDevice => {
+                ScenarioAction::Intent(IntentAction::RemoveSelectedDevice)
+            }
+            SemanticActionKind::CreateContactInvitation => {
+                ScenarioAction::Intent(IntentAction::CreateContactInvitation {
+                    receiver_authority_id: required(value.value, "value", value.action)?,
+                    code_name: required(value.name, "name", value.action)?,
+                })
+            }
+            SemanticActionKind::AcceptContactInvitation => {
+                ScenarioAction::Intent(IntentAction::AcceptContactInvitation {
+                    code: required(value.value, "value", value.action)?,
+                })
+            }
+            SemanticActionKind::AcceptPendingChannelInvitation => {
+                ScenarioAction::Intent(IntentAction::AcceptPendingChannelInvitation)
+            }
+            SemanticActionKind::JoinChannel => ScenarioAction::Intent(IntentAction::JoinChannel {
+                channel_name: required(value.value, "value", value.action)?,
+            }),
+            SemanticActionKind::InviteActorToChannel => {
+                ScenarioAction::Intent(IntentAction::InviteActorToChannel {
+                    authority_id: required(value.value, "value", value.action)?,
+                })
+            }
             SemanticActionKind::Navigate => ScenarioAction::Ui(UiAction::Navigate(required(
                 value.screen_id,
                 "screen_id",
@@ -325,9 +449,11 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
             SemanticActionKind::SendChatCommand => ScenarioAction::Ui(UiAction::SendChatCommand(
                 required(value.value, "value", value.action)?,
             )),
-            SemanticActionKind::SendChatMessage => ScenarioAction::Ui(UiAction::SendChatMessage(
-                required(value.value, "value", value.action)?,
-            )),
+            SemanticActionKind::SendChatMessage => {
+                ScenarioAction::Intent(IntentAction::SendChatMessage {
+                    message: required(value.value, "value", value.action)?,
+                })
+            }
             SemanticActionKind::PasteClipboard => ScenarioAction::Ui(UiAction::PasteClipboard {
                 source_actor: value.source_actor,
             }),
@@ -380,6 +506,12 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
             SemanticActionKind::ReadinessIs => ScenarioAction::Expect(Expectation::ReadinessIs(
                 required(value.readiness, "readiness", value.action)?,
             )),
+            SemanticActionKind::RuntimeEventOccurred => {
+                ScenarioAction::Expect(Expectation::RuntimeEventOccurred {
+                    kind: required(value.runtime_event_kind, "runtime_event_kind", value.action)?,
+                    detail_contains: value.value,
+                })
+            }
             SemanticActionKind::OperationStateIs => {
                 ScenarioAction::Expect(Expectation::OperationStateIs {
                     operation_id: required(value.operation_id, "operation_id", value.action)?,
@@ -430,8 +562,8 @@ fn required<T>(value: Option<T>, field: &str, action: SemanticActionKind) -> Res
 #[cfg(test)]
 mod tests {
     use super::{
-        Expectation, FieldId, ScenarioAction, ScenarioDefinition, ScenarioStep, ScreenId,
-        SemanticActionKind, SemanticScenarioFile, SemanticScenarioFileStep, UiAction,
+        Expectation, FieldId, IntentAction, ScenarioAction, ScenarioDefinition, ScenarioStep,
+        ScreenId, SemanticActionKind, SemanticScenarioFile, SemanticScenarioFileStep, UiAction,
     };
 
     #[test]
@@ -458,17 +590,16 @@ mod tests {
                     kind: None,
                     count: None,
                     readiness: None,
+                    runtime_event_kind: None,
                     operation_id: None,
                     operation_state: None,
                     confirmation: None,
                     peer_actor: None,
-                    confirmation: None,
+                    section: None,
                     name: None,
                     regex: None,
                     group: None,
                     from: None,
-                    count: None,
-                    confirmation: None,
                 },
                 SemanticScenarioFileStep {
                     id: "fill".to_string(),
@@ -488,17 +619,16 @@ mod tests {
                     kind: None,
                     count: None,
                     readiness: None,
+                    runtime_event_kind: None,
                     operation_id: None,
                     operation_state: None,
                     confirmation: None,
                     peer_actor: None,
-                    confirmation: None,
+                    section: None,
                     name: None,
                     regex: None,
                     group: None,
                     from: None,
-                    count: None,
-                    confirmation: None,
                 },
             ],
         };
@@ -535,24 +665,23 @@ mod tests {
             modal_id: None,
             list_id: None,
             item_id: None,
+            count: None,
             value: None,
             key: None,
             repeat: None,
             source_actor: None,
             kind: None,
-            count: None,
             readiness: None,
+            runtime_event_kind: None,
             operation_id: None,
             operation_state: None,
             confirmation: None,
             peer_actor: None,
-            confirmation: None,
+            section: None,
             name: None,
             regex: None,
             group: None,
             from: None,
-            count: None,
-            confirmation: None,
         };
 
         let error = ScenarioStep::try_from(step)
@@ -582,21 +711,23 @@ mod tests {
             modal_id: None,
             list_id: None,
             item_id: None,
+            count: None,
             value: None,
             key: None,
             repeat: None,
             source_actor: None,
             kind: None,
             readiness: None,
+            runtime_event_kind: None,
             operation_id: None,
             operation_state: None,
             peer_actor: Some(super::ActorId("tui".to_string())),
             confirmation: None,
+            section: None,
             name: None,
             regex: None,
             group: None,
             from: None,
-            count: None,
         };
 
         let converted = ScenarioStep::try_from(step).expect("parity conversion should succeed");
@@ -605,5 +736,87 @@ mod tests {
             ScenarioAction::Expect(Expectation::ParityWithActor { actor })
                 if actor.0 == "tui"
         ));
+    }
+
+    #[test]
+    fn semantic_intent_file_converts_to_definition() {
+        let file = SemanticScenarioFile {
+            id: "semantic-intent".to_string(),
+            goal: "check intent schema".to_string(),
+            steps: vec![SemanticScenarioFileStep {
+                id: "create-account".to_string(),
+                actor: Some(super::ActorId("alice".to_string())),
+                timeout_ms: Some(1000),
+                action: SemanticActionKind::CreateAccount,
+                screen_id: None,
+                control_id: None,
+                field_id: None,
+                modal_id: None,
+                list_id: None,
+                item_id: None,
+                count: None,
+                value: Some("Alice".to_string()),
+                key: None,
+                repeat: None,
+                source_actor: None,
+                kind: None,
+                readiness: None,
+                runtime_event_kind: None,
+                operation_id: None,
+                operation_state: None,
+                peer_actor: None,
+                confirmation: None,
+                section: None,
+                name: None,
+                regex: None,
+                group: None,
+                from: None,
+            }],
+        };
+
+        let definition = ScenarioDefinition::try_from(file)
+            .unwrap_or_else(|error| panic!("semantic conversion failed: {error}"));
+        assert!(matches!(
+            definition.steps[0].action,
+            ScenarioAction::Intent(IntentAction::CreateAccount { ref account_name })
+                if account_name == "Alice"
+        ));
+    }
+
+    #[test]
+    fn shared_intent_contract_accepts_intents() {
+        let definition = ScenarioDefinition {
+            id: "shared-intent".to_string(),
+            goal: "intent validation".to_string(),
+            steps: vec![ScenarioStep {
+                id: "open".to_string(),
+                actor: Some(super::ActorId("alice".to_string())),
+                timeout_ms: Some(1000),
+                action: ScenarioAction::Intent(IntentAction::OpenScreen(ScreenId::Chat)),
+            }],
+        };
+
+        definition
+            .validate_shared_intent_contract()
+            .unwrap_or_else(|error| panic!("intent validation failed: {error}"));
+    }
+
+    #[test]
+    fn shared_intent_contract_rejects_ui_actions() {
+        let definition = ScenarioDefinition {
+            id: "shared-ui-invalid".to_string(),
+            goal: "intent validation".to_string(),
+            steps: vec![ScenarioStep {
+                id: "bad".to_string(),
+                actor: Some(super::ActorId("alice".to_string())),
+                timeout_ms: Some(1000),
+                action: ScenarioAction::Ui(UiAction::Navigate(ScreenId::Chat)),
+            }],
+        };
+
+        let error = definition
+            .validate_shared_intent_contract()
+            .expect_err("shared validator must reject raw ui actions");
+        assert!(error.contains("raw ui action"));
     }
 }

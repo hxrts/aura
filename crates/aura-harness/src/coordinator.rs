@@ -674,6 +674,28 @@ impl HarnessCoordinator {
         backend.as_trait_mut().activate_list_item(list_id, item_id)
     }
 
+    pub fn create_contact_invitation(
+        &mut self,
+        instance_id: &str,
+        receiver_authority_id: &str,
+    ) -> Result<String> {
+        let backend = self
+            .backends
+            .get_mut(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        self.events.push(
+            "action",
+            "create_contact_invitation",
+            Some(instance_id.to_string()),
+            serde_json::json!({
+                "receiver_authority_id": receiver_authority_id,
+            }),
+        );
+        backend
+            .as_trait_mut()
+            .create_contact_invitation(receiver_authority_id)
+    }
+
     pub fn wait_for(
         &mut self,
         instance_id: &str,

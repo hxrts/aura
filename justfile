@@ -311,6 +311,12 @@ ci-harness-contract:
 ci-harness-ui-state-evented:
     bash scripts/check/harness-ui-state-evented.sh
 
+# Harness shared intent-contract policy
+ci-harness-shared-intent-contract:
+    bash scripts/check/harness-shared-scenario-contract.sh
+    cargo test -p aura-app shared_intent_contract_accepts_intents --quiet
+    cargo test -p aura-app shared_intent_contract_rejects_ui_actions --quiet
+
 # Harness replay regression (nightly mixed-topology lane)
 ci-harness-replay:
     cargo build -p aura-terminal --bin aura -q
@@ -664,6 +670,7 @@ ci-dry-run profile="push":
         # Harness workflow lanes that run on push
         run_step "Harness Build"         "just ci-harness-build"
         run_step "Harness Contract"      "just ci-harness-contract"
+        run_step "Harness Shared Intent" "just ci-harness-shared-intent-contract"
         run_step "Harness UI Evented"    "just ci-harness-ui-state-evented"
         run_step "Harness Browser"       "just ci-harness-browser"
         run_step "LAN Smoke"             "just ci-lan-smoke"

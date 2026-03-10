@@ -668,7 +668,7 @@ pub async fn accept_pending_home_invitation(
 ) -> Result<InvitationId, AuraError> {
     let runtime = require_runtime(app_core).await?;
     let our_authority = runtime.authority_id();
-    const HOME_ACCEPT_ATTEMPTS: usize = 8;
+    const HOME_ACCEPT_ATTEMPTS: usize = 40;
     const HOME_ACCEPT_BACKOFF_MS: u64 = 150;
 
     for attempt in 0..HOME_ACCEPT_ATTEMPTS {

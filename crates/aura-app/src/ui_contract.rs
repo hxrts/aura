@@ -238,6 +238,7 @@ pub enum ControlId {
     NeighborhoodNewHomeButton,
     NeighborhoodAcceptInvitationButton,
     ContactsCreateInvitationButton,
+    ContactsInviteToChannelButton,
     ContactsEditNicknameButton,
     ContactsRemoveContactButton,
     NeighborhoodEnterAsButton,
@@ -287,6 +288,7 @@ impl ControlId {
             Self::NeighborhoodNewHomeButton => Some("aura-neighborhood-new-home"),
             Self::NeighborhoodAcceptInvitationButton => Some("aura-neighborhood-accept-invitation"),
             Self::ContactsCreateInvitationButton => Some("aura-contacts-create-invitation"),
+            Self::ContactsInviteToChannelButton => Some("aura-contacts-invite-channel"),
             Self::ContactsEditNicknameButton => Some("aura-contacts-edit-nickname"),
             Self::ContactsRemoveContactButton => Some("aura-contacts-remove-contact"),
             Self::NeighborhoodEnterAsButton => Some("aura-neighborhood-enter-as"),
@@ -341,6 +343,7 @@ impl ControlId {
             Self::NeighborhoodNewHomeButton => Some("n"),
             Self::NeighborhoodAcceptInvitationButton => Some("a"),
             Self::ContactsCreateInvitationButton => Some("n"),
+            Self::ContactsInviteToChannelButton => Some("i"),
             Self::NeighborhoodEnterAsButton => Some("d"),
             Self::ChatNewGroupButton => Some("n"),
             Self::ContactsStartChatButton => Some("c"),
@@ -472,10 +475,17 @@ pub struct OperationSnapshot {
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeEventKind {
     InvitationAccepted,
+    InvitationCodeReady,
+    PendingHomeInvitationReady,
+    DeviceEnrollmentCodeReady,
+    ContactLinkReady,
     HomeCreated,
     HomeEntered,
     ChannelJoined,
+    ChannelMembershipReady,
+    RecipientPeersResolved,
     MessageCommitted,
+    MessageDeliveryReady,
     RemoteFactsPulled,
     ChatSignalUpdated,
 }
@@ -1295,6 +1305,10 @@ mod tests {
             Some("aura-contacts-start-chat")
         );
         assert_eq!(
+            ControlId::ContactsInviteToChannelButton.web_dom_id(),
+            Some("aura-contacts-invite-channel")
+        );
+        assert_eq!(
             ControlId::SettingsToggleThemeButton.web_dom_id(),
             Some("aura-settings-toggle-theme")
         );
@@ -1314,10 +1328,7 @@ mod tests {
             ControlId::ContactsRemoveContactButton.web_dom_id(),
             Some("aura-contacts-remove-contact")
         );
-        assert_eq!(
-            ControlId::ModalInput.web_dom_id(),
-            Some("aura-modal-input")
-        );
+        assert_eq!(ControlId::ModalInput.web_dom_id(), Some("aura-modal-input"));
     }
 
     #[test]
@@ -1338,7 +1349,10 @@ mod tests {
             FieldId::InvitationMessage.web_dom_id(),
             Some("aura-field-invitation-message")
         );
-        assert_eq!(FieldId::InvitationTtl.web_dom_id(), Some("aura-field-invitation-ttl"));
+        assert_eq!(
+            FieldId::InvitationTtl.web_dom_id(),
+            Some("aura-field-invitation-ttl")
+        );
     }
 
     #[test]
@@ -1376,6 +1390,7 @@ mod tests {
             ControlId::NeighborhoodNewHomeButton,
             ControlId::NeighborhoodAcceptInvitationButton,
             ControlId::ContactsCreateInvitationButton,
+            ControlId::ContactsInviteToChannelButton,
             ControlId::NeighborhoodEnterAsButton,
             ControlId::ChatNewGroupButton,
             ControlId::ContactsStartChatButton,

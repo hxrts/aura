@@ -196,10 +196,9 @@ pub enum DispatchCommand {
     /// The shell populates the modal with the selected receiver (contact/peer)
     /// from reactive subscriptions.
     OpenCreateInvitationModal,
+    InviteSelectedContactToChannel,
     /// Invite the currently selected LAN peer.
     InviteLanPeer,
-    /// Refresh LAN discovery list.
-    RefreshLanPeers,
     StartChat,
     RemoveContact {
         contact_id: ContactId,
@@ -281,6 +280,11 @@ pub enum DispatchCommand {
     /// Import a device enrollment code on the target device runtime.
     /// In demo mode this routes to the simulated Mobile agent.
     ImportDeviceEnrollmentOnMobile {
+        code: String,
+    },
+    /// Import a device enrollment code while completing onboarding.
+    /// Success must always dismiss the onboarding flow.
+    ImportDeviceEnrollmentDuringOnboarding {
         code: String,
     },
     /// Open authority picker modal (for switching between authorities)

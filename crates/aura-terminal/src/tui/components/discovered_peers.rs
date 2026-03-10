@@ -225,7 +225,7 @@ pub fn DiscoveredPeersPanel(props: &DiscoveredPeersPanelProps) -> impl Into<AnyE
                     vec![element! {
                         View(padding: 1) {
                             Text(
-                                content: "No peers discovered. Press d to rescan",
+                                content: "No peers discovered yet.",
                                 color: Theme::TEXT_MUTED,
                             )
                         }
@@ -298,8 +298,8 @@ pub fn DiscoveredPeersPanel(props: &DiscoveredPeersPanelProps) -> impl Into<AnyE
                             } else {
                                 None
                             })
-                            Text(content: "d", color: Theme::SECONDARY)
-                            Text(content: "Rescan", color: Theme::TEXT_MUTED)
+                            Text(content: "Auto", color: Theme::SECONDARY)
+                            Text(content: "Refresh", color: Theme::TEXT_MUTED)
                         }
                     }
                 })

@@ -17,6 +17,8 @@ bash scripts/check/harness-scenario-inventory.sh
 bash scripts/check/harness-shared-scenario-contract.sh
 
 cargo test -p aura-app shared_flow_support_contract_is_consistent --quiet
+cargo test -p aura-app shared_intent_contract_accepts_intents --quiet
+cargo test -p aura-app shared_intent_contract_rejects_ui_actions --quiet
 cargo test -p aura-harness --lib browser_driver_maps_shared_controls_to_selectors --quiet
 cargo test -p aura-harness --lib browser_driver_maps_shared_fields_to_selectors --quiet
 cargo test -p aura-harness --lib browser_driver_maps_navigation_items_to_controls --quiet

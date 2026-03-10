@@ -380,6 +380,7 @@ pub fn use_messages_subscription(
     app_ctx: &AppCoreContext,
     shared_channels: SharedChannels,
     tui_selected: Arc<RwLock<usize>>,
+    selected_channel_id: Arc<RwLock<Option<String>>>,
 ) -> SharedMessages {
     // Create the shared messages holder - use_ref ensures it persists across renders.
     let shared_messages_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
@@ -388,16 +389,20 @@ pub fn use_messages_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let messages = shared_messages.clone();
+        let selected_channel_id = selected_channel_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                // Get the selected channel from TUI state
-                let selected_idx = tui_selected.read().map(|g| *g).unwrap_or(0);
-
-                // Look up the channel ID from shared channels
-                let channel_id = shared_channels
+                let channel_id = selected_channel_id
                     .read()
                     .ok()
-                    .and_then(|guard| guard.get(selected_idx).map(|c| c.id.clone()));
+                    .and_then(|guard| guard.clone())
+                    .or_else(|| {
+                        let selected_idx = tui_selected.read().map(|g| *g).unwrap_or(0);
+                        shared_channels
+                            .read()
+                            .ok()
+                            .and_then(|guard| guard.get(selected_idx).map(|c| c.id.clone()))
+                    });
 
                 // Get messages for that channel (or empty if none selected)
                 let message_list: Vec<Message> = if let Some(channel_id) = channel_id {

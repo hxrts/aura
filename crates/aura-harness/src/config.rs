@@ -10,18 +10,47 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
 use aura_app::scenario_contract::{
-    ActorId, EnvironmentAction, Expectation, ExtractSource, InputKey,
+    ActorId, EnvironmentAction, Expectation, ExtractSource, InputKey, IntentAction,
     ScenarioAction as SemanticAction, ScenarioDefinition, ScenarioStep as SemanticStep,
-    SemanticScenarioFile, UiAction, VariableAction,
+    SemanticScenarioFile, SettingsSection, UiAction, VariableAction,
 };
 use aura_app::ui::contract::{
-    ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState, ScreenId,
-    ToastKind, UiReadiness,
+    ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState,
+    RuntimeEventKind, ScreenId, ToastKind, UiReadiness,
 };
 use serde::{Deserialize, Serialize};
 
 pub const RUN_SCHEMA_VERSION: u32 = 1;
 pub const SCENARIO_SCHEMA_VERSION: u32 = 1;
+const HARNESS_SCENARIO_INVENTORY_PATH: &str = "scenarios/harness_inventory.toml";
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScenarioInventoryFile {
+    #[serde(rename = "version")]
+    _version: u32,
+    scenario: Vec<ScenarioInventoryEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScenarioInventoryEntry {
+    id: String,
+    path: PathBuf,
+    classification: ScenarioClassification,
+    migration_status: String,
+    runtime_substrate: String,
+    notes: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum ScenarioClassification {
+    Shared,
+    TuiOnly,
+    WebOnly,
+    ToBeRemoved,
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -159,6 +188,14 @@ pub enum ScenarioAction {
     CaptureCurrentAuthorityId,
     CaptureSelection,
     ExtractVar,
+    CreateAccount,
+    StartDeviceEnrollment,
+    ImportDeviceEnrollmentCode,
+    RemoveSelectedDevice,
+    CreateContactInvitation,
+    AcceptContactInvitation,
+    InviteActorToChannel,
+    AcceptPendingChannelInvitation,
     SendKeys,
     SendChatCommand,
     SendChatMessage,
@@ -204,6 +241,14 @@ impl fmt::Display for ScenarioAction {
             Self::CaptureCurrentAuthorityId => "capture_current_authority_id",
             Self::CaptureSelection => "capture_selection",
             Self::ExtractVar => "extract_var",
+            Self::CreateAccount => "create_account",
+            Self::StartDeviceEnrollment => "start_device_enrollment",
+            Self::ImportDeviceEnrollmentCode => "import_device_enrollment_code",
+            Self::RemoveSelectedDevice => "remove_selected_device",
+            Self::CreateContactInvitation => "create_contact_invitation",
+            Self::AcceptContactInvitation => "accept_contact_invitation",
+            Self::InviteActorToChannel => "invite_actor_to_channel",
+            Self::AcceptPendingChannelInvitation => "accept_pending_channel_invitation",
             Self::SendKeys => "send_keys",
             Self::SendChatCommand => "send_chat_command",
             Self::SendChatMessage => "send_chat_message",
@@ -272,6 +317,8 @@ pub struct ScenarioStep {
     pub modal_id: Option<ModalId>,
     /// Semantic readiness reference for typed scenario expectations.
     pub readiness: Option<UiReadiness>,
+    /// Semantic runtime-event reference for typed scenario expectations.
+    pub runtime_event_kind: Option<RuntimeEventKind>,
     /// Semantic operation identifier for typed lifecycle expectations.
     pub operation_id: Option<OperationId>,
     /// Semantic operation state for typed lifecycle expectations.
@@ -362,6 +409,68 @@ impl ScenarioStep {
                     from: parse_extract_source(self.from.as_deref().unwrap_or("screen"))?,
                 }))
             }
+            ScenarioAction::CreateAccount => {
+                Some(SemanticAction::Intent(IntentAction::CreateAccount {
+                    account_name: required_field(
+                        self.value.clone().or_else(|| self.expect.clone()),
+                        "value",
+                        self.action,
+                    )?,
+                }))
+            }
+            ScenarioAction::StartDeviceEnrollment => Some(SemanticAction::Intent(
+                IntentAction::StartDeviceEnrollment {
+                    device_name: required_field(
+                        self.value.clone().or_else(|| self.expect.clone()),
+                        "value",
+                        self.action,
+                    )?,
+                    code_name: required_field(self.var.clone(), "var", self.action)?,
+                },
+            )),
+            ScenarioAction::ImportDeviceEnrollmentCode => Some(SemanticAction::Intent(
+                IntentAction::ImportDeviceEnrollmentCode {
+                    code: required_field(
+                        self.value.clone().or_else(|| self.expect.clone()),
+                        "value",
+                        self.action,
+                    )?,
+                },
+            )),
+            ScenarioAction::RemoveSelectedDevice => {
+                Some(SemanticAction::Intent(IntentAction::RemoveSelectedDevice))
+            }
+            ScenarioAction::CreateContactInvitation => Some(SemanticAction::Intent(
+                IntentAction::CreateContactInvitation {
+                    receiver_authority_id: required_field(
+                        self.value.clone().or_else(|| self.expect.clone()),
+                        "value",
+                        self.action,
+                    )?,
+                    code_name: required_field(self.var.clone(), "var", self.action)?,
+                },
+            )),
+            ScenarioAction::AcceptContactInvitation => Some(SemanticAction::Intent(
+                IntentAction::AcceptContactInvitation {
+                    code: required_field(
+                        self.value.clone().or_else(|| self.expect.clone()),
+                        "value",
+                        self.action,
+                    )?,
+                },
+            )),
+            ScenarioAction::InviteActorToChannel => {
+                Some(SemanticAction::Intent(IntentAction::InviteActorToChannel {
+                    authority_id: required_field(
+                        self.value.clone().or_else(|| self.expect.clone()),
+                        "value",
+                        self.action,
+                    )?,
+                }))
+            }
+            ScenarioAction::AcceptPendingChannelInvitation => Some(SemanticAction::Intent(
+                IntentAction::AcceptPendingChannelInvitation,
+            )),
             ScenarioAction::SendKeys => {
                 Some(SemanticAction::Ui(UiAction::InputText(required_field(
                     self.keys.clone().or_else(|| self.expect.clone()),
@@ -389,22 +498,32 @@ impl ScenarioStep {
                     self.action,
                 )?,
             ))),
-            ScenarioAction::SendChatMessage => Some(SemanticAction::Ui(UiAction::SendChatMessage(
-                required_field(
-                    self.value.clone().or_else(|| self.expect.clone()),
-                    "value",
-                    self.action,
-                )?,
-            ))),
+            ScenarioAction::SendChatMessage => {
+                Some(SemanticAction::Intent(IntentAction::SendChatMessage {
+                    message: required_field(
+                        self.value.clone().or_else(|| self.expect.clone()),
+                        "value",
+                        self.action,
+                    )?,
+                }))
+            }
             ScenarioAction::ClickButton => {
-                if let Some(control_id) = self.control_id {
+                if let Some(screen_id) = self.control_id.and_then(screen_id_for_nav_control_id) {
+                    Some(SemanticAction::Intent(IntentAction::OpenScreen(screen_id)))
+                } else if let Some(control_id) = self.control_id {
                     Some(SemanticAction::Ui(UiAction::Activate(control_id)))
                 } else if let (Some(list_id), Some(item_id)) = (self.list_id, self.item_id.clone())
                 {
-                    Some(SemanticAction::Ui(UiAction::ActivateListItem {
-                        list: list_id,
-                        item_id,
-                    }))
+                    if list_id == ListId::SettingsSections {
+                        settings_section_from_item_id(&item_id).map(|section| {
+                            SemanticAction::Intent(IntentAction::OpenSettingsSection(section))
+                        })
+                    } else {
+                        Some(SemanticAction::Ui(UiAction::ActivateListItem {
+                            list: list_id,
+                            item_id,
+                        }))
+                    }
                 } else {
                     None
                 }
@@ -572,6 +691,61 @@ impl TryFrom<SemanticStep> for ScenarioStep {
                 step.action = ScenarioAction::FaultTunnelDrop;
                 step.instance = Some(actor.0);
             }
+            SemanticAction::Intent(IntentAction::OpenScreen(screen_id)) => {
+                step.action = ScenarioAction::ClickButton;
+                step.control_id = Some(nav_control_id_for_screen(screen_id));
+            }
+            SemanticAction::Intent(IntentAction::CreateAccount { account_name }) => {
+                step.action = ScenarioAction::CreateAccount;
+                step.value = Some(account_name);
+            }
+            SemanticAction::Intent(IntentAction::StartDeviceEnrollment {
+                device_name,
+                code_name,
+            }) => {
+                step.action = ScenarioAction::StartDeviceEnrollment;
+                step.value = Some(device_name);
+                step.var = Some(code_name);
+            }
+            SemanticAction::Intent(IntentAction::ImportDeviceEnrollmentCode { code }) => {
+                step.action = ScenarioAction::ImportDeviceEnrollmentCode;
+                step.value = Some(code);
+            }
+            SemanticAction::Intent(IntentAction::OpenSettingsSection(section)) => {
+                step.action = ScenarioAction::ClickButton;
+                step.list_id = Some(ListId::SettingsSections);
+                step.item_id = Some(settings_section_item_id(section).to_string());
+            }
+            SemanticAction::Intent(IntentAction::RemoveSelectedDevice) => {
+                step.action = ScenarioAction::RemoveSelectedDevice;
+            }
+            SemanticAction::Intent(IntentAction::CreateContactInvitation {
+                receiver_authority_id,
+                code_name,
+            }) => {
+                step.action = ScenarioAction::CreateContactInvitation;
+                step.value = Some(receiver_authority_id);
+                step.var = Some(code_name);
+            }
+            SemanticAction::Intent(IntentAction::AcceptContactInvitation { code }) => {
+                step.action = ScenarioAction::AcceptContactInvitation;
+                step.value = Some(code);
+            }
+            SemanticAction::Intent(IntentAction::AcceptPendingChannelInvitation) => {
+                step.action = ScenarioAction::AcceptPendingChannelInvitation;
+            }
+            SemanticAction::Intent(IntentAction::JoinChannel { channel_name }) => {
+                step.action = ScenarioAction::SendChatCommand;
+                step.command = Some(format!("join {channel_name}"));
+            }
+            SemanticAction::Intent(IntentAction::InviteActorToChannel { authority_id }) => {
+                step.action = ScenarioAction::InviteActorToChannel;
+                step.value = Some(authority_id);
+            }
+            SemanticAction::Intent(IntentAction::SendChatMessage { message }) => {
+                step.action = ScenarioAction::SendChatMessage;
+                step.value = Some(message);
+            }
             SemanticAction::Ui(UiAction::Navigate(screen_id)) => {
                 step.action = ScenarioAction::ClickButton;
                 step.control_id = Some(nav_control_id_for_screen(screen_id));
@@ -602,10 +776,6 @@ impl TryFrom<SemanticStep> for ScenarioStep {
             SemanticAction::Ui(UiAction::SendChatCommand(command)) => {
                 step.action = ScenarioAction::SendChatCommand;
                 step.command = Some(command);
-            }
-            SemanticAction::Ui(UiAction::SendChatMessage(message)) => {
-                step.action = ScenarioAction::SendChatMessage;
-                step.value = Some(message);
             }
             SemanticAction::Ui(UiAction::PasteClipboard { source_actor }) => {
                 step.action = ScenarioAction::SendClipboard;
@@ -671,6 +841,14 @@ impl TryFrom<SemanticStep> for ScenarioStep {
                 step.action = ScenarioAction::WaitFor;
                 step.readiness = Some(readiness);
             }
+            SemanticAction::Expect(Expectation::RuntimeEventOccurred {
+                kind,
+                detail_contains,
+            }) => {
+                step.action = ScenarioAction::WaitFor;
+                step.runtime_event_kind = Some(kind);
+                step.contains = detail_contains;
+            }
             SemanticAction::Expect(Expectation::OperationStateIs {
                 operation_id,
                 state,
@@ -727,6 +905,31 @@ fn nav_control_id_for_screen(screen_id: ScreenId) -> ControlId {
         ScreenId::Contacts => ControlId::NavContacts,
         ScreenId::Notifications => ControlId::NavNotifications,
         ScreenId::Settings => ControlId::NavSettings,
+    }
+}
+
+fn screen_id_for_nav_control_id(control_id: ControlId) -> Option<ScreenId> {
+    match control_id {
+        ControlId::OnboardingRoot => Some(ScreenId::Onboarding),
+        ControlId::NavNeighborhood => Some(ScreenId::Neighborhood),
+        ControlId::NavChat => Some(ScreenId::Chat),
+        ControlId::NavContacts => Some(ScreenId::Contacts),
+        ControlId::NavNotifications => Some(ScreenId::Notifications),
+        ControlId::NavSettings => Some(ScreenId::Settings),
+        _ => None,
+    }
+}
+
+fn settings_section_item_id(section: SettingsSection) -> &'static str {
+    match section {
+        SettingsSection::Devices => "devices",
+    }
+}
+
+fn settings_section_from_item_id(item_id: &str) -> Option<SettingsSection> {
+    match item_id.replace('_', "-").as_str() {
+        "devices" => Some(SettingsSection::Devices),
+        _ => None,
     }
 }
 
@@ -848,6 +1051,14 @@ fn expectation_from_step(step: &ScenarioStep) -> Result<Option<SemanticAction>> 
             readiness,
         ))));
     }
+    if let Some(kind) = step.runtime_event_kind {
+        return Ok(Some(SemanticAction::Expect(
+            Expectation::RuntimeEventOccurred {
+                kind,
+                detail_contains: step.contains.clone().or_else(|| step.expect.clone()),
+            },
+        )));
+    }
     if let (Some(operation_id), Some(state)) = (step.operation_id.clone(), step.operation_state) {
         return Ok(Some(SemanticAction::Expect(
             Expectation::OperationStateIs {
@@ -920,12 +1131,61 @@ pub fn load_semantic_scenario_definition(path: &Path) -> Result<ScenarioDefiniti
             path.display()
         )
     })?;
-    ScenarioDefinition::try_from(file).map_err(|error| {
+    let definition = ScenarioDefinition::try_from(file).map_err(|error| {
         anyhow!(
             "failed to convert semantic scenario at {}: {error}",
             path.display()
         )
-    })
+    })?;
+    if scenario_classification_for_path(path)? == Some(ScenarioClassification::Shared) {
+        definition
+            .validate_shared_intent_contract()
+            .map_err(|error| {
+                anyhow!(
+                    "shared scenario {} violates intent contract: {error}",
+                    path.display()
+                )
+            })?;
+    }
+    Ok(definition)
+}
+
+fn scenario_classification_for_path(path: &Path) -> Result<Option<ScenarioClassification>> {
+    let inventory_path = Path::new(HARNESS_SCENARIO_INVENTORY_PATH);
+    if !inventory_path.exists() {
+        return Ok(None);
+    }
+    let body = fs::read_to_string(inventory_path).with_context(|| {
+        format!(
+            "failed to read scenario inventory at {}",
+            inventory_path.display()
+        )
+    })?;
+    let inventory: ScenarioInventoryFile = toml::from_str(&body).with_context(|| {
+        format!(
+            "failed to parse scenario inventory TOML at {}",
+            inventory_path.display()
+        )
+    })?;
+    let requested = normalize_inventory_path(path)?;
+    Ok(inventory
+        .scenario
+        .into_iter()
+        .find(|entry| normalize_inventory_path_lossy(&entry.path) == requested)
+        .map(|entry| entry.classification))
+}
+
+fn normalize_inventory_path(path: &Path) -> Result<String> {
+    let current_dir = std::env::current_dir().context("failed to resolve current_dir")?;
+    Ok(path
+        .strip_prefix(&current_dir)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/"))
+}
+
+fn normalize_inventory_path_lossy(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 impl RunConfig {
@@ -1077,7 +1337,11 @@ impl RunConfig {
                             instance.id
                         );
                     }
-                    if instance.env.iter().any(|entry| !is_harness_env_entry(entry)) {
+                    if instance
+                        .env
+                        .iter()
+                        .any(|entry| !is_harness_env_entry(entry))
+                    {
                         bail!(
                             "ssh instance {} must not set non-harness env entries",
                             instance.id
@@ -1153,6 +1417,7 @@ impl ScenarioConfig {
                 && step.control_id.is_none()
                 && step.modal_id.is_none()
                 && step.readiness.is_none()
+                && step.runtime_event_kind.is_none()
                 && step.list_id.is_none()
                 && step.operation_id.is_none()
             {

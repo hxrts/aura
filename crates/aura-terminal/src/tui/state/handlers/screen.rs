@@ -195,18 +195,19 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 DispatchCommand::OpenCreateInvitationModal,
             ));
         }
+        KeyCode::Char('i') => {
+            commands.push(TuiCommand::Dispatch(
+                DispatchCommand::InviteSelectedContactToChannel,
+            ));
+        }
         KeyCode::Char('p') => {
             if state.contacts.focus.is_list() {
                 if state.contacts.lan_peer_count > 0 {
                     state.contacts.list_focus = state.contacts.list_focus.toggle();
                 } else {
-                    state.toast_info("No LAN peers yet. Press d to rescan.");
+                    state.toast_info("No LAN peers discovered yet.");
                 }
             }
-        }
-        KeyCode::Char('d') => {
-            // Refresh LAN discovery list
-            commands.push(TuiCommand::Dispatch(DispatchCommand::RefreshLanPeers));
         }
         KeyCode::Char('r') => {
             // Open remove contact confirmation modal via dispatch (shell populates selected contact)

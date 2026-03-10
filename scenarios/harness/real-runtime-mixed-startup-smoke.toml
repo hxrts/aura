@@ -17,14 +17,14 @@ timeout_ms = 20000
 
 [[steps]]
 id = "alice-onboarding-visible"
-action = "control_visible"
+action = "screen_is"
 actor = "alice"
-control_id = "onboarding_root"
+screen_id = "onboarding"
 timeout_ms = 30000
 
 [[steps]]
 id = "bob-onboarding-visible"
-action = "control_visible"
+action = "screen_is"
 actor = "bob"
-control_id = "onboarding_root"
+screen_id = "onboarding"
 timeout_ms = 60000

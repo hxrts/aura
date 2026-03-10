@@ -164,6 +164,14 @@ const CONTACTS_BINDINGS: &[KeyBinding] = &[
         true,
     ),
     KeyBinding::new(
+        "i",
+        "i",
+        "Invite",
+        "Invite selected contact to current channel",
+        "Contacts",
+        true,
+    ),
+    KeyBinding::new(
         "p",
         "p",
         "Peers",
@@ -171,7 +179,6 @@ const CONTACTS_BINDINGS: &[KeyBinding] = &[
         "Contacts",
         false,
     ),
-    KeyBinding::new("d", "d", "Rescan", "Rescan LAN peers", "Contacts", true),
     KeyBinding::new("r", "r", "Remove", "Remove contact", "Contacts", false),
 ];
 

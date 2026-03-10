@@ -36,46 +36,30 @@ timeout_ms = 15000
 
 [[steps]]
 id = "alice-onboarding-visible"
-action = "control_visible"
+action = "screen_is"
 actor = "alice"
-control_id = "onboarding_root"
+screen_id = "onboarding"
 timeout_ms = 60000
 
 [[steps]]
 id = "bob-onboarding-visible"
-action = "control_visible"
+action = "screen_is"
 actor = "bob"
-control_id = "onboarding_root"
+screen_id = "onboarding"
 timeout_ms = 60000
 
 [[steps]]
-id = "alice-fill-account-name"
-action = "fill"
+id = "alice-create-account"
+action = "create_account"
 actor = "alice"
-field_id = "account_name"
 value = "AliceUser"
 timeout_ms = 3000
 
 [[steps]]
-id = "alice-create-account"
-action = "activate"
-actor = "alice"
-control_id = "onboarding_create_account_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "bob-fill-account-name"
-action = "fill"
-actor = "bob"
-field_id = "account_name"
-value = "BobUser"
-timeout_ms = 4000
-
-[[steps]]
 id = "bob-create-account"
-action = "activate"
+action = "create_account"
 actor = "bob"
-control_id = "onboarding_create_account_button"
+value = "BobUser"
 timeout_ms = 4000
 
 [[steps]]
@@ -108,14 +92,14 @@ timeout_ms = 120000
 
 [[steps]]
 id = "alice-open-contacts"
-action = "navigate"
+action = "open_screen"
 actor = "alice"
 screen_id = "contacts"
 timeout_ms = 3000
 
 [[steps]]
 id = "bob-open-contacts"
-action = "navigate"
+action = "open_screen"
 actor = "bob"
 screen_id = "contacts"
 timeout_ms = 3000
@@ -135,127 +119,73 @@ name = "bob_authority_id"
 timeout_ms = 3000
 
 [[steps]]
-id = "bob-open-invite-modal"
-action = "activate"
+id = "bob-create-contact-invitation"
+action = "create_contact_invitation"
 actor = "bob"
-control_id = "contacts_create_invitation_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "bob-create-invite-modal-open"
-action = "modal_open"
-actor = "bob"
-modal_id = "create_invitation"
-timeout_ms = 12000
-
-[[steps]]
-id = "bob-fill-invite-receiver"
-action = "fill"
-actor = "bob"
-field_id = "invitation_receiver"
 value = "${alice_authority_id}"
-timeout_ms = 3000
-
-[[steps]]
-id = "bob-create-invite"
-action = "activate"
-actor = "bob"
-control_id = "modal_confirm_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "bob-invite-created"
-action = "operation_state_is"
-actor = "bob"
-operation_id = "invitation_create"
-operation_state = "succeeded"
+name = "invite_code"
 timeout_ms = 30000
 
 [[steps]]
-id = "bob-read-invite-code"
-action = "read_clipboard"
+id = "bob-invite-code-ready"
+action = "runtime_event_occurred"
 actor = "bob"
-name = "invite_code"
+runtime_event_kind = "invitation_code_ready"
 timeout_ms = 12000
 
 [[steps]]
-id = "alice-open-accept-modal"
-action = "activate"
+id = "alice-accept-contact-invitation"
+action = "accept_contact_invitation"
 actor = "alice"
-control_id = "contacts_accept_invitation_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "alice-accept-modal-open"
-action = "modal_open"
-actor = "alice"
-modal_id = "accept_invitation"
-timeout_ms = 8000
-
-[[steps]]
-id = "alice-fill-invite-code"
-action = "fill"
-actor = "alice"
-field_id = "invitation_code"
 value = "${invite_code}"
 timeout_ms = 12000
 
 [[steps]]
-id = "alice-submit-invite"
-action = "activate"
+id = "alice-contact-link-ready"
+action = "runtime_event_occurred"
 actor = "alice"
-control_id = "modal_confirm_button"
-timeout_ms = 3000
-
-[[steps]]
-id = "alice-contact-count-one"
-action = "list_count_is"
-actor = "alice"
-list_id = "contacts"
-count = 1
+runtime_event_kind = "contact_link_ready"
 timeout_ms = 30000
 
 [[steps]]
 id = "alice-open-chat"
-action = "navigate"
+action = "open_screen"
 actor = "alice"
 screen_id = "chat"
 timeout_ms = 3000
 
 [[steps]]
-id = "bob-contact-count-one"
-action = "list_count_is"
-actor = "bob"
-list_id = "contacts"
-count = 1
-timeout_ms = 30000
-
-[[steps]]
 id = "bob-open-chat"
-action = "navigate"
+action = "open_screen"
 actor = "bob"
 screen_id = "chat"
 timeout_ms = 3000
 
 [[steps]]
 id = "alice-join-shared-channel"
-action = "send_chat_command"
+action = "join_channel"
 actor = "alice"
-value = "join shared-parity-lab"
+value = "shared-parity-lab"
 timeout_ms = 6000
 
 [[steps]]
-id = "alice-invite-bob-to-shared-channel"
-action = "send_chat_command"
+id = "alice-channel-membership-ready"
+action = "runtime_event_occurred"
 actor = "alice"
-value = "invite ${bob_authority_id}"
+runtime_event_kind = "channel_membership_ready"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-invite-bob-to-shared-channel"
+action = "invite_actor_to_channel"
+actor = "alice"
+value = "${bob_authority_id}"
 timeout_ms = 6000
 
 [[steps]]
 id = "bob-join-shared-channel"
-action = "send_chat_command"
+action = "accept_pending_channel_invitation"
 actor = "bob"
-value = "join shared-parity-lab"
 timeout_ms = 6000
 
 [[steps]]

@@ -20,7 +20,10 @@ use crate::{
 use async_lock::RwLock;
 use aura_core::identifiers::AuthorityId;
 use aura_core::AuraError;
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, sync::Arc, time::Duration};
+
+/// Period between automatic discovered-peer refreshes in interactive frontends.
+pub const DISCOVERED_PEERS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
 // ============================================================================
 // Peer Management (connected peer tracking)

@@ -436,7 +436,10 @@ impl InstanceBackend for LocalPtyBackend {
                 thread::sleep(Duration::from_millis(50));
             }
         }
-        if matches!(field_id, FieldId::InvitationCode | FieldId::DeviceImportCode) {
+        if matches!(
+            field_id,
+            FieldId::InvitationCode | FieldId::DeviceImportCode
+        ) {
             for ch in value.chars() {
                 let mut buf = [0u8; 4];
                 let s = ch.encode_utf8(&mut buf);

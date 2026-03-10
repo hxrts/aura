@@ -914,6 +914,41 @@ impl UiModel {
         }
     }
 
+    pub fn set_modal_field_value(&mut self, field_id: FieldId, value: impl Into<String>) {
+        let value = value.into();
+        if let Some(ActiveModal::CreateChannel(state)) = self.active_modal.as_mut() {
+            if matches!(state.step, CreateChannelWizardStep::Details) {
+                match field_id {
+                    FieldId::CreateChannelName => {
+                        state.active_field = CreateChannelDetailsField::Name;
+                        state.name = value;
+                        return;
+                    }
+                    FieldId::CreateChannelTopic => {
+                        state.active_field = CreateChannelDetailsField::Topic;
+                        state.topic = value;
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        self.set_modal_text_value(value);
+    }
+
+    pub fn set_modal_active_field(&mut self, field_id: FieldId) {
+        let Some(ActiveModal::CreateChannel(state)) = self.active_modal.as_mut() else {
+            return;
+        };
+        if !matches!(state.step, CreateChannelWizardStep::Details) {
+            return;
+        }
+        state.active_field = match field_id {
+            FieldId::CreateChannelTopic => CreateChannelDetailsField::Topic,
+            _ => CreateChannelDetailsField::Name,
+        };
+    }
+
     pub fn append_modal_text_char(&mut self, ch: char) {
         let mut value = self.modal_text_value().unwrap_or_default();
         value.push(ch);
@@ -1627,6 +1662,16 @@ impl UiController {
         self.request_rerender();
     }
 
+    pub fn set_modal_field_value(&self, field_id: FieldId, value: &str) {
+        write_model(&self.model).set_modal_field_value(field_id, value);
+        self.request_rerender();
+    }
+
+    pub fn set_modal_active_field(&self, field_id: FieldId) {
+        write_model(&self.model).set_modal_active_field(field_id);
+        self.request_rerender();
+    }
+
     pub fn clear_input_buffer(&self) {
         write_model(&self.model).input_buffer.clear();
         self.request_rerender();
@@ -1761,6 +1806,19 @@ impl UiController {
         self.request_rerender();
     }
 
+    pub fn complete_runtime_modal_operation_success(
+        &self,
+        operation_id: OperationId,
+        message: impl Into<String>,
+    ) {
+        let mut model = write_model(&self.model);
+        model.set_operation_state(operation_id, OperationState::Succeeded);
+        set_toast(&mut model, '✓', message);
+        dismiss_modal(&mut model);
+        drop(model);
+        self.request_rerender();
+    }
+
     pub fn clear_runtime_operation(&self, operation_id: &OperationId) {
         let mut model = write_model(&self.model);
         model.clear_operation(operation_id);
@@ -1806,6 +1864,47 @@ impl UiController {
         self.request_rerender();
     }
 
+    pub fn complete_runtime_contact_invitation_acceptance(
+        &self,
+        authority_id: AuthorityId,
+        display_name: String,
+    ) {
+        let mut model = write_model(&self.model);
+        model.ensure_runtime_contact(authority_id, display_name, false);
+        model.push_runtime_event(
+            RuntimeEventKind::InvitationAccepted,
+            format!("kind=contact sender_id={authority_id}"),
+        );
+        model.push_runtime_event(
+            RuntimeEventKind::ContactLinkReady,
+            format!("authority_id={authority_id}"),
+        );
+        model.set_selected_contact_authority_id(authority_id);
+        dismiss_modal(&mut model);
+        model.set_operation_state(OperationId::invitation_accept(), OperationState::Succeeded);
+        let snapshot = model.semantic_snapshot();
+        let snapshot_modal = snapshot
+            .open_modal
+            .map(|modal| format!("{modal:?}"))
+            .unwrap_or_else(|| "None".to_string());
+        let invitation_state = snapshot
+            .operations
+            .iter()
+            .find(|operation| operation.id == OperationId::invitation_accept())
+            .map(|operation| format!("{:?}", operation.state))
+            .unwrap_or_else(|| "Missing".to_string());
+        tracing::info!(
+            modal = %snapshot_modal,
+            invitation_accept = %invitation_state,
+            "complete_runtime_invitation_operation snapshot"
+        );
+        model.logs.push(format!(
+            "complete_runtime_invitation_operation snapshot modal={snapshot_modal} invitation_accept={invitation_state}"
+        ));
+        drop(model);
+        self.request_rerender();
+    }
+
     pub fn complete_runtime_modal_success(&self, message: impl Into<String>) {
         let mut model = write_model(&self.model);
         set_toast(&mut model, '✓', message);
@@ -1824,6 +1923,10 @@ impl UiController {
             code_copied: false,
             ..AddDeviceModalState::default()
         }));
+        model.push_runtime_event(
+            RuntimeEventKind::DeviceEnrollmentCodeReady,
+            format!("device_name={name} code_len={}", enrollment_code.len()),
+        );
         drop(model);
         self.request_rerender();
     }

@@ -2894,7 +2894,10 @@ mod tests {
                 break;
             }
         }
-        assert!(found, "expected sender-side ContactFact::Added for receiver");
+        assert!(
+            found,
+            "expected sender-side ContactFact::Added for receiver"
+        );
     }
 
     #[tokio::test]
