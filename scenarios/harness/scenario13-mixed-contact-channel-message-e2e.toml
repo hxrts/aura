@@ -140,14 +140,6 @@ actor = "alice"
 runtime_event_kind = "contact_link_ready"
 timeout_ms = 30000
 
-[[steps]]
-id = "alice-create-home"
-action = "create_home"
-actor = "alice"
-value = "Alice Shared Home"
-timeout_ms = 12000
-
-[[steps]]
 id = "alice-join-shared-channel"
 action = "join_channel"
 actor = "alice"

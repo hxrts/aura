@@ -774,6 +774,18 @@ impl InstanceBackend for LocalPtyBackend {
     }
 
     fn join_channel_via_ui(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
+        const PLACEHOLDER_HOME_ID: &str =
+            "channel:0000000000000000000000000000000000000000000000000000000000000000";
+        let has_real_home = self
+            .ui_snapshot()?
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Homes)
+            .map(|list| list.items.iter().any(|item| item.id != PLACEHOLDER_HOME_ID))
+            .unwrap_or(false);
+        if !has_real_home {
+            let _ = self.create_home_via_ui("Harness Shared Home");
+        }
         self.activate_control(ControlId::NavChat)?;
         wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
         self.send_keys("n")?;
