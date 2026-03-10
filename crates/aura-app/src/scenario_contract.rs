@@ -61,6 +61,9 @@ pub enum IntentAction {
     CreateAccount {
         account_name: String,
     },
+    CreateHome {
+        home_name: String,
+    },
     StartDeviceEnrollment {
         device_name: String,
         code_name: String,

@@ -189,6 +189,7 @@ pub enum ScenarioAction {
     CaptureSelection,
     ExtractVar,
     CreateAccount,
+    CreateHome,
     StartDeviceEnrollment,
     ImportDeviceEnrollmentCode,
     RemoveSelectedDevice,
@@ -243,6 +244,7 @@ impl fmt::Display for ScenarioAction {
             Self::CaptureSelection => "capture_selection",
             Self::ExtractVar => "extract_var",
             Self::CreateAccount => "create_account",
+            Self::CreateHome => "create_home",
             Self::StartDeviceEnrollment => "start_device_enrollment",
             Self::ImportDeviceEnrollmentCode => "import_device_enrollment_code",
             Self::RemoveSelectedDevice => "remove_selected_device",
@@ -420,6 +422,13 @@ impl ScenarioStep {
                     )?,
                 }))
             }
+            ScenarioAction::CreateHome => Some(SemanticAction::Intent(IntentAction::CreateHome {
+                home_name: required_field(
+                    self.value.clone().or_else(|| self.expect.clone()),
+                    "value",
+                    self.action,
+                )?,
+            })),
             ScenarioAction::StartDeviceEnrollment => Some(SemanticAction::Intent(
                 IntentAction::StartDeviceEnrollment {
                     device_name: required_field(
@@ -709,6 +718,10 @@ impl TryFrom<SemanticStep> for ScenarioStep {
             SemanticAction::Intent(IntentAction::CreateAccount { account_name }) => {
                 step.action = ScenarioAction::CreateAccount;
                 step.value = Some(account_name);
+            }
+            SemanticAction::Intent(IntentAction::CreateHome { home_name }) => {
+                step.action = ScenarioAction::CreateHome;
+                step.value = Some(home_name);
             }
             SemanticAction::Intent(IntentAction::StartDeviceEnrollment {
                 device_name,

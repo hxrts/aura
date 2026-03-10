@@ -682,6 +682,34 @@ impl InstanceBackend for LocalPtyBackend {
         Ok(SubmittedAction::without_handle(()))
     }
 
+    fn create_home_via_ui(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
+        const PLACEHOLDER_HOME_ID: &str =
+            "channel:0000000000000000000000000000000000000000000000000000000000000000";
+        self.activate_control(ControlId::NavNeighborhood)?;
+        wait_for_screen_visible(self, ScreenId::Neighborhood, Duration::from_secs(5))?;
+        self.activate_control(ControlId::NeighborhoodNewHomeButton)?;
+        wait_for_modal_visible(self, ModalId::CreateHome, Duration::from_secs(5))?;
+        thread::sleep(Duration::from_millis(200));
+        self.fill_field(FieldId::HomeName, home_name)?;
+        thread::sleep(Duration::from_millis(150));
+        self.send_keys("\r")?;
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            let ready = snapshot
+                .lists
+                .iter()
+                .find(|list| list.id == ListId::Homes)
+                .map(|list| list.items.iter().any(|item| item.id != PLACEHOLDER_HOME_ID))
+                .unwrap_or(false);
+            if ready || Instant::now() >= deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(80));
+        }
+        Ok(SubmittedAction::without_handle(()))
+    }
+
     fn create_contact_invitation(&mut self, receiver_authority_id: &str) -> Result<String> {
         Ok(self
             .create_contact_invitation_via_ui(receiver_authority_id)?
@@ -973,6 +1001,10 @@ impl SharedSemanticBackend for LocalPtyBackend {
 
     fn submit_create_account(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
         InstanceBackend::create_account_via_ui(self, account_name)
+    }
+
+    fn submit_create_home(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
+        InstanceBackend::create_home_via_ui(self, home_name)
     }
 
     fn submit_create_contact_invitation(

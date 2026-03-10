@@ -141,18 +141,11 @@ runtime_event_kind = "contact_link_ready"
 timeout_ms = 30000
 
 [[steps]]
-id = "alice-open-chat"
-action = "open_screen"
+id = "alice-create-home"
+action = "create_home"
 actor = "alice"
-screen_id = "chat"
-timeout_ms = 3000
-
-[[steps]]
-id = "bob-open-chat"
-action = "open_screen"
-actor = "bob"
-screen_id = "chat"
-timeout_ms = 3000
+value = "Alice Shared Home"
+timeout_ms = 12000
 
 [[steps]]
 id = "alice-join-shared-channel"

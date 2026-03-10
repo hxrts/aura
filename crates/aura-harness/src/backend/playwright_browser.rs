@@ -780,6 +780,16 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         Ok(SubmittedAction::without_handle(()))
     }
 
+    fn create_home_via_ui(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
+        self.activate_control(ControlId::NavNeighborhood)?;
+        wait_for_screen_visible(self, ScreenId::Neighborhood, Duration::from_secs(5))?;
+        self.activate_control(ControlId::NeighborhoodNewHomeButton)?;
+        wait_for_modal_visible(self, ModalId::CreateHome, Duration::from_secs(5))?;
+        self.fill_field(FieldId::HomeName, home_name)?;
+        self.activate_control(ControlId::ModalConfirmButton)?;
+        Ok(SubmittedAction::without_handle(()))
+    }
+
     fn create_contact_invitation_via_ui(
         &mut self,
         receiver_authority_id: &str,
@@ -843,7 +853,31 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         wait_for_modal_visible(self, ModalId::CreateChannel, Duration::from_secs(5))?;
         self.fill_field(FieldId::CreateChannelName, channel_name)?;
         self.activate_control(ControlId::ModalConfirmButton)?;
+        let members_deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            let advanced = snapshot.open_modal == Some(ModalId::CreateChannel)
+                && !matches!(
+                    snapshot.focused_control,
+                    Some(ControlId::Field(FieldId::CreateChannelName))
+                        | Some(ControlId::Field(FieldId::CreateChannelTopic))
+                );
+            if advanced || Instant::now() >= members_deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(80));
+        }
         self.activate_control(ControlId::ModalConfirmButton)?;
+        let threshold_deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            if snapshot.focused_control == Some(ControlId::Field(FieldId::ThresholdInput))
+                || Instant::now() >= threshold_deadline
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(80));
+        }
         self.activate_control(ControlId::ModalConfirmButton)?;
         Ok(SubmittedAction::without_handle(()))
     }
@@ -1024,6 +1058,10 @@ impl SharedSemanticBackend for PlaywrightBrowserBackend {
 
     fn submit_create_account(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
         InstanceBackend::create_account_via_ui(self, account_name)
+    }
+
+    fn submit_create_home(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
+        InstanceBackend::create_home_via_ui(self, home_name)
     }
 
     fn submit_create_contact_invitation(

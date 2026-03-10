@@ -236,6 +236,14 @@ impl ToolApi {
             .create_account_via_ui(instance_id, account_name)
     }
 
+    pub fn submit_create_home(
+        &mut self,
+        instance_id: &str,
+        home_name: &str,
+    ) -> anyhow::Result<SubmittedAction<()>> {
+        self.coordinator.create_home_via_ui(instance_id, home_name)
+    }
+
     pub fn submit_create_contact_invitation(
         &mut self,
         instance_id: &str,

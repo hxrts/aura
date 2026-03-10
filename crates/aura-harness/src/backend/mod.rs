@@ -175,12 +175,21 @@ pub trait InstanceBackend {
             self.backend_kind()
         )
     }
+    fn create_home_via_ui(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
+        let _ = home_name;
+        bail!(
+            "semantic create_home is not supported by backend {}",
+            self.backend_kind()
+        )
+    }
     fn create_contact_invitation_via_ui(
         &mut self,
         receiver_authority_id: &str,
     ) -> Result<SubmittedAction<ContactInvitationCode>> {
         let code = self.create_contact_invitation(receiver_authority_id)?;
-        Ok(SubmittedAction::without_handle(ContactInvitationCode { code }))
+        Ok(SubmittedAction::without_handle(ContactInvitationCode {
+            code,
+        }))
     }
     fn accept_contact_invitation_via_ui(&mut self, code: &str) -> Result<SubmittedAction<()>> {
         let _ = code;
@@ -253,12 +262,14 @@ pub trait SharedSemanticBackend {
         after_version: Option<u64>,
     ) -> Option<Result<UiSnapshotEvent>>;
     fn submit_create_account(&mut self, account_name: &str) -> Result<SubmittedAction<()>>;
+    fn submit_create_home(&mut self, home_name: &str) -> Result<SubmittedAction<()>>;
     fn submit_create_contact_invitation(
         &mut self,
         receiver_authority_id: &str,
     ) -> Result<SubmittedAction<ContactInvitationCode>>;
     fn submit_accept_contact_invitation(&mut self, code: &str) -> Result<SubmittedAction<()>>;
-    fn submit_invite_actor_to_channel(&mut self, authority_id: &str) -> Result<SubmittedAction<()>>;
+    fn submit_invite_actor_to_channel(&mut self, authority_id: &str)
+        -> Result<SubmittedAction<()>>;
     fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>>;
     fn submit_join_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>>;
     fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>>;
@@ -334,7 +345,10 @@ pub(crate) fn wait_for_operation_submission(
             }
         }
         if std::time::Instant::now() >= deadline {
-            bail!("timed out waiting for operation submission {:?}", operation_id);
+            bail!(
+                "timed out waiting for operation submission {:?}",
+                operation_id
+            );
         }
         std::thread::sleep(Duration::from_millis(50));
     }

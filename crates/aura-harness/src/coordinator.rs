@@ -711,7 +711,27 @@ impl HarnessCoordinator {
             Some(instance_id.to_string()),
             serde_json::json!({ "account_name": account_name }),
         );
-        backend.as_shared_semantic_mut()?.submit_create_account(account_name)
+        backend
+            .as_shared_semantic_mut()?
+            .submit_create_account(account_name)
+    }
+
+    pub fn create_home_via_ui(
+        &mut self,
+        instance_id: &str,
+        home_name: &str,
+    ) -> Result<SubmittedAction<()>> {
+        let backend = self
+            .backends
+            .get_mut(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        self.events.push(
+            "action",
+            "create_home_via_ui",
+            Some(instance_id.to_string()),
+            serde_json::json!({ "home_name": home_name }),
+        );
+        backend.as_shared_semantic_mut()?.submit_create_home(home_name)
     }
 
     pub fn create_contact_invitation_via_ui(
@@ -810,7 +830,9 @@ impl HarnessCoordinator {
             Some(instance_id.to_string()),
             serde_json::json!({ "channel_name": channel_name }),
         );
-        backend.as_shared_semantic_mut()?.submit_join_channel(channel_name)
+        backend
+            .as_shared_semantic_mut()?
+            .submit_join_channel(channel_name)
     }
 
     pub fn send_chat_message_via_ui(
@@ -1147,6 +1169,7 @@ fn provision_browser_app_url(config: &RunConfig) -> Result<BrowserAppUrlProvisio
     let log_file_err = log_file.try_clone()?;
     let child = Command::new(&script)
         .arg(port.to_string())
+        .env("AURA_HARNESS_WEB_BUILD_PROFILE", "debug")
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(log_file_err))
         .spawn()

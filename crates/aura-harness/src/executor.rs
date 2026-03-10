@@ -331,6 +331,7 @@ impl SharedFlowState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SharedSemanticBinding {
     CreateAccount,
+    CreateHome,
     StartDeviceEnrollment,
     ImportDeviceEnrollmentCode,
     RemoveSelectedDevice,
@@ -346,6 +347,7 @@ impl SharedSemanticBinding {
     fn from_action(action: ScenarioAction) -> Option<Self> {
         match action {
             ScenarioAction::CreateAccount => Some(Self::CreateAccount),
+            ScenarioAction::CreateHome => Some(Self::CreateHome),
             ScenarioAction::StartDeviceEnrollment => Some(Self::StartDeviceEnrollment),
             ScenarioAction::ImportDeviceEnrollmentCode => Some(Self::ImportDeviceEnrollmentCode),
             ScenarioAction::RemoveSelectedDevice => Some(Self::RemoveSelectedDevice),
@@ -556,6 +558,7 @@ fn execute_step(
     }
     match step.action {
         ScenarioAction::LaunchInstances | ScenarioAction::Noop => Ok(()),
+        ScenarioAction::CreateHome => unreachable!("shared semantic action should have been handled"),
         ScenarioAction::SetVar => {
             let var = step
                 .var
@@ -661,7 +664,6 @@ fn execute_step(
             Ok(())
         }
         ScenarioAction::CreateAccount => {
-            const CREATE_ACCOUNT_MIN_TIMEOUT_MS: u64 = 30_000;
             let instance_id = resolve_required_instance(step, context)?;
             let account_name = resolve_required_field(
                 step,
@@ -669,50 +671,11 @@ fn execute_step(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let action_timeout_ms = step
-                .timeout_ms
-                .unwrap_or(step_budget_ms)
-                .max(CREATE_ACCOUNT_MIN_TIMEOUT_MS);
             let submission = issue_stage(
                 step,
                 tool_api.submit_create_account(&instance_id, &account_name),
             )?;
             record_submission_handle(context, &instance_id, submission.handle.ui_operation);
-            let deadline = Instant::now() + Duration::from_millis(action_timeout_ms);
-            let mut neighborhood_step = semantic_wait_step(step);
-            neighborhood_step.screen_id = Some(ScreenId::Neighborhood);
-            convergence_stage(
-                step,
-                "account_neighborhood",
-                wait_for_semantic_state(
-                    &neighborhood_step,
-                    tool_api,
-                    &instance_id,
-                    action_timeout_ms,
-                ),
-            )?;
-            let remaining_ms = deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis()
-                .max(1) as u64;
-            let mut readiness_step = semantic_wait_step(step);
-            readiness_step.readiness = Some(aura_app::ui::contract::UiReadiness::Ready);
-            convergence_stage(
-                step,
-                "account_readiness",
-                wait_for_semantic_state(&readiness_step, tool_api, &instance_id, remaining_ms),
-            )?;
-            let remaining_ms = deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis()
-                .max(1) as u64;
-            if tool_api.backend_kind(&instance_id)? != "local_pty" {
-                convergence_stage(
-                    step,
-                    "home_bootstrap",
-                    wait_for_home_bootstrap_ready(step, tool_api, &instance_id, remaining_ms),
-                )?;
-            }
             record_shared_flow_progress(step, context, &instance_id);
             Ok(())
         }
@@ -1738,7 +1701,6 @@ fn execute_shared_semantic_action(
 ) -> Result<()> {
     match binding {
         SharedSemanticBinding::CreateAccount => {
-            const CREATE_ACCOUNT_MIN_TIMEOUT_MS: u64 = 30_000;
             let instance_id = resolve_required_instance(step, context)?;
             let account_name = resolve_required_field(
                 step,
@@ -1746,50 +1708,25 @@ fn execute_shared_semantic_action(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let action_timeout_ms = step
-                .timeout_ms
-                .unwrap_or(step_budget_ms)
-                .max(CREATE_ACCOUNT_MIN_TIMEOUT_MS);
             let submission = issue_stage(
                 step,
                 tool_api.submit_create_account(&instance_id, &account_name),
             )?;
             record_submission_handle(context, &instance_id, submission.handle.ui_operation);
-            let deadline = Instant::now() + Duration::from_millis(action_timeout_ms);
-            let mut neighborhood_step = semantic_wait_step(step);
-            neighborhood_step.screen_id = Some(ScreenId::Neighborhood);
-            convergence_stage(
+            record_shared_flow_progress(step, context, &instance_id);
+            Ok(())
+        }
+        SharedSemanticBinding::CreateHome => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let home_name = resolve_required_field(
                 step,
-                "account_neighborhood",
-                wait_for_semantic_state(
-                    &neighborhood_step,
-                    tool_api,
-                    &instance_id,
-                    action_timeout_ms,
-                ),
+                "value",
+                step.value.as_deref().or(step.expect.as_deref()),
+                context,
             )?;
-            let remaining_ms = deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis()
-                .max(1) as u64;
-            let mut readiness_step = semantic_wait_step(step);
-            readiness_step.readiness = Some(aura_app::ui::contract::UiReadiness::Ready);
-            convergence_stage(
-                step,
-                "account_readiness",
-                wait_for_semantic_state(&readiness_step, tool_api, &instance_id, remaining_ms),
-            )?;
-            let remaining_ms = deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis()
-                .max(1) as u64;
-            if tool_api.backend_kind(&instance_id)? != "local_pty" {
-                convergence_stage(
-                    step,
-                    "home_bootstrap",
-                    wait_for_home_bootstrap_ready(step, tool_api, &instance_id, remaining_ms),
-                )?;
-            }
+            let submission =
+                issue_stage(step, tool_api.submit_create_home(&instance_id, &home_name))?;
+            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
             record_shared_flow_progress(step, context, &instance_id);
             Ok(())
         }
@@ -2871,9 +2808,23 @@ fn wait_for_semantic_state(
                     browser_version = Some(version);
                     snapshot
                 }
-                Ok(None) => fetch_ui_snapshot(tool_api, instance_id)?,
-                Err(error) if error.to_string().contains("wait_for_ui_state timed out") => {
-                    fetch_ui_snapshot(tool_api, instance_id)?
+                Ok(None) => match fetch_ui_snapshot(tool_api, instance_id) {
+                    Ok(snapshot) => snapshot,
+                    Err(error) if is_browser_ui_snapshot_transient(&error) => {
+                        std::thread::sleep(Duration::from_millis(100));
+                        continue;
+                    }
+                    Err(error) => return Err(error),
+                },
+                Err(error) if is_browser_ui_snapshot_transient(&error) => {
+                    match fetch_ui_snapshot(tool_api, instance_id) {
+                        Ok(snapshot) => snapshot,
+                        Err(fetch_error) if is_browser_ui_snapshot_transient(&fetch_error) => {
+                            std::thread::sleep(Duration::from_millis(100));
+                            continue;
+                        }
+                        Err(fetch_error) => return Err(fetch_error),
+                    }
                 }
                 Err(error) => return Err(error),
             }
@@ -2895,6 +2846,15 @@ fn wait_for_semantic_state(
         Some(last_snapshot),
         diagnostic_screen
     )
+}
+
+fn is_browser_ui_snapshot_transient(error: &anyhow::Error) -> bool {
+    let message = error.to_string();
+    message.contains("wait_for_ui_state timed out")
+        || message.contains("request:ui_state timed out")
+        || message.contains("Playwright driver ui_state timed out")
+        || message.contains("Target page, context or browser has been closed")
+        || message.contains("ui_state timed out for request")
 }
 
 fn wait_for_parity(
