@@ -422,6 +422,12 @@ impl InstanceBackend for LocalPtyBackend {
             }
             _ => {}
         }
+        if control_id == ControlId::ModalConfirmButton {
+            let snapshot = self.ui_snapshot()?;
+            if snapshot.open_modal == Some(ModalId::CreateInvitation) {
+                return self.send_keys("\r");
+            }
+        }
         let sequence = control_id.activation_key().ok_or_else(|| {
             anyhow::anyhow!("control {control_id:?} does not have a PTY activation mapping")
         })?;

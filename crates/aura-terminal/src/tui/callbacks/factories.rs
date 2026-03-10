@@ -13,6 +13,10 @@ use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
 use crate::tui::types::{AccessLevel, MfaPolicy};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
+use aura_app::ui::signals::CONTACTS_SIGNAL;
+use aura_app::ui::types::InvitationBridgeType;
+use aura_app::ui::workflows::invitation::import_invitation_details;
+use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::CeremonyId;
 use aura_core::AuthorityId;
 
@@ -708,10 +712,55 @@ impl ContactsCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let code_clone = code.clone();
+            let app_core = ctx.app_core_raw().clone();
             let cmd = EffectCommand::ImportInvitation { code };
             spawn_ctx(ctx.clone(), async move {
+                let invitation = import_invitation_details(&app_core, &code_clone).await.ok();
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
+                        if let Some(invitation) = invitation.as_ref() {
+                            if matches!(
+                                invitation.invitation_type,
+                                InvitationBridgeType::Contact { .. }
+                            ) {
+                                const CONTACT_LINK_ATTEMPTS: usize = 150;
+                                const CONTACT_LINK_DELAY_MS: u64 = 100;
+                                let mut linked = false;
+                                for _ in 0..CONTACT_LINK_ATTEMPTS {
+                                    let has_contact = {
+                                        let core = app_core.read().await;
+                                        core.read(&*CONTACTS_SIGNAL)
+                                            .await
+                                            .ok()
+                                            .map(|contacts_state| {
+                                                contacts_state.all_contacts().any(|contact| {
+                                                    contact.id == invitation.sender_id
+                                                })
+                                            })
+                                            .unwrap_or(false)
+                                    };
+                                    if has_contact {
+                                        linked = true;
+                                        break;
+                                    }
+                                    tokio::time::sleep(Duration::from_millis(
+                                        CONTACT_LINK_DELAY_MS,
+                                    ))
+                                    .await;
+                                }
+                                if !linked {
+                                    send_ui_update_reliable(
+                                        &tx,
+                                        UiUpdate::operation_failed(
+                                            "ImportInvitation",
+                                            "timed out waiting for contact link".to_string(),
+                                        ),
+                                    )
+                                    .await;
+                                    return;
+                                }
+                            }
+                        }
                         let _ = tx.try_send(UiUpdate::InvitationImported {
                             invitation_code: code_clone,
                         });
@@ -894,35 +943,43 @@ impl InvitationsCallbacks {
                   ttl_secs: Option<u64>| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
+                let app_core = ctx.app_core_raw().clone();
                 spawn_ctx(ctx.clone(), async move {
-                    match tokio::time::timeout(
-                        Duration::from_secs(8),
-                        ctx.create_invitation_code(
-                            receiver_id,
-                            &invitation_type,
-                            message,
-                            ttl_secs,
-                        ),
-                    )
-                    .await
+                    let result = if invitation_type.eq_ignore_ascii_case("contact")
+                        || invitation_type.eq_ignore_ascii_case("personal")
                     {
-                        Ok(Ok(code)) => {
+                        let ttl_ms = ttl_secs.map(|secs| secs.saturating_mul(1000));
+                        match aura_app::ui::workflows::invitation::create_contact_invitation(
+                            &app_core,
+                            receiver_id,
+                            None,
+                            message,
+                            ttl_ms,
+                        )
+                        .await
+                        {
+                            Ok(invitation) => {
+                                aura_app::ui::workflows::invitation::export_invitation(
+                                    &app_core,
+                                    &invitation.invitation_id,
+                                )
+                                .await
+                                .map_err(|error| error.into())
+                            }
+                            Err(error) => Err(error.into()),
+                        }
+                    } else {
+                        ctx.create_invitation_code(receiver_id, &invitation_type, message, ttl_secs)
+                            .await
+                    };
+                    match result {
+                        Ok(code) => {
                             let _ = tx.try_send(UiUpdate::InvitationExported { code });
                         }
-                        Ok(Err(e)) => {
+                        Err(e) => {
                             send_ui_update_reliable(
                                 &tx,
                                 UiUpdate::operation_failed("CreateInvitation", e.to_string()),
-                            )
-                            .await;
-                        }
-                        Err(_) => {
-                            send_ui_update_reliable(
-                                &tx,
-                                UiUpdate::operation_failed(
-                                    "CreateInvitation",
-                                    "timed out waiting for invitation export",
-                                ),
                             )
                             .await;
                         }
@@ -1668,33 +1725,31 @@ impl AppCallbacks {
                 // Create the account file via async storage effects.
                 match ctx.create_account(&nickname_suggestion).await {
                     Ok(()) => {
-                        // Then persist the nickname suggestion to settings storage and emit SETTINGS_SIGNAL.
-                        // This is best-effort and does not hold up account creation.
-                        let _ = ctx
-                            .dispatch(EffectCommand::UpdateNickname {
-                                name: nickname_suggestion.clone(),
-                            })
-                            .await;
-
                         let _ = tx.try_send(UiUpdate::NicknameSuggestionChanged(
                             nickname_suggestion.clone(),
                         ));
 
-                        // Then dispatch the intent to create a journal fact.
-                        let cmd = EffectCommand::CreateAccount {
-                            nickname_suggestion: nickname_suggestion.clone(),
-                        };
+                        let _ = tx.try_send(UiUpdate::AccountCreated);
 
-                        match ctx.dispatch(cmd).await {
-                            Ok(_) => {
-                                let _ = tx.try_send(UiUpdate::AccountCreated);
-                            }
-                            Err(e) => {
-                                // Non-fatal: file was created, journal fact is optional.
+                        // Persist the nickname suggestion and create the journal fact in the
+                        // background. The local account already exists at this point, so
+                        // onboarding should not remain blocked on these best-effort follow-ups.
+                        let ctx_for_fact = ctx.clone();
+                        let nickname_for_fact = nickname_suggestion.clone();
+                        spawn_ctx(ctx_for_fact.clone(), async move {
+                            let _ = ctx_for_fact
+                                .dispatch(EffectCommand::UpdateNickname {
+                                    name: nickname_for_fact.clone(),
+                                })
+                                .await;
+
+                            let cmd = EffectCommand::CreateAccount {
+                                nickname_suggestion: nickname_for_fact,
+                            };
+                            if let Err(e) = ctx_for_fact.dispatch(cmd).await {
                                 tracing::warn!("Journal fact creation failed: {}", e);
-                                let _ = tx.try_send(UiUpdate::AccountCreated);
                             }
-                        }
+                        });
                     }
                     Err(e) => {
                         let _ = tx.try_send(UiUpdate::OperationFailed {

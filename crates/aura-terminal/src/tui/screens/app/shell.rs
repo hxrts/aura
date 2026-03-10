@@ -1975,49 +1975,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         }
                                     }
                                     DispatchCommand::OpenCreateInvitationModal => {
-                                        let self_authority_id = shared_authority_id_for_dispatch
-                                            .read()
-                                            .map(|guard| guard.clone())
-                                            .ok()
-                                            .flatten();
                                         let idx = new_state.contacts.selected_index;
                                         if let Ok(guard) = shared_contacts_for_dispatch.read() {
-                                            if let Some(contact) = guard.get(idx) {
-                                                match contact.id.parse::<AuthorityId>() {
-                                                    Ok(receiver_id) => {
-                                                        (cb.invitations.on_create)(
-                                                            receiver_id,
-                                                            "contact".to_string(),
-                                                            None,
-                                                            None,
-                                                        );
-                                                    }
-                                                    Err(error) => {
-                                                        new_state.toast_error(format!(
-                                                            "Invalid authority id: {error}"
-                                                        ));
-                                                    }
-                                                }
+                                            let mut modal_state = if let Some(contact) = guard.get(idx) {
+                                                crate::tui::state_machine::CreateInvitationModalState::for_receiver(
+                                                    contact.id.clone(),
+                                                    contact.nickname.clone(),
+                                                )
                                             } else {
-                                                if self_authority_id.is_none() {
-                                                    new_state.toast_error("No active authority");
-                                                    continue;
-                                                }
-                                                let mut modal_state =
-                                                    crate::tui::state_machine::CreateInvitationModalState::for_receiver(
-                                                        self_authority_id
-                                                            .as_ref()
-                                                            .map(|id| id.to_string())
-                                                            .unwrap_or_default(),
-                                                        "New contact".to_string(),
-                                                    );
-                                                modal_state.type_index = 1;
-                                                new_state
-                                                    .modal_queue
-                                                    .enqueue(crate::tui::state_machine::QueuedModal::ContactsCreate(
-                                                        modal_state,
-                                                    ));
-                                            }
+                                                crate::tui::state_machine::CreateInvitationModalState::new()
+                                            };
+                                            modal_state.type_index = 1;
+                                            new_state
+                                                .modal_queue
+                                                .enqueue(crate::tui::state_machine::QueuedModal::ContactsCreate(
+                                                    modal_state,
+                                                ));
                                         } else {
                                             new_state.toast_error("Failed to read contacts");
                                         }

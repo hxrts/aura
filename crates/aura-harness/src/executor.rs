@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
 use aura_app::ui::contract::{
-    compare_ui_snapshots_for_parity, ControlId, FieldId, ModalId, OperationId, OperationState,
-    RuntimeEventKind, ScreenId, UiSnapshot,
+    compare_ui_snapshots_for_parity, ControlId, FieldId, ListId, ModalId, OperationId,
+    OperationState, RuntimeEventKind, ScreenId, UiSnapshot,
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -493,6 +493,28 @@ fn execute_step(
                     ControlId::OnboardingCreateAccountButton,
                 ),
             )?;
+            let deadline =
+                Instant::now() + Duration::from_millis(step.timeout_ms.unwrap_or(step_budget_ms));
+            let mut neighborhood_step = semantic_wait_step(step);
+            neighborhood_step.screen_id = Some(ScreenId::Neighborhood);
+            wait_for_semantic_state(
+                &neighborhood_step,
+                tool_api,
+                &instance_id,
+                step.timeout_ms.unwrap_or(step_budget_ms),
+            )?;
+            let remaining_ms = deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis()
+                .max(1) as u64;
+            let mut readiness_step = semantic_wait_step(step);
+            readiness_step.readiness = Some(aura_app::ui::contract::UiReadiness::Ready);
+            wait_for_semantic_state(&readiness_step, tool_api, &instance_id, remaining_ms)?;
+            let remaining_ms = deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis()
+                .max(1) as u64;
+            wait_for_home_bootstrap_ready(step, tool_api, &instance_id, remaining_ms)?;
             Ok(())
         }
         ScenarioAction::StartDeviceEnrollment => {
@@ -565,6 +587,28 @@ fn execute_step(
                     ControlId::OnboardingImportDeviceButton,
                 ),
             )?;
+            let deadline =
+                Instant::now() + Duration::from_millis(step.timeout_ms.unwrap_or(step_budget_ms));
+            let mut neighborhood_step = semantic_wait_step(step);
+            neighborhood_step.screen_id = Some(ScreenId::Neighborhood);
+            wait_for_semantic_state(
+                &neighborhood_step,
+                tool_api,
+                &instance_id,
+                step.timeout_ms.unwrap_or(step_budget_ms),
+            )?;
+            let remaining_ms = deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis()
+                .max(1) as u64;
+            let mut readiness_step = semantic_wait_step(step);
+            readiness_step.readiness = Some(aura_app::ui::contract::UiReadiness::Ready);
+            wait_for_semantic_state(&readiness_step, tool_api, &instance_id, remaining_ms)?;
+            let remaining_ms = deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis()
+                .max(1) as u64;
+            wait_for_home_bootstrap_ready(step, tool_api, &instance_id, remaining_ms)?;
             Ok(())
         }
         ScenarioAction::RemoveSelectedDevice => {
@@ -659,17 +703,6 @@ fn execute_step(
                 tool_api,
                 plan_activate_control_request(&instance_id, ControlId::ModalConfirmButton),
             )?;
-            let mut invitation_code_wait = step.clone();
-            invitation_code_wait.value = None;
-            invitation_code_wait.expect = None;
-            invitation_code_wait.contains = None;
-            wait_for_runtime_event(
-                &invitation_code_wait,
-                tool_api,
-                &instance_id,
-                timeout_ms,
-                RuntimeEventKind::InvitationCodeReady,
-            )?;
             let clipboard_text =
                 read_clipboard_value(tool_api, &instance_id, &step.id, timeout_ms)?;
             context.vars.insert(code_name.to_string(), clipboard_text);
@@ -684,6 +717,7 @@ fn execute_step(
                 context,
             )?;
             let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
+            let deadline = Instant::now() + Duration::from_millis(timeout_ms);
             dispatch(
                 tool_api,
                 plan_activate_control_request(
@@ -706,6 +740,24 @@ fn execute_step(
                 tool_api,
                 plan_activate_control_request(&instance_id, ControlId::ModalConfirmButton),
             )?;
+            let mut contact_link_step = semantic_wait_step(step);
+            contact_link_step.runtime_event_kind = Some(RuntimeEventKind::ContactLinkReady);
+            let remaining_ms = deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis()
+                .max(1) as u64;
+            if wait_for_semantic_state(&contact_link_step, tool_api, &instance_id, remaining_ms)
+                .is_err()
+            {
+                let remaining_ms = deadline
+                    .saturating_duration_since(Instant::now())
+                    .as_millis()
+                    .max(1) as u64;
+                let mut contacts_step = semantic_wait_step(step);
+                contacts_step.list_id = Some(ListId::Contacts);
+                contacts_step.count = Some(1);
+                wait_for_semantic_state(&contacts_step, tool_api, &instance_id, remaining_ms)?;
+            }
             Ok(())
         }
         ScenarioAction::InviteActorToChannel => {
@@ -1739,6 +1791,56 @@ fn wait_for_runtime_event(
     let mut wait_step = semantic_wait_step(step);
     wait_step.runtime_event_kind = Some(runtime_event_kind);
     wait_for_semantic_state(&wait_step, tool_api, instance_id, timeout_ms)
+}
+
+fn wait_for_home_bootstrap_ready(
+    step: &ScenarioStep,
+    tool_api: &mut ToolApi,
+    instance_id: &str,
+    timeout_ms: u64,
+) -> Result<()> {
+    const PLACEHOLDER_HOME_ID: &str =
+        "channel:0000000000000000000000000000000000000000000000000000000000000000";
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let mut last_snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
+    if home_bootstrap_ready(&last_snapshot) {
+        return Ok(());
+    }
+    loop {
+        if Instant::now() >= deadline {
+            bail!(
+                "step {} home bootstrap wait timed out on instance {} last_snapshot={:?}",
+                step.id,
+                instance_id,
+                Some(last_snapshot)
+            );
+        }
+        std::thread::sleep(Duration::from_millis(40));
+        let snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
+        if snapshot
+            .selections
+            .iter()
+            .find(|selection| selection.list == ListId::Homes)
+            .map(|selection| selection.item_id.as_str())
+            .filter(|item_id| *item_id != PLACEHOLDER_HOME_ID)
+            .is_some()
+        {
+            return Ok(());
+        }
+        last_snapshot = snapshot;
+    }
+}
+
+fn home_bootstrap_ready(snapshot: &UiSnapshot) -> bool {
+    const PLACEHOLDER_HOME_ID: &str =
+        "channel:0000000000000000000000000000000000000000000000000000000000000000";
+    snapshot
+        .selections
+        .iter()
+        .find(|selection| selection.list == ListId::Homes)
+        .map(|selection| selection.item_id.as_str())
+        .filter(|item_id| *item_id != PLACEHOLDER_HOME_ID)
+        .is_some()
 }
 
 fn wait_for_operation_state(

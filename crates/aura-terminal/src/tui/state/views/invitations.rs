@@ -18,6 +18,7 @@ pub use aura_app::ui::types::{
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CreateInvitationField {
     #[default]
+    Receiver,
     Type,
     Message,
     Ttl,
@@ -54,7 +55,7 @@ impl CreateInvitationModalState {
             type_index: 0,
             message: String::new(),
             ttl_hours: DEFAULT_INVITATION_TTL_HOURS,
-            focused_field: CreateInvitationField::Type,
+            focused_field: CreateInvitationField::Receiver,
             error: None,
         }
     }
@@ -75,23 +76,25 @@ impl CreateInvitationModalState {
         self.type_index = 0;
         self.message.clear();
         self.ttl_hours = DEFAULT_INVITATION_TTL_HOURS;
-        self.focused_field = CreateInvitationField::Type;
+        self.focused_field = CreateInvitationField::Receiver;
         self.error = None;
     }
 
     /// Move focus to next field
     pub fn focus_next(&mut self) {
         self.focused_field = match self.focused_field {
+            CreateInvitationField::Receiver => CreateInvitationField::Type,
             CreateInvitationField::Type => CreateInvitationField::Message,
             CreateInvitationField::Message => CreateInvitationField::Ttl,
-            CreateInvitationField::Ttl => CreateInvitationField::Type,
+            CreateInvitationField::Ttl => CreateInvitationField::Receiver,
         };
     }
 
     /// Move focus to previous field
     pub fn focus_prev(&mut self) {
         self.focused_field = match self.focused_field {
-            CreateInvitationField::Type => CreateInvitationField::Ttl,
+            CreateInvitationField::Receiver => CreateInvitationField::Ttl,
+            CreateInvitationField::Type => CreateInvitationField::Receiver,
             CreateInvitationField::Message => CreateInvitationField::Type,
             CreateInvitationField::Ttl => CreateInvitationField::Message,
         };

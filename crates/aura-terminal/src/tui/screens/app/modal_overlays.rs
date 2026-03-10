@@ -253,6 +253,8 @@ pub fn render_contacts_create_modal(contacts: &ContactsViewProps) -> Option<AnyE
                         focused_field: contacts.create_modal_focused_field,
                         creating: false,
                         error: String::new(),
+                        receiver_id: contacts.create_modal_receiver_id.clone(),
+                        receiver_name: contacts.create_modal_receiver_name.clone(),
                         invitation_type: invitation_type,
                         message: contacts.create_modal_message.clone(),
                         ttl_hours: contacts.create_modal_ttl_hours as u32,

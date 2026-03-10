@@ -40,6 +40,10 @@ pub struct InvitationCreateModalProps {
     pub creating: bool,
     /// Error message if creation failed
     pub error: String,
+    /// Receiver authority id
+    pub receiver_id: String,
+    /// Receiver display name hint
+    pub receiver_name: String,
     /// Currently selected invitation type
     pub invitation_type: InvitationType,
     /// Optional message for the invitation
@@ -64,6 +68,8 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
     let creating = props.creating;
     let has_error = !props.error.is_empty();
     let error = props.error.clone();
+    let receiver_id = props.receiver_id.clone();
+    let receiver_name = props.receiver_name.clone();
     let invitation_type = props.invitation_type;
     let message = props.message.clone();
     let ttl_hours = props.ttl_hours;
@@ -75,10 +81,16 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
     let type_label = invitation_type.label();
 
     // Field focus colors
+    let receiver_focused = focused_field == CreateInvitationField::Receiver;
     let type_focused = focused_field == CreateInvitationField::Type;
     let message_focused = focused_field == CreateInvitationField::Message;
     let ttl_focused = focused_field == CreateInvitationField::Ttl;
 
+    let receiver_border = if receiver_focused {
+        Theme::BORDER_FOCUS
+    } else {
+        Theme::BORDER
+    };
     let type_border = if type_focused {
         Theme::BORDER_FOCUS
     } else {
@@ -96,9 +108,32 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
     };
 
     // Focus indicator
+    let receiver_pointer = if receiver_focused { "▸ " } else { "  " };
     let type_pointer = if type_focused { "▸ " } else { "  " };
     let message_pointer = if message_focused { "▸ " } else { "  " };
     let ttl_pointer = if ttl_focused { "▸ " } else { "  " };
+
+    let receiver_display = if receiver_focused {
+        if receiver_id.is_empty() {
+            "│".to_string()
+        } else {
+            format!("{receiver_id}│")
+        }
+    } else if receiver_id.is_empty() {
+        "(required)".to_string()
+    } else {
+        receiver_id.clone()
+    };
+    let receiver_hint = if receiver_name.trim().is_empty() {
+        "Authority id for the invite recipient".to_string()
+    } else {
+        format!("Invite recipient: {receiver_name}")
+    };
+    let receiver_color = if receiver_focused || !receiver_id.is_empty() {
+        Theme::TEXT
+    } else {
+        Theme::TEXT_MUTED
+    };
 
     // Message display (truncated to fit input width, show cursor when focused)
     let message_display = if message_focused {
@@ -187,6 +222,25 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                 flex_shrink: 1.0,
                 overflow: Overflow::Hidden,
             ) {
+                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
+                    View(flex_direction: FlexDirection::Row) {
+                        Text(content: receiver_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
+                        Text(content: "Receiver", color: if receiver_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
+                        Text(content: " - ", color: Theme::TEXT_MUTED)
+                        Text(content: receiver_hint, color: Theme::TEXT_MUTED)
+                    }
+                    View(
+                        margin_left: 2,
+                        width: 42,
+                        border_style: Borders::INPUT,
+                        border_color: receiver_border,
+                        padding_left: Spacing::PANEL_PADDING,
+                        padding_right: Spacing::PANEL_PADDING,
+                    ) {
+                        Text(content: receiver_display, color: receiver_color)
+                    }
+                }
+
                 // Invitation Type selector
                 View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
                     View(flex_direction: FlexDirection::Row) {
@@ -229,7 +283,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                     }
                     View(
                         margin_left: 2,
-                        width: 18,
+                        width: 26,
                         border_style: Borders::INPUT,
                         border_color: message_border,
                         padding_left: Spacing::PANEL_PADDING,
@@ -249,7 +303,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                     }
                     View(
                         margin_left: 2,
-                        width: 18,
+                        width: 24,
                         border_style: Borders::INPUT,
                         border_color: ttl_border,
                         padding_left: Spacing::PANEL_PADDING,

@@ -1188,6 +1188,7 @@ fn handle_create_invitation_key_queue(
         KeyCode::Left => {
             // Change value: cycle backward for Type and TTL fields
             match modal_state.focused_field {
+                CreateInvitationField::Receiver => {}
                 CreateInvitationField::Type => {
                     state.modal_queue.update_active(|modal| {
                         if let QueuedModal::ContactsCreate(ref mut s) = modal {
@@ -1210,6 +1211,7 @@ fn handle_create_invitation_key_queue(
         KeyCode::Right => {
             // Change value: cycle forward for Type and TTL fields
             match modal_state.focused_field {
+                CreateInvitationField::Receiver => {}
                 CreateInvitationField::Type => {
                     state.modal_queue.update_active(|modal| {
                         if let QueuedModal::ContactsCreate(ref mut s) = modal {
@@ -1229,26 +1231,40 @@ fn handle_create_invitation_key_queue(
                 }
             }
         }
-        KeyCode::Char(c) => {
-            // Typing only works in Message field
-            if modal_state.focused_field == CreateInvitationField::Message {
+        KeyCode::Char(c) => match modal_state.focused_field {
+            CreateInvitationField::Receiver => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ContactsCreate(ref mut s) = modal {
+                        s.receiver_id.push(c);
+                    }
+                });
+            }
+            CreateInvitationField::Message => {
                 state.modal_queue.update_active(|modal| {
                     if let QueuedModal::ContactsCreate(ref mut s) = modal {
                         s.message.push(c);
                     }
                 });
             }
-        }
-        KeyCode::Backspace => {
-            // Backspace only works in Message field
-            if modal_state.focused_field == CreateInvitationField::Message {
+            CreateInvitationField::Type | CreateInvitationField::Ttl => {}
+        },
+        KeyCode::Backspace => match modal_state.focused_field {
+            CreateInvitationField::Receiver => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ContactsCreate(ref mut s) = modal {
+                        s.receiver_id.pop();
+                    }
+                });
+            }
+            CreateInvitationField::Message => {
                 state.modal_queue.update_active(|modal| {
                     if let QueuedModal::ContactsCreate(ref mut s) = modal {
                         s.message.pop();
                     }
                 });
             }
-        }
+            CreateInvitationField::Type | CreateInvitationField::Ttl => {}
+        },
         _ => {}
     }
 }

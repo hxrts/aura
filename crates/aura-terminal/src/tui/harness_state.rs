@@ -169,6 +169,7 @@ pub fn semantic_ui_snapshot(
         Some(ControlId::OnboardingRoot)
     } else if let Some(QueuedModal::ContactsCreate(modal_state)) = state.modal_queue.current() {
         Some(ControlId::Field(match modal_state.focused_field {
+            CreateInvitationField::Receiver => aura_app::ui::contract::FieldId::InvitationReceiver,
             CreateInvitationField::Type => aura_app::ui::contract::FieldId::InvitationType,
             CreateInvitationField::Message => aura_app::ui::contract::FieldId::InvitationMessage,
             CreateInvitationField::Ttl => aura_app::ui::contract::FieldId::InvitationTtl,
