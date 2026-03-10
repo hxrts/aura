@@ -1616,6 +1616,7 @@ async function startPage(params) {
         id: instanceId,
         context,
         page,
+        startOptions: options,
         headless,
         appUrl: targetUrl,
         dataDir,
@@ -1785,6 +1786,28 @@ async function startPage(params) {
   );
 }
 
+async function restartPageSession(session, reason) {
+  const options = session.startOptions;
+  if (!options) {
+    throw new Error(`restart_page_session missing start options for ${session.id}`);
+  }
+  console.error(
+    `[driver] restart_page_session instance=${session.id} reason=${reason} data_dir=${options.dataDir}`
+  );
+  await stop({ instance_id: session.id });
+  return startPage({
+    instance_id: options.instanceId,
+    app_url: options.appUrl,
+    data_dir: options.dataDir,
+    headless: options.headless,
+    artifact_dir: options.artifactDir,
+    page_goto_timeout_ms: options.pageGotoTimeoutMs,
+    harness_ready_timeout_ms: options.harnessReadyTimeoutMs,
+    start_max_attempts: options.startMaxAttempts,
+    start_retry_backoff_ms: options.startRetryBackoffMs
+  });
+}
+
 function getSession(instanceId) {
   const session = sessions.get(instanceId);
   if (!session) {
@@ -1868,17 +1891,36 @@ async function navigateScreen(params) {
     throw new Error('screen is required');
   }
   const session = getSession(instanceId);
-  const result = await withOperationTimeout(
-    `navigate_screen:${instanceId}:${screen}`,
-    session.page.evaluate((targetScreen) => {
-      if (!window.__AURA_DRIVER_MUTATION_QUEUE_INSTALLED) {
-        return { ok: false, reason: 'mutation_queue_missing' };
-      }
-      window.__AURA_DRIVER_PENDING_NAV_SCREEN__ = targetScreen;
-      return { ok: true };
-    }, screen),
-    1000
-  );
+  let result;
+  try {
+    result = await withOperationTimeout(
+      `navigate_screen:${instanceId}:${screen}`,
+      session.page.evaluate((targetScreen) => {
+        if (!window.__AURA_DRIVER_MUTATION_QUEUE_INSTALLED) {
+          return { ok: false, reason: 'mutation_queue_missing' };
+        }
+        window.__AURA_DRIVER_PENDING_NAV_SCREEN__ = targetScreen;
+        return { ok: true };
+      }, screen),
+      1000
+    );
+  } catch (error) {
+    console.error(
+      `[driver] navigate_screen restart_retry instance=${instanceId} screen=${screen} error=${error?.message ?? String(error)}`
+    );
+    await restartPageSession(session, `navigate_screen:${screen}`);
+    result = await withOperationTimeout(
+      `navigate_screen_restart:${instanceId}:${screen}`,
+      session.page.evaluate((targetScreen) => {
+        if (!window.__AURA_DRIVER_MUTATION_QUEUE_INSTALLED) {
+          return { ok: false, reason: 'mutation_queue_missing' };
+        }
+        window.__AURA_DRIVER_PENDING_NAV_SCREEN__ = targetScreen;
+        return { ok: true };
+      }, screen),
+      2000
+    );
+  }
   if (!result?.ok) {
     throw new Error(`navigate_screen_failed screen=${screen} reason=${result?.reason ?? 'unknown'}`);
   }
@@ -1943,13 +1985,19 @@ async function uiState(params) {
     return value && typeof value === 'object' ? value : null;
   };
 
-  const readStructuredUiState = async (reason, timeoutMs = 1000) => {
+  const readStructuredUiState = async (reason, timeoutMs = 1000, targetSession = session) => {
     console.error(
       `[driver] ui_state structured_read start instance=${instanceId} reason=${reason} timeout_ms=${timeoutMs}`
     );
     const payload = await withOperationTimeout(
       `ui_state_structured_${reason}`,
-      session.page.evaluate(() => {
+      targetSession.page.evaluate(() => {
+        if (typeof window.__AURA_UI_STATE_JSON__ === 'string') {
+          return window.__AURA_UI_STATE_JSON__;
+        }
+        if (window.__AURA_UI_STATE_CACHE__ && typeof window.__AURA_UI_STATE_CACHE__ === 'object') {
+          return window.__AURA_UI_STATE_CACHE__;
+        }
         if (typeof window.__AURA_HARNESS__?.ui_state === 'function') {
           return window.__AURA_HARNESS__.ui_state();
         }
@@ -1962,8 +2010,8 @@ async function uiState(params) {
     );
     const parsed = tryParseUiState(payload);
     if (parsed && typeof parsed === 'object') {
-      await ensureUiStateRenderConvergence(session, parsed, reason);
-      storeUiState(session, parsed);
+      await ensureUiStateRenderConvergence(targetSession, parsed, reason);
+      storeUiState(targetSession, parsed);
       console.error(
         `[driver] ui_state structured_read done instance=${instanceId} reason=${reason}`
       );
@@ -1975,21 +2023,25 @@ async function uiState(params) {
     return null;
   };
 
-  const readStructuredUiStateWithNavigationRecovery = async (reason, timeoutMs = 1000) => {
+  const readStructuredUiStateWithNavigationRecovery = async (
+    reason,
+    timeoutMs = 1000,
+    targetSession = session
+  ) => {
     try {
-      return await readStructuredUiState(reason, timeoutMs);
+      return await readStructuredUiState(reason, timeoutMs, targetSession);
     } catch (error) {
       if (!isNavigationTransitionError(error)) {
         throw error;
       }
-      session.uiStateCache = null;
-      session.uiStateCacheJson = null;
+      targetSession.uiStateCache = null;
+      targetSession.uiStateCacheJson = null;
       console.error(
         `[driver] ui_state structured_navigation_recovery instance=${instanceId} reason=${reason}`
       );
-      await waitForPageNavigationStabilization(session, `structured_navigation_${reason}`);
-      await assertRootStructure(session, `ui_state_after_navigation_${reason}`);
-      return readStructuredUiState(`post_navigation_${reason}`, UI_STATE_TIMEOUT_MS);
+      await waitForPageNavigationStabilization(targetSession, `structured_navigation_${reason}`);
+      await assertRootStructure(targetSession, `ui_state_after_navigation_${reason}`);
+      return readStructuredUiState(`post_navigation_${reason}`, UI_STATE_TIMEOUT_MS, targetSession);
     }
   };
 
@@ -2012,7 +2064,7 @@ async function uiState(params) {
       try {
         const refreshed = await readStructuredUiStateWithNavigationRecovery(
           'post_onboarding_submit',
-          UI_STATE_TIMEOUT_MS
+          2000
         );
         if (refreshed) {
           return refreshed;
@@ -2021,10 +2073,23 @@ async function uiState(params) {
         console.error(
           `[driver] ui_state stale_onboarding_refresh_failed instance=${instanceId} error=${error?.message ?? String(error)}`
         );
+        if (recentConsoleLower.includes('[web-onboarding] submit_account ok')) {
+          try {
+            console.error(`[driver] ui_state stale_onboarding_restart instance=${instanceId}`);
+            await restartPageSession(session, 'post_onboarding_submit');
+          } catch (restartError) {
+            console.error(
+              `[driver] ui_state stale_onboarding_restart_failed instance=${instanceId} error=${restartError?.message ?? String(restartError)}`
+            );
+          }
+        }
         if (cached) {
           return cached;
         }
         throw error;
+      }
+      if (cached) {
+        return cached;
       }
     }
     if (cached && !cachedUiStateConverged(session, cached)) {

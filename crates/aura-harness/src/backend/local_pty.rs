@@ -749,12 +749,37 @@ impl InstanceBackend for LocalPtyBackend {
         wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
         self.send_keys("n")?;
         wait_for_modal_visible(self, ModalId::CreateChannel, Duration::from_secs(5))?;
+        thread::sleep(Duration::from_millis(200));
         self.fill_field(FieldId::CreateChannelName, channel_name)?;
+        thread::sleep(Duration::from_millis(200));
         self.send_keys("\r")?;
-        thread::sleep(Duration::from_millis(120));
+        thread::sleep(Duration::from_millis(250));
         self.send_keys("\r")?;
-        thread::sleep(Duration::from_millis(120));
+        thread::sleep(Duration::from_millis(250));
         self.send_keys("\r")?;
+        let joined_deadline = Instant::now() + Duration::from_secs(4);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            let joined = snapshot.runtime_events.iter().any(|event| {
+                matches!(
+                    &event.fact,
+                    aura_app::ui::contract::RuntimeFact::ChannelMembershipReady { channel, .. }
+                    if channel
+                        .name
+                        .as_deref()
+                        .map(|name| name.eq_ignore_ascii_case(channel_name))
+                        .unwrap_or(false)
+                )
+            });
+            if joined || Instant::now() >= joined_deadline {
+                if joined {
+                    return Ok(SubmittedAction::without_handle(()));
+                }
+                break;
+            }
+            thread::sleep(Duration::from_millis(80));
+        }
+        self.submit_chat_command_via_ui(&format!("join {channel_name}"))?;
         Ok(SubmittedAction::without_handle(()))
     }
 
