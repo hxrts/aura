@@ -194,6 +194,7 @@ pub enum ScenarioAction {
     RemoveSelectedDevice,
     CreateContactInvitation,
     AcceptContactInvitation,
+    JoinChannel,
     InviteActorToChannel,
     AcceptPendingChannelInvitation,
     SendKeys,
@@ -247,6 +248,7 @@ impl fmt::Display for ScenarioAction {
             Self::RemoveSelectedDevice => "remove_selected_device",
             Self::CreateContactInvitation => "create_contact_invitation",
             Self::AcceptContactInvitation => "accept_contact_invitation",
+            Self::JoinChannel => "join_channel",
             Self::InviteActorToChannel => "invite_actor_to_channel",
             Self::AcceptPendingChannelInvitation => "accept_pending_channel_invitation",
             Self::SendKeys => "send_keys",
@@ -471,6 +473,15 @@ impl ScenarioStep {
             ScenarioAction::AcceptPendingChannelInvitation => Some(SemanticAction::Intent(
                 IntentAction::AcceptPendingChannelInvitation,
             )),
+            ScenarioAction::JoinChannel => {
+                Some(SemanticAction::Intent(IntentAction::JoinChannel {
+                    channel_name: required_field(
+                        self.value.clone().or_else(|| self.expect.clone()),
+                        "value",
+                        self.action,
+                    )?,
+                }))
+            }
             ScenarioAction::SendKeys => {
                 Some(SemanticAction::Ui(UiAction::InputText(required_field(
                     self.keys.clone().or_else(|| self.expect.clone()),
@@ -731,12 +742,12 @@ impl TryFrom<SemanticStep> for ScenarioStep {
                 step.action = ScenarioAction::AcceptContactInvitation;
                 step.value = Some(code);
             }
+            SemanticAction::Intent(IntentAction::JoinChannel { channel_name }) => {
+                step.action = ScenarioAction::JoinChannel;
+                step.value = Some(channel_name);
+            }
             SemanticAction::Intent(IntentAction::AcceptPendingChannelInvitation) => {
                 step.action = ScenarioAction::AcceptPendingChannelInvitation;
-            }
-            SemanticAction::Intent(IntentAction::JoinChannel { channel_name }) => {
-                step.action = ScenarioAction::SendChatCommand;
-                step.command = Some(format!("join {channel_name}"));
             }
             SemanticAction::Intent(IntentAction::InviteActorToChannel { authority_id }) => {
                 step.action = ScenarioAction::InviteActorToChannel;

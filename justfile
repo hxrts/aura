@@ -84,12 +84,13 @@ web-serve port="4173":
     #!/usr/bin/env bash
     set -euo pipefail
     selected_port="{{port}}"
-    if command -v lsof >/dev/null 2>&1; then
-        while lsof -PiTCP:"$selected_port" -sTCP:LISTEN -t >/dev/null 2>&1; do
-            selected_port="$((selected_port + 1))"
-        done
+    if command -v lsof >/dev/null 2>&1 && lsof -PiTCP:"$selected_port" -sTCP:LISTEN -t >/dev/null 2>&1; then
+        echo "Port $selected_port is already in use." >&2
+        lsof -nP -iTCP:"$selected_port" -sTCP:LISTEN >&2 || true
+        echo "Stop the existing server or run: just web-dev <different-port>" >&2
+        exit 1
     fi
-    echo "Serving aura-web on port $selected_port"
+    echo "Serving aura-web on http://127.0.0.1:$selected_port"
     cd crates/aura-web
     mkdir -p ../../artifacts
     if [ ! -d node_modules ]; then

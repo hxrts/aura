@@ -8,6 +8,7 @@ use crate::model::{
     CreateChannelDetailsField, CreateChannelWizardStep, ModalState, NeighborhoodMode,
     SettingsSection, ThresholdWizardStep, UiModel, UiScreen,
 };
+use aura_app::views::chat::NOTE_TO_SELF_CHANNEL_NAME;
 
 const PANEL_WIDTH: usize = 38;
 const CONTENT_ROWS: usize = 20;
@@ -174,7 +175,9 @@ fn neighborhood_row(model: &UiModel, row_idx: usize) -> (String, String, String)
 
 fn chat_row(model: &UiModel, row_idx: usize) -> (String, String, String) {
     if row_idx == 0 {
-        let channel = model.selected_channel_name().unwrap_or("general");
+        let channel = model
+            .selected_channel_name()
+            .unwrap_or(NOTE_TO_SELF_CHANNEL_NAME);
         let topic = model.selected_channel_topic();
         return (
             "Channels".to_string(),

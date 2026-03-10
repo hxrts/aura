@@ -92,7 +92,7 @@ pub fn UiCard(
         LbCard {
             class: Some(card_class),
             div {
-                class: "flex h-[4.5rem] w-full shrink-0 flex-col items-start justify-center border-b-[1px] border-border px-6 py-3 text-left",
+                class: "flex h-[4.5rem] w-full shrink-0 flex-col items-start justify-start border-b-[1px] border-border px-6 py-3 text-left",
                 div {
                     class: "flex w-full min-w-0 flex-col items-start text-left",
                     div {
@@ -235,7 +235,7 @@ pub fn UiModal(
     rsx! {
         div {
             id: modal.modal_id.web_dom_id().to_string(),
-            class: "fixed inset-0 z-50 flex items-center justify-center bg-background/95 px-4 backdrop-blur-sm",
+            class: "fixed inset-0 z-40 flex items-center justify-center bg-background/95 px-4 backdrop-blur-sm",
             onclick: move |_| on_cancel.call(()),
             div {
                 id: "aura-modal-content",
@@ -775,10 +775,10 @@ pub fn UiFooter(
         footer {
             class: "shrink-0 overflow-hidden bg-background px-4 pt-0 pb-6 text-xs tracking-[0.02em] text-muted-foreground sm:px-6",
             div {
-                class: "flex h-9 min-w-0 items-center justify-between gap-3 overflow-hidden",
+                class: "flex h-8 min-w-0 items-center justify-between gap-3 overflow-hidden",
                 span { class: "min-w-0 truncate whitespace-nowrap text-card-foreground leading-none", "{left}" }
                 div {
-                    class: "flex min-w-0 items-center justify-end gap-2 overflow-hidden whitespace-nowrap",
+                    class: "flex min-w-0 items-center justify-end gap-2 overflow-hidden whitespace-nowrap px-6",
                     FooterStatusItem { label: "Network", value: network_status }
                     FooterStatusItem { label: "Peers", value: peer_count }
                     FooterStatusItem { label: "Online", value: online_count }

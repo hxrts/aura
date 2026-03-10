@@ -370,11 +370,18 @@ pub fn semantic_ui_snapshot(
         );
     }
 
-    let mut home_ids = vec![app_snapshot.neighborhood.home_home_id.to_string()];
+    let current_home_id = app_snapshot
+        .homes
+        .current_home()
+        .map(|home| home.id)
+        .filter(|home_id| *home_id != aura_core::identifiers::ChannelId::default())
+        .unwrap_or(app_snapshot.neighborhood.home_home_id);
+    let mut home_ids = vec![current_home_id.to_string()];
     home_ids.extend(
         app_snapshot
             .neighborhood
             .all_neighbors()
+            .filter(|home| home.id != current_home_id)
             .map(|home| home.id.to_string()),
     );
     let home_items = home_ids

@@ -9,6 +9,7 @@ use crate::clipboard::ClipboardPort;
 use crate::keyboard::{apply_named_key, apply_text_keys};
 use crate::snapshot::render_canonical_snapshot;
 use async_lock::RwLock as AsyncRwLock;
+use aura_app::views::chat::{NOTE_TO_SELF_CHANNEL_NAME, NOTE_TO_SELF_CHANNEL_TOPIC};
 use aura_app::{
     ui::contract::{
         ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot, ListSnapshot,
@@ -576,18 +577,11 @@ impl UiModel {
             account_setup_error: None,
             screen: UiScreen::Neighborhood,
             settings_section: SettingsSection::Profile,
-            channels: vec![
-                ChannelRow {
-                    name: "general".to_string(),
-                    selected: true,
-                    topic: "bootstrap-topic".to_string(),
-                },
-                ChannelRow {
-                    name: "dm".to_string(),
-                    selected: false,
-                    topic: String::new(),
-                },
-            ],
+            channels: vec![ChannelRow {
+                name: NOTE_TO_SELF_CHANNEL_NAME.to_string(),
+                selected: true,
+                topic: NOTE_TO_SELF_CHANNEL_TOPIC.to_string(),
+            }],
             contacts: Vec::new(),
             authorities: Vec::new(),
             messages: Vec::new(),
@@ -617,7 +611,7 @@ impl UiModel {
             secondary_device_name: None,
             selected_contact_id: None,
             selected_authority_id: None,
-            selected_channel: Some("general".to_string()),
+            selected_channel: Some(NOTE_TO_SELF_CHANNEL_NAME.to_string()),
             selected_neighborhood_member_key: None,
             selected_notification_id: None,
             contact_details: false,
@@ -2020,6 +2014,11 @@ impl UiController {
         model.push_runtime_event(
             RuntimeEventKind::HomeEntered,
             format!("name={name} depth={}", depth.label()),
+        );
+        set_toast(
+            &mut model,
+            '✓',
+            format!("Entered '{name}' with {} access", depth.label()),
         );
         drop(model);
         self.request_rerender();

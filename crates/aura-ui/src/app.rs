@@ -37,10 +37,11 @@ use aura_app::ui::workflows::moderation as moderation_workflows;
 use aura_app::ui::workflows::moderator as moderator_workflows;
 use aura_app::ui::workflows::{
     access as access_workflows, contacts as contacts_workflows, context as context_workflows,
-    invitation as invitation_workflows, messaging as messaging_workflows,
-    network as network_workflows, query as query_workflows, recovery as recovery_workflows,
-    runtime as runtime_workflows, settings as settings_workflows, time as time_workflows,
+    invitation as invitation_workflows, messaging as messaging_workflows, query as query_workflows,
+    recovery as recovery_workflows, runtime as runtime_workflows, settings as settings_workflows,
+    time as time_workflows,
 };
+use aura_app::views::chat::{is_note_to_self_channel_name, NOTE_TO_SELF_CHANNEL_NAME};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, CeremonyId};
 use aura_core::ChannelId;
@@ -227,6 +228,10 @@ fn is_dm_like_channel(channel: &aura_app::ui::types::Channel) -> bool {
             .unwrap_or(false)
 }
 
+fn is_pinned_chat_channel(channel: &aura_app::ui::types::Channel) -> bool {
+    is_dm_like_channel(channel) || is_note_to_self_channel_name(&channel.name)
+}
+
 fn scoped_channels(
     chat_state: &ChatState,
     active_home_scope: Option<&str>,
@@ -245,7 +250,7 @@ fn scoped_channels(
     let mut channels: Vec<_> = chat_state
         .all_channels()
         .filter(|channel| {
-            if is_dm_like_channel(channel) {
+            if is_pinned_chat_channel(channel) {
                 return true;
             }
 
@@ -266,7 +271,16 @@ fn scoped_channels(
         })
         .collect();
 
-    channels.sort_by(|left, right| left.name.cmp(&right.name));
+    channels.sort_by(|left, right| {
+        match (
+            is_note_to_self_channel_name(&left.name),
+            is_note_to_self_channel_name(&right.name),
+        ) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => left.name.cmp(&right.name),
+        }
+    });
     channels
 }
 
@@ -437,7 +451,16 @@ fn build_chat_runtime_view(
             is_dm: channel.is_dm,
         })
         .collect();
-    channels.sort_by(|left, right| left.name.cmp(&right.name));
+    channels.sort_by(|left, right| {
+        match (
+            is_note_to_self_channel_name(&left.name),
+            is_note_to_self_channel_name(&right.name),
+        ) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => left.name.cmp(&right.name),
+        }
+    });
 
     let active_channel = selected_channel_name
         .and_then(|name| {
@@ -480,7 +503,11 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
         let core = controller.app_core().read().await;
         let signal_chat = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
         let local_chat = core.snapshot().chat;
-        merge_chat_state(signal_chat, local_chat)
+        let mut merged = merge_chat_state(signal_chat, local_chat);
+        if let Some(authority_id) = core.authority().cloned() {
+            merged.ensure_note_to_self_channel(authority_id);
+        }
+        merged
     };
     let selected_name = controller
         .ui_model()
@@ -2697,18 +2724,6 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
             }
         });
 
-        let controller_for_discovery_refresh = controller_for_runtime.clone();
-        spawn(async move {
-            let app_core = controller_for_discovery_refresh.app_core().clone();
-            loop {
-                if let Err(error) = network_workflows::refresh_discovered_peers(&app_core).await {
-                    controller_for_discovery_refresh
-                        .push_log(&format!("discovered_peers_refresh: error {error}"));
-                }
-                tokio::time::sleep(network_workflows::DISCOVERED_PEERS_REFRESH_INTERVAL).await;
-            }
-        });
-
         let mut runtime_for_chat = neighborhood_runtime;
         let controller_for_chat = controller_for_runtime.clone();
         spawn(async move {
@@ -2993,12 +3008,12 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                     class: "relative flex items-end px-4 pt-6 pb-0 sm:px-6",
                     div {
                         class: "absolute bottom-0 left-4 z-10 flex items-center justify-start gap-3 sm:left-6",
-                        span { id: "aura-nav-brand", class: "inline-flex h-9 items-center text-xs font-bold uppercase tracking-[0.12em] text-foreground", "AURA" }
+                        span { id: "aura-nav-brand", class: "inline-flex h-8 items-center px-6 text-xs font-bold uppercase tracking-[0.12em] text-foreground", "AURA" }
                     }
                     div {
                         class: "w-full min-w-0 overflow-x-auto px-16 [::-webkit-scrollbar]:hidden sm:px-24",
                         div {
-                            class: "flex min-w-max h-9 items-center justify-center gap-2 mx-auto",
+                            class: "mx-auto flex h-8 min-w-max items-center justify-center gap-2",
                             for (screen, label, is_active) in screen_tabs(model.screen) {
                                 button {
                                     r#type: "button",
@@ -3605,7 +3620,7 @@ fn NeighborhoodScreen(
                 subtitle: Some(if is_detail {
                     format!("Access: {access_label} ({hop_hint})")
                 } else {
-                    format!("Enter as: {access_label} ({hop_hint})")
+                    "Explore your neighboring network".to_string()
                 }),
                 extra_class: Some("lg:col-span-4".to_string()),
                 if is_detail {
@@ -3622,7 +3637,7 @@ fn NeighborhoodScreen(
                         }
                         if show_detail_lists {
                             div {
-                                class: "grid flex-1 lg:min-h-0 gap-3 md:grid-cols-2",
+                                class: "grid flex-1 gap-4 lg:min-h-0 md:grid-cols-2",
                                 div {
                                     class: "flex lg:min-h-0 min-w-0 flex-col overflow-hidden rounded-sm bg-background/60 px-3 py-3",
                                     p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Channels" }
@@ -3719,7 +3734,7 @@ fn NeighborhoodScreen(
                         }
                         UiCardFooter {
                             extra_class: None,
-                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
+                            div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                                 UiButton {
                                     label: "Back To Map".to_string(),
                                     variant: ButtonVariant::Secondary,
@@ -3845,7 +3860,7 @@ fn NeighborhoodScreen(
                         }
                         UiCardFooter {
                             extra_class: None,
-                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
+                            div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                                 if can_enter_selected_home {
                                     UiButton {
                                         label: "Enter Home".to_string(),
@@ -3939,11 +3954,11 @@ fn NeighborhoodScreen(
                 subtitle: Some("Neighborhood status and scope".to_string()),
                 extra_class: Some("lg:col-span-8".to_string()),
                 div {
-                    class: "aura-list grid gap-2 md:grid-cols-2",
+                    class: "aura-list grid gap-2 md:grid-cols-2 md:gap-x-5",
                     UiListItem {
                         label: format!("Neighborhood: {display_neighborhood_name}"),
                         secondary: Some(format!("Selected home: {selected_home}")),
-                        active: true,
+                        active: false,
                     }
                     UiListItem {
                         label: format!("Home ID: {selected_home_id}"),
@@ -3952,7 +3967,10 @@ fn NeighborhoodScreen(
                     }
                     UiListItem {
                         label: format!("Access: {access_label} ({hop_hint})"),
-                        secondary: Some(format!("{social_mode_label} • {}", model.access_depth.compact())),
+                        secondary: Some(format!(
+                            "{social_mode_label} • {} access",
+                            model.access_depth.label()
+                        )),
                         active: false,
                     }
                     UiListItem {
@@ -4012,7 +4030,7 @@ fn ChatScreen(
     let active_channel = if runtime.active_channel.is_empty() {
         model
             .selected_channel_name()
-            .unwrap_or("general")
+            .unwrap_or(NOTE_TO_SELF_CHANNEL_NAME)
             .to_string()
     } else {
         runtime.active_channel.clone()
@@ -4058,19 +4076,19 @@ fn ChatScreen(
             class: "grid w-full gap-3 lg:grid-cols-12 lg:h-full lg:min-h-0 lg:[grid-template-rows:minmax(0,1fr)]",
             UiCard {
                 title: "Channels".to_string(),
-                subtitle: Some(format!("Current: #{active_channel}")),
+                subtitle: Some("E2EE and forward secure".to_string()),
                 extra_class: Some("lg:col-span-4".to_string()),
                 UiCardBody {
-                    extra_class: None,
+                    extra_class: Some("gap-1".to_string()),
                     ScrollArea {
                         class: Some("flex-1 lg:min-h-0 pr-1".to_string()),
                         ScrollAreaViewport {
-                            class: Some("aura-list space-y-2".to_string()),
+                            class: Some("flex flex-col gap-1".to_string()),
                             for channel in &runtime_channels {
-                                button {
-                                    r#type: "button",
-                                    id: list_item_dom_id(ListId::Channels, &channel.id),
-                                    class: "block w-full text-left",
+                                UiListButton {
+                                    id: Some(list_item_dom_id(ListId::Channels, &channel.id)),
+                                    label: channel.name.clone(),
+                                    active: channel.name.eq_ignore_ascii_case(&active_channel),
                                     onclick: {
                                         let controller = controller.clone();
                                         let channel_name = channel.name.clone();
@@ -4078,19 +4096,6 @@ fn ChatScreen(
                                             controller.select_channel_by_name(&channel_name);
                                             render_tick.set(render_tick() + 1);
                                         }
-                                    },
-                                    UiListItem {
-                                        label: format!("# {}", channel.name),
-                                        secondary: Some(
-                                            channel
-                                                .last_message
-                                                .clone()
-                                                .or_else(|| {
-                                                    (!channel.topic.is_empty()).then(|| channel.topic.clone())
-                                                })
-                                                .unwrap_or_else(|| "\u{00A0}".to_string())
-                                        ),
-                                        active: channel.name.eq_ignore_ascii_case(&active_channel),
                                     }
                                 }
                             }
@@ -4098,7 +4103,7 @@ fn ChatScreen(
                     }
                     UiCardFooter {
                         extra_class: None,
-                        div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
+                        div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                             UiButton {
                                 id: Some(
                                     ControlId::ChatNewGroupButton
@@ -4119,8 +4124,8 @@ fn ChatScreen(
             }
 
             UiCard {
-                title: "Conversation".to_string(),
-                subtitle: Some(format!("Topic: {topic}")),
+                title: active_channel.clone(),
+                subtitle: Some(if topic.is_empty() { "No topic set".to_string() } else { topic.clone() }),
                 extra_class: Some("lg:col-span-8".to_string()),
                 UiCardBody {
                     extra_class: None,
@@ -4146,9 +4151,9 @@ fn ChatScreen(
                     UiCardFooter {
                         extra_class: None,
                         div {
-                            class: "grid h-full w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3",
+                            class: "grid h-full w-full grid-cols-[minmax(0,1fr)_auto] items-stretch gap-3",
                             div {
-                                class: "flex h-full min-w-0 items-center rounded-sm bg-background/80 px-3",
+                                class: "flex h-full min-w-0 items-center rounded-sm bg-background/80",
                                 onclick: move |_| {
                                     if !is_input_mode {
                                         composer_container_focus_controller.send_action_keys("i");
@@ -4429,7 +4434,7 @@ fn ContactsScreen(
                     }
                     UiCardFooter {
                         extra_class: None,
-                        div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
+                        div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                             UiButton {
                                 id: Some(
                                     ControlId::ContactsAcceptInvitationButton
@@ -4540,7 +4545,7 @@ fn ContactsScreen(
                         }
                         UiCardFooter {
                             extra_class: None,
-                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
+                            div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                                 UiButton {
                                     id: Some(
                                         ControlId::ContactsStartChatButton
@@ -4747,7 +4752,7 @@ fn NotificationsScreen(
                         UiCardFooter {
                             extra_class: None,
                             div {
-                                class: "flex h-full w-full items-center gap-2 overflow-x-auto",
+                                class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                                 match item.action {
                                     NotificationRuntimeAction::ReceivedInvitation => {
                                         let accept_controller = controller.clone();
@@ -4919,7 +4924,7 @@ fn SettingsScreen(
                             class: "aura-list flex flex-col gap-2",
                             UiListItem {
                                 label: format!("Nickname: {}", runtime.nickname),
-                                secondary: Some("Update display name for this authority".to_string()),
+                                secondary: Some("Suggestion for what contacts should call you".to_string()),
                                 active: false,
                             }
                             UiListItem {
@@ -4930,7 +4935,7 @@ fn SettingsScreen(
                         }
                         UiCardFooter {
                             extra_class: None,
-                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
+                            div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                             UiButton {
                                 id: Some(
                                     ControlId::SettingsEditNicknameButton
@@ -4973,7 +4978,7 @@ fn SettingsScreen(
                         }
                         UiCardFooter {
                             extra_class: None,
-                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
+                            div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                             UiButton {
                                 id: Some(
                                     ControlId::SettingsConfigureThresholdButton
@@ -5016,7 +5021,7 @@ fn SettingsScreen(
                         }
                         UiCardFooter {
                             extra_class: None,
-                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
+                            div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                             UiButton {
                                 id: Some(
                                     ControlId::SettingsRequestRecoveryButton
@@ -5046,11 +5051,6 @@ fn SettingsScreen(
                         extra_class: Some("gap-2".to_string()),
                         div {
                             class: "aura-list flex flex-col gap-2",
-                            UiListItem {
-                                label: "Add device".to_string(),
-                                secondary: Some("Start device enrollment flow".to_string()),
-                                active: false,
-                            }
                             for device in &runtime.devices {
                                 UiListItem {
                                     label: if device.is_current {
@@ -5069,7 +5069,7 @@ fn SettingsScreen(
                         }
                         UiCardFooter {
                             extra_class: None,
-                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
+                            div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                             UiButton {
                                 id: Some(
                                     ControlId::SettingsAddDeviceButton
@@ -5166,7 +5166,7 @@ fn SettingsScreen(
                         }
                         UiCardFooter {
                             extra_class: None,
-                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
+                            div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                             UiButton {
                                 id: Some(
                                     ControlId::SettingsSwitchAuthorityButton
@@ -5235,7 +5235,7 @@ fn SettingsScreen(
                         }
                         UiCardFooter {
                             extra_class: None,
-                            div { class: "flex h-full w-full items-center gap-2 overflow-x-auto",
+                            div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                             UiButton {
                                 id: Some(
                                     ControlId::SettingsToggleThemeButton
@@ -5323,9 +5323,9 @@ fn dom_slug(value: &str) -> String {
 
 fn nav_tab_class(is_active: bool) -> &'static str {
     if is_active {
-        "inline-flex h-9 items-center rounded-sm bg-accent px-3 text-xs uppercase tracking-[0.08em] text-foreground"
+        "inline-flex h-8 items-center rounded-sm bg-accent px-3 text-xs uppercase tracking-[0.08em] text-foreground"
     } else {
-        "inline-flex h-9 items-center rounded-sm px-3 text-xs uppercase tracking-[0.08em] text-muted-foreground hover:bg-accent hover:text-foreground"
+        "inline-flex h-8 items-center rounded-sm px-3 text-xs uppercase tracking-[0.08em] text-muted-foreground hover:bg-accent hover:text-foreground"
     }
 }
 
@@ -5809,7 +5809,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
             let active_channel = if chat_runtime.active_channel.is_empty() {
                 model
                     .selected_channel_name()
-                    .unwrap_or("general")
+                    .unwrap_or(NOTE_TO_SELF_CHANNEL_NAME)
                     .to_string()
             } else {
                 chat_runtime.active_channel.clone()
@@ -5849,7 +5849,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
             }
         }
         ModalState::EditNickname => {
-            details.push("Update the selected nickname and press Enter.".to_string());
+            details.push("Update your nickname suggestion and press Enter.".to_string());
             inputs.push(ModalInputView {
                 label: "Nickname".to_string(),
                 field_id: FieldId::Nickname,

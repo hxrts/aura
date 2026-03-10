@@ -19,7 +19,11 @@ use crate::{
     signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME},
     thresholds::{default_channel_threshold, normalize_channel_threshold},
     views::{
-        chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus},
+        chat::{
+            is_note_to_self_channel_name, note_to_self_channel_id, note_to_self_context_id,
+            Channel, ChannelType, ChatState, Message, MessageDeliveryStatus,
+            NOTE_TO_SELF_CHANNEL_NAME, NOTE_TO_SELF_CHANNEL_TOPIC,
+        },
         home::{HomeMember, HomeRole, HomeState},
     },
     AppCore,
@@ -175,6 +179,82 @@ async fn send_chat_fact_with_retry(
     Err(AuraError::agent(format!(
         "Failed to deliver chat fact to {peer} after {CHAT_FACT_SEND_MAX_ATTEMPTS} attempts: {message}"
     )))
+}
+
+async fn ensure_runtime_note_to_self_channel(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn RuntimeBridge>,
+    authority_id: AuthorityId,
+    timestamp_ms: u64,
+) -> Result<ChannelId, AuraError> {
+    let context_id = note_to_self_context_id(authority_id);
+    let channel_id = note_to_self_channel_id(authority_id);
+
+    let create_result = runtime
+        .amp_create_channel(ChannelCreateParams {
+            context: context_id,
+            channel: Some(channel_id),
+            skip_window: None,
+            topic: Some(NOTE_TO_SELF_CHANNEL_TOPIC.to_string()),
+        })
+        .await;
+
+    let created_now = match create_result {
+        Ok(_) => true,
+        Err(error) => {
+            let lowered = error.to_string().to_ascii_lowercase();
+            if lowered.contains("already") || lowered.contains("exists") {
+                false
+            } else {
+                return Err(AuraError::agent(format!(
+                    "Failed to create note-to-self channel: {error}"
+                )));
+            }
+        }
+    };
+
+    if let Err(error) = runtime
+        .amp_join_channel(ChannelJoinParams {
+            context: context_id,
+            channel: channel_id,
+            participant: authority_id,
+        })
+        .await
+    {
+        let lowered = error.to_string().to_ascii_lowercase();
+        if !(lowered.contains("already") || lowered.contains("exists")) {
+            return Err(AuraError::agent(format!(
+                "Failed to join note-to-self channel: {error}"
+            )));
+        }
+    }
+
+    if created_now {
+        let fact = ChatFact::channel_created_ms(
+            context_id,
+            channel_id,
+            NOTE_TO_SELF_CHANNEL_NAME.to_string(),
+            Some(NOTE_TO_SELF_CHANNEL_TOPIC.to_string()),
+            false,
+            timestamp_ms,
+            authority_id,
+        )
+        .to_generic();
+
+        runtime
+            .commit_relational_facts(std::slice::from_ref(&fact))
+            .await
+            .map_err(|e| {
+                AuraError::agent(format!("Failed to persist note-to-self channel: {e}"))
+            })?;
+    }
+
+    with_chat_state(app_core, |chat_state| {
+        chat_state.ensure_note_to_self_channel(authority_id);
+    })
+    .await?;
+
+    Ok(channel_id)
 }
 
 fn bootstrap_required_for_recipients(recipient_count: usize) -> bool {
@@ -1278,175 +1358,206 @@ pub async fn send_message_ref(
     let (sender_id, message_id) = if backend == MessagingBackend::Runtime {
         let runtime = require_runtime(app_core).await?;
         let sender_id = runtime.authority_id();
-        let message_id = next_message_id(channel_id, sender_id, timestamp_ms, content);
-        let context_id =
-            context_id_for_channel(app_core, channel_id, Some(runtime.authority_id())).await?;
-        enforce_home_moderation_for_sender(
-            app_core,
-            context_id,
-            channel_id,
-            sender_id,
-            timestamp_ms,
-        )
-        .await?;
-        channel_context = Some(context_id);
+        let is_note_to_self = channel_id == note_to_self_channel_id(sender_id)
+            || matches!(&channel, ChannelRef::Name(name) if is_note_to_self_channel_name(name));
+        if is_note_to_self {
+            ensure_runtime_note_to_self_channel(app_core, &runtime, sender_id, timestamp_ms)
+                .await?;
+            let context_id = note_to_self_context_id(sender_id);
+            let message_id = next_message_id(channel_id, sender_id, timestamp_ms, content);
+            channel_context = Some(context_id);
+            let fact = ChatFact::message_sent_sealed_ms(
+                context_id,
+                channel_id,
+                message_id.clone(),
+                sender_id,
+                "You".to_string(),
+                content.as_bytes().to_vec(),
+                timestamp_ms,
+                None,
+                None,
+            )
+            .to_generic();
+            runtime
+                .commit_relational_facts(std::slice::from_ref(&fact))
+                .await
+                .map_err(|e| {
+                    AuraError::agent(format!("Failed to persist note-to-self message: {e}"))
+                })?;
+            (sender_id, message_id)
+        } else {
+            let message_id = next_message_id(channel_id, sender_id, timestamp_ms, content);
+            let context_id =
+                context_id_for_channel(app_core, channel_id, Some(runtime.authority_id())).await?;
+            enforce_home_moderation_for_sender(
+                app_core,
+                context_id,
+                channel_id,
+                sender_id,
+                timestamp_ms,
+            )
+            .await?;
+            channel_context = Some(context_id);
 
-        let send_params = ChannelSendParams {
-            context: context_id,
-            channel: channel_id,
-            sender: sender_id,
-            plaintext: content.as_bytes().to_vec(),
-            reply_to: None,
-        };
-        let mut maybe_cipher = match runtime.amp_send_message(send_params.clone()).await {
-            Ok(cipher) => Some(cipher),
-            Err(error) => {
-                let error_text = error.to_string();
-                if error_text.contains("channel state not found") {
-                    None
-                } else {
-                    return Err(AuraError::agent(format!(
-                        "Failed to send message on context {context_id} channel {channel_id}: {error}"
-                    )));
-                }
-            }
-        };
-        if maybe_cipher.is_none() {
-            for attempt in 1..=AMP_SEND_RETRY_ATTEMPTS {
-                runtime
-                    .sleep_ms(AMP_SEND_RETRY_BACKOFF_MS * attempt as u64)
-                    .await;
-                match runtime.amp_send_message(send_params.clone()).await {
-                    Ok(cipher) => {
-                        maybe_cipher = Some(cipher);
-                        break;
-                    }
-                    Err(error) => {
-                        let error_text = error.to_string();
-                        if error_text.contains("channel state not found") {
-                            continue;
-                        }
+            let send_params = ChannelSendParams {
+                context: context_id,
+                channel: channel_id,
+                sender: sender_id,
+                plaintext: content.as_bytes().to_vec(),
+                reply_to: None,
+            };
+            let mut maybe_cipher = match runtime.amp_send_message(send_params.clone()).await {
+                Ok(cipher) => Some(cipher),
+                Err(error) => {
+                    let error_text = error.to_string();
+                    if error_text.contains("channel state not found") {
+                        None
+                    } else {
                         return Err(AuraError::agent(format!(
                             "Failed to send message on context {context_id} channel {channel_id}: {error}"
                         )));
                     }
                 }
+            };
+            if maybe_cipher.is_none() {
+                for attempt in 1..=AMP_SEND_RETRY_ATTEMPTS {
+                    runtime
+                        .sleep_ms(AMP_SEND_RETRY_BACKOFF_MS * attempt as u64)
+                        .await;
+                    match runtime.amp_send_message(send_params.clone()).await {
+                        Ok(cipher) => {
+                            maybe_cipher = Some(cipher);
+                            break;
+                        }
+                        Err(error) => {
+                            let error_text = error.to_string();
+                            if error_text.contains("channel state not found") {
+                                continue;
+                            }
+                            return Err(AuraError::agent(format!(
+                                "Failed to send message on context {context_id} channel {channel_id}: {error}"
+                            )));
+                        }
+                    }
+                }
             }
-        }
 
-        let maybe_fact = if let Some(cipher) = maybe_cipher {
-            let wire = AmpMessage::new(cipher.header.clone(), cipher.ciphertext.clone());
-            let sealed = serialize_amp_message(&wire)
-                .map_err(|e| AuraError::agent(format!("Failed to encode AMP message: {e}")))?;
+            let maybe_fact = if let Some(cipher) = maybe_cipher {
+                let wire = AmpMessage::new(cipher.header.clone(), cipher.ciphertext.clone());
+                let sealed = serialize_amp_message(&wire)
+                    .map_err(|e| AuraError::agent(format!("Failed to encode AMP message: {e}")))?;
 
-            // Extract epoch from the AMP header (used for consensus finalization tracking)
-            epoch_hint = Some(cipher.header.chan_epoch as u32);
+                // Extract epoch from the AMP header (used for consensus finalization tracking)
+                epoch_hint = Some(cipher.header.chan_epoch as u32);
 
-            Some(
-                ChatFact::message_sent_sealed_ms(
+                Some(
+                    ChatFact::message_sent_sealed_ms(
+                        context_id,
+                        channel_id,
+                        message_id.clone(),
+                        sender_id,
+                        "You".to_string(),
+                        sealed,
+                        timestamp_ms,
+                        None,
+                        epoch_hint,
+                    )
+                    .to_generic(),
+                )
+            } else {
+                messaging_warn!(
+                    "AMP send unavailable for context {} channel {} after {} retries; falling back to optimistic local send",
                     context_id,
                     channel_id,
-                    message_id.clone(),
-                    sender_id,
-                    "You".to_string(),
-                    sealed,
-                    timestamp_ms,
-                    None,
-                    epoch_hint,
-                )
-                .to_generic(),
-            )
-        } else {
-            messaging_warn!(
-                "AMP send unavailable for context {} channel {} after {} retries; falling back to optimistic local send",
-                context_id,
-                channel_id,
-                AMP_SEND_RETRY_ATTEMPTS
-            );
-            None
-        };
+                    AMP_SEND_RETRY_ATTEMPTS
+                );
+                None
+            };
 
-        if let Some(fact) = maybe_fact {
-            // Enable ack tracking for message facts to support delivery confirmation
-            runtime
-                .commit_relational_facts_with_options(
-                    std::slice::from_ref(&fact),
-                    FactOptions::default().with_ack_tracking(),
-                )
-                .await
-                .map_err(|e| AuraError::agent(format!("Failed to persist message: {e}")))?;
+            if let Some(fact) = maybe_fact {
+                runtime
+                    .commit_relational_facts_with_options(
+                        std::slice::from_ref(&fact),
+                        FactOptions::default().with_ack_tracking(),
+                    )
+                    .await
+                    .map_err(|e| AuraError::agent(format!("Failed to persist message: {e}")))?;
 
-            let mut recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
-            let mut attempted_fanout = 0usize;
-            let mut failed_fanout = Vec::new();
-            let channel_requires_remote_delivery = chat_snapshot(app_core)
-                .await
-                .channel(&channel_id)
-                .map(|channel| channel.is_dm || channel.member_count > 1)
-                .unwrap_or(false);
-            if recipients.is_empty() && channel_requires_remote_delivery {
-                for attempt in 0..CHAT_FACT_CONNECTIVITY_ATTEMPTS {
-                    let _ = ensure_runtime_peer_connectivity(&runtime, "send_message_ref").await;
-                    converge_runtime(&runtime).await;
-                    runtime.sleep_ms(CHAT_FACT_CONNECTIVITY_BACKOFF_MS).await;
-                    recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
-                    if !recipients.is_empty() {
-                        break;
-                    }
-                    if attempt + 1 >= CHAT_FACT_CONNECTIVITY_ATTEMPTS {
-                        return Err(AuraError::agent(format!(
-                            "Missing sync prerequisite for channel {channel_id}: no recipient peers resolved"
-                        )));
-                    }
-                }
-            }
-            if !recipients.is_empty() {
-                for attempt in 0..CHAT_FACT_CONNECTIVITY_ATTEMPTS {
-                    if ensure_runtime_peer_connectivity(&runtime, "send_message_ref")
-                        .await
-                        .is_ok()
-                    {
-                        break;
-                    }
-                    if attempt + 1 < CHAT_FACT_CONNECTIVITY_ATTEMPTS {
+                let mut recipients =
+                    recipient_peers_for_channel(app_core, channel_id, sender_id).await;
+                let mut attempted_fanout = 0usize;
+                let mut failed_fanout = Vec::new();
+                let channel_requires_remote_delivery = chat_snapshot(app_core)
+                    .await
+                    .channel(&channel_id)
+                    .map(|channel| channel.is_dm || channel.member_count > 1)
+                    .unwrap_or(false);
+                if recipients.is_empty() && channel_requires_remote_delivery {
+                    for attempt in 0..CHAT_FACT_CONNECTIVITY_ATTEMPTS {
+                        let _ =
+                            ensure_runtime_peer_connectivity(&runtime, "send_message_ref").await;
                         converge_runtime(&runtime).await;
                         runtime.sleep_ms(CHAT_FACT_CONNECTIVITY_BACKOFF_MS).await;
+                        recipients =
+                            recipient_peers_for_channel(app_core, channel_id, sender_id).await;
+                        if !recipients.is_empty() {
+                            break;
+                        }
+                        if attempt + 1 >= CHAT_FACT_CONNECTIVITY_ATTEMPTS {
+                            return Err(AuraError::agent(format!(
+                                "Missing sync prerequisite for channel {channel_id}: no recipient peers resolved"
+                            )));
+                        }
                     }
                 }
-            }
-            for peer in recipients {
-                attempted_fanout = attempted_fanout.saturating_add(1);
-                if let Err(error) =
-                    send_chat_fact_with_retry(&runtime, peer, context_id, &fact).await
+                if !recipients.is_empty() {
+                    for attempt in 0..CHAT_FACT_CONNECTIVITY_ATTEMPTS {
+                        if ensure_runtime_peer_connectivity(&runtime, "send_message_ref")
+                            .await
+                            .is_ok()
+                        {
+                            break;
+                        }
+                        if attempt + 1 < CHAT_FACT_CONNECTIVITY_ATTEMPTS {
+                            converge_runtime(&runtime).await;
+                            runtime.sleep_ms(CHAT_FACT_CONNECTIVITY_BACKOFF_MS).await;
+                        }
+                    }
+                }
+                for peer in recipients {
+                    attempted_fanout = attempted_fanout.saturating_add(1);
+                    if let Err(error) =
+                        send_chat_fact_with_retry(&runtime, peer, context_id, &fact).await
+                    {
+                        failed_fanout.push(format!("{peer}: {error}"));
+                    }
+                }
+                if attempted_fanout == 0 {
+                    messaging_warn!(
+                        "No recipient peers resolved for channel {channel_id}; treating send as locally persisted"
+                    );
+                }
+                if attempted_fanout > 0 && failed_fanout.len() == attempted_fanout {
+                    messaging_warn!(
+                        "Message fanout unavailable for all recipients on {channel_id}: {}",
+                        failed_fanout.join("; ")
+                    );
+                }
+                converge_runtime(&runtime).await;
+                if let Err(_error) =
+                    ensure_runtime_peer_connectivity(&runtime, "send_message_ref").await
                 {
-                    failed_fanout.push(format!("{peer}: {error}"));
+                    #[cfg(feature = "instrumented")]
+                    tracing::warn!(
+                        error = %_error,
+                        channel_id = %channel_id,
+                        "message send completed without reachable peers"
+                    );
                 }
             }
-            if attempted_fanout == 0 {
-                messaging_warn!(
-                    "No recipient peers resolved for channel {channel_id}; treating send as locally persisted"
-                );
-            }
-            if attempted_fanout > 0 && failed_fanout.len() == attempted_fanout {
-                messaging_warn!(
-                    "Message fanout unavailable for all recipients on {channel_id}: {}",
-                    failed_fanout.join("; ")
-                );
-            }
-            converge_runtime(&runtime).await;
-            if let Err(_error) =
-                ensure_runtime_peer_connectivity(&runtime, "send_message_ref").await
-            {
-                #[cfg(feature = "instrumented")]
-                tracing::warn!(
-                    error = %_error,
-                    channel_id = %channel_id,
-                    "message send completed without reachable peers"
-                );
-            }
-        }
 
-        (sender_id, message_id)
+            (sender_id, message_id)
+        }
     } else {
         let sender_id = AuthorityId::new_from_entropy([1u8; 32]);
         let message_id = next_message_id(channel_id, sender_id, timestamp_ms, content);

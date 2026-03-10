@@ -1,8 +1,55 @@
 //! # Chat View State
 
+use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+/// Canonical default channel name for the account-authority self channel.
+pub const NOTE_TO_SELF_CHANNEL_NAME: &str = "Note to Self";
+/// Canonical topic for the account-authority self channel.
+pub const NOTE_TO_SELF_CHANNEL_TOPIC: &str = "Private notes for your account authority";
+
+/// Derive the deterministic relational context for the account-authority self channel.
+#[must_use]
+pub fn note_to_self_context_id(authority_id: AuthorityId) -> ContextId {
+    ContextId::new_from_entropy(hash(&authority_id.to_bytes()))
+}
+
+/// Derive the deterministic channel identifier for the account-authority self channel.
+#[must_use]
+pub fn note_to_self_channel_id(authority_id: AuthorityId) -> ChannelId {
+    let mut seed = Vec::with_capacity("note-to-self:".len() + authority_id.to_bytes().len());
+    seed.extend_from_slice(b"note-to-self:");
+    seed.extend_from_slice(&authority_id.to_bytes());
+    ChannelId::from_bytes(hash(&seed))
+}
+
+/// Returns true when a channel name refers to the canonical self channel.
+#[must_use]
+pub fn is_note_to_self_channel_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case(NOTE_TO_SELF_CHANNEL_NAME)
+}
+
+/// Construct the canonical self channel for the given account authority.
+#[must_use]
+pub fn note_to_self_channel(authority_id: AuthorityId) -> Channel {
+    Channel {
+        id: note_to_self_channel_id(authority_id),
+        context_id: Some(note_to_self_context_id(authority_id)),
+        name: NOTE_TO_SELF_CHANNEL_NAME.to_string(),
+        topic: Some(NOTE_TO_SELF_CHANNEL_TOPIC.to_string()),
+        channel_type: ChannelType::Home,
+        unread_count: 0,
+        is_dm: false,
+        member_ids: Vec::new(),
+        member_count: 1,
+        last_message: None,
+        last_message_time: None,
+        last_activity: 0,
+        last_finalized_epoch: 0,
+    }
+}
 
 // =============================================================================
 // Serde Helper for HashMap<ChannelId, Channel>
@@ -348,6 +395,28 @@ impl ChatState {
     /// Insert or update a channel.
     pub fn upsert_channel(&mut self, channel: Channel) {
         self.channels.insert(channel.id, channel);
+    }
+
+    /// Ensure the canonical self channel exists for the given account authority.
+    pub fn ensure_note_to_self_channel(&mut self, authority_id: AuthorityId) {
+        let channel_id = note_to_self_channel_id(authority_id);
+        let canonical = note_to_self_channel(authority_id);
+        if let Some(channel) = self.channels.get_mut(&channel_id) {
+            if channel.name.trim().is_empty() || channel.name == channel.id.to_string() {
+                channel.name = canonical.name;
+            }
+            if channel.topic.is_none() {
+                channel.topic = canonical.topic;
+            }
+            if channel.context_id.is_none() {
+                channel.context_id = canonical.context_id;
+            }
+            if channel.member_count == 0 {
+                channel.member_count = 1;
+            }
+        } else {
+            self.channels.insert(channel_id, canonical);
+        }
     }
 
     /// Remove a channel by ID, returning it if it existed.

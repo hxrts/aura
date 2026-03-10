@@ -395,19 +395,6 @@ pub async fn accept_device_enrollment_invitation(
             expected_min_devices,
             "device enrollment convergence poll"
         );
-        #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(
-            &format!(
-                "[device-enrollment-convergence] invitation_id={};attempt={};runtime_devices={};settings_devices={};expected_min_devices={}",
-                invitation.invitation_id,
-                attempt,
-                runtime_device_count,
-                settings_device_count,
-                expected_min_devices
-            )
-            .into(),
-        );
-
         if runtime_device_count >= expected_min_devices
             || settings_device_count >= expected_min_devices
         {
@@ -434,15 +421,6 @@ pub async fn accept_device_enrollment_invitation(
         invitation_id = %invitation.invitation_id,
         expected_min_devices,
         "device enrollment acceptance completed before local device list convergence"
-    );
-    #[cfg(target_arch = "wasm32")]
-    web_sys::console::warn_1(
-        &format!(
-            "[device-enrollment-convergence] invitation_id={};status=non_converged;expected_min_devices={}",
-            invitation.invitation_id,
-            expected_min_devices
-        )
-        .into(),
     );
     Ok(())
 }

@@ -20,9 +20,12 @@ use aura_core::{
     AuraError,
 };
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::workflows::signals::emit_signal;
 pub use crate::workflows::time::current_time_ms;
+
+const LOCAL_FIRST_TIME_BUDGET_MS: u64 = 50;
 
 const MISSING_ACTIVE_HOME_MESSAGE: &str =
     "No active home selected. Open Neighborhood and create or select a home.";
@@ -88,6 +91,18 @@ async fn homes_state_signal_fallback(app_core: &Arc<RwLock<AppCore>>) -> HomesSt
         core.views_mut().set_homes(signal_homes.clone());
     }
     signal_homes
+}
+
+async fn local_first_timestamp_ms(app_core: &Arc<RwLock<AppCore>>) -> u64 {
+    match tokio::time::timeout(
+        Duration::from_millis(LOCAL_FIRST_TIME_BUDGET_MS),
+        current_time_ms(app_core),
+    )
+    .await
+    {
+        Ok(Ok(timestamp_ms)) => timestamp_ms,
+        Ok(Err(_)) | Err(_) => 0,
+    }
 }
 
 /// Set active context for navigation and command targeting
@@ -230,7 +245,7 @@ pub async fn create_neighborhood(
     app_core: &Arc<RwLock<AppCore>>,
     name: String,
 ) -> Result<String, AuraError> {
-    let timestamp_ms = current_time_ms(app_core).await.unwrap_or(0);
+    let timestamp_ms = local_first_timestamp_ms(app_core).await;
     let neighborhood_name = if name.trim().is_empty() {
         "Neighborhood".to_string()
     } else {
@@ -383,7 +398,7 @@ pub async fn create_home(
     name: Option<String>,
     description: Option<String>,
 ) -> Result<ChannelId, AuraError> {
-    let timestamp_ms = current_time_ms(app_core).await.unwrap_or(0);
+    let timestamp_ms = local_first_timestamp_ms(app_core).await;
     let home_name = name
         .as_deref()
         .map(str::trim)
@@ -417,15 +432,28 @@ pub async fn create_home(
         let mut core = app_core.write().await;
 
         let mut homes = core.views().get_homes();
-        if homes.is_empty() {
+        let should_promote_to_primary = homes.is_empty()
+            || homes
+                .current_home()
+                .map(|current| current.id == ChannelId::default())
+                .unwrap_or(true);
+        if should_promote_to_primary {
             home.is_primary = true;
         }
-        homes.add_home_with_auto_select(home);
+        let result = homes.add_home(home);
+        homes.select_home(Some(result.home_id));
 
         let mut neighborhood = core.views().get_neighborhood();
-        if neighborhood.home_name.is_empty() {
+        if neighborhood.home_name.is_empty() || neighborhood.home_home_id == ChannelId::default() {
             neighborhood.home_home_id = home_id;
             neighborhood.home_name = home_name.clone();
+            neighborhood.position = Some(TraversalPosition {
+                current_home_id: home_id,
+                current_home_name: home_name.clone(),
+                depth: 2, // Full
+                path: vec![home_id],
+            });
+        } else if should_promote_to_primary {
             neighborhood.position = Some(TraversalPosition {
                 current_home_id: home_id,
                 current_home_name: home_name.clone(),

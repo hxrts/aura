@@ -12,6 +12,7 @@ use crate::model::{
     ThresholdWizardModalState, ThresholdWizardStep, ToastState, UiModel, UiScreen,
 };
 use aura_app::ui::types::parse_chat_command;
+use aura_app::views::chat::{NOTE_TO_SELF_CHANNEL_NAME, NOTE_TO_SELF_CHANNEL_TOPIC};
 
 fn set_toast(model: &mut UiModel, icon: char, message: impl Into<String>) {
     model.toast_key = model.toast_key.saturating_add(1);
@@ -167,7 +168,9 @@ fn handle_chat_char(model: &mut UiModel, ch: char) {
             }));
         }
         'o' => {
-            let channel = model.selected_channel_name().unwrap_or("general");
+            let channel = model
+                .selected_channel_name()
+                .unwrap_or(NOTE_TO_SELF_CHANNEL_NAME);
             model.modal_hint = format!("Channel: #{channel}");
             model.active_modal = Some(ActiveModal::ChannelInfo);
         }
@@ -237,10 +240,11 @@ fn handle_neighborhood_char(model: &mut UiModel, ch: char) {
         }
         'd' => {
             model.access_depth = model.access_depth.next();
-            model.toast = Some(ToastState {
-                icon: 'ℹ',
-                message: model.access_depth.compact().to_string(),
-            });
+            set_toast(
+                model,
+                'ℹ',
+                format!("Access depth set to {} access", model.access_depth.label()),
+            );
         }
         'm' => {}
         'v' => {}
@@ -252,18 +256,12 @@ fn handle_neighborhood_char(model: &mut UiModel, ch: char) {
                     name: "Neighborhood".to_string(),
                 });
             }
-            model.toast = Some(ToastState {
-                icon: 'ℹ',
-                message: "Neighborhood".to_string(),
-            });
+            set_toast(model, 'ℹ', "Viewing the neighborhood map");
         }
         'b' => {
             model.access_depth = AccessDepth::Limited;
             model.neighborhood_mode = crate::model::NeighborhoodMode::Map;
-            model.toast = Some(ToastState {
-                icon: 'ℹ',
-                message: "Neighborhood".to_string(),
-            });
+            set_toast(model, 'ℹ', "Returned to the neighborhood map");
         }
         'o' if matches!(
             model.neighborhood_mode,
@@ -798,11 +796,12 @@ fn submit_chat_input(model: &mut UiModel, text: &str) {
                             model.channels.retain(|row| row.name != current);
                             if model.channels.is_empty() {
                                 model.channels.push(crate::model::ChannelRow {
-                                    name: "general".to_string(),
+                                    name: NOTE_TO_SELF_CHANNEL_NAME.to_string(),
                                     selected: true,
-                                    topic: String::new(),
+                                    topic: NOTE_TO_SELF_CHANNEL_TOPIC.to_string(),
                                 });
-                                model.selected_channel = Some("general".to_string());
+                                model.selected_channel =
+                                    Some(NOTE_TO_SELF_CHANNEL_NAME.to_string());
                             } else {
                                 let selected_name = model.channels[0].name.clone();
                                 model.selected_channel = Some(selected_name.clone());

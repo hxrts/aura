@@ -526,6 +526,7 @@ fn publish_scoped_channels(
 pub fn use_channels_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
+    shared_authority_id: SharedAuthorityId,
     update_tx: Option<UiUpdateSender>,
 ) -> SharedChannels {
     let shared_channels_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
@@ -544,16 +545,24 @@ pub fn use_channels_subscription(
         let channels = shared_channels.clone();
         let active_scope = active_scope.clone();
         let latest_chat_state = latest_chat_state.clone();
+        let shared_authority_id = shared_authority_id.clone();
         let update_tx = update_tx.clone();
         let last_channel_count = last_channel_count.clone();
         let last_message_count = last_message_count.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                let stabilized = latest_chat_state
+                let mut stabilized = latest_chat_state
                     .read()
                     .ok()
                     .map(|previous| merge_dm_like_channels(&chat_state, &previous))
                     .unwrap_or_else(|| chat_state.clone());
+                if let Some(authority_id) = shared_authority_id
+                    .read()
+                    .ok()
+                    .and_then(|guard| guard.clone())
+                {
+                    stabilized.ensure_note_to_self_channel(authority_id);
+                }
                 tracing::debug!(
                     "CHAT_SIGNAL_UPDATE: incoming={} stabilized={}",
                     chat_state.channel_count(),
@@ -585,6 +594,49 @@ pub fn use_channels_subscription(
                     &last_channel_count,
                     &last_message_count,
                     &stabilized,
+                    scope.as_deref(),
+                );
+            })
+            .await;
+        }
+    });
+
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let channels = shared_channels.clone();
+        let shared_authority_id = shared_authority_id.clone();
+        let latest_chat_state = latest_chat_state.clone();
+        let active_scope = active_scope.clone();
+        let update_tx = update_tx.clone();
+        let last_channel_count = last_channel_count.clone();
+        let last_message_count = last_message_count.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
+                let authority_id = settings_state.authority_id.parse::<AuthorityId>().ok();
+                if let Ok(mut guard) = shared_authority_id.write() {
+                    *guard = authority_id;
+                }
+
+                let Some(authority_id) = authority_id else {
+                    return;
+                };
+
+                let mut chat_state = latest_chat_state
+                    .read()
+                    .ok()
+                    .map(|g| g.clone())
+                    .unwrap_or_default();
+                chat_state.ensure_note_to_self_channel(authority_id);
+                if let Ok(mut guard) = latest_chat_state.write() {
+                    *guard = chat_state.clone();
+                }
+                let scope = active_scope.read().ok().and_then(|g| g.clone());
+                publish_scoped_channels(
+                    &channels,
+                    &update_tx,
+                    &last_channel_count,
+                    &last_message_count,
+                    &chat_state,
                     scope.as_deref(),
                 );
             })

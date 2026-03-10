@@ -1,5 +1,8 @@
 use super::*;
 use crate::signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME};
+use crate::views::chat::{
+    is_note_to_self_channel_name, note_to_self_channel_id, note_to_self_context_id,
+};
 use crate::workflows::channel_ref::ChannelSelector;
 use crate::workflows::signals::read_signal;
 
@@ -24,6 +27,16 @@ pub(super) async fn resolve_channel_id_from_state_or_input(
     let normalized_name = raw.trim_start_matches('#').trim();
     let normalized_lower = normalized_name.to_ascii_lowercase();
     let raw_lower = raw.to_ascii_lowercase();
+
+    let local_authority = {
+        let core = app_core.read().await;
+        core.authority().cloned()
+    };
+    if is_note_to_self_channel_name(normalized_name) {
+        if let Some(authority_id) = local_authority {
+            return Ok(note_to_self_channel_id(authority_id));
+        }
+    }
 
     let chat = chat_snapshot(app_core).await;
     if let Some(existing) = chat.all_channels().find(|channel| {
@@ -85,6 +98,11 @@ pub(super) async fn matching_channel_ids(
     let normalized_lower = normalized_name.to_ascii_lowercase();
     let raw_lower = raw.to_ascii_lowercase();
 
+    let local_authority = {
+        let core = app_core.read().await;
+        core.authority().cloned()
+    };
+
     let chat = chat_snapshot(app_core).await;
     let mut matches = Vec::new();
     for channel in chat.all_channels() {
@@ -100,6 +118,15 @@ pub(super) async fn matching_channel_ids(
 
         if is_match {
             matches.push(channel.id);
+        }
+    }
+
+    if is_note_to_self_channel_name(normalized_name) {
+        if let Some(authority_id) = local_authority {
+            let channel_id = note_to_self_channel_id(authority_id);
+            if !matches.contains(&channel_id) {
+                matches.push(channel_id);
+            }
         }
     }
 
@@ -145,6 +172,12 @@ pub(super) async fn context_id_for_channel(
     channel_id: ChannelId,
     local_authority: Option<AuthorityId>,
 ) -> Result<ContextId, AuraError> {
+    if let Some(authority_id) = local_authority {
+        if channel_id == note_to_self_channel_id(authority_id) {
+            return Ok(note_to_self_context_id(authority_id));
+        }
+    }
+
     {
         let chat = chat_snapshot(app_core).await;
         if let Some(channel) = chat.channel(&channel_id) {

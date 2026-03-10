@@ -17,6 +17,7 @@ cfg_if! {
         use aura_app::{AppConfig, AppCore};
         use aura_app::ui::workflows::account as account_workflows;
         use aura_app::ui::workflows::invitation as invitation_workflows;
+        use aura_app::ui::workflows::network as network_workflows;
         use aura_app::ui::workflows::runtime as runtime_workflows;
         use aura_app::ui::workflows::settings as settings_workflows;
         use aura_app::ui::workflows::time as time_workflows;
@@ -477,6 +478,7 @@ cfg_if! {
                             let _ = runtime.trigger_discovery().await;
                             let _ = runtime.trigger_sync().await;
                         }
+                        let _ = network_workflows::refresh_discovered_peers(&app_core).await;
                         let _ = time_workflows::sleep_ms(&app_core, 1_500).await;
                     }
                 });

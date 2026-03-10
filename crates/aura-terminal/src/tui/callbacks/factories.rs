@@ -8,6 +8,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::tui::components::copy_to_clipboard;
 use crate::tui::components::ToastMessage;
 use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
@@ -974,7 +975,9 @@ impl InvitationsCallbacks {
                     };
                     match result {
                         Ok(code) => {
-                            let _ = tx.try_send(UiUpdate::InvitationExported { code });
+                            let _ = copy_to_clipboard(&code);
+                            send_ui_update_reliable(&tx, UiUpdate::InvitationExported { code })
+                                .await;
                         }
                         Err(e) => {
                             send_ui_update_reliable(
@@ -996,7 +999,8 @@ impl InvitationsCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.export_invitation_code(&invitation_id).await {
                     Ok(code) => {
-                        let _ = tx.try_send(UiUpdate::InvitationExported { code });
+                        let _ = copy_to_clipboard(&code);
+                        send_ui_update_reliable(&tx, UiUpdate::InvitationExported { code }).await;
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -1725,11 +1729,13 @@ impl AppCallbacks {
                 // Create the account file via async storage effects.
                 match ctx.create_account(&nickname_suggestion).await {
                     Ok(()) => {
-                        let _ = tx.try_send(UiUpdate::NicknameSuggestionChanged(
-                            nickname_suggestion.clone(),
-                        ));
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::NicknameSuggestionChanged(nickname_suggestion.clone()),
+                        )
+                        .await;
 
-                        let _ = tx.try_send(UiUpdate::AccountCreated);
+                        send_ui_update_reliable(&tx, UiUpdate::AccountCreated).await;
 
                         // Persist the nickname suggestion and create the journal fact in the
                         // background. The local account already exists at this point, so
@@ -1742,20 +1748,17 @@ impl AppCallbacks {
                                     name: nickname_for_fact.clone(),
                                 })
                                 .await;
-
-                            let cmd = EffectCommand::CreateAccount {
-                                nickname_suggestion: nickname_for_fact,
-                            };
-                            if let Err(e) = ctx_for_fact.dispatch(cmd).await {
-                                tracing::warn!("Journal fact creation failed: {}", e);
-                            }
                         });
                     }
                     Err(e) => {
-                        let _ = tx.try_send(UiUpdate::OperationFailed {
-                            operation: "CreateAccount".to_string(),
-                            error: e.to_string(),
-                        });
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::OperationFailed {
+                                operation: "CreateAccount".to_string(),
+                                error: e.to_string(),
+                            },
+                        )
+                        .await;
                     }
                 }
             });
@@ -1772,17 +1775,22 @@ impl AppCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.import_device_enrollment_code(&code).await {
                     Ok(()) => {
-                        let _ = tx.try_send(UiUpdate::AccountCreated);
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
-                            "devices",
-                            "Device enrollment invitation accepted",
-                        )));
+                        send_ui_update_reliable(&tx, UiUpdate::AccountCreated).await;
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::success(
+                                "devices",
+                                "Device enrollment invitation accepted",
+                            )),
+                        )
+                        .await;
                     }
                     Err(e) => {
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                            "devices",
-                            e.to_string(),
-                        )));
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::error("devices", e.to_string())),
+                        )
+                        .await;
                     }
                 }
             });

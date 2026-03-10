@@ -475,6 +475,7 @@ fn execute_step(
             Ok(())
         }
         ScenarioAction::CreateAccount => {
+            const CREATE_ACCOUNT_MIN_TIMEOUT_MS: u64 = 30_000;
             let instance_id = resolve_required_instance(step, context)?;
             let account_name = resolve_required_field(
                 step,
@@ -482,6 +483,10 @@ fn execute_step(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
+            let action_timeout_ms = step
+                .timeout_ms
+                .unwrap_or(step_budget_ms)
+                .max(CREATE_ACCOUNT_MIN_TIMEOUT_MS);
             dispatch(
                 tool_api,
                 plan_fill_field_request(&instance_id, FieldId::AccountName, account_name),
@@ -493,15 +498,14 @@ fn execute_step(
                     ControlId::OnboardingCreateAccountButton,
                 ),
             )?;
-            let deadline =
-                Instant::now() + Duration::from_millis(step.timeout_ms.unwrap_or(step_budget_ms));
+            let deadline = Instant::now() + Duration::from_millis(action_timeout_ms);
             let mut neighborhood_step = semantic_wait_step(step);
             neighborhood_step.screen_id = Some(ScreenId::Neighborhood);
             wait_for_semantic_state(
                 &neighborhood_step,
                 tool_api,
                 &instance_id,
-                step.timeout_ms.unwrap_or(step_budget_ms),
+                action_timeout_ms,
             )?;
             let remaining_ms = deadline
                 .saturating_duration_since(Instant::now())
@@ -514,7 +518,9 @@ fn execute_step(
                 .saturating_duration_since(Instant::now())
                 .as_millis()
                 .max(1) as u64;
-            wait_for_home_bootstrap_ready(step, tool_api, &instance_id, remaining_ms)?;
+            if tool_api.backend_kind(&instance_id)? != "local_pty" {
+                wait_for_home_bootstrap_ready(step, tool_api, &instance_id, remaining_ms)?;
+            }
             Ok(())
         }
         ScenarioAction::StartDeviceEnrollment => {
@@ -807,6 +813,39 @@ fn execute_step(
                 fault_rng,
                 context,
             )
+        }
+        ScenarioAction::JoinChannel => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let channel_name = resolve_required_field(
+                step,
+                "value",
+                step.value.as_deref().or(step.expect.as_deref()),
+                context,
+            )?;
+            let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
+            dispatch(
+                tool_api,
+                plan_activate_control_request(&instance_id, ControlId::ChatNewGroupButton),
+            )?;
+            wait_for_modal(
+                step,
+                tool_api,
+                &instance_id,
+                timeout_ms,
+                ModalId::CreateChannel,
+            )?;
+            dispatch(
+                tool_api,
+                plan_fill_field_request(&instance_id, FieldId::CreateChannelName, channel_name),
+            )?;
+            for _ in 0..3 {
+                dispatch(
+                    tool_api,
+                    plan_activate_control_request(&instance_id, ControlId::ModalConfirmButton),
+                )?;
+                std::thread::sleep(Duration::from_millis(120));
+            }
+            Ok(())
         }
         ScenarioAction::SendKeys => {
             let instance_id = resolve_required_instance(step, context)?;

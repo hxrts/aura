@@ -1,6 +1,7 @@
 //! Chat scoping helpers tied to neighborhood traversal state.
 
 use aura_app::ui::types::{Channel as AppChannel, ChatState, NeighborhoodState};
+use aura_app::views::chat::is_note_to_self_channel_name;
 use aura_core::identifiers::ChannelId;
 
 /// Resolve the active home scope for chat from neighborhood traversal state.
@@ -33,6 +34,11 @@ pub fn is_dm_like_channel(channel: &AppChannel) -> bool {
             .unwrap_or(false)
 }
 
+#[must_use]
+pub fn is_pinned_channel(channel: &AppChannel) -> bool {
+    is_dm_like_channel(channel) || is_note_to_self_channel_name(&channel.name)
+}
+
 /// Returns scoped chat channels while preserving visibility when scope metadata is incomplete.
 #[must_use]
 pub fn scoped_channels<'a>(
@@ -50,10 +56,10 @@ pub fn scoped_channels<'a>(
     let has_active_home_channel = active_home_channel.is_some();
     let active_home_context = active_home_channel.and_then(|channel| channel.context_id);
 
-    chat_state
+    let mut channels: Vec<_> = chat_state
         .all_channels()
         .filter(|channel| {
-            if is_dm_like_channel(channel) {
+            if is_pinned_channel(channel) {
                 return true;
             }
 
@@ -69,7 +75,20 @@ pub fn scoped_channels<'a>(
                 }
             }
         })
-        .collect()
+        .collect();
+
+    channels.sort_by(|left, right| {
+        match (
+            is_note_to_self_channel_name(&left.name),
+            is_note_to_self_channel_name(&right.name),
+        ) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => left.name.cmp(&right.name),
+        }
+    });
+
+    channels
 }
 
 #[cfg(test)]

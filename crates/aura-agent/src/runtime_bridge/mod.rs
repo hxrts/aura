@@ -4,8 +4,6 @@
 //! enabling the dependency inversion where `aura-app` defines the trait and
 //! `aura-agent` provides the implementation.
 
-use std::future::Future;
-
 use crate::core::AuraAgent;
 use crate::handlers::shared::context_commitment_from_journal;
 use crate::runtime::consensus::build_consensus_params;
@@ -310,7 +308,7 @@ impl AgentRuntimeBridge {
 async fn run_local_ws<Mk, Fut, T>(make_fut: Mk) -> Result<T, IntentError>
 where
     Mk: FnOnce() -> Fut + 'static,
-    Fut: Future<Output = Result<T, IntentError>> + 'static,
+    Fut: core::future::Future<Output = Result<T, IntentError>> + 'static,
     T: 'static,
 {
     let (tx, rx) = oneshot::channel();

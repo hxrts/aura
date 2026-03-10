@@ -133,6 +133,19 @@
 
 /* These rules are outside @layer to ensure they come after all Tailwind utilities */
 
+/* Ensure toasts appear above modal overlays (z-50) */
+[data-slot="toaster"],
+div[data-slot="toaster"] {
+  z-index: 100 !important;
+  position: fixed !important;
+}
+
+/* Ensure individual toasts are also above overlays */
+[data-slot="toast"],
+div[data-slot="toast"] {
+  z-index: 100 !important;
+}
+
 /* Remove bottom border from last list item in flex column containers */
 div.aura-list > button:last-child > div.aura-list-item,
 div.aura-list > div.aura-list-item:last-child {

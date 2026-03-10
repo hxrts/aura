@@ -13,7 +13,9 @@ use aura_app::signal_defs::{
     CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL,
 };
 use aura_app::views::{
-    chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus},
+    chat::{
+        note_to_self_channel_id, Channel, ChannelType, ChatState, Message, MessageDeliveryStatus,
+    },
     contacts::{Contact, ContactError, ContactsState},
     home::{BanRecord, HomeRole, HomeState, HomesState, KickRecord, MuteRecord, PinnedMessageMeta},
     invitations::{
@@ -1109,6 +1111,7 @@ impl ReactiveView for ChatSignalView {
                             let sealed_len = payload.len();
                             let payload_bytes = payload.clone();
                             let context = context_id;
+                            let note_to_self_channel = note_to_self_channel_id(self.own_authority);
                             drop(state);
                             if !self
                                 .sender_allowed_for_context(
@@ -1129,7 +1132,10 @@ impl ReactiveView for ChatSignalView {
                                 state = self.state.lock().await;
                                 continue;
                             }
-                            let content =
+                            let content = if channel_id == note_to_self_channel {
+                                String::from_utf8(payload_bytes.clone())
+                                    .unwrap_or_else(|_| format!("[sealed: {} bytes]", sealed_len))
+                            } else {
                                 match amp_recv(self.effects.as_ref(), context, payload_bytes).await
                                 {
                                     Ok(msg) => {
@@ -1146,7 +1152,8 @@ impl ReactiveView for ChatSignalView {
                                         );
                                         format!("[sealed: {} bytes]", sealed_len)
                                     }
-                                };
+                                }
+                            };
                             state = self.state.lock().await;
                             tracing::info!(
                                 channel_id = %channel_id,

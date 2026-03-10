@@ -6,6 +6,7 @@ asset_dir = "public"
 hot_reload = true
 
 [web.app]
+title = "Aura"
 
 [web.watcher]
 index_on_404 = true
