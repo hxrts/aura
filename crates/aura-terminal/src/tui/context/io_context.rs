@@ -537,7 +537,7 @@ impl IoContext {
                 self.demo_bridge.as_ref()
             }
 
-            /// Import an invitation code on the demo Mobile device and accept it.
+            /// Import an invite code on the demo Mobile device and accept it.
             pub async fn import_invitation_on_mobile(&self, code: &str) -> TerminalResult<()> {
                 let agent = self
                     .demo_mobile_agent
@@ -646,7 +646,28 @@ impl IoContext {
                     .await;
             });
 
-            let _ = context_workflows::create_home(&app_core, Some(home_name), None).await;
+            const SIGNING_KEY_ATTEMPTS: usize = 40;
+            const BOOTSTRAP_RETRY_MS: u64 = 250;
+            for attempt in 0..SIGNING_KEY_ATTEMPTS {
+                let bootstrap_ready = {
+                    let core = app_core.read().await;
+                    if core.has_runtime() {
+                        core.bootstrap_signing_keys().await.is_ok()
+                    } else {
+                        false
+                    }
+                };
+                if bootstrap_ready {
+                    break;
+                }
+                if attempt + 1 < SIGNING_KEY_ATTEMPTS {
+                    tokio::time::sleep(std::time::Duration::from_millis(BOOTSTRAP_RETRY_MS)).await;
+                }
+            }
+
+            let _ = settings_workflows::refresh_settings_from_runtime(&app_core).await;
+            let _ = system_workflows::refresh_account(&app_core).await;
+            context_workflows::create_home(&app_core, Some(home_name), None).await?;
             return Ok(());
         }
 

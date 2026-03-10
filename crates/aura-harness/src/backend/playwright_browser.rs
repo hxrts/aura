@@ -837,7 +837,14 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 
     fn join_channel_via_ui(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
-        self.submit_chat_command_via_ui(&format!("join {channel_name}"))?;
+        self.activate_control(ControlId::NavChat)?;
+        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
+        self.send_keys("n")?;
+        wait_for_modal_visible(self, ModalId::CreateChannel, Duration::from_secs(5))?;
+        self.fill_field(FieldId::CreateChannelName, channel_name)?;
+        self.activate_control(ControlId::ModalConfirmButton)?;
+        self.activate_control(ControlId::ModalConfirmButton)?;
+        self.activate_control(ControlId::ModalConfirmButton)?;
         Ok(SubmittedAction::without_handle(()))
     }
 

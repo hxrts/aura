@@ -28,6 +28,7 @@ cfg_if! {
             OperationState, ScreenId, UiReadiness, UiSnapshot,
         };
         use aura_ui::{AuraUiRoot, UiController};
+        use dioxus::dioxus_core::schedule_update;
         use dioxus::prelude::*;
         use std::sync::Arc;
         use web_clipboard::WebClipboardAdapter;
@@ -426,8 +427,10 @@ cfg_if! {
         #[component]
         fn BootstrappedApp(state: BootstrapState) -> Element {
             let controller = state.controller.clone();
-            let account_ready = use_signal(|| state.account_ready);
+            let rerender = schedule_update();
+            controller.set_rerender_callback(rerender.clone());
             let mut sync_loop_started = use_signal(|| false);
+            let mut bootstrap_account_ready = use_signal(|| state.account_ready);
             let mut account_name = use_signal(String::new);
             let mut account_error = use_signal(|| Option::<String>::None);
             let creating_account = use_signal(|| false);
@@ -435,6 +438,10 @@ cfg_if! {
             let mut import_error = use_signal(|| Option::<String>::None);
             let importing_code = use_signal(|| false);
             let mut auto_import_started = use_signal(|| false);
+            let controller_snapshot = controller.semantic_model_snapshot();
+            let controller_account_ready = controller_snapshot.readiness == UiReadiness::Ready
+                && controller_snapshot.screen != ScreenId::Onboarding;
+            let account_ready = bootstrap_account_ready() || controller_account_ready;
 
             let publish_onboarding_snapshot = {
                 let controller = controller.clone();
@@ -459,7 +466,7 @@ cfg_if! {
                         screen: ScreenId::Onboarding,
                         focused_control: Some(ControlId::OnboardingRoot),
                         open_modal: None,
-                        readiness: if account_ready() {
+                        readiness: if account_ready {
                             UiReadiness::Ready
                         } else {
                             UiReadiness::Loading
@@ -474,7 +481,7 @@ cfg_if! {
                 }
             };
 
-            if account_ready() && !sync_loop_started() {
+            if account_ready && !sync_loop_started() {
                 sync_loop_started.set(true);
                 let app_core = controller.app_core().clone();
                 spawn(async move {
@@ -490,7 +497,7 @@ cfg_if! {
                 });
             }
 
-            if account_ready() {
+            if account_ready {
                 controller.set_account_setup_state(true, "", None);
                 return rsx! {
                     AuraUiRoot {
@@ -505,11 +512,10 @@ cfg_if! {
                 let controller = controller.clone();
                 let import_error = import_error.clone();
                 let importing_code = importing_code.clone();
-                let account_ready = account_ready.clone();
+                let mut bootstrap_account_ready = bootstrap_account_ready.clone();
                 move |code: String| {
                     let mut import_error = import_error.clone();
                     let mut importing_code = importing_code.clone();
-                    let mut account_ready = account_ready.clone();
                     if importing_code() {
                         return;
                     }
@@ -658,8 +664,8 @@ cfg_if! {
                                         OperationState::Succeeded,
                                     );
                                     controller.info_toast("Device enrollment complete");
+                                    bootstrap_account_ready.set(true);
                                     controller.set_account_setup_state(true, "", None);
-                                    account_ready.set(true);
                                 } else {
                                     controller.info_toast("Reloading to finish import");
                                 }
@@ -703,10 +709,10 @@ cfg_if! {
 
             let submit_account = {
                 let controller = controller.clone();
-                let mut account_ready = account_ready.clone();
                 let account_name = account_name.clone();
                 let mut account_error = account_error.clone();
                 let mut creating_account = creating_account.clone();
+                let mut bootstrap_account_ready = bootstrap_account_ready.clone();
                 move |_| {
                     if creating_account() {
                         return;
@@ -737,16 +743,22 @@ cfg_if! {
                                     &"[web-onboarding] submit_account ok".into(),
                                 );
                                 if harness_mode_enabled() {
-                                    web_sys::console::log_1(
-                                        &"[web-onboarding] reloading_after_submit".into(),
-                                    );
-                                    if let Some(window) = web_sys::window() {
-                                        let _ = window.location().reload();
+                                    let storage_prefix = active_storage_prefix();
+                                    let authority_storage_key =
+                                        selected_authority_key(&storage_prefix);
+                                    let runtime = controller.app_core().read().await.runtime().cloned();
+                                    if let Some(runtime) = runtime {
+                                        let _ = persist_selected_authority(
+                                            &authority_storage_key,
+                                            &runtime.authority_id(),
+                                        );
+                                        let _ = reload_page();
+                                        creating_account.set(false);
+                                        return;
                                     }
-                                    return;
                                 }
+                                bootstrap_account_ready.set(true);
                                 controller.set_account_setup_state(true, "", None);
-                                account_ready.set(true);
                                 creating_account.set(false);
                             }
                             Err(error) => {

@@ -1950,11 +1950,11 @@ async function uiState(params) {
     const payload = await withOperationTimeout(
       `ui_state_structured_${reason}`,
       session.page.evaluate(() => {
-        if (typeof window.__AURA_UI_STATE__ === 'function') {
-          return window.__AURA_UI_STATE__();
-        }
         if (typeof window.__AURA_HARNESS__?.ui_state === 'function') {
           return window.__AURA_HARNESS__.ui_state();
+        }
+        if (typeof window.__AURA_UI_STATE__ === 'function') {
+          return window.__AURA_UI_STATE__();
         }
         return null;
       }),
@@ -2009,12 +2009,22 @@ async function uiState(params) {
         recentConsoleLower.includes('[web-import-device] accepting_on_bound_runtime'));
     if (staleOnboardingCache) {
       console.error(`[driver] ui_state stale_onboarding_cache instance=${instanceId}`);
-      const refreshed = await readStructuredUiStateWithNavigationRecovery(
-        'post_onboarding_submit',
-        2000
-      );
-      if (refreshed) {
-        return refreshed;
+      try {
+        const refreshed = await readStructuredUiStateWithNavigationRecovery(
+          'post_onboarding_submit',
+          UI_STATE_TIMEOUT_MS
+        );
+        if (refreshed) {
+          return refreshed;
+        }
+      } catch (error) {
+        console.error(
+          `[driver] ui_state stale_onboarding_refresh_failed instance=${instanceId} error=${error?.message ?? String(error)}`
+        );
+        if (cached) {
+          return cached;
+        }
+        throw error;
       }
     }
     if (cached && !cachedUiStateConverged(session, cached)) {
@@ -2248,6 +2258,45 @@ async function fillInput(params) {
       fillTimeoutMs + 2000
     );
     console.error(`[driver] fill_input playwright_fill done instance=${instanceId} selector=${selector}`);
+    await withOperationTimeout(
+      `fill_input_commit:${selector}`,
+      session.page.evaluate(
+        ({ targetSelector, nextValue }) => {
+          const element = document.querySelector(targetSelector);
+          if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
+            return { ok: false, reason: 'field_not_found' };
+          }
+          element.focus();
+          element.value = nextValue;
+          element.dispatchEvent(new InputEvent('input', { bubbles: true, data: nextValue }));
+          element.dispatchEvent(new Event('change', { bubbles: true }));
+          element.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+          return {
+            ok: true,
+            disabled: element.disabled,
+            readOnly: element.readOnly,
+            value: element.value
+          };
+        },
+        { targetSelector: selector, nextValue: value }
+      ),
+      fillTimeoutMs + 2000
+    );
+    await withOperationTimeout(
+      `fill_input_value_ack:${selector}`,
+      session.page.waitForFunction(
+        ({ targetSelector, nextValue }) => {
+          const element = document.querySelector(targetSelector);
+          return (
+            (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) &&
+            element.value === nextValue
+          );
+        },
+        { targetSelector: selector, nextValue: value },
+        { timeout: fillTimeoutMs }
+      ),
+      fillTimeoutMs + 1000
+    );
   } catch (error) {
     console.error(
       `[driver] fill_input playwright_path_failed instance=${instanceId} selector=${selector} error=${error?.message ?? String(error)}`
