@@ -17,11 +17,11 @@ use crate::model::{
 };
 use aura_app::signal_defs::{DiscoveredPeersState, SettingsState};
 use aura_app::ui::contract::{
-    list_item_dom_id, ChannelFactKey, ConfirmationState, ControlId, FieldId, InvitationFactKind,
-    ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId, OperationId,
-    OperationInstanceId, OperationSnapshot, OperationState, RuntimeFact,
-    ScreenId as ContractScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
+    list_item_dom_id, ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot,
+    ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
+    OperationState, ScreenId as ContractScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
 };
+use aura_app::ui_contract::{ChannelFactKey, RuntimeFact};
 use aura_app::ui::signals::{
     DiscoveredPeerMethod, NetworkStatus, CHAT_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL,
     ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL,
@@ -531,17 +531,17 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
     {
         runtime_facts.push(RuntimeFact::ChannelMembershipReady {
             channel: ChannelFactKey::named(channel.name.clone()),
-            member_count: Some(channel.member_count),
+            member_count: Some(channel.member_count as usize),
         });
         if channel.is_dm || channel.member_count > 1 {
             let channel_key = ChannelFactKey::named(channel.name.clone());
             runtime_facts.push(RuntimeFact::RecipientPeersResolved {
                 channel: channel_key.clone(),
-                member_count: channel.member_count,
+                member_count: channel.member_count as usize,
             });
             runtime_facts.push(RuntimeFact::MessageDeliveryReady {
                 channel: channel_key,
-                member_count: channel.member_count,
+                member_count: channel.member_count as usize,
             });
         }
     }
@@ -1392,9 +1392,7 @@ fn submit_runtime_modal_action(
                                             controller_for_import.push_runtime_fact(
                                                 RuntimeFact::ChannelJoined {
                                                     channel: None,
-                                                    source: Some(
-                                                        "accepted_invitation".to_string(),
-                                                    ),
+                                                    source: Some("accepted_invitation".to_string()),
                                                 },
                                             );
                                         }
@@ -2628,6 +2626,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
     let controller_for_chat_selection = controller.clone();
     let mut chat_for_selection_change = chat_runtime;
     use_effect(move || {
+        let _ = render_tick();
         let Some(current_model) = controller_for_chat_selection.ui_model() else {
             return;
         };
@@ -2965,6 +2964,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         &notifications_runtime_snapshot,
     );
     controller.set_ui_snapshot(semantic_snapshot);
+    let keydown_controller = controller.clone();
     rsx! {
         main {
             id: ControlId::AppRoot
@@ -2980,12 +2980,12 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                 });
             },
             onkeydown: move |event| {
-                if should_skip_global_key(controller.as_ref(), event.data().as_ref()) {
+                if should_skip_global_key(keydown_controller.as_ref(), event.data().as_ref()) {
                     return;
                 }
                 if let Key::Character(text) = event.data().key() {
                     if handle_runtime_character_shortcut(
-                        controller.clone(),
+                        keydown_controller.clone(),
                         &model,
                         &keydown_runtime_snapshot,
                         &text,
@@ -2999,7 +2999,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                     && matches!(model.screen, UiScreen::Chat)
                     && model.input_mode
                     && submit_runtime_chat_input(
-                        controller.clone(),
+                        keydown_controller.clone(),
                         chat_runtime_snapshot.active_channel.clone(),
                         model.input_buffer.clone(),
                         keydown_rerender.clone(),
@@ -3010,7 +3010,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                 }
                 if matches!(event.data().key(), Key::Enter)
                     && submit_runtime_modal_action(
-                                controller.clone(),
+                                keydown_controller.clone(),
                                 modal_state,
                                 add_device_modal_state
                                     .as_ref()
@@ -3040,7 +3040,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                     event.prevent_default();
                     return;
                 }
-                if handle_keydown(controller.as_ref(), event.data().as_ref()) {
+                if handle_keydown(keydown_controller.as_ref(), event.data().as_ref()) {
                     event.prevent_default();
                     render_tick.set(render_tick() + 1);
                 }
@@ -3060,7 +3060,19 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                     class: "relative flex items-end px-4 pt-6 pb-0 sm:px-6",
                     div {
                         class: "absolute bottom-0 left-4 z-10 flex items-center justify-start gap-3 sm:left-6",
-                        span { id: "aura-nav-brand", class: "inline-flex h-8 items-center px-6 text-xs font-sans font-bold uppercase tracking-[0.12em] text-foreground", "AURA" }
+                        button {
+                            r#type: "button",
+                            id: "aura-nav-brand",
+                            class: "inline-flex h-8 items-center px-6 text-xs font-sans font-bold uppercase tracking-[0.12em] text-foreground cursor-pointer hover:text-muted-foreground transition-colors",
+                            onclick: {
+                                let controller = controller.clone();
+                                move |_| {
+                                    controller.set_screen(UiScreen::Neighborhood);
+                                    render_tick.set(render_tick() + 1);
+                                }
+                            },
+                            "AURA"
+                        }
                     }
                     div {
                         class: "w-full min-w-0 overflow-x-auto px-16 [::-webkit-scrollbar]:hidden sm:px-24",
@@ -4087,14 +4099,14 @@ fn ChatScreen(
     controller: Arc<UiController>,
     mut render_tick: Signal<u64>,
 ) -> Element {
-    let active_channel = if runtime.active_channel.is_empty() {
-        model
-            .selected_channel_name()
-            .unwrap_or(NOTE_TO_SELF_CHANNEL_NAME)
-            .to_string()
-    } else {
-        runtime.active_channel.clone()
-    };
+    let active_channel = model
+        .selected_channel_name()
+        .filter(|name| !name.trim().is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            (!runtime.active_channel.trim().is_empty()).then(|| runtime.active_channel.clone())
+        })
+        .unwrap_or_else(|| NOTE_TO_SELF_CHANNEL_NAME.to_string());
     let topic = runtime
         .channels
         .iter()
@@ -4218,11 +4230,11 @@ fn ChatScreen(
                             }
                         }
                         UiCardFooter {
-                            extra_class: None,
+                            extra_class: Some("!px-3".to_string()),
                             div {
-                                class: "grid h-full w-full grid-cols-[minmax(0,1fr)_auto] items-stretch gap-3",
+                                class: "grid h-full w-full grid-cols-[minmax(0,1fr)_auto] items-stretch gap-2",
                                 div {
-                                    class: "flex h-full min-w-0 items-center rounded-sm bg-background/80",
+                                    class: "flex h-full min-w-0 items-center rounded-sm bg-background/80 px-3",
                                     onclick: move |_| {
                                         if !is_input_mode {
                                             composer_container_focus_controller.send_action_keys("i");
@@ -4274,7 +4286,7 @@ fn ChatScreen(
                                     }
                                 }
                                 div {
-                                    class: "flex h-full min-w-[7rem] flex-col items-end justify-end gap-1",
+                                    class: "flex h-full min-w-[4.5rem] flex-col items-end justify-end gap-1",
                                     UiButton {
                                         id: Some(
                                             ControlId::ChatSendMessageButton
@@ -4380,7 +4392,7 @@ fn ContactsScreen(
             class: "grid w-full gap-3 lg:grid-cols-12 lg:h-full lg:min-h-0 lg:[grid-template-rows:minmax(0,1fr)]",
             UiCard {
                 title: format!("Contacts ({})", contacts.len()),
-                subtitle: Some("Contacts share relational context".to_string()),
+                subtitle: Some("People you know".to_string()),
                 extra_class: Some("lg:col-span-4".to_string()),
                 UiCardBody {
                     extra_class: Some("gap-3".to_string()),
@@ -5421,6 +5433,7 @@ fn render_screen_content(
                     .web_dom_id()
                     .expect("Screen(Onboarding) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
+                {OnboardingScreen()}
             }
         },
         UiScreen::Neighborhood => rsx! {
@@ -5475,6 +5488,15 @@ fn render_screen_content(
                 )}
             }
         },
+    }
+}
+
+#[component]
+fn OnboardingScreen() -> Element {
+    rsx! {
+        div {
+            class: "w-full lg:h-full lg:min-h-0"
+        }
     }
 }
 

@@ -13,8 +13,7 @@
 //! Account backup operations (encode/decode/validate) are portable business
 //! logic. The actual file I/O for export/import remains in aura-terminal.
 
-use crate::workflows::runtime::require_runtime;
-use crate::workflows::settings;
+use crate::workflows::{context, runtime::require_runtime, settings, system};
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::identifiers::{AuthorityId, ContextId};
@@ -284,12 +283,35 @@ pub async fn initialize_runtime_account(
 ) -> Result<(), AuraError> {
     let nickname_suggestion = validate_nickname_suggestion(&nickname_suggestion)
         .map_err(|error| AuraError::invalid(error.to_string()))?;
+    let home_name = format!("{nickname_suggestion}'s Home");
     let runtime = require_runtime(app_core).await?;
     runtime
         .initialize_account(&nickname_suggestion)
         .await
         .map_err(|e| AuraError::agent(format!("Failed to initialize account: {e}")))?;
+    context::create_home(app_core, Some(home_name), None).await?;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        const SIGNING_KEY_ATTEMPTS: usize = 40;
+        const BOOTSTRAP_RETRY_MS: u64 = 250;
+        for attempt in 0..SIGNING_KEY_ATTEMPTS {
+            if app_core.read().await.bootstrap_signing_keys().await.is_ok() {
+                break;
+            }
+            if attempt + 1 < SIGNING_KEY_ATTEMPTS {
+                tokio::time::sleep(std::time::Duration::from_millis(BOOTSTRAP_RETRY_MS)).await;
+            }
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = app_core.read().await.bootstrap_signing_keys().await;
+    }
+
     settings::refresh_settings_from_runtime(app_core).await?;
+    system::refresh_account(app_core).await?;
     Ok(())
 }
 

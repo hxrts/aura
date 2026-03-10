@@ -9,11 +9,12 @@ use crate::tui::types::{
 };
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
-    ChannelFactKey, ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot,
-    MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
-    OperationState, RuntimeEventId, RuntimeEventSnapshot, RuntimeFact, ScreenId,
-    SelectionSnapshot, ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
+    ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot,
+    ModalId, OperationId, OperationInstanceId, OperationSnapshot, OperationState, RuntimeEventId,
+    RuntimeEventSnapshot, ScreenId, SelectionSnapshot, ToastId, ToastKind, ToastSnapshot,
+    UiReadiness, UiSnapshot,
 };
+use aura_app::ui_contract::{ChannelFactKey, RuntimeFact};
 use aura_app::ui::types::StateSnapshot;
 use std::fs;
 use std::io;
@@ -610,11 +611,7 @@ pub fn semantic_ui_snapshot(
         runtime_events.push(RuntimeEventSnapshot {
             id: RuntimeEventId("tui-invitation-code-ready".to_string()),
             fact: RuntimeFact::InvitationCodeReady {
-                receiver_authority_id: state
-                    .create_invitation_state
-                    .receiver_authority_id
-                    .as_ref()
-                    .map(ToString::to_string),
+                receiver_authority_id: None,
                 source_operation: OperationId::invitation_create(),
             },
         });
@@ -629,11 +626,7 @@ pub fn semantic_ui_snapshot(
         runtime_events.push(RuntimeEventSnapshot {
             id: RuntimeEventId("tui-device-enrollment-code-ready".to_string()),
             fact: RuntimeFact::DeviceEnrollmentCodeReady {
-                device_name: state
-                    .settings
-                    .devices
-                    .first()
-                    .map(|device| device.name.clone()),
+                device_name: None,
                 code_len: None,
             },
         });
@@ -687,7 +680,7 @@ pub fn semantic_ui_snapshot(
                             id: Some(channel_id.clone()),
                             name: Some(channel.name.clone()),
                         },
-                        member_count: channel.member_count,
+                        member_count: channel.member_count as usize,
                     },
                 });
                 runtime_events.push(RuntimeEventSnapshot {
@@ -697,7 +690,7 @@ pub fn semantic_ui_snapshot(
                             id: Some(channel_id.clone()),
                             name: Some(channel.name.clone()),
                         },
-                        member_count: channel.member_count,
+                        member_count: channel.member_count as usize,
                     },
                 });
             }

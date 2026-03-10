@@ -16,7 +16,7 @@ use crate::{
 use async_lock::RwLock;
 use aura_core::{
     crypto::hash::hash,
-    identifiers::{ChannelId, ContextId},
+    identifiers::{AuthorityId, ChannelId, ContextId},
     AuraError,
 };
 use std::sync::Arc;
@@ -94,6 +94,11 @@ async fn homes_state_signal_fallback(app_core: &Arc<RwLock<AppCore>>) -> HomesSt
 }
 
 async fn local_first_timestamp_ms(app_core: &Arc<RwLock<AppCore>>) -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        return current_time_ms(app_core).await.unwrap_or(0);
+    }
+
     match tokio::time::timeout(
         Duration::from_millis(LOCAL_FIRST_TIME_BUDGET_MS),
         current_time_ms(app_core),
@@ -543,6 +548,27 @@ pub async fn current_home_context_or_fallback(
     Ok(resolve_active_home(app_core, None).await?.context_id)
 }
 
+/// Stable default relational context for an authority when no home-scoped context applies.
+#[must_use]
+pub fn authority_default_relational_context(authority_id: AuthorityId) -> ContextId {
+    ContextId::new_from_entropy(hash(&authority_id.to_bytes()))
+}
+
+/// Resolve a chat-capable context, preferring the active home and falling back to
+/// the authority default context when no home has been selected yet.
+pub async fn current_home_context_or_authority_default(
+    app_core: &Arc<RwLock<AppCore>>,
+    authority_id: AuthorityId,
+) -> Result<(ContextId, bool), AuraError> {
+    match resolve_active_home(app_core, None).await {
+        Ok(resolution) => Ok((resolution.context_id, true)),
+        Err(AuraError::NotFound { message }) if message == MISSING_ACTIVE_HOME_MESSAGE => {
+            Ok((authority_default_relational_context(authority_id), false))
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// Stable fallback context for relational facts that should not depend on UI selection.
 pub fn default_relational_context() -> ContextId {
     ContextId::new_from_entropy(hash(b"relational-context:default"))
@@ -719,6 +745,52 @@ mod tests {
 
         let error = resolve_active_home(&app_core, None).await.unwrap_err();
         assert!(error.to_string().contains(MISSING_ACTIVE_HOME_MESSAGE));
+    }
+
+    #[tokio::test]
+    async fn test_current_home_context_or_authority_default_uses_active_home_when_available() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let authority = aura_core::identifiers::AuthorityId::new_from_entropy([31u8; 32]);
+        let home_id = ChannelId::from_bytes(hash(b"chat-home"));
+        let home_ctx = ContextId::new_from_entropy(hash(b"chat-home-ctx"));
+
+        {
+            let mut core = app_core.write().await;
+            let mut homes = core.views().get_homes();
+            homes.add_home_with_auto_select(HomeState::new(
+                home_id,
+                Some("Chat Home".to_string()),
+                authority,
+                1,
+                home_ctx,
+            ));
+            core.views_mut().set_homes(homes);
+        }
+
+        let (resolved_ctx, used_home_context) =
+            current_home_context_or_authority_default(&app_core, authority)
+                .await
+                .expect("context should resolve");
+        assert_eq!(resolved_ctx, home_ctx);
+        assert!(used_home_context);
+    }
+
+    #[tokio::test]
+    async fn test_current_home_context_or_authority_default_falls_back_without_home() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let authority = aura_core::identifiers::AuthorityId::new_from_entropy([32u8; 32]);
+
+        let (resolved_ctx, used_home_context) =
+            current_home_context_or_authority_default(&app_core, authority)
+                .await
+                .expect("fallback context should resolve");
+        assert_eq!(
+            resolved_ctx,
+            authority_default_relational_context(authority)
+        );
+        assert!(!used_home_context);
     }
 
     #[tokio::test]

@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use aura_app::ui::contract::{
-    ControlId, FieldId, ListId, ModalId, OperationId, ScreenId, UiSnapshot,
+    ControlId, FieldId, ListId, ModalId, OperationId, ScreenId, UiReadiness, UiSnapshot,
 };
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use tokio::sync::Mutex;
@@ -46,6 +46,21 @@ pub struct LocalPtyBackend {
 }
 
 impl LocalPtyBackend {
+    fn synthetic_onboarding_snapshot() -> UiSnapshot {
+        UiSnapshot {
+            screen: ScreenId::Onboarding,
+            focused_control: Some(ControlId::OnboardingRoot),
+            open_modal: None,
+            readiness: UiReadiness::Loading,
+            selections: Vec::new(),
+            lists: Vec::new(),
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        }
+    }
+
     fn is_cargo_program(program: &str) -> bool {
         std::path::Path::new(program)
             .file_name()
@@ -413,6 +428,9 @@ impl InstanceBackend for LocalPtyBackend {
         }
 
         let detail = last_error.unwrap_or_else(|| "no snapshot produced".to_string());
+        if detail.contains("No such file or directory") {
+            return Ok(Self::synthetic_onboarding_snapshot());
+        }
         anyhow::bail!(
             "failed to read TUI UI snapshot {} after {} attempts: {}",
             path.display(),
@@ -652,7 +670,8 @@ impl InstanceBackend for LocalPtyBackend {
         &mut self,
         receiver_authority_id: &str,
     ) -> Result<SubmittedAction<ContactInvitationCode>> {
-        let previous_operation = observe_operation(&self.ui_snapshot()?, &OperationId::invitation_create());
+        let previous_operation =
+            observe_operation(&self.ui_snapshot()?, &OperationId::invitation_create());
         self.activate_control(ControlId::ContactsCreateInvitationButton)?;
         wait_for_modal_visible(self, ModalId::CreateInvitation, Duration::from_secs(5))?;
         self.fill_field(FieldId::InvitationReceiver, receiver_authority_id)?;
@@ -672,7 +691,8 @@ impl InstanceBackend for LocalPtyBackend {
     }
 
     fn accept_contact_invitation_via_ui(&mut self, code: &str) -> Result<SubmittedAction<()>> {
-        let previous_operation = observe_operation(&self.ui_snapshot()?, &OperationId::invitation_accept());
+        let previous_operation =
+            observe_operation(&self.ui_snapshot()?, &OperationId::invitation_accept());
         self.activate_control(ControlId::ContactsAcceptInvitationButton)?;
         wait_for_modal_visible(self, ModalId::AcceptInvitation, Duration::from_secs(5))?;
         self.fill_field(FieldId::InvitationCode, code)?;
@@ -906,7 +926,10 @@ impl SharedSemanticBackend for LocalPtyBackend {
         InstanceBackend::accept_contact_invitation_via_ui(self, code)
     }
 
-    fn submit_invite_actor_to_channel(&mut self, authority_id: &str) -> Result<SubmittedAction<()>> {
+    fn submit_invite_actor_to_channel(
+        &mut self,
+        authority_id: &str,
+    ) -> Result<SubmittedAction<()>> {
         InstanceBackend::invite_actor_to_channel_via_ui(self, authority_id)
     }
 
