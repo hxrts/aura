@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 use aura_app::ui::contract::{
     ControlId, FieldId, ListId, ModalId, OperationId, ScreenId, UiReadiness, UiSnapshot,
 };
+use aura_app::ui_contract::RuntimeFact;
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
@@ -763,11 +764,11 @@ impl InstanceBackend for LocalPtyBackend {
             let joined = snapshot.runtime_events.iter().any(|event| {
                 matches!(
                     &event.fact,
-                    aura_app::ui::contract::RuntimeFact::ChannelMembershipReady { channel, .. }
+                    RuntimeFact::ChannelMembershipReady { channel, .. }
                     if channel
                         .name
                         .as_deref()
-                        .map(|name| name.eq_ignore_ascii_case(channel_name))
+                        .map(|name: &str| name.eq_ignore_ascii_case(channel_name))
                         .unwrap_or(false)
                 )
             });
