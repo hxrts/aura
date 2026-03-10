@@ -18,6 +18,19 @@ Use this report for UI/product flow traceability and regression targeting.
 | Auxiliary Coverage Scenarios | 8 |
 | Core UX Flow Domains | 11 |
 
+## Coverage Classes
+
+Aura tracks three different coverage classes in this document:
+
+| Class | Meaning | Main Artifact |
+|-------|---------|---------------|
+| Parity-critical shared flow | One semantic flow that must remain portable across TUI and web | `aura-app::ui_contract` + canonical harness scenarios |
+| Mixed-runtime interoperability | User-visible flow that intentionally spans different frontend/runtime combinations | Canonical mixed-runtime scenarios |
+| Frontend-specific or auxiliary coverage | Focused smoke, modal, or renderer-specific coverage that is useful but not the parity contract | Supplementary scenarios |
+
+This report is a traceability document for those classes. It is not a proof of
+protocol correctness, and it does not replace conformance or verification lanes.
+
 ## Canonical UX Scenario Set
 
 | Scenario | File | Primary Flow |
@@ -69,6 +82,18 @@ These scenarios are maintained as focused supplements and smoke checks:
 
 ## Coverage Expectations
 
+### Shared Flow Contract Expectations
+
+Every parity-critical shared flow should have, in code and metadata:
+
+- a canonical shared flow identifier in `aura-app::ui_contract`
+- semantic action contracts with preconditions and terminal success/failure conditions
+- an authoritative readiness, event, or quiescence owner for waits
+- at least one canonical scenario reference in this report
+
+Frontend-specific flows may still have scenario coverage, but they are not part
+of the portability contract unless explicitly promoted into the shared contract.
+
 ### PR Gate Expectations
 
 1. Changes to global navigation, settings, chat, contacts, neighborhood, or ceremonies should have at least one impacted canonical scenario updated or re-validated.
@@ -77,7 +102,15 @@ These scenarios are maintained as focused supplements and smoke checks:
 
 ### CI Enforcement
 
-Fast CI runs `scripts/check/ux-flow-coverage.sh` (`just ci-ux-flow-coverage`) to enforce that flow-relevant source changes are paired with scenario updates or an update to this report.
+Fast CI currently uses two separate gates:
+
+- `just ci-ux-flow-coverage` enforces traceability heuristics between changed UX-facing source files, canonical scenarios, and this report
+- `just ci-ux-policy` enforces documentation and contributor-guidance updates for shared UX contract and determinism surfaces via `scripts/check/ux-guidance-sync.sh`
+
+Current limitation:
+
+- `ci-ux-flow-coverage` still infers some ownership from filenames and does not yet prove that the correct scenario set changed
+- docs updates and coverage traceability are distinct concerns; this report should not claim stronger behavioral enforcement than CI actually provides
 
 ### Residual Risk Areas
 
@@ -90,6 +123,7 @@ Fast CI runs `scripts/check/ux-flow-coverage.sh` (`just ci-ux-flow-coverage`) to
 ## References
 
 - [Testing Guide](804_testing_guide.md)
+- [UX Guidance Sync Gate](../scripts/check/ux-guidance-sync.sh)
 - [Simulation Guide](805_simulation_guide.md)
 - [Verification Coverage Report](998_verification_coverage.md)
 - [Project Structure](999_project_structure.md)

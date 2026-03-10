@@ -44,6 +44,12 @@ By default it is intended to validate the real Aura runtime and real user interf
   matching.
 - Semantic-first observation: structured `UiSnapshot` and render-heartbeat data
   are authoritative; DOM/text fallbacks are diagnostics only.
+- Parity-critical waits must resolve against documented readiness, event, or
+  quiescence contracts rather than raw sleep/poll heuristics.
+- Observation surfaces are read-only; recovery and retries remain explicit and
+  separate from state reads.
+- Parity-critical export and observation paths must not rely on placeholder
+  identifiers, override caches, or heuristic success/event synthesis.
 
 ### Detailed Specifications
 
@@ -95,6 +101,8 @@ Failure mode:
 - Timeouts become ambiguous because the harness cannot distinguish semantic
   state drift from renderer drift.
 - Browser/TUI failures require ad hoc scraping and manual interpretation.
+- Observation reads mutate state or silently repair it, making failures
+  non-deterministic and hard to attribute.
 
 Verification hooks:
 - Playwright driver self-test

@@ -44,6 +44,41 @@ Use semantic readiness and state assertions before using fallback text matching.
 
 Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or `Uuid::new_v4()` is forbidden. These operations must flow through effect traits instead.
 
+### Shared UX Contract And Determinism
+
+For parity-critical shared flows, `aura-app::ui_contract` is the authoritative
+contract surface. It owns:
+
+- canonical screen, modal, control, field, list, and operation identifiers
+- focus and selection semantics
+- shared-flow support and coverage metadata
+- `UiSnapshot`, `RenderHeartbeat`, and typed runtime-event shapes
+
+The web shell and the TUI must consume that contract rather than deriving local
+IDs, local focus semantics, or ad hoc flow metadata.
+
+For parity-critical observation:
+
+- `UiSnapshot` and render-convergence data are authoritative
+- observation surfaces must be side-effect free
+- recovery and retries must be explicit and separate from observation
+- onboarding must publish through the same semantic snapshot path as the rest of the UI
+- placeholder IDs, override-backed exports, and heuristic success/event synthesis are not acceptable correctness paths
+
+For parity-critical waits and assertions:
+
+- waits must bind to declared readiness, event, or quiescence conditions
+- raw sleeps, redraw polling, DOM scraping, and fallback text matching are diagnostics only
+- harness mode may change instrumentation and render stability, but it must not change business-flow semantics
+
+For failure analysis:
+
+- prefer canonical action/event/state traces and structured timeout diagnostics
+- treat final text or screenshot inspection as supporting evidence, not the primary oracle
+
+The authoritative written update map for these surfaces lives in
+`scripts/check/ux-guidance-sync.sh` and is enforced by `just ci-ux-policy`.
+
 ## 2. The `#[aura_test]` Macro
 
 The macro provides async test setup with tracing and timeout:

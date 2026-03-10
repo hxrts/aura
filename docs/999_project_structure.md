@@ -443,6 +443,16 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 - Backend selection for `mock`, `patchbay`, and `patchbay-vm` holepunch lanes
 - Resource guards and capability checking
 
+Shared UX contract ownership is split intentionally:
+- `aura-app::ui_contract` owns parity-critical ids, action contracts, support declarations, and typed observation shapes
+- Layer 7 frontends consume that contract and publish semantic state
+- `aura-harness` consumes those semantic publications and must treat them as side-effect-free authoritative observation surfaces
+
+Deterministic observation policy:
+- parity-critical waits bind to declared readiness, event, or quiescence conditions
+- harness mode may change instrumentation or rendering stability, but not business-flow semantics
+- placeholder IDs, exporter override caches, and heuristic success/event synthesis are not valid parity-critical correctness paths
+
 **Key characteristics**: Mock handlers in `aura-testkit` are allowed to be stateful (using `Arc<Mutex<>>`, etc.) since they need controllable, deterministic state for testing. This maintains the stateless principle for production handlers in `aura-effects` while enabling comprehensive testing.
 
 **Deterministic seed policy**: Test construction of `AuraEffectSystem` must use seeded helper constructors (`simulation_for_test*`). Do not call legacy `testing*` or raw `simulation*` constructors from test code. For multiple instances from the same callsite, use `simulation_for_named_test_with_salt(...)` so each seed is unique and replayable.

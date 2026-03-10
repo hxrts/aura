@@ -60,6 +60,10 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
 - **Flow budgets**: only `spent` counters are facts; limits derived at runtime from Biscuit + policy
 - **No direct impure functions** outside effect implementations — no `SystemTime::now()`, `thread_rng()`, `std::fs` in application code
 - **Unified encryption-at-rest**: `aura-effects::EncryptedStorage` wraps `StorageEffects`; no ad-hoc storage encryption
+- **Shared UX contract ownership**: parity-critical UI ids, focus semantics, action contracts, and parity metadata come from `aura-app::ui_contract`
+- **Harness mode discipline**: `AURA_HARNESS_MODE` may change instrumentation or rendering stability, but must not change parity-critical business-flow semantics
+- **Parity-critical waits**: use authoritative readiness, event, or quiescence contracts; raw sleeps, raw polling, and fallback text/DOM checks are diagnostics only
+- **Shared UX documentation sync**: shared UX contract or policy changes must update the mapped authoritative targets enforced by `scripts/check/ux-guidance-sync.sh`
 
 ### Conditional Compilation
 
@@ -258,5 +262,6 @@ Four domains via effect traits (no direct `SystemTime::now()` or chrono):
 
 - Prefer specific file paths over broad searches
 - Use `just check-arch` before complex refactoring
+- For shared UX or harness policy work, run `just ci-ux-policy`
 - Use `.claude/skills/` for project-specific knowledge
 - Batch operations and parallel tool calls when possible

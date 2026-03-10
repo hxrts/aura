@@ -24,6 +24,12 @@ platform-agnostic.
 - Parse/validation failures for identifiers and thresholds are handled at UI/input boundaries.
 - Internal command and modal contracts should prefer typed IDs/domain values over raw `String`.
 - Operational responses for core flows should use structured variants instead of free-form strings.
+- Parity-critical IDs, focus semantics, and action metadata must come from
+  `aura-app::ui_contract`, not frontend-local derivation.
+- Harness mode may add instrumentation or render-stability hooks, but it must
+  not bypass normal user-visible execution semantics for parity-critical flows.
+- Parity-critical semantic export must not depend on placeholder IDs,
+  override-backed lists, or heuristic runtime-event inference.
 
 ### Detailed Specifications
 

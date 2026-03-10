@@ -18,6 +18,9 @@ The harness now runs through the shared semantic contracts in `aura-app`:
 For core shared scenarios, do not fall back to raw keypresses, raw CSS selectors,
 or label-based button matching. Those are debugging tools, not the primary
 contract.
+Do not add new parity-critical waits based on sleeps, redraw polling, or text
+scraping. Use the shared semantic contract, readiness/event barriers, and the
+authoritative observation surfaces instead.
 
 ## Usage
 
@@ -151,6 +154,17 @@ This validates:
 - required app-shell and modal ids
 - browser control/field mappings
 - that core shared scenarios are still authored semantically
+
+Run:
+
+```bash
+just ci-ux-policy
+```
+
+This validates:
+- shared UX docs stay in sync via `scripts/check/ux-guidance-sync.sh`
+- new `AURA_HARNESS_MODE` branches do not spread beyond allowlisted surfaces
+- new sleeps/polling, parity-remap helpers, and row-index export patterns do not creep into guarded paths
 
 Run:
 

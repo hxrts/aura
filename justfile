@@ -487,6 +487,11 @@ ci-verification-coverage:
 ci-ux-flow-coverage:
     scripts/check/ux-flow-coverage.sh
 
+# Verify shared UX policy guardrails and required docs/guidance sync
+ci-ux-policy:
+    scripts/check/ux-policy-guardrails.sh
+    scripts/check/ux-guidance-sync.sh
+
 # Choreography wiring lint
 ci-choreo:
     scripts/check/choreo-wiring.sh
@@ -627,9 +632,9 @@ ci-dry-run profile="push":
     }
 
     case "{{profile}}" in
-        pr) total=13 ;;
-        push) total=25 ;;
-        all) total=33 ;;
+        pr) total=14 ;;
+        push) total=26 ;;
+        all) total=34 ;;
         *)
             echo "Unknown ci-dry-run profile: {{profile}}"
             echo "Valid profiles: pr, push, all"
@@ -660,6 +665,7 @@ ci-dry-run profile="push":
     run_step "Architecture Check"    "scripts/check/arch.sh --quick"
     run_step "Shared Flow Policy"    "just ci-shared-flow-policy"
     run_step "UX Flow Coverage"      "just ci-ux-flow-coverage"
+    run_step "UX Policy"             "just ci-ux-policy"
     run_step "Tests"                 "just ci-test"
     run_step "Protocol Compat"       "just ci-protocol-compat"
 

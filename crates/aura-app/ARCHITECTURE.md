@@ -53,8 +53,9 @@ Contract alignment:
 ### InvariantSharedUiContractAuthority
 `aura-app` is the authoritative home for shared semantic UI identity,
 shared-flow parity declarations, shared screen/modal/list parity declarations,
-typed harness-visible diagnostics, and the machine-checkable screen/module map
-used for web/TUI parity enforcement.
+typed harness-visible diagnostics, shared focus/selection semantics, shared
+action/readiness metadata, and the machine-checkable screen/module map used for
+web/TUI parity enforcement.
 
 Enforcement locus:
 - `src/ui_contract.rs` defines semantic ids, `UiSnapshot`,

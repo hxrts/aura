@@ -28,6 +28,14 @@ It remains thin and delegates shared UI state, routing, and snapshot rendering t
 - Harness bridge methods are deterministic and backwards-compatible.
 - Harness publication is semantic-first: pushed shared-contract state and render
   heartbeat are authoritative; DOM inspection is secondary diagnostics only.
+- Browser harness observation must be side-effect free; retries and recovery are
+  explicit behaviors, not part of reading state.
+- Harness mode may change instrumentation and render stability, but not
+  business-flow semantics.
+- Published semantic state must support stale-state detection through shared
+  revision/sequence and render-convergence semantics.
+- Onboarding uses the same semantic snapshot/publication path as every other
+  screen.
 
 ### InvariantBrowserHarnessBridgePublishesSemanticState
 The browser shell exports structured semantic UI state and render convergence
@@ -41,6 +49,7 @@ Failure mode:
 - Browser harness runs must infer state from DOM text or ad hoc JS scraping.
 - Post-action hangs cannot be attributed to semantic state vs render
   convergence.
+- State reads silently repair stale state or hide observation side effects.
 
 Verification hooks:
 - Playwright driver self-test

@@ -30,6 +30,12 @@ text snapshot rendering used by harness automation.
   snapshots rather than frontend-local row indexes or renderer-only state.
 - Shared screen and modal structure remains stable enough for semantic harness
   execution and render-convergence checks.
+- Parity-critical IDs, focus semantics, and action shapes are consumed from
+  `aura-app::ui_contract`; they are not locally reinvented here.
+- Published semantic state must support stale-state detection through shared
+  revision/sequence and render-convergence semantics.
+- Onboarding must publish through the same semantic snapshot path as every
+  other screen.
 
 ### InvariantUiSnapshotReflectsSemanticState
 `aura-ui` publishes semantic state that matches the shared contract rather than

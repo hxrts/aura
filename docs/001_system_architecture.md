@@ -507,6 +507,12 @@ Signal emission is non-blocking. Handlers batch rapid updates to reduce overhead
 Journal fact changes flow through reducers to signals. Reducers compute derived state from facts. Signals expose that state to UI observers. The flow is unidirectional and predictable.
 
 The `aura-app` crate defines application signals. The `aura-terminal` crate consumes these signals for rendering. This separation keeps UI concerns out of core logic.
+For shared UX validation, `aura-app::ui_contract` is the canonical authority
+for parity-critical UI identity, readiness semantics, and typed observation
+payloads. Frontend shells consume that contract and publish deterministic
+semantic state. `aura-harness` is the primary execution lane for real TUI/web
+validation and must observe side-effect-free semantic state rather than rely on
+DOM or text scraping as a correctness path.
 
 ## 12. Error Handling
 
