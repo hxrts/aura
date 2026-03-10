@@ -519,39 +519,40 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
         runtime.active_channel,
         runtime.channels.len()
     ));
-    controller.sync_runtime_channels(
-        runtime
-            .channels
-            .iter()
-            .map(|channel| (channel.name.clone(), channel.topic.clone()))
-            .collect(),
-    );
-    controller.push_runtime_fact(RuntimeFact::ChatSignalUpdated {
+    let mut runtime_facts = vec![RuntimeFact::ChatSignalUpdated {
         active_channel: runtime.active_channel.clone(),
         channel_count: runtime.channels.len(),
         message_count: runtime.messages.len(),
-    });
+    }];
     if let Some(channel) = runtime
         .channels
         .iter()
         .find(|channel| channel.name.eq_ignore_ascii_case(&runtime.active_channel))
     {
-        controller.push_runtime_fact(RuntimeFact::ChannelMembershipReady {
+        runtime_facts.push(RuntimeFact::ChannelMembershipReady {
             channel: ChannelFactKey::named(channel.name.clone()),
             member_count: Some(channel.member_count),
         });
         if channel.is_dm || channel.member_count > 1 {
             let channel_key = ChannelFactKey::named(channel.name.clone());
-            controller.push_runtime_fact(RuntimeFact::RecipientPeersResolved {
+            runtime_facts.push(RuntimeFact::RecipientPeersResolved {
                 channel: channel_key.clone(),
                 member_count: channel.member_count,
             });
-            controller.push_runtime_fact(RuntimeFact::MessageDeliveryReady {
+            runtime_facts.push(RuntimeFact::MessageDeliveryReady {
                 channel: channel_key,
                 member_count: channel.member_count,
             });
         }
     }
+    controller.publish_runtime_channels_projection(
+        runtime
+            .channels
+            .iter()
+            .map(|channel| (channel.name.clone(), channel.topic.clone()))
+            .collect(),
+        runtime_facts,
+    );
     runtime
 }
 
@@ -650,7 +651,17 @@ async fn load_contacts_runtime_view(controller: Arc<UiController>) -> ContactsRu
             .unwrap_or_default()
     };
     let runtime = build_contacts_runtime_view(contacts, discovered_peers);
-    controller.sync_runtime_contacts(
+    let mut runtime_facts = vec![RuntimeFact::RemoteFactsPulled {
+        contact_count: runtime.contacts.len(),
+        lan_peer_count: runtime.lan_peers.len(),
+    }];
+    if !runtime.contacts.is_empty() {
+        runtime_facts.push(RuntimeFact::ContactLinkReady {
+            authority_id: None,
+            contact_count: Some(runtime.contacts.len()),
+        });
+    }
+    controller.publish_runtime_contacts_projection(
         runtime
             .contacts
             .iter()
@@ -662,17 +673,8 @@ async fn load_contacts_runtime_view(controller: Arc<UiController>) -> ContactsRu
                 )
             })
             .collect(),
+        runtime_facts,
     );
-    controller.push_runtime_fact(RuntimeFact::RemoteFactsPulled {
-        contact_count: runtime.contacts.len(),
-        lan_peer_count: runtime.lan_peers.len(),
-    });
-    if !runtime.contacts.is_empty() {
-        controller.push_runtime_fact(RuntimeFact::ContactLinkReady {
-            authority_id: None,
-            contact_count: Some(runtime.contacts.len()),
-        });
-    }
     runtime
 }
 
@@ -956,18 +958,20 @@ async fn load_notifications_runtime_view(
         core.read(&*ERROR_SIGNAL).await.unwrap_or_default()
     };
     let runtime = build_notifications_runtime_view(invitations, recovery, error);
+    let mut runtime_facts = Vec::new();
     if runtime.items.iter().any(|item| {
         matches!(item.action, NotificationRuntimeAction::ReceivedInvitation)
             && (item.kind_label == "Home Invite" || item.kind_label == "Chat Invite")
     }) {
-        controller.push_runtime_fact(RuntimeFact::PendingHomeInvitationReady);
+        runtime_facts.push(RuntimeFact::PendingHomeInvitationReady);
     }
-    controller.sync_runtime_notifications(
+    controller.publish_runtime_notifications_projection(
         runtime
             .items
             .iter()
             .map(|item| (NotificationSelectionId(item.id.clone()), item.title.clone()))
             .collect(),
+        runtime_facts,
     );
     runtime
 }

@@ -133,17 +133,78 @@
 
 /* These rules are outside @layer to ensure they come after all Tailwind utilities */
 
-/* Ensure toasts appear above modal overlays (z-50) */
+/* Toast container positioning - align with left panel, inside footer area */
 [data-slot="toaster"],
 div[data-slot="toaster"] {
-  z-index: 100 !important;
-  position: fixed !important;
+  z-index: 2147483647 !important;
+  isolation: isolate !important;
+  bottom: 0.875rem !important;
+  left: 1rem !important;
+  right: auto !important;
+  width: calc(100vw - 2rem) !important;
+  max-width: none !important;
+  padding: 0 !important;
 }
 
-/* Ensure individual toasts are also above overlays */
+@media (min-width: 640px) {
+  [data-slot="toaster"],
+  div[data-slot="toaster"] {
+    left: 1.5rem !important;
+    width: calc(100vw - 3rem) !important;
+  }
+}
+
+@media (min-width: 1024px) {
+  [data-slot="toaster"],
+  div[data-slot="toaster"] {
+    width: calc((100vw - 3rem) / 3 - 0.5rem) !important;
+  }
+}
+
+/* Individual toast styling - consistent size, compact for footer */
 [data-slot="toast"],
-div[data-slot="toast"] {
-  z-index: 100 !important;
+div[data-slot="toast"],
+div[role="alert"][data-slot="toast"] {
+  z-index: 2147483647 !important;
+  padding: 0.625rem 0.75rem !important;
+  min-height: 2.5rem !important;
+  max-height: 2.5rem !important;
+  gap: 0.5rem !important;
+  border-radius: 3px !important;
+}
+
+/* Toast content layout */
+[data-slot="toast"] > div:first-child {
+  gap: 0.5rem !important;
+}
+
+/* Toast icon size */
+[data-slot="toast-icon"] {
+  flex-shrink: 0 !important;
+}
+
+[data-slot="toast-icon"] svg {
+  width: 0.875rem !important;
+  height: 0.875rem !important;
+}
+
+/* Toast title - single line */
+[data-slot="toast-title"] {
+  font-size: 0.75rem !important;
+  line-height: 1rem !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+/* Hide description in compact mode */
+[data-slot="toast-description"] {
+  display: none !important;
+}
+
+/* Hide close button - toasts auto-dismiss */
+[data-slot="toast"] button[aria-label="Close"] {
+  display: none !important;
 }
 
 /* Remove bottom border from last list item in flex column containers */
