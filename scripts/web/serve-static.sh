@@ -12,6 +12,11 @@ if [ ! -d node_modules ]; then
     npm ci
 fi
 npm run tailwind:build >/dev/null
+mkdir -p \
+    "$repo_root/target/dx/aura-web/release/web/public/assets" \
+    "$repo_root/target/dx/aura-web/release/web/public/fonts" \
+    "$repo_root/target/dx/aura-web/debug/web/public/assets" \
+    "$repo_root/target/dx/aura-web/debug/web/public/fonts"
 case "$build_profile" in
     release)
         NO_COLOR=true ../../scripts/web/dx.sh build --release --platform web --package aura-web --bin aura-web --features web

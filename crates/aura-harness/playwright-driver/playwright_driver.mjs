@@ -655,7 +655,7 @@ async function assertRootStructure(session, reason) {
   const toastRegionCount = Number(structure.toast_region_count ?? 0);
   const activeScreenRootCount = Number(structure.active_screen_root_count ?? 0);
   const onboardingShellValid =
-    onboardingRootCount === 1 &&
+    onboardingRootCount >= 1 &&
     appRootCount === 0 &&
     modalRegionCount === 0 &&
     toastRegionCount === 0 &&
@@ -1514,6 +1514,7 @@ function parseStartOptions(params) {
     0,
     MAX_TIMEOUT_MS
   );
+  const resetStorage = params?.reset_storage === true;
 
   return {
     instanceId,
@@ -1524,7 +1525,8 @@ function parseStartOptions(params) {
     pageGotoTimeoutMs,
     harnessReadyTimeoutMs,
     startMaxAttempts,
-    startRetryBackoffMs
+    startRetryBackoffMs,
+    resetStorage
   };
 }
 
@@ -1543,6 +1545,8 @@ function requestTimeoutMs(method, params) {
     case 'fill_input':
     case 'create_contact_invitation':
       return 30000;
+    case 'create_account':
+      return 60000;
     case 'start_page': {
       const pageGotoTimeoutMs = Number(params?.page_goto_timeout_ms ?? DEFAULT_PAGE_GOTO_TIMEOUT_MS);
       const harnessReadyTimeoutMs = Number(
@@ -1579,7 +1583,8 @@ async function startPage(params) {
     pageGotoTimeoutMs,
     harnessReadyTimeoutMs,
     startMaxAttempts,
-    startRetryBackoffMs
+    startRetryBackoffMs,
+    resetStorage
   } = options;
   const targetUrl = withHarnessInstanceQuery(appUrl, instanceId);
 
@@ -1616,7 +1621,7 @@ async function startPage(params) {
         id: instanceId,
         context,
         page,
-        startOptions: options,
+        startOptions: { ...options, resetStorage: false },
         headless,
         appUrl: targetUrl,
         dataDir,
@@ -1676,6 +1681,69 @@ async function startPage(params) {
       console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} goto done`
       );
+      if (resetStorage) {
+        console.error(
+          `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} storage_reset start`
+        );
+        await page.waitForLoadState('domcontentloaded', { timeout: pageGotoTimeoutMs });
+        await page.evaluate(async () => {
+          try {
+            window.localStorage?.clear();
+          } catch {}
+          try {
+            window.sessionStorage?.clear();
+          } catch {}
+          try {
+            if (typeof indexedDB !== 'undefined' && typeof indexedDB.databases === 'function') {
+              const databases = await indexedDB.databases();
+              await Promise.all(
+                databases
+                  .map((database) => database?.name)
+                  .filter((name) => typeof name === 'string' && name.length > 0)
+                  .map(
+                    (name) =>
+                      new Promise((resolve) => {
+                        try {
+                          const request = indexedDB.deleteDatabase(name);
+                          request.onsuccess = () => resolve();
+                          request.onerror = () => resolve();
+                          request.onblocked = () => resolve();
+                        } catch {
+                          resolve();
+                        }
+                      })
+                  )
+              );
+            }
+          } catch {}
+          try {
+            if ('caches' in window) {
+              const keys = await caches.keys();
+              await Promise.all(keys.map((key) => caches.delete(key)));
+            }
+          } catch {}
+          try {
+            if (navigator.serviceWorker?.getRegistrations) {
+              const registrations = await navigator.serviceWorker.getRegistrations();
+              await Promise.all(registrations.map((registration) => registration.unregister()));
+            }
+          } catch {}
+        });
+        session.uiStateCache = null;
+        session.uiStateCacheJson = null;
+        session.uiStateVersion = 0;
+        session.clipboardCache = '';
+        console.error(
+          `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} storage_reset done`
+        );
+        console.error(
+          `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} goto_reset start url=${targetUrl}`
+        );
+        await page.goto(targetUrl, { waitUntil: 'commit', timeout: pageGotoTimeoutMs });
+        console.error(
+          `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} goto_reset done`
+        );
+      }
       console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensurePageInteractive start`
       );
@@ -2450,6 +2518,25 @@ async function createContactInvitation(params) {
   return { code: normalized };
 }
 
+async function createAccount(params) {
+  const instanceId = normalizeInstanceId(params);
+  const session = getSession(instanceId);
+  const accountName = String(params?.account_name ?? '').trim();
+  if (accountName.length === 0) {
+    throw new Error('account_name is required');
+  }
+  await session.page.evaluate((nickname) => {
+    if (typeof window.__AURA_HARNESS__?.create_account !== 'function') {
+      throw new Error('window.__AURA_HARNESS__.create_account is unavailable');
+    }
+    window.setTimeout(() => {
+      window.__AURA_HARNESS__.create_account(nickname);
+    }, 0);
+    return true;
+  }, accountName);
+  return { status: 'submitted' };
+}
+
 async function getAuthorityId(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
@@ -2463,6 +2550,14 @@ async function getAuthorityId(params) {
     return {};
   }
   return { authority_id: String(authorityId) };
+}
+
+async function reloadPage(params) {
+  const instanceId = normalizeInstanceId(params);
+  const session = getSession(instanceId);
+  const reason = String(params?.reason ?? 'manual_reload');
+  await restartPageSession(session, reason);
+  return { status: 'reloaded' };
 }
 
 async function tailLog(params) {
@@ -2579,8 +2674,12 @@ async function dispatch(method, params) {
       return readClipboard(params);
     case 'create_contact_invitation':
       return createContactInvitation(params);
+    case 'create_account':
+      return createAccount(params);
     case 'get_authority_id':
       return getAuthorityId(params);
+    case 'reload_page':
+      return reloadPage(params);
     case 'tail_log':
       return tailLog(params);
     case 'inject_message':

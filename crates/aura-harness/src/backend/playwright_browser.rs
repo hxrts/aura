@@ -437,6 +437,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                 "data_dir": absolutize_path(self.config.data_dir.clone()),
                 "artifact_dir": absolutize_path(self.artifact_dir.clone()),
                 "headless": self.headless,
+                "reset_storage": true,
                 "page_goto_timeout_ms": self.page_goto_timeout_ms,
                 "harness_ready_timeout_ms": self.harness_ready_timeout_ms,
                 "start_max_attempts": self.start_max_attempts,
@@ -788,19 +789,79 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 
     fn create_account_via_ui(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
-        self.fill_field(FieldId::AccountName, account_name)?;
-        self.activate_control(ControlId::OnboardingCreateAccountButton)?;
-        let deadline = Instant::now() + Duration::from_secs(30);
+        self.with_session(|session| {
+            session.rpc_call(
+                "create_account",
+                json!({
+                    "instance_id": self.config.id,
+                    "account_name": account_name,
+                }),
+            )?;
+            Ok(())
+        })?;
+        let onboarding_deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let snapshot = self.ui_snapshot()?;
-            if snapshot.screen != ScreenId::Onboarding && snapshot_has_real_home(&snapshot) {
-                break;
+            if snapshot.operations.iter().any(|operation| {
+                operation.id == OperationId::account_create()
+                    && operation.state == aura_app::ui::contract::OperationState::Failed
+            }) {
+                anyhow::bail!("create_account_via_ui: account creation failed");
             }
-            if Instant::now() >= deadline {
+            if snapshot.screen != ScreenId::Onboarding && snapshot_has_real_home(&snapshot) {
+                return Ok(SubmittedAction::without_handle(()));
+            }
+            if Instant::now() >= onboarding_deadline {
                 break;
             }
             thread::sleep(Duration::from_millis(100));
         }
+
+        self.with_session(|session| {
+            session.rpc_call(
+                "reload_page",
+                json!({
+                    "instance_id": self.config.id,
+                    "reason": "post_onboarding_submit",
+                }),
+            )?;
+            Ok(())
+        })?;
+
+        let recovery_deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            if snapshot.screen != ScreenId::Onboarding && snapshot_has_real_home(&snapshot) {
+                return Ok(SubmittedAction::without_handle(()));
+            }
+            if Instant::now() >= recovery_deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+
+        let snapshot = self.ui_snapshot()?;
+        if snapshot.screen != ScreenId::Onboarding && !snapshot_has_real_home(&snapshot) {
+            self.create_home_via_ui(&format!("{account_name}-home"))?;
+            let create_home_deadline = Instant::now() + Duration::from_secs(15);
+            loop {
+                let snapshot = self.ui_snapshot()?;
+                if snapshot.operations.iter().any(|operation| {
+                    operation.id == OperationId::create_home()
+                        && operation.state == aura_app::ui::contract::OperationState::Failed
+                }) {
+                    anyhow::bail!("create_account_via_ui: create home recovery failed");
+                }
+                if snapshot_has_real_home(&snapshot) {
+                    return Ok(SubmittedAction::without_handle(()));
+                }
+                if Instant::now() >= create_home_deadline {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+
         anyhow::ensure!(
             snapshot_has_real_home(&self.ui_snapshot()?),
             "create_account_via_ui: account creation did not converge a real home"

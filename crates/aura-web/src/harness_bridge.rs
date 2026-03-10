@@ -3,8 +3,9 @@
 //! Exposes the UiController to JavaScript via window.harness, enabling the test
 //! harness to send keys, capture screenshots, and query UI state from Playwright.
 
-use aura_app::ui::contract::{RenderHeartbeat, ScreenId, UiReadiness, UiSnapshot};
+use aura_app::ui::contract::{ControlId, FieldId, RenderHeartbeat, ScreenId, UiReadiness, UiSnapshot};
 use aura_app::ui_contract::RuntimeFact;
+use aura_app::ui::workflows::account as account_workflows;
 use aura_app::ui::workflows::invitation as invitation_workflows;
 use aura_core::AuthorityId;
 use aura_ui::UiController;
@@ -15,13 +16,44 @@ use std::cell::RefCell;
 use std::sync::Arc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
-use wasm_bindgen_futures::future_to_promise;
+use wasm_bindgen_futures::{future_to_promise, spawn_local};
 
 thread_local! {
     static CONTROLLER: RefCell<Option<Arc<UiController>>> = const { RefCell::new(None) };
     static LAST_PUBLISHED_UI_STATE_JSON: RefCell<Option<String>> = const { RefCell::new(None) };
     static RENDER_SEQ: RefCell<u64> = const { RefCell::new(0) };
     static UI_PUBLISH_SEQ: RefCell<u64> = const { RefCell::new(0) };
+}
+
+const WEB_STORAGE_PREFIX: &str = "aura_";
+const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
+
+fn sanitize_storage_segment(raw: &str) -> String {
+    raw.chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn harness_storage_prefix(window: &web_sys::Window) -> String {
+    let search = window.location().search().ok().unwrap_or_default();
+    let query = search.strip_prefix('?').unwrap_or(&search);
+    for pair in query.split('&') {
+        if let Some((key, value)) = pair.split_once('=') {
+            if key == HARNESS_INSTANCE_QUERY_KEY && !value.is_empty() {
+                let sanitized = sanitize_storage_segment(value);
+                if !sanitized.is_empty() {
+                    return format!("{WEB_STORAGE_PREFIX}{sanitized}_");
+                }
+            }
+        }
+    }
+    WEB_STORAGE_PREFIX.to_string()
 }
 
 fn publish_ui_snapshot_now(
@@ -383,6 +415,49 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
         create_contact_invitation.as_ref().unchecked_ref(),
     )?;
     create_contact_invitation.forget();
+
+    let create_account_controller = controller.clone();
+    let create_account = Closure::wrap(Box::new(move |account_name: JsValue| -> JsValue {
+        let controller = create_account_controller.clone();
+        let Some(nickname) = account_name.as_string() else {
+            return JsValue::FALSE;
+        };
+        spawn_local(async move {
+            web_sys::console::log_1(
+                &format!("[web-harness] create_account start nickname={nickname}").into(),
+            );
+            controller.set_account_setup_state(false, nickname.clone(), None);
+            if let Err(error) =
+                account_workflows::initialize_runtime_account(controller.app_core(), nickname.clone())
+                    .await
+            {
+                web_sys::console::error_1(
+                    &format!("[web-harness] create_account error {}", error).into(),
+                );
+                return;
+            }
+            if let Some(window) = web_sys::window() {
+                if let Ok(Some(storage)) = window.local_storage() {
+                    let storage_key = format!(
+                        "{}selected_authority",
+                        harness_storage_prefix(&window)
+                    );
+                    let _ = storage.set_item(&storage_key, &controller.authority_id());
+                }
+            }
+            controller.set_account_setup_state(true, "", None);
+            web_sys::console::log_1(
+                &format!("[web-harness] create_account ok nickname={nickname}").into(),
+            );
+        });
+        JsValue::TRUE
+    }) as Box<dyn FnMut(JsValue) -> JsValue>);
+    Reflect::set(
+        &harness,
+        &JsValue::from_str("create_account"),
+        create_account.as_ref().unchecked_ref(),
+    )?;
+    create_account.forget();
 
     let authority_id_controller = controller.clone();
     let get_authority_id = Closure::wrap(Box::new(move || -> JsValue {

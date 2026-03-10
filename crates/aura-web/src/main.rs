@@ -37,6 +37,7 @@ cfg_if! {
 
         const WEB_STORAGE_PREFIX: &str = "aura_";
         const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
+        const HARNESS_BOOTSTRAP_RESET_MARKER: &str = "__aura_harness_bootstrap_reset_done";
 
         fn selected_authority_key(storage_prefix: &str) -> String {
             format!("{storage_prefix}selected_authority")
@@ -148,6 +149,45 @@ cfg_if! {
                 .map_err(|error| format!("failed to persist selected device: {:?}", error))
         }
 
+        fn clear_storage_key(storage_key: &str) -> Result<(), String> {
+            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
+            let storage = window
+                .local_storage()
+                .map_err(|error| format!("localStorage unavailable: {:?}", error))?
+                .ok_or_else(|| "localStorage unavailable".to_string())?;
+            storage
+                .remove_item(storage_key)
+                .map_err(|error| format!("failed to clear storage key {storage_key}: {:?}", error))
+        }
+
+        fn reset_harness_bootstrap_storage_once(
+            authority_storage_key: &str,
+            device_storage_key: &str,
+            pending_device_code_key: &str,
+        ) -> Result<(), String> {
+            if !harness_mode_enabled() {
+                return Ok(());
+            }
+            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
+            let session_storage = window
+                .session_storage()
+                .map_err(|error| format!("sessionStorage unavailable: {:?}", error))?
+                .ok_or_else(|| "sessionStorage unavailable".to_string())?;
+            if session_storage
+                .get_item(HARNESS_BOOTSTRAP_RESET_MARKER)
+                .map_err(|error| format!("failed to inspect harness bootstrap marker: {:?}", error))?
+                .is_some()
+            {
+                return Ok(());
+            }
+            clear_storage_key(authority_storage_key)?;
+            clear_storage_key(device_storage_key)?;
+            clear_storage_key(pending_device_code_key)?;
+            session_storage
+                .set_item(HARNESS_BOOTSTRAP_RESET_MARKER, "1")
+                .map_err(|error| format!("failed to persist harness bootstrap marker: {:?}", error))
+        }
+
         fn load_pending_device_enrollment_code(storage_key: &str) -> Option<String> {
             let window = web_sys::window()?;
             let storage = window.local_storage().ok().flatten()?;
@@ -214,6 +254,16 @@ cfg_if! {
             let storage_prefix = active_storage_prefix();
             let authority_storage_key = selected_authority_key(&storage_prefix);
             let device_storage_key = selected_device_key(&storage_prefix);
+            let pending_device_code_key = pending_device_enrollment_code_key(&storage_prefix);
+            if let Err(error) = reset_harness_bootstrap_storage_once(
+                &authority_storage_key,
+                &device_storage_key,
+                &pending_device_code_key,
+            ) {
+                web_sys::console::warn_1(
+                    &format!("[web-bootstrap] harness bootstrap reset failed: {error}").into(),
+                );
+            }
             let selected_authority = load_selected_authority(&authority_storage_key);
             let selected_device = load_selected_device(&device_storage_key);
             web_sys::console::log_1(
@@ -485,11 +535,7 @@ cfg_if! {
                         screen: ScreenId::Onboarding,
                         focused_control: Some(ControlId::OnboardingRoot),
                         open_modal: None,
-                        readiness: if account_ready {
-                            UiReadiness::Ready
-                        } else {
-                            UiReadiness::Loading
-                        },
+                        readiness: UiReadiness::Loading,
                         selections: Vec::new(),
                         lists: Vec::new(),
                         messages: Vec::new(),
