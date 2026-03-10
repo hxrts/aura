@@ -667,41 +667,39 @@ pub fn semantic_ui_snapshot(
             fact: RuntimeFact::PendingHomeInvitationReady,
         });
     }
-    if let Some(channel_id) = channel_ids.get(state.chat.selected_channel) {
+    for channel in app_snapshot.chat.all_channels() {
+        let channel_id = channel.id.to_string();
         runtime_events.push(RuntimeEventSnapshot {
-            id: RuntimeEventId("tui-channel-membership-ready".to_string()),
+            id: RuntimeEventId(format!("tui-channel-membership-ready:{channel_id}")),
             fact: RuntimeFact::ChannelMembershipReady {
-                channel: ChannelFactKey::identified(channel_id.clone()),
-                member_count: None,
+                channel: ChannelFactKey {
+                    id: Some(channel_id.clone()),
+                    name: Some(channel.name.clone()),
+                },
+                member_count: Some(channel.member_count as usize),
             },
         });
-        if let Some(channel) = app_snapshot
-            .chat
-            .all_channels()
-            .find(|channel| channel.id.to_string() == *channel_id)
-        {
-            if channel.is_dm || channel.member_count > 1 {
-                runtime_events.push(RuntimeEventSnapshot {
-                    id: RuntimeEventId("tui-recipient-peers-resolved".to_string()),
-                    fact: RuntimeFact::RecipientPeersResolved {
-                        channel: ChannelFactKey {
-                            id: Some(channel_id.clone()),
-                            name: Some(channel.name.clone()),
-                        },
-                        member_count: channel.member_count as usize,
+        if channel.is_dm || channel.member_count > 1 {
+            runtime_events.push(RuntimeEventSnapshot {
+                id: RuntimeEventId(format!("tui-recipient-peers-resolved:{channel_id}")),
+                fact: RuntimeFact::RecipientPeersResolved {
+                    channel: ChannelFactKey {
+                        id: Some(channel_id.clone()),
+                        name: Some(channel.name.clone()),
                     },
-                });
-                runtime_events.push(RuntimeEventSnapshot {
-                    id: RuntimeEventId("tui-message-delivery-ready".to_string()),
-                    fact: RuntimeFact::MessageDeliveryReady {
-                        channel: ChannelFactKey {
-                            id: Some(channel_id.clone()),
-                            name: Some(channel.name.clone()),
-                        },
-                        member_count: channel.member_count as usize,
+                    member_count: channel.member_count as usize,
+                },
+            });
+            runtime_events.push(RuntimeEventSnapshot {
+                id: RuntimeEventId(format!("tui-message-delivery-ready:{channel_id}")),
+                fact: RuntimeFact::MessageDeliveryReady {
+                    channel: ChannelFactKey {
+                        id: Some(channel_id.clone()),
+                        name: Some(channel.name.clone()),
                     },
-                });
-            }
+                    member_count: channel.member_count as usize,
+                },
+            });
         }
     }
 

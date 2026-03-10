@@ -5,7 +5,9 @@
 
 use crate::workflows::channel_ref::ChannelRef;
 use crate::workflows::chat_commands::normalize_channel_name;
-use crate::workflows::context::current_home_context_or_fallback;
+use crate::workflows::context::{
+    current_home_context_or_authority_default, current_home_context_or_fallback,
+};
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::{
     converge_runtime, cooperative_yield, ensure_runtime_peer_connectivity, require_runtime,
@@ -780,7 +782,7 @@ pub async fn send_direct_message_to_authority(
     Ok(channel_id)
 }
 
-/// Create a group channel (home channel) in chat state.
+/// Create a group channel in chat state.
 ///
 /// **What it does**: Creates a chat channel and selects it
 /// **Returns**: ChannelId (typed) - use this directly in send_message, not a string!
@@ -809,11 +811,14 @@ pub async fn create_channel(
     let mut channel_id = ChannelId::from_bytes(hash(format!("local:{timestamp_ms}").as_bytes()));
     let mut channel_context: Option<ContextId> = None;
     let mut channel_owner: Option<AuthorityId> = None;
+    let mut created_in_home_context = false;
 
     if backend == MessagingBackend::Runtime {
         let runtime = require_runtime(app_core).await?;
         channel_owner = Some(runtime.authority_id());
-        let context_id = current_home_context_or_fallback(app_core).await?;
+        let (context_id, is_home_context) =
+            current_home_context_or_authority_default(app_core, runtime.authority_id()).await?;
+        created_in_home_context = is_home_context;
         channel_context = Some(context_id);
         let channel_hint = (!name.trim().is_empty())
             .then(|| channel_id_from_input(name))
@@ -900,7 +905,7 @@ pub async fn create_channel(
     })
     .await?;
 
-    if backend == MessagingBackend::Runtime {
+    if backend == MessagingBackend::Runtime && created_in_home_context {
         if let (Some(context_id), Some(owner_id)) = (channel_context, channel_owner) {
             ensure_home_state_for_channel(
                 app_core,
@@ -1118,7 +1123,9 @@ pub async fn join_channel_by_name(
             }
 
             let runtime = require_runtime(app_core).await?;
-            let fallback_context = current_home_context_or_fallback(app_core).await?;
+            let (fallback_context, _) =
+                current_home_context_or_authority_default(app_core, runtime.authority_id())
+                    .await?;
             enforce_home_join_allowed(
                 app_core,
                 fallback_context,

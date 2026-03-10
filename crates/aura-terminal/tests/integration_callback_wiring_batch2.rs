@@ -154,7 +154,7 @@ async fn test_invitation_export_produces_valid_code() {
     let (ctx, _app_core) = setup_test_env("inv-export").await;
 
     // Phase 1: Export an invitation
-    println!("Phase 1: Export invitation code");
+    println!("Phase 1: Export invite code");
     let invitation_id = "test-invite-123";
     let result = ctx.export_invitation_code(invitation_id).await;
 

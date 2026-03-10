@@ -2,8 +2,8 @@
 //!
 //! This test mimics the exact TUI flow:
 //! 1. Start demo mode
-//! 2. Import Alice as a contact via invitation code
-//! 3. Import Carol as a contact via invitation code
+//! 2. Import Alice as a contact via invite code
+//! 3. Import Carol as a contact via invite code
 //! 4. Create a channel with them as members
 //! 5. Send a message
 //! 6. Verify Alice and Carol echo the message back
@@ -31,7 +31,7 @@ use aura_terminal::tui::context::InitializedAppCore;
 
 mod support;
 
-/// REGRESSION TEST: Echo fails when contacts are imported via invitation codes
+/// REGRESSION TEST: Echo fails when contacts are imported via invite codes
 /// before creating a channel (mimics real TUI flow).
 ///
 /// ## Isolated Regression:
@@ -103,7 +103,7 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
         .await
         .expect("init signals");
 
-    // Get demo hints (invitation codes) - this is how the TUI gets them
+    // Get demo hints (invite codes) - this is how the TUI gets them
     let hints = DemoHints::new(seed);
     eprintln!("[Test] Alice invite code: {}", hints.alice_invite_code);
     eprintln!("[Test] Carol invite code: {}", hints.carol_invite_code);
@@ -122,13 +122,13 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
     let _listener = spawn_amp_inbox_listener(agent.runtime().effects(), bob_authority, peers);
 
     // ========================================================================
-    // KEY DIFFERENCE: Import contacts via invitation codes (like TUI does)
+    // KEY DIFFERENCE: Import contacts via invite codes (like TUI does)
     // ========================================================================
 
     // Import and accept Alice as a contact (two-step process)
     // Step 1: import_invitation_details parses the code and returns InvitationInfo with invitation_id
     // Step 2: accept_invitation uses that invitation_id to accept
-    eprintln!("[Test] Importing Alice via invitation code...");
+    eprintln!("[Test] Importing Alice via invite code...");
     let alice_info = invitation::import_invitation_details(&app_core, &hints.alice_invite_code)
         .await
         .expect("Alice import should succeed");
@@ -140,7 +140,7 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
     eprintln!("[Test] Alice accept result: {:?}", alice_accept);
 
     // Import and accept Carol as a contact
-    eprintln!("[Test] Importing Carol via invitation code...");
+    eprintln!("[Test] Importing Carol via invite code...");
     let carol_info = invitation::import_invitation_details(&app_core, &hints.carol_invite_code)
         .await
         .expect("Carol import should succeed");
@@ -178,7 +178,7 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
 
     if members.is_empty() {
         panic!(
-            "REGRESSION: No contacts found after importing Alice and Carol via invitation codes! \
+            "REGRESSION: No contacts found after importing Alice and Carol via invite codes! \
              This means the invitation import did not create contacts correctly."
         );
     }
@@ -264,7 +264,7 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
     assert!(
         found_echo,
         "REGRESSION: Expected an echo message from Alice or Carol after importing contacts \
-         via invitation codes and creating a channel. This works when members are added \
+         via invite codes and creating a channel. This works when members are added \
          directly but fails when using the TUI flow. Check that:\n\
          1. Invitation codes are being processed correctly\n\
          2. Contacts are being added to the channel properly\n\

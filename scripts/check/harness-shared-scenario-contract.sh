@@ -101,6 +101,10 @@ for entry in "${shared_paths[@]}"; do
     && ! rg -q 'runtime_event_kind\s*=\s*"channel_membership_ready"' "$path"; then
     fail "shared scenario uses join_channel without channel_membership_ready barrier: $path"
   fi
+  if rg -q 'action\s*=\s*"accept_pending_channel_invitation"' "$path" \
+    && ! rg -q 'runtime_event_kind\s*=\s*"pending_home_invitation_ready"' "$path"; then
+    fail "shared scenario uses accept_pending_channel_invitation without pending_home_invitation_ready barrier: $path"
+  fi
   if rg -q 'action\s*=\s*"send_chat_message"' "$path" \
     && ! rg -q 'runtime_event_kind\s*=\s*"recipient_peers_resolved"' "$path"; then
     fail "shared scenario uses send_chat_message without recipient_peers_resolved barrier: $path"

@@ -4,6 +4,7 @@ use crate::views::chat::{
     is_note_to_self_channel_name, note_to_self_channel_id, note_to_self_context_id,
 };
 use crate::workflows::channel_ref::ChannelSelector;
+use crate::workflows::context::current_home_context_or_fallback;
 use crate::workflows::signals::read_signal;
 
 pub(super) fn parse_channel_ref(channel: &str) -> Result<ChannelSelector, AuraError> {

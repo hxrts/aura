@@ -2232,7 +2232,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                         if let Err(error) = copy_to_clipboard(&code) {
                                                             tracing::warn!(
                                                                 error = %error,
-                                                                "failed to copy harness invitation code to clipboard"
+                                                                "failed to copy harness invite code to clipboard"
                                                             );
                                                         }
                                                         if let Some(tx) = update_tx {

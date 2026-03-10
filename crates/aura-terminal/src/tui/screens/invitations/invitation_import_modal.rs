@@ -1,6 +1,6 @@
 //! # Invitation Import Modal
 //!
-//! Modal for importing invitation codes received out-of-band.
+//! Modal for importing invite codes received out-of-band.
 
 use iocraft::prelude::*;
 use std::sync::Arc;
@@ -37,7 +37,7 @@ pub struct InvitationImportModalProps {
     pub on_cancel: Option<CancelCallback>,
 }
 
-/// Modal for importing invitation codes
+/// Modal for importing invite codes
 #[component]
 pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<AnyElement<'static>> {
     if !props.visible {
@@ -61,7 +61,7 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
 
     // Create display text for code input
     let code_display = if code.is_empty() {
-        "Paste invitation code here...".to_string()
+        "Paste invite code here...".to_string()
     } else {
         code.clone()
     };
@@ -122,7 +122,7 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
                 // Instructions
                 View(margin_bottom: Spacing::XS) {
                     Text(
-                        content: "Paste the invitation code you received:",
+                        content: "Paste the invite code you received:",
                         color: Theme::TEXT,
                     )
                 }

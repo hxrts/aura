@@ -90,7 +90,7 @@ pub async fn handle_network(
         } => {
             // LAN peer invitation flow:
             // 1. Create a contact invitation for this peer
-            // 2. Export the invitation code
+            // 2. Export the invite code
             // 3. Send the code to the peer's address via LAN transport
             tracing::info!(
                 "Inviting LAN peer: authority={} at address={}",
@@ -107,7 +107,7 @@ pub async fn handle_network(
                 &authority_id_str[..8.min(authority_id_str.len())]
             );
 
-            // Export the invitation code
+            // Export the invite code
             let code = match app_core_guard.export_invitation(&invitation_id).await {
                 Ok(code) => code,
                 Err(e) => {
@@ -161,7 +161,7 @@ pub async fn handle_network(
                     authority_id: authority_id.to_string(),
                     address: address.clone(),
                     message: format!(
-                        "No runtime available. Share invitation code manually: {}",
+                        "No runtime available. Share invite code manually: {}",
                         &code[..50.min(code.len())]
                     ),
                 }))

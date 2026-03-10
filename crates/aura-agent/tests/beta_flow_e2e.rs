@@ -4,7 +4,7 @@
 //! 1. User A creates account
 //! 2. User A creates invitation and exports shareable code
 //! 3. User B creates account
-//! 4. User B imports invitation code
+//! 4. User B imports invite code
 //! 5. User B accepts invitation
 //! 6. Both users can chat
 //!
@@ -55,7 +55,7 @@ async fn create_test_agent(seed: u8) -> TestResult<Arc<AuraAgent>> {
     Ok(Arc::new(agent))
 }
 
-/// Test: Shareable invitation code roundtrip
+/// Test: Shareable invite code roundtrip
 #[tokio::test]
 async fn test_invitation_code_roundtrip() -> TestResult {
     // Create shareable invitation
@@ -122,7 +122,7 @@ async fn test_two_agent_invitation_flow() -> TestResult {
 
     assert!(code.starts_with("aura:v1:"));
 
-    // User B imports the invitation code
+    // User B imports the invite code
     let shareable = InvitationServiceApi::import_code(&code)?;
 
     assert_eq!(shareable.sender_id, authority_a);
@@ -302,7 +302,7 @@ async fn test_complete_beta_flow() -> TestResult {
         .invite_as_contact(bob_id, Some("bob".to_string()), None, None)
         .await?;
 
-    // === Step 2: Alice exports invitation code ===
+    // === Step 2: Alice exports invite code ===
     let code = alice_invitations
         .export_code(&invitation.invitation_id)
         .await?;

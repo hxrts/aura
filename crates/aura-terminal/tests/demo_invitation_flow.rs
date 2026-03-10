@@ -6,7 +6,7 @@
 )]
 //! # Demo Invitation Flow E2E Tests
 //!
-//! Tests the complete demo flow for importing Alice and Carol's invitation codes,
+//! Tests the complete demo flow for importing Alice and Carol's invite codes,
 //! adding them as contacts, and creating a group chat with them.
 //!
 //! ## Running
@@ -49,7 +49,7 @@ struct TestEnv {
 /// Generate a deterministic invite code for a demo agent.
 ///
 /// This MUST match the derivation in:
-/// - `aura_terminal::demo::hints::generate_invite_code` (invitation codes)
+/// - `aura_terminal::demo::hints::generate_invite_code` (invite codes)
 /// - `aura_terminal::demo::mod::SimulatedAgent::new_with_shared_transport` (agent IDs)
 /// - `aura_terminal::demo::mod::AgentFactory::create_demo_agents` (seed offsets)
 ///
@@ -225,13 +225,13 @@ async fn wait_for_message(
 }
 
 // ============================================================================
-// Demo Invitation Code Parsing Tests
+// Demo Invite Code Parsing Tests
 // ============================================================================
 
-/// Test that demo hint invitation codes can be successfully parsed by ShareableInvitation
+/// Test that demo hint invite codes can be successfully parsed by ShareableInvitation
 #[tokio::test]
 async fn test_demo_invitation_codes_are_parseable() {
-    println!("\n=== Demo Invitation Code Parsing Test ===\n");
+    println!("\n=== Demo Invite Code Parsing Test ===\n");
 
     let seed = 2024; // Standard demo seed
                      // Names and seeds must match AgentFactory::create_demo_agents
@@ -246,7 +246,7 @@ async fn test_demo_invitation_codes_are_parseable() {
     println!("Carol's invite code: {carol_preview}...");
 
     // Phase 1: Parse Alice's code
-    println!("\nPhase 1: Parse Alice's invitation code");
+    println!("\nPhase 1: Parse Alice's invite code");
     let alice_result = ShareableInvitation::from_code(&alice_code);
     match &alice_result {
         Ok(invitation) => {
@@ -267,13 +267,13 @@ async fn test_demo_invitation_codes_are_parseable() {
             println!("    Message: {message:?}", message = invitation.message);
         }
         Err(e) => {
-            panic!("Failed to parse Alice's invitation code: {e:?}");
+            panic!("Failed to parse Alice's invite code: {e:?}");
         }
     }
     let alice_invitation = alice_result.expect("Alice's code should parse");
 
     // Phase 2: Parse Carol's code
-    println!("\nPhase 2: Parse Carol's invitation code");
+    println!("\nPhase 2: Parse Carol's invite code");
     let carol_result = ShareableInvitation::from_code(&carol_code);
     match &carol_result {
         Ok(invitation) => {
@@ -294,7 +294,7 @@ async fn test_demo_invitation_codes_are_parseable() {
             println!("    Message: {message:?}", message = invitation.message);
         }
         Err(e) => {
-            panic!("Failed to parse Carol's invitation code: {e:?}");
+            panic!("Failed to parse Carol's invite code: {e:?}");
         }
     }
     let carol_invitation = carol_result.expect("Carol's code should parse");
@@ -329,7 +329,7 @@ async fn test_demo_invitation_codes_are_parseable() {
         "Alice and Carol should have different sender IDs"
     );
 
-    println!("\n=== Demo Invitation Code Parsing Test PASSED ===\n");
+    println!("\n=== Demo Invite Code Parsing Test PASSED ===\n");
 }
 
 /// Test that ImportInvitation command successfully imports demo codes
@@ -349,7 +349,7 @@ async fn test_import_invitation_command_with_demo_codes() {
         .expect("Parse Carol code")
         .sender_id;
 
-    // Phase 1: Import Alice's invitation code via EffectCommand
+    // Phase 1: Import Alice's invite code via EffectCommand
     println!("Phase 1: Import Alice's invitation via EffectCommand");
     let result = env
         .ctx
@@ -366,7 +366,7 @@ async fn test_import_invitation_command_with_demo_codes() {
     }
     wait_for_contact(&env.app_core, alice_sender).await;
 
-    // Phase 2: Import Carol's invitation code
+    // Phase 2: Import Carol's invite code
     println!("\nPhase 2: Import Carol's invitation via EffectCommand");
     let result = env
         .ctx
@@ -427,8 +427,8 @@ async fn test_complete_demo_invitation_flow() {
     let alice_invitation = ShareableInvitation::from_code(&alice_code).expect("Parse Alice");
     let carol_invitation = ShareableInvitation::from_code(&carol_code).expect("Parse Carol");
 
-    // Phase 1: Import both invitation codes
-    println!("Phase 1: Import Alice and Carol's invitation codes");
+    // Phase 1: Import both invite codes
+    println!("Phase 1: Import Alice and Carol's invite codes");
 
     env.ctx
         .dispatch(EffectCommand::ImportInvitation {
@@ -448,7 +448,7 @@ async fn test_complete_demo_invitation_flow() {
     println!("  Carol's invitation imported successfully");
     wait_for_contact(&env.app_core, carol_invitation.sender_id).await;
 
-    // Note: Import already auto-accepts for demo invitation codes, so contacts
+    // Note: Import already auto-accepts for demo invite codes, so contacts
     // are already created. The wait_for_contact above confirms this.
     // No explicit AcceptInvitation is needed.
 
@@ -552,7 +552,7 @@ async fn test_complete_demo_invitation_flow() {
     println!("\n=== Complete Demo Invitation Flow Test PASSED ===\n");
 }
 
-/// Test that deterministic seeds produce consistent invitation codes
+/// Test that deterministic seeds produce consistent invite codes
 #[tokio::test]
 async fn test_demo_hints_deterministic() {
     println!("\n=== Demo Hints Determinism Test ===\n");
@@ -603,10 +603,10 @@ async fn test_demo_hints_deterministic() {
     println!("\n=== Demo Hints Determinism Test PASSED ===\n");
 }
 
-/// Test invalid invitation codes are properly rejected
+/// Test invalid invite codes are properly rejected
 #[tokio::test]
 async fn test_invalid_invitation_code_rejection() {
-    println!("\n=== Invalid Invitation Code Rejection Test ===\n");
+    println!("\n=== Invalid Invite Code Rejection Test ===\n");
 
     let env = setup_test_env("invalid-codes").await;
 
@@ -657,7 +657,7 @@ async fn test_invalid_invitation_code_rejection() {
     assert!(result.is_err(), "Invalid JSON should fail");
 
     let _ = std::fs::remove_dir_all(&env.test_dir);
-    println!("\n=== Invalid Invitation Code Rejection Test PASSED ===\n");
+    println!("\n=== Invalid Invite Code Rejection Test PASSED ===\n");
 }
 
 // ============================================================================
@@ -678,7 +678,7 @@ async fn test_guardian_authority_id_matching() {
 
     let seed = 2024u64;
 
-    // Step 1: Generate invitation codes the same way DemoHints does
+    // Step 1: Generate invite codes the same way DemoHints does
     let alice_code = generate_demo_invite_code("Alice", seed);
     let carol_code = generate_demo_invite_code("Carol", seed + 1);
 

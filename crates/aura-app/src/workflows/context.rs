@@ -495,6 +495,86 @@ pub async fn create_home(
     Ok(home_id)
 }
 
+/// Ensure a local-first home projection remains present in views/signals until
+/// runtime-backed facts supersede it.
+pub async fn ensure_local_home_projection(
+    app_core: &Arc<RwLock<AppCore>>,
+    home_id: ChannelId,
+    home_name: String,
+    creator: AuthorityId,
+) -> Result<(), AuraError> {
+    let context_id =
+        ContextId::new_from_entropy(hash(format!("home-context:{creator}:{home_id}").as_bytes()));
+    let timestamp_ms = local_first_timestamp_ms(app_core).await;
+
+    let (homes_state, neighborhood_state) = {
+        let mut core = app_core.write().await;
+        let mut homes = core.views().get_homes();
+        if !homes.has_home(&home_id) {
+            let mut home = HomeState::new(
+                home_id,
+                Some(home_name.clone()),
+                creator,
+                timestamp_ms,
+                context_id,
+            );
+            if homes.is_empty()
+                || homes
+                    .current_home()
+                    .map(|current| current.id == ChannelId::default())
+                    .unwrap_or(true)
+            {
+                home.is_primary = true;
+            }
+            let _ = homes.add_home(home);
+        }
+        homes.select_home(Some(home_id));
+
+        let mut neighborhood = core.views().get_neighborhood();
+        let should_set_local_home = neighborhood.home_home_id == ChannelId::default()
+            || neighborhood.home_name.trim().is_empty()
+            || neighborhood
+                .position
+                .as_ref()
+                .map(|position| position.current_home_id == ChannelId::default())
+                .unwrap_or(true);
+        if should_set_local_home {
+            neighborhood.home_home_id = home_id;
+            neighborhood.home_name = home_name.clone();
+            neighborhood.position = Some(TraversalPosition {
+                current_home_id: home_id,
+                current_home_name: home_name.clone(),
+                depth: 2,
+                path: vec![home_id],
+            });
+        } else if neighborhood.home_home_id != home_id && neighborhood.neighbor(&home_id).is_none()
+        {
+            neighborhood.add_neighbor(NeighborHome {
+                id: home_id,
+                name: home_name.clone(),
+                one_hop_link: OneHopLinkType::Direct,
+                shared_contacts: 0,
+                member_count: Some(1),
+                can_traverse: true,
+            });
+        }
+
+        core.views_mut().set_homes(homes.clone());
+        core.views_mut().set_neighborhood(neighborhood.clone());
+        (homes, neighborhood)
+    };
+
+    emit_signal(app_core, &*HOMES_SIGNAL, homes_state, HOMES_SIGNAL_NAME).await?;
+    emit_signal(
+        app_core,
+        &*NEIGHBORHOOD_SIGNAL,
+        neighborhood_state,
+        NEIGHBORHOOD_SIGNAL_NAME,
+    )
+    .await?;
+    Ok(())
+}
+
 /// Get current neighborhood state
 ///
 /// **What it does**: Reads neighborhood state from views

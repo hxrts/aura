@@ -746,7 +746,7 @@ fn test_chat_create_state_machine() {
     println!("✓ ChatCreateState state machine works correctly");
 }
 
-/// Test invitation code display state
+/// Test invite code display state
 #[test]
 fn test_invitation_code_state_machine() {
     let mut state = InvitationCodeState::new();

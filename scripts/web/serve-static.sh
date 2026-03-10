@@ -5,19 +5,31 @@ port="${1:-4173}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../.." && pwd)"
 web_root="$repo_root/crates/aura-web"
+build_profile="${AURA_HARNESS_WEB_BUILD_PROFILE:-release}"
 
 cd "$web_root"
 if [ ! -d node_modules ]; then
     npm ci
 fi
 npm run tailwind:build >/dev/null
-NO_COLOR=true ../../scripts/web/dx.sh build --release --platform web --package aura-web --bin aura-web --features web
-
-public_dir="$repo_root/target/dx/aura-web/release/web/public"
-if [[ ! -f "$public_dir/index.html" ]]; then
-    NO_COLOR=true ../../scripts/web/dx.sh build --platform web --package aura-web --bin aura-web --features web
-    public_dir="$repo_root/target/dx/aura-web/debug/web/public"
-fi
+case "$build_profile" in
+    release)
+        NO_COLOR=true ../../scripts/web/dx.sh build --release --platform web --package aura-web --bin aura-web --features web
+        public_dir="$repo_root/target/dx/aura-web/release/web/public"
+        if [[ ! -f "$public_dir/index.html" ]]; then
+            NO_COLOR=true ../../scripts/web/dx.sh build --platform web --package aura-web --bin aura-web --features web
+            public_dir="$repo_root/target/dx/aura-web/debug/web/public"
+        fi
+        ;;
+    debug)
+        NO_COLOR=true ../../scripts/web/dx.sh build --platform web --package aura-web --bin aura-web --features web
+        public_dir="$repo_root/target/dx/aura-web/debug/web/public"
+        ;;
+    *)
+        echo "[serve-web-static] unsupported AURA_HARNESS_WEB_BUILD_PROFILE=$build_profile" >&2
+        exit 1
+        ;;
+esac
 
 if [[ ! -f "$public_dir/index.html" ]]; then
     echo "[serve-web-static] expected build output at $public_dir/index.html" >&2

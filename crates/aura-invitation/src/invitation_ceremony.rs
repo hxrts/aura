@@ -43,7 +43,7 @@
 //! ## Note on device enrollment
 //!
 //! Device enrollment ("add device") is also a Category C ceremony, but it is
-//! currently orchestrated by the agent runtime using out-of-band invitation codes
+//! currently orchestrated by the agent runtime using out-of-band invite codes
 //! and transport acknowledgements. This module focuses on consensus-backed
 //! relationship invitations (contacts/guardian/channel).
 

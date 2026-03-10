@@ -312,10 +312,10 @@ async fn test_invitation_flow_creates_contact() {
         count = bob_contacts.contact_count()
     );
 
-    // Phase 3: Generate invitation code for Alice
+    // Phase 3: Generate invite code for Alice
     // Note: In a full implementation, this would use the invitation system
     // For now, we use the demo hint pattern from demo_invitation_flow.rs
-    println!("\nPhase 3: Generate invitation code");
+    println!("\nPhase 3: Generate invite code");
     let seed = 2024u64;
     let alice_code = generate_demo_invite_code("alice", seed);
     println!(

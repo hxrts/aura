@@ -3,7 +3,8 @@
 //! Exposes the UiController to JavaScript via window.harness, enabling the test
 //! harness to send keys, capture screenshots, and query UI state from Playwright.
 
-use aura_app::ui::contract::{RenderHeartbeat, RuntimeEventKind, UiSnapshot};
+use aura_app::ui::contract::{RenderHeartbeat, ScreenId, UiReadiness, UiSnapshot};
+use aura_app::ui_contract::RuntimeFact;
 use aura_app::ui::workflows::invitation as invitation_workflows;
 use aura_core::AuthorityId;
 use aura_ui::UiController;
@@ -182,13 +183,32 @@ fn serialized_published_ui_snapshot(
     window: &web_sys::Window,
     controller: &UiController,
 ) -> JsValue {
-    Reflect::get(
+    let live_snapshot = controller.ui_snapshot();
+    let live_json = serialize_ui_snapshot(&live_snapshot);
+    let published = Reflect::get(
         window.as_ref(),
         &JsValue::from_str("__AURA_UI_STATE_JSON__"),
     )
     .ok()
-    .filter(|value| !value.is_null() && !value.is_undefined())
-    .unwrap_or_else(|| serialize_ui_snapshot(&controller.ui_snapshot()))
+    .filter(|value| !value.is_null() && !value.is_undefined());
+
+    let Some(published) = published else {
+        return live_json;
+    };
+
+    let Some(published_json) = published.as_string() else {
+        return live_json;
+    };
+
+    let stale_onboarding_publish = published_json.contains("\"screen\":\"onboarding\"")
+        && published_json.contains("\"readiness\":\"loading\"");
+    let live_is_ahead = live_snapshot.readiness == UiReadiness::Ready
+        || live_snapshot.screen != ScreenId::Onboarding;
+    if stale_onboarding_publish && live_is_ahead {
+        return live_json;
+    }
+
+    published
 }
 
 pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), JsValue> {
@@ -350,10 +370,10 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
                         .await
                         .map_err(|error| JsValue::from_str(&error.to_string()))?;
                 controller.write_clipboard(&code);
-                controller.push_runtime_event(
-                    RuntimeEventKind::InvitationCodeReady,
-                    format!("receiver={authority_id}"),
-                );
+                controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
+                    receiver_authority_id: Some(authority_id.to_string()),
+                    source_operation: aura_app::ui::contract::OperationId::invitation_create(),
+                });
                 Ok(JsValue::from_str(&code))
             })
         }) as Box<dyn FnMut(JsValue) -> js_sys::Promise>);

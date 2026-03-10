@@ -13,7 +13,7 @@ mod development {
 
         // Verify Alice's code can be parsed
         let alice_parsed = ShareableInvitation::from_code(&hints.alice_invite_code)
-            .expect("Alice's invitation code should be parseable");
+            .expect("Alice's invite code should be parseable");
         assert_eq!(alice_parsed.version, 1);
         assert!(!alice_parsed.invitation_id.0.is_empty());
         // Verify the invitation type is Contact (not Guardian)
@@ -29,7 +29,7 @@ mod development {
 
         // Verify Carol's code can be parsed
         let carol_parsed = ShareableInvitation::from_code(&hints.carol_invite_code)
-            .expect("Carol's invitation code should be parseable");
+            .expect("Carol's invite code should be parseable");
         assert_eq!(carol_parsed.version, 1);
         assert!(!carol_parsed.invitation_id.0.is_empty());
         match carol_parsed.invitation_type {

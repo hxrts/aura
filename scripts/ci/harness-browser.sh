@@ -13,6 +13,7 @@ mkdir -p artifacts/harness/browser
 )
 
 bash scripts/check/harness-browser-install.sh
+export AURA_HARNESS_WEB_BUILD_PROFILE=debug
 
 ./scripts/web/serve-static.sh 4173 > artifacts/harness/browser/web-serve.log 2>&1 &
 server_pid=$!

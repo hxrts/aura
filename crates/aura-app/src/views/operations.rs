@@ -19,7 +19,7 @@ use aura_core::types::Epoch;
 pub struct ExportedInvitation {
     /// The invitation ID
     pub id: String,
-    /// The exportable invitation code
+    /// The exportable invite code
     pub code: String,
 }
 
@@ -34,7 +34,7 @@ impl ExportedInvitation {
     }
 }
 
-/// Result of importing an invitation code.
+/// Result of importing an invite code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedInvitation {
     /// The parsed invitation ID

@@ -51,9 +51,9 @@ pub struct ContactsViewState {
     pub lan_peer_count: usize,
     /// Filter text
     pub filter: String,
-    /// Demo mode: Alice's invitation code (for Ctrl+a shortcut)
+    /// Demo mode: Alice's invite code (for Ctrl+a shortcut)
     pub demo_alice_code: String,
-    /// Demo mode: Carol's invitation code (for Ctrl+l shortcut)
+    /// Demo mode: Carol's invite code (for Ctrl+l shortcut)
     pub demo_carol_code: String,
     // Note: Modal state is now stored in ModalQueue, not here.
     // Use modal_queue.enqueue(QueuedModal::ContactsNickname/Import/Create/Code(...)) to show modals.

@@ -5,7 +5,7 @@
 //! - [`env`]: Test environment setup (`SimpleTestEnv`, `FullTestEnv`)
 //! - [`state_machine`]: Pure TUI state machine testing (`TestTui`)
 //! - [`signals`]: Signal waiting and polling helpers
-//! - [`demo`]: Demo-specific helpers (invitation codes, agent IDs)
+//! - [`demo`]: Demo-specific helpers (invite codes, agent IDs)
 //!
 //! # Quick Start
 //!

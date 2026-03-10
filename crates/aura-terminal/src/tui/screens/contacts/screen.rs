@@ -13,8 +13,8 @@
 //! ## Invitation Flows
 //!
 //! The contacts screen now handles both:
-//! - **Accept Invitation (a)**: Accept a contact invitation code received out-of-band
-//! - **Send Invitation (n)**: Generate a new invitation code to share with others
+//! - **Accept Invitation (a)**: Accept a contact invite code received out-of-band
+//! - **Send Invitation (n)**: Generate a new invite code to share with others
 //!
 //! In demo mode, Ctrl+A and Ctrl+L fill Alice's and Carol's codes respectively.
 //!
@@ -235,7 +235,7 @@ pub struct ContactsScreenProps {
     pub on_start_chat: Option<StartChatCallback>,
     /// Callback when inviting a discovered LAN peer
     pub on_invite_lan_peer: Option<InvitePeerCallback>,
-    /// Callback when importing an invitation code
+    /// Callback when importing an invite code
     pub on_import_invitation: Option<ImportInvitationCallback>,
 }
 

@@ -16,7 +16,7 @@
 //! - **Sync**: ForceSync, RequestState
 //! - **Network**: AddPeer, RemovePeer, ListPeers, DiscoverPeers, ListLanPeers
 //! - **Settings**: UpdateMfaPolicy, UpdateNickname, SetChannelMode
-//! - **Invitation Codes**: ExportInvitation, ImportInvitation
+//! - **Invite Codes**: ExportInvitation, ImportInvitation
 //! - **Recovery**: StartRecovery, SubmitGuardianApproval, CompleteRecovery, CancelRecovery
 //!
 //! ## Module Organization

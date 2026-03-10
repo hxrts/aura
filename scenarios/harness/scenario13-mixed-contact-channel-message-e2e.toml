@@ -140,6 +140,7 @@ actor = "alice"
 runtime_event_kind = "contact_link_ready"
 timeout_ms = 30000
 
+[[steps]]
 id = "alice-join-shared-channel"
 action = "join_channel"
 actor = "alice"

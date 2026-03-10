@@ -111,7 +111,7 @@ pub async fn handle_invitation(
             let service = agent.invitations()?;
             let invitation_id = InvitationId::new(invitation_id.clone());
             let code = service.export_code(&invitation_id).await?;
-            output.section("Shareable Invitation Code");
+            output.section("Shareable Invite Code");
             output.println(&code);
             output.blank();
             output.println("Share this code with the recipient.");
@@ -121,7 +121,7 @@ pub async fn handle_invitation(
         InvitationAction::Import { code } => {
             let mut output = CliOutput::new();
             let shareable = InvitationServiceApi::import_code(code)
-                .map_err(|e| TerminalError::Input(format!("Invalid invitation code: {e}")))?;
+                .map_err(|e| TerminalError::Input(format!("Invalid invite code: {e}")))?;
 
             output.section("Invitation Details");
             output.kv("Invitation ID", shareable.invitation_id.to_string());

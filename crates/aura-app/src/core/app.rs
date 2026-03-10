@@ -824,7 +824,7 @@ impl AppCore {
         runtime.sync_with_peer(peer_id).await
     }
 
-    /// Export an invitation code for sharing
+    /// Export an invite code for sharing
     ///
     /// Generates a shareable code that another user can use to establish
     /// a connection. Delegates to the runtime's invitation service.

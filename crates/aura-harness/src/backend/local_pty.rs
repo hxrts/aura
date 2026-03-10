@@ -29,6 +29,18 @@ enum BackendState {
     Running,
 }
 
+const PLACEHOLDER_HOME_ID: &str =
+    "channel:0000000000000000000000000000000000000000000000000000000000000000";
+
+fn snapshot_has_real_home(snapshot: &UiSnapshot) -> bool {
+    snapshot
+        .lists
+        .iter()
+        .find(|list| list.id == ListId::Homes)
+        .map(|list| list.items.iter().any(|item| item.id != PLACEHOLDER_HOME_ID))
+        .unwrap_or(false)
+}
+
 struct RunningSession {
     child: Box<dyn Child + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -668,46 +680,86 @@ impl InstanceBackend for LocalPtyBackend {
     fn create_account_via_ui(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
         self.fill_field(FieldId::AccountName, account_name)?;
         self.activate_control(ControlId::OnboardingCreateAccountButton)?;
-        let onboarding_exit_deadline = Instant::now() + Duration::from_secs(10);
+        let convergence_deadline = Instant::now() + Duration::from_secs(20);
         loop {
             let snapshot = self.ui_snapshot()?;
-            if snapshot.screen != ScreenId::Onboarding {
+            if snapshot.screen != ScreenId::Onboarding && snapshot_has_real_home(&snapshot) {
                 break;
             }
-            if Instant::now() >= onboarding_exit_deadline {
+            if Instant::now() >= convergence_deadline {
                 break;
             }
             thread::sleep(Duration::from_millis(100));
         }
+        anyhow::ensure!(
+            snapshot_has_real_home(&self.ui_snapshot()?),
+            "create_account_via_ui: account creation did not converge a real home"
+        );
         Ok(SubmittedAction::without_handle(()))
     }
 
     fn create_home_via_ui(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
-        const PLACEHOLDER_HOME_ID: &str =
-            "channel:0000000000000000000000000000000000000000000000000000000000000000";
-        self.activate_control(ControlId::NavNeighborhood)?;
-        wait_for_screen_visible(self, ScreenId::Neighborhood, Duration::from_secs(5))?;
-        self.activate_control(ControlId::NeighborhoodNewHomeButton)?;
-        wait_for_modal_visible(self, ModalId::CreateHome, Duration::from_secs(5))?;
+        self.activate_control(ControlId::NavNeighborhood)
+            .context("create_home_via_ui: nav_neighborhood")?;
+        wait_for_screen_visible(self, ScreenId::Neighborhood, Duration::from_secs(5))
+            .context("create_home_via_ui: wait_neighborhood")?;
+        let modal_open_deadline = Instant::now() + Duration::from_secs(5);
+        let mut modal_open = false;
+        while Instant::now() < modal_open_deadline {
+            self.activate_control(ControlId::NeighborhoodNewHomeButton)
+                .context("create_home_via_ui: open_create_home")?;
+            if wait_for_modal_visible(self, ModalId::CreateHome, Duration::from_secs(2)).is_ok() {
+                modal_open = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(150));
+        }
+        anyhow::ensure!(modal_open, "create_home_via_ui: create_home_modal did not open");
         thread::sleep(Duration::from_millis(200));
-        self.fill_field(FieldId::HomeName, home_name)?;
+        self.fill_field(FieldId::HomeName, home_name)
+            .context("create_home_via_ui: fill_home_name")?;
         thread::sleep(Duration::from_millis(150));
-        self.send_keys("\r")?;
+        for _ in 0..3 {
+            self.send_keys("\r")
+                .context("create_home_via_ui: submit_create_home")?;
+            let modal_close_deadline = Instant::now() + Duration::from_millis(800);
+            loop {
+                let snapshot = self.ui_snapshot()?;
+                if snapshot.open_modal != Some(ModalId::CreateHome) {
+                    break;
+                }
+                if Instant::now() >= modal_close_deadline {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(80));
+            }
+            if self.ui_snapshot()?.open_modal != Some(ModalId::CreateHome) {
+                break;
+            }
+        }
         let deadline = Instant::now() + Duration::from_secs(8);
         loop {
             let snapshot = self.ui_snapshot()?;
-            let ready = snapshot
+            let created_home = snapshot
                 .lists
                 .iter()
                 .find(|list| list.id == ListId::Homes)
-                .map(|list| list.items.iter().any(|item| item.id != PLACEHOLDER_HOME_ID))
-                .unwrap_or(false);
-            if ready || Instant::now() >= deadline {
+                .and_then(|list| {
+                    list.items
+                        .iter()
+                        .find(|item| item.id != PLACEHOLDER_HOME_ID)
+                        .map(|item| item.id.clone())
+                });
+            if let Some(home_id) = created_home {
+                self.activate_list_item(ListId::Homes, &home_id)?;
+                return Ok(SubmittedAction::without_handle(()));
+            }
+            if Instant::now() >= deadline {
                 break;
             }
             thread::sleep(Duration::from_millis(80));
         }
-        Ok(SubmittedAction::without_handle(()))
+        anyhow::bail!("create_home_via_ui did not produce a non-placeholder home")
     }
 
     fn create_contact_invitation(&mut self, receiver_authority_id: &str) -> Result<String> {
@@ -774,30 +826,38 @@ impl InstanceBackend for LocalPtyBackend {
     }
 
     fn join_channel_via_ui(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
-        const PLACEHOLDER_HOME_ID: &str =
-            "channel:0000000000000000000000000000000000000000000000000000000000000000";
-        let has_real_home = self
-            .ui_snapshot()?
-            .lists
-            .iter()
-            .find(|list| list.id == ListId::Homes)
-            .map(|list| list.items.iter().any(|item| item.id != PLACEHOLDER_HOME_ID))
-            .unwrap_or(false);
-        if !has_real_home {
-            let _ = self.create_home_via_ui("Harness Shared Home");
+        self.activate_control(ControlId::NavChat)
+            .context("join_channel_via_ui: nav_chat")?;
+        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))
+            .context("join_channel_via_ui: wait_chat")?;
+        let modal_open_deadline = Instant::now() + Duration::from_secs(5);
+        let mut modal_open = false;
+        while Instant::now() < modal_open_deadline {
+            self.activate_control(ControlId::ChatNewGroupButton)
+                .context("join_channel_via_ui: open_create_channel")?;
+            if wait_for_modal_visible(self, ModalId::CreateChannel, Duration::from_secs(2)).is_ok()
+            {
+                modal_open = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(150));
         }
-        self.activate_control(ControlId::NavChat)?;
-        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
-        self.send_keys("n")?;
-        wait_for_modal_visible(self, ModalId::CreateChannel, Duration::from_secs(5))?;
+        anyhow::ensure!(
+            modal_open,
+            "join_channel_via_ui: create_channel_modal did not open"
+        );
         thread::sleep(Duration::from_millis(200));
-        self.fill_field(FieldId::CreateChannelName, channel_name)?;
+        self.fill_field(FieldId::CreateChannelName, channel_name)
+            .context("join_channel_via_ui: fill_channel_name")?;
         thread::sleep(Duration::from_millis(200));
-        self.send_keys("\r")?;
+        self.send_keys("\r")
+            .context("join_channel_via_ui: advance_details")?;
         thread::sleep(Duration::from_millis(250));
-        self.send_keys("\r")?;
+        self.send_keys("\r")
+            .context("join_channel_via_ui: advance_members")?;
         thread::sleep(Duration::from_millis(250));
-        self.send_keys("\r")?;
+        self.send_keys("\r")
+            .context("join_channel_via_ui: submit_threshold")?;
         let joined_deadline = Instant::now() + Duration::from_secs(4);
         loop {
             let snapshot = self.ui_snapshot()?;
@@ -820,7 +880,8 @@ impl InstanceBackend for LocalPtyBackend {
             }
             thread::sleep(Duration::from_millis(80));
         }
-        self.submit_chat_command_via_ui(&format!("join {channel_name}"))?;
+        self.submit_chat_command_via_ui(&format!("join {channel_name}"))
+            .context("join_channel_via_ui: join_fallback")?;
         Ok(SubmittedAction::without_handle(()))
     }
 

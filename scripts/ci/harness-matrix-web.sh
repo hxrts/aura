@@ -16,6 +16,7 @@ bash scripts/check/harness-browser-install.sh
 
 cargo build -p aura-harness --bin aura-harness -q
 export AURA_HARNESS_BIN="$repo_root/target/debug/aura-harness"
+export AURA_HARNESS_WEB_BUILD_PROFILE=debug
 
 ./scripts/web/serve-static.sh 4173 > artifacts/harness/browser/web-serve.log 2>&1 &
 server_pid=$!

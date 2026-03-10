@@ -1,6 +1,6 @@
-//! # Invitation Code Modal
+//! # Invite Code Modal
 //!
-//! Modal for displaying shareable invitation codes.
+//! Modal for displaying shareable invite codes.
 //! Uses the shared CodeDisplayModal component.
 
 use iocraft::prelude::*;
@@ -16,7 +16,7 @@ pub type CloseCallback = Arc<dyn Fn() + Send + Sync>;
 pub struct InvitationCodeModalProps {
     /// Whether the modal is visible
     pub visible: bool,
-    /// The invitation code to display
+    /// The invite code to display
     pub code: String,
     /// The invitation type (for display)
     pub invitation_type: String,
@@ -26,7 +26,7 @@ pub struct InvitationCodeModalProps {
     pub copied: bool,
 }
 
-/// Modal for displaying shareable invitation codes
+/// Modal for displaying shareable invite codes
 #[component]
 pub fn InvitationCodeModal(props: &InvitationCodeModalProps) -> impl Into<AnyElement<'static>> {
     element! {
@@ -44,12 +44,12 @@ pub fn InvitationCodeModal(props: &InvitationCodeModalProps) -> impl Into<AnyEle
     }
 }
 
-/// State for invitation code modal
+/// State for invite code modal
 #[derive(Clone, Debug, Default)]
 pub struct InvitationCodeState {
     /// Whether the modal is visible
     pub visible: bool,
-    /// The invitation code
+    /// The invite code
     pub code: String,
     /// The invitation type
     pub invitation_type: String,
@@ -60,7 +60,7 @@ pub struct InvitationCodeState {
 }
 
 impl InvitationCodeState {
-    /// Create a new invitation code state
+    /// Create a new invite code state
     #[must_use]
     pub fn new() -> Self {
         Self::default()

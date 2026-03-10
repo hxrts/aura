@@ -299,7 +299,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                         Text(content: ttl_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
                         Text(content: "Expiry", color: if ttl_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
                         Text(content: " - ", color: Theme::TEXT_MUTED)
-                        Text(content: "How long the invitation code remains valid", color: Theme::TEXT_MUTED)
+                        Text(content: "How long the invite code remains valid", color: Theme::TEXT_MUTED)
                     }
                     View(
                         margin_left: 2,

@@ -259,7 +259,7 @@ pub async fn list_pending_invitations(app_core: &Arc<RwLock<AppCore>>) -> Vec<In
 
 /// Import and get invitation details from a shareable code
 ///
-/// **What it does**: Parses invitation code and returns the details
+/// **What it does**: Parses invite code and returns the details
 /// **Returns**: InvitationInfo with parsed details
 /// **Signal pattern**: Read-only until acceptance
 pub async fn import_invitation_details(
@@ -278,14 +278,14 @@ pub async fn import_invitation_details(
 // Export Operations via RuntimeBridge
 // ============================================================================
 
-/// Export an invitation code for sharing
+/// Export an invite code for sharing
 ///
-/// **What it does**: Generates shareable invitation code
-/// **Returns**: Base64-encoded invitation code
+/// **What it does**: Generates shareable invite code
+/// **Returns**: Base64-encoded invite code
 /// **Signal pattern**: Read-only operation (no emission)
 ///
 /// This method is implemented via RuntimeBridge.export_invitation().
-/// Takes a typed InvitationId, returns the shareable invitation code as String.
+/// Takes a typed InvitationId, returns the shareable invite code as String.
 pub async fn export_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &InvitationId,
@@ -485,7 +485,7 @@ pub async fn cancel_invitation_by_str(
 
 /// Import an invitation from a shareable code
 ///
-/// **What it does**: Parses and validates invitation code via RuntimeBridge
+/// **What it does**: Parses and validates invite code via RuntimeBridge
 /// **Returns**: Unit result
 /// **Signal pattern**: RuntimeBridge handles signal emission
 ///

@@ -179,7 +179,7 @@ impl ImportInvitationModalState {
     }
 }
 
-/// State for invitation code display modal
+/// State for invite code display modal
 ///
 /// Note: Visibility is controlled by ModalQueue, not a `visible` field.
 #[derive(Clone, Debug, Default)]
@@ -197,7 +197,7 @@ pub struct InvitationCodeModalState {
 }
 
 impl InvitationCodeModalState {
-    /// Create initialized state for showing an invitation code
+    /// Create initialized state for showing an invite code
     #[must_use]
     pub fn for_invitation(invitation_id: &str) -> Self {
         Self {

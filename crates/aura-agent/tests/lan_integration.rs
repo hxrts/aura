@@ -625,7 +625,7 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
     .await?;
     let invite_code = invitation_workflow::export_invitation(&app_a, &invite.invitation_id).await?;
 
-    // Bob imports and accepts the invitation code.
+    // Bob imports and accepts the invite code.
     invitation_workflow::import_invitation(&app_b, &invite_code).await?;
     invitation_workflow::accept_invitation(&app_b, &invite.invitation_id).await?;
 

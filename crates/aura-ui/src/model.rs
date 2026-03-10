@@ -12,14 +12,14 @@ use async_lock::RwLock as AsyncRwLock;
 use aura_app::views::chat::{NOTE_TO_SELF_CHANNEL_NAME, NOTE_TO_SELF_CHANNEL_TOPIC};
 use aura_app::{
     ui::contract::{
-        ChannelFactKey, InvitationFactKind,
         ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot, ListSnapshot,
         MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
-        OperationState, RuntimeEventId, RuntimeEventSnapshot, RuntimeFact, SelectionSnapshot,
-        ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
+        OperationState, RuntimeEventId, RuntimeEventSnapshot, SelectionSnapshot, ToastId,
+        ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
     },
     AppCore,
 };
+use aura_app::ui_contract::{InvitationFactKind, RuntimeFact};
 use aura_core::identifiers::{AuthorityId, CeremonyId};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -656,8 +656,7 @@ impl UiModel {
     fn push_runtime_fact(&mut self, fact: RuntimeFact) {
         let fact_key = fact.key();
         self.runtime_event_key = self.runtime_event_key.saturating_add(1);
-        self.runtime_events
-            .retain(|event| event.key() != fact_key);
+        self.runtime_events.retain(|event| event.key() != fact_key);
         self.runtime_events.push(RuntimeEventSnapshot {
             id: RuntimeEventId(format!("runtime-event-{}", self.runtime_event_key)),
             fact,

@@ -294,7 +294,7 @@ pub async fn handle_invitations(
                     }))
                 }
                 Err(e) => Some(Err(OpError::InvalidArgument(format!(
-                    "Invalid invitation code: {e}"
+                    "Invalid invite code: {e}"
                 )))),
             }
         }

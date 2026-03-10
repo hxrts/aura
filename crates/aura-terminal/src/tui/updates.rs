@@ -202,19 +202,19 @@ pub enum UiUpdate {
 
     /// A new invitation was created
     InvitationCreated {
-        /// The invitation code or ID
+        /// The invite code or ID
         invitation_code: String,
     },
 
-    /// An invitation code was exported (retrieved for sharing)
+    /// An invite code was exported (retrieved for sharing)
     InvitationExported {
-        /// The exported invitation code
+        /// The exported invite code
         code: String,
     },
 
     /// An invitation was imported from a file
     InvitationImported {
-        /// The invitation code that was imported
+        /// The invite code that was imported
         invitation_code: String,
     },
 

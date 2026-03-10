@@ -335,9 +335,9 @@ pub enum InvitationAction {
         /// Invitation ID to export.
         invitation_id: String,
     },
-    /// Import and display details of a shareable invitation code.
+    /// Import and display details of a shareable invite code.
     Import {
-        /// The shareable invitation code (format: aura:v1:<base64>).
+        /// The shareable invite code (format: aura:v1:<base64>).
         code: String,
     },
 }

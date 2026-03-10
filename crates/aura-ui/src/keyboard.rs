@@ -407,7 +407,7 @@ fn handle_enter(model: &mut UiModel, clipboard: &dyn ClipboardPort) {
                     model.active_modal = Some(ActiveModal::SwitchAuthority);
                 }
             }
-            SettingsSection::Appearance => {}
+            SettingsSection::Appearance | SettingsSection::Info => {}
         },
         UiScreen::Chat | UiScreen::Notifications => {}
     }

@@ -746,7 +746,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             return Ok(format!("aura:v1:{b64}"));
         }
 
-        // For IDs not in our map, generate a synthetic invitation code
+        // For IDs not in our map, generate a synthetic invite code
         // This allows tests to export arbitrary IDs without pre-creating invitations
         let now = self.now_ms();
         let invitation_data = serde_json::json!({
@@ -960,7 +960,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         // Parse aura:v1:<base64> format
         if !code.starts_with("aura:v1:") {
             return Err(IntentError::internal_error(
-                "Invalid invitation code format: must start with aura:v1:".to_string(),
+                "Invalid invite code format: must start with aura:v1:".to_string(),
             ));
         }
 

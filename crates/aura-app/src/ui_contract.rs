@@ -441,9 +441,7 @@ impl ChannelFactKey {
 
     #[must_use]
     pub fn matches_needle(&self, needle: &str) -> bool {
-        self.id
-            .as_deref()
-            .is_some_and(|id| id.contains(needle))
+        self.id.as_deref().is_some_and(|id| id.contains(needle))
             || self
                 .name
                 .as_deref()
@@ -642,7 +640,9 @@ impl RuntimeFact {
             } => format!(
                 "contact_link_ready:{}:{}",
                 authority_id.as_deref().unwrap_or("*"),
-                contact_count.map(|value| value.to_string()).unwrap_or_else(|| "*".to_string())
+                contact_count
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "*".to_string())
             ),
             Self::HomeCreated { name } => format!("home_created:{name}"),
             Self::HomeEntered { name, .. } => format!("home_entered:{name}"),
@@ -690,9 +690,9 @@ impl RuntimeFact {
                 contact_count,
                 lan_peer_count,
             } => format!("remote_facts_pulled:{contact_count}:{lan_peer_count}"),
-            Self::ChatSignalUpdated {
-                active_channel, ..
-            } => format!("chat_signal_updated:{active_channel}"),
+            Self::ChatSignalUpdated { active_channel, .. } => {
+                format!("chat_signal_updated:{active_channel}")
+            }
         }
     }
 
@@ -703,45 +703,56 @@ impl RuntimeFact {
                 authority_id,
                 operation_state,
                 ..
-            } => authority_id
-                .as_deref()
-                .is_some_and(|value| value.contains(needle))
-                || operation_state
-                    .is_some_and(|state| format!("{state:?}").contains(needle)),
+            } => {
+                authority_id
+                    .as_deref()
+                    .is_some_and(|value| value.contains(needle))
+                    || operation_state.is_some_and(|state| format!("{state:?}").contains(needle))
+            }
             Self::InvitationCodeReady {
                 receiver_authority_id,
                 source_operation,
-            } => receiver_authority_id
-                .as_deref()
-                .is_some_and(|value| value.contains(needle))
-                || source_operation.0.contains(needle),
+            } => {
+                receiver_authority_id
+                    .as_deref()
+                    .is_some_and(|value| value.contains(needle))
+                    || source_operation.0.contains(needle)
+            }
             Self::PendingHomeInvitationReady => needle.contains("pending_home_invitation"),
             Self::DeviceEnrollmentCodeReady {
                 device_name,
                 code_len,
-            } => device_name
-                .as_deref()
-                .is_some_and(|value| value.contains(needle))
-                || code_len.is_some_and(|value| value.to_string().contains(needle)),
+            } => {
+                device_name
+                    .as_deref()
+                    .is_some_and(|value| value.contains(needle))
+                    || code_len.is_some_and(|value| value.to_string().contains(needle))
+            }
             Self::ContactLinkReady {
                 authority_id,
                 contact_count,
-            } => authority_id
-                .as_deref()
-                .is_some_and(|value| value.contains(needle))
-                || contact_count.is_some_and(|value| value.to_string().contains(needle)),
-            Self::HomeCreated { name } | Self::HomeEntered { name, .. } => name.contains(needle),
-            Self::ChannelJoined { channel, source } => channel
-                .as_ref()
-                .is_some_and(|channel| channel.matches_needle(needle))
-                || source
+            } => {
+                authority_id
                     .as_deref()
-                    .is_some_and(|value| value.contains(needle)),
+                    .is_some_and(|value| value.contains(needle))
+                    || contact_count.is_some_and(|value| value.to_string().contains(needle))
+            }
+            Self::HomeCreated { name } | Self::HomeEntered { name, .. } => name.contains(needle),
+            Self::ChannelJoined { channel, source } => {
+                channel
+                    .as_ref()
+                    .is_some_and(|channel| channel.matches_needle(needle))
+                    || source
+                        .as_deref()
+                        .is_some_and(|value| value.contains(needle))
+            }
             Self::ChannelMembershipReady {
                 channel,
                 member_count,
-            } => channel.matches_needle(needle)
-                || member_count.is_some_and(|value| value.to_string().contains(needle)),
+            } => {
+                channel.matches_needle(needle)
+                    || member_count.is_some_and(|value| value.to_string().contains(needle))
+            }
             Self::RecipientPeersResolved {
                 channel,
                 member_count,
@@ -756,15 +767,19 @@ impl RuntimeFact {
             Self::RemoteFactsPulled {
                 contact_count,
                 lan_peer_count,
-            } => contact_count.to_string().contains(needle)
-                || lan_peer_count.to_string().contains(needle),
+            } => {
+                contact_count.to_string().contains(needle)
+                    || lan_peer_count.to_string().contains(needle)
+            }
             Self::ChatSignalUpdated {
                 active_channel,
                 channel_count,
                 message_count,
-            } => active_channel.contains(needle)
-                || channel_count.to_string().contains(needle)
-                || message_count.to_string().contains(needle),
+            } => {
+                active_channel.contains(needle)
+                    || channel_count.to_string().contains(needle)
+                    || message_count.to_string().contains(needle)
+            }
         }
     }
 }
@@ -1077,9 +1092,9 @@ pub const SHARED_SCREEN_MODULE_MAP: &[SharedScreenModuleMap] = &[
     SharedScreenModuleMap {
         screen: ScreenId::Onboarding,
         web_symbol: "OnboardingScreen",
-        web_path: "crates/aura-web/src/main.rs",
-        tui_symbol: "OnboardingScreen",
-        tui_path: "crates/aura-terminal/src/handlers/tui.rs",
+        web_path: "crates/aura-ui/src/app.rs",
+        tui_symbol: "AccountSetupModal",
+        tui_path: "crates/aura-terminal/src/tui/components/account_setup_modal_template.rs",
     },
     SharedScreenModuleMap {
         screen: ScreenId::Neighborhood,
@@ -1338,11 +1353,7 @@ impl UiSnapshot {
     }
 
     #[must_use]
-    pub fn has_runtime_event(
-        &self,
-        kind: RuntimeEventKind,
-        detail_needle: Option<&str>,
-    ) -> bool {
+    pub fn has_runtime_event(&self, kind: RuntimeEventKind, detail_needle: Option<&str>) -> bool {
         self.runtime_events.iter().any(|event| {
             event.kind() == kind
                 && detail_needle
@@ -1367,7 +1378,9 @@ impl UiSnapshot {
     ) -> Option<OperationState> {
         self.operations
             .iter()
-            .find(|candidate| &candidate.id == operation_id && &candidate.instance_id == instance_id)
+            .find(|candidate| {
+                &candidate.id == operation_id && &candidate.instance_id == instance_id
+            })
             .map(|operation| operation.state)
     }
 }

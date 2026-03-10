@@ -190,7 +190,7 @@ pub struct ContactsViewProps {
     pub nickname_modal_contact_id: String,
     pub nickname_modal_value: String,
     pub nickname_modal_nickname_suggestion: Option<String>,
-    // Import invitation modal (accept invitation code)
+    // Import invitation modal (accept invite code)
     pub import_modal_visible: bool,
     pub import_modal_code: String,
     pub import_modal_importing: bool,

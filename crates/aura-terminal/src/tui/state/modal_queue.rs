@@ -88,7 +88,7 @@ pub enum QueuedModal {
     /// Create invitation (contacts screen)
     ContactsCreate(CreateInvitationModalState),
 
-    /// Show invitation code (contacts screen)
+    /// Show invite code (contacts screen)
     ContactsCode(InvitationCodeModalState),
 
     /// Guardian setup wizard (multi-select + threshold + ceremony)

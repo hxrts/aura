@@ -1,11 +1,11 @@
 //! Demo-specific test helpers.
 //!
 //! This module provides utilities for testing demo flows, including
-//! deterministic invitation code generation that matches the demo system.
+//! deterministic invite code generation that matches the demo system.
 //!
-//! # Invitation Code Generation
+//! # Invite Code Generation
 //!
-//! Demo invitation codes must match the derivation in:
+//! Demo invite codes must match the derivation in:
 //! - `aura_terminal::demo::hints::generate_invite_code`
 //! - `aura_terminal::demo::mod::SimulatedAgent::new_with_shared_transport`
 //! - `aura_terminal::demo::mod::AgentFactory::create_demo_agents`
@@ -28,7 +28,7 @@ pub const CAROL: &str = "Carol";
 /// Generate a deterministic invite code for a demo agent.
 ///
 /// This MUST match the derivation used by the demo system to ensure
-/// invitation codes generated in tests are compatible with demo agents.
+/// invite codes generated in tests are compatible with demo agents.
 ///
 /// # Arguments
 ///
@@ -94,7 +94,7 @@ pub fn carol_authority_id() -> aura_core::identifiers::AuthorityId {
     ids::authority_id(&format!("demo:{seed}:{CAROL}:authority"))
 }
 
-/// Generate a guardian invitation code for demo testing.
+/// Generate a guardian invite code for demo testing.
 ///
 /// Unlike contact invitations, guardian invitations are typically
 /// sent in-band during the guardian setup flow. This function is

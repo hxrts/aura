@@ -604,7 +604,7 @@ pub trait RuntimeBridge: Send + Sync {
 
     /// Send an invitation to a LAN peer
     ///
-    /// Sends an invitation code directly to a peer discovered on the LAN.
+    /// Sends an invite code directly to a peer discovered on the LAN.
     /// This bypasses the need for manual code sharing when peers are on
     /// the same local network.
     async fn send_lan_invitation(
@@ -785,7 +785,7 @@ pub trait RuntimeBridge: Send + Sync {
     // Invitation Operations
     // =========================================================================
 
-    /// Export an invitation code for sharing
+    /// Export an invite code for sharing
     ///
     /// Returns a shareable code that another user can use to establish
     /// a connection with this authority.

@@ -612,42 +612,21 @@ impl IoContext {
         let nickname_suggestion = nickname_suggestion.to_string();
         let home_name = format!("{nickname_suggestion}'s Home");
         let harness_mode = std::env::var_os("AURA_HARNESS_MODE").is_some();
-        let authority_id = if harness_mode {
-            self.account_files.set_account_created();
-            let core = app_core.read().await;
-            core.runtime()
-                .map(|runtime| runtime.authority_id())
-                .or_else(|| core.authority().copied())
-                .ok_or_else(|| {
-                    TerminalError::Operation(
-                        "Missing placeholder authority during account creation".to_string(),
-                    )
-                })?
-        } else {
-            let (authority_id, _context_id) = self
-                .account_files
-                .create_account(&nickname_suggestion)
-                .await?;
-            authority_id
-        };
+        let (authority_id, _context_id) = self
+            .account_files
+            .create_account(&nickname_suggestion)
+            .await?;
 
         {
             let mut core = app_core.write().await;
             core.set_authority(authority_id);
         }
 
-        let account_files = self.account_files.clone();
         if harness_mode {
-            let persist_account_files = account_files.clone();
-            let persist_nickname = nickname_suggestion.clone();
-            tokio::spawn(async move {
-                let _ = persist_account_files
-                    .create_account(&persist_nickname)
-                    .await;
-            });
-
             const SIGNING_KEY_ATTEMPTS: usize = 40;
             const BOOTSTRAP_RETRY_MS: u64 = 250;
+            const HOME_CONVERGENCE_ATTEMPTS: usize = 16;
+            const HOME_CONVERGENCE_RETRY_MS: u64 = 250;
             for attempt in 0..SIGNING_KEY_ATTEMPTS {
                 let bootstrap_ready = {
                     let core = app_core.read().await;
@@ -667,15 +646,61 @@ impl IoContext {
 
             let _ = settings_workflows::refresh_settings_from_runtime(&app_core).await;
             let _ = system_workflows::refresh_account(&app_core).await;
-            context_workflows::create_home(&app_core, Some(home_name), None).await?;
+            let created_home_id =
+                context_workflows::create_home(&app_core, Some(home_name.clone()), None).await?;
+            let mut home_ready = false;
+            for attempt in 0..HOME_CONVERGENCE_ATTEMPTS {
+                home_ready = self
+                    .snapshots
+                    .snapshot_home()
+                    .home_state
+                    .map(|home| home.id != aura_core::identifiers::ChannelId::default())
+                    .unwrap_or(false);
+                if home_ready {
+                    break;
+                }
+                if attempt == 4 || attempt == 10 {
+                    let _ = context_workflows::ensure_local_home_projection(
+                        &app_core,
+                        created_home_id,
+                        home_name.clone(),
+                        authority_id,
+                    )
+                    .await;
+                }
+                if attempt + 1 < HOME_CONVERGENCE_ATTEMPTS {
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        HOME_CONVERGENCE_RETRY_MS,
+                    ))
+                    .await;
+                }
+            }
+            if !home_ready {
+                let _ = context_workflows::ensure_local_home_projection(
+                    &app_core,
+                    created_home_id,
+                    home_name.clone(),
+                    authority_id,
+                )
+                .await;
+                home_ready = self
+                    .snapshots
+                    .snapshot_home()
+                    .home_state
+                    .map(|home| home.id != aura_core::identifiers::ChannelId::default())
+                    .unwrap_or(false);
+            }
+            if !home_ready {
+                return Err(crate::error::TerminalError::Operation(
+                    "account bootstrap did not converge a real home".to_string(),
+                ));
+            }
             return Ok(());
         }
 
         const SIGNING_KEY_ATTEMPTS: usize = 40;
         const BOOTSTRAP_RETRY_MS: u64 = 250;
         tokio::spawn(async move {
-            let _ = context_workflows::create_home(&app_core, Some(home_name.clone()), None).await;
-
             for attempt in 0..SIGNING_KEY_ATTEMPTS {
                 let bootstrap_ready = {
                     let core = app_core.read().await;
@@ -695,6 +720,7 @@ impl IoContext {
 
             let _ = settings_workflows::refresh_settings_from_runtime(&app_core).await;
             let _ = system_workflows::refresh_account(&app_core).await;
+            let _ = context_workflows::create_home(&app_core, Some(home_name.clone()), None).await;
         });
 
         Ok(())

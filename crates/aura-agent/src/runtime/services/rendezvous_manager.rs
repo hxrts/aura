@@ -951,7 +951,7 @@ impl RendezvousManager {
 
     /// Send an invitation to a LAN peer
     ///
-    /// This method uses the LAN transport to send an invitation code directly
+    /// This method uses the LAN transport to send an invite code directly
     /// to a peer discovered on the local network.
     pub async fn send_lan_invitation(
         &self,
@@ -968,7 +968,7 @@ impl RendezvousManager {
         // Get the LAN discovery service for sending
         let lan = self.state.read().await.lan_discovery.clone();
         if let Some(lan) = lan.as_ref() {
-            // Use the LAN socket to send the invitation code
+            // Use the LAN socket to send the invite code
             // The invitation is sent as a simple UDP packet
             let message = format!("AURA_INV:{}", invitation_code);
             let socket = lan.socket();

@@ -1259,7 +1259,7 @@ impl InvitationHandler {
             invitation_id = %shareable.invitation_id,
             sender = %shareable.sender_id,
             invitation_type = ?shareable.invitation_type,
-            "Importing invitation code with context={:?}",
+            "Importing invite code with context={:?}",
             shareable.context_id
         );
 
@@ -1993,7 +1993,7 @@ struct DeviceEnrollmentInvitation {
 /// Error type for shareable invitation operations
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShareableInvitationError {
-    /// Invalid invitation code format
+    /// Invalid invite code format
     InvalidFormat,
     /// Unsupported version
     UnsupportedVersion(u8),
@@ -2006,7 +2006,7 @@ pub enum ShareableInvitationError {
 impl std::fmt::Display for ShareableInvitationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidFormat => write!(f, "invalid invitation code format"),
+            Self::InvalidFormat => write!(f, "invalid invite code format"),
             Self::UnsupportedVersion(v) => write!(f, "unsupported version: {}", v),
             Self::DecodingFailed => write!(f, "base64 decoding failed"),
             Self::ParsingFailed => write!(f, "JSON parsing failed"),
@@ -2044,7 +2044,7 @@ pub struct ShareableInvitation {
     pub sender_id: AuthorityId,
     /// Context for invitation-scoped facts, when known.
     ///
-    /// Older invitation codes may omit this and rely on channel defaults.
+    /// Older invite codes may omit this and rely on channel defaults.
     #[serde(default)]
     pub context_id: Option<ContextId>,
     /// Type of invitation
@@ -2059,7 +2059,7 @@ impl ShareableInvitation {
     /// Current version of the shareable invitation format
     pub const CURRENT_VERSION: u8 = 1;
 
-    /// Protocol prefix for invitation codes
+    /// Protocol prefix for invite codes
     pub const PREFIX: &'static str = "aura";
 
     /// Encode the invitation as a shareable code string

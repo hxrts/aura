@@ -26,6 +26,17 @@ use crate::tool_api::ToolKey;
 
 const DEFAULT_PAGE_GOTO_TIMEOUT_MS: u64 = 90_000;
 const DEFAULT_HARNESS_READY_TIMEOUT_MS: u64 = 90_000;
+const PLACEHOLDER_HOME_ID: &str =
+    "channel:0000000000000000000000000000000000000000000000000000000000000000";
+
+fn snapshot_has_real_home(snapshot: &UiSnapshot) -> bool {
+    snapshot
+        .lists
+        .iter()
+        .find(|list| list.id == ListId::Homes)
+        .map(|list| list.items.iter().any(|item| item.id != PLACEHOLDER_HOME_ID))
+        .unwrap_or(false)
+}
 const DEFAULT_RPC_TIMEOUT_MS: u64 = 15_000;
 const WAIT_RPC_TIMEOUT_MARGIN_MS: u64 = 5_000;
 const DEFAULT_START_MAX_ATTEMPTS: u32 = 3;
@@ -776,7 +787,22 @@ impl InstanceBackend for PlaywrightBrowserBackend {
 
     fn create_account_via_ui(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
         self.fill_field(FieldId::AccountName, account_name)?;
-        let _ = self.activate_control(ControlId::OnboardingCreateAccountButton);
+        self.activate_control(ControlId::OnboardingCreateAccountButton)?;
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            if snapshot.screen != ScreenId::Onboarding && snapshot_has_real_home(&snapshot) {
+                break;
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        anyhow::ensure!(
+            snapshot_has_real_home(&self.ui_snapshot()?),
+            "create_account_via_ui: account creation did not converge a real home"
+        );
         Ok(SubmittedAction::without_handle(()))
     }
 
@@ -796,8 +822,30 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     ) -> Result<SubmittedAction<ContactInvitationCode>> {
         let previous_operation =
             observe_operation(&self.ui_snapshot()?, &OperationId::invitation_create());
-        self.activate_control(ControlId::ContactsCreateInvitationButton)?;
-        wait_for_modal_visible(self, ModalId::CreateInvitation, Duration::from_secs(5))?;
+        self.activate_control(ControlId::NavContacts)?;
+        wait_for_screen_visible(self, ScreenId::Contacts, Duration::from_secs(5))?;
+        let modal_open_deadline = Instant::now() + Duration::from_secs(8);
+        let mut last_open_error = None;
+        while Instant::now() < modal_open_deadline {
+            if let Err(error) = self.activate_control(ControlId::ContactsCreateInvitationButton) {
+                last_open_error = Some(error);
+                thread::sleep(Duration::from_millis(150));
+                continue;
+            }
+            match wait_for_modal_visible(self, ModalId::CreateInvitation, Duration::from_secs(2)) {
+                Ok(()) => {
+                    last_open_error = None;
+                    break;
+                }
+                Err(error) => {
+                    last_open_error = Some(error);
+                    thread::sleep(Duration::from_millis(150));
+                }
+            }
+        }
+        if let Some(error) = last_open_error {
+            return Err(error).context("failed to open create invitation modal on contacts screen");
+        }
         self.fill_field(FieldId::InvitationReceiver, receiver_authority_id)?;
         self.activate_control(ControlId::ModalConfirmButton)?;
         let handle = wait_for_operation_submission(
@@ -847,12 +895,30 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 
     fn join_channel_via_ui(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
-        self.activate_control(ControlId::NavChat)?;
-        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
-        self.send_keys("n")?;
-        wait_for_modal_visible(self, ModalId::CreateChannel, Duration::from_secs(5))?;
-        self.fill_field(FieldId::CreateChannelName, channel_name)?;
-        self.activate_control(ControlId::ModalConfirmButton)?;
+        self.activate_control(ControlId::NavChat)
+            .context("join_channel_via_ui: nav_chat")?;
+        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))
+            .context("join_channel_via_ui: wait_chat")?;
+        let modal_open_deadline = Instant::now() + Duration::from_secs(8);
+        let mut modal_open = false;
+        while Instant::now() < modal_open_deadline {
+            self.activate_control(ControlId::ChatNewGroupButton)
+                .context("join_channel_via_ui: open_create_channel")?;
+            if wait_for_modal_visible(self, ModalId::CreateChannel, Duration::from_secs(2)).is_ok()
+            {
+                modal_open = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(150));
+        }
+        anyhow::ensure!(
+            modal_open,
+            "join_channel_via_ui: create_channel_modal did not open"
+        );
+        self.fill_field(FieldId::CreateChannelName, channel_name)
+            .context("join_channel_via_ui: fill_channel_name")?;
+        self.activate_control(ControlId::ModalConfirmButton)
+            .context("join_channel_via_ui: advance_details")?;
         let members_deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let snapshot = self.ui_snapshot()?;
@@ -867,7 +933,8 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             }
             thread::sleep(Duration::from_millis(80));
         }
-        self.activate_control(ControlId::ModalConfirmButton)?;
+        self.activate_control(ControlId::ModalConfirmButton)
+            .context("join_channel_via_ui: advance_members")?;
         let threshold_deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let snapshot = self.ui_snapshot()?;
@@ -878,7 +945,8 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             }
             thread::sleep(Duration::from_millis(80));
         }
-        self.activate_control(ControlId::ModalConfirmButton)?;
+        self.activate_control(ControlId::ModalConfirmButton)
+            .context("join_channel_via_ui: submit_threshold")?;
         Ok(SubmittedAction::without_handle(()))
     }
 

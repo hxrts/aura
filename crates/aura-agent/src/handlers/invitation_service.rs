@@ -499,7 +499,7 @@ impl InvitationServiceApi {
         ShareableInvitation::from_code(code)
     }
 
-    /// Import an out-of-band invitation code into the local invitation cache.
+    /// Import an out-of-band invite code into the local invitation cache.
     ///
     /// This enables follow-up operations (e.g., accept) to look up the invitation
     /// details by `invitation_id` without requiring the original `Sent` fact to

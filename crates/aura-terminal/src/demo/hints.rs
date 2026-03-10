@@ -189,7 +189,7 @@ mod tests {
 
     /// Verify that hints derive the SAME authority IDs as the simulator.
     ///
-    /// This test ensures that when a user imports an invitation code from hints,
+    /// This test ensures that when a user imports an invite code from hints,
     /// the contact's AuthorityId matches what the SimulatedAgent uses internally.
     /// Without this, guardian bindings won't match because the signal_coordinator
     /// looks up contacts by authority_id.
@@ -202,7 +202,7 @@ mod tests {
 
         // Parse Alice's invitation to get the sender_id used in hints
         let alice_parsed = ShareableInvitation::from_code(&hints.alice_invite_code)
-            .expect("Alice's invitation code should be parseable");
+            .expect("Alice's invite code should be parseable");
         // sender_id is already AuthorityId (typed ID refactor)
         let hints_alice_authority = alice_parsed.sender_id;
 
@@ -217,7 +217,7 @@ mod tests {
 
         // Same check for Carol (uses seed + 1 like AgentFactory)
         let carol_parsed = ShareableInvitation::from_code(&hints.carol_invite_code)
-            .expect("Carol's invitation code should be parseable");
+            .expect("Carol's invite code should be parseable");
         let hints_carol_authority = carol_parsed.sender_id;
 
         // Carol's seed is seed + 1 (see AgentFactory::create_demo_agents)

@@ -2854,7 +2854,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .invitations()
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
-        // Export the invitation code
+        // Export the invite code
         let invitation_id = aura_core::identifiers::InvitationId::new(invitation_id.to_string());
         invitation_service
             .export_code(&invitation_id)
@@ -3023,9 +3023,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let invitation = invitation_service
             .import_and_cache(code)
             .await
-            .map_err(|e| {
-                IntentError::validation_failed(format!("Invalid invitation code: {}", e))
-            })?;
+            .map_err(|e| IntentError::validation_failed(format!("Invalid invite code: {}", e)))?;
 
         Ok(convert_invitation_to_bridge_info(&invitation))
     }

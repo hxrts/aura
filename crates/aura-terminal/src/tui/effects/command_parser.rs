@@ -331,7 +331,7 @@ pub enum EffectCommand {
     },
     /// Import an invitation from a code
     ImportInvitation {
-        /// The invitation code to import
+        /// The invite code to import
         code: String,
     },
     /// Accept an invitation

@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use aura_app::ui::contract::{
     compare_ui_snapshots_for_parity, ControlId, FieldId, ListId, ModalId, OperationId,
     OperationState, RuntimeEventKind, ScreenId, UiSnapshot,
@@ -2689,14 +2689,21 @@ fn record_submission_handle(
 }
 
 fn issue_stage<T>(step: &ScenarioStep, result: Result<T>) -> Result<T> {
-    result.with_context(|| format!("step {} issue stage failed for {}", step.id, step.action))
+    result.map_err(|error| {
+        anyhow::anyhow!(
+            "step {} issue stage failed for {}: {error:#}",
+            step.id,
+            step.action
+        )
+    })
 }
 
 fn convergence_stage<T>(step: &ScenarioStep, label: &str, result: Result<T>) -> Result<T> {
-    result.with_context(|| {
-        format!(
-            "step {} convergence stage failed for {} ({label})",
-            step.id, step.action
+    result.map_err(|error| {
+        anyhow::anyhow!(
+            "step {} convergence stage failed for {} ({label}): {error:#}",
+            step.id,
+            step.action
         )
     })
 }
