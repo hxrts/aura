@@ -269,6 +269,7 @@ pub enum SemanticActionKind {
     FaultTunnelDrop,
     OpenScreen,
     CreateAccount,
+    CreateHome,
     StartDeviceEnrollment,
     ImportDeviceEnrollmentCode,
     OpenSettingsSection,
@@ -376,6 +377,9 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                     account_name: required(value.value, "value", value.action)?,
                 })
             }
+            SemanticActionKind::CreateHome => ScenarioAction::Intent(IntentAction::CreateHome {
+                home_name: required(value.value, "value", value.action)?,
+            }),
             SemanticActionKind::StartDeviceEnrollment => {
                 ScenarioAction::Intent(IntentAction::StartDeviceEnrollment {
                     device_name: required(value.value, "value", value.action)?,
