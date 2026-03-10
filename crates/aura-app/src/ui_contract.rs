@@ -416,6 +416,48 @@ pub struct OperationInstanceId(pub String);
 #[serde(transparent)]
 pub struct RuntimeEventId(pub String);
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelFactKey {
+    pub id: Option<String>,
+    pub name: Option<String>,
+}
+
+impl ChannelFactKey {
+    #[must_use]
+    pub fn named(name: impl Into<String>) -> Self {
+        Self {
+            id: None,
+            name: Some(name.into()),
+        }
+    }
+
+    #[must_use]
+    pub fn identified(id: impl Into<String>) -> Self {
+        Self {
+            id: Some(id.into()),
+            name: None,
+        }
+    }
+
+    #[must_use]
+    pub fn matches_needle(&self, needle: &str) -> bool {
+        self.id
+            .as_deref()
+            .is_some_and(|id| id.contains(needle))
+            || self
+                .name
+                .as_deref()
+                .is_some_and(|name| name.contains(needle))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InvitationFactKind {
+    Generic,
+    Contact,
+}
+
 impl OperationId {
     #[must_use]
     pub fn create_home() -> Self {
@@ -491,10 +533,174 @@ pub enum RuntimeEventKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RuntimeFact {
+    InvitationAccepted {
+        invitation_kind: InvitationFactKind,
+        authority_id: Option<String>,
+        operation_state: Option<OperationState>,
+    },
+    InvitationCodeReady {
+        receiver_authority_id: Option<String>,
+        source_operation: OperationId,
+    },
+    PendingHomeInvitationReady,
+    DeviceEnrollmentCodeReady {
+        device_name: Option<String>,
+        code_len: Option<usize>,
+    },
+    ContactLinkReady {
+        authority_id: Option<String>,
+        contact_count: Option<usize>,
+    },
+    HomeCreated {
+        name: String,
+    },
+    HomeEntered {
+        name: String,
+        access_depth: Option<String>,
+    },
+    ChannelJoined {
+        channel: Option<ChannelFactKey>,
+        source: Option<String>,
+    },
+    ChannelMembershipReady {
+        channel: ChannelFactKey,
+        member_count: Option<usize>,
+    },
+    RecipientPeersResolved {
+        channel: ChannelFactKey,
+        member_count: usize,
+    },
+    MessageCommitted {
+        channel: ChannelFactKey,
+        content: String,
+    },
+    MessageDeliveryReady {
+        channel: ChannelFactKey,
+        member_count: usize,
+    },
+    RemoteFactsPulled {
+        contact_count: usize,
+        lan_peer_count: usize,
+    },
+    ChatSignalUpdated {
+        active_channel: String,
+        channel_count: usize,
+        message_count: usize,
+    },
+}
+
+impl RuntimeFact {
+    #[must_use]
+    pub fn kind(&self) -> RuntimeEventKind {
+        match self {
+            Self::InvitationAccepted { .. } => RuntimeEventKind::InvitationAccepted,
+            Self::InvitationCodeReady { .. } => RuntimeEventKind::InvitationCodeReady,
+            Self::PendingHomeInvitationReady => RuntimeEventKind::PendingHomeInvitationReady,
+            Self::DeviceEnrollmentCodeReady { .. } => RuntimeEventKind::DeviceEnrollmentCodeReady,
+            Self::ContactLinkReady { .. } => RuntimeEventKind::ContactLinkReady,
+            Self::HomeCreated { .. } => RuntimeEventKind::HomeCreated,
+            Self::HomeEntered { .. } => RuntimeEventKind::HomeEntered,
+            Self::ChannelJoined { .. } => RuntimeEventKind::ChannelJoined,
+            Self::ChannelMembershipReady { .. } => RuntimeEventKind::ChannelMembershipReady,
+            Self::RecipientPeersResolved { .. } => RuntimeEventKind::RecipientPeersResolved,
+            Self::MessageCommitted { .. } => RuntimeEventKind::MessageCommitted,
+            Self::MessageDeliveryReady { .. } => RuntimeEventKind::MessageDeliveryReady,
+            Self::RemoteFactsPulled { .. } => RuntimeEventKind::RemoteFactsPulled,
+            Self::ChatSignalUpdated { .. } => RuntimeEventKind::ChatSignalUpdated,
+        }
+    }
+
+    #[must_use]
+    pub fn matches_needle(&self, needle: &str) -> bool {
+        match self {
+            Self::InvitationAccepted {
+                authority_id,
+                operation_state,
+                ..
+            } => authority_id
+                .as_deref()
+                .is_some_and(|value| value.contains(needle))
+                || operation_state
+                    .is_some_and(|state| format!("{state:?}").contains(needle)),
+            Self::InvitationCodeReady {
+                receiver_authority_id,
+                source_operation,
+            } => receiver_authority_id
+                .as_deref()
+                .is_some_and(|value| value.contains(needle))
+                || source_operation.0.contains(needle),
+            Self::PendingHomeInvitationReady => needle.contains("pending_home_invitation"),
+            Self::DeviceEnrollmentCodeReady {
+                device_name,
+                code_len,
+            } => device_name
+                .as_deref()
+                .is_some_and(|value| value.contains(needle))
+                || code_len.is_some_and(|value| value.to_string().contains(needle)),
+            Self::ContactLinkReady {
+                authority_id,
+                contact_count,
+            } => authority_id
+                .as_deref()
+                .is_some_and(|value| value.contains(needle))
+                || contact_count.is_some_and(|value| value.to_string().contains(needle)),
+            Self::HomeCreated { name } | Self::HomeEntered { name, .. } => name.contains(needle),
+            Self::ChannelJoined { channel, source } => channel
+                .as_ref()
+                .is_some_and(|channel| channel.matches_needle(needle))
+                || source
+                    .as_deref()
+                    .is_some_and(|value| value.contains(needle)),
+            Self::ChannelMembershipReady {
+                channel,
+                member_count,
+            } => channel.matches_needle(needle)
+                || member_count.is_some_and(|value| value.to_string().contains(needle)),
+            Self::RecipientPeersResolved {
+                channel,
+                member_count,
+            }
+            | Self::MessageDeliveryReady {
+                channel,
+                member_count,
+            } => channel.matches_needle(needle) || member_count.to_string().contains(needle),
+            Self::MessageCommitted { channel, content } => {
+                channel.matches_needle(needle) || content.contains(needle)
+            }
+            Self::RemoteFactsPulled {
+                contact_count,
+                lan_peer_count,
+            } => contact_count.to_string().contains(needle)
+                || lan_peer_count.to_string().contains(needle),
+            Self::ChatSignalUpdated {
+                active_channel,
+                channel_count,
+                message_count,
+            } => active_channel.contains(needle)
+                || channel_count.to_string().contains(needle)
+                || message_count.to_string().contains(needle),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeEventSnapshot {
     pub id: RuntimeEventId,
-    pub kind: RuntimeEventKind,
-    pub detail: String,
+    pub fact: RuntimeFact,
+}
+
+impl RuntimeEventSnapshot {
+    #[must_use]
+    pub fn kind(&self) -> RuntimeEventKind {
+        self.fact.kind()
+    }
+
+    #[must_use]
+    pub fn matches_needle(&self, needle: &str) -> bool {
+        self.fact.matches_needle(needle)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1033,6 +1239,47 @@ impl UiSnapshot {
             toasts: Vec::new(),
             runtime_events: Vec::new(),
         }
+    }
+
+    #[must_use]
+    pub fn message_contains(&self, needle: &str) -> bool {
+        self.messages
+            .iter()
+            .any(|message| message.content.contains(needle))
+    }
+
+    #[must_use]
+    pub fn has_runtime_event(
+        &self,
+        kind: RuntimeEventKind,
+        detail_needle: Option<&str>,
+    ) -> bool {
+        self.runtime_events.iter().any(|event| {
+            event.kind() == kind
+                && detail_needle
+                    .map(|needle| event.matches_needle(needle))
+                    .unwrap_or(true)
+        })
+    }
+
+    #[must_use]
+    pub fn operation_state(&self, operation_id: &OperationId) -> Option<OperationState> {
+        self.operations
+            .iter()
+            .find(|candidate| &candidate.id == operation_id)
+            .map(|operation| operation.state)
+    }
+
+    #[must_use]
+    pub fn operation_state_for_instance(
+        &self,
+        operation_id: &OperationId,
+        instance_id: &OperationInstanceId,
+    ) -> Option<OperationState> {
+        self.operations
+            .iter()
+            .find(|candidate| &candidate.id == operation_id && &candidate.instance_id == instance_id)
+            .map(|operation| operation.state)
     }
 }
 

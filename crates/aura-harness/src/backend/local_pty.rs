@@ -7,12 +7,17 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use aura_app::ui::contract::{ControlId, FieldId, ListId, ModalId, ScreenId, UiSnapshot};
+use aura_app::ui::contract::{
+    ControlId, FieldId, ListId, ModalId, OperationId, ScreenId, UiSnapshot,
+};
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
-use crate::backend::InstanceBackend;
+use crate::backend::{
+    observe_operation, wait_for_modal_visible, wait_for_operation_submission,
+    wait_for_screen_visible, ContactInvitationCode, InstanceBackend, SubmittedAction,
+};
 use crate::config::InstanceConfig;
 use crate::screen_normalization::{authoritative_screen, has_nav_header};
 
@@ -61,6 +66,17 @@ impl LocalPtyBackend {
             pty_cols: pty_cols.unwrap_or(120),
             last_authoritative_screen: Arc::new(Mutex::new(None)),
         }
+    }
+
+    fn submit_chat_command_via_ui(&mut self, command: &str) -> Result<()> {
+        self.send_key(crate::tool_api::ToolKey::Esc, 1)?;
+        self.activate_control(ControlId::NavChat)?;
+        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
+        self.send_key(crate::tool_api::ToolKey::Esc, 1)?;
+        self.send_keys("i")?;
+        thread::sleep(Duration::from_millis(180));
+        self.send_keys(&format!("/{command}\r"))?;
+        self.send_key(crate::tool_api::ToolKey::Esc, 1)
     }
 
     fn default_command(&self) -> (String, Vec<String>) {
@@ -616,6 +632,83 @@ impl InstanceBackend for LocalPtyBackend {
             thread::sleep(Duration::from_millis(60));
         }
         Ok(())
+    }
+
+    fn create_account_via_ui(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
+        self.fill_field(FieldId::AccountName, account_name)?;
+        self.activate_control(ControlId::OnboardingCreateAccountButton)?;
+        Ok(SubmittedAction::without_handle(()))
+    }
+
+    fn create_contact_invitation(&mut self, receiver_authority_id: &str) -> Result<String> {
+        Ok(self
+            .create_contact_invitation_via_ui(receiver_authority_id)?
+            .value
+            .code)
+    }
+
+    fn create_contact_invitation_via_ui(
+        &mut self,
+        receiver_authority_id: &str,
+    ) -> Result<SubmittedAction<ContactInvitationCode>> {
+        let previous_operation = observe_operation(&self.ui_snapshot()?, &OperationId::invitation_create());
+        self.activate_control(ControlId::ContactsCreateInvitationButton)?;
+        wait_for_modal_visible(self, ModalId::CreateInvitation, Duration::from_secs(5))?;
+        self.fill_field(FieldId::InvitationReceiver, receiver_authority_id)?;
+        self.activate_control(ControlId::ModalConfirmButton)?;
+        let handle = wait_for_operation_submission(
+            self,
+            OperationId::invitation_create(),
+            previous_operation,
+            Duration::from_secs(5),
+        )?;
+        Ok(SubmittedAction::with_ui_operation(
+            ContactInvitationCode {
+                code: self.read_clipboard()?,
+            },
+            handle,
+        ))
+    }
+
+    fn accept_contact_invitation_via_ui(&mut self, code: &str) -> Result<SubmittedAction<()>> {
+        let previous_operation = observe_operation(&self.ui_snapshot()?, &OperationId::invitation_accept());
+        self.activate_control(ControlId::ContactsAcceptInvitationButton)?;
+        wait_for_modal_visible(self, ModalId::AcceptInvitation, Duration::from_secs(5))?;
+        self.fill_field(FieldId::InvitationCode, code)?;
+        self.activate_control(ControlId::ModalConfirmButton)?;
+        let handle = wait_for_operation_submission(
+            self,
+            OperationId::invitation_accept(),
+            previous_operation,
+            Duration::from_secs(5),
+        )?;
+        Ok(SubmittedAction::with_ui_operation((), handle))
+    }
+
+    fn invite_actor_to_channel_via_ui(
+        &mut self,
+        authority_id: &str,
+    ) -> Result<SubmittedAction<()>> {
+        self.activate_control(ControlId::NavContacts)?;
+        wait_for_screen_visible(self, ScreenId::Contacts, Duration::from_secs(5))?;
+        self.activate_list_item(ListId::Contacts, authority_id)?;
+        self.activate_control(ControlId::ContactsInviteToChannelButton)?;
+        Ok(SubmittedAction::without_handle(()))
+    }
+
+    fn accept_pending_channel_invitation_via_ui(&mut self) -> Result<SubmittedAction<()>> {
+        self.submit_chat_command_via_ui("homeaccept")?;
+        Ok(SubmittedAction::without_handle(()))
+    }
+
+    fn join_channel_via_ui(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
+        self.submit_chat_command_via_ui(&format!("join {channel_name}"))?;
+        Ok(SubmittedAction::without_handle(()))
+    }
+
+    fn send_chat_message_via_ui(&mut self, message: &str) -> Result<SubmittedAction<()>> {
+        self.send_keys(&format!("\u{1b}2i{message}\r"))?;
+        Ok(SubmittedAction::without_handle(()))
     }
 
     fn send_keys(&mut self, keys: &str) -> Result<()> {

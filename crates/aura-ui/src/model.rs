@@ -12,9 +12,10 @@ use async_lock::RwLock as AsyncRwLock;
 use aura_app::views::chat::{NOTE_TO_SELF_CHANNEL_NAME, NOTE_TO_SELF_CHANNEL_TOPIC};
 use aura_app::{
     ui::contract::{
+        ChannelFactKey, InvitationFactKind,
         ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot, ListSnapshot,
         MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
-        OperationState, RuntimeEventId, RuntimeEventKind, RuntimeEventSnapshot, SelectionSnapshot,
+        OperationState, RuntimeEventId, RuntimeEventSnapshot, RuntimeFact, SelectionSnapshot,
         ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
     },
     AppCore,
@@ -393,16 +394,18 @@ pub enum SettingsSection {
     Devices,
     Authority,
     Appearance,
+    Info,
 }
 
 impl SettingsSection {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Profile,
         Self::GuardianThreshold,
         Self::RequestRecovery,
         Self::Devices,
         Self::Authority,
         Self::Appearance,
+        Self::Info,
     ];
 
     #[must_use]
@@ -414,18 +417,20 @@ impl SettingsSection {
             Self::Devices => "Devices",
             Self::Authority => "Authority",
             Self::Appearance => "Appearance",
+            Self::Info => "Info",
         }
     }
 
     #[must_use]
     pub const fn subtitle(self) -> &'static str {
         match self {
-            Self::Profile => "Configure nickname",
+            Self::Profile => "Configure profile settings",
             Self::GuardianThreshold => "Configure guardian policy",
             Self::RequestRecovery => "Configure recovery operations",
             Self::Devices => "Configure devices",
             Self::Authority => "Authority scope",
             Self::Appearance => "Theme and display",
+            Self::Info => "Application and environment details",
         }
     }
 
@@ -438,6 +443,7 @@ impl SettingsSection {
             Self::Devices => "devices",
             Self::Authority => "authority",
             Self::Appearance => "appearance",
+            Self::Info => "info",
         }
     }
 
@@ -450,6 +456,7 @@ impl SettingsSection {
             Self::Devices => 3,
             Self::Authority => 4,
             Self::Appearance => 5,
+            Self::Info => 6,
         }
     }
 
@@ -461,7 +468,8 @@ impl SettingsSection {
             2 => Self::RequestRecovery,
             3 => Self::Devices,
             4 => Self::Authority,
-            _ => Self::Appearance,
+            5 => Self::Appearance,
+            _ => Self::Info,
         }
     }
 }
@@ -645,12 +653,11 @@ impl UiModel {
             .retain(|operation| &operation.id != operation_id);
     }
 
-    fn push_runtime_event(&mut self, kind: RuntimeEventKind, detail: impl Into<String>) {
+    fn push_runtime_fact(&mut self, fact: RuntimeFact) {
         self.runtime_event_key = self.runtime_event_key.saturating_add(1);
         self.runtime_events.push(RuntimeEventSnapshot {
             id: RuntimeEventId(format!("runtime-event-{}", self.runtime_event_key)),
-            kind,
-            detail: detail.into(),
+            fact,
         });
         if self.runtime_events.len() > 32 {
             let drain = self.runtime_events.len().saturating_sub(32);
@@ -1671,6 +1678,14 @@ impl UiController {
         self.request_rerender();
     }
 
+    pub fn exit_input_mode(&self) {
+        let mut model = write_model(&self.model);
+        model.input_mode = false;
+        model.input_buffer.clear();
+        drop(model);
+        self.request_rerender();
+    }
+
     pub fn set_input_buffer(&self, value: impl Into<String>) {
         write_model(&self.model).input_buffer = value.into();
         self.request_rerender();
@@ -1719,8 +1734,8 @@ impl UiController {
         self.try_update_model(|model| model.replace_contacts(contacts));
     }
 
-    pub fn push_runtime_event(&self, kind: RuntimeEventKind, detail: impl Into<String>) {
-        self.try_update_model(|model| model.push_runtime_event(kind, detail.into()));
+    pub fn push_runtime_fact(&self, fact: RuntimeFact) {
+        self.try_update_model(|model| model.push_runtime_fact(fact));
     }
 
     pub fn ensure_runtime_contact(
@@ -1779,7 +1794,9 @@ impl UiController {
         );
         model.access_depth = AccessDepth::Full;
         model.neighborhood_mode = NeighborhoodMode::Map;
-        model.push_runtime_event(RuntimeEventKind::HomeCreated, format!("name={name}"));
+        model.push_runtime_fact(RuntimeFact::HomeCreated {
+            name: name.to_string(),
+        });
         set_toast(&mut model, '✓', format!("Home '{name}' created"));
         dismiss_modal(&mut model);
         drop(model);
@@ -1831,10 +1848,11 @@ impl UiController {
         let mut model = write_model(&self.model);
         dismiss_modal(&mut model);
         model.set_operation_state(OperationId::invitation_accept(), state);
-        model.push_runtime_event(
-            RuntimeEventKind::InvitationAccepted,
-            format!("state={state:?}"),
-        );
+        model.push_runtime_fact(RuntimeFact::InvitationAccepted {
+            invitation_kind: InvitationFactKind::Generic,
+            authority_id: None,
+            operation_state: Some(state),
+        });
         let snapshot = model.semantic_snapshot();
         let snapshot_modal = snapshot
             .open_modal
@@ -1865,14 +1883,15 @@ impl UiController {
     ) {
         let mut model = write_model(&self.model);
         model.ensure_runtime_contact(authority_id, display_name, false);
-        model.push_runtime_event(
-            RuntimeEventKind::InvitationAccepted,
-            format!("kind=contact sender_id={authority_id}"),
-        );
-        model.push_runtime_event(
-            RuntimeEventKind::ContactLinkReady,
-            format!("authority_id={authority_id}"),
-        );
+        model.push_runtime_fact(RuntimeFact::InvitationAccepted {
+            invitation_kind: InvitationFactKind::Contact,
+            authority_id: Some(authority_id.to_string()),
+            operation_state: Some(OperationState::Succeeded),
+        });
+        model.push_runtime_fact(RuntimeFact::ContactLinkReady {
+            authority_id: Some(authority_id.to_string()),
+            contact_count: None,
+        });
         model.set_selected_contact_authority_id(authority_id);
         dismiss_modal(&mut model);
         model.set_operation_state(OperationId::invitation_accept(), OperationState::Succeeded);
@@ -1917,10 +1936,10 @@ impl UiController {
             code_copied: false,
             ..AddDeviceModalState::default()
         }));
-        model.push_runtime_event(
-            RuntimeEventKind::DeviceEnrollmentCodeReady,
-            format!("device_name={name} code_len={}", enrollment_code.len()),
-        );
+        model.push_runtime_fact(RuntimeFact::DeviceEnrollmentCodeReady {
+            device_name: Some(name.to_string()),
+            code_len: Some(enrollment_code.len()),
+        });
         drop(model);
         self.request_rerender();
     }
@@ -2011,10 +2030,10 @@ impl UiController {
         model.access_depth = depth;
         model.neighborhood_mode = NeighborhoodMode::Detail;
         model.selected_neighborhood_member_key = None;
-        model.push_runtime_event(
-            RuntimeEventKind::HomeEntered,
-            format!("name={name} depth={}", depth.label()),
-        );
+        model.push_runtime_fact(RuntimeFact::HomeEntered {
+            name: name.to_string(),
+            access_depth: Some(depth.label().to_string()),
+        });
         set_toast(
             &mut model,
             '✓',
@@ -2177,7 +2196,9 @@ fn write_model(model: &RwLock<UiModel>) -> RwLockWriteGuard<'_, UiModel> {
 #[cfg(test)]
 mod tests {
     use super::{NeighborhoodMode, UiModel, UiScreen};
-    use aura_app::ui::contract::{OperationId, OperationState, RuntimeEventKind};
+    use aura_app::ui::contract::{
+        InvitationFactKind, OperationId, OperationState, RuntimeEventKind, RuntimeFact,
+    };
 
     #[test]
     fn set_screen_clears_input_mode_and_buffer() {
@@ -2245,7 +2266,11 @@ mod tests {
     #[test]
     fn semantic_snapshot_includes_runtime_events() {
         let mut model = UiModel::new("authority-local".to_string());
-        model.push_runtime_event(RuntimeEventKind::InvitationAccepted, "kind=contact");
+        model.push_runtime_fact(RuntimeFact::InvitationAccepted {
+            invitation_kind: InvitationFactKind::Contact,
+            authority_id: None,
+            operation_state: None,
+        });
 
         let snapshot = model.semantic_snapshot();
         let event = snapshot
@@ -2253,7 +2278,6 @@ mod tests {
             .last()
             .expect("runtime event should be present");
 
-        assert_eq!(event.kind, RuntimeEventKind::InvitationAccepted);
-        assert_eq!(event.detail, "kind=contact");
+        assert_eq!(event.kind(), RuntimeEventKind::InvitationAccepted);
     }
 }

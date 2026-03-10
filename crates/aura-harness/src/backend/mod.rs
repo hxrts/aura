@@ -3,7 +3,11 @@ pub mod playwright_browser;
 pub mod ssh_tunnel;
 
 use anyhow::{bail, Result};
-use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
+use aura_app::ui::contract::{
+    ControlId, FieldId, ListId, ModalId, OperationId, OperationInstanceId, OperationState,
+    ScreenId, UiSnapshot,
+};
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use crate::config::{InstanceConfig, InstanceMode};
@@ -13,6 +17,63 @@ use crate::tool_api::ToolKey;
 pub struct UiSnapshotEvent {
     pub snapshot: UiSnapshot,
     pub version: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContactInvitationCode {
+    pub code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiOperationHandle {
+    pub id: OperationId,
+    pub instance_id: OperationInstanceId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SemanticSubmissionHandle {
+    pub ui_operation: Option<UiOperationHandle>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubmissionState {
+    Accepted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubmittedAction<T> {
+    pub value: T,
+    pub submission: SubmissionState,
+    pub handle: SemanticSubmissionHandle,
+}
+
+impl<T> SubmittedAction<T> {
+    #[must_use]
+    pub fn without_handle(value: T) -> Self {
+        Self {
+            value,
+            submission: SubmissionState::Accepted,
+            handle: SemanticSubmissionHandle::default(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_ui_operation(value: T, handle: UiOperationHandle) -> Self {
+        Self {
+            value,
+            submission: SubmissionState::Accepted,
+            handle: SemanticSubmissionHandle {
+                ui_operation: Some(handle),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObservedOperation {
+    pub instance_id: OperationInstanceId,
+    pub state: OperationState,
 }
 
 pub trait InstanceBackend {
@@ -107,6 +168,57 @@ pub trait InstanceBackend {
             self.backend_kind()
         )
     }
+    fn create_account_via_ui(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
+        let _ = account_name;
+        bail!(
+            "semantic create_account is not supported by backend {}",
+            self.backend_kind()
+        )
+    }
+    fn create_contact_invitation_via_ui(
+        &mut self,
+        receiver_authority_id: &str,
+    ) -> Result<SubmittedAction<ContactInvitationCode>> {
+        let code = self.create_contact_invitation(receiver_authority_id)?;
+        Ok(SubmittedAction::without_handle(ContactInvitationCode { code }))
+    }
+    fn accept_contact_invitation_via_ui(&mut self, code: &str) -> Result<SubmittedAction<()>> {
+        let _ = code;
+        bail!(
+            "semantic accept_contact_invitation is not supported by backend {}",
+            self.backend_kind()
+        )
+    }
+    fn invite_actor_to_channel_via_ui(
+        &mut self,
+        authority_id: &str,
+    ) -> Result<SubmittedAction<()>> {
+        let _ = authority_id;
+        bail!(
+            "semantic invite_actor_to_channel is not supported by backend {}",
+            self.backend_kind()
+        )
+    }
+    fn accept_pending_channel_invitation_via_ui(&mut self) -> Result<SubmittedAction<()>> {
+        bail!(
+            "semantic accept_pending_channel_invitation is not supported by backend {}",
+            self.backend_kind()
+        )
+    }
+    fn join_channel_via_ui(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
+        let _ = channel_name;
+        bail!(
+            "semantic join_channel is not supported by backend {}",
+            self.backend_kind()
+        )
+    }
+    fn send_chat_message_via_ui(&mut self, message: &str) -> Result<SubmittedAction<()>> {
+        let _ = message;
+        bail!(
+            "semantic send_chat_message is not supported by backend {}",
+            self.backend_kind()
+        )
+    }
     fn tail_log(&self, lines: usize) -> Result<Vec<String>>;
     fn inject_message(&mut self, _message: &str) -> Result<()> {
         Ok(())
@@ -131,6 +243,82 @@ pub trait InstanceBackend {
         self.start()
     }
     fn is_healthy(&self) -> bool;
+}
+
+pub(crate) fn wait_for_modal_visible(
+    backend: &dyn InstanceBackend,
+    modal_id: ModalId,
+    timeout: Duration,
+) -> Result<()> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if backend.ui_snapshot()?.open_modal == Some(modal_id) {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            bail!("timed out waiting for modal {modal_id:?}");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+pub(crate) fn wait_for_screen_visible(
+    backend: &dyn InstanceBackend,
+    screen_id: ScreenId,
+    timeout: Duration,
+) -> Result<()> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if backend.ui_snapshot()?.screen == screen_id {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            bail!("timed out waiting for screen {screen_id:?}");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[must_use]
+pub(crate) fn observe_operation(
+    snapshot: &UiSnapshot,
+    operation_id: &OperationId,
+) -> Option<ObservedOperation> {
+    snapshot
+        .operations
+        .iter()
+        .find(|operation| &operation.id == operation_id)
+        .map(|operation| ObservedOperation {
+            instance_id: operation.instance_id.clone(),
+            state: operation.state,
+        })
+}
+
+pub(crate) fn wait_for_operation_submission(
+    backend: &dyn InstanceBackend,
+    operation_id: OperationId,
+    previous: Option<ObservedOperation>,
+    timeout: Duration,
+) -> Result<UiOperationHandle> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let snapshot = backend.ui_snapshot()?;
+        if let Some(current) = observe_operation(&snapshot, &operation_id) {
+            let changed = previous.as_ref().map_or(true, |previous| {
+                current.instance_id != previous.instance_id || current.state != previous.state
+            });
+            if changed {
+                return Ok(UiOperationHandle {
+                    id: operation_id,
+                    instance_id: current.instance_id,
+                });
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            bail!("timed out waiting for operation submission {:?}", operation_id);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 fn tool_key_sequence(key: ToolKey) -> &'static str {

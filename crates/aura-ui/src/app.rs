@@ -17,10 +17,10 @@ use crate::model::{
 };
 use aura_app::signal_defs::{DiscoveredPeersState, SettingsState};
 use aura_app::ui::contract::{
-    list_item_dom_id, ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot,
-    ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
-    OperationState, RuntimeEventKind, ScreenId as ContractScreenId, SelectionSnapshot, UiReadiness,
-    UiSnapshot,
+    list_item_dom_id, ChannelFactKey, ConfirmationState, ControlId, FieldId, InvitationFactKind,
+    ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId, OperationId,
+    OperationInstanceId, OperationSnapshot, OperationState, RuntimeFact,
+    ScreenId as ContractScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::signals::{
     DiscoveredPeerMethod, NetworkStatus, CHAT_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL,
@@ -526,28 +526,30 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
             .map(|channel| (channel.name.clone(), channel.topic.clone()))
             .collect(),
     );
-    controller.push_runtime_event(
-        RuntimeEventKind::ChatSignalUpdated,
-        format!(
-            "active_channel={} channels={} messages={}",
-            runtime.active_channel,
-            runtime.channels.len(),
-            runtime.messages.len()
-        ),
-    );
+    controller.push_runtime_fact(RuntimeFact::ChatSignalUpdated {
+        active_channel: runtime.active_channel.clone(),
+        channel_count: runtime.channels.len(),
+        message_count: runtime.messages.len(),
+    });
     if let Some(channel) = runtime
         .channels
         .iter()
         .find(|channel| channel.name.eq_ignore_ascii_case(&runtime.active_channel))
     {
-        controller.push_runtime_event(
-            RuntimeEventKind::ChannelMembershipReady,
-            format!("channel={} members={}", channel.name, channel.member_count),
-        );
+        controller.push_runtime_fact(RuntimeFact::ChannelMembershipReady {
+            channel: ChannelFactKey::named(channel.name.clone()),
+            member_count: Some(channel.member_count),
+        });
         if channel.is_dm || channel.member_count > 1 {
-            let detail = format!("channel={} members={}", channel.name, channel.member_count);
-            controller.push_runtime_event(RuntimeEventKind::RecipientPeersResolved, detail.clone());
-            controller.push_runtime_event(RuntimeEventKind::MessageDeliveryReady, detail);
+            let channel_key = ChannelFactKey::named(channel.name.clone());
+            controller.push_runtime_fact(RuntimeFact::RecipientPeersResolved {
+                channel: channel_key.clone(),
+                member_count: channel.member_count,
+            });
+            controller.push_runtime_fact(RuntimeFact::MessageDeliveryReady {
+                channel: channel_key,
+                member_count: channel.member_count,
+            });
         }
     }
     runtime
@@ -661,19 +663,15 @@ async fn load_contacts_runtime_view(controller: Arc<UiController>) -> ContactsRu
             })
             .collect(),
     );
-    controller.push_runtime_event(
-        RuntimeEventKind::RemoteFactsPulled,
-        format!(
-            "contacts={} lan_peers={}",
-            runtime.contacts.len(),
-            runtime.lan_peers.len()
-        ),
-    );
+    controller.push_runtime_fact(RuntimeFact::RemoteFactsPulled {
+        contact_count: runtime.contacts.len(),
+        lan_peer_count: runtime.lan_peers.len(),
+    });
     if !runtime.contacts.is_empty() {
-        controller.push_runtime_event(
-            RuntimeEventKind::ContactLinkReady,
-            format!("contacts={}", runtime.contacts.len()),
-        );
+        controller.push_runtime_fact(RuntimeFact::ContactLinkReady {
+            authority_id: None,
+            contact_count: Some(runtime.contacts.len()),
+        });
     }
     runtime
 }
@@ -962,10 +960,7 @@ async fn load_notifications_runtime_view(
         matches!(item.action, NotificationRuntimeAction::ReceivedInvitation)
             && (item.kind_label == "Home Invite" || item.kind_label == "Chat Invite")
     }) {
-        controller.push_runtime_event(
-            RuntimeEventKind::PendingHomeInvitationReady,
-            "pending_home_invitation",
-        );
+        controller.push_runtime_fact(RuntimeFact::PendingHomeInvitationReady);
     }
     controller.sync_runtime_notifications(
         runtime
@@ -1326,9 +1321,11 @@ fn submit_runtime_modal_action(
                                 controller_for_import
                                     .push_log("accept_invitation runtime_accept ok");
                                 harness_log("accept_invitation runtime_accept ok");
-                                controller_for_import.push_runtime_event(
-                                    RuntimeEventKind::RemoteFactsPulled,
-                                    format!("invitation_kind={invitation_kind}"),
+                                controller_for_import.push_runtime_fact(
+                                    RuntimeFact::RemoteFactsPulled {
+                                        contact_count: 0,
+                                        lan_peer_count: 0,
+                                    },
                                 );
                                 if matches!(
                                     invitation.invitation_type,
@@ -1388,9 +1385,13 @@ fn submit_runtime_modal_action(
                                             harness_log("accept_invitation refresh_contacts done");
                                         }
                                         InvitationBridgeType::Channel { .. } => {
-                                            controller_for_import.push_runtime_event(
-                                                RuntimeEventKind::ChannelJoined,
-                                                format!("source=accepted_invitation"),
+                                            controller_for_import.push_runtime_fact(
+                                                RuntimeFact::ChannelJoined {
+                                                    channel: None,
+                                                    source: Some(
+                                                        "accepted_invitation".to_string(),
+                                                    ),
+                                                },
                                             );
                                         }
                                         InvitationBridgeType::DeviceEnrollment { .. }
@@ -1567,10 +1568,10 @@ fn submit_runtime_modal_action(
                                 tracing::info!("create_invitation export_invitation ok");
                                 controller.write_clipboard(&code);
                                 tracing::info!("create_invitation write_clipboard ok");
-                                controller.push_runtime_event(
-                                    RuntimeEventKind::InvitationCodeReady,
-                                    format!("receiver={receiver_id}"),
-                                );
+                                controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
+                                    receiver_authority_id: Some(receiver_id.to_string()),
+                                    source_operation: OperationId::invitation_create(),
+                                });
                                 controller.complete_runtime_modal_operation_success(
                                     OperationId::invitation_create(),
                                     "Invitation code copied to clipboard",
@@ -2201,10 +2202,10 @@ fn submit_runtime_chat_input(
                         .await
                         .map(|_| {
                             controller_for_task.select_channel_by_name(&channel_for_selection);
-                            controller_for_task.push_runtime_event(
-                                RuntimeEventKind::ChannelJoined,
-                                format!("channel={channel_for_selection}"),
-                            );
+                            controller_for_task.push_runtime_fact(RuntimeFact::ChannelJoined {
+                                channel: Some(ChannelFactKey::named(channel_for_selection.clone())),
+                                source: Some("join_command".to_string()),
+                            });
                             controller_for_task.push_log(&format!(
                                 "chat_join: success channel={channel_for_selection} selected={channel_for_selection}"
                             ));
@@ -2432,10 +2433,10 @@ fn submit_runtime_chat_input(
             )
             .await
             .map(|_| {
-                controller_for_task.push_runtime_event(
-                    RuntimeEventKind::MessageCommitted,
-                    format!("channel={channel_name} message={trimmed}"),
-                );
+                controller_for_task.push_runtime_fact(RuntimeFact::MessageCommitted {
+                    channel: ChannelFactKey::named(channel_name.clone()),
+                    content: trimmed.to_string(),
+                });
                 None
             })
         };
@@ -2527,11 +2528,26 @@ pub fn AuraUiRoot(controller: Arc<UiController>) -> Element {
         ThemeProvider {
             theme: themes::neutral(),
             color_scheme: ColorScheme::Dark,
+            style {
+                r#"
+                [data-slot="toaster"] {{
+                    z-index: 2147483647 !important;
+                    isolation: isolate !important;
+                }}
+
+                [data-slot="toast"] {{
+                    z-index: 2147483647 !important;
+                    min-height: 5rem !important;
+                    padding-top: 1.25rem !important;
+                    padding-bottom: 1.25rem !important;
+                }}
+                "#
+            }
             div {
                 id: ControlId::ToastRegion
                     .web_dom_id()
                     .expect("ToastRegion must define a web DOM id"),
-                style: "--normal-bg: var(--popover); --normal-text: var(--popover-foreground); --normal-border: var(--border);",
+                style: "--normal-bg: var(--popover); --normal-text: var(--popover-foreground); --normal-border: var(--border); position: relative; z-index: 2147483647;",
                 ToastProvider {
                     default_duration: Duration::from_secs(5),
                     max_toasts: 8,
@@ -2548,6 +2564,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
     let mut render_tick = use_signal(|| 0_u64);
     let render_tick_value = render_tick();
     let mut last_toast_key = use_signal(|| None::<String>);
+    let mut last_chat_selection_key = use_signal(|| None::<String>);
     let mut runtime_bridge_started = use_signal(|| false);
     let neighborhood_runtime = use_signal(NeighborhoodRuntimeView::default);
     let chat_runtime = use_signal(ChatRuntimeView::default);
@@ -2602,6 +2619,27 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         }
 
         last_toast_key.set(next_key);
+    });
+
+    let controller_for_chat_selection = controller.clone();
+    let mut chat_for_selection_change = chat_runtime;
+    use_effect(move || {
+        let Some(current_model) = controller_for_chat_selection.ui_model() else {
+            return;
+        };
+        let selected_channel_key = current_model.selected_channel_name().map(str::to_string);
+        if last_chat_selection_key() == selected_channel_key {
+            return;
+        }
+
+        last_chat_selection_key.set(selected_channel_key);
+
+        let controller_for_reload = controller_for_chat_selection.clone();
+        spawn(async move {
+            chat_for_selection_change
+                .set(load_chat_runtime_view(controller_for_reload.clone()).await);
+            controller_for_reload.request_rerender();
+        });
     });
 
     use_effect(move || {
@@ -2886,6 +2924,10 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
     } else {
         "0".to_string()
     };
+    let should_exit_insert_mode_from_shell =
+        matches!(model.screen, UiScreen::Chat) && model.input_mode;
+    let shell_header_exit_input_controller = controller.clone();
+    let shell_footer_exit_input_controller = controller.clone();
     let keydown_runtime_snapshot = runtime_snapshot.clone();
     let keydown_chat_runtime = chat_runtime_snapshot.clone();
     let keydown_contacts_runtime = contacts_runtime_snapshot.clone();
@@ -3004,6 +3046,12 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                     .web_dom_id()
                     .expect("NavRoot must define a web DOM id"),
                 class: "bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80",
+                onclick: move |_| {
+                    if should_exit_insert_mode_from_shell {
+                        shell_header_exit_input_controller.exit_input_mode();
+                        render_tick.set(render_tick() + 1);
+                    }
+                },
                 div {
                     class: "relative flex items-end px-4 pt-6 pb-0 sm:px-6",
                     div {
@@ -3411,11 +3459,19 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                 }
             }
 
-            UiFooter {
-                left: String::new(),
-                network_status: footer_network_status,
-                peer_count: footer_peer_count,
-                online_count: footer_online_count,
+            div {
+                onclick: move |_| {
+                    if should_exit_insert_mode_from_shell {
+                        shell_footer_exit_input_controller.exit_input_mode();
+                        render_tick.set(render_tick() + 1);
+                    }
+                },
+                UiFooter {
+                    left: String::new(),
+                    network_status: footer_network_status,
+                    peer_count: footer_peer_count,
+                    online_count: footer_online_count,
+                }
             }
         }
     }
@@ -4042,7 +4098,6 @@ fn ChatScreen(
         .map(|channel| channel.topic.clone())
         .unwrap_or_else(|| model.selected_channel_topic().to_string());
     let is_input_mode = model.input_mode;
-    let mode = if is_input_mode { "insert" } else { "normal" };
     let composer_text = model.input_buffer.clone();
     let new_group_controller = controller.clone();
     let composer_container_focus_controller = controller.clone();
@@ -4050,6 +4105,7 @@ fn ChatScreen(
     let composer_input_controller = controller.clone();
     let composer_keydown_controller = controller.clone();
     let send_message_controller = controller.clone();
+    let exit_insert_mode_controller = controller.clone();
     let composer_value = composer_text.clone();
     let composer_active_channel = active_channel.clone();
     let composer_submit_text = composer_text.clone();
@@ -4074,16 +4130,22 @@ fn ChatScreen(
     rsx! {
         div {
             class: "grid w-full gap-3 lg:grid-cols-12 lg:h-full lg:min-h-0 lg:[grid-template-rows:minmax(0,1fr)]",
+            onclick: move |_| {
+                if is_input_mode {
+                    exit_insert_mode_controller.exit_input_mode();
+                    render_tick.set(render_tick() + 1);
+                }
+            },
             UiCard {
                 title: "Channels".to_string(),
                 subtitle: Some("E2EE and forward secure".to_string()),
                 extra_class: Some("lg:col-span-4".to_string()),
                 UiCardBody {
-                    extra_class: Some("gap-1".to_string()),
+                    extra_class: Some("gap-2".to_string()),
                     ScrollArea {
                         class: Some("flex-1 lg:min-h-0 pr-1".to_string()),
                         ScrollAreaViewport {
-                            class: Some("flex flex-col gap-1".to_string()),
+                            class: Some("flex flex-col gap-2".to_string()),
                             for channel in &runtime_channels {
                                 UiListButton {
                                     id: Some(list_item_dom_id(ListId::Channels, &channel.id)),
@@ -4123,114 +4185,114 @@ fn ChatScreen(
                 }
             }
 
-            UiCard {
-                title: active_channel.clone(),
-                subtitle: Some(if topic.is_empty() { "No topic set".to_string() } else { topic.clone() }),
-                extra_class: Some("lg:col-span-8".to_string()),
-                UiCardBody {
+            div {
+                class: "lg:col-span-8 h-full min-h-0",
+                onclick: move |event| event.stop_propagation(),
+                UiCard {
+                    title: active_channel.clone(),
+                    subtitle: Some(if topic.is_empty() { "No topic set".to_string() } else { topic.clone() }),
                     extra_class: None,
-                    div {
-                        class: "flex-1 lg:min-h-0 overflow-y-auto pr-1",
+                    UiCardBody {
+                        extra_class: None,
                         div {
-                            class: "flex min-h-full flex-col justify-end gap-3",
-                            if runtime.messages.is_empty() {
-                                Empty {
-                                    class: Some("h-full flex-1 border-0 bg-background/40".to_string()),
-                                    EmptyHeader {
-                                        EmptyTitle { "No messages yet" }
-                                        EmptyDescription { "Send one from input mode." }
+                            class: "flex-1 lg:min-h-0 overflow-y-auto pr-1",
+                            div {
+                                class: "flex min-h-full flex-col justify-end gap-3",
+                                if runtime.messages.is_empty() {
+                                    Empty {
+                                        class: Some("h-full flex-1 border-0 bg-background/40".to_string()),
+                                        EmptyHeader {
+                                            EmptyTitle { "No messages yet" }
+                                            EmptyDescription { "Send one from input mode." }
+                                        }
                                     }
-                                }
-                            } else {
-                                for message in &runtime.messages {
-                                    {render_chat_message_bubble(message.clone())}
+                                } else {
+                                    for message in &runtime.messages {
+                                        {render_chat_message_bubble(message.clone())}
+                                    }
                                 }
                             }
                         }
-                    }
-                    UiCardFooter {
-                        extra_class: None,
-                        div {
-                            class: "grid h-full w-full grid-cols-[minmax(0,1fr)_auto] items-stretch gap-3",
+                        UiCardFooter {
+                            extra_class: None,
                             div {
-                                class: "flex h-full min-w-0 items-center rounded-sm bg-background/80",
-                                onclick: move |_| {
-                                    if !is_input_mode {
-                                        composer_container_focus_controller.send_action_keys("i");
-                                        render_tick.set(render_tick() + 1);
-                                    }
-                                },
-                                textarea {
-                                    id: FieldId::ChatInput
-                                        .web_dom_id()
-                                        .expect("FieldId::ChatInput must define a web DOM id"),
-                                    class: "h-full w-full resize-none overflow-hidden border-0 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground",
-                                    value: "{composer_value}",
-                                    readonly: !is_input_mode,
-                                    placeholder: if is_input_mode {
-                                        "Type a message and press Enter to send"
-                                    } else {
-                                        "Press i to start typing"
-                                    },
-                                    onfocus: move |_| {
-                                        if !is_input_mode {
-                                            composer_field_focus_controller.send_action_keys("i");
-                                            render_tick.set(render_tick() + 1);
-                                        }
-                                    },
-                                    oninput: move |event| {
-                                        composer_input_controller.set_input_buffer(event.value());
-                                    },
-                                    onkeydown: move |event| {
-                                        event.stop_propagation();
-                                        if matches!(event.data().key(), Key::Enter)
-                                            && !event.data().modifiers().contains(Modifiers::SHIFT)
-                                        {
-                                            event.prevent_default();
-                                            let _ = submit_runtime_chat_input(
-                                                composer_keydown_controller.clone(),
-                                                composer_active_channel.clone(),
-                                                composer_submit_text.clone(),
-                                                schedule_update(),
-                                            );
-                                            render_tick.set(render_tick() + 1);
-                                            return;
-                                        }
-                                        if matches!(event.data().key(), Key::Escape) {
-                                            event.prevent_default();
-                                            composer_keydown_controller.send_key_named("esc", 1);
-                                            render_tick.set(render_tick() + 1);
-                                        }
-                                    },
-                                }
-                            }
-                            div {
-                                class: "flex min-w-[7rem] flex-col items-end justify-center gap-1",
-                                p {
-                                    class: "m-0 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground",
-                                    "Mode: {mode}"
-                                }
-                                UiButton {
-                                    id: Some(
-                                        ControlId::ChatSendMessageButton
-                                            .web_dom_id()
-                                            .expect("ControlId::ChatSendMessageButton must define a web DOM id")
-                                            .to_string()
-                                    ),
-                                    label: "Send".to_string(),
-                                    variant: ButtonVariant::Primary,
+                                class: "grid h-full w-full grid-cols-[minmax(0,1fr)_auto] items-stretch gap-3",
+                                div {
+                                    class: "flex h-full min-w-0 items-center rounded-sm bg-background/80",
                                     onclick: move |_| {
-                                        if is_input_mode {
-                                            let _ = submit_runtime_chat_input(
-                                                send_message_controller.clone(),
-                                                active_channel.clone(),
-                                                composer_text.clone(),
-                                                schedule_update(),
-                                            );
-                                        } else {
-                                            send_message_controller.send_action_keys("i");
+                                        if !is_input_mode {
+                                            composer_container_focus_controller.send_action_keys("i");
+                                            render_tick.set(render_tick() + 1);
                                         }
-                                        render_tick.set(render_tick() + 1);
+                                    },
+                                    textarea {
+                                        id: FieldId::ChatInput
+                                            .web_dom_id()
+                                            .expect("FieldId::ChatInput must define a web DOM id"),
+                                        class: "h-full w-full resize-none overflow-hidden border-0 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground",
+                                        value: "{composer_value}",
+                                        readonly: !is_input_mode,
+                                        placeholder: if is_input_mode {
+                                            "Type a message and press Enter to send"
+                                        } else {
+                                            "Click here or press i to start typing"
+                                        },
+                                        onfocus: move |_| {
+                                            if !is_input_mode {
+                                                composer_field_focus_controller.send_action_keys("i");
+                                                render_tick.set(render_tick() + 1);
+                                            }
+                                        },
+                                        oninput: move |event| {
+                                            composer_input_controller.set_input_buffer(event.value());
+                                        },
+                                        onkeydown: move |event| {
+                                            event.stop_propagation();
+                                            if matches!(event.data().key(), Key::Enter)
+                                                && !event.data().modifiers().contains(Modifiers::SHIFT)
+                                            {
+                                                event.prevent_default();
+                                                let _ = submit_runtime_chat_input(
+                                                    composer_keydown_controller.clone(),
+                                                    composer_active_channel.clone(),
+                                                    composer_submit_text.clone(),
+                                                    schedule_update(),
+                                                );
+                                                render_tick.set(render_tick() + 1);
+                                                return;
+                                            }
+                                            if matches!(event.data().key(), Key::Escape) {
+                                                event.prevent_default();
+                                                composer_keydown_controller.send_key_named("esc", 1);
+                                                render_tick.set(render_tick() + 1);
+                                            }
+                                        },
+                                    }
+                                }
+                                div {
+                                    class: "flex h-full min-w-[7rem] flex-col items-end justify-end gap-1",
+                                    UiButton {
+                                        id: Some(
+                                            ControlId::ChatSendMessageButton
+                                                .web_dom_id()
+                                                .expect("ControlId::ChatSendMessageButton must define a web DOM id")
+                                                .to_string()
+                                        ),
+                                        label: "Send".to_string(),
+                                        variant: if is_input_mode { ButtonVariant::Primary } else { ButtonVariant::Secondary },
+                                        onclick: move |_| {
+                                            if is_input_mode {
+                                                let _ = submit_runtime_chat_input(
+                                                    send_message_controller.clone(),
+                                                    active_channel.clone(),
+                                                    composer_text.clone(),
+                                                    schedule_update(),
+                                                );
+                                            } else {
+                                                send_message_controller.send_action_keys("i");
+                                            }
+                                            render_tick.set(render_tick() + 1);
+                                        }
                                     }
                                 }
                             }
@@ -4456,7 +4518,7 @@ fn ContactsScreen(
                                         .expect("ControlId::ContactsCreateInvitationButton must define a web DOM id")
                                         .to_string(),
                                 ),
-                                label: "Invite".to_string(),
+                                label: "Create Invitation".to_string(),
                                 variant: ButtonVariant::Primary,
                                 onclick: {
                                     let controller = invite_controller;
@@ -4485,9 +4547,11 @@ fn ContactsScreen(
                                                         {
                                                             Ok(code) => {
                                                                 controller.write_clipboard(&code);
-                                                                controller.push_runtime_event(
-                                                                    RuntimeEventKind::InvitationCodeReady,
-                                                                    format!("receiver={authority_id}"),
+                                                                controller.push_runtime_fact(
+                                                                    RuntimeFact::InvitationCodeReady {
+                                                                        receiver_authority_id: Some(authority_id.to_string()),
+                                                                        source_operation: OperationId::invitation_create(),
+                                                                    },
                                                                 );
                                                                 controller.info_toast(
                                                                     "Invitation code copied to clipboard",
@@ -4892,10 +4956,10 @@ fn SettingsScreen(
             class: "grid w-full gap-3 lg:grid-cols-12 lg:h-full lg:min-h-0 lg:[grid-template-rows:minmax(0,1fr)]",
             UiCard {
                 title: "Settings".to_string(),
-                subtitle: Some("Storage: IndexedDB".to_string()),
+                subtitle: Some("Manage your account".to_string()),
                 extra_class: Some("lg:col-span-4".to_string()),
                 UiCardBody {
-                    extra_class: Some("gap-1".to_string()),
+                    extra_class: Some("gap-2".to_string()),
                     for section in SettingsSection::ALL {
                         UiListButton {
                             id: Some(list_item_dom_id(ListId::SettingsSections, section.dom_id())),
@@ -5008,11 +5072,6 @@ fn SettingsScreen(
                         extra_class: Some("gap-2".to_string()),
                         div {
                             class: "aura-list flex flex-col gap-2",
-                            UiListItem {
-                                label: "Recovery request".to_string(),
-                                secondary: Some("Start guardian-assisted recovery flow".to_string()),
-                                active: false,
-                            }
                             UiListItem {
                                 label: format!("Last status: {}", runtime.active_recovery_label),
                                 secondary: Some(format!("Pending approvals to review: {}", runtime.pending_recovery_requests)),
@@ -5227,11 +5286,6 @@ fn SettingsScreen(
                                 secondary: Some("Switch the current web theme".to_string()),
                                 active: false,
                             }
-                            UiListItem {
-                                label: "Palette".to_string(),
-                                secondary: Some("Aura uses the same neutral palette in both modes".to_string()),
-                                active: false,
-                            }
                         }
                         UiCardFooter {
                             extra_class: None,
@@ -5255,6 +5309,21 @@ fn SettingsScreen(
                                     render_tick.set(render_tick() + 1);
                                 }
                             }
+                            }
+                        }
+                    }
+                }
+                if matches!(model.settings_section, SettingsSection::Info) {
+                    UiCardBody {
+                        extra_class: Some("gap-2".to_string()),
+                        div {
+                            class: "aura-list flex flex-col gap-2",
+                            UiListItem {
+                                label: "Storage: IndexedDB".to_string(),
+                                secondary: Some(
+                                    "Browser-backed local persistence for this device.".to_string()
+                                ),
+                                active: false,
                             }
                         }
                     }
@@ -5708,17 +5777,17 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
             keybind_rows = help_keybind_rows;
         }
         ModalState::CreateInvitation => {
-            if let Some(receiver_label) = model
+            if model
                 .create_invitation_modal()
                 .and_then(|state| state.receiver_label.as_ref())
+                .is_some()
             {
-                details.push(format!("Create an invitation code for {receiver_label}."));
                 details.push(
                     "Review or adjust the authority id, then press Enter to generate and copy the code."
                         .to_string(),
                 );
             } else {
-                details.push("Create an invitation code for a contact.".to_string());
+                details.push("Create an invite code for a contact.".to_string());
                 details.push("Enter the target authority id, then press Enter to generate and copy the code.".to_string());
             }
             inputs.push(ModalInputView {
@@ -5728,9 +5797,9 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
             });
         }
         ModalState::AcceptInvitation => {
-            details.push("Paste an invitation code, then press Enter.".to_string());
+            details.push("Paste an invite code, then press Enter.".to_string());
             inputs.push(ModalInputView {
-                label: "Invitation Code".to_string(),
+                label: "Invite Code".to_string(),
                 field_id: FieldId::InvitationCode,
                 value: model.modal_text_value().unwrap_or_default(),
             });
@@ -5749,7 +5818,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                     CreateChannelWizardStep::Details => {
                         let active = match state.active_field {
                             CreateChannelDetailsField::Name => "Group Name",
-                            CreateChannelDetailsField::Topic => "Topic",
+                            CreateChannelDetailsField::Topic => "Topic (optional)",
                         };
                         details.push("Step 1 of 3: Configure group details.".to_string());
                         details.push(format!("Active field: {active} (Tab to switch)"));
@@ -5759,7 +5828,7 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
                             value: state.name.clone(),
                         });
                         inputs.push(ModalInputView {
-                            label: "Topic".to_string(),
+                            label: "Topic (optional)".to_string(),
                             field_id: FieldId::CreateChannelTopic,
                             value: state.topic.clone(),
                         });

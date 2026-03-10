@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use aura_app::ui::contract::{
     compare_ui_snapshots_for_parity, ControlId, FieldId, ListId, ModalId, OperationId,
     OperationState, RuntimeEventKind, ScreenId, UiSnapshot,
@@ -15,6 +15,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 
+use crate::backend::UiOperationHandle;
 use crate::config::{ScenarioAction, ScenarioConfig, ScenarioStep, ScreenSource};
 use crate::introspection::{
     extract_command_consistency, extract_command_reason, extract_command_status, extract_toast,
@@ -180,6 +181,47 @@ struct ScenarioContext {
     vars: BTreeMap<String, String>,
     last_request_id: Option<u64>,
     last_chat_command: BTreeMap<String, String>,
+    last_operation_handle: BTreeMap<String, UiOperationHandle>,
+    shared_flow_state: BTreeMap<String, SharedFlowState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum AccountPhase {
+    #[default]
+    New,
+    Ready,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum ContactPhase {
+    #[default]
+    None,
+    InvitationReady,
+    Linked,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum ChannelPhase {
+    #[default]
+    None,
+    InvitationPending,
+    MembershipReady,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum MessagingPhase {
+    #[default]
+    None,
+    Ready,
+    Visible,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct SharedFlowState {
+    account: AccountPhase,
+    contact: ContactPhase,
+    channel: ChannelPhase,
+    messaging: MessagingPhase,
 }
 
 impl Default for ExecutionBudgets {
@@ -368,6 +410,9 @@ fn execute_step(
     context: &mut ScenarioContext,
 ) -> Result<()> {
     enforce_request_order(step, context)?;
+    if let Some(instance_id) = step.instance.as_deref() {
+        ensure_shared_flow_prerequisites(step, context, instance_id)?;
+    }
     match step.action {
         ScenarioAction::LaunchInstances | ScenarioAction::Noop => Ok(()),
         ScenarioAction::SetVar => {
@@ -487,25 +532,21 @@ fn execute_step(
                 .timeout_ms
                 .unwrap_or(step_budget_ms)
                 .max(CREATE_ACCOUNT_MIN_TIMEOUT_MS);
-            dispatch(
-                tool_api,
-                plan_fill_field_request(&instance_id, FieldId::AccountName, account_name),
-            )?;
-            dispatch(
-                tool_api,
-                plan_activate_control_request(
-                    &instance_id,
-                    ControlId::OnboardingCreateAccountButton,
-                ),
-            )?;
+            let submission =
+                issue_stage(step, tool_api.submit_create_account(&instance_id, &account_name))?;
+            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
             let deadline = Instant::now() + Duration::from_millis(action_timeout_ms);
             let mut neighborhood_step = semantic_wait_step(step);
             neighborhood_step.screen_id = Some(ScreenId::Neighborhood);
-            wait_for_semantic_state(
-                &neighborhood_step,
-                tool_api,
-                &instance_id,
-                action_timeout_ms,
+            convergence_stage(
+                step,
+                "account_neighborhood",
+                wait_for_semantic_state(
+                    &neighborhood_step,
+                    tool_api,
+                    &instance_id,
+                    action_timeout_ms,
+                ),
             )?;
             let remaining_ms = deadline
                 .saturating_duration_since(Instant::now())
@@ -513,14 +554,23 @@ fn execute_step(
                 .max(1) as u64;
             let mut readiness_step = semantic_wait_step(step);
             readiness_step.readiness = Some(aura_app::ui::contract::UiReadiness::Ready);
-            wait_for_semantic_state(&readiness_step, tool_api, &instance_id, remaining_ms)?;
+            convergence_stage(
+                step,
+                "account_readiness",
+                wait_for_semantic_state(&readiness_step, tool_api, &instance_id, remaining_ms),
+            )?;
             let remaining_ms = deadline
                 .saturating_duration_since(Instant::now())
                 .as_millis()
                 .max(1) as u64;
             if tool_api.backend_kind(&instance_id)? != "local_pty" {
-                wait_for_home_bootstrap_ready(step, tool_api, &instance_id, remaining_ms)?;
+                convergence_stage(
+                    step,
+                    "home_bootstrap",
+                    wait_for_home_bootstrap_ready(step, tool_api, &instance_id, remaining_ms),
+                )?;
             }
+            record_shared_flow_progress(step, context, &instance_id);
             Ok(())
         }
         ScenarioAction::StartDeviceEnrollment => {
@@ -660,58 +710,15 @@ fn execute_step(
                 .var
                 .as_deref()
                 .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
-            let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
-            if tool_api.backend_kind(&instance_id)? == "playwright_browser" {
-                let payload = dispatch_payload(
-                    tool_api,
-                    ToolRequest::CreateContactInvitation {
-                        instance_id: instance_id.clone(),
-                        receiver_authority_id: receiver_authority_id.clone(),
-                    },
-                )?;
-                let code = payload
-                    .get("code")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
-                if code.trim().is_empty() {
-                    bail!(
-                        "browser contact invitation creation returned an empty code for instance {}",
-                        instance_id
-                    );
-                }
-                context.vars.insert(code_name.to_string(), code);
-                return Ok(());
-            }
-            dispatch(
-                tool_api,
-                plan_activate_control_request(
-                    &instance_id,
-                    ControlId::ContactsCreateInvitationButton,
-                ),
-            )?;
-            wait_for_modal(
+            let submission = issue_stage(
                 step,
-                tool_api,
-                &instance_id,
-                timeout_ms,
-                ModalId::CreateInvitation,
+                tool_api.submit_create_contact_invitation(&instance_id, &receiver_authority_id),
             )?;
-            dispatch(
-                tool_api,
-                plan_fill_field_request(
-                    &instance_id,
-                    FieldId::InvitationReceiver,
-                    receiver_authority_id,
-                ),
-            )?;
-            dispatch(
-                tool_api,
-                plan_activate_control_request(&instance_id, ControlId::ModalConfirmButton),
-            )?;
-            let clipboard_text =
-                read_clipboard_value(tool_api, &instance_id, &step.id, timeout_ms)?;
-            context.vars.insert(code_name.to_string(), clipboard_text);
+            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            context
+                .vars
+                .insert(code_name.to_string(), submission.value.code);
+            record_shared_flow_progress(step, context, &instance_id);
             Ok(())
         }
         ScenarioAction::AcceptContactInvitation => {
@@ -724,36 +731,40 @@ fn execute_step(
             )?;
             let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
             let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-            dispatch(
-                tool_api,
-                plan_activate_control_request(
-                    &instance_id,
-                    ControlId::ContactsAcceptInvitationButton,
-                ),
-            )?;
-            wait_for_modal(
-                step,
-                tool_api,
-                &instance_id,
-                timeout_ms,
-                ModalId::AcceptInvitation,
-            )?;
-            dispatch(
-                tool_api,
-                plan_fill_field_request(&instance_id, FieldId::InvitationCode, code),
-            )?;
-            dispatch(
-                tool_api,
-                plan_activate_control_request(&instance_id, ControlId::ModalConfirmButton),
-            )?;
+            let submission =
+                issue_stage(step, tool_api.submit_accept_contact_invitation(&instance_id, &code))?;
+            let operation_handle = submission.handle.ui_operation.clone();
+            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
             let mut contact_link_step = semantic_wait_step(step);
             contact_link_step.runtime_event_kind = Some(RuntimeEventKind::ContactLinkReady);
+            if let Some(handle) = operation_handle {
+                let remaining_ms = deadline
+                    .saturating_duration_since(Instant::now())
+                    .as_millis()
+                    .max(1) as u64;
+                convergence_stage(
+                    step,
+                    "accept_contact_operation",
+                    wait_for_operation_handle_state(
+                        step,
+                        tool_api,
+                        &instance_id,
+                        remaining_ms,
+                        &handle,
+                        OperationState::Succeeded,
+                    ),
+                )?;
+            }
             let remaining_ms = deadline
                 .saturating_duration_since(Instant::now())
                 .as_millis()
                 .max(1) as u64;
-            if wait_for_semantic_state(&contact_link_step, tool_api, &instance_id, remaining_ms)
-                .is_err()
+            if convergence_stage(
+                step,
+                "contact_link",
+                wait_for_semantic_state(&contact_link_step, tool_api, &instance_id, remaining_ms),
+            )
+            .is_err()
             {
                 let remaining_ms = deadline
                     .saturating_duration_since(Instant::now())
@@ -762,8 +773,13 @@ fn execute_step(
                 let mut contacts_step = semantic_wait_step(step);
                 contacts_step.list_id = Some(ListId::Contacts);
                 contacts_step.count = Some(1);
-                wait_for_semantic_state(&contacts_step, tool_api, &instance_id, remaining_ms)?;
+                convergence_stage(
+                    step,
+                    "contacts_list",
+                    wait_for_semantic_state(&contacts_step, tool_api, &instance_id, remaining_ms),
+                )?;
             }
+            record_shared_flow_progress(step, context, &instance_id);
             Ok(())
         }
         ScenarioAction::InviteActorToChannel => {
@@ -774,45 +790,21 @@ fn execute_step(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            dispatch(
-                tool_api,
-                plan_activate_control_request(&instance_id, ControlId::NavContacts),
-            )?;
-            wait_for_control(
+            let submission = issue_stage(
                 step,
-                tool_api,
-                &instance_id,
-                step_budget_ms,
-                ControlId::Screen(ScreenId::Contacts),
+                tool_api.submit_invite_actor_to_channel(&instance_id, &authority_id),
             )?;
-            dispatch(
-                tool_api,
-                ToolRequest::ActivateListItem {
-                    instance_id: instance_id.clone(),
-                    list_id: aura_app::ui::contract::ListId::Contacts,
-                    item_id: authority_id,
-                },
-            )?;
-            dispatch(
-                tool_api,
-                plan_activate_control_request(
-                    &instance_id,
-                    ControlId::ContactsInviteToChannelButton,
-                ),
-            )
+            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            Ok(())
         }
         ScenarioAction::AcceptPendingChannelInvitation => {
-            let mut command_step = step.clone();
-            command_step.action = ScenarioAction::SendChatCommand;
-            command_step.command = Some("homeaccept".to_string());
-            execute_step(
-                &command_step,
-                tool_api,
-                step_budget_ms,
-                scenario_rng,
-                fault_rng,
-                context,
-            )
+            let instance_id = resolve_required_instance(step, context)?;
+            let submission = issue_stage(
+                step,
+                tool_api.submit_accept_pending_channel_invitation(&instance_id),
+            )?;
+            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            Ok(())
         }
         ScenarioAction::JoinChannel => {
             let instance_id = resolve_required_instance(step, context)?;
@@ -822,29 +814,9 @@ fn execute_step(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
-            dispatch(
-                tool_api,
-                plan_activate_control_request(&instance_id, ControlId::ChatNewGroupButton),
-            )?;
-            wait_for_modal(
-                step,
-                tool_api,
-                &instance_id,
-                timeout_ms,
-                ModalId::CreateChannel,
-            )?;
-            dispatch(
-                tool_api,
-                plan_fill_field_request(&instance_id, FieldId::CreateChannelName, channel_name),
-            )?;
-            for _ in 0..3 {
-                dispatch(
-                    tool_api,
-                    plan_activate_control_request(&instance_id, ControlId::ModalConfirmButton),
-                )?;
-                std::thread::sleep(Duration::from_millis(120));
-            }
+            let submission =
+                issue_stage(step, tool_api.submit_join_channel(&instance_id, &channel_name))?;
+            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
             Ok(())
         }
         ScenarioAction::SendKeys => {
@@ -996,30 +968,9 @@ fn execute_step(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let backend_kind = tool_api.backend_kind(&instance_id).unwrap_or("unknown");
-            if backend_kind == "playwright_browser" {
-                ensure_chat_screen(step, tool_api, &instance_id, backend_kind, step_budget_ms)?;
-                dispatch(
-                    tool_api,
-                    ToolRequest::FillField {
-                        instance_id: instance_id.clone(),
-                        field_id: FieldId::ChatInput,
-                        value: message,
-                    },
-                )?;
-                dispatch(
-                    tool_api,
-                    ToolRequest::SendKey {
-                        instance_id,
-                        key: ToolKey::Enter,
-                        repeat: 1,
-                    },
-                )?;
-            } else {
-                for request in plan_tui_send_chat_message_request(&instance_id, &message) {
-                    dispatch(tool_api, request)?;
-                }
-            }
+            let submission =
+                issue_stage(step, tool_api.submit_send_chat_message(&instance_id, &message))?;
+            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
             Ok(())
         }
         ScenarioAction::SendClipboard => {
@@ -1209,43 +1160,6 @@ fn execute_step(
         ScenarioAction::WaitFor | ScenarioAction::MessageContains => {
             let instance_id = resolve_required_instance(step, context)?;
             if matches!(step.action, ScenarioAction::MessageContains)
-                && matches!(tool_api.backend_kind(&instance_id), Ok("local_pty"))
-            {
-                let pattern = resolve_required_field(
-                    step,
-                    "pattern",
-                    step.value.as_deref().or(step.expect.as_deref()),
-                    context,
-                )?;
-                let wait_result = dispatch(
-                    tool_api,
-                    ToolRequest::WaitFor {
-                        instance_id: instance_id.clone(),
-                        pattern: pattern.clone(),
-                        timeout_ms: step.timeout_ms.unwrap_or(step_budget_ms),
-                        screen_source: step.screen_source.unwrap_or_default(),
-                        selector: None,
-                    },
-                );
-                if wait_result.is_ok() {
-                    return Ok(());
-                }
-                for attempt in 0..1200 {
-                    if attempt > 0 {
-                        std::thread::sleep(Duration::from_millis(100));
-                    }
-                    let final_screen = fetch_screen_text(
-                        tool_api,
-                        &instance_id,
-                        step.screen_source.unwrap_or_default(),
-                    )?;
-                    if final_screen.contains(&pattern) {
-                        return Ok(());
-                    }
-                }
-                wait_result?;
-            }
-            if matches!(step.action, ScenarioAction::MessageContains)
                 || step.screen_id.is_some()
                 || step.control_id.is_some()
                 || step.modal_id.is_some()
@@ -1256,12 +1170,41 @@ fn execute_step(
                 || step.contains.is_some()
                 || step.level.is_some()
             {
-                wait_for_semantic_state(
+                if let (Some(operation_id), Some(operation_state)) =
+                    (step.operation_id.as_ref(), step.operation_state)
+                {
+                    if let Some(handle) = context
+                        .last_operation_handle
+                        .get(&instance_id)
+                        .filter(|handle| &handle.id == operation_id)
+                        .cloned()
+                    {
+                        convergence_stage(
+                            step,
+                            "operation_handle",
+                            wait_for_operation_handle_state(
+                                step,
+                                tool_api,
+                                &instance_id,
+                                step.timeout_ms.unwrap_or(step_budget_ms),
+                                &handle,
+                                operation_state,
+                            ),
+                        )?;
+                        return Ok(());
+                    }
+                }
+                convergence_stage(
                     step,
-                    tool_api,
-                    &instance_id,
-                    step.timeout_ms.unwrap_or(step_budget_ms),
+                    "semantic_wait",
+                    wait_for_semantic_state(
+                        step,
+                        tool_api,
+                        &instance_id,
+                        step.timeout_ms.unwrap_or(step_budget_ms),
+                    ),
                 )?;
+                record_shared_flow_progress(step, context, &instance_id);
                 return Ok(());
             }
             let selector = match step.selector.as_deref() {
@@ -1896,6 +1839,40 @@ fn wait_for_operation_state(
     wait_for_semantic_state(&wait_step, tool_api, instance_id, timeout_ms)
 }
 
+fn wait_for_operation_handle_state(
+    step: &ScenarioStep,
+    tool_api: &mut ToolApi,
+    instance_id: &str,
+    timeout_ms: u64,
+    handle: &UiOperationHandle,
+    state: OperationState,
+) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let mut last_snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
+    if operation_handle_matches(&last_snapshot, handle, state) {
+        return Ok(());
+    }
+    loop {
+        if Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(40));
+        let snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
+        if operation_handle_matches(&snapshot, handle, state) {
+            return Ok(());
+        }
+        last_snapshot = snapshot;
+    }
+    bail!(
+        "step {} operation-handle wait timed out on instance {} (operation={} instance_id={} state={state:?}) last_snapshot={:?}",
+        step.id,
+        instance_id,
+        handle.id.0,
+        handle.instance_id.0,
+        Some(last_snapshot)
+    )
+}
+
 fn read_clipboard_value(
     tool_api: &mut ToolApi,
     instance_id: &str,
@@ -2090,46 +2067,12 @@ fn fetch_screen_text(
         .unwrap_or_else(|| payload.to_string()))
 }
 
-fn fetch_live_screen_text(
-    tool_api: &mut ToolApi,
-    instance_id: &str,
-    screen_source: ScreenSource,
-) -> Result<String> {
-    let payload = dispatch_payload(
-        tool_api,
-        ToolRequest::Screen {
-            instance_id: instance_id.to_string(),
-            screen_source,
-        },
-    )?;
-    Ok(payload
-        .get("raw_screen")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| payload.get("screen").and_then(serde_json::Value::as_str))
-        .or_else(|| {
-            payload
-                .get("normalized_screen")
-                .and_then(serde_json::Value::as_str)
-        })
-        .or_else(|| {
-            payload
-                .get("authoritative_screen")
-                .and_then(serde_json::Value::as_str)
-        })
-        .map(ToOwned::to_owned)
-        .or_else(|| payload.as_str().map(ToOwned::to_owned))
-        .unwrap_or_else(|| payload.to_string()))
-}
-
 fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
     if matches!(step.action, ScenarioAction::MessageContains) {
         let Some(expected_contains) = step.value.as_deref().or(step.expect.as_deref()) else {
             return false;
         };
-        return snapshot
-            .messages
-            .iter()
-            .any(|message| message.content.contains(expected_contains));
+        return snapshot.message_contains(expected_contains);
     }
 
     if let Some(screen_id) = step.screen_id {
@@ -2150,16 +2093,26 @@ fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
         }
     }
     if let Some(kind) = step.runtime_event_kind {
-        let matched = snapshot.runtime_events.iter().any(|event| {
-            event.kind == kind
-                && step
-                    .contains
-                    .as_deref()
-                    .or(step.value.as_deref())
-                    .or(step.expect.as_deref())
-                    .map(|needle| event.detail.contains(needle))
-                    .unwrap_or(true)
-        });
+        let detail_needle = step
+            .contains
+            .as_deref()
+            .or(step.value.as_deref())
+            .or(step.expect.as_deref());
+        let matched = snapshot.has_runtime_event(kind, detail_needle)
+            || matches!(kind, RuntimeEventKind::ChannelMembershipReady)
+            && snapshot
+                .lists
+                .iter()
+                .find(|candidate| candidate.id == ListId::Channels)
+                .map(|channels| {
+                    channels.items.iter().any(|item| {
+                        item.selected
+                            && detail_needle
+                                .map(|needle| item.id.contains(needle))
+                                .unwrap_or(true)
+                    })
+                })
+                .unwrap_or(false);
         if !matched {
             return false;
         }
@@ -2168,14 +2121,10 @@ fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
     if let (Some(operation_id), Some(operation_state)) =
         (step.operation_id.as_ref(), step.operation_state)
     {
-        let Some(operation) = snapshot
-            .operations
-            .iter()
-            .find(|candidate| &candidate.id == operation_id)
-        else {
+        let Some(observed_state) = snapshot.operation_state(operation_id) else {
             return false;
         };
-        if operation.state != operation_state {
+        if observed_state != operation_state {
             return false;
         }
     }
@@ -2256,23 +2205,12 @@ fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
     true
 }
 
-fn semantic_wait_matches_screen_fallback(
-    step: &ScenarioStep,
+fn operation_handle_matches(
     snapshot: &UiSnapshot,
-    screen_text: Option<&str>,
+    handle: &UiOperationHandle,
+    state: OperationState,
 ) -> bool {
-    if semantic_wait_matches(step, snapshot) {
-        return true;
-    }
-    if !matches!(step.action, ScenarioAction::MessageContains) {
-        return false;
-    }
-    let Some(expected_contains) = step.value.as_deref().or(step.expect.as_deref()) else {
-        return false;
-    };
-    screen_text
-        .map(|screen| screen.contains(expected_contains))
-        .unwrap_or(false)
+    snapshot.operation_state_for_instance(&handle.id, &handle.instance_id) == Some(state)
 }
 
 fn semantic_wait_description(step: &ScenarioStep) -> String {
@@ -2330,6 +2268,160 @@ fn semantic_screen_name(screen: ScreenId) -> &'static str {
     }
 }
 
+fn record_submission_handle(
+    context: &mut ScenarioContext,
+    instance_id: &str,
+    handle: Option<UiOperationHandle>,
+) {
+    if let Some(handle) = handle {
+        context
+            .last_operation_handle
+            .insert(instance_id.to_string(), handle);
+    }
+}
+
+fn issue_stage<T>(step: &ScenarioStep, result: Result<T>) -> Result<T> {
+    result.with_context(|| format!("step {} issue stage failed for {}", step.id, step.action))
+}
+
+fn convergence_stage<T>(step: &ScenarioStep, label: &str, result: Result<T>) -> Result<T> {
+    result.with_context(|| {
+        format!(
+            "step {} convergence stage failed for {} ({label})",
+            step.id, step.action
+        )
+    })
+}
+
+fn shared_flow_state_mut<'a>(
+    context: &'a mut ScenarioContext,
+    instance_id: &str,
+) -> &'a mut SharedFlowState {
+    context
+        .shared_flow_state
+        .entry(instance_id.to_string())
+        .or_default()
+}
+
+fn ensure_shared_flow_prerequisites(
+    step: &ScenarioStep,
+    context: &mut ScenarioContext,
+    instance_id: &str,
+) -> Result<()> {
+    let state = *shared_flow_state_mut(context, instance_id);
+    match step.action {
+        ScenarioAction::CreateAccount => {
+            if !matches!(state.account, AccountPhase::New) {
+                bail!(
+                    "step {} invalid shared-flow transition: create_account requires account phase New, found {:?}",
+                    step.id,
+                    state.account
+                );
+            }
+        }
+        ScenarioAction::CreateContactInvitation | ScenarioAction::AcceptContactInvitation => {
+            if !matches!(state.account, AccountPhase::Ready) {
+                bail!(
+                    "step {} invalid shared-flow transition: {:?} requires account phase Ready, found {:?}",
+                    step.id,
+                    step.action,
+                    state.account
+                );
+            }
+        }
+        ScenarioAction::JoinChannel => {
+            if !matches!(state.account, AccountPhase::Ready) {
+                bail!(
+                    "step {} invalid shared-flow transition: join_channel requires account phase Ready, found {:?}",
+                    step.id,
+                    state.account
+                );
+            }
+        }
+        ScenarioAction::InviteActorToChannel => {
+            if !matches!(state.contact, ContactPhase::Linked) {
+                bail!(
+                    "step {} invalid shared-flow transition: invite_actor_to_channel requires contact phase Linked, found {:?}",
+                    step.id,
+                    state.contact
+                );
+            }
+            if !matches!(state.channel, ChannelPhase::MembershipReady) {
+                bail!(
+                    "step {} invalid shared-flow transition: invite_actor_to_channel requires channel phase MembershipReady, found {:?}",
+                    step.id,
+                    state.channel
+                );
+            }
+        }
+        ScenarioAction::AcceptPendingChannelInvitation => {
+            if !matches!(state.channel, ChannelPhase::InvitationPending) {
+                bail!(
+                    "step {} invalid shared-flow transition: accept_pending_channel_invitation requires channel phase InvitationPending, found {:?}",
+                    step.id,
+                    state.channel
+                );
+            }
+        }
+        ScenarioAction::SendChatMessage => {
+            if !matches!(state.channel, ChannelPhase::MembershipReady) {
+                bail!(
+                    "step {} invalid shared-flow transition: send_chat_message requires channel phase MembershipReady, found {:?}",
+                    step.id,
+                    state.channel
+                );
+            }
+        }
+        ScenarioAction::MessageContains => {
+            if !matches!(state.channel, ChannelPhase::MembershipReady) {
+                bail!(
+                    "step {} invalid shared-flow transition: message_contains requires channel phase MembershipReady, found {:?}",
+                    step.id,
+                    state.channel
+                );
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn record_shared_flow_progress(
+    step: &ScenarioStep,
+    context: &mut ScenarioContext,
+    instance_id: &str,
+) {
+    let state = shared_flow_state_mut(context, instance_id);
+    match step.action {
+        ScenarioAction::CreateAccount => {
+            state.account = AccountPhase::Ready;
+        }
+        ScenarioAction::CreateContactInvitation => {
+            state.contact = ContactPhase::InvitationReady;
+        }
+        ScenarioAction::AcceptContactInvitation => {
+            state.contact = ContactPhase::Linked;
+        }
+        ScenarioAction::WaitFor => match step.runtime_event_kind {
+            Some(RuntimeEventKind::ContactLinkReady) => {
+                state.contact = ContactPhase::Linked;
+            }
+            Some(RuntimeEventKind::PendingHomeInvitationReady) => {
+                state.channel = ChannelPhase::InvitationPending;
+            }
+            Some(RuntimeEventKind::ChannelMembershipReady) => {
+                state.channel = ChannelPhase::MembershipReady;
+                state.messaging = MessagingPhase::Ready;
+            }
+            _ => {}
+        },
+        ScenarioAction::MessageContains => {
+            state.messaging = MessagingPhase::Visible;
+        }
+        _ => {}
+    }
+}
+
 fn semantic_modal_name(modal: ModalId) -> &'static str {
     match modal {
         ModalId::Help => "help",
@@ -2364,49 +2456,13 @@ fn wait_for_semantic_state(
 ) -> Result<()> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let backend_kind = tool_api.backend_kind(instance_id).unwrap_or("unknown");
-    let local_pty_message_grace =
-        backend_kind == "local_pty" && matches!(step.action, ScenarioAction::MessageContains);
     let mut last_snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
-    let last_screen =
-        if backend_kind == "local_pty" && matches!(step.action, ScenarioAction::MessageContains) {
-            Some(fetch_live_screen_text(
-                tool_api,
-                instance_id,
-                ScreenSource::Default,
-            )?)
-        } else {
-            None
-        };
-    if semantic_wait_matches_screen_fallback(step, &last_snapshot, last_screen.as_deref()) {
+    if semantic_wait_matches(step, &last_snapshot) {
         return Ok(());
     }
     let mut browser_version = None;
     loop {
         if Instant::now() >= deadline {
-            let grace_attempts = if local_pty_message_grace { 1200 } else { 1 };
-            for attempt in 0..grace_attempts {
-                if attempt > 0 {
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-                let final_snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
-                let final_screen = if local_pty_message_grace {
-                    Some(fetch_live_screen_text(
-                        tool_api,
-                        instance_id,
-                        ScreenSource::Default,
-                    )?)
-                } else {
-                    None
-                };
-                if semantic_wait_matches_screen_fallback(
-                    step,
-                    &final_snapshot,
-                    final_screen.as_deref(),
-                ) {
-                    return Ok(());
-                }
-                last_snapshot = final_snapshot;
-            }
             break;
         }
         let snapshot = if backend_kind == "playwright_browser" {
@@ -2426,28 +2482,19 @@ fn wait_for_semantic_state(
             std::thread::sleep(Duration::from_millis(40));
             fetch_ui_snapshot(tool_api, instance_id)?
         };
-        let screen_text = if backend_kind == "local_pty"
-            && matches!(step.action, ScenarioAction::MessageContains)
-        {
-            Some(fetch_live_screen_text(
-                tool_api,
-                instance_id,
-                ScreenSource::Default,
-            )?)
-        } else {
-            None
-        };
-        if semantic_wait_matches_screen_fallback(step, &snapshot, screen_text.as_deref()) {
+        if semantic_wait_matches(step, &snapshot) {
             return Ok(());
         }
         last_snapshot = snapshot;
     }
+    let diagnostic_screen = fetch_screen_text(tool_api, instance_id, ScreenSource::Default).ok();
     bail!(
-        "step {} semantic wait timed out on instance {} ({}) last_snapshot={:?}",
+        "step {} semantic wait timed out on instance {} ({}) last_snapshot={:?} diagnostic_screen={:?}",
         step.id,
         instance_id,
         semantic_wait_description(step),
-        Some(last_snapshot)
+        Some(last_snapshot),
+        diagnostic_screen
     )
 }
 

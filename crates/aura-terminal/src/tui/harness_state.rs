@@ -9,10 +9,10 @@ use crate::tui::types::{
 };
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
-    ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId,
-    OperationId, OperationInstanceId, OperationSnapshot, OperationState, RuntimeEventId,
-    RuntimeEventKind, RuntimeEventSnapshot, ScreenId, SelectionSnapshot, ToastId, ToastKind,
-    ToastSnapshot, UiReadiness, UiSnapshot,
+    ChannelFactKey, ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot,
+    MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
+    OperationState, RuntimeEventId, RuntimeEventSnapshot, RuntimeFact, ScreenId,
+    SelectionSnapshot, ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::types::StateSnapshot;
 use std::fs;
@@ -374,16 +374,44 @@ pub fn semantic_ui_snapshot(
         .homes
         .current_home()
         .map(|home| home.id)
+        .filter(|home_id| *home_id != aura_core::identifiers::ChannelId::default());
+    let neighborhood_home_id = (app_snapshot.neighborhood.home_home_id
+        != aura_core::identifiers::ChannelId::default())
+    .then_some(app_snapshot.neighborhood.home_home_id);
+    let mut home_ids = app_snapshot
+        .homes
+        .iter()
+        .map(|(home_id, _)| *home_id)
         .filter(|home_id| *home_id != aura_core::identifiers::ChannelId::default())
-        .unwrap_or(app_snapshot.neighborhood.home_home_id);
-    let mut home_ids = vec![current_home_id.to_string()];
-    home_ids.extend(
-        app_snapshot
-            .neighborhood
-            .all_neighbors()
-            .filter(|home| home.id != current_home_id)
-            .map(|home| home.id.to_string()),
-    );
+        .map(|home_id| home_id.to_string())
+        .collect::<Vec<_>>();
+    home_ids.sort();
+    home_ids.dedup();
+    if let Some(current_home_id) = current_home_id {
+        let current_home_id = current_home_id.to_string();
+        home_ids.retain(|home_id| home_id != &current_home_id);
+        home_ids.insert(0, current_home_id);
+    } else if let Some(neighborhood_home_id) = neighborhood_home_id {
+        let neighborhood_home_id = neighborhood_home_id.to_string();
+        if !home_ids
+            .iter()
+            .any(|home_id| home_id == &neighborhood_home_id)
+        {
+            home_ids.insert(0, neighborhood_home_id);
+        }
+    }
+    let selected_home_id = current_home_id.or(neighborhood_home_id);
+    let neighbor_home_ids = app_snapshot
+        .neighborhood
+        .all_neighbors()
+        .filter(|home| Some(home.id) != selected_home_id)
+        .map(|home| home.id.to_string())
+        .filter(|home_id| !home_ids.iter().any(|existing| existing == home_id))
+        .collect::<Vec<_>>();
+    home_ids.extend(neighbor_home_ids);
+    if home_ids.is_empty() {
+        home_ids.push(aura_core::identifiers::ChannelId::default().to_string());
+    }
     let home_items = home_ids
         .iter()
         .enumerate()
@@ -581,8 +609,14 @@ pub fn semantic_ui_snapshot(
     {
         runtime_events.push(RuntimeEventSnapshot {
             id: RuntimeEventId("tui-invitation-code-ready".to_string()),
-            kind: RuntimeEventKind::InvitationCodeReady,
-            detail: "invitation_create".to_string(),
+            fact: RuntimeFact::InvitationCodeReady {
+                receiver_authority_id: state
+                    .create_invitation_state
+                    .receiver_authority_id
+                    .as_ref()
+                    .map(ToString::to_string),
+                source_operation: OperationId::invitation_create(),
+            },
         });
     }
     if operations.iter().any(|operation| {
@@ -594,15 +628,23 @@ pub fn semantic_ui_snapshot(
     }) {
         runtime_events.push(RuntimeEventSnapshot {
             id: RuntimeEventId("tui-device-enrollment-code-ready".to_string()),
-            kind: RuntimeEventKind::DeviceEnrollmentCodeReady,
-            detail: "device_enrollment".to_string(),
+            fact: RuntimeFact::DeviceEnrollmentCodeReady {
+                device_name: state
+                    .settings
+                    .devices
+                    .first()
+                    .map(|device| device.name.clone()),
+                code_len: None,
+            },
         });
     }
     if !contact_ids.is_empty() {
         runtime_events.push(RuntimeEventSnapshot {
             id: RuntimeEventId("tui-contact-link-ready".to_string()),
-            kind: RuntimeEventKind::ContactLinkReady,
-            detail: format!("contacts={}", contact_ids.len()),
+            fact: RuntimeFact::ContactLinkReady {
+                authority_id: None,
+                contact_count: Some(contact_ids.len()),
+            },
         });
     }
     if app_snapshot
@@ -621,15 +663,16 @@ pub fn semantic_ui_snapshot(
     {
         runtime_events.push(RuntimeEventSnapshot {
             id: RuntimeEventId("tui-pending-home-invitation-ready".to_string()),
-            kind: RuntimeEventKind::PendingHomeInvitationReady,
-            detail: "pending_home_invitation".to_string(),
+            fact: RuntimeFact::PendingHomeInvitationReady,
         });
     }
     if let Some(channel_id) = channel_ids.get(state.chat.selected_channel) {
         runtime_events.push(RuntimeEventSnapshot {
             id: RuntimeEventId("tui-channel-membership-ready".to_string()),
-            kind: RuntimeEventKind::ChannelMembershipReady,
-            detail: format!("channel={channel_id}"),
+            fact: RuntimeFact::ChannelMembershipReady {
+                channel: ChannelFactKey::identified(channel_id.clone()),
+                member_count: None,
+            },
         });
         if let Some(channel) = app_snapshot
             .chat
@@ -637,16 +680,25 @@ pub fn semantic_ui_snapshot(
             .find(|channel| channel.id.to_string() == *channel_id)
         {
             if channel.is_dm || channel.member_count > 1 {
-                let detail = format!("channel={} members={}", channel.name, channel.member_count);
                 runtime_events.push(RuntimeEventSnapshot {
                     id: RuntimeEventId("tui-recipient-peers-resolved".to_string()),
-                    kind: RuntimeEventKind::RecipientPeersResolved,
-                    detail: detail.clone(),
+                    fact: RuntimeFact::RecipientPeersResolved {
+                        channel: ChannelFactKey {
+                            id: Some(channel_id.clone()),
+                            name: Some(channel.name.clone()),
+                        },
+                        member_count: channel.member_count,
+                    },
                 });
                 runtime_events.push(RuntimeEventSnapshot {
                     id: RuntimeEventId("tui-message-delivery-ready".to_string()),
-                    kind: RuntimeEventKind::MessageDeliveryReady,
-                    detail,
+                    fact: RuntimeFact::MessageDeliveryReady {
+                        channel: ChannelFactKey {
+                            id: Some(channel_id.clone()),
+                            name: Some(channel.name.clone()),
+                        },
+                        member_count: channel.member_count,
+                    },
                 });
             }
         }

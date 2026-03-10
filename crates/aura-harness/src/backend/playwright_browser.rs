@@ -8,13 +8,20 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
-use aura_app::ui::contract::{list_item_selector, ControlId, FieldId, ListId, UiSnapshot};
+use aura_app::ui::contract::{
+    list_item_selector, ControlId, FieldId, ListId, ModalId, OperationId, ScreenId,
+    UiSnapshot,
+};
 use nix::poll::{poll, PollFd, PollFlags};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
-use crate::backend::{InstanceBackend, UiSnapshotEvent};
+use crate::backend::{
+    observe_operation, wait_for_modal_visible, wait_for_operation_submission,
+    wait_for_screen_visible, ContactInvitationCode, InstanceBackend, SubmittedAction,
+    UiSnapshotEvent,
+};
 use crate::config::InstanceConfig;
 use crate::tool_api::ToolKey;
 
@@ -318,6 +325,13 @@ impl PlaywrightBrowserBackend {
         }
         self.state = BackendState::Stopped;
         Ok(())
+    }
+
+    fn submit_chat_command_via_ui(&mut self, command: &str) -> Result<()> {
+        self.activate_control(ControlId::NavChat)?;
+        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
+        self.fill_field(FieldId::ChatInput, &format!("/{command}"))?;
+        self.send_key(ToolKey::Enter, 1)
     }
 }
 
@@ -755,28 +769,83 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 
     fn create_contact_invitation(&mut self, receiver_authority_id: &str) -> Result<String> {
-        self.with_session(|session| {
-            let payload = session.rpc_call(
-                "create_contact_invitation",
-                json!({
-                    "instance_id": self.config.id,
-                    "receiver_authority_id": receiver_authority_id,
-                }),
-            )?;
-            let code = payload
-                .get("code")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .trim_end_matches(['\n', '\r'])
-                .to_string();
-            if code.trim().is_empty() {
-                bail!(
-                    "contact invitation code for browser instance {} is empty",
-                    self.config.id
-                );
-            }
-            Ok(code)
-        })
+        Ok(self
+            .create_contact_invitation_via_ui(receiver_authority_id)?
+            .value
+            .code)
+    }
+
+    fn create_account_via_ui(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
+        self.fill_field(FieldId::AccountName, account_name)?;
+        self.activate_control(ControlId::OnboardingCreateAccountButton)?;
+        Ok(SubmittedAction::without_handle(()))
+    }
+
+    fn create_contact_invitation_via_ui(
+        &mut self,
+        receiver_authority_id: &str,
+    ) -> Result<SubmittedAction<ContactInvitationCode>> {
+        let previous_operation = observe_operation(&self.ui_snapshot()?, &OperationId::invitation_create());
+        self.activate_control(ControlId::ContactsCreateInvitationButton)?;
+        wait_for_modal_visible(self, ModalId::CreateInvitation, Duration::from_secs(5))?;
+        self.fill_field(FieldId::InvitationReceiver, receiver_authority_id)?;
+        self.activate_control(ControlId::ModalConfirmButton)?;
+        let handle = wait_for_operation_submission(
+            self,
+            OperationId::invitation_create(),
+            previous_operation,
+            Duration::from_secs(5),
+        )?;
+        Ok(SubmittedAction::with_ui_operation(
+            ContactInvitationCode {
+                code: self.read_clipboard()?,
+            },
+            handle,
+        ))
+    }
+
+    fn accept_contact_invitation_via_ui(&mut self, code: &str) -> Result<SubmittedAction<()>> {
+        let previous_operation = observe_operation(&self.ui_snapshot()?, &OperationId::invitation_accept());
+        self.activate_control(ControlId::ContactsAcceptInvitationButton)?;
+        wait_for_modal_visible(self, ModalId::AcceptInvitation, Duration::from_secs(5))?;
+        self.fill_field(FieldId::InvitationCode, code)?;
+        self.activate_control(ControlId::ModalConfirmButton)?;
+        let handle = wait_for_operation_submission(
+            self,
+            OperationId::invitation_accept(),
+            previous_operation,
+            Duration::from_secs(5),
+        )?;
+        Ok(SubmittedAction::with_ui_operation((), handle))
+    }
+
+    fn invite_actor_to_channel_via_ui(
+        &mut self,
+        authority_id: &str,
+    ) -> Result<SubmittedAction<()>> {
+        self.activate_control(ControlId::NavContacts)?;
+        wait_for_screen_visible(self, ScreenId::Contacts, Duration::from_secs(5))?;
+        self.activate_list_item(ListId::Contacts, authority_id)?;
+        self.activate_control(ControlId::ContactsInviteToChannelButton)?;
+        Ok(SubmittedAction::without_handle(()))
+    }
+
+    fn accept_pending_channel_invitation_via_ui(&mut self) -> Result<SubmittedAction<()>> {
+        self.submit_chat_command_via_ui("homeaccept")?;
+        Ok(SubmittedAction::without_handle(()))
+    }
+
+    fn join_channel_via_ui(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
+        self.submit_chat_command_via_ui(&format!("join {channel_name}"))?;
+        Ok(SubmittedAction::without_handle(()))
+    }
+
+    fn send_chat_message_via_ui(&mut self, message: &str) -> Result<SubmittedAction<()>> {
+        self.activate_control(ControlId::NavChat)?;
+        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
+        self.fill_field(FieldId::ChatInput, message)?;
+        self.send_key(ToolKey::Enter, 1)?;
+        Ok(SubmittedAction::without_handle(()))
     }
 
     fn tail_log(&self, lines: usize) -> Result<Vec<String>> {
