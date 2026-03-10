@@ -276,9 +276,10 @@ impl SharedFlowState {
                 next.messaging = MessagingPhase::Ready;
             }
             SharedFlowTransition::MessageVisible => {
-                if !matches!(self.channel, ChannelPhase::MembershipReady) {
-                    bail!("message visibility requires ChannelPhase::MembershipReady");
+                if !matches!(self.account, AccountPhase::Ready) {
+                    bail!("message visibility requires AccountPhase::Ready");
                 }
+                next.channel = ChannelPhase::MembershipReady;
                 next.messaging = MessagingPhase::Visible;
             }
         }
@@ -311,17 +312,18 @@ impl SharedFlowState {
                 }
             }
             ScenarioAction::AcceptPendingChannelInvitation => {
-                if !matches!(self.channel, ChannelPhase::InvitationPending) {
+                if !matches!(self.channel, ChannelPhase::None | ChannelPhase::InvitationPending) {
                     bail!(
-                        "accept_pending_channel_invitation requires ChannelPhase::InvitationPending"
+                        "accept_pending_channel_invitation requires no completed channel membership"
                     );
                 }
             }
-            ScenarioAction::SendChatMessage | ScenarioAction::MessageContains => {
+            ScenarioAction::SendChatMessage => {
                 if !matches!(self.channel, ChannelPhase::MembershipReady) {
                     bail!("{action:?} requires ChannelPhase::MembershipReady");
                 }
             }
+            ScenarioAction::MessageContains => {}
             _ => {}
         }
         Ok(())
@@ -907,6 +909,7 @@ fn execute_step(
                 tool_api.submit_accept_pending_channel_invitation(&instance_id),
             )?;
             record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            record_shared_flow_progress(step, context, &instance_id);
             Ok(())
         }
         ScenarioAction::JoinChannel => {
@@ -2745,6 +2748,9 @@ fn record_shared_flow_progress(
             Some(SharedFlowTransition::ContactInvitationReady)
         }
         ScenarioAction::AcceptContactInvitation => Some(SharedFlowTransition::ContactLinked),
+        ScenarioAction::AcceptPendingChannelInvitation => {
+            Some(SharedFlowTransition::ChannelMembershipReady)
+        }
         ScenarioAction::WaitFor => match step.runtime_event_kind {
             Some(RuntimeEventKind::ContactLinkReady) => Some(SharedFlowTransition::ContactLinked),
             Some(RuntimeEventKind::PendingHomeInvitationReady) => {

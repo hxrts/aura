@@ -499,15 +499,19 @@ fn build_chat_runtime_view(
 }
 
 async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeView {
-    let chat = {
+    let (chat, contacts, homes, authority_id) = {
         let core = controller.app_core().read().await;
         let signal_chat = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
-        let local_chat = core.snapshot().chat;
+        let snapshot = core.snapshot();
+        let local_chat = snapshot.chat;
+        let contacts = snapshot.contacts;
+        let homes = snapshot.homes;
         let mut merged = merge_chat_state(signal_chat, local_chat);
-        if let Some(authority_id) = core.authority().cloned() {
+        let authority_id = core.authority().cloned();
+        if let Some(authority_id) = authority_id {
             merged.ensure_note_to_self_channel(authority_id);
         }
-        merged
+        (merged, contacts, homes, authority_id)
     };
     let selected_name = controller
         .ui_model()
@@ -524,24 +528,38 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
         channel_count: runtime.channels.len(),
         message_count: runtime.messages.len(),
     }];
-    if let Some(channel) = runtime
+    if let (Some(channel), Some(authority_id)) = (
+        runtime
         .channels
         .iter()
-        .find(|channel| channel.name.eq_ignore_ascii_case(&runtime.active_channel))
-    {
+        .find(|channel| channel.name.eq_ignore_ascii_case(&runtime.active_channel)),
+        authority_id,
+    ) {
+        let resolved_recipient_count =
+            messaging_workflows::resolved_recipient_peers_for_channel_view(
+                channel,
+                &homes,
+                &contacts,
+                &[],
+                authority_id,
+            )
+            .len();
+        let resolved_member_count = channel
+            .member_count
+            .max((resolved_recipient_count.saturating_add(1)) as u32);
         runtime_facts.push(RuntimeFact::ChannelMembershipReady {
             channel: ChannelFactKey::named(channel.name.clone()),
-            member_count: Some(channel.member_count as usize),
+            member_count: Some(resolved_member_count as usize),
         });
-        if channel.is_dm || channel.member_count > 1 {
+        if resolved_recipient_count > 0 {
             let channel_key = ChannelFactKey::named(channel.name.clone());
             runtime_facts.push(RuntimeFact::RecipientPeersResolved {
                 channel: channel_key.clone(),
-                member_count: channel.member_count as usize,
+                member_count: resolved_member_count as usize,
             });
             runtime_facts.push(RuntimeFact::MessageDeliveryReady {
                 channel: channel_key,
-                member_count: channel.member_count as usize,
+                member_count: resolved_member_count as usize,
             });
         }
     }

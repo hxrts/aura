@@ -663,7 +663,7 @@ pub async fn accept_pending_home_invitation(
 ) -> Result<InvitationId, AuraError> {
     let runtime = require_runtime(app_core).await?;
     let our_authority = runtime.authority_id();
-    const HOME_ACCEPT_ATTEMPTS: usize = 40;
+    const HOME_ACCEPT_ATTEMPTS: usize = 200;
     const HOME_ACCEPT_BACKOFF_MS: u64 = 150;
 
     for attempt in 0..HOME_ACCEPT_ATTEMPTS {
@@ -674,14 +674,29 @@ pub async fn accept_pending_home_invitation(
         });
 
         if let Some(inv) = home_invitation {
+            let invited_channel_id = match &inv.invitation_type {
+                InvitationBridgeType::Channel { home_id, .. } => home_id.parse().ok(),
+                _ => None,
+            };
             match runtime.accept_invitation(inv.invitation_id.as_str()).await {
-                Ok(()) => return Ok(inv.invitation_id.clone()),
+                Ok(()) => {
+                    converge_runtime(&runtime).await;
+                    if let Some(channel_id) = invited_channel_id {
+                        let _ = crate::workflows::messaging::join_channel(app_core, channel_id).await;
+                        converge_runtime(&runtime).await;
+                    }
+                    return Ok(inv.invitation_id.clone());
+                }
                 Err(e) => {
                     let message = e.to_string();
                     let lowered = message.to_lowercase();
                     // Channel invites may be auto-accepted by the inbound envelope pipeline.
                     // Treat these races as idempotent success for `/homeaccept`.
                     if lowered.contains("already accepted") || lowered.contains("not pending") {
+                        if let Some(channel_id) = invited_channel_id {
+                            let _ = crate::workflows::messaging::join_channel(app_core, channel_id).await;
+                            converge_runtime(&runtime).await;
+                        }
                         return Ok(inv.invitation_id.clone());
                     }
                     return Err(AuraError::agent(format!(

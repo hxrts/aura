@@ -16,6 +16,7 @@ use aura_app::ui::contract::{
 };
 use aura_app::ui_contract::{ChannelFactKey, RuntimeFact};
 use aura_app::ui::types::StateSnapshot;
+use aura_app::ui::workflows::messaging as messaging_workflows;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -667,8 +668,27 @@ pub fn semantic_ui_snapshot(
             fact: RuntimeFact::PendingHomeInvitationReady,
         });
     }
+    let local_authority = app_snapshot
+        .homes
+        .current_home()
+        .and_then(|home| home.members.first().map(|member| member.id));
     for channel in app_snapshot.chat.all_channels() {
         let channel_id = channel.id.to_string();
+        let resolved_recipient_count = local_authority
+            .map(|authority_id| {
+                messaging_workflows::resolved_recipient_peers_for_channel_view(
+                    channel,
+                    &app_snapshot.homes,
+                    &app_snapshot.contacts,
+                    &[],
+                    authority_id,
+                )
+                .len()
+            })
+            .unwrap_or(0);
+        let resolved_member_count = channel
+            .member_count
+            .max((resolved_recipient_count.saturating_add(1)) as u32);
         runtime_events.push(RuntimeEventSnapshot {
             id: RuntimeEventId(format!("tui-channel-membership-ready:{channel_id}")),
             fact: RuntimeFact::ChannelMembershipReady {
@@ -676,10 +696,10 @@ pub fn semantic_ui_snapshot(
                     id: Some(channel_id.clone()),
                     name: Some(channel.name.clone()),
                 },
-                member_count: Some(channel.member_count as usize),
+                member_count: Some(resolved_member_count as usize),
             },
         });
-        if channel.is_dm || channel.member_count > 1 {
+        if resolved_recipient_count > 0 {
             runtime_events.push(RuntimeEventSnapshot {
                 id: RuntimeEventId(format!("tui-recipient-peers-resolved:{channel_id}")),
                 fact: RuntimeFact::RecipientPeersResolved {
@@ -687,7 +707,7 @@ pub fn semantic_ui_snapshot(
                         id: Some(channel_id.clone()),
                         name: Some(channel.name.clone()),
                     },
-                    member_count: channel.member_count as usize,
+                    member_count: resolved_member_count as usize,
                 },
             });
             runtime_events.push(RuntimeEventSnapshot {
@@ -697,7 +717,7 @@ pub fn semantic_ui_snapshot(
                         id: Some(channel_id.clone()),
                         name: Some(channel.name.clone()),
                     },
-                    member_count: channel.member_count as usize,
+                    member_count: resolved_member_count as usize,
                 },
             });
         }

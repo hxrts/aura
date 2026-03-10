@@ -21,12 +21,13 @@ use crate::{
     signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME},
     thresholds::{default_channel_threshold, normalize_channel_threshold},
     views::{
+        contacts::ContactsState,
         chat::{
             is_note_to_self_channel_name, note_to_self_channel_id, note_to_self_context_id,
             Channel, ChannelType, ChatState, Message, MessageDeliveryStatus,
             NOTE_TO_SELF_CHANNEL_NAME, NOTE_TO_SELF_CHANNEL_TOPIC,
         },
-        home::{HomeMember, HomeRole, HomeState},
+        home::{HomeMember, HomeRole, HomeState, HomesState},
     },
     AppCore,
 };
@@ -643,26 +644,55 @@ async fn recipient_peers_for_channel(
     self_authority: AuthorityId,
 ) -> Vec<AuthorityId> {
     let chat = chat_snapshot(app_core).await;
-    let Some(channel) = chat.channel(&channel_id) else {
+    let Some(channel) = chat.channel(&channel_id).cloned() else {
         return Vec::new();
     };
-    let channel_context = channel.context_id;
+    let contacts = contacts_snapshot(app_core).await;
+    let homes = {
+        let core = app_core.read().await;
+        core.views().get_homes()
+    };
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime().cloned()
+    };
+    let discovered = if let Some(runtime) = runtime {
+        runtime
+            .get_discovered_peers()
+            .await
+            .into_iter()
+            .filter(|peer| *peer != self_authority)
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    resolved_recipient_peers_for_channel_view(
+        &channel,
+        &homes,
+        &contacts,
+        &discovered,
+        self_authority,
+    )
+}
 
+pub fn resolved_recipient_peers_for_channel_view(
+    channel: &Channel,
+    homes: &HomesState,
+    contacts: &ContactsState,
+    discovered: &[AuthorityId],
+    self_authority: AuthorityId,
+) -> Vec<AuthorityId> {
+    let channel_context = channel.context_id;
     let mut recipients = BTreeSet::new();
+
     for member in &channel.member_ids {
         if *member != self_authority {
             recipients.insert(*member);
         }
     }
 
-    // Runtime ChatState reductions can briefly omit member_ids for freshly-created
-    // channels. When that happens, fall back to home membership for this channel.
     if recipients.is_empty() {
-        let homes = {
-            let core = app_core.read().await;
-            core.views().get_homes()
-        };
-        if let Some(home) = homes.home_state(&channel_id) {
+        if let Some(home) = homes.home_state(&channel.id) {
             for member in home.members.iter().map(|member| member.id) {
                 if member != self_authority {
                     recipients.insert(member);
@@ -698,28 +728,12 @@ async fn recipient_peers_for_channel(
     }
 
     if recipients.is_empty() {
-        let runtime = {
-            let core = app_core.read().await;
-            core.runtime().cloned()
-        };
-        if let Some(runtime) = runtime {
-            let discovered: Vec<AuthorityId> = runtime
-                .get_discovered_peers()
-                .await
-                .into_iter()
-                .filter(|peer| *peer != self_authority)
-                .collect();
-            if channel.is_dm || discovered.len() == 1 {
-                recipients.extend(discovered);
-            }
+        if channel.is_dm || discovered.len() == 1 {
+            recipients.extend(discovered.iter().copied());
         }
     }
 
-    // Reactive channel reductions may temporarily omit explicit members.
-    // Fall back to known contacts for two-party sessions so reply traffic keeps flowing.
-    // Keep this conservative for non-DM channels: only apply if there is a single peer.
     if recipients.is_empty() {
-        let contacts = contacts_snapshot(app_core).await;
         for contact_id in contacts.contact_ids() {
             if *contact_id != self_authority {
                 recipients.insert(*contact_id);
@@ -1897,6 +1911,8 @@ pub async fn invite_authority_to_channel(
         ttl_ms,
     )
     .await?;
+
+    converge_runtime(&runtime).await;
 
     Ok(invitation.invitation_id)
 }

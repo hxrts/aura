@@ -8,7 +8,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use aura_app::ui::contract::{
-    ControlId, FieldId, ListId, ModalId, OperationId, ScreenId, UiReadiness, UiSnapshot,
+    ControlId, FieldId, ListId, ModalId, OperationId, OperationState, ScreenId, UiReadiness,
+    UiSnapshot,
 };
 use aura_app::ui_contract::RuntimeFact;
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
@@ -847,8 +848,44 @@ impl InstanceBackend for LocalPtyBackend {
     }
 
     fn accept_pending_channel_invitation_via_ui(&mut self) -> Result<SubmittedAction<()>> {
+        let previous_channel_count = self
+            .ui_snapshot()?
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Channels)
+            .map(|list| list.items.len())
+            .unwrap_or(0);
         self.submit_chat_command_via_ui("homeaccept")?;
-        Ok(SubmittedAction::without_handle(()))
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            let channel_count = snapshot
+                .lists
+                .iter()
+                .find(|list| list.id == ListId::Channels)
+                .map(|list| list.items.len())
+                .unwrap_or(0);
+            let joined = channel_count > previous_channel_count
+                || snapshot.runtime_events.iter().any(|event| {
+                    matches!(&event.fact, RuntimeFact::ChannelMembershipReady { .. })
+                });
+            if joined {
+                return Ok(SubmittedAction::without_handle(()));
+            }
+            if snapshot.operation_state(&OperationId::invitation_accept())
+                == Some(OperationState::Failed)
+            {
+                anyhow::bail!(
+                    "accept_pending_channel_invitation_via_ui: invitation_accept failed"
+                );
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!(
+                    "accept_pending_channel_invitation_via_ui: timed out waiting for channel join"
+                );
+            }
+            thread::sleep(Duration::from_millis(80));
+        }
     }
 
     fn join_channel_via_ui(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
@@ -914,6 +951,27 @@ impl InstanceBackend for LocalPtyBackend {
     fn send_chat_message_via_ui(&mut self, message: &str) -> Result<SubmittedAction<()>> {
         self.activate_control(ControlId::NavChat)?;
         wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
+        let snapshot = self.ui_snapshot()?;
+        if let Some(channels) = snapshot.lists.iter().find(|list| list.id == ListId::Channels) {
+            let selected = channels.items.iter().any(|item| item.selected);
+            if !selected && channels.items.len() == 1 {
+                self.send_keys("h")?;
+                thread::sleep(Duration::from_millis(80));
+                for sequence in ["k", "j"] {
+                    self.send_keys(sequence)?;
+                    thread::sleep(Duration::from_millis(80));
+                    let updated = self.ui_snapshot()?;
+                    let visible_selected = updated
+                        .lists
+                        .iter()
+                        .find(|list| list.id == ListId::Channels)
+                        .is_some_and(|list| list.items.iter().any(|item| item.selected));
+                    if visible_selected {
+                        break;
+                    }
+                }
+            }
+        }
         self.fill_field(FieldId::ChatInput, message)?;
         self.send_key(crate::tool_api::ToolKey::Enter, 1)?;
         Ok(SubmittedAction::without_handle(()))
