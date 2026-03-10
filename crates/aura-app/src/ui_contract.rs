@@ -838,6 +838,15 @@ pub enum ParityException {
     BrowserThemeControl,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParityExceptionMetadata {
+    pub exception: ParityException,
+    pub reason_code: &'static str,
+    pub scope: &'static str,
+    pub affected_surface: &'static str,
+    pub doc_reference: &'static str,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FlowAvailability {
@@ -880,6 +889,14 @@ pub const ALL_SHARED_FLOW_IDS: &[SharedFlowId] = &[
     SharedFlowId::SwitchAuthority,
     SharedFlowId::ThemeAppearance,
 ];
+
+pub const PARITY_EXCEPTION_METADATA: &[ParityExceptionMetadata] = &[ParityExceptionMetadata {
+    exception: ParityException::BrowserThemeControl,
+    reason_code: "browser_only_theme_control",
+    scope: "flow:theme_appearance",
+    affected_surface: "screen:settings/control:settings_toggle_theme",
+    doc_reference: "docs/997_ux_flow_coverage.md",
+}];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SharedFlowSupport {
@@ -1279,6 +1296,16 @@ pub fn shared_flow_support(flow: SharedFlowId) -> &'static SharedFlowSupport {
 }
 
 #[must_use]
+pub fn parity_exception_metadata(
+    exception: ParityException,
+) -> &'static ParityExceptionMetadata {
+    PARITY_EXCEPTION_METADATA
+        .iter()
+        .find(|metadata| metadata.exception == exception)
+        .expect("parity exception metadata must be declared")
+}
+
+#[must_use]
 pub fn shared_flow_scenarios(flow: SharedFlowId) -> Vec<&'static str> {
     SHARED_FLOW_SCENARIO_COVERAGE
         .iter()
@@ -1576,8 +1603,9 @@ mod tests {
         shared_screen_module_map, shared_screen_support, ConfirmationState, ControlId, FieldId,
         FlowAvailability, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId,
         OperationId, OperationInstanceId, OperationSnapshot, OperationState, ParityException,
-        RenderHeartbeat, ScreenId, SelectionSnapshot, SharedFlowId, UiParityMismatch, UiReadiness,
-        UiSnapshot, ALL_SHARED_FLOW_IDS, SHARED_FLOW_SCENARIO_COVERAGE, SHARED_FLOW_SUPPORT,
+        RenderHeartbeat, ScreenId, SelectionSnapshot, SharedFlowId, UiParityMismatch,
+        UiReadiness, UiSnapshot, ALL_SHARED_FLOW_IDS,
+        PARITY_EXCEPTION_METADATA, SHARED_FLOW_SCENARIO_COVERAGE, SHARED_FLOW_SUPPORT,
         SHARED_LIST_SUPPORT, SHARED_MODAL_SUPPORT, SHARED_SCREEN_MODULE_MAP, SHARED_SCREEN_SUPPORT,
     };
     use std::collections::HashSet;
@@ -1897,6 +1925,16 @@ mod tests {
             theme_support.tui,
             FlowAvailability::Exception(ParityException::BrowserThemeControl)
         );
+
+        let unique_exception_metadata: HashSet<_> = PARITY_EXCEPTION_METADATA
+            .iter()
+            .map(|metadata| metadata.exception)
+            .collect();
+        assert_eq!(
+            unique_exception_metadata.len(),
+            PARITY_EXCEPTION_METADATA.len(),
+            "parity exception metadata must stay unique"
+        );
     }
 
     #[test]
@@ -1967,6 +2005,61 @@ mod tests {
             shared_list_support(ListId::Contacts).web,
             FlowAvailability::Supported
         );
+    }
+
+    #[test]
+    fn parity_exception_metadata_is_complete_and_documented() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("workspace root");
+
+        let declared_exceptions: HashSet<_> = SHARED_FLOW_SUPPORT
+            .iter()
+            .flat_map(|support| [support.web, support.tui])
+            .filter_map(|availability| match availability {
+                FlowAvailability::Exception(exception) => Some(exception),
+                FlowAvailability::Supported => None,
+            })
+            .collect();
+
+        let metadata_exceptions: HashSet<_> = PARITY_EXCEPTION_METADATA
+            .iter()
+            .map(|metadata| metadata.exception)
+            .collect();
+        assert_eq!(
+            metadata_exceptions, declared_exceptions,
+            "parity exception metadata must stay exhaustive"
+        );
+
+        for metadata in PARITY_EXCEPTION_METADATA {
+            assert!(
+                !metadata.reason_code.trim().is_empty(),
+                "parity exception {:?} must declare a reason code",
+                metadata.exception
+            );
+            assert!(
+                !metadata.scope.trim().is_empty(),
+                "parity exception {:?} must declare a scope",
+                metadata.exception
+            );
+            assert!(
+                !metadata.affected_surface.trim().is_empty(),
+                "parity exception {:?} must declare an affected surface",
+                metadata.exception
+            );
+            assert!(
+                metadata.doc_reference.starts_with("docs/"),
+                "parity exception {:?} must point at authoritative docs",
+                metadata.exception
+            );
+            assert!(
+                workspace_root.join(metadata.doc_reference).is_file(),
+                "parity exception {:?} references missing doc {}",
+                metadata.exception,
+                metadata.doc_reference
+            );
+        }
     }
 
     #[test]

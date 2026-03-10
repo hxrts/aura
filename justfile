@@ -315,6 +315,9 @@ ci-harness-contract:
 ci-harness-ui-state-evented:
     bash scripts/check/harness-ui-state-evented.sh
 
+ci-harness-matrix-inventory:
+    bash scripts/check/harness-matrix-inventory.sh
+
 # Harness shared intent-contract policy
 ci-harness-shared-intent-contract:
     bash scripts/check/harness-shared-scenario-contract.sh
@@ -633,8 +636,8 @@ ci-dry-run profile="push":
 
     case "{{profile}}" in
         pr) total=14 ;;
-        push) total=26 ;;
-        all) total=34 ;;
+        push) total=27 ;;
+        all) total=35 ;;
         *)
             echo "Unknown ci-dry-run profile: {{profile}}"
             echo "Valid profiles: pr, push, all"
@@ -682,6 +685,7 @@ ci-dry-run profile="push":
         run_step "Harness Contract"      "just ci-harness-contract"
         run_step "Harness Shared Intent" "just ci-harness-shared-intent-contract"
         run_step "Harness UI Evented"    "just ci-harness-ui-state-evented"
+        run_step "Harness Matrix Inventory" "just ci-harness-matrix-inventory"
         run_step "Harness Browser"       "just ci-harness-browser"
         run_step "LAN Smoke"             "just ci-lan-smoke"
 

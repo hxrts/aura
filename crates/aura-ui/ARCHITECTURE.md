@@ -63,6 +63,12 @@ Enforcement locus:
 - keyboard and click flows resolve through shared control ids and typed modal
   state.
 
+Uniform shared-flow shape means:
+- canonical ids for screens, modals, lists, controls, and operations
+- shared focus and selection semantics
+- stable list/entity shape keyed by semantic ids rather than renderer order
+- shared operation and runtime-event shape at the `UiSnapshot` boundary
+
 Failure mode:
 - Harness execution requires per-screen or per-frontend special cases.
 - Shared scenarios regress back to raw mechanics.

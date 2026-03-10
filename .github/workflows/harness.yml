@@ -64,6 +64,22 @@ jobs:
           name: harness-deep
           replay-command: nix develop --command just ci-harness-ui-state-evented
 
+  matrix-inventory:
+    name: Harness Matrix Inventory
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: harness-matrix-inventory
+      - run: nix develop --command just ci-harness-matrix-inventory
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: harness-deep
+          replay-command: nix develop --command just ci-harness-matrix-inventory
+
   shared-intent:
     name: Harness Shared Intent
     runs-on: ubuntu-latest

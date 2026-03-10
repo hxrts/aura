@@ -89,6 +89,7 @@ Every parity-critical shared flow should have, in code and metadata:
 - a canonical shared flow identifier in `aura-app::ui_contract`
 - semantic action contracts with preconditions and terminal success/failure conditions
 - an authoritative readiness, event, or quiescence owner for waits
+- any parity exception recorded as typed metadata in `aura-app::ui_contract`
 - at least one canonical scenario reference in this report
 
 Frontend-specific flows may still have scenario coverage, but they are not part
@@ -106,6 +107,7 @@ Fast CI currently uses two separate gates:
 
 - `just ci-ux-flow-coverage` enforces traceability heuristics between changed UX-facing source files, canonical scenarios, and this report
 - `just ci-ux-policy` enforces documentation and contributor-guidance updates for shared UX contract and determinism surfaces via `scripts/check/ux-guidance-sync.sh`
+- `just ci-harness-matrix-inventory` enforces that converted scenario classification drives the TUI/web matrix lanes
 
 Current limitation:
 

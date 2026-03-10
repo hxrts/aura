@@ -43,7 +43,8 @@ By default it is intended to validate the real Aura runtime and real user interf
   actions and typed ids rather than raw selectors, raw keypresses, or label
   matching.
 - Semantic-first observation: structured `UiSnapshot` and render-heartbeat data
-  are authoritative; DOM/text fallbacks are diagnostics only.
+  are authoritative; DOM/text fallbacks are diagnostics only and must not
+  resolve parity-critical success-path observation.
 - Parity-critical waits must resolve against documented readiness, event, or
   quiescence contracts rather than raw sleep/poll heuristics.
 - Observation surfaces are read-only; recovery and retries remain explicit and

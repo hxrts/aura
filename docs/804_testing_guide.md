@@ -62,6 +62,7 @@ For parity-critical observation:
 - `UiSnapshot` and render-convergence data are authoritative
 - observation surfaces must be side-effect free
 - recovery and retries must be explicit and separate from observation
+- DOM/text fallback paths are diagnostics only and must not become success-path observation behavior
 - onboarding must publish through the same semantic snapshot path as the rest of the UI
 - placeholder IDs, override-backed exports, and heuristic success/event synthesis are not acceptable correctness paths
 
@@ -78,6 +79,9 @@ For failure analysis:
 
 The authoritative written update map for these surfaces lives in
 `scripts/check/ux-guidance-sync.sh` and is enforced by `just ci-ux-policy`.
+The authoritative frontend matrix for converted shared scenarios comes from
+`scenarios/harness_inventory.toml` and is enforced by
+`just ci-harness-matrix-inventory`.
 
 ## 2. The `#[aura_test]` Macro
 

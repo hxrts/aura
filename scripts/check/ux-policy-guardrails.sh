@@ -74,6 +74,35 @@ is_row_index_guard_path() {
   esac
 }
 
+shared_scenario_classification() {
+  local scenario_path="$1"
+  awk -v target="$scenario_path" '
+    BEGIN { path=""; class="" }
+    /^\[\[scenario\]\]/ {
+      if (path == target) {
+        print class
+        exit
+      }
+      path=""
+      class=""
+      next
+    }
+    /^path = / {
+      gsub(/^path = |"/, "", $0)
+      path=$0
+      next
+    }
+    /^classification = / {
+      gsub(/^classification = |"/, "", $0)
+      class=$0
+      next
+    }
+    END {
+      if (path == target) print class
+    }
+  ' scenarios/harness_inventory.toml
+}
+
 while IFS= read -r raw_line; do
   if [[ "$raw_line" == "+++ b/"* ]]; then
     current_file="${raw_line#+++ b/}"
@@ -114,9 +143,47 @@ while IFS= read -r raw_line; do
     fi
   fi
 
+  if [[ "$current_file" == crates/* && "$current_file" != "crates/aura-app/src/ui_contract.rs" ]]; then
+    if [[ "$text" == *'ScreenId("'*
+       || "$text" == *'ModalId("'*
+       || "$text" == *'ControlId("'*
+       || "$text" == *'FieldId("'*
+       || "$text" == *'ListId("'*
+       || "$text" == *'OperationId("'*
+       || "$text" == *'RuntimeEventId("'*
+       || "$text" == *'ToastId("'* ]]; then
+      record_violation "$current_file:$new_line: new stringly-typed parity identifier outside aura-app::ui_contract"
+    fi
+  fi
+
   if is_row_index_guard_path "$current_file"; then
     if [[ "$text" == *selected_index* || "$text" == *selected_idx* || "$text" == *selected_by_index* ]]; then
       record_violation "$current_file:$new_line: new row-index selection/addressing in parity-critical export or contract code"
+    fi
+  fi
+
+  if [[ "$current_file" == scenarios/harness/*.toml ]]; then
+    if [[ "$(shared_scenario_classification "$current_file")" == "shared" ]]; then
+      if [[ "$text" == *'action = "wait_for"'*
+         || "$text" == *'action = "message_contains"'*
+         || "$text" == *'action = "expect_toast"'*
+         || "$text" == *'action = "expect_command_result"'*
+         || "$text" == *'action = "expect_denied"'* ]]; then
+        record_violation "$current_file:$new_line: new raw wait or text assertion in shared scenario"
+      fi
+    fi
+  fi
+
+  if [[ "$current_file" != "justfile"
+     && "$current_file" != ".github/workflows/ci.yml"
+     && "$current_file" != ".github/workflows/harness.yml"
+     && "$current_file" != "scripts/check/harness-boundary-policy.sh"
+     && "$current_file" != "scripts/check/ux-policy-guardrails.sh"
+     && "$current_file" != "scripts/harness/run-matrix.sh"
+     && "$current_file" != "docs/804_testing_guide.md"
+     && "$current_file" != ".claude/skills/harness-run/SKILL.md" ]]; then
+    if [[ "$text" == *'just harness-run'* || "$text" == *'aura-harness -- run'* || "$text" == *'window.__AURA_HARNESS__'* ]]; then
+      record_violation "$current_file:$new_line: new frontend-driving harness entry point outside approved owner files"
     fi
   fi
 
