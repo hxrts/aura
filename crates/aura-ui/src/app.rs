@@ -3060,7 +3060,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                     class: "relative flex items-end px-4 pt-6 pb-0 sm:px-6",
                     div {
                         class: "absolute bottom-0 left-4 z-10 flex items-center justify-start gap-3 sm:left-6",
-                        span { id: "aura-nav-brand", class: "inline-flex h-8 items-center px-6 text-xs font-bold uppercase tracking-[0.12em] text-foreground", "AURA" }
+                        span { id: "aura-nav-brand", class: "inline-flex h-8 items-center px-6 text-xs font-sans font-bold uppercase tracking-[0.12em] text-foreground", "AURA" }
                     }
                     div {
                         class: "w-full min-w-0 overflow-x-auto px-16 [::-webkit-scrollbar]:hidden sm:px-24",
@@ -3688,7 +3688,7 @@ fn NeighborhoodScreen(
                         extra_class: Some("gap-3".to_string()),
                         div {
                             class: "rounded-sm bg-background/60 px-3 py-3",
-                            p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Home" }
+                            p { class: "m-0 text-xs font-sans font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Home" }
                             p { class: "m-0 mt-1 text-sm text-foreground", "Name: {selected_home}" }
                             p {
                                 class: "m-0 mt-1 text-xs text-muted-foreground",
@@ -3700,7 +3700,7 @@ fn NeighborhoodScreen(
                                 class: "grid flex-1 gap-4 lg:min-h-0 md:grid-cols-2",
                                 div {
                                     class: "flex lg:min-h-0 min-w-0 flex-col overflow-hidden rounded-sm bg-background/60 px-3 py-3",
-                                    p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Channels" }
+                                    p { class: "m-0 text-xs font-sans font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Channels" }
                                     div {
                                         class: "mt-3 flex-1 lg:min-h-0 min-w-0 overflow-y-auto pr-1",
                                         if display_channels.is_empty() {
@@ -3737,7 +3737,7 @@ fn NeighborhoodScreen(
                                 }
                                 div {
                                     class: "flex lg:min-h-0 flex-col rounded-sm bg-background/60 px-3 py-3",
-                                    p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Members & Participants" }
+                                    p { class: "m-0 text-xs font-sans font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Members & Participants" }
                                     div {
                                         class: "mt-3 flex-1 lg:min-h-0 overflow-y-auto pr-1",
                                         div { class: "aura-list space-y-2",
@@ -3908,7 +3908,7 @@ fn NeighborhoodScreen(
                         }
                         div {
                             class: "rounded-sm bg-background/60 px-3 py-3",
-                            p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Traversal" }
+                            p { class: "m-0 text-xs font-sans font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Traversal" }
                             p {
                                 class: "m-0 mt-1 text-sm text-foreground",
                                 "Can enter: Limited, Partial, Full"
@@ -4388,7 +4388,7 @@ fn ContactsScreen(
                         class: "rounded-sm bg-background/60 px-3 py-3",
                         div {
                             class: "flex items-center gap-3",
-                            p { class: "m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", "LAN Peers" }
+                            p { class: "m-0 text-xs font-sans font-semibold uppercase tracking-[0.08em] text-muted-foreground", "LAN Peers" }
                             p {
                                 class: "m-0 text-xs text-muted-foreground",
                                 "updates automatically"
@@ -5396,9 +5396,9 @@ fn dom_slug(value: &str) -> String {
 
 fn nav_tab_class(is_active: bool) -> &'static str {
     if is_active {
-        "inline-flex h-8 items-center rounded-sm bg-accent px-3 text-xs uppercase tracking-[0.08em] text-foreground"
+        "inline-flex h-8 items-center rounded-sm bg-accent px-3 text-xs font-sans uppercase tracking-[0.08em] text-foreground"
     } else {
-        "inline-flex h-8 items-center rounded-sm px-3 text-xs uppercase tracking-[0.08em] text-muted-foreground hover:bg-accent hover:text-foreground"
+        "inline-flex h-8 items-center rounded-sm px-3 text-xs font-sans uppercase tracking-[0.08em] text-muted-foreground hover:bg-accent hover:text-foreground"
     }
 }
 

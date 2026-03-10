@@ -96,7 +96,7 @@ pub fn UiCard(
                 div {
                     class: "flex w-full min-w-0 flex-col items-start text-left",
                     div {
-                        class: "w-full text-left text-xs font-semibold uppercase tracking-[0.08em] truncate",
+                        class: "w-full text-left text-xs font-sans font-semibold uppercase tracking-[0.08em] truncate",
                         "{title}"
                     }
                     if let Some(subtitle) = subtitle {
@@ -248,7 +248,7 @@ pub fn UiModal(
                     class: "bg-card px-4 py-3 border-b border-border flex items-center justify-between gap-3",
                     h2 {
                         id: "aura-modal-title",
-                        class: "m-0 text-sm font-semibold text-card-foreground",
+                        class: "m-0 text-sm font-sans font-semibold text-card-foreground",
                         "{modal.title}"
                     }
                     button {
@@ -415,7 +415,7 @@ pub fn UiDeviceEnrollmentModal(
                         class: "flex-1 space-y-1",
                         LbDialogTitle {
                             id: Some("aura-device-enrollment-modal-title".to_string()),
-                            class: Some("m-0 text-sm font-semibold text-card-foreground".to_string()),
+                            class: Some("m-0 text-sm font-sans font-semibold text-card-foreground".to_string()),
                             "{title}"
                         }
                         p {
@@ -596,7 +596,7 @@ pub fn UiAuthorityPickerModal(
                         class: "flex-1 space-y-1",
                         LbDialogTitle {
                             id: Some("aura-authority-picker-modal-title".to_string()),
-                            class: Some("m-0 text-sm font-semibold text-card-foreground".to_string()),
+                            class: Some("m-0 text-sm font-sans font-semibold text-card-foreground".to_string()),
                             "{title}"
                         }
                         p {
