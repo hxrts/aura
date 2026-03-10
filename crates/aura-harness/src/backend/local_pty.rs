@@ -16,7 +16,8 @@ use tokio::time::Instant;
 
 use crate::backend::{
     observe_operation, wait_for_modal_visible, wait_for_operation_submission,
-    wait_for_screen_visible, ContactInvitationCode, InstanceBackend, SubmittedAction,
+    wait_for_screen_visible, ContactInvitationCode, InstanceBackend, SharedSemanticBackend,
+    SubmittedAction, UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
 use crate::screen_normalization::{authoritative_screen, has_nav_header};
@@ -874,6 +875,51 @@ impl InstanceBackend for LocalPtyBackend {
 
     fn is_healthy(&self) -> bool {
         self.state == BackendState::Running
+    }
+}
+
+impl SharedSemanticBackend for LocalPtyBackend {
+    fn shared_projection(&self) -> Result<UiSnapshot> {
+        InstanceBackend::ui_snapshot(self)
+    }
+
+    fn wait_for_shared_projection_event(
+        &self,
+        timeout: Duration,
+        after_version: Option<u64>,
+    ) -> Option<Result<UiSnapshotEvent>> {
+        InstanceBackend::wait_for_ui_snapshot_event(self, timeout, after_version)
+    }
+
+    fn submit_create_account(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
+        InstanceBackend::create_account_via_ui(self, account_name)
+    }
+
+    fn submit_create_contact_invitation(
+        &mut self,
+        receiver_authority_id: &str,
+    ) -> Result<SubmittedAction<ContactInvitationCode>> {
+        InstanceBackend::create_contact_invitation_via_ui(self, receiver_authority_id)
+    }
+
+    fn submit_accept_contact_invitation(&mut self, code: &str) -> Result<SubmittedAction<()>> {
+        InstanceBackend::accept_contact_invitation_via_ui(self, code)
+    }
+
+    fn submit_invite_actor_to_channel(&mut self, authority_id: &str) -> Result<SubmittedAction<()>> {
+        InstanceBackend::invite_actor_to_channel_via_ui(self, authority_id)
+    }
+
+    fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>> {
+        InstanceBackend::accept_pending_channel_invitation_via_ui(self)
+    }
+
+    fn submit_join_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
+        InstanceBackend::join_channel_via_ui(self, channel_name)
+    }
+
+    fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>> {
+        InstanceBackend::send_chat_message_via_ui(self, message)
     }
 }
 

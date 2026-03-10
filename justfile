@@ -148,6 +148,9 @@ harness-scenario-inventory-check:
 harness-shared-scenario-contract-check:
     bash scripts/check/harness-shared-scenario-contract.sh
 
+harness-scenario-legality-check:
+    bash scripts/check/harness-scenario-legality.sh
+
 harness-ui-state-evented-check:
     bash scripts/check/harness-ui-state-evented.sh
 

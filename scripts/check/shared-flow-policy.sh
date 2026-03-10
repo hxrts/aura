@@ -15,6 +15,7 @@ bash scripts/check/ui-parity-contract.sh
 # Inventory and converted shared-scenario contract
 bash scripts/check/harness-scenario-inventory.sh
 bash scripts/check/harness-shared-scenario-contract.sh
+bash scripts/check/harness-scenario-legality.sh
 
 cargo test -p aura-app shared_flow_support_contract_is_consistent --quiet
 cargo test -p aura-app shared_intent_contract_accepts_intents --quiet

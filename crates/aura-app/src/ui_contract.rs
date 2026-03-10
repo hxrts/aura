@@ -613,6 +613,90 @@ impl RuntimeFact {
     }
 
     #[must_use]
+    pub fn key(&self) -> String {
+        match self {
+            Self::InvitationAccepted {
+                invitation_kind,
+                authority_id,
+                ..
+            } => format!(
+                "invitation_accepted:{invitation_kind:?}:{}",
+                authority_id.as_deref().unwrap_or("*")
+            ),
+            Self::InvitationCodeReady {
+                receiver_authority_id,
+                source_operation,
+            } => format!(
+                "invitation_code_ready:{}:{}",
+                source_operation.0,
+                receiver_authority_id.as_deref().unwrap_or("*")
+            ),
+            Self::PendingHomeInvitationReady => "pending_home_invitation_ready".to_string(),
+            Self::DeviceEnrollmentCodeReady { device_name, .. } => format!(
+                "device_enrollment_code_ready:{}",
+                device_name.as_deref().unwrap_or("*")
+            ),
+            Self::ContactLinkReady {
+                authority_id,
+                contact_count,
+            } => format!(
+                "contact_link_ready:{}:{}",
+                authority_id.as_deref().unwrap_or("*"),
+                contact_count.map(|value| value.to_string()).unwrap_or_else(|| "*".to_string())
+            ),
+            Self::HomeCreated { name } => format!("home_created:{name}"),
+            Self::HomeEntered { name, .. } => format!("home_entered:{name}"),
+            Self::ChannelJoined { channel, source } => format!(
+                "channel_joined:{}:{}",
+                channel
+                    .as_ref()
+                    .and_then(|channel| channel.name.clone().or(channel.id.clone()))
+                    .unwrap_or_else(|| "*".to_string()),
+                source.as_deref().unwrap_or("*")
+            ),
+            Self::ChannelMembershipReady { channel, .. } => format!(
+                "channel_membership_ready:{}",
+                channel
+                    .name
+                    .as_deref()
+                    .or(channel.id.as_deref())
+                    .unwrap_or("*")
+            ),
+            Self::RecipientPeersResolved { channel, .. } => format!(
+                "recipient_peers_resolved:{}",
+                channel
+                    .name
+                    .as_deref()
+                    .or(channel.id.as_deref())
+                    .unwrap_or("*")
+            ),
+            Self::MessageCommitted { channel, content } => format!(
+                "message_committed:{}:{content}",
+                channel
+                    .name
+                    .as_deref()
+                    .or(channel.id.as_deref())
+                    .unwrap_or("*")
+            ),
+            Self::MessageDeliveryReady { channel, .. } => format!(
+                "message_delivery_ready:{}",
+                channel
+                    .name
+                    .as_deref()
+                    .or(channel.id.as_deref())
+                    .unwrap_or("*")
+            ),
+            Self::RemoteFactsPulled {
+                contact_count,
+                lan_peer_count,
+            } => format!("remote_facts_pulled:{contact_count}:{lan_peer_count}"),
+            Self::ChatSignalUpdated {
+                active_channel, ..
+            } => format!("chat_signal_updated:{active_channel}"),
+        }
+    }
+
+    #[must_use]
     pub fn matches_needle(&self, needle: &str) -> bool {
         match self {
             Self::InvitationAccepted {
@@ -700,6 +784,11 @@ impl RuntimeEventSnapshot {
     #[must_use]
     pub fn matches_needle(&self, needle: &str) -> bool {
         self.fact.matches_needle(needle)
+    }
+
+    #[must_use]
+    pub fn key(&self) -> String {
+        self.fact.key()
     }
 }
 

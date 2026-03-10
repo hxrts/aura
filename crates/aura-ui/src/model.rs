@@ -654,7 +654,10 @@ impl UiModel {
     }
 
     fn push_runtime_fact(&mut self, fact: RuntimeFact) {
+        let fact_key = fact.key();
         self.runtime_event_key = self.runtime_event_key.saturating_add(1);
+        self.runtime_events
+            .retain(|event| event.key() != fact_key);
         self.runtime_events.push(RuntimeEventSnapshot {
             id: RuntimeEventId(format!("runtime-event-{}", self.runtime_event_key)),
             fact,
@@ -1726,12 +1729,51 @@ impl UiController {
         self.try_update_model(|model| model.sync_runtime_notifications(notifications));
     }
 
+    pub fn publish_runtime_notifications_projection(
+        &self,
+        notifications: Vec<(NotificationSelectionId, String)>,
+        facts: Vec<RuntimeFact>,
+    ) {
+        self.try_update_model(|model| {
+            model.sync_runtime_notifications(notifications);
+            for fact in facts {
+                model.push_runtime_fact(fact);
+            }
+        });
+    }
+
     pub fn sync_runtime_channels(&self, channels: Vec<(String, String)>) {
         self.try_update_model(|model| model.replace_channels(channels));
     }
 
+    pub fn publish_runtime_channels_projection(
+        &self,
+        channels: Vec<(String, String)>,
+        facts: Vec<RuntimeFact>,
+    ) {
+        self.try_update_model(|model| {
+            model.replace_channels(channels);
+            for fact in facts {
+                model.push_runtime_fact(fact);
+            }
+        });
+    }
+
     pub fn sync_runtime_contacts(&self, contacts: Vec<(AuthorityId, String, bool)>) {
         self.try_update_model(|model| model.replace_contacts(contacts));
+    }
+
+    pub fn publish_runtime_contacts_projection(
+        &self,
+        contacts: Vec<(AuthorityId, String, bool)>,
+        facts: Vec<RuntimeFact>,
+    ) {
+        self.try_update_model(|model| {
+            model.replace_contacts(contacts);
+            for fact in facts {
+                model.push_runtime_fact(fact);
+            }
+        });
     }
 
     pub fn push_runtime_fact(&self, fact: RuntimeFact) {

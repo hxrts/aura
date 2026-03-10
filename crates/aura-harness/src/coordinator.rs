@@ -711,7 +711,7 @@ impl HarnessCoordinator {
             Some(instance_id.to_string()),
             serde_json::json!({ "account_name": account_name }),
         );
-        backend.as_trait_mut().create_account_via_ui(account_name)
+        backend.as_shared_semantic_mut()?.submit_create_account(account_name)
     }
 
     pub fn create_contact_invitation_via_ui(
@@ -732,8 +732,8 @@ impl HarnessCoordinator {
             }),
         );
         backend
-            .as_trait_mut()
-            .create_contact_invitation_via_ui(receiver_authority_id)
+            .as_shared_semantic_mut()?
+            .submit_create_contact_invitation(receiver_authority_id)
     }
 
     pub fn accept_contact_invitation_via_ui(
@@ -751,7 +751,9 @@ impl HarnessCoordinator {
             Some(instance_id.to_string()),
             serde_json::json!({ "bytes": code.len() }),
         );
-        backend.as_trait_mut().accept_contact_invitation_via_ui(code)
+        backend
+            .as_shared_semantic_mut()?
+            .submit_accept_contact_invitation(code)
     }
 
     pub fn invite_actor_to_channel_via_ui(
@@ -770,8 +772,8 @@ impl HarnessCoordinator {
             serde_json::json!({ "authority_id": authority_id }),
         );
         backend
-            .as_trait_mut()
-            .invite_actor_to_channel_via_ui(authority_id)
+            .as_shared_semantic_mut()?
+            .submit_invite_actor_to_channel(authority_id)
     }
 
     pub fn accept_pending_channel_invitation_via_ui(
@@ -789,8 +791,8 @@ impl HarnessCoordinator {
             serde_json::json!({}),
         );
         backend
-            .as_trait_mut()
-            .accept_pending_channel_invitation_via_ui()
+            .as_shared_semantic_mut()?
+            .submit_accept_pending_channel_invitation()
     }
 
     pub fn join_channel_via_ui(
@@ -808,7 +810,7 @@ impl HarnessCoordinator {
             Some(instance_id.to_string()),
             serde_json::json!({ "channel_name": channel_name }),
         );
-        backend.as_trait_mut().join_channel_via_ui(channel_name)
+        backend.as_shared_semantic_mut()?.submit_join_channel(channel_name)
     }
 
     pub fn send_chat_message_via_ui(
@@ -826,7 +828,9 @@ impl HarnessCoordinator {
             Some(instance_id.to_string()),
             serde_json::json!({ "bytes": message.len() }),
         );
-        backend.as_trait_mut().send_chat_message_via_ui(message)
+        backend
+            .as_shared_semantic_mut()?
+            .submit_send_chat_message(message)
     }
 
     pub fn wait_for(

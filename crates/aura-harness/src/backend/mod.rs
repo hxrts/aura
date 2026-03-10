@@ -245,6 +245,25 @@ pub trait InstanceBackend {
     fn is_healthy(&self) -> bool;
 }
 
+pub trait SharedSemanticBackend {
+    fn shared_projection(&self) -> Result<UiSnapshot>;
+    fn wait_for_shared_projection_event(
+        &self,
+        timeout: Duration,
+        after_version: Option<u64>,
+    ) -> Option<Result<UiSnapshotEvent>>;
+    fn submit_create_account(&mut self, account_name: &str) -> Result<SubmittedAction<()>>;
+    fn submit_create_contact_invitation(
+        &mut self,
+        receiver_authority_id: &str,
+    ) -> Result<SubmittedAction<ContactInvitationCode>>;
+    fn submit_accept_contact_invitation(&mut self, code: &str) -> Result<SubmittedAction<()>>;
+    fn submit_invite_actor_to_channel(&mut self, authority_id: &str) -> Result<SubmittedAction<()>>;
+    fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>>;
+    fn submit_join_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>>;
+    fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>>;
+}
+
 pub(crate) fn wait_for_modal_visible(
     backend: &dyn InstanceBackend,
     modal_id: ModalId,
@@ -376,6 +395,17 @@ impl BackendHandle {
             Self::Local(backend) => backend,
             Self::Browser(backend) => backend.as_ref(),
             Self::Ssh(backend) => backend,
+        }
+    }
+
+    pub fn as_shared_semantic_mut(&mut self) -> Result<&mut dyn SharedSemanticBackend> {
+        match self {
+            Self::Local(backend) => Ok(backend),
+            Self::Browser(backend) => Ok(backend.as_mut()),
+            Self::Ssh(backend) => bail!(
+                "backend {} does not implement the shared semantic adapter contract",
+                backend.backend_kind()
+            ),
         }
     }
 }
