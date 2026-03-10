@@ -750,33 +750,11 @@ impl InstanceBackend for LocalPtyBackend {
         self.send_keys("n")?;
         wait_for_modal_visible(self, ModalId::CreateChannel, Duration::from_secs(5))?;
         self.fill_field(FieldId::CreateChannelName, channel_name)?;
-        self.activate_control(ControlId::ModalConfirmButton)?;
-        let members_deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            let advanced = snapshot.open_modal == Some(ModalId::CreateChannel)
-                && !matches!(
-                    snapshot.focused_control,
-                    Some(ControlId::Field(FieldId::CreateChannelName))
-                        | Some(ControlId::Field(FieldId::CreateChannelTopic))
-                );
-            if advanced || Instant::now() >= members_deadline {
-                break;
-            }
-            thread::sleep(Duration::from_millis(80));
-        }
-        self.activate_control(ControlId::ModalConfirmButton)?;
-        let threshold_deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            if snapshot.focused_control == Some(ControlId::Field(FieldId::ThresholdInput))
-                || Instant::now() >= threshold_deadline
-            {
-                break;
-            }
-            thread::sleep(Duration::from_millis(80));
-        }
-        self.activate_control(ControlId::ModalConfirmButton)?;
+        self.send_keys("\r")?;
+        thread::sleep(Duration::from_millis(120));
+        self.send_keys("\r")?;
+        thread::sleep(Duration::from_millis(120));
+        self.send_keys("\r")?;
         Ok(SubmittedAction::without_handle(()))
     }
 

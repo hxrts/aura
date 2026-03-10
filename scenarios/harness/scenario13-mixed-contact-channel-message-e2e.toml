@@ -127,13 +127,6 @@ name = "invite_code"
 timeout_ms = 30000
 
 [[steps]]
-id = "bob-invite-code-ready"
-action = "runtime_event_occurred"
-actor = "bob"
-runtime_event_kind = "invitation_code_ready"
-timeout_ms = 12000
-
-[[steps]]
 id = "alice-accept-contact-invitation"
 action = "accept_contact_invitation"
 actor = "alice"
@@ -181,6 +174,13 @@ action = "invite_actor_to_channel"
 actor = "alice"
 value = "${bob_authority_id}"
 timeout_ms = 6000
+
+[[steps]]
+id = "bob-pending-channel-invitation-ready"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "pending_home_invitation_ready"
+timeout_ms = 30000
 
 [[steps]]
 id = "bob-join-shared-channel"
