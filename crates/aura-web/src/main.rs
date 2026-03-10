@@ -31,6 +31,8 @@ cfg_if! {
         use dioxus::dioxus_core::schedule_update;
         use dioxus::prelude::*;
         use std::sync::Arc;
+        use wasm_bindgen::closure::Closure;
+        use wasm_bindgen::JsCast;
         use web_clipboard::WebClipboardAdapter;
 
         const WEB_STORAGE_PREFIX: &str = "aura_";
@@ -183,6 +185,23 @@ cfg_if! {
                 .location()
                 .reload()
                 .map_err(|error| format!("failed to reload page: {:?}", error))
+        }
+
+        fn reload_page_deferred() -> Result<(), String> {
+            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
+            let callback = Closure::once(Box::new(move || {
+                if let Some(window) = web_sys::window() {
+                    let _ = window.location().reload();
+                }
+            }) as Box<dyn FnOnce()>);
+            window
+                .set_timeout_with_callback_and_timeout_and_arguments_0(
+                    callback.as_ref().unchecked_ref(),
+                    0,
+                )
+                .map_err(|error| format!("failed to schedule page reload: {:?}", error))?;
+            callback.forget();
+            Ok(())
         }
 
         #[derive(Clone, PartialEq)]
@@ -498,7 +517,6 @@ cfg_if! {
             }
 
             if account_ready {
-                controller.set_account_setup_state(true, "", None);
                 return rsx! {
                     AuraUiRoot {
                         controller: controller.clone(),
@@ -746,14 +764,24 @@ cfg_if! {
                                     let storage_prefix = active_storage_prefix();
                                     let authority_storage_key =
                                         selected_authority_key(&storage_prefix);
-                                    let runtime = controller.app_core().read().await.runtime().cloned();
-                                    if let Some(runtime) = runtime {
+                                    let selected_authority = {
+                                        let core = controller.app_core().read().await;
+                                        core.authority()
+                                            .copied()
+                                            .or_else(|| core.runtime().map(|runtime| runtime.authority_id()))
+                                    };
+                                    if let Some(authority_id) = selected_authority {
+                                        web_sys::console::log_1(&format!(
+                                            "[web-onboarding] harness_persist authority={authority_id}"
+                                        ).into());
                                         let _ = persist_selected_authority(
                                             &authority_storage_key,
-                                            &runtime.authority_id(),
+                                            &authority_id,
                                         );
-                                        let _ = reload_page();
+                                        bootstrap_account_ready.set(true);
+                                        controller.set_account_setup_state(true, "", None);
                                         creating_account.set(false);
+                                        let _ = reload_page_deferred();
                                         return;
                                     }
                                 }

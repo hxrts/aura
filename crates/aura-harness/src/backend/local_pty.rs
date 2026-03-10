@@ -667,36 +667,16 @@ impl InstanceBackend for LocalPtyBackend {
     fn create_account_via_ui(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
         self.fill_field(FieldId::AccountName, account_name)?;
         self.activate_control(ControlId::OnboardingCreateAccountButton)?;
-        let home_ready_deadline = Instant::now() + Duration::from_secs(10);
+        let onboarding_exit_deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let snapshot = self.ui_snapshot()?;
             if snapshot.screen != ScreenId::Onboarding {
                 break;
             }
-            if Instant::now() >= home_ready_deadline {
+            if Instant::now() >= onboarding_exit_deadline {
                 break;
             }
             thread::sleep(Duration::from_millis(100));
-        }
-        let snapshot = self.ui_snapshot()?;
-        let default_home_id = aura_core::identifiers::ChannelId::default().to_string();
-        let has_real_home = snapshot
-            .lists
-            .iter()
-            .find(|list| list.id == ListId::Homes)
-            .map(|list| {
-                list.items
-                    .iter()
-                    .any(|item| item.id != default_home_id)
-            })
-            .unwrap_or(false);
-        if !has_real_home {
-            self.activate_control(ControlId::NavNeighborhood)?;
-            wait_for_screen_visible(self, ScreenId::Neighborhood, Duration::from_secs(5))?;
-            self.send_keys("n")?;
-            wait_for_modal_visible(self, ModalId::CreateHome, Duration::from_secs(5))?;
-            self.fill_field(FieldId::HomeName, &format!("{account_name}'s Home"))?;
-            self.activate_control(ControlId::ModalConfirmButton)?;
         }
         Ok(SubmittedAction::without_handle(()))
     }
@@ -771,7 +751,31 @@ impl InstanceBackend for LocalPtyBackend {
         wait_for_modal_visible(self, ModalId::CreateChannel, Duration::from_secs(5))?;
         self.fill_field(FieldId::CreateChannelName, channel_name)?;
         self.activate_control(ControlId::ModalConfirmButton)?;
+        let members_deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            let advanced = snapshot.open_modal == Some(ModalId::CreateChannel)
+                && !matches!(
+                    snapshot.focused_control,
+                    Some(ControlId::Field(FieldId::CreateChannelName))
+                        | Some(ControlId::Field(FieldId::CreateChannelTopic))
+                );
+            if advanced || Instant::now() >= members_deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(80));
+        }
         self.activate_control(ControlId::ModalConfirmButton)?;
+        let threshold_deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            if snapshot.focused_control == Some(ControlId::Field(FieldId::ThresholdInput))
+                || Instant::now() >= threshold_deadline
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(80));
+        }
         self.activate_control(ControlId::ModalConfirmButton)?;
         Ok(SubmittedAction::without_handle(()))
     }
