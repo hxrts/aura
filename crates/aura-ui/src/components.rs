@@ -260,7 +260,7 @@ pub fn UiModal(
                     }
                 }
                 div {
-                    class: "bg-card px-4 py-3 space-y-2 text-sm text-card-foreground",
+                    class: "bg-card px-4 py-5 space-y-4 text-sm text-card-foreground",
                     p {
                         id: "aura-modal-description",
                         class: "sr-only",
@@ -289,10 +289,10 @@ pub fn UiModal(
                     }
                     if !modal.inputs.is_empty() {
                         div {
-                            class: "pt-1 space-y-1",
+                            class: "pt-2 space-y-3",
                             for input_view in modal.inputs.clone() {
                                 div {
-                                    class: "space-y-1",
+                                    class: "space-y-2",
                                     label {
                                         r#for: "{input_view.field_id.web_dom_id().or_else(|| ControlId::ModalInput.web_dom_id()).expect(\"modal input field identifier must be defined\")}",
                                         class: "text-[0.7rem] uppercase tracking-[0.06em] text-muted-foreground",

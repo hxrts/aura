@@ -4209,7 +4209,7 @@ fn ChatScreen(
                     subtitle: Some(if topic.is_empty() { "No topic set".to_string() } else { topic.clone() }),
                     extra_class: None,
                     UiCardBody {
-                        extra_class: None,
+                        extra_class: Some("!-mt-6".to_string()),
                         div {
                             class: "flex-1 lg:min-h-0 overflow-y-auto pr-1",
                             div {
