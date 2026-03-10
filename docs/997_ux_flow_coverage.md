@@ -106,6 +106,7 @@ of the portability contract unless explicitly promoted into the shared contract.
 Fast CI currently uses two separate gates:
 
 - `just ci-ux-flow-coverage` enforces traceability heuristics between changed UX-facing source files, canonical scenarios, and this report
+- `AURA_ALLOW_FLOW_COVERAGE_SKIP=1` is a local-only escape hatch; CI rejects it
 - `just ci-ux-policy` enforces documentation and contributor-guidance updates for shared UX contract and determinism surfaces via `scripts/check/ux-guidance-sync.sh`
 - `just ci-harness-matrix-inventory` enforces that converted scenario classification drives the TUI/web matrix lanes
 

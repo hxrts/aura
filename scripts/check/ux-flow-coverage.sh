@@ -2,6 +2,10 @@
 set -euo pipefail
 
 if [[ "${AURA_ALLOW_FLOW_COVERAGE_SKIP:-0}" == "1" ]]; then
+  if [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    echo "ux-flow-coverage: AURA_ALLOW_FLOW_COVERAGE_SKIP=1 is not allowed in CI"
+    exit 1
+  fi
   echo "ux-flow-coverage: skipped via AURA_ALLOW_FLOW_COVERAGE_SKIP=1"
   exit 0
 fi

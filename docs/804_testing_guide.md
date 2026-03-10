@@ -82,6 +82,13 @@ The authoritative written update map for these surfaces lives in
 The authoritative frontend matrix for converted shared scenarios comes from
 `scenarios/harness_inventory.toml` and is enforced by
 `just ci-harness-matrix-inventory`.
+Allowlisted harness-mode hooks must carry explicit owner, justification, and
+design-note references in `scripts/check/ux-policy-guardrails.sh`.
+Changes to the browser harness bridge request/response or observation surface
+must update both `crates/aura-web/ARCHITECTURE.md` and this guide so
+compatibility expectations stay explicit.
+Parity exceptions must remain typed metadata in `aura-app::ui_contract` with a
+reason code, scope, affected surface, and authoritative doc reference.
 
 ## 2. The `#[aura_test]` Macro
 
