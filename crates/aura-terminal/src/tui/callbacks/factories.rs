@@ -20,6 +20,7 @@ use aura_app::ui::workflows::invitation::import_invitation_details;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::CeremonyId;
 use aura_core::AuthorityId;
+use futures::FutureExt;
 
 use super::types::*;
 
@@ -1726,9 +1727,14 @@ impl AppCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             spawn_ctx(ctx.clone(), async move {
-                // Create the account file via async storage effects.
-                match ctx.create_account(&nickname_suggestion).await {
-                    Ok(()) => {
+                let account_result = std::panic::AssertUnwindSafe(async {
+                    ctx.create_account(&nickname_suggestion).await
+                })
+                .catch_unwind()
+                .await;
+
+                match account_result {
+                    Ok(Ok(())) => {
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::NicknameSuggestionChanged(nickname_suggestion.clone()),
@@ -1750,12 +1756,22 @@ impl AppCallbacks {
                                 .await;
                         });
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::OperationFailed {
                                 operation: "CreateAccount".to_string(),
                                 error: e.to_string(),
+                            },
+                        )
+                        .await;
+                    }
+                    Err(_) => {
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::OperationFailed {
+                                operation: "CreateAccount".to_string(),
+                                error: "panic in CreateAccount callback".to_string(),
                             },
                         )
                         .await;

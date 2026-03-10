@@ -612,42 +612,44 @@ impl IoContext {
         let nickname_suggestion = nickname_suggestion.to_string();
         let home_name = format!("{nickname_suggestion}'s Home");
         let harness_mode = std::env::var_os("AURA_HARNESS_MODE").is_some();
-        let (authority_id, _context_id) = self
-            .account_files
-            .create_account(&nickname_suggestion)
-            .await?;
+        let (authority_id, _context_id) = if harness_mode {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                self.account_files.create_account(&nickname_suggestion),
+            )
+            .await
+            .map_err(|_| {
+                crate::error::TerminalError::Operation(
+                    "create_account timed out while persisting account files".to_string(),
+                )
+            })??
+        } else {
+            self.account_files.create_account(&nickname_suggestion).await?
+        };
 
-        {
+        if !harness_mode {
             let mut core = app_core.write().await;
             core.set_authority(authority_id);
         }
 
         if harness_mode {
-            const SIGNING_KEY_ATTEMPTS: usize = 40;
-            const BOOTSTRAP_RETRY_MS: u64 = 250;
             const HOME_CONVERGENCE_ATTEMPTS: usize = 16;
             const HOME_CONVERGENCE_RETRY_MS: u64 = 250;
-            for attempt in 0..SIGNING_KEY_ATTEMPTS {
-                let bootstrap_ready = {
-                    let core = app_core.read().await;
-                    if core.has_runtime() {
-                        core.bootstrap_signing_keys().await.is_ok()
-                    } else {
-                        false
-                    }
-                };
-                if bootstrap_ready {
-                    break;
-                }
-                if attempt + 1 < SIGNING_KEY_ATTEMPTS {
-                    tokio::time::sleep(std::time::Duration::from_millis(BOOTSTRAP_RETRY_MS)).await;
-                }
-            }
-
-            let _ = settings_workflows::refresh_settings_from_runtime(&app_core).await;
-            let _ = system_workflows::refresh_account(&app_core).await;
-            let created_home_id =
-                context_workflows::create_home(&app_core, Some(home_name.clone()), None).await?;
+            let created_home_id = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                context_workflows::create_home_for_authority(
+                    &app_core,
+                    authority_id,
+                    Some(home_name.clone()),
+                    None,
+                ),
+            )
+            .await
+            .map_err(|_| {
+                crate::error::TerminalError::Operation(
+                    "create_account timed out while creating local home projection".to_string(),
+                )
+            })??;
             let mut home_ready = false;
             for attempt in 0..HOME_CONVERGENCE_ATTEMPTS {
                 home_ready = self
@@ -660,11 +662,14 @@ impl IoContext {
                     break;
                 }
                 if attempt == 4 || attempt == 10 {
-                    let _ = context_workflows::ensure_local_home_projection(
-                        &app_core,
-                        created_home_id,
-                        home_name.clone(),
-                        authority_id,
+                    let _ = tokio::time::timeout(
+                        std::time::Duration::from_secs(2),
+                        context_workflows::ensure_local_home_projection(
+                            &app_core,
+                            created_home_id,
+                            home_name.clone(),
+                            authority_id,
+                        ),
                     )
                     .await;
                 }
@@ -676,11 +681,14 @@ impl IoContext {
                 }
             }
             if !home_ready {
-                let _ = context_workflows::ensure_local_home_projection(
-                    &app_core,
-                    created_home_id,
-                    home_name.clone(),
-                    authority_id,
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    context_workflows::ensure_local_home_projection(
+                        &app_core,
+                        created_home_id,
+                        home_name.clone(),
+                        authority_id,
+                    ),
                 )
                 .await;
                 home_ready = self
@@ -695,6 +703,59 @@ impl IoContext {
                     "account bootstrap did not converge a real home".to_string(),
                 ));
             }
+            let bootstrap_core = app_core.clone();
+            let bootstrap_home_name = home_name.clone();
+            tokio::spawn(async move {
+                const AUTHORITY_SET_ATTEMPTS: usize = 40;
+                const SIGNING_KEY_ATTEMPTS: usize = 40;
+                const BOOTSTRAP_RETRY_MS: u64 = 250;
+                for attempt in 0..AUTHORITY_SET_ATTEMPTS {
+                    let authority_set = match tokio::time::timeout(
+                        std::time::Duration::from_millis(50),
+                        bootstrap_core.write(),
+                    )
+                    .await
+                    {
+                        Ok(mut core) => {
+                            core.set_authority(authority_id);
+                            true
+                        }
+                        Err(_) => false,
+                    };
+                    if authority_set {
+                        break;
+                    }
+                    if attempt + 1 < AUTHORITY_SET_ATTEMPTS {
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
+                }
+                for attempt in 0..SIGNING_KEY_ATTEMPTS {
+                    let bootstrap_ready = {
+                        let core = bootstrap_core.read().await;
+                        if core.has_runtime() {
+                            core.bootstrap_signing_keys().await.is_ok()
+                        } else {
+                            false
+                        }
+                    };
+                    if bootstrap_ready {
+                        break;
+                    }
+                    if attempt + 1 < SIGNING_KEY_ATTEMPTS {
+                        tokio::time::sleep(std::time::Duration::from_millis(BOOTSTRAP_RETRY_MS))
+                            .await;
+                    }
+                }
+                let _ = settings_workflows::refresh_settings_from_runtime(&bootstrap_core).await;
+                let _ = system_workflows::refresh_account(&bootstrap_core).await;
+                let _ = context_workflows::ensure_local_home_projection(
+                    &bootstrap_core,
+                    created_home_id,
+                    bootstrap_home_name,
+                    authority_id,
+                )
+                .await;
+            });
             return Ok(());
         }
 

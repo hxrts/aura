@@ -26,6 +26,8 @@ use crate::workflows::signals::emit_signal;
 pub use crate::workflows::time::current_time_ms;
 
 const LOCAL_FIRST_TIME_BUDGET_MS: u64 = 50;
+const LOCAL_FIRST_WRITE_ATTEMPTS: usize = 100;
+const LOCAL_FIRST_WRITE_RETRY_MS: u64 = 10;
 
 const MISSING_ACTIVE_HOME_MESSAGE: &str =
     "No active home selected. Open Neighborhood and create or select a home.";
@@ -398,8 +400,9 @@ pub async fn link_home_one_hop_link(
 ///
 /// This is currently a local-first workflow. It creates a deterministic home ID,
 /// updates `HOMES_SIGNAL`, and makes the home visible in `NEIGHBORHOOD_SIGNAL`.
-pub async fn create_home(
+async fn create_home_with_creator(
     app_core: &Arc<RwLock<AppCore>>,
+    creator: AuthorityId,
     name: Option<String>,
     description: Option<String>,
 ) -> Result<ChannelId, AuraError> {
@@ -410,14 +413,6 @@ pub async fn create_home(
         .filter(|s| !s.is_empty())
         .unwrap_or("Home")
         .to_string();
-
-    let creator = {
-        let core = app_core.read().await;
-        core.runtime()
-            .map(|r| r.authority_id())
-            .or_else(|| core.authority().copied())
-    }
-    .ok_or_else(|| AuraError::permission_denied("Authority not set"))?;
 
     let home_id = ChannelId::from_bytes(hash(
         format!("home:{creator}:{home_name}:{timestamp_ms}").as_bytes(),
@@ -434,7 +429,19 @@ pub async fn create_home(
     );
 
     let (homes_state, neighborhood_state) = {
-        let mut core = app_core.write().await;
+        let mut maybe_core = None;
+        for attempt in 0..LOCAL_FIRST_WRITE_ATTEMPTS {
+            if let Some(core) = app_core.try_write() {
+                maybe_core = Some(core);
+                break;
+            }
+            if attempt + 1 < LOCAL_FIRST_WRITE_ATTEMPTS {
+                tokio::time::sleep(Duration::from_millis(LOCAL_FIRST_WRITE_RETRY_MS)).await;
+            }
+        }
+        let mut core = maybe_core.ok_or_else(|| {
+            AuraError::internal("local-first create_home timed out acquiring app core write lock")
+        })?;
 
         let mut homes = core.views().get_homes();
         let should_promote_to_primary = homes.is_empty()
@@ -495,6 +502,31 @@ pub async fn create_home(
     Ok(home_id)
 }
 
+pub async fn create_home(
+    app_core: &Arc<RwLock<AppCore>>,
+    name: Option<String>,
+    description: Option<String>,
+) -> Result<ChannelId, AuraError> {
+    let creator = {
+        let core = app_core.read().await;
+        core.runtime()
+            .map(|r| r.authority_id())
+            .or_else(|| core.authority().copied())
+    }
+    .ok_or_else(|| AuraError::permission_denied("Authority not set"))?;
+
+    create_home_with_creator(app_core, creator, name, description).await
+}
+
+pub async fn create_home_for_authority(
+    app_core: &Arc<RwLock<AppCore>>,
+    creator: AuthorityId,
+    name: Option<String>,
+    description: Option<String>,
+) -> Result<ChannelId, AuraError> {
+    create_home_with_creator(app_core, creator, name, description).await
+}
+
 /// Ensure a local-first home projection remains present in views/signals until
 /// runtime-backed facts supersede it.
 pub async fn ensure_local_home_projection(
@@ -508,7 +540,21 @@ pub async fn ensure_local_home_projection(
     let timestamp_ms = local_first_timestamp_ms(app_core).await;
 
     let (homes_state, neighborhood_state) = {
-        let mut core = app_core.write().await;
+        let mut maybe_core = None;
+        for attempt in 0..LOCAL_FIRST_WRITE_ATTEMPTS {
+            if let Some(core) = app_core.try_write() {
+                maybe_core = Some(core);
+                break;
+            }
+            if attempt + 1 < LOCAL_FIRST_WRITE_ATTEMPTS {
+                tokio::time::sleep(Duration::from_millis(LOCAL_FIRST_WRITE_RETRY_MS)).await;
+            }
+        }
+        let mut core = maybe_core.ok_or_else(|| {
+            AuraError::internal(
+                "local-first ensure_local_home_projection timed out acquiring app core write lock",
+            )
+        })?;
         let mut homes = core.views().get_homes();
         if !homes.has_home(&home_id) {
             let mut home = HomeState::new(

@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::thread;
 use std::time::Duration;
 
@@ -56,6 +56,7 @@ pub struct LocalPtyBackend {
     pty_rows: u16,
     pty_cols: u16,
     last_authoritative_screen: Arc<Mutex<Option<String>>>,
+    last_ui_snapshot: Arc<StdMutex<Option<UiSnapshot>>>,
 }
 
 impl LocalPtyBackend {
@@ -94,6 +95,7 @@ impl LocalPtyBackend {
             pty_rows: pty_rows.unwrap_or(40),
             pty_cols: pty_cols.unwrap_or(120),
             last_authoritative_screen: Arc::new(Mutex::new(None)),
+            last_ui_snapshot: Arc::new(StdMutex::new(None)),
         }
     }
 
@@ -438,8 +440,13 @@ impl InstanceBackend for LocalPtyBackend {
         let mut last_error = None;
         for _ in 0..SNAPSHOT_WAIT_ATTEMPTS {
             match fs::read_to_string(&path) {
-                Ok(content) => match serde_json::from_str(&content) {
-                    Ok(snapshot) => return Ok(snapshot),
+                Ok(content) => match serde_json::from_str::<UiSnapshot>(&content) {
+                    Ok(snapshot) => {
+                        if let Ok(mut cached) = self.last_ui_snapshot.lock() {
+                            *cached = Some(snapshot.clone());
+                        }
+                        return Ok(snapshot);
+                    }
                     Err(error) => last_error = Some(format!("parse error: {error}")),
                 },
                 Err(error) => last_error = Some(format!("read error: {error}")),
@@ -448,6 +455,11 @@ impl InstanceBackend for LocalPtyBackend {
         }
 
         let detail = last_error.unwrap_or_else(|| "no snapshot produced".to_string());
+        if let Ok(cached) = self.last_ui_snapshot.lock() {
+            if let Some(snapshot) = cached.clone() {
+                return Ok(snapshot);
+            }
+        }
         if detail.contains("No such file or directory") {
             return Ok(Self::synthetic_onboarding_snapshot());
         }
@@ -683,6 +695,12 @@ impl InstanceBackend for LocalPtyBackend {
         let convergence_deadline = Instant::now() + Duration::from_secs(20);
         loop {
             let snapshot = self.ui_snapshot()?;
+            if snapshot.operations.iter().any(|operation| {
+                operation.id == OperationId::account_create()
+                    && operation.state == aura_app::ui::contract::OperationState::Failed
+            }) {
+                anyhow::bail!("create_account_via_ui: account creation failed");
+            }
             if snapshot.screen != ScreenId::Onboarding && snapshot_has_real_home(&snapshot) {
                 break;
             }
@@ -691,8 +709,16 @@ impl InstanceBackend for LocalPtyBackend {
             }
             thread::sleep(Duration::from_millis(100));
         }
+        let final_snapshot = self.ui_snapshot()?;
         anyhow::ensure!(
-            snapshot_has_real_home(&self.ui_snapshot()?),
+            final_snapshot.operations.iter().any(|operation| {
+                operation.id == OperationId::account_create()
+                    && operation.state == aura_app::ui::contract::OperationState::Submitting
+            }) == false,
+            "create_account_via_ui: account creation remained stuck submitting"
+        );
+        anyhow::ensure!(
+            snapshot_has_real_home(&final_snapshot),
             "create_account_via_ui: account creation did not converge a real home"
         );
         Ok(SubmittedAction::without_handle(()))

@@ -397,8 +397,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
             // Initial read.
             {
-                let core = app_core.raw().read().await;
-                if let Ok(Some(err)) = core.read(&*ERROR_SIGNAL).await {
+                let reactive = {
+                    let core = app_core.raw().read().await;
+                    core.reactive().clone()
+                };
+                if let Ok(Some(err)) = reactive.read(&*ERROR_SIGNAL).await {
                     let msg = format_error(&err);
                     tui.with_mut(|state| {
                         // Prefer routing errors into the account setup modal when it is active.
@@ -1366,8 +1369,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // Account
                         // =========================================================================
                         UiUpdate::AccountCreated => {
-                            // Update the account setup modal to show success screen.
                             tui.with_mut(|state| {
+                                state.set_operation_state(
+                                    OperationId::account_create(),
+                                    OperationState::Succeeded,
+                                );
                                 state.account_created_queued();
                             });
                         }
@@ -1409,6 +1415,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             // For account creation, show error in the modal instead of toast.
                             if operation == "CreateAccount" {
                                 tui.with_mut(|state| {
+                                    state.set_operation_state(
+                                        OperationId::account_create(),
+                                        OperationState::Failed,
+                                    );
                                     state.modal_queue.update_active(|modal| {
                                         if let QueuedModal::AccountSetup(ref mut s) = modal {
                                             s.set_error(error.clone());
@@ -1588,17 +1598,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 // Handle dispatch commands via CallbackRegistry
                                 match dispatch_cmd {
                                     DispatchCommand::CreateAccount { name } => {
-                                        if std::env::var_os("AURA_HARNESS_MODE").is_some() {
-                                            new_state.account_created_queued();
-                                        }
+                                        new_state.set_operation_state(
+                                            OperationId::account_create(),
+                                            OperationState::Submitting,
+                                        );
                                         (cb.app.on_create_account)(name);
                                     }
                                     DispatchCommand::ImportDeviceEnrollmentDuringOnboarding {
                                         code,
                                     } => {
-                                        if std::env::var_os("AURA_HARNESS_MODE").is_some() {
-                                            new_state.account_created_queued();
-                                        }
                                         (cb.app.on_import_device_enrollment_during_onboarding)(
                                             code,
                                         );
@@ -3415,8 +3423,12 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     // Settings data - reactively updated via SETTINGS_SIGNAL
     let devices = Vec::new();
     let nickname_suggestion = {
-        let core = ctx_arc.app_core_raw().read().await;
-        core.read(&*SETTINGS_SIGNAL)
+        let reactive = {
+            let core = ctx_arc.app_core_raw().read().await;
+            core.reactive().clone()
+        };
+        reactive
+            .read(&*SETTINGS_SIGNAL)
             .await
             .unwrap_or_default()
             .nickname_suggestion

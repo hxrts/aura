@@ -458,6 +458,11 @@ pub enum InvitationFactKind {
 
 impl OperationId {
     #[must_use]
+    pub fn account_create() -> Self {
+        Self("account_create".to_string())
+    }
+
+    #[must_use]
     pub fn create_home() -> Self {
         Self("create_home".to_string())
     }
