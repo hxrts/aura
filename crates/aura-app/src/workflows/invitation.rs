@@ -665,6 +665,8 @@ pub async fn accept_pending_home_invitation(
     let our_authority = runtime.authority_id();
     const HOME_ACCEPT_ATTEMPTS: usize = 200;
     const HOME_ACCEPT_BACKOFF_MS: u64 = 150;
+    const CHANNEL_CONTEXT_ATTEMPTS: usize = 60;
+    const CHANNEL_CONTEXT_BACKOFF_MS: u64 = 100;
 
     for attempt in 0..HOME_ACCEPT_ATTEMPTS {
         let pending = runtime.list_pending_invitations().await;
@@ -685,35 +687,22 @@ pub async fn accept_pending_home_invitation(
                 Ok(()) => {
                     converge_runtime(&runtime).await;
                     if let Some(channel_id) = invited_channel_id {
-                        let channel_visible = crate::workflows::snapshot_policy::chat_snapshot(
-                            app_core,
-                        )
-                        .await
-                        .channel(&channel_id)
-                        .is_some();
-                        if !channel_visible {
-                            let _ =
-                                crate::workflows::messaging::join_channel(app_core, channel_id)
-                                    .await;
+                        let mut authoritative_context = None;
+                        for attempt in 0..CHANNEL_CONTEXT_ATTEMPTS {
+                            authoritative_context =
+                                crate::workflows::messaging::authoritative_context_id_for_channel(
+                                    app_core, channel_id,
+                                )
+                                .await;
+                            if authoritative_context.is_some() {
+                                break;
+                            }
+                            if attempt + 1 < CHANNEL_CONTEXT_ATTEMPTS {
+                                converge_runtime(&runtime).await;
+                                runtime.sleep_ms(CHANNEL_CONTEXT_BACKOFF_MS).await;
+                            }
                         }
-                        let _ = crate::workflows::messaging::project_channel_peer_membership(
-                            app_core,
-                            channel_id,
-                            inv.sender_id,
-                            channel_name_hint.as_deref(),
-                        )
-                        .await;
-                        converge_runtime(&runtime).await;
-                    }
-                    return Ok(inv.invitation_id.clone());
-                }
-                Err(e) => {
-                    let message = e.to_string();
-                    let lowered = message.to_lowercase();
-                    // Channel invites may be auto-accepted by the inbound envelope pipeline.
-                    // Treat these races as idempotent success for `/homeaccept`.
-                    if lowered.contains("already accepted") || lowered.contains("not pending") {
-                        if let Some(channel_id) = invited_channel_id {
+                        if authoritative_context.is_none() {
                             let channel_visible = crate::workflows::snapshot_policy::chat_snapshot(
                                 app_core,
                             )
@@ -725,13 +714,91 @@ pub async fn accept_pending_home_invitation(
                                     crate::workflows::messaging::join_channel(app_core, channel_id)
                                         .await;
                             }
-                            let _ = crate::workflows::messaging::project_channel_peer_membership(
+                            authoritative_context =
+                                crate::workflows::messaging::authoritative_context_id_for_channel(
+                                    app_core, channel_id,
+                                )
+                                .await;
+                        }
+                        let authoritative_context = authoritative_context.ok_or_else(|| {
+                            AuraError::agent(format!(
+                                "Accepted channel invitation for {channel_id} but no authoritative context was materialized"
+                            ))
+                        })?;
+                        crate::workflows::messaging::project_channel_peer_membership_with_context(
+                            app_core,
+                            channel_id,
+                            Some(authoritative_context),
+                            inv.sender_id,
+                            channel_name_hint.as_deref(),
+                        )
+                        .await?;
+                        if crate::workflows::snapshot_policy::chat_snapshot(app_core)
+                            .await
+                            .channel(&channel_id)
+                            .is_none()
+                        {
+                            let _ =
+                                crate::workflows::messaging::join_channel(app_core, channel_id)
+                                    .await;
+                        }
+                        converge_runtime(&runtime).await;
+                    }
+                    return Ok(inv.invitation_id.clone());
+                }
+                Err(e) => {
+                    let message = e.to_string();
+                    let lowered = message.to_lowercase();
+                    // Channel invites may be auto-accepted by the inbound envelope pipeline.
+                    // Treat these races as idempotent success for `/homeaccept`.
+                    if lowered.contains("already accepted") || lowered.contains("not pending") {
+                        if let Some(channel_id) = invited_channel_id {
+                            let mut authoritative_context = None;
+                            for attempt in 0..CHANNEL_CONTEXT_ATTEMPTS {
+                                authoritative_context =
+                                    crate::workflows::messaging::authoritative_context_id_for_channel(
+                                        app_core, channel_id,
+                                    )
+                                    .await;
+                                if authoritative_context.is_some() {
+                                    break;
+                                }
+                                if attempt + 1 < CHANNEL_CONTEXT_ATTEMPTS {
+                                    converge_runtime(&runtime).await;
+                                    runtime.sleep_ms(CHANNEL_CONTEXT_BACKOFF_MS).await;
+                                }
+                            }
+                            if authoritative_context.is_none() {
+                                let channel_visible = crate::workflows::snapshot_policy::chat_snapshot(
+                                    app_core,
+                                )
+                                .await
+                                .channel(&channel_id)
+                                .is_some();
+                                if !channel_visible {
+                                    let _ =
+                                        crate::workflows::messaging::join_channel(app_core, channel_id)
+                                            .await;
+                                }
+                                authoritative_context =
+                                    crate::workflows::messaging::authoritative_context_id_for_channel(
+                                        app_core, channel_id,
+                                    )
+                                    .await;
+                            }
+                            let authoritative_context = authoritative_context.ok_or_else(|| {
+                                AuraError::agent(format!(
+                                    "Accepted channel invitation for {channel_id} but no authoritative context was materialized"
+                                ))
+                            })?;
+                            crate::workflows::messaging::project_channel_peer_membership_with_context(
                                 app_core,
                                 channel_id,
+                                Some(authoritative_context),
                                 inv.sender_id,
                                 channel_name_hint.as_deref(),
                             )
-                            .await;
+                            .await?;
                             converge_runtime(&runtime).await;
                         }
                         return Ok(inv.invitation_id.clone());

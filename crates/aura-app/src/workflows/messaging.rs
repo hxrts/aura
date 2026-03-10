@@ -6,7 +6,7 @@
 use crate::workflows::channel_ref::ChannelRef;
 use crate::workflows::chat_commands::normalize_channel_name;
 use crate::workflows::context::{
-    current_home_context_or_authority_default, current_home_context_or_fallback,
+    current_home_context_or_authority_default,
 };
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::{
@@ -545,9 +545,29 @@ async fn restore_home_member_membership(
     Ok(())
 }
 
+/// Ensure a peer appears in the projected local membership for a channel.
 pub async fn project_channel_peer_membership(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
+    peer_authority: AuthorityId,
+    name_hint: Option<&str>,
+) -> Result<(), AuraError> {
+    project_channel_peer_membership_with_context(
+        app_core,
+        channel_id,
+        None,
+        peer_authority,
+        name_hint,
+    )
+    .await
+}
+
+/// Ensure a peer appears in the projected local membership for a channel,
+/// using an explicit context hint when one is already known.
+pub async fn project_channel_peer_membership_with_context(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    context_id: Option<ContextId>,
     peer_authority: AuthorityId,
     name_hint: Option<&str>,
 ) -> Result<(), AuraError> {
@@ -558,6 +578,9 @@ pub async fn project_channel_peer_membership(
             .unwrap_or_else(|| channel_id.to_string());
         let channel = chat.channel_mut(&channel_id);
         if let Some(channel) = channel {
+            if channel.context_id.is_none() {
+                channel.context_id = context_id;
+            }
             if !channel.member_ids.contains(&peer_authority) {
                 channel.member_ids.push(peer_authority);
             }
@@ -570,7 +593,7 @@ pub async fn project_channel_peer_membership(
 
         chat.upsert_channel(Channel {
             id: channel_id,
-            context_id: None,
+            context_id,
             name: fallback_name,
             topic: None,
             channel_type: ChannelType::Home,
@@ -586,7 +609,131 @@ pub async fn project_channel_peer_membership(
     })
     .await?;
 
+    project_home_peer_membership(
+        app_core,
+        channel_id,
+        context_id,
+        peer_authority,
+        name_hint,
+    )
+    .await?;
+
     Ok(())
+}
+
+async fn project_home_peer_membership(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    context_id: Option<ContextId>,
+    peer_authority: AuthorityId,
+    name_hint: Option<&str>,
+) -> Result<(), AuraError> {
+    let joined_at_ms = crate::workflows::time::current_time_ms(app_core).await?;
+    let mut core = app_core.write().await;
+    let mut homes = core.views().get_homes();
+    let local_authority = core.authority().copied();
+
+    let target_home_id = homes.home_state(&channel_id).map(|_| channel_id).or_else(|| {
+        context_id.and_then(|context_id| {
+            homes.iter().find_map(|(home_id, home)| {
+                (home.context_id == Some(context_id)).then_some(*home_id)
+            })
+        })
+    });
+
+    let target_home_id = match target_home_id {
+        Some(target_home_id) => target_home_id,
+        None => {
+            let Some(context_id) = context_id else {
+                return Ok(());
+            };
+            let mut home = HomeState::new(
+                channel_id,
+                Some(
+                    name_hint
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(ToOwned::to_owned)
+                        .unwrap_or_else(|| channel_id.to_string()),
+                ),
+                peer_authority,
+                joined_at_ms,
+                context_id,
+            );
+            if let Some(local_authority) = local_authority.filter(|id| *id != peer_authority) {
+                if home.member(&local_authority).is_none() {
+                    home.add_member(HomeMember {
+                        id: local_authority,
+                        name: "You".to_string(),
+                        role: HomeRole::Participant,
+                        is_online: true,
+                        joined_at: joined_at_ms,
+                        last_seen: Some(joined_at_ms),
+                        storage_allocated: HomeState::MEMBER_ALLOCATION,
+                    });
+                }
+                home.my_role = HomeRole::Participant;
+            }
+            homes.add_home(home);
+            channel_id
+        }
+    };
+
+    let Some(home) = homes.home_mut(&target_home_id) else {
+        return Ok(());
+    };
+
+    if home.member(&peer_authority).is_some() {
+        return Ok(());
+    }
+
+    home.add_member(HomeMember {
+        id: peer_authority,
+        name: name_hint
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| peer_authority.to_string()),
+        role: HomeRole::Participant,
+        is_online: true,
+        joined_at: joined_at_ms,
+        last_seen: Some(joined_at_ms),
+        storage_allocated: HomeState::MEMBER_ALLOCATION,
+    });
+    let homes_state = homes.clone();
+    core.views_mut().set_homes(homes);
+    drop(core);
+    emit_signal(app_core, &*HOMES_SIGNAL, homes_state, HOMES_SIGNAL_NAME).await?;
+
+    Ok(())
+}
+
+pub(crate) async fn authoritative_context_id_for_channel(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+) -> Option<ContextId> {
+    if let Some(context_id) = chat_snapshot(app_core)
+        .await
+        .channel(&channel_id)
+        .and_then(|channel| channel.context_id)
+    {
+        return Some(context_id);
+    }
+
+    let mut homes = {
+        let core = app_core.read().await;
+        core.views().get_homes()
+    };
+    if homes.iter().next().is_none() {
+        let signal_homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME)
+            .await
+            .unwrap_or_default();
+        if signal_homes.iter().next().is_some() {
+            homes = signal_homes;
+        }
+    }
+
+    homes.home_state(&channel_id).and_then(|home| home.context_id)
 }
 
 async fn ensure_home_state_for_channel(
@@ -719,6 +866,7 @@ async fn recipient_peers_for_channel(
     )
 }
 
+/// Resolve recipient peers for a channel view from known channel, home, contact, and discovery state.
 pub fn resolved_recipient_peers_for_channel_view(
     channel: &Channel,
     homes: &HomesState,
@@ -1956,6 +2104,8 @@ pub async fn invite_authority_to_channel(
     )
     .await?;
 
+    project_channel_peer_membership_with_context(app_core, channel_id, Some(context_id), receiver, None)
+        .await?;
     converge_runtime(&runtime).await;
 
     Ok(invitation.invitation_id)

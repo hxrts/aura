@@ -168,6 +168,13 @@ actor = "bob"
 timeout_ms = 30000
 
 [[steps]]
+id = "alice-message-delivery-ready"
+action = "runtime_event_occurred"
+actor = "alice"
+runtime_event_kind = "message_delivery_ready"
+timeout_ms = 120000
+
+[[steps]]
 id = "alice-send-message"
 action = "send_chat_message"
 actor = "alice"
@@ -179,6 +186,13 @@ id = "bob-receives-alice-message"
 action = "message_contains"
 actor = "bob"
 value = "hello-from-tu1"
+timeout_ms = 120000
+
+[[steps]]
+id = "bob-message-delivery-ready"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "message_delivery_ready"
 timeout_ms = 120000
 
 [[steps]]

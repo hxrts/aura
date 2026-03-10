@@ -1212,6 +1212,89 @@ impl InvitationHandler {
         Ok(())
     }
 
+    async fn materialize_home_signal_for_channel_acceptance(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation: &Invitation,
+    ) -> AgentResult<()> {
+        use aura_effects::ReactiveEffects;
+
+        let InvitationType::Channel {
+            home_id,
+            nickname_suggestion,
+            ..
+        } = &invitation.invitation_type
+        else {
+            return Ok(());
+        };
+
+        let reactive = effects.reactive_handler();
+        let mut homes: HomesState = match reactive.read(&*HOMES_SIGNAL).await {
+            Ok(state) => state,
+            Err(_) => {
+                let _ = reactive
+                    .register(&*HOMES_SIGNAL, HomesState::default())
+                    .await;
+                reactive.read(&*HOMES_SIGNAL).await.unwrap_or_default()
+            }
+        };
+
+        let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
+        let mut changed = false;
+        let home_name = nickname_suggestion
+            .clone()
+            .unwrap_or_else(|| home_id.to_string());
+
+        if !homes.has_home(home_id) {
+            let mut home = HomeState::new(
+                *home_id,
+                Some(home_name),
+                invitation.sender_id,
+                now_ms,
+                invitation.context_id,
+            );
+            if home.member(&invitation.receiver_id).is_none() {
+                home.add_member(HomeMember {
+                    id: invitation.receiver_id,
+                    name: invitation.receiver_id.to_string(),
+                    role: HomeRole::Participant,
+                    is_online: false,
+                    joined_at: now_ms,
+                    last_seen: Some(now_ms),
+                    storage_allocated: HomeState::MEMBER_ALLOCATION,
+                });
+            }
+            homes.add_home(home);
+            changed = true;
+        } else if let Some(home) = homes.home_mut(home_id) {
+            if home.context_id.is_none() {
+                home.context_id = Some(invitation.context_id);
+                changed = true;
+            }
+            if home.member(&invitation.receiver_id).is_none() {
+                home.add_member(HomeMember {
+                    id: invitation.receiver_id,
+                    name: invitation.receiver_id.to_string(),
+                    role: HomeRole::Participant,
+                    is_online: false,
+                    joined_at: now_ms,
+                    last_seen: Some(now_ms),
+                    storage_allocated: HomeState::MEMBER_ALLOCATION,
+                });
+                changed = true;
+            }
+        }
+
+        if changed {
+            reactive
+                .emit(&*HOMES_SIGNAL, homes)
+                .await
+                .map_err(|e| AgentError::effects(format!("emit homes signal: {e}")))?;
+        }
+
+        Ok(())
+    }
+
     async fn materialize_channel_invitation_acceptance(
         &self,
         effects: &AuraEffectSystem,
@@ -1720,6 +1803,13 @@ impl InvitationHandler {
                                 "invitation response decode failed: {error}"
                             ))
                         })?;
+                    if response.0.accepted {
+                        self.materialize_home_signal_for_channel_acceptance(
+                            effects.as_ref(),
+                            invitation,
+                        )
+                        .await?;
+                    }
                     let status = if response.0.accepted {
                         aura_invitation::InvitationAckStatus::Accepted
                     } else {

@@ -713,6 +713,31 @@ pub fn semantic_ui_snapshot(
         .homes
         .current_home()
         .and_then(|home| home.members.first().map(|member| member.id));
+    let authoritative_recipient_count_for_channel =
+        |authority_id: aura_app::ui::types::AuthorityId, app_channel: &aura_app::ui::types::Channel| {
+            app_snapshot
+                .homes
+                .home_state(&app_channel.id)
+                .map(|home| {
+                    home.members
+                        .iter()
+                        .filter(|member| member.id != authority_id)
+                        .count()
+                })
+                .or_else(|| {
+                    app_channel.context_id.and_then(|context_id| {
+                        app_snapshot.homes.iter().find_map(|(_, home)| {
+                            (home.context_id == Some(context_id)).then(|| {
+                                home.members
+                                    .iter()
+                                    .filter(|member| member.id != authority_id)
+                                    .count()
+                            })
+                        })
+                    })
+                })
+                .unwrap_or(0)
+        };
     if let Some(ref channels) = effective_channels {
         for channel in channels {
             let channel_id = channel.id.clone();
@@ -736,6 +761,27 @@ pub fn semantic_ui_snapshot(
             let resolved_member_count = channel
                 .member_count
                 .max((resolved_recipient_count.saturating_add(1)) as u32);
+            let authoritative_recipient_count = local_authority
+                .zip(app_channel)
+                .map(|(authority_id, app_channel)| {
+                    authoritative_recipient_count_for_channel(authority_id, app_channel)
+                })
+                .unwrap_or(0);
+            let observed_channel_traffic = app_channel
+                .map(|app_channel| {
+                    if selected_channel_id.as_deref() == Some(channel_id.as_str()) {
+                        !messages.is_empty()
+                    } else {
+                        app_snapshot
+                            .chat
+                            .messages_for_channel(&app_channel.id)
+                            .iter()
+                            .any(|_| true)
+                    }
+                })
+                .unwrap_or(false);
+            let reply_ready_recipient_count = authoritative_recipient_count
+                .max(usize::from(observed_channel_traffic));
             runtime_events.push(RuntimeEventSnapshot {
                 id: RuntimeEventId(format!("tui-channel-membership-ready:{channel_id}")),
                 fact: RuntimeFact::ChannelMembershipReady {
@@ -746,7 +792,7 @@ pub fn semantic_ui_snapshot(
                     member_count: Some(resolved_member_count as usize),
                 },
             });
-            if resolved_recipient_count > 0 {
+            if reply_ready_recipient_count > 0 {
                 runtime_events.push(RuntimeEventSnapshot {
                     id: RuntimeEventId(format!("tui-recipient-peers-resolved:{channel_id}")),
                     fact: RuntimeFact::RecipientPeersResolved {
@@ -754,7 +800,7 @@ pub fn semantic_ui_snapshot(
                             id: Some(channel_id.clone()),
                             name: Some(channel.name.clone()),
                         },
-                        member_count: resolved_member_count as usize,
+                        member_count: reply_ready_recipient_count.saturating_add(1),
                     },
                 });
                 runtime_events.push(RuntimeEventSnapshot {
@@ -764,7 +810,7 @@ pub fn semantic_ui_snapshot(
                             id: Some(channel_id.clone()),
                             name: Some(channel.name.clone()),
                         },
-                        member_count: resolved_member_count as usize,
+                        member_count: reply_ready_recipient_count.saturating_add(1),
                     },
                 });
             }
@@ -787,6 +833,17 @@ pub fn semantic_ui_snapshot(
             let resolved_member_count = channel
                 .member_count
                 .max((resolved_recipient_count.saturating_add(1)) as u32);
+            let authoritative_recipient_count = local_authority
+                .map(|authority_id| authoritative_recipient_count_for_channel(authority_id, channel))
+                .unwrap_or(0);
+            let observed_channel_traffic = app_snapshot
+                .chat
+                .messages_for_channel(&channel.id)
+                .iter()
+                .any(|_| true)
+                || (selected_channel_id.as_deref() == Some(channel_id.as_str()) && !messages.is_empty());
+            let reply_ready_recipient_count = authoritative_recipient_count
+                .max(usize::from(observed_channel_traffic));
             runtime_events.push(RuntimeEventSnapshot {
                 id: RuntimeEventId(format!("tui-channel-membership-ready:{channel_id}")),
                 fact: RuntimeFact::ChannelMembershipReady {
@@ -797,7 +854,7 @@ pub fn semantic_ui_snapshot(
                     member_count: Some(resolved_member_count as usize),
                 },
             });
-            if resolved_recipient_count > 0 {
+            if reply_ready_recipient_count > 0 {
                 runtime_events.push(RuntimeEventSnapshot {
                     id: RuntimeEventId(format!("tui-recipient-peers-resolved:{channel_id}")),
                     fact: RuntimeFact::RecipientPeersResolved {
@@ -805,7 +862,7 @@ pub fn semantic_ui_snapshot(
                             id: Some(channel_id.clone()),
                             name: Some(channel.name.clone()),
                         },
-                        member_count: resolved_member_count as usize,
+                        member_count: reply_ready_recipient_count.saturating_add(1),
                     },
                 });
                 runtime_events.push(RuntimeEventSnapshot {
@@ -815,7 +872,7 @@ pub fn semantic_ui_snapshot(
                             id: Some(channel_id.clone()),
                             name: Some(channel.name.clone()),
                         },
-                        member_count: resolved_member_count as usize,
+                        member_count: reply_ready_recipient_count.saturating_add(1),
                     },
                 });
             }
