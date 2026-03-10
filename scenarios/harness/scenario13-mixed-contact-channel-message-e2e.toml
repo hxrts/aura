@@ -193,7 +193,7 @@ id = "alice-recipient-peers-ready"
 action = "runtime_event_occurred"
 actor = "alice"
 runtime_event_kind = "recipient_peers_resolved"
-contains = "shared-parity-lab"
+value = "shared-parity-lab"
 timeout_ms = 120000
 
 [[steps]]

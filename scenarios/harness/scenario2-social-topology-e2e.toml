@@ -305,7 +305,7 @@ timeout_ms = 3000
 id = "alice-home-created"
 action = "expect_toast"
 instance = "alice"
-contains = "Home 'AliceHomeS2' created"
+value = "Home 'AliceHomeS2' created"
 timeout_ms = 12000
 
 [[steps]]
@@ -347,7 +347,7 @@ timeout_ms = 3000
 id = "bob-home-created"
 action = "expect_toast"
 instance = "bob"
-contains = "Home 'BobHomeS2' created"
+value = "Home 'BobHomeS2' created"
 timeout_ms = 12000
 
 [[steps]]

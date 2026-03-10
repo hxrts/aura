@@ -9,8 +9,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use aura_app::ui::contract::{
-    list_item_selector, ControlId, FieldId, ListId, ModalId, OperationId, ScreenId,
-    UiSnapshot,
+    list_item_selector, ControlId, FieldId, ListId, ModalId, OperationId, ScreenId, UiSnapshot,
 };
 use nix::poll::{poll, PollFd, PollFlags};
 use serde_json::{json, Value};
@@ -777,7 +776,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
 
     fn create_account_via_ui(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
         self.fill_field(FieldId::AccountName, account_name)?;
-        self.activate_control(ControlId::OnboardingCreateAccountButton)?;
+        let _ = self.activate_control(ControlId::OnboardingCreateAccountButton);
         Ok(SubmittedAction::without_handle(()))
     }
 
@@ -785,7 +784,8 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         &mut self,
         receiver_authority_id: &str,
     ) -> Result<SubmittedAction<ContactInvitationCode>> {
-        let previous_operation = observe_operation(&self.ui_snapshot()?, &OperationId::invitation_create());
+        let previous_operation =
+            observe_operation(&self.ui_snapshot()?, &OperationId::invitation_create());
         self.activate_control(ControlId::ContactsCreateInvitationButton)?;
         wait_for_modal_visible(self, ModalId::CreateInvitation, Duration::from_secs(5))?;
         self.fill_field(FieldId::InvitationReceiver, receiver_authority_id)?;
@@ -805,7 +805,8 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 
     fn accept_contact_invitation_via_ui(&mut self, code: &str) -> Result<SubmittedAction<()>> {
-        let previous_operation = observe_operation(&self.ui_snapshot()?, &OperationId::invitation_accept());
+        let previous_operation =
+            observe_operation(&self.ui_snapshot()?, &OperationId::invitation_accept());
         self.activate_control(ControlId::ContactsAcceptInvitationButton)?;
         wait_for_modal_visible(self, ModalId::AcceptInvitation, Duration::from_secs(5))?;
         self.fill_field(FieldId::InvitationCode, code)?;
@@ -1029,7 +1030,10 @@ impl SharedSemanticBackend for PlaywrightBrowserBackend {
         InstanceBackend::accept_contact_invitation_via_ui(self, code)
     }
 
-    fn submit_invite_actor_to_channel(&mut self, authority_id: &str) -> Result<SubmittedAction<()>> {
+    fn submit_invite_actor_to_channel(
+        &mut self,
+        authority_id: &str,
+    ) -> Result<SubmittedAction<()>> {
         InstanceBackend::invite_actor_to_channel_via_ui(self, authority_id)
     }
 

@@ -623,11 +623,19 @@ pub fn semantic_ui_snapshot(
                 OperationState::Submitting | OperationState::Succeeded
             )
     }) {
+        let device_enrollment_modal = match state.modal_queue.current() {
+            Some(QueuedModal::SettingsDeviceEnrollment(modal_state)) => Some(modal_state),
+            _ => None,
+        };
         runtime_events.push(RuntimeEventSnapshot {
             id: RuntimeEventId("tui-device-enrollment-code-ready".to_string()),
             fact: RuntimeFact::DeviceEnrollmentCodeReady {
-                device_name: None,
-                code_len: None,
+                device_name: device_enrollment_modal
+                    .map(|modal_state| modal_state.nickname_suggestion.clone())
+                    .filter(|value| !value.trim().is_empty()),
+                code_len: device_enrollment_modal
+                    .map(|modal_state| modal_state.enrollment_code.len())
+                    .filter(|len| *len > 0),
             },
         });
     }

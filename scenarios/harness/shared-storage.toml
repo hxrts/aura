@@ -66,7 +66,7 @@ timeout_ms = 2000
 id = "alice-join-shared-lab-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "membership updated"
+value = "membership updated"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -81,7 +81,7 @@ timeout_ms = 2000
 id = "alice-pin-fact-result"
 action = "expect_denied"
 instance = "alice"
-contains = "permission denied"
+value = "permission denied"
 timeout_ms = 12000
 
 [[steps]]

@@ -125,7 +125,7 @@ timeout_ms = 2000
 id = "alice-home-created"
 action = "expect_toast"
 instance = "alice"
-contains = "Home 'GapHome' created"
+value = "Home 'GapHome' created"
 timeout_ms = 12000
 
 [[steps]]
@@ -249,7 +249,7 @@ timeout_ms = 2000
 id = "alice-join-gap-lab-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "membership updated"
+value = "membership updated"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -264,7 +264,7 @@ timeout_ms = 2000
 id = "alice-invite-bob-gap-lab-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "invitation sent"
+value = "invitation sent"
 consistency = "enforced"
 timeout_ms = 12000
 
@@ -279,7 +279,7 @@ timeout_ms = 2000
 id = "bob-join-gap-lab-result"
 action = "expect_command_result"
 instance = "bob"
-contains = "membership updated"
+value = "membership updated"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -294,7 +294,7 @@ timeout_ms = 2000
 id = "alice-op-self-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "moderator granted"
+value = "moderator granted"
 consistency = "enforced"
 timeout_ms = 12000
 
@@ -309,7 +309,7 @@ timeout_ms = 2000
 id = "alice-kick-bob-result"
 action = "expect_toast"
 instance = "alice"
-contains = "kick"
+value = "kick"
 timeout_ms = 12000
 
 [[steps]]
@@ -323,7 +323,7 @@ timeout_ms = 2000
 id = "alice-reinvite-bob-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "invitation sent"
+value = "invitation sent"
 consistency = "enforced"
 timeout_ms = 12000
 
@@ -338,7 +338,7 @@ timeout_ms = 2000
 id = "bob-rejoin-gap-lab-result"
 action = "expect_command_result"
 instance = "bob"
-contains = "membership updated"
+value = "membership updated"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -407,7 +407,7 @@ timeout_ms = 2000
 id = "alice-access-override-preview"
 action = "expect_toast"
 instance = "alice"
-contains = "Access override preview"
+value = "Access override preview"
 timeout_ms = 12000
 
 [[steps]]
@@ -477,7 +477,7 @@ timeout_ms = 2000
 id = "alice-cap-config-saved"
 action = "expect_toast"
 instance = "alice"
-contains = "Capability config saved"
+value = "Capability config saved"
 timeout_ms = 12000
 
 [[steps]]
@@ -512,5 +512,5 @@ timeout_ms = 2000
 id = "alice-moderator-assignment-denied"
 action = "expect_toast"
 instance = "alice"
-contains = "Cannot designate non-member"
+value = "Cannot designate non-member"
 timeout_ms = 12000

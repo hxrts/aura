@@ -267,7 +267,7 @@ timeout_ms = 2000
 id = "alice-create-neighborhood-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "neighborhood updated"
+value = "neighborhood updated"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -282,7 +282,7 @@ timeout_ms = 2000
 id = "alice-add-home-to-neighborhood-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "home added to neighborhood"
+value = "home added to neighborhood"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -318,7 +318,7 @@ timeout_ms = 2000
 id = "alice-join-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "membership updated"
+value = "membership updated"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -333,7 +333,7 @@ timeout_ms = 2000
 id = "alice-homeinvite-bob-result"
 action = "expect_toast"
 instance = "alice"
-contains = "home invitation"
+value = "home invitation"
 timeout_ms = 12000
 
 [[steps]]
@@ -347,7 +347,7 @@ timeout_ms = 2000
 id = "bob-homeaccept-result"
 action = "expect_toast"
 instance = "bob"
-contains = "home invitation"
+value = "home invitation"
 timeout_ms = 12000
 
 [[steps]]
@@ -361,7 +361,7 @@ timeout_ms = 2000
 id = "alice-invite-bob-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "invitation sent"
+value = "invitation sent"
 consistency = "enforced"
 timeout_ms = 12000
 
@@ -376,7 +376,7 @@ timeout_ms = 2000
 id = "alice-invite-carol-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "invitation sent"
+value = "invitation sent"
 consistency = "enforced"
 timeout_ms = 12000
 
@@ -391,7 +391,7 @@ timeout_ms = 2000
 id = "bob-join-result"
 action = "expect_command_result"
 instance = "bob"
-contains = "membership updated"
+value = "membership updated"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -406,7 +406,7 @@ timeout_ms = 2000
 id = "carol-join-result"
 action = "expect_command_result"
 instance = "carol"
-contains = "membership updated"
+value = "membership updated"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -421,7 +421,7 @@ timeout_ms = 2000
 id = "alice-op-bob-result"
 action = "expect_denied"
 instance = "alice"
-contains = "only members can be designated as moderators"
+value = "only members can be designated as moderators"
 timeout_ms = 12000
 
 [[steps]]
@@ -448,5 +448,5 @@ timeout_ms = 2000
 id = "alice-kick-carol-result"
 action = "expect_toast"
 instance = "alice"
-contains = "kick"
+value = "kick"
 timeout_ms = 12000

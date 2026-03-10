@@ -106,7 +106,7 @@ timeout_ms = 2000
 id = "alice-home-created"
 action = "expect_toast"
 instance = "alice"
-contains = "Home 'ModalHome' created"
+value = "Home 'ModalHome' created"
 timeout_ms = 12000
 
 [[steps]]
@@ -258,7 +258,7 @@ timeout_ms = 2000
 id = "alice-join-modal-lab-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "membership updated"
+value = "membership updated"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -273,7 +273,7 @@ timeout_ms = 2000
 id = "alice-invite-bob-modal-lab-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "invitation sent"
+value = "invitation sent"
 consistency = "enforced"
 timeout_ms = 12000
 
@@ -288,7 +288,7 @@ timeout_ms = 2000
 id = "bob-join-modal-lab-result"
 action = "expect_command_result"
 instance = "bob"
-contains = "membership updated"
+value = "membership updated"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -380,7 +380,7 @@ timeout_ms = 2000
 id = "alice-channel-created-toast"
 action = "expect_toast"
 instance = "alice"
-contains = "Created 'team-room'."
+value = "Created 'team-room'."
 timeout_ms = 12000
 
 [[steps]]
@@ -479,5 +479,5 @@ timeout_ms = 1000
 id = "alice-retry-toast"
 action = "expect_toast"
 instance = "alice"
-contains = "No message selected"
+value = "No message selected"
 timeout_ms = 8000

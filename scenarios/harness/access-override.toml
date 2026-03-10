@@ -109,7 +109,7 @@ timeout_ms = 2000
 id = "alice-home-created"
 action = "expect_toast"
 instance = "alice"
-contains = "Home 'OverrideHome' created"
+value = "Home 'OverrideHome' created"
 timeout_ms = 12000
 
 [[steps]]

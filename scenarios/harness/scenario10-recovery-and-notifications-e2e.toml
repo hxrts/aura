@@ -101,7 +101,7 @@ timeout_ms = 2000
 id = "alice-recovery-guard-toast"
 action = "expect_toast"
 instance = "alice"
-contains = "guardians"
+value = "guardians"
 timeout_ms = 8000
 
 [[steps]]

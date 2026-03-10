@@ -73,6 +73,10 @@ cfg_if! {
             None
         }
 
+        fn harness_mode_enabled() -> bool {
+            harness_instance_id().is_some()
+        }
+
         fn active_storage_prefix() -> String {
             if let Some(instance_id) = harness_instance_id() {
                 let sanitized = sanitize_storage_segment(&instance_id);
@@ -290,15 +294,17 @@ cfg_if! {
                 })),
             ));
             controller.set_account_setup_state(account_ready, "", None);
-            controller.set_ui_snapshot_sink(Arc::new(|snapshot| {
-                harness_bridge::publish_ui_snapshot(&snapshot);
-            }));
+            if harness_mode_enabled() {
+                controller.set_ui_snapshot_sink(Arc::new(|snapshot| {
+                    harness_bridge::publish_ui_snapshot(&snapshot);
+                }));
 
-            harness_bridge::set_controller(controller.clone());
-            if let Err(error) = harness_bridge::install_window_harness_api(controller.clone()) {
-                web_sys::console::error_1(
-                    &format!("failed to install harness API: {error:?}").into(),
-                );
+                harness_bridge::set_controller(controller.clone());
+                if let Err(error) = harness_bridge::install_window_harness_api(controller.clone()) {
+                    web_sys::console::error_1(
+                        &format!("failed to install harness API: {error:?}").into(),
+                    );
+                }
             }
 
             if account_ready {
@@ -730,6 +736,15 @@ cfg_if! {
                                 web_sys::console::log_1(
                                     &"[web-onboarding] submit_account ok".into(),
                                 );
+                                if harness_mode_enabled() {
+                                    web_sys::console::log_1(
+                                        &"[web-onboarding] reloading_after_submit".into(),
+                                    );
+                                    if let Some(window) = web_sys::window() {
+                                        let _ = window.location().reload();
+                                    }
+                                    return;
+                                }
                                 controller.set_account_setup_state(true, "", None);
                                 account_ready.set(true);
                                 creating_account.set(false);

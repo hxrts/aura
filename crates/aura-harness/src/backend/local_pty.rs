@@ -204,6 +204,17 @@ impl LocalPtyBackend {
     fn requires_tui_readiness(&self) -> bool {
         self.config.command.is_none()
     }
+
+    fn type_text(&mut self, value: &str, inter_key_delay_ms: u64) -> Result<()> {
+        for ch in value.chars() {
+            let mut buf = [0u8; 4];
+            let s = ch.encode_utf8(&mut buf);
+            self.send_keys(s)?;
+            thread::sleep(Duration::from_millis(inter_key_delay_ms));
+        }
+        thread::sleep(Duration::from_millis(50));
+        Ok(())
+    }
 }
 
 impl InstanceBackend for LocalPtyBackend {
@@ -477,20 +488,11 @@ impl InstanceBackend for LocalPtyBackend {
                 thread::sleep(Duration::from_millis(50));
             }
         }
-        if matches!(
-            field_id,
-            FieldId::InvitationCode | FieldId::DeviceImportCode
-        ) {
-            for ch in value.chars() {
-                let mut buf = [0u8; 4];
-                let s = ch.encode_utf8(&mut buf);
-                self.send_keys(s)?;
-                thread::sleep(Duration::from_millis(3));
-            }
-            thread::sleep(Duration::from_millis(50));
-            return Ok(());
+        match field_id {
+            FieldId::ChatInput => self.send_keys(value),
+            FieldId::InvitationCode | FieldId::DeviceImportCode => self.type_text(value, 3),
+            _ => self.type_text(value, 8),
         }
-        self.send_keys(value)
     }
 
     fn activate_list_item(&mut self, list_id: ListId, item_id: &str) -> Result<()> {

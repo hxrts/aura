@@ -171,7 +171,7 @@ timeout_ms = 2000
 id = "alice-create-neighborhood-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "neighborhood updated"
+value = "neighborhood updated"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -186,7 +186,7 @@ timeout_ms = 2000
 id = "alice-add-home-to-neighborhood-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "home added to neighborhood"
+value = "home added to neighborhood"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -201,7 +201,7 @@ timeout_ms = 2000
 id = "alice-join-cross-lab-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "membership updated"
+value = "membership updated"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -216,7 +216,7 @@ timeout_ms = 2000
 id = "alice-homeinvite-bob-result"
 action = "expect_toast"
 instance = "alice"
-contains = "home invitation"
+value = "home invitation"
 timeout_ms = 12000
 
 [[steps]]
@@ -230,7 +230,7 @@ timeout_ms = 2000
 id = "bob-homeaccept-result"
 action = "expect_toast"
 instance = "bob"
-contains = "home invitation"
+value = "home invitation"
 timeout_ms = 12000
 
 [[steps]]
@@ -244,6 +244,6 @@ timeout_ms = 2000
 id = "bob-add-home-to-neighborhood-result"
 action = "expect_command_result"
 instance = "bob"
-contains = "home added to neighborhood"
+value = "home added to neighborhood"
 consistency = "accepted"
 timeout_ms = 12000

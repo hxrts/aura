@@ -130,7 +130,7 @@ timeout_ms = 2000
 id = "alice-copy-toast-visible"
 action = "expect_toast"
 instance = "alice"
-contains = "Copied to clipboard"
+value = "Copied to clipboard"
 timeout_ms = 8000
 
 [[steps]]
@@ -193,7 +193,7 @@ timeout_ms = 2000
 id = "alice-lan-empty-toast"
 action = "expect_toast"
 instance = "alice"
-contains = "No LAN peers yet. Press d to rescan."
+value = "No LAN peers yet. Press d to rescan."
 timeout_ms = 8000
 
 [[steps]]

@@ -248,7 +248,10 @@ impl SharedFlowState {
                 if !matches!(self.account, AccountPhase::Ready) {
                     bail!("contact invitation requires AccountPhase::Ready");
                 }
-                if !matches!(self.contact, ContactPhase::None | ContactPhase::InvitationReady) {
+                if !matches!(
+                    self.contact,
+                    ContactPhase::None | ContactPhase::InvitationReady
+                ) {
                     bail!("contact invitation transition requires unlinked contact state");
                 }
                 next.contact = ContactPhase::InvitationReady;
@@ -670,8 +673,10 @@ fn execute_step(
                 .timeout_ms
                 .unwrap_or(step_budget_ms)
                 .max(CREATE_ACCOUNT_MIN_TIMEOUT_MS);
-            let submission =
-                issue_stage(step, tool_api.submit_create_account(&instance_id, &account_name))?;
+            let submission = issue_stage(
+                step,
+                tool_api.submit_create_account(&instance_id, &account_name),
+            )?;
             record_submission_handle(context, &instance_id, submission.handle.ui_operation);
             let deadline = Instant::now() + Duration::from_millis(action_timeout_ms);
             let mut neighborhood_step = semantic_wait_step(step);
@@ -798,11 +803,6 @@ fn execute_step(
             let mut readiness_step = semantic_wait_step(step);
             readiness_step.readiness = Some(aura_app::ui::contract::UiReadiness::Ready);
             wait_for_semantic_state(&readiness_step, tool_api, &instance_id, remaining_ms)?;
-            let remaining_ms = deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis()
-                .max(1) as u64;
-            wait_for_home_bootstrap_ready(step, tool_api, &instance_id, remaining_ms)?;
             Ok(())
         }
         ScenarioAction::RemoveSelectedDevice => {
@@ -869,8 +869,10 @@ fn execute_step(
             )?;
             let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
             let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-            let submission =
-                issue_stage(step, tool_api.submit_accept_contact_invitation(&instance_id, &code))?;
+            let submission = issue_stage(
+                step,
+                tool_api.submit_accept_contact_invitation(&instance_id, &code),
+            )?;
             let operation_handle = submission.handle.ui_operation.clone();
             record_submission_handle(context, &instance_id, submission.handle.ui_operation);
             let mut contact_link_step = semantic_wait_step(step);
@@ -952,8 +954,10 @@ fn execute_step(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let submission =
-                issue_stage(step, tool_api.submit_join_channel(&instance_id, &channel_name))?;
+            let submission = issue_stage(
+                step,
+                tool_api.submit_join_channel(&instance_id, &channel_name),
+            )?;
             record_submission_handle(context, &instance_id, submission.handle.ui_operation);
             Ok(())
         }
@@ -1106,8 +1110,10 @@ fn execute_step(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let submission =
-                issue_stage(step, tool_api.submit_send_chat_message(&instance_id, &message))?;
+            let submission = issue_stage(
+                step,
+                tool_api.submit_send_chat_message(&instance_id, &message),
+            )?;
             record_submission_handle(context, &instance_id, submission.handle.ui_operation);
             Ok(())
         }
@@ -1744,8 +1750,10 @@ fn execute_shared_semantic_action(
                 .timeout_ms
                 .unwrap_or(step_budget_ms)
                 .max(CREATE_ACCOUNT_MIN_TIMEOUT_MS);
-            let submission =
-                issue_stage(step, tool_api.submit_create_account(&instance_id, &account_name))?;
+            let submission = issue_stage(
+                step,
+                tool_api.submit_create_account(&instance_id, &account_name),
+            )?;
             record_submission_handle(context, &instance_id, submission.handle.ui_operation);
             let deadline = Instant::now() + Duration::from_millis(action_timeout_ms);
             let mut neighborhood_step = semantic_wait_step(step);
@@ -1753,7 +1761,12 @@ fn execute_shared_semantic_action(
             convergence_stage(
                 step,
                 "account_neighborhood",
-                wait_for_semantic_state(&neighborhood_step, tool_api, &instance_id, action_timeout_ms),
+                wait_for_semantic_state(
+                    &neighborhood_step,
+                    tool_api,
+                    &instance_id,
+                    action_timeout_ms,
+                ),
             )?;
             let remaining_ms = deadline
                 .saturating_duration_since(Instant::now())
@@ -1867,11 +1880,6 @@ fn execute_shared_semantic_action(
             let mut readiness_step = semantic_wait_step(step);
             readiness_step.readiness = Some(aura_app::ui::contract::UiReadiness::Ready);
             wait_for_semantic_state(&readiness_step, tool_api, &instance_id, remaining_ms)?;
-            let remaining_ms = deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis()
-                .max(1) as u64;
-            wait_for_home_bootstrap_ready(step, tool_api, &instance_id, remaining_ms)?;
             Ok(())
         }
         SharedSemanticBinding::RemoveSelectedDevice => {
@@ -1938,8 +1946,10 @@ fn execute_shared_semantic_action(
             )?;
             let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
             let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-            let submission =
-                issue_stage(step, tool_api.submit_accept_contact_invitation(&instance_id, &code))?;
+            let submission = issue_stage(
+                step,
+                tool_api.submit_accept_contact_invitation(&instance_id, &code),
+            )?;
             let operation_handle = submission.handle.ui_operation.clone();
             record_submission_handle(context, &instance_id, submission.handle.ui_operation);
             let mut contact_link_step = semantic_wait_step(step);
@@ -1997,8 +2007,10 @@ fn execute_shared_semantic_action(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let submission =
-                issue_stage(step, tool_api.submit_join_channel(&instance_id, &channel_name))?;
+            let submission = issue_stage(
+                step,
+                tool_api.submit_join_channel(&instance_id, &channel_name),
+            )?;
             record_submission_handle(context, &instance_id, submission.handle.ui_operation);
             Ok(())
         }
@@ -2034,8 +2046,10 @@ fn execute_shared_semantic_action(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let submission =
-                issue_stage(step, tool_api.submit_send_chat_message(&instance_id, &message))?;
+            let submission = issue_stage(
+                step,
+                tool_api.submit_send_chat_message(&instance_id, &message),
+            )?;
             record_submission_handle(context, &instance_id, submission.handle.ui_operation);
             Ok(())
         }
@@ -2557,19 +2571,19 @@ fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
             .or(step.expect.as_deref());
         let matched = snapshot.has_runtime_event(kind, detail_needle)
             || matches!(kind, RuntimeEventKind::ChannelMembershipReady)
-            && snapshot
-                .lists
-                .iter()
-                .find(|candidate| candidate.id == ListId::Channels)
-                .map(|channels| {
-                    channels.items.iter().any(|item| {
-                        item.selected
-                            && detail_needle
-                                .map(|needle| item.id.contains(needle))
-                                .unwrap_or(true)
+                && snapshot
+                    .lists
+                    .iter()
+                    .find(|candidate| candidate.id == ListId::Channels)
+                    .map(|channels| {
+                        channels.items.iter().any(|item| {
+                            item.selected
+                                && detail_needle
+                                    .map(|needle| item.id.contains(needle))
+                                    .unwrap_or(true)
+                        })
                     })
-                })
-                .unwrap_or(false);
+                    .unwrap_or(false);
         if !matched {
             return false;
         }
@@ -2783,7 +2797,9 @@ fn record_shared_flow_progress(
     let state = shared_flow_state_mut(context, instance_id);
     let transition = match step.action {
         ScenarioAction::CreateAccount => Some(SharedFlowTransition::AccountReady),
-        ScenarioAction::CreateContactInvitation => Some(SharedFlowTransition::ContactInvitationReady),
+        ScenarioAction::CreateContactInvitation => {
+            Some(SharedFlowTransition::ContactInvitationReady)
+        }
         ScenarioAction::AcceptContactInvitation => Some(SharedFlowTransition::ContactLinked),
         ScenarioAction::WaitFor => match step.runtime_event_kind {
             Some(RuntimeEventKind::ContactLinkReady) => Some(SharedFlowTransition::ContactLinked),

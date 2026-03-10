@@ -214,7 +214,7 @@ timeout_ms = 2000
 id = "alice-remove-device-guard-toast"
 action = "expect_toast"
 instance = "alice"
-contains = "Cannot remove the current device"
+value = "Cannot remove the current device"
 timeout_ms = 8000
 
 [[steps]]

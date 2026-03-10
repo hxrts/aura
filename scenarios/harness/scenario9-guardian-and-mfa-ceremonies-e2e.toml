@@ -268,5 +268,5 @@ timeout_ms = 2000
 id = "alice-mfa-guard-toast"
 action = "expect_toast"
 instance = "alice"
-contains = "MFA requires at least 2 devices"
+value = "MFA requires at least 2 devices"
 timeout_ms = 8000

@@ -494,7 +494,7 @@ timeout_ms = 2000
 id = "alice-help-result"
 action = "expect_toast"
 instance = "alice"
-contains = "Use ? for TUI help"
+value = "Use ? for TUI help"
 timeout_ms = 8000
 
 [[steps]]
@@ -508,7 +508,7 @@ timeout_ms = 2000
 id = "alice-help-alias-h-result"
 action = "expect_toast"
 instance = "alice"
-contains = "Use ? for TUI help"
+value = "Use ? for TUI help"
 timeout_ms = 8000
 
 [[steps]]
@@ -522,7 +522,7 @@ timeout_ms = 2000
 id = "alice-help-alias-question-result"
 action = "expect_toast"
 instance = "alice"
-contains = "Use ? for TUI help"
+value = "Use ? for TUI help"
 timeout_ms = 8000
 
 [[steps]]
@@ -536,7 +536,7 @@ timeout_ms = 2000
 id = "alice-help-kick-result"
 action = "expect_toast"
 instance = "alice"
-contains = "/kick <user> [reason]"
+value = "/kick <user> [reason]"
 timeout_ms = 8000
 
 [[steps]]
@@ -581,7 +581,7 @@ timeout_ms = 2000
 id = "alice-whois-result"
 action = "expect_toast"
 instance = "alice"
-contains = "User:"
+value = "User:"
 timeout_ms = 8000
 
 [[steps]]

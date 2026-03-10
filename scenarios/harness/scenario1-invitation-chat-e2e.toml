@@ -8,7 +8,7 @@ required_capabilities = ["local"]
 #
 # Phase 1 - Out-of-band invitation:
 # 1. Alice opens Contacts, creates invitation, copies code.
-# 2. Bob opens Contacts, imports invitation code, submits.
+# 2. Bob opens Contacts, imports invite code, submits.
 # 3. Both sides confirm connected contact state.
 #
 # Phase 2 - Chat channel setup:
@@ -224,7 +224,7 @@ timeout_ms = 3000
 id = "alice-home-created"
 action = "expect_toast"
 instance = "alice"
-contains = "Home 'AliceHomeS1' created"
+value = "Home 'AliceHomeS1' created"
 timeout_ms = 12000
 
 [[steps]]
@@ -266,7 +266,7 @@ timeout_ms = 3000
 id = "bob-home-created"
 action = "expect_toast"
 instance = "bob"
-contains = "Home 'BobHomeS1' created"
+value = "Home 'BobHomeS1' created"
 timeout_ms = 12000
 
 [[steps]]
