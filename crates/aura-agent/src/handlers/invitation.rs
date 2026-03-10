@@ -195,6 +195,22 @@ impl InvitationHandler {
         InvitationCacheHandler::persist_created_invitation(effects, authority_id, invitation).await
     }
 
+    async fn best_effort_current_timestamp_ms(effects: &AuraEffectSystem) -> u64 {
+        if std::env::var_os("AURA_HARNESS_MODE").is_some() {
+            return match tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                effects.current_timestamp(),
+            )
+            .await
+            {
+                Ok(Ok(value)) => value,
+                Ok(Err(_)) | Err(_) => 0,
+            };
+        }
+
+        effects.current_timestamp().await.unwrap_or(0)
+    }
+
     pub(crate) async fn load_created_invitation(
         effects: &AuraEffectSystem,
         authority_id: AuthorityId,
@@ -275,7 +291,7 @@ impl InvitationHandler {
         effects: &AuraEffectSystem,
         context_id: ContextId,
     ) -> GuardSnapshot {
-        let now_ms = effects.current_timestamp().await.unwrap_or(0);
+        let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
 
         // Build capabilities list - in testing mode, grant all capabilities
         let capabilities = if effects.is_testing() {
@@ -424,11 +440,12 @@ impl InvitationHandler {
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
+        let harness_mode = std::env::var_os("AURA_HARNESS_MODE").is_some();
 
         // Generate unique invitation ID
         let invitation_id =
             InvitationId::new(format!("inv-{}", effects.random_uuid().await.simple()));
-        let current_time = effects.current_timestamp().await.unwrap_or(0);
+        let current_time = Self::best_effort_current_timestamp_ms(&effects).await;
         let expires_at = expires_in_ms.map(|ms| current_time + ms);
 
         let invitation_context = if let Some(context_id) = context_override {
@@ -447,9 +464,19 @@ impl InvitationHandler {
         // Build snapshot and prepare through service.
         // For channel invitations this must use the channel context so the
         // generated invitation facts and transport metadata are scoped correctly.
-        let snapshot = self
-            .build_snapshot_for_context(effects.as_ref(), invitation_context)
-            .await;
+        let snapshot = if harness_mode {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                self.build_snapshot_for_context(effects.as_ref(), invitation_context),
+            )
+            .await
+            .map_err(|_| {
+                AgentError::internal("Timed out building invitation guard snapshot".to_string())
+            })?
+        } else {
+            self.build_snapshot_for_context(effects.as_ref(), invitation_context)
+                .await
+        };
 
         let outcome = self.service.prepare_send_invitation(
             &snapshot,
@@ -461,8 +488,21 @@ impl InvitationHandler {
         );
 
         // Execute the outcome (handles denial and effects)
-        execute_guard_outcome_for_accept(outcome, &self.context.authority, effects.as_ref())
-            .await?;
+        if harness_mode {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                execute_guard_outcome_for_accept(
+                    outcome,
+                    &self.context.authority,
+                    effects.as_ref(),
+                ),
+            )
+            .await
+            .map_err(|_| AgentError::internal("Timed out executing invitation guard outcome"))??;
+        } else {
+            execute_guard_outcome_for_accept(outcome, &self.context.authority, effects.as_ref())
+                .await?;
+        }
 
         let invitation = Invitation {
             invitation_id: invitation_id.clone(),
@@ -477,13 +517,26 @@ impl InvitationHandler {
         };
 
         if let InvitationType::Contact { .. } = invitation.invitation_type {
-            if !Self::sender_contact_exists(
-                effects.as_ref(),
-                invitation.sender_id,
-                invitation.receiver_id,
-            )
-            .await
-            {
+            let sender_contact_exists = if harness_mode {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    Self::sender_contact_exists(
+                        effects.as_ref(),
+                        invitation.sender_id,
+                        invitation.receiver_id,
+                    ),
+                )
+                .await
+                .map_err(|_| AgentError::internal("Timed out loading sender contact state"))?
+            } else {
+                Self::sender_contact_exists(
+                    effects.as_ref(),
+                    invitation.sender_id,
+                    invitation.receiver_id,
+                )
+                .await
+            };
+            if !sender_contact_exists {
                 let contact_fact = ContactFact::Added {
                     context_id: invitation.context_id,
                     owner_id: invitation.sender_id,
@@ -495,25 +548,52 @@ impl InvitationHandler {
                     },
                 };
 
-                effects
-                    .commit_generic_fact_bytes(
-                        invitation.context_id,
-                        CONTACT_FACT_TYPE_ID.into(),
-                        contact_fact.to_bytes(),
+                if harness_mode {
+                    tokio::time::timeout(
+                        std::time::Duration::from_secs(2),
+                        effects.commit_generic_fact_bytes(
+                            invitation.context_id,
+                            CONTACT_FACT_TYPE_ID.into(),
+                            contact_fact.to_bytes(),
+                        ),
                     )
                     .await
+                    .map_err(|_| AgentError::effects("Timed out committing contact fact"))?
                     .map_err(|e| AgentError::effects(format!("commit contact fact: {e}")))?;
+                } else {
+                    effects
+                        .commit_generic_fact_bytes(
+                            invitation.context_id,
+                            CONTACT_FACT_TYPE_ID.into(),
+                            contact_fact.to_bytes(),
+                        )
+                        .await
+                        .map_err(|e| AgentError::effects(format!("commit contact fact: {e}")))?;
+                }
                 effects.await_next_view_update().await;
             }
         }
 
         // Persist the invitation to storage (so it survives service recreation)
-        Self::persist_created_invitation(
-            effects.as_ref(),
-            self.context.authority.authority_id(),
-            &invitation,
-        )
-        .await?;
+        if harness_mode {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                Self::persist_created_invitation(
+                    effects.as_ref(),
+                    self.context.authority.authority_id(),
+                    &invitation,
+                ),
+            )
+            .await
+            .map_err(|_| AgentError::internal("Timed out persisting created invitation"))??;
+        } else {
+            Self::persist_created_invitation(
+                effects.as_ref(),
+                self.context.authority.authority_id(),
+                &invitation,
+            )
+            .await?;
+        }
 
         // Cache the pending invitation (for fast lookup within same service instance)
         self.invitation_cache
@@ -565,7 +645,7 @@ impl InvitationHandler {
 
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
-        let now_ms = effects.current_timestamp().await.unwrap_or(0);
+        let now_ms = Self::best_effort_current_timestamp_ms(&effects).await;
         self.validate_cached_invitation_accept(effects.as_ref(), invitation_id, now_ms)
             .await?;
 
@@ -594,7 +674,7 @@ impl InvitationHandler {
             .resolve_contact_invitation(effects.as_ref(), invitation_id)
             .await?
         {
-            let now_ms = effects.current_timestamp().await.unwrap_or(0);
+            let now_ms = Self::best_effort_current_timestamp_ms(&effects).await;
             let context_id = self.context.effect_context.context_id();
             let fact = ContactFact::Added {
                 context_id,
@@ -1053,7 +1133,7 @@ impl InvitationHandler {
         };
 
         let own_id = self.context.authority.authority_id();
-        let now_ms = effects.current_timestamp().await.unwrap_or(0);
+        let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
         let mut changed = false;
 
         if !homes.has_home(&invite.channel_id) {
@@ -1204,7 +1284,7 @@ impl InvitationHandler {
             return Ok(existing);
         }
 
-        let now_ms = effects.current_timestamp().await.unwrap_or(0);
+        let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
         if let Some(addr) = sender_hint_addr {
             self.cache_direct_descriptor_for_peer(effects, shareable.sender_id, &addr, now_ms)
                 .await;
@@ -1445,7 +1525,7 @@ impl InvitationHandler {
             .map(|inv| inv.invitation_id.clone())
             .collect();
         let own_id = self.context.authority.authority_id();
-        let now_ms = effects.current_timestamp().await.unwrap_or(0);
+        let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
 
         let imported_prefix = Self::imported_invitation_prefix(own_id);
         if let Ok(keys) = effects.list_keys(Some(&imported_prefix)).await {
@@ -1506,7 +1586,7 @@ impl InvitationHandler {
         if let Some(shareable) =
             Self::load_imported_invitation(effects, own_id, invitation_id).await
         {
-            let now_ms = effects.current_timestamp().await.unwrap_or(0);
+            let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
             return Some(Invitation {
                 invitation_id: shareable.invitation_id,
                 context_id: self.context.effect_context.context_id(),

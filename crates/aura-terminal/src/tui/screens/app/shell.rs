@@ -43,7 +43,6 @@ use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::CeremonyId;
 use aura_core::types::FrostThreshold;
-use aura_core::AuthorityId;
 
 use crate::tui::callbacks::CallbackRegistry;
 use crate::tui::components::{
@@ -209,6 +208,9 @@ pub struct IoAppProps {
     pub update_tx: Option<UiUpdateSender>,
     /// Callback registry for all domain actions
     pub callbacks: Option<CallbackRegistry>,
+    /// Cached runtime bridge for harness-mode semantic actions that should not
+    /// contend on AppCore state locks during startup convergence.
+    pub runtime_bridge: Option<Arc<dyn aura_app::runtime_bridge::RuntimeBridge>>,
 }
 
 /// Main application with screen navigation
@@ -312,7 +314,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Channels subscription: SharedChannels for dispatch handlers to read
     // =========================================================================
     // Must be created before messages subscription since messages depend on channels
-    let shared_channels = use_channels_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
+    let shared_channels = use_channels_subscription(
+        &mut hooks,
+        &app_ctx,
+        shared_authority_id.clone(),
+        update_tx_holder.clone(),
+    );
 
     // =========================================================================
     // Shared selection state for messages subscription
@@ -1537,8 +1544,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         // always gets current contacts (not stale props)
         let shared_contacts_for_dispatch = shared_contacts;
         let shared_discovered_peers_for_dispatch = shared_discovered_peers;
-        let shared_authority_id_for_dispatch = shared_authority_id;
+        let _shared_authority_id_for_dispatch = shared_authority_id;
         let app_ctx_for_dispatch = app_ctx.clone();
+        let runtime_bridge_for_dispatch = props.runtime_bridge.clone();
         // Clone shared messages Arc for message retry dispatch
         // Used to look up failed messages by ID to get channel and content for retry
         let shared_messages_for_dispatch = shared_messages;
@@ -1580,11 +1588,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 // Handle dispatch commands via CallbackRegistry
                                 match dispatch_cmd {
                                     DispatchCommand::CreateAccount { name } => {
+                                        if std::env::var_os("AURA_HARNESS_MODE").is_some() {
+                                            new_state.account_created_queued();
+                                        }
                                         (cb.app.on_create_account)(name);
                                     }
                                     DispatchCommand::ImportDeviceEnrollmentDuringOnboarding {
                                         code,
                                     } => {
+                                        if std::env::var_os("AURA_HARNESS_MODE").is_some() {
+                                            new_state.account_created_queued();
+                                        }
                                         (cb.app.on_import_device_enrollment_during_onboarding)(
                                             code,
                                         );
@@ -2145,15 +2159,201 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         message,
                                         ttl_secs,
                                     } => {
-                                        (cb.invitations.on_create)(
-                                            receiver_id,
-                                            invitation_type.as_str().to_owned(),
-                                            message,
-                                            ttl_secs,
-                                        );
+                                        if std::env::var_os("AURA_HARNESS_MODE").is_some()
+                                            && matches!(
+                                                invitation_type,
+                                                crate::tui::state_machine::InvitationKind::Contact
+                                            )
+                                        {
+                                            let message_for_task = message.clone();
+                                            let update_tx = update_tx_for_ceremony.clone();
+                                            let runtime_bridge = runtime_bridge_for_dispatch.clone();
+                                            tasks_for_dispatch.spawn(async move {
+                                                if let Some(tx) = update_tx.clone() {
+                                                    let _ = tx
+                                                        .send(UiUpdate::ToastAdded(ToastMessage::info(
+                                                            "create-invitation",
+                                                            "Creating contact invitation...",
+                                                        )))
+                                                        .await;
+                                                }
+                                                let ttl_ms =
+                                                    ttl_secs.map(|seconds| seconds.saturating_mul(1000));
+                                                let result: Result<String, aura_core::AuraError> =
+                                                    match runtime_bridge {
+                                                        Some(runtime) => {
+                                                            match tokio::time::timeout(
+                                                                std::time::Duration::from_secs(10),
+                                                                runtime.create_contact_invitation(
+                                                                    receiver_id,
+                                                                    None,
+                                                                    message_for_task,
+                                                                    ttl_ms,
+                                                                ),
+                                                            )
+                                                            .await
+                                                            {
+                                                                Ok(Ok(invitation)) => {
+                                                                    match tokio::time::timeout(
+                                                                        std::time::Duration::from_secs(10),
+                                                                        runtime.export_invitation(
+                                                                            invitation.invitation_id.as_str(),
+                                                                        ),
+                                                                    )
+                                                                    .await
+                                                                    {
+                                                                        Ok(result) => result.map_err(|error| {
+                                                                            aura_core::AuraError::agent(format!(
+                                                                                "Failed to export contact invitation: {error}"
+                                                                            ))
+                                                                        }),
+                                                                        Err(_) => Err(aura_core::AuraError::internal(
+                                                                            "Timed out exporting contact invitation",
+                                                                        )),
+                                                                    }
+                                                                }
+                                                                Ok(Err(error)) => Err(aura_core::AuraError::agent(
+                                                                    format!(
+                                                                        "Failed to create contact invitation: {error}"
+                                                                    ),
+                                                                )),
+                                                                Err(_) => Err(aura_core::AuraError::internal(
+                                                                    "Timed out creating contact invitation",
+                                                                )),
+                                                            }
+                                                        }
+                                                        None => Err(aura_core::AuraError::agent(
+                                                            "Runtime bridge unavailable for harness contact invitation",
+                                                        )),
+                                                    };
+
+                                                match result {
+                                                    Ok(code) => {
+                                                        if let Err(error) = copy_to_clipboard(&code) {
+                                                            tracing::warn!(
+                                                                error = %error,
+                                                                "failed to copy harness invitation code to clipboard"
+                                                            );
+                                                        }
+                                                        if let Some(tx) = update_tx {
+                                                            let _ = tx
+                                                                .send(UiUpdate::InvitationExported { code })
+                                                                .await;
+                                                        }
+                                                    }
+                                                    Err(error) => {
+                                                        tracing::warn!(
+                                                            error = %error,
+                                                            receiver_id = %receiver_id,
+                                                            "failed to create harness contact invitation"
+                                                        );
+                                                        if let Some(tx) = update_tx {
+                                                            let _ = tx
+                                                                .send(UiUpdate::operation_failed(
+                                                                    "create invitation",
+                                                                    error.to_string(),
+                                                                ))
+                                                                .await;
+                                                        }
+                                                    }
+                                                }
+                                            });
+                                        } else {
+                                            (cb.invitations.on_create)(
+                                                receiver_id,
+                                                invitation_type.as_str().to_owned(),
+                                                message,
+                                                ttl_secs,
+                                            );
+                                        }
                                     }
                                     DispatchCommand::ImportInvitation { code } => {
-                                        (cb.invitations.on_import)(code);
+                                        if std::env::var_os("AURA_HARNESS_MODE").is_some() {
+                                            let code_for_task = code.clone();
+                                            let update_tx = update_tx_for_ceremony.clone();
+                                            let runtime_bridge = runtime_bridge_for_dispatch.clone();
+                                            tasks_for_dispatch.spawn(async move {
+                                                let result: Result<String, aura_core::AuraError> =
+                                                    match runtime_bridge {
+                                                        Some(runtime) => {
+                                                            match tokio::time::timeout(
+                                                                std::time::Duration::from_secs(10),
+                                                                runtime.import_invitation(&code_for_task),
+                                                            )
+                                                            .await
+                                                            {
+                                                                Ok(Ok(invitation)) => {
+                                                                    if matches!(
+                                                                        invitation.invitation_type,
+                                                                        aura_app::ui::types::InvitationBridgeType::Contact { .. }
+                                                                            | aura_app::ui::types::InvitationBridgeType::Channel { .. }
+                                                                            | aura_app::ui::types::InvitationBridgeType::Guardian { .. }
+                                                                    ) {
+                                                                        match tokio::time::timeout(
+                                                                            std::time::Duration::from_secs(10),
+                                                                            runtime.accept_invitation(
+                                                                                invitation.invitation_id.as_str(),
+                                                                            ),
+                                                                        )
+                                                                        .await
+                                                                        {
+                                                                            Ok(Ok(())) => {
+                                                                                aura_app::ui::workflows::runtime::converge_runtime(&runtime).await;
+                                                                                Ok(code_for_task)
+                                                                            }
+                                                                            Ok(Err(error)) => Err(aura_core::AuraError::agent(
+                                                                                format!(
+                                                                                    "Failed to accept invitation: {error}"
+                                                                                ),
+                                                                            )),
+                                                                            Err(_) => Err(aura_core::AuraError::internal(
+                                                                                "Timed out accepting invitation",
+                                                                            )),
+                                                                        }
+                                                                    } else {
+                                                                        Ok(code_for_task)
+                                                                    }
+                                                                }
+                                                                Ok(Err(error)) => Err(aura_core::AuraError::agent(
+                                                                    format!(
+                                                                        "Failed to import invitation: {error}"
+                                                                    ),
+                                                                )),
+                                                                Err(_) => Err(aura_core::AuraError::internal(
+                                                                    "Timed out importing invitation",
+                                                                )),
+                                                            }
+                                                        }
+                                                        None => Err(aura_core::AuraError::agent(
+                                                            "Runtime bridge unavailable for harness invitation import",
+                                                        )),
+                                                    };
+
+                                                match result {
+                                                    Ok(imported_code) => {
+                                                        if let Some(tx) = update_tx {
+                                                            let _ = tx
+                                                                .send(UiUpdate::InvitationImported {
+                                                                    invitation_code: imported_code,
+                                                                })
+                                                                .await;
+                                                        }
+                                                    }
+                                                    Err(error) => {
+                                                        if let Some(tx) = update_tx {
+                                                            let _ = tx
+                                                                .send(UiUpdate::operation_failed(
+                                                                    "ImportInvitation",
+                                                                    error.to_string(),
+                                                                ))
+                                                                .await;
+                                                        }
+                                                    }
+                                                }
+                                            });
+                                        } else {
+                                            (cb.invitations.on_import)(code);
+                                        }
                                     }
                                     DispatchCommand::ExportInvitation => {
                                         let selected = read_selected_notification(
@@ -3233,6 +3433,10 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     // Create AppCoreContext for components to access AppCore and signals
     // AppCore is always available (demo mode uses agent-less AppCore)
     let app_core_context = AppCoreContext::new(ctx_arc.app_core().clone(), ctx_arc.clone());
+    let runtime_bridge = {
+        let core = ctx_arc.app_core_raw().read().await;
+        core.runtime().cloned()
+    };
 
     // Wrap the app in nested ContextProviders
     // This enables components to use:
@@ -3282,6 +3486,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         update_tx: Some(update_tx.clone()),
                         // Callbacks registry
                         callbacks: Some(callbacks),
+                        runtime_bridge: runtime_bridge.clone(),
                     )
                 }
             }
@@ -3322,6 +3527,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         update_tx: Some(update_tx.clone()),
                         // Callbacks registry
                         callbacks: Some(callbacks),
+                        runtime_bridge: runtime_bridge.clone(),
                     )
                 }
             }

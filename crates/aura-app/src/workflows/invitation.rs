@@ -169,12 +169,29 @@ pub async fn create_contact_invitation(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationInfo, AuraError> {
-    let runtime = require_runtime(app_core).await?;
+    let harness_mode = std::env::var_os("AURA_HARNESS_MODE").is_some();
+    let runtime = if harness_mode {
+        tokio::time::timeout(std::time::Duration::from_secs(2), require_runtime(app_core))
+            .await
+            .map_err(|_| AuraError::agent("Timed out acquiring runtime for contact invitation"))??
+    } else {
+        require_runtime(app_core).await?
+    };
 
-    runtime
-        .create_contact_invitation(receiver, nickname, message, ttl_ms)
+    if harness_mode {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            runtime.create_contact_invitation(receiver, nickname, message, ttl_ms),
+        )
         .await
+        .map_err(|_| AuraError::agent("Timed out in runtime.create_contact_invitation"))?
         .map_err(|e| AuraError::agent(format!("Failed to create contact invitation: {e}")))
+    } else {
+        runtime
+            .create_contact_invitation(receiver, nickname, message, ttl_ms)
+            .await
+            .map_err(|e| AuraError::agent(format!("Failed to create contact invitation: {e}")))
+    }
 }
 
 /// Create a guardian invitation

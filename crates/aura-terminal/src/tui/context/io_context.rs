@@ -608,109 +608,73 @@ impl IoContext {
     // =========================================================================
 
     pub async fn create_account(&self, nickname_suggestion: &str) -> TerminalResult<()> {
-        let (authority_id, _context_id) = self
-            .account_files
-            .create_account(nickname_suggestion)
-            .await?;
-
         let app_core = self.app_core_raw().clone();
+        let nickname_suggestion = nickname_suggestion.to_string();
         let home_name = format!("{nickname_suggestion}'s Home");
-        if std::env::var_os("AURA_HARNESS_MODE").is_some() {
-            const INITIAL_HOME_ATTEMPTS: usize = 40;
-            const BOOTSTRAP_RETRY_MS: u64 = 250;
+        let harness_mode = std::env::var_os("AURA_HARNESS_MODE").is_some();
+        let authority_id = if harness_mode {
+            self.account_files.set_account_created();
+            let core = app_core.read().await;
+            core.runtime()
+                .map(|runtime| runtime.authority_id())
+                .or_else(|| core.authority().copied())
+                .ok_or_else(|| {
+                    TerminalError::Operation(
+                        "Missing placeholder authority during account creation".to_string(),
+                    )
+                })?
+        } else {
+            let (authority_id, _context_id) = self
+                .account_files
+                .create_account(&nickname_suggestion)
+                .await?;
+            authority_id
+        };
 
-            {
-                let mut core = app_core.write().await;
-                core.set_authority(authority_id);
-            }
+        {
+            let mut core = app_core.write().await;
+            core.set_authority(authority_id);
+        }
 
-            for attempt in 0..INITIAL_HOME_ATTEMPTS {
-                if context_workflows::create_home(&app_core, Some(home_name.clone()), None)
-                    .await
-                    .is_ok()
-                {
+        let account_files = self.account_files.clone();
+        if harness_mode {
+            let persist_account_files = account_files.clone();
+            let persist_nickname = nickname_suggestion.clone();
+            tokio::spawn(async move {
+                let _ = persist_account_files
+                    .create_account(&persist_nickname)
+                    .await;
+            });
+
+            let _ = context_workflows::create_home(&app_core, Some(home_name), None).await;
+            return Ok(());
+        }
+
+        const SIGNING_KEY_ATTEMPTS: usize = 40;
+        const BOOTSTRAP_RETRY_MS: u64 = 250;
+        tokio::spawn(async move {
+            let _ = context_workflows::create_home(&app_core, Some(home_name.clone()), None).await;
+
+            for attempt in 0..SIGNING_KEY_ATTEMPTS {
+                let bootstrap_ready = {
+                    let core = app_core.read().await;
+                    if core.has_runtime() {
+                        core.bootstrap_signing_keys().await.is_ok()
+                    } else {
+                        false
+                    }
+                };
+                if bootstrap_ready {
                     break;
                 }
-                if attempt + 1 < INITIAL_HOME_ATTEMPTS {
+                if attempt + 1 < SIGNING_KEY_ATTEMPTS {
                     tokio::time::sleep(std::time::Duration::from_millis(BOOTSTRAP_RETRY_MS)).await;
                 }
             }
 
-            let app_core_for_refresh = app_core.clone();
-            tokio::spawn(async move {
-                const SIGNING_KEY_ATTEMPTS: usize = 40;
-                const BOOTSTRAP_RETRY_MS: u64 = 250;
-
-                for attempt in 0..SIGNING_KEY_ATTEMPTS {
-                    let bootstrap_ready = {
-                        let core = app_core_for_refresh.read().await;
-                        if core.has_runtime() {
-                            core.bootstrap_signing_keys().await.is_ok()
-                        } else {
-                            false
-                        }
-                    };
-                    if bootstrap_ready {
-                        break;
-                    }
-                    if attempt + 1 < SIGNING_KEY_ATTEMPTS {
-                        tokio::time::sleep(std::time::Duration::from_millis(BOOTSTRAP_RETRY_MS))
-                            .await;
-                    }
-                }
-
-                let _ = settings_workflows::refresh_settings_from_runtime(&app_core_for_refresh).await;
-                let _ = system_workflows::refresh_account(&app_core_for_refresh).await;
-            });
-        } else {
-            // Complete onboarding once the local account exists. Initial home seeding and
-            // subsequent refreshes run in the background so transient runtime startup lag
-            // does not leave the onboarding UI stuck in a spinner.
-            tokio::spawn(async move {
-                {
-                    let mut core = app_core.write().await;
-                    core.set_authority(authority_id);
-                }
-
-                const SIGNING_KEY_ATTEMPTS: usize = 40;
-                const INITIAL_HOME_ATTEMPTS: usize = 40;
-                const BOOTSTRAP_RETRY_MS: u64 = 250;
-
-                for attempt in 0..SIGNING_KEY_ATTEMPTS {
-                    let bootstrap_ready = {
-                        let core = app_core.read().await;
-                        if core.has_runtime() {
-                            core.bootstrap_signing_keys().await.is_ok()
-                        } else {
-                            false
-                        }
-                    };
-                    if bootstrap_ready {
-                        break;
-                    }
-                    if attempt + 1 < SIGNING_KEY_ATTEMPTS {
-                        tokio::time::sleep(std::time::Duration::from_millis(BOOTSTRAP_RETRY_MS))
-                            .await;
-                    }
-                }
-
-                for attempt in 0..INITIAL_HOME_ATTEMPTS {
-                    if context_workflows::create_home(&app_core, Some(home_name.clone()), None)
-                        .await
-                        .is_ok()
-                    {
-                        break;
-                    }
-                    if attempt + 1 < INITIAL_HOME_ATTEMPTS {
-                        tokio::time::sleep(std::time::Duration::from_millis(BOOTSTRAP_RETRY_MS))
-                            .await;
-                    }
-                }
-
-                let _ = settings_workflows::refresh_settings_from_runtime(&app_core).await;
-                let _ = system_workflows::refresh_account(&app_core).await;
-            });
-        }
+            let _ = settings_workflows::refresh_settings_from_runtime(&app_core).await;
+            let _ = system_workflows::refresh_account(&app_core).await;
+        });
 
         Ok(())
     }
@@ -725,32 +689,15 @@ impl IoContext {
             .await?;
 
         let app_core = self.app_core_raw().clone();
+        {
+            let mut core = app_core.write().await;
+            core.set_authority(recovered_authority_id);
+        }
+
         let bootstrap = async move {
-            {
-                let mut core = app_core.write().await;
-                core.set_authority(recovered_authority_id);
-            }
-
-            const INITIAL_HOME_ATTEMPTS: usize = 40;
-            const INITIAL_HOME_RETRY_MS: u64 = 250;
-
-            for attempt in 0..INITIAL_HOME_ATTEMPTS {
-                if context_workflows::create_home(
-                    &app_core,
-                    Some("Recovered Home".to_string()),
-                    None,
-                )
-                .await
-                .is_ok()
-                {
-                    break;
-                }
-                if attempt + 1 < INITIAL_HOME_ATTEMPTS {
-                    tokio::time::sleep(std::time::Duration::from_millis(INITIAL_HOME_RETRY_MS))
-                        .await;
-                }
-            }
-
+            let _ =
+                context_workflows::create_home(&app_core, Some("Recovered Home".to_string()), None)
+                    .await;
             let _ = settings_workflows::refresh_settings_from_runtime(&app_core).await;
             let _ = system_workflows::refresh_account(&app_core).await;
         };

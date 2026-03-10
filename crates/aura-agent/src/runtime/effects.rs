@@ -632,13 +632,22 @@ impl AuraEffectSystem {
             return;
         };
 
-        loop {
-            match rx.recv().await {
-                Ok(ViewUpdate::Batch { .. }) => return,
-                Ok(_) => continue,
-                Err(_) => return, // Channel closed or lagged, just return
+        let wait_for_batch = async {
+            loop {
+                match rx.recv().await {
+                    Ok(ViewUpdate::Batch { .. }) => return,
+                    Ok(_) => continue,
+                    Err(_) => return, // Channel closed or lagged, just return
+                }
             }
+        };
+
+        if std::env::var_os("AURA_HARNESS_MODE").is_some() {
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), wait_for_batch).await;
+            return;
         }
+
+        wait_for_batch.await;
     }
 
     pub fn requeue_envelope(&self, envelope: TransportEnvelope) {
