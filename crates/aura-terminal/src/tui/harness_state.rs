@@ -5,7 +5,8 @@ use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::state::toast::ToastLevel;
 use crate::tui::state::CreateInvitationField;
 use crate::tui::types::{
-    Contact as TuiContact, Device as TuiDevice, Message as TuiMessage, SettingsSection,
+    Channel as TuiChannel, Contact as TuiContact, Device as TuiDevice, Message as TuiMessage,
+    SettingsSection,
 };
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
@@ -26,6 +27,8 @@ const UI_STATE_FILE_ENV: &str = "AURA_TUI_UI_STATE_FILE";
 
 static UI_STATE_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
 static LAST_WRITTEN_SNAPSHOT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static CHANNELS_OVERRIDE: OnceLock<Mutex<Option<Vec<TuiChannel>>>> = OnceLock::new();
+static SELECTED_CHANNEL_ID_OVERRIDE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static CONTACTS_OVERRIDE: OnceLock<Mutex<Option<Vec<TuiContact>>>> = OnceLock::new();
 static DEVICES_OVERRIDE: OnceLock<Mutex<Option<Vec<TuiDevice>>>> = OnceLock::new();
 static MESSAGES_OVERRIDE: OnceLock<Mutex<Option<Vec<TuiMessage>>>> = OnceLock::new();
@@ -38,6 +41,14 @@ fn configured_ui_state_file() -> Option<&'static PathBuf> {
 
 fn last_written_snapshot() -> &'static Mutex<Option<String>> {
     LAST_WRITTEN_SNAPSHOT.get_or_init(|| Mutex::new(None))
+}
+
+fn channels_override() -> &'static Mutex<Option<Vec<TuiChannel>>> {
+    CHANNELS_OVERRIDE.get_or_init(|| Mutex::new(None))
+}
+
+fn selected_channel_id_override() -> &'static Mutex<Option<String>> {
+    SELECTED_CHANNEL_ID_OVERRIDE.get_or_init(|| Mutex::new(None))
 }
 
 fn contacts_override() -> &'static Mutex<Option<Vec<TuiContact>>> {
@@ -223,27 +234,55 @@ pub fn semantic_ui_snapshot(
         selected_navigation_id,
     );
 
-    let channel_ids = app_snapshot
-        .chat
-        .all_channels()
-        .map(|channel| channel.id.to_string())
-        .collect::<Vec<_>>();
-    let channel_items = app_snapshot
-        .chat
-        .all_channels()
-        .enumerate()
-        .map(|(idx, channel)| ListItemSnapshot {
-            id: channel.id.to_string(),
-            selected: idx == state.chat.selected_channel,
-            confirmation: ConfirmationState::Confirmed,
-        })
-        .collect::<Vec<_>>();
+    let effective_channels = channels_override()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let selected_channel_override = selected_channel_id_override()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let channel_ids = if let Some(ref channels) = effective_channels {
+        channels.iter().map(|channel| channel.id.clone()).collect::<Vec<_>>()
+    } else {
+        app_snapshot
+            .chat
+            .all_channels()
+            .map(|channel| channel.id.to_string())
+            .collect::<Vec<_>>()
+    };
+    let selected_channel_index = selected_channel_override
+        .as_ref()
+        .and_then(|selected_id| channel_ids.iter().position(|channel_id| channel_id == selected_id))
+        .unwrap_or(state.chat.selected_channel);
+    let channel_items = if let Some(ref channels) = effective_channels {
+        channels
+            .iter()
+            .enumerate()
+            .map(|(idx, channel)| ListItemSnapshot {
+                id: channel.id.clone(),
+                selected: idx == selected_channel_index,
+                confirmation: ConfirmationState::Confirmed,
+            })
+            .collect::<Vec<_>>()
+    } else {
+        app_snapshot
+            .chat
+            .all_channels()
+            .enumerate()
+            .map(|(idx, channel)| ListItemSnapshot {
+                id: channel.id.to_string(),
+                selected: idx == selected_channel_index,
+                confirmation: ConfirmationState::Confirmed,
+            })
+            .collect::<Vec<_>>()
+    };
     push_list(
         &mut lists,
         &mut selections,
         ListId::Channels,
         channel_items,
-        selected_by_index(&channel_ids, state.chat.selected_channel),
+        selected_by_index(&channel_ids, selected_channel_index),
     );
 
     let effective_contacts = contacts_override_input
@@ -543,7 +582,9 @@ pub fn semantic_ui_snapshot(
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone()
         .unwrap_or_default();
-    let selected_channel_id = channel_ids.get(state.chat.selected_channel).cloned();
+    let selected_channel_id = selected_channel_override
+        .clone()
+        .or_else(|| channel_ids.get(selected_channel_index).cloned());
     let messages = if !effective_messages.is_empty() {
         effective_messages
             .iter()
@@ -672,54 +713,112 @@ pub fn semantic_ui_snapshot(
         .homes
         .current_home()
         .and_then(|home| home.members.first().map(|member| member.id));
-    for channel in app_snapshot.chat.all_channels() {
-        let channel_id = channel.id.to_string();
-        let resolved_recipient_count = local_authority
-            .map(|authority_id| {
-                messaging_workflows::resolved_recipient_peers_for_channel_view(
-                    channel,
-                    &app_snapshot.homes,
-                    &app_snapshot.contacts,
-                    &[],
-                    authority_id,
-                )
-                .len()
-            })
-            .unwrap_or(0);
-        let resolved_member_count = channel
-            .member_count
-            .max((resolved_recipient_count.saturating_add(1)) as u32);
-        runtime_events.push(RuntimeEventSnapshot {
-            id: RuntimeEventId(format!("tui-channel-membership-ready:{channel_id}")),
-            fact: RuntimeFact::ChannelMembershipReady {
-                channel: ChannelFactKey {
-                    id: Some(channel_id.clone()),
-                    name: Some(channel.name.clone()),
-                },
-                member_count: Some(resolved_member_count as usize),
-            },
-        });
-        if resolved_recipient_count > 0 {
+    if let Some(ref channels) = effective_channels {
+        for channel in channels {
+            let channel_id = channel.id.clone();
+            let app_channel = app_snapshot
+                .chat
+                .all_channels()
+                .find(|candidate| candidate.id.to_string() == channel_id);
+            let resolved_recipient_count = local_authority
+                .zip(app_channel)
+                .map(|(authority_id, app_channel)| {
+                    messaging_workflows::resolved_recipient_peers_for_channel_view(
+                        app_channel,
+                        &app_snapshot.homes,
+                        &app_snapshot.contacts,
+                        &[],
+                        authority_id,
+                    )
+                    .len()
+                })
+                .unwrap_or(0);
+            let resolved_member_count = channel
+                .member_count
+                .max((resolved_recipient_count.saturating_add(1)) as u32);
             runtime_events.push(RuntimeEventSnapshot {
-                id: RuntimeEventId(format!("tui-recipient-peers-resolved:{channel_id}")),
-                fact: RuntimeFact::RecipientPeersResolved {
+                id: RuntimeEventId(format!("tui-channel-membership-ready:{channel_id}")),
+                fact: RuntimeFact::ChannelMembershipReady {
                     channel: ChannelFactKey {
                         id: Some(channel_id.clone()),
                         name: Some(channel.name.clone()),
                     },
-                    member_count: resolved_member_count as usize,
+                    member_count: Some(resolved_member_count as usize),
                 },
             });
+            if resolved_recipient_count > 0 {
+                runtime_events.push(RuntimeEventSnapshot {
+                    id: RuntimeEventId(format!("tui-recipient-peers-resolved:{channel_id}")),
+                    fact: RuntimeFact::RecipientPeersResolved {
+                        channel: ChannelFactKey {
+                            id: Some(channel_id.clone()),
+                            name: Some(channel.name.clone()),
+                        },
+                        member_count: resolved_member_count as usize,
+                    },
+                });
+                runtime_events.push(RuntimeEventSnapshot {
+                    id: RuntimeEventId(format!("tui-message-delivery-ready:{channel_id}")),
+                    fact: RuntimeFact::MessageDeliveryReady {
+                        channel: ChannelFactKey {
+                            id: Some(channel_id.clone()),
+                            name: Some(channel.name.clone()),
+                        },
+                        member_count: resolved_member_count as usize,
+                    },
+                });
+            }
+        }
+    } else {
+        for channel in app_snapshot.chat.all_channels() {
+            let channel_id = channel.id.to_string();
+            let resolved_recipient_count = local_authority
+                .map(|authority_id| {
+                    messaging_workflows::resolved_recipient_peers_for_channel_view(
+                        channel,
+                        &app_snapshot.homes,
+                        &app_snapshot.contacts,
+                        &[],
+                        authority_id,
+                    )
+                    .len()
+                })
+                .unwrap_or(0);
+            let resolved_member_count = channel
+                .member_count
+                .max((resolved_recipient_count.saturating_add(1)) as u32);
             runtime_events.push(RuntimeEventSnapshot {
-                id: RuntimeEventId(format!("tui-message-delivery-ready:{channel_id}")),
-                fact: RuntimeFact::MessageDeliveryReady {
+                id: RuntimeEventId(format!("tui-channel-membership-ready:{channel_id}")),
+                fact: RuntimeFact::ChannelMembershipReady {
                     channel: ChannelFactKey {
                         id: Some(channel_id.clone()),
                         name: Some(channel.name.clone()),
                     },
-                    member_count: resolved_member_count as usize,
+                    member_count: Some(resolved_member_count as usize),
                 },
             });
+            if resolved_recipient_count > 0 {
+                runtime_events.push(RuntimeEventSnapshot {
+                    id: RuntimeEventId(format!("tui-recipient-peers-resolved:{channel_id}")),
+                    fact: RuntimeFact::RecipientPeersResolved {
+                        channel: ChannelFactKey {
+                            id: Some(channel_id.clone()),
+                            name: Some(channel.name.clone()),
+                        },
+                        member_count: resolved_member_count as usize,
+                    },
+                });
+                runtime_events.push(RuntimeEventSnapshot {
+                    id: RuntimeEventId(format!("tui-message-delivery-ready:{channel_id}")),
+                    fact: RuntimeFact::MessageDeliveryReady {
+                        channel: ChannelFactKey {
+                            id: Some(channel_id.clone()),
+                            name: Some(channel.name.clone()),
+                        },
+                        member_count: resolved_member_count as usize,
+                    },
+                });
+            }
         }
     }
 
@@ -774,6 +873,16 @@ pub fn publish_devices_list_override(devices: &[TuiDevice]) {
     *devices_override()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(devices.to_vec());
+}
+
+pub fn publish_channels_override(channels: &[TuiChannel], selected_channel_id: Option<&str>) {
+    *channels_override()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(channels.to_vec());
+    *selected_channel_id_override()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        selected_channel_id.map(ToOwned::to_owned);
 }
 
 pub fn publish_messages_override(messages: &[TuiMessage]) {

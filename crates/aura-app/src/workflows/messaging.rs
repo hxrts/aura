@@ -545,6 +545,50 @@ async fn restore_home_member_membership(
     Ok(())
 }
 
+pub async fn project_channel_peer_membership(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    peer_authority: AuthorityId,
+    name_hint: Option<&str>,
+) -> Result<(), AuraError> {
+    with_chat_state(app_core, |chat| {
+        let fallback_name = name_hint
+            .map(normalize_channel_name)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| channel_id.to_string());
+        let channel = chat.channel_mut(&channel_id);
+        if let Some(channel) = channel {
+            if !channel.member_ids.contains(&peer_authority) {
+                channel.member_ids.push(peer_authority);
+            }
+            channel.member_count = channel.member_count.max(channel.member_ids.len() as u32 + 1);
+            if channel.name == channel.id.to_string() && fallback_name != channel.name {
+                channel.name = fallback_name;
+            }
+            return;
+        }
+
+        chat.upsert_channel(Channel {
+            id: channel_id,
+            context_id: None,
+            name: fallback_name,
+            topic: None,
+            channel_type: ChannelType::Home,
+            unread_count: 0,
+            is_dm: false,
+            member_ids: vec![peer_authority],
+            member_count: 2,
+            last_message: None,
+            last_message_time: None,
+            last_activity: 0,
+            last_finalized_epoch: 0,
+        });
+    })
+    .await?;
+
+    Ok(())
+}
+
 async fn ensure_home_state_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
@@ -1559,10 +1603,10 @@ pub async fn send_message_ref(
                     );
                 }
                 if attempted_fanout > 0 && failed_fanout.len() == attempted_fanout {
-                    messaging_warn!(
+                    return Err(AuraError::agent(format!(
                         "Message fanout unavailable for all recipients on {channel_id}: {}",
                         failed_fanout.join("; ")
-                    );
+                    )));
                 }
                 converge_runtime(&runtime).await;
                 if let Err(_error) =

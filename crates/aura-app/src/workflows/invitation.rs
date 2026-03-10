@@ -674,15 +674,35 @@ pub async fn accept_pending_home_invitation(
         });
 
         if let Some(inv) = home_invitation {
-            let invited_channel_id = match &inv.invitation_type {
-                InvitationBridgeType::Channel { home_id, .. } => home_id.parse().ok(),
-                _ => None,
+            let (invited_channel_id, channel_name_hint) = match &inv.invitation_type {
+                InvitationBridgeType::Channel {
+                    home_id,
+                    nickname_suggestion,
+                } => (home_id.parse().ok(), nickname_suggestion.clone()),
+                _ => (None, None),
             };
             match runtime.accept_invitation(inv.invitation_id.as_str()).await {
                 Ok(()) => {
                     converge_runtime(&runtime).await;
                     if let Some(channel_id) = invited_channel_id {
-                        let _ = crate::workflows::messaging::join_channel(app_core, channel_id).await;
+                        let channel_visible = crate::workflows::snapshot_policy::chat_snapshot(
+                            app_core,
+                        )
+                        .await
+                        .channel(&channel_id)
+                        .is_some();
+                        if !channel_visible {
+                            let _ =
+                                crate::workflows::messaging::join_channel(app_core, channel_id)
+                                    .await;
+                        }
+                        let _ = crate::workflows::messaging::project_channel_peer_membership(
+                            app_core,
+                            channel_id,
+                            inv.sender_id,
+                            channel_name_hint.as_deref(),
+                        )
+                        .await;
                         converge_runtime(&runtime).await;
                     }
                     return Ok(inv.invitation_id.clone());
@@ -694,7 +714,24 @@ pub async fn accept_pending_home_invitation(
                     // Treat these races as idempotent success for `/homeaccept`.
                     if lowered.contains("already accepted") || lowered.contains("not pending") {
                         if let Some(channel_id) = invited_channel_id {
-                            let _ = crate::workflows::messaging::join_channel(app_core, channel_id).await;
+                            let channel_visible = crate::workflows::snapshot_policy::chat_snapshot(
+                                app_core,
+                            )
+                            .await
+                            .channel(&channel_id)
+                            .is_some();
+                            if !channel_visible {
+                                let _ =
+                                    crate::workflows::messaging::join_channel(app_core, channel_id)
+                                        .await;
+                            }
+                            let _ = crate::workflows::messaging::project_channel_peer_membership(
+                                app_core,
+                                channel_id,
+                                inv.sender_id,
+                                channel_name_hint.as_deref(),
+                            )
+                            .await;
                             converge_runtime(&runtime).await;
                         }
                         return Ok(inv.invitation_id.clone());

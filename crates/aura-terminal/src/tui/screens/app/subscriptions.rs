@@ -496,22 +496,36 @@ fn publish_scoped_channels(
     update_tx: &Option<UiUpdateSender>,
     last_channel_count: &Arc<AtomicUsize>,
     last_message_count: &Arc<AtomicUsize>,
+    last_channel_signature: &Arc<RwLock<Option<String>>>,
     chat_state: &ChatState,
     active_scope: Option<&str>,
 ) {
     let (channel_list, message_count) = scoped_channel_snapshot(chat_state, active_scope);
     let channel_count = channel_list.len();
+    let channel_signature = channel_list
+        .iter()
+        .map(|channel| channel.id.as_str())
+        .collect::<Vec<_>>()
+        .join("|");
 
     if let Ok(mut guard) = channels.write() {
         *guard = channel_list;
     }
 
     if let Some(tx) = update_tx {
+        let channel_signature_changed = {
+            let mut guard = last_channel_signature
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let changed = guard.as_deref() != Some(channel_signature.as_str());
+            *guard = Some(channel_signature);
+            changed
+        };
         let channel_changed =
             last_channel_count.swap(channel_count, Ordering::Relaxed) != channel_count;
         let message_changed =
             last_message_count.swap(message_count, Ordering::Relaxed) != message_count;
-        if !(channel_changed || message_changed) {
+        if !(channel_changed || message_changed || channel_signature_changed) {
             return;
         }
         let _ = tx.try_send(UiUpdate::ChatStateUpdated {
@@ -539,6 +553,8 @@ pub fn use_channels_subscription(
     let last_channel_count = last_channel_count_ref.read().clone();
     let last_message_count_ref = hooks.use_ref(|| Arc::new(AtomicUsize::new(usize::MAX)));
     let last_message_count = last_message_count_ref.read().clone();
+    let last_channel_signature_ref = hooks.use_ref(|| Arc::new(RwLock::new(None::<String>)));
+    let last_channel_signature = last_channel_signature_ref.read().clone();
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
@@ -549,6 +565,7 @@ pub fn use_channels_subscription(
         let update_tx = update_tx.clone();
         let last_channel_count = last_channel_count.clone();
         let last_message_count = last_message_count.clone();
+        let last_channel_signature = last_channel_signature.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 let mut stabilized = latest_chat_state
@@ -593,6 +610,7 @@ pub fn use_channels_subscription(
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,
+                    &last_channel_signature,
                     &stabilized,
                     scope.as_deref(),
                 );
@@ -610,6 +628,7 @@ pub fn use_channels_subscription(
         let update_tx = update_tx.clone();
         let last_channel_count = last_channel_count.clone();
         let last_message_count = last_message_count.clone();
+        let last_channel_signature = last_channel_signature.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
                 let authority_id = settings_state.authority_id.parse::<AuthorityId>().ok();
@@ -636,6 +655,7 @@ pub fn use_channels_subscription(
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,
+                    &last_channel_signature,
                     &chat_state,
                     scope.as_deref(),
                 );
@@ -647,6 +667,7 @@ pub fn use_channels_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let channels = shared_channels.clone();
+        let last_channel_signature = last_channel_signature.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
                 let scope = active_home_scope_id(&neighborhood);
@@ -664,6 +685,7 @@ pub fn use_channels_subscription(
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,
+                    &last_channel_signature,
                     &chat_state,
                     Some(scope.as_str()),
                 );

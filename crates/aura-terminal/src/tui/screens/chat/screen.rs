@@ -26,7 +26,7 @@ use crate::tui::callbacks::{
 };
 use crate::tui::chat_scope::{active_home_scope_id, scoped_channels};
 use crate::tui::components::{ListPanel, MessageInput, MessagePanel};
-use crate::tui::harness_state::publish_messages_override;
+use crate::tui::harness_state::{publish_channels_override, publish_messages_override};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::ChatViewProps;
@@ -245,6 +245,11 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                                 .and_then(|s| s.read().ok().map(|g| *g))
                         })
                         .unwrap_or(0);
+                    let selected_idx = if scoped.is_empty() {
+                        0
+                    } else {
+                        selected_idx.min(scoped.len().saturating_sub(1))
+                    };
 
                     let selected_channel_message_count = scoped
                         .get(selected_idx)
@@ -290,12 +295,20 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         .into_iter()
         .map(Channel::from)
         .collect();
+    let selected_channel_index = if channels.is_empty() {
+        0
+    } else {
+        props.view
+            .selected_channel
+            .min(channels.len().saturating_sub(1))
+    };
     let selected_channel_id = channels
-        .get(props.view.selected_channel)
-        .and_then(|ch| ch.id.parse::<aura_core::identifiers::ChannelId>().ok());
+        .get(selected_channel_index)
+        .map(|ch| ch.id.clone());
     let app_messages = selected_channel_id
         .as_ref()
-        .map(|id| chat_state.messages_for_channel(id))
+        .and_then(|id| id.parse::<aura_core::identifiers::ChannelId>().ok())
+        .map(|id| chat_state.messages_for_channel(&id))
         .unwrap_or(&[]);
     let messages: Vec<Message> = app_messages
         .iter()
@@ -310,6 +323,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 .with_finalized(m.is_finalized)
         })
         .collect();
+    publish_channels_override(&channels, selected_channel_id.as_deref());
     publish_messages_override(&messages);
 
     let empty_message = if channels.is_empty() {
