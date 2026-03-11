@@ -1,12 +1,19 @@
 use super::*;
 
+pub(super) fn resolve_committed_selected_channel_id(
+    state: &TuiState,
+    shared_channels: &[Channel],
+) -> Option<String> {
+    shared_channels
+        .get(state.chat.selected_channel)
+        .map(|channel| channel.id.clone())
+}
+
 pub(super) fn handle_channel_selection_change(
     current: &TuiState,
     new_state: &TuiState,
     shared_channels: &Arc<std::sync::RwLock<Vec<Channel>>>,
-    tui_selected: &Arc<std::sync::RwLock<usize>>,
     selected_channel_id: &Arc<std::sync::RwLock<Option<String>>>,
-    callbacks: &CallbackRegistry,
 ) {
     if new_state.chat.selected_channel == current.chat.selected_channel {
         return;
@@ -14,18 +21,108 @@ pub(super) fn handle_channel_selection_change(
 
     let idx = new_state.chat.selected_channel;
 
-    if let Ok(mut guard) = tui_selected.write() {
-        *guard = idx;
-    }
-
     let channels = match shared_channels.read() {
         Ok(guard) => guard.clone(),
         Err(poisoned) => poisoned.into_inner().clone(),
     };
     if let Some(channel) = channels.get(idx) {
-        if let Ok(mut selected_id) = selected_channel_id.write() {
-            *selected_id = Some(channel.id.clone());
+        if let Ok(mut guard) = selected_channel_id.write() {
+            *guard = Some(channel.id.to_string());
         }
-        (callbacks.chat.on_channel_select)(channel.id.clone());
+    } else if let Ok(mut guard) = selected_channel_id.write() {
+        *guard = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_committed_selected_channel_id;
+    use crate::tui::state_machine::TuiState;
+    use crate::tui::types::Channel;
+    use std::path::Path;
+
+    #[test]
+    fn committed_channel_resolution_requires_authoritative_selection() {
+        let mut state = TuiState::new();
+        let channels = vec![
+            Channel::new("channel-1", "General"),
+            Channel::new("channel-2", "Ops"),
+        ];
+
+        state.chat.selected_channel = 1;
+        assert_eq!(
+            resolve_committed_selected_channel_id(&state, &channels),
+            Some("channel-2".to_string())
+        );
+
+        state.chat.selected_channel = 4;
+        assert_eq!(resolve_committed_selected_channel_id(&state, &channels), None);
+    }
+
+    #[test]
+    fn send_dispatch_does_not_background_retry_selection() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let shell_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
+        let shell_source = std::fs::read_to_string(&shell_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", shell_path.display()));
+        let send_start = shell_source
+            .find("DispatchCommand::SendChatMessage")
+            .unwrap_or_else(|| panic!("missing SendChatMessage dispatch arm"));
+        let retry_start = shell_source[send_start..]
+            .find("DispatchCommand::RetryMessage")
+            .map(|offset| send_start + offset)
+            .unwrap_or_else(|| panic!("missing RetryMessage dispatch arm"));
+        let send_branch = &shell_source[send_start..retry_start];
+
+        assert!(!send_branch.contains("sending shortly"));
+        assert!(!send_branch.contains("tokio::time::sleep"));
+        assert!(!send_branch.contains("selected_channel_id_for_dispatch.read()"));
+    }
+
+    #[test]
+    fn start_chat_dispatch_does_not_optimistically_navigate() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let shell_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
+        let shell_source = std::fs::read_to_string(&shell_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", shell_path.display()));
+        let start_chat = shell_source
+            .find("DispatchCommand::StartChat")
+            .unwrap_or_else(|| panic!("missing StartChat dispatch arm"));
+        let next_arm = shell_source[start_chat..]
+            .find("DispatchCommand::InviteSelectedContactToChannel")
+            .map(|offset| start_chat + offset)
+            .unwrap_or_else(|| panic!("missing InviteSelectedContactToChannel dispatch arm"));
+        let start_chat_branch = &shell_source[start_chat..next_arm];
+
+        assert!(!start_chat_branch.contains("router.go_to(Screen::Chat)"));
+    }
+
+    #[test]
+    fn invitation_dispatch_uses_product_callbacks_without_harness_shortcuts() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let shell_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
+        let shell_source = std::fs::read_to_string(&shell_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", shell_path.display()));
+
+        let create_start = shell_source
+            .find("DispatchCommand::CreateInvitation")
+            .unwrap_or_else(|| panic!("missing CreateInvitation dispatch arm"));
+        let import_start = shell_source[create_start..]
+            .find("DispatchCommand::ImportInvitation")
+            .map(|offset| create_start + offset)
+            .unwrap_or_else(|| panic!("missing ImportInvitation dispatch arm"));
+        let export_start = shell_source[import_start..]
+            .find("DispatchCommand::ExportInvitation")
+            .map(|offset| import_start + offset)
+            .unwrap_or_else(|| panic!("missing ExportInvitation dispatch arm"));
+        let create_branch = &shell_source[create_start..import_start];
+        let import_branch = &shell_source[import_start..export_start];
+
+        assert!(!create_branch.contains("AURA_HARNESS_MODE"));
+        assert!(!import_branch.contains("AURA_HARNESS_MODE"));
+        assert!(!create_branch.contains("runtime.create_contact_invitation"));
+        assert!(!create_branch.contains("runtime.export_invitation"));
+        assert!(!import_branch.contains("runtime.import_invitation"));
+        assert!(!import_branch.contains("runtime.accept_invitation"));
     }
 }

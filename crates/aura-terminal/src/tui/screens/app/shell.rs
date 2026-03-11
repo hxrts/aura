@@ -33,6 +33,7 @@ use aura_app::ceremonies::{
 use aura_app::ui::contract::OperationState;
 use aura_app::ui::prelude::*;
 use aura_app::ui::signals::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
+use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact};
 use aura_app::ui::workflows::access as access_workflows;
 use aura_app::ui::workflows::ceremonies::{
     cancel_key_rotation_ceremony, monitor_key_rotation_ceremony, start_device_threshold_ceremony,
@@ -49,7 +50,7 @@ use crate::tui::components::{
     DiscoveredPeerInfo, Footer, NavBar, ToastContainer, ToastLevel, ToastMessage,
 };
 use crate::tui::context::IoContext;
-use crate::tui::harness_state::maybe_export_ui_snapshot;
+use crate::tui::harness_state::{maybe_export_ui_snapshot, TuiSemanticInputs};
 use crate::tui::hooks::{AppCoreContext, CallbackContext};
 use crate::tui::keymap::{global_footer_hints, screen_footer_hints};
 use crate::tui::layout::dim;
@@ -83,7 +84,7 @@ mod events;
 mod input;
 mod render;
 mod state;
-use events::handle_channel_selection_change;
+use events::{handle_channel_selection_change, resolve_committed_selected_channel_id};
 use input::transition_from_terminal_event;
 use render::{build_global_modals, state_indicator_label};
 use state::{sync_neighborhood_navigation_state, TuiStateHandle};
@@ -208,9 +209,6 @@ pub struct IoAppProps {
     pub update_tx: Option<UiUpdateSender>,
     /// Callback registry for all domain actions
     pub callbacks: Option<CallbackRegistry>,
-    /// Cached runtime bridge for harness-mode semantic actions that should not
-    /// contend on AppCore state locks during startup convergence.
-    pub runtime_bridge: Option<Arc<dyn aura_app::runtime_bridge::RuntimeBridge>>,
 }
 
 /// Main application with screen navigation
@@ -322,16 +320,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     );
 
     // =========================================================================
-    // Shared selection state for messages subscription
+    // Shared selected channel identity for subscriptions and dispatch
     // =========================================================================
-    // The TUI state's selected_channel index, shared so the messages subscription
-    // can read which channel's messages to fetch.
-    let tui_selected_ref = hooks.use_ref(|| std::sync::Arc::new(std::sync::RwLock::new(0_usize)));
-    let tui_selected: std::sync::Arc<std::sync::RwLock<usize>> = tui_selected_ref.read().clone();
-    let selected_channel_id_ref =
+    let tui_selected_ref =
         hooks.use_ref(|| std::sync::Arc::new(std::sync::RwLock::new(None::<String>)));
-    let selected_channel_id: std::sync::Arc<std::sync::RwLock<Option<String>>> =
-        selected_channel_id_ref.read().clone();
+    let tui_selected: std::sync::Arc<std::sync::RwLock<Option<String>>> =
+        tui_selected_ref.read().clone();
 
     // =========================================================================
     // Messages subscription: SharedMessages for dispatch handlers to read
@@ -341,9 +335,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let shared_messages = use_messages_subscription(
         &mut hooks,
         &app_ctx,
-        shared_channels.clone(),
         tui_selected.clone(),
-        selected_channel_id.clone(),
     );
 
     // Clone for ChatScreen to compute per-channel message counts
@@ -357,7 +349,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Invitations subscription: SharedInvitations for notification action dispatch
     // =========================================================================
-    let shared_invitations = use_invitations_subscription(&mut hooks, &app_ctx);
+    let shared_invitations =
+        use_invitations_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
 
     // =========================================================================
     // Neighborhood homes subscription: SharedNeighborhoodHomes for dispatch handlers to read
@@ -541,7 +534,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let shared_channels_for_updates = shared_channels.clone();
             // Shared selection state for messages subscription synchronization
             let tui_selected_for_updates = tui_selected;
-            let selected_channel_id_for_updates = selected_channel_id.clone();
             async move {
                 // Helper macro-like function to add a toast to the queue
                 // (Inline to avoid borrow checker issues with closures)
@@ -600,8 +592,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             device_id: _,
                         } => {
                             tui.with_mut(|state| {
+                                state.set_operation_state(
+                                    OperationId::device_enrollment(),
+                                    OperationState::Submitting,
+                                );
                                 state.settings.last_device_enrollment_code =
                                     enrollment_code.clone();
+                                state.upsert_runtime_fact(RuntimeFact::DeviceEnrollmentCodeReady {
+                                    device_name: Some(nickname_suggestion.clone()),
+                                    code_len: Some(enrollment_code.len()),
+                                });
                                 if state.settings.pending_mobile_enrollment_autofill {
                                     state.settings.pending_mobile_enrollment_autofill = false;
                                     state.modal_queue.update_active(|modal| {
@@ -640,6 +640,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 None;
                             let mut dismiss_ceremony_started_toast = false;
                             let mut handled_device_enrollment_modal = false;
+                            let mut next_device_enrollment_state: Option<OperationState> = None;
 
                             tui.with_mut(|state| {
                                 let mut dismiss_modal = false;
@@ -661,6 +662,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             );
 
                                             if has_failed {
+                                                next_device_enrollment_state =
+                                                    Some(OperationState::Failed);
                                                 toast = Some((
                                                     error_message
                                                         .clone()
@@ -668,6 +671,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     crate::tui::state_machine::ToastLevel::Error,
                                                 ));
                                             } else if is_complete {
+                                                next_device_enrollment_state =
+                                                    Some(OperationState::Succeeded);
                                                 dismiss_modal = true;
                                                 toast = Some((
                                                     "Device enrollment complete".to_string(),
@@ -680,6 +685,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                                                     let _ = refresh_settings_from_runtime(&app_core).await;
                                                 });
+                                            } else {
+                                                next_device_enrollment_state =
+                                                    Some(OperationState::Submitting);
                                             }
                                         }
                                     } else if let crate::tui::state_machine::QueuedModal::GuardianSetup(ref mut s) = modal {
@@ -826,6 +834,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 if dismiss_modal {
                                     state.modal_queue.dismiss();
                                 }
+                                if let Some(operation_state) = next_device_enrollment_state.clone() {
+                                    state.set_operation_state(
+                                        OperationId::device_enrollment(),
+                                        operation_state,
+                                    );
+                                }
                                 if dismiss_ceremony_started_toast {
                                     state.toast_queue.dismiss();
                                 }
@@ -909,11 +923,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             );
                         }
                         UiUpdate::ChannelSelected(channel_id) => {
-                            // Navigation/state machine owns selected index; cache selected ID
-                            // so dispatch can still send when scoped channel snapshots lag.
-                            if let Ok(mut selected_id) = selected_channel_id_for_updates.write() {
-                                *selected_id = Some(channel_id.clone());
-                            }
                             let selected_idx = shared_channels_for_updates
                                 .read()
                                 .ok()
@@ -927,6 +936,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     state.chat.selected_channel = idx;
                                     state.chat.message_scroll = 0;
                                 });
+                                if let Ok(mut guard) = tui_selected_for_updates.write() {
+                                    *guard = Some(channel_id);
+                                }
                             }
                         }
                         UiUpdate::ChannelCreated(name) => {
@@ -950,6 +962,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 if channel_count == 0 {
                                     state.chat.selected_channel = 0;
                                     state.chat.message_scroll = 0;
+                                    if let Ok(mut guard) = tui_selected_for_updates.write() {
+                                        *guard = None;
+                                    }
                                     return;
                                 }
 
@@ -966,40 +981,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     state.chat.message_scroll = 0;
                                 }
 
-                                let selected_channel_id = selected_channel_id_for_updates
-                                    .read()
-                                    .ok()
-                                    .and_then(|guard| guard.clone());
-                                if let Some(selected_channel_id) = selected_channel_id {
-                                    if let Ok(channels) = shared_channels_for_updates.read() {
-                                        if let Some(idx) = channels
-                                            .iter()
-                                            .position(|channel| channel.id == selected_channel_id)
-                                        {
-                                            if state.chat.selected_channel != idx {
-                                                state.chat.selected_channel = idx;
-                                                state.chat.message_scroll = 0;
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Sync the shared selection state so message subscription
-                                // knows which channel's messages to fetch
+                                // Sync the shared selection identity so message subscription
+                                // resolves against channel IDs, not row positions.
                                 if let Ok(mut guard) = tui_selected_for_updates.write() {
-                                    *guard = state.chat.selected_channel;
-                                }
-                                if let Ok(channels) = shared_channels_for_updates.read() {
-                                    if let Some(selected) = channels
-                                        .get(state.chat.selected_channel)
-                                        .map(|channel| channel.id.clone())
-                                    {
-                                        if let Ok(mut selected_id) =
-                                            selected_channel_id_for_updates.write()
-                                        {
-                                            *selected_id = Some(selected);
-                                        }
-                                    }
+                                    *guard = shared_channels_for_updates
+                                        .read()
+                                        .ok()
+                                        .and_then(|channels| {
+                                            channels
+                                                .get(state.chat.selected_channel)
+                                                .map(|channel| channel.id.clone())
+                                        });
                                 }
 
                                 // Auto-scroll to bottom when new messages arrive, but only if
@@ -1118,6 +1110,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     OperationState::Succeeded,
                                 );
                                 state.last_exported_invitation_code = Some(code.clone());
+                                state.upsert_runtime_fact(RuntimeFact::InvitationCodeReady {
+                                    receiver_authority_id: None,
+                                    source_operation: OperationId::invitation_create(),
+                                });
                                 let copied = copy_to_clipboard(&code).is_ok();
                                 state
                                     .modal_queue
@@ -1299,6 +1295,19 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 });
                             }
                         }
+                        UiUpdate::RuntimeFactsUpdated {
+                            replace_kinds,
+                            facts,
+                        } => {
+                            tui.with_mut(|state| {
+                                for kind in replace_kinds {
+                                    state.clear_runtime_fact_kind(kind);
+                                }
+                                for fact in facts {
+                                    state.upsert_runtime_fact(fact);
+                                }
+                            });
+                        }
                         UiUpdate::NicknameUpdated {
                             contact_id: _,
                             nickname: _,
@@ -1452,11 +1461,24 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // reactivity, ensuring the component re-renders when state changes via tui.replace().
     // See TuiStateHandle and TuiStateSnapshot docs for the reactivity model.
     let tui_snapshot = tui.read_for_render();
-    let harness_contacts = shared_contacts.read().ok().map(|contacts| contacts.clone());
+    let app_snapshot = app_ctx.snapshot();
+    let harness_devices = shared_devices
+        .read()
+        .ok()
+        .map(|devices| devices.clone())
+        .unwrap_or_default();
+    let harness_channels = shared_channels
+        .read()
+        .ok()
+        .map(|channels| channels.clone())
+        .unwrap_or_default();
     maybe_export_ui_snapshot(
         &tui_snapshot,
-        &app_ctx.snapshot(),
-        harness_contacts.as_deref(),
+        TuiSemanticInputs {
+            app_snapshot: &app_snapshot,
+            settings_devices: &harness_devices,
+            chat_channels: &harness_channels,
+        },
     );
 
     // Callbacks registry and individual callback extraction for screen props
@@ -1468,9 +1490,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let on_retry_message = callbacks
         .as_ref()
         .map(|cb| cb.chat.on_retry_message.clone());
-    let on_channel_select = callbacks
-        .as_ref()
-        .map(|cb| cb.chat.on_channel_select.clone());
     let on_create_channel = callbacks
         .as_ref()
         .map(|cb| cb.chat.on_create_channel.clone());
@@ -1539,7 +1558,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let mut tui = tui;
         // Clone AppCore for key rotation operations
         let app_core_for_ceremony = app_ctx.app_core.clone();
-        let tasks_for_dispatch = tasks;
+        let _tasks_for_dispatch = tasks;
         // Clone update channel sender for ceremony UI updates
         let update_tx_for_ceremony = props.update_tx.clone();
         // Clone callbacks registry for command dispatch
@@ -1556,7 +1575,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let shared_discovered_peers_for_dispatch = shared_discovered_peers;
         let _shared_authority_id_for_dispatch = shared_authority_id;
         let app_ctx_for_dispatch = app_ctx.clone();
-        let runtime_bridge_for_dispatch = props.runtime_bridge.clone();
         // Clone shared messages Arc for message retry dispatch
         // Used to look up failed messages by ID to get channel and content for retry
         let shared_messages_for_dispatch = shared_messages;
@@ -1564,7 +1582,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let shared_devices_for_dispatch = shared_devices;
         // Clone shared selection state for immediate sync on channel navigation
         let tui_selected_for_events = tui_selected_for_chat_screen.clone();
-        let selected_channel_id_for_dispatch = selected_channel_id.clone();
         // Used for recovery eligibility checks (from threshold subscription)
         move |event| {
             if let Some(input_transition) = transition_from_terminal_event(
@@ -1573,7 +1590,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 &shared_channels_for_dispatch,
                 &shared_neighborhood_homes_for_dispatch,
                 &shared_neighborhood_home_meta_for_dispatch,
-                &selected_channel_id_for_dispatch,
             ) {
                 let current = input_transition.current;
                 let mut new_state = input_transition.new_state;
@@ -1586,8 +1602,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         &new_state,
                         &shared_channels_for_dispatch,
                         &tui_selected_for_events,
-                        &selected_channel_id_for_dispatch,
-                        cb,
                     );
                     for cmd in commands {
                         match cmd {
@@ -1617,99 +1631,31 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                     // === Chat Screen Commands ===
                                     DispatchCommand::SelectChannel { channel_id } => {
-                                        if let Ok(mut selected_id) = selected_channel_id_for_dispatch.write() {
-                                            *selected_id = Some(channel_id.to_string());
-                                        }
-                                        (cb.chat.on_channel_select)(channel_id.to_string());
-                                    }
-                                    DispatchCommand::SendChatMessage { content } => {
-                                        // Get channel_id from TUI's selected_channel to avoid
-                                        // race condition with async channel selection updates
-                                        let idx = new_state.chat.selected_channel;
-                                        let is_slash_command = content.trim_start().starts_with('/');
                                         let channels = match shared_channels_for_dispatch.read() {
                                             Ok(guard) => guard.clone(),
                                             Err(poisoned) => poisoned.into_inner().clone(),
                                         };
-                                        let selected_channel_id = if channels.is_empty() {
-                                                None
-                                            } else {
-                                                let clamped = idx.min(channels.len().saturating_sub(1));
-                                                channels.get(clamped).map(|channel| channel.id.clone())
-                                            };
-                                        let fallback_channel_id = selected_channel_id.or_else(|| {
-                                            match selected_channel_id_for_dispatch.read() {
-                                                Ok(guard) => guard.clone(),
-                                                Err(poisoned) => poisoned.into_inner().clone(),
+                                        if let Some(idx) = channels
+                                            .iter()
+                                            .position(|channel| channel.id == channel_id)
+                                        {
+                                            new_state.chat.selected_channel = idx;
+                                            if let Ok(mut guard) = tui_selected_for_events.write() {
+                                                *guard = Some(channel_id.to_string());
                                             }
-                                        });
-                                        if let Some(channel_id) = fallback_channel_id {
+                                        }
+                                    }
+                                    DispatchCommand::SendChatMessage { content } => {
+                                        let channels = match shared_channels_for_dispatch.read() {
+                                            Ok(guard) => guard.clone(),
+                                            Err(poisoned) => poisoned.into_inner().clone(),
+                                        };
+                                        if let Some(channel_id) =
+                                            resolve_committed_selected_channel_id(&new_state, &channels)
+                                        {
                                             (cb.chat.on_send)(channel_id, content);
-                                        } else if is_slash_command {
-                                            // Allow slash commands even when no channel is selected.
-                                            // This unblocks bootstrap flows such as `/join <name>`.
-                                            let fallback_channel = new_state
-                                                .neighborhood
-                                                .entered_home_id
-                                                .clone()
-                                                .unwrap_or_else(|| "home".to_string());
-                                            (cb.chat.on_send)(fallback_channel, content);
                                         } else {
-                                            // Channel selection and scoped channel snapshots can
-                                            // briefly lag after channel creation/navigation.
-                                            // Retry send in the background before surfacing a hard failure.
-                                            let retry_idx = idx;
-                                            let retry_content = content.clone();
-                                            let on_send = cb.chat.on_send.clone();
-                                            let retry_channels = shared_channels_for_dispatch.clone();
-                                            let retry_selected_id =
-                                                selected_channel_id_for_dispatch.clone();
-                                            tasks_for_dispatch.spawn(async move {
-                                                for _ in 0..40 {
-                                                    let resolved_from_channels = match retry_channels
-                                                        .read()
-                                                    {
-                                                        Ok(guard) => {
-                                                            if guard.is_empty() {
-                                                                None
-                                                            } else {
-                                                                let clamped = retry_idx
-                                                                    .min(guard.len().saturating_sub(1));
-                                                                guard
-                                                                    .get(clamped)
-                                                                    .map(|channel| channel.id.clone())
-                                                            }
-                                                        }
-                                                        Err(poisoned) => {
-                                                            let guard = poisoned.into_inner();
-                                                            if guard.is_empty() {
-                                                                None
-                                                            } else {
-                                                                let clamped = retry_idx
-                                                                    .min(guard.len().saturating_sub(1));
-                                                                guard
-                                                                    .get(clamped)
-                                                                    .map(|channel| channel.id.clone())
-                                                            }
-                                                        }
-                                                    };
-                                                    let resolved = resolved_from_channels.or_else(|| {
-                                                        match retry_selected_id.read() {
-                                                            Ok(guard) => guard.clone(),
-                                                            Err(poisoned) => poisoned.into_inner().clone(),
-                                                        }
-                                                    });
-                                                    if let Some(channel_id) = resolved {
-                                                        on_send(channel_id, retry_content.clone());
-                                                        return;
-                                                    }
-                                                    tokio::time::sleep(std::time::Duration::from_millis(25))
-                                                        .await;
-                                                }
-                                            });
-                                            new_state.toast_warning(
-                                                "Channel selection syncing; sending shortly",
-                                            );
+                                            new_state.toast_error("No committed channel selected");
                                         }
                                     }
                                     DispatchCommand::RetryMessage => {
@@ -2046,9 +1992,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         if let Ok(guard) = shared_contacts_for_dispatch.read() {
                                             if let Some(contact) = guard.get(idx) {
                                                 (cb.contacts.on_start_chat)(contact.id.clone());
-                                                // Move to Chat immediately so operators can proceed
-                                                // while the async start-chat command finalizes.
-                                                new_state.router.go_to(Screen::Chat);
                                             } else {
                                                 new_state.toast_error("No contact selected");
                                             }
@@ -2167,201 +2110,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         message,
                                         ttl_secs,
                                     } => {
-                                        if std::env::var_os("AURA_HARNESS_MODE").is_some()
-                                            && matches!(
-                                                invitation_type,
-                                                crate::tui::state_machine::InvitationKind::Contact
-                                            )
-                                        {
-                                            let message_for_task = message.clone();
-                                            let update_tx = update_tx_for_ceremony.clone();
-                                            let runtime_bridge = runtime_bridge_for_dispatch.clone();
-                                            tasks_for_dispatch.spawn(async move {
-                                                if let Some(tx) = update_tx.clone() {
-                                                    let _ = tx
-                                                        .send(UiUpdate::ToastAdded(ToastMessage::info(
-                                                            "create-invitation",
-                                                            "Creating contact invitation...",
-                                                        )))
-                                                        .await;
-                                                }
-                                                let ttl_ms =
-                                                    ttl_secs.map(|seconds| seconds.saturating_mul(1000));
-                                                let result: Result<String, aura_core::AuraError> =
-                                                    match runtime_bridge {
-                                                        Some(runtime) => {
-                                                            match tokio::time::timeout(
-                                                                std::time::Duration::from_secs(10),
-                                                                runtime.create_contact_invitation(
-                                                                    receiver_id,
-                                                                    None,
-                                                                    message_for_task,
-                                                                    ttl_ms,
-                                                                ),
-                                                            )
-                                                            .await
-                                                            {
-                                                                Ok(Ok(invitation)) => {
-                                                                    match tokio::time::timeout(
-                                                                        std::time::Duration::from_secs(10),
-                                                                        runtime.export_invitation(
-                                                                            invitation.invitation_id.as_str(),
-                                                                        ),
-                                                                    )
-                                                                    .await
-                                                                    {
-                                                                        Ok(result) => result.map_err(|error| {
-                                                                            aura_core::AuraError::agent(format!(
-                                                                                "Failed to export contact invitation: {error}"
-                                                                            ))
-                                                                        }),
-                                                                        Err(_) => Err(aura_core::AuraError::internal(
-                                                                            "Timed out exporting contact invitation",
-                                                                        )),
-                                                                    }
-                                                                }
-                                                                Ok(Err(error)) => Err(aura_core::AuraError::agent(
-                                                                    format!(
-                                                                        "Failed to create contact invitation: {error}"
-                                                                    ),
-                                                                )),
-                                                                Err(_) => Err(aura_core::AuraError::internal(
-                                                                    "Timed out creating contact invitation",
-                                                                )),
-                                                            }
-                                                        }
-                                                        None => Err(aura_core::AuraError::agent(
-                                                            "Runtime bridge unavailable for harness contact invitation",
-                                                        )),
-                                                    };
-
-                                                match result {
-                                                    Ok(code) => {
-                                                        if let Err(error) = copy_to_clipboard(&code) {
-                                                            tracing::warn!(
-                                                                error = %error,
-                                                                "failed to copy harness invite code to clipboard"
-                                                            );
-                                                        }
-                                                        if let Some(tx) = update_tx {
-                                                            let _ = tx
-                                                                .send(UiUpdate::InvitationExported { code })
-                                                                .await;
-                                                        }
-                                                    }
-                                                    Err(error) => {
-                                                        tracing::warn!(
-                                                            error = %error,
-                                                            receiver_id = %receiver_id,
-                                                            "failed to create harness contact invitation"
-                                                        );
-                                                        if let Some(tx) = update_tx {
-                                                            let _ = tx
-                                                                .send(UiUpdate::operation_failed(
-                                                                    "create invitation",
-                                                                    error.to_string(),
-                                                                ))
-                                                                .await;
-                                                        }
-                                                    }
-                                                }
-                                            });
-                                        } else {
-                                            (cb.invitations.on_create)(
-                                                receiver_id,
-                                                invitation_type.as_str().to_owned(),
-                                                message,
-                                                ttl_secs,
-                                            );
-                                        }
+                                        new_state.set_operation_state(
+                                            OperationId::invitation_create(),
+                                            OperationState::Submitting,
+                                        );
+                                        new_state.clear_runtime_fact_kind(
+                                            RuntimeEventKind::InvitationCodeReady,
+                                        );
+                                        (cb.invitations.on_create)(
+                                            receiver_id,
+                                            invitation_type.as_str().to_owned(),
+                                            message,
+                                            ttl_secs,
+                                        );
                                     }
                                     DispatchCommand::ImportInvitation { code } => {
-                                        if std::env::var_os("AURA_HARNESS_MODE").is_some() {
-                                            let code_for_task = code.clone();
-                                            let update_tx = update_tx_for_ceremony.clone();
-                                            let runtime_bridge = runtime_bridge_for_dispatch.clone();
-                                            tasks_for_dispatch.spawn(async move {
-                                                let result: Result<String, aura_core::AuraError> =
-                                                    match runtime_bridge {
-                                                        Some(runtime) => {
-                                                            match tokio::time::timeout(
-                                                                std::time::Duration::from_secs(10),
-                                                                runtime.import_invitation(&code_for_task),
-                                                            )
-                                                            .await
-                                                            {
-                                                                Ok(Ok(invitation)) => {
-                                                                    if matches!(
-                                                                        invitation.invitation_type,
-                                                                        aura_app::ui::types::InvitationBridgeType::Contact { .. }
-                                                                            | aura_app::ui::types::InvitationBridgeType::Channel { .. }
-                                                                            | aura_app::ui::types::InvitationBridgeType::Guardian { .. }
-                                                                    ) {
-                                                                        match tokio::time::timeout(
-                                                                            std::time::Duration::from_secs(10),
-                                                                            runtime.accept_invitation(
-                                                                                invitation.invitation_id.as_str(),
-                                                                            ),
-                                                                        )
-                                                                        .await
-                                                                        {
-                                                                            Ok(Ok(())) => {
-                                                                                aura_app::ui::workflows::runtime::converge_runtime(&runtime).await;
-                                                                                Ok(code_for_task)
-                                                                            }
-                                                                            Ok(Err(error)) => Err(aura_core::AuraError::agent(
-                                                                                format!(
-                                                                                    "Failed to accept invitation: {error}"
-                                                                                ),
-                                                                            )),
-                                                                            Err(_) => Err(aura_core::AuraError::internal(
-                                                                                "Timed out accepting invitation",
-                                                                            )),
-                                                                        }
-                                                                    } else {
-                                                                        Ok(code_for_task)
-                                                                    }
-                                                                }
-                                                                Ok(Err(error)) => Err(aura_core::AuraError::agent(
-                                                                    format!(
-                                                                        "Failed to import invitation: {error}"
-                                                                    ),
-                                                                )),
-                                                                Err(_) => Err(aura_core::AuraError::internal(
-                                                                    "Timed out importing invitation",
-                                                                )),
-                                                            }
-                                                        }
-                                                        None => Err(aura_core::AuraError::agent(
-                                                            "Runtime bridge unavailable for harness invitation import",
-                                                        )),
-                                                    };
-
-                                                match result {
-                                                    Ok(imported_code) => {
-                                                        if let Some(tx) = update_tx {
-                                                            let _ = tx
-                                                                .send(UiUpdate::InvitationImported {
-                                                                    invitation_code: imported_code,
-                                                                })
-                                                                .await;
-                                                        }
-                                                    }
-                                                    Err(error) => {
-                                                        if let Some(tx) = update_tx {
-                                                            let _ = tx
-                                                                .send(UiUpdate::operation_failed(
-                                                                    "ImportInvitation",
-                                                                    error.to_string(),
-                                                                ))
-                                                                .await;
-                                                        }
-                                                    }
-                                                }
-                                            });
-                                        } else {
-                                            (cb.invitations.on_import)(code);
-                                        }
+                                        (cb.invitations.on_import)(code);
                                     }
                                     DispatchCommand::ExportInvitation => {
                                         let selected = read_selected_notification(
@@ -3248,11 +3012,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             ChatScreen(
                                 view: chat_props.clone(),
                                 selected_channel: Some(tui_selected_for_chat_screen),
-                                selected_channel_id: Some(selected_channel_id),
                                 shared_channels: Some(shared_channels),
                                 on_send: on_send.clone(),
                                 on_retry_message: on_retry_message.clone(),
-                                on_channel_select: on_channel_select.clone(),
                                 on_create_channel: on_create_channel.clone(),
                                 on_set_topic: on_set_topic.clone(),
                                 update_tx: update_tx_holder.clone(),
@@ -3445,11 +3207,6 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     // Create AppCoreContext for components to access AppCore and signals
     // AppCore is always available (demo mode uses agent-less AppCore)
     let app_core_context = AppCoreContext::new(ctx_arc.app_core().clone(), ctx_arc.clone());
-    let runtime_bridge = {
-        let core = ctx_arc.app_core_raw().read().await;
-        core.runtime().cloned()
-    };
-
     // Wrap the app in nested ContextProviders
     // This enables components to use:
     // - `hooks.use_context::<AppCoreContext>()` for reactive signal subscription
@@ -3498,7 +3255,6 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         update_tx: Some(update_tx.clone()),
                         // Callbacks registry
                         callbacks: Some(callbacks),
-                        runtime_bridge: runtime_bridge.clone(),
                     )
                 }
             }
@@ -3539,7 +3295,6 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         update_tx: Some(update_tx.clone()),
                         // Callbacks registry
                         callbacks: Some(callbacks),
-                        runtime_bridge: runtime_bridge.clone(),
                     )
                 }
             }

@@ -28,6 +28,9 @@ It remains thin and delegates shared UI state, routing, and snapshot rendering t
 - Harness bridge methods are deterministic and backwards-compatible.
 - Harness publication is semantic-first: pushed shared-contract state and render
   heartbeat are authoritative; DOM inspection is secondary diagnostics only.
+- `src/main.rs` owns harness instrumentation installation for browser startup;
+  `src/harness_bridge.rs` owns the explicit bridge surface, with passive
+  observation kept separate from action/recovery behavior.
 - Browser/DOM fallback paths are diagnostic-only and must not become
   parity-critical success-path observation.
 - Browser harness observation must be side-effect free; retries and recovery are

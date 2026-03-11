@@ -9,12 +9,15 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Result};
 use aura_app::scenario_contract::{
     ActionPrecondition, ActorId, AuthoritativeTransitionFact, AuthoritativeTransitionKind,
-    CanonicalTraceEvent, IntentAction, SharedActionContract, SharedActionHandle, SharedActionId,
-    SharedActionRequest, TerminalFailureFact, TerminalSuccessFact, TerminalSuccessKind,
+    BarrierDeclaration, CanonicalTraceEvent, EnvironmentAction, Expectation, ExtractSource,
+    InputKey, IntentAction, SharedActionContract,
+    SharedActionHandle, SharedActionId, SharedActionRequest, TerminalFailureFact,
+    TerminalSuccessFact, TerminalSuccessKind, ScenarioAction as SemanticAction,
+    ScenarioStep as SemanticStep, UiAction, VariableAction,
 };
 use aura_app::ui::contract::{
     ControlId, FieldId, ListId, ModalId, OperationId, OperationState, RuntimeEventKind, ScreenId,
-    UiSnapshot,
+    ToastKind, UiSnapshot, UiReadiness,
 };
 use aura_app::ui_contract::uncovered_ui_parity_mismatches;
 use regex::Regex;
@@ -23,7 +26,10 @@ use tokio::time::Instant;
 
 use crate::backend::observe_operation;
 use crate::backend::UiOperationHandle;
-use crate::config::{ScenarioAction, ScenarioConfig, ScenarioStep, ScreenSource};
+use crate::config::{
+    nav_control_id_for_screen, settings_section_item_id, ScenarioAction, ScenarioConfig,
+    ScenarioStep, ScreenSource,
+};
 use crate::introspection::{
     extract_command_metadata, extract_toast, CommandConsistency, CommandStatus, ToastLevel,
 };
@@ -192,6 +198,7 @@ struct ScenarioContext {
     last_operation_handle: BTreeMap<String, UiOperationHandle>,
     canonical_trace: Vec<CanonicalTraceEvent>,
     shared_flow_state: BTreeMap<String, SharedFlowState>,
+    pending_convergence: BTreeMap<String, Vec<BarrierDeclaration>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -244,12 +251,18 @@ struct WaitCoordinator<'a> {
     tool_api: &'a mut ToolApi,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum WaitContractRef<'a> {
     Modal(ModalId),
     RuntimeEvent(RuntimeEventKind),
-    Semantic(&'a str),
-    Operation(&'a str),
+    Screen(ScreenId),
+    Readiness(aura_app::ui::contract::UiReadiness),
+    Quiescence(aura_app::ui_contract::QuiescenceState),
+    OperationState {
+        operation_id: OperationId,
+        state: OperationState,
+        label: &'a str,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -296,7 +309,12 @@ impl<'a> WaitCoordinator<'a> {
         instance_id: &str,
         timeout_ms: u64,
     ) -> Result<()> {
-        debug_assert!(matches!(contract, WaitContractRef::Semantic(name) if !name.is_empty()));
+        debug_assert!(matches!(
+            contract,
+            WaitContractRef::Screen(_)
+                | WaitContractRef::Readiness(_)
+                | WaitContractRef::Quiescence(_)
+        ));
         wait_for_semantic_state(step, self.tool_api, instance_id, timeout_ms)
     }
 
@@ -309,7 +327,14 @@ impl<'a> WaitCoordinator<'a> {
         handle: &UiOperationHandle,
         state: OperationState,
     ) -> Result<()> {
-        debug_assert!(matches!(contract, WaitContractRef::Operation(name) if !name.is_empty()));
+        debug_assert!(matches!(
+            contract,
+            WaitContractRef::OperationState {
+                operation_id: _,
+                state: expected_state,
+                label,
+            } if expected_state == state && !label.is_empty()
+        ));
         wait_for_operation_handle_state(step, self.tool_api, instance_id, timeout_ms, handle, state)
     }
 }
@@ -497,7 +522,16 @@ impl ScenarioExecutor {
         tool_api: &mut ToolApi,
         budgets: ExecutionBudgets,
     ) -> Result<ScenarioReport> {
-        let machine = StateMachine::from_steps(&scenario.steps);
+        if let Some(shared_steps) = scenario.shared_execution_semantic_steps() {
+            return self.execute_semantic_shared_with_budgets(
+                scenario,
+                shared_steps,
+                tool_api,
+                budgets,
+            );
+        }
+        let execution_steps = scenario.execution_steps()?;
+        let machine = StateMachine::from_steps(&execution_steps);
         let mut current = machine
             .start_state
             .clone()
@@ -623,6 +657,149 @@ impl ScenarioExecutor {
             completed: true,
         })
     }
+
+    fn execute_semantic_shared_with_budgets(
+        &self,
+        scenario: &ScenarioConfig,
+        semantic_steps: &[SemanticStep],
+        tool_api: &mut ToolApi,
+        budgets: ExecutionBudgets,
+    ) -> Result<ScenarioReport> {
+        let machine = SemanticStateMachine::from_steps(semantic_steps);
+        let mut current = machine
+            .start_state
+            .clone()
+            .ok_or_else(|| anyhow!("scenario has no start state"))?;
+        let mut visited = Vec::new();
+        let mut transitions = Vec::new();
+        let mut global_remaining = budgets.global_budget_ms;
+        let mut scenario_rng = DeterministicRng::new(budgets.scenario_seed);
+        let mut fault_rng = DeterministicRng::new(budgets.fault_seed);
+        let mut context = ScenarioContext::default();
+        let mut step_metrics = Vec::new();
+        let verbose_steps = std::env::var_os("AURA_HARNESS_VERBOSE_STEPS").is_some();
+        let scenario_started = Instant::now();
+
+        loop {
+            let state = machine
+                .states
+                .get(&current)
+                .ok_or_else(|| anyhow!("missing state {current}"))?;
+            if verbose_steps {
+                eprintln!(
+                    "[harness] step={} action={} actor={}",
+                    state.id,
+                    semantic_action_label(&state.step.action),
+                    state
+                        .step
+                        .actor
+                        .as_ref()
+                        .map(|actor| actor.0.as_str())
+                        .unwrap_or("-")
+                );
+            }
+            let step_budget = state
+                .step
+                .timeout_ms
+                .unwrap_or(budgets.default_step_budget_ms);
+            if let Some(remaining) = global_remaining {
+                if remaining < step_budget {
+                    bail!(
+                        "scenario budget exceeded at state {} remaining_ms={} required_ms={}",
+                        state.id,
+                        remaining,
+                        step_budget
+                    );
+                }
+                global_remaining = Some(remaining.saturating_sub(step_budget));
+            }
+            visited.push(state.id.clone());
+            let step_started = Instant::now();
+            let trace_metadata = build_shared_trace_metadata_from_semantic(&state.step, tool_api)?;
+            if let Some(metadata) = &trace_metadata {
+                context
+                    .canonical_trace
+                    .push(CanonicalTraceEvent::ActionRequested {
+                        request: metadata.request.clone(),
+                        observed_revision: metadata.handle.baseline_revision,
+                    });
+                context
+                    .canonical_trace
+                    .push(CanonicalTraceEvent::ActionIssued {
+                        handle: metadata.handle.clone(),
+                    });
+            }
+            let step_result = execute_semantic_shared_step(
+                &state.step,
+                tool_api,
+                step_budget,
+                &mut scenario_rng,
+                &mut fault_rng,
+                &mut context,
+            );
+            match step_result {
+                Ok(()) => {
+                    if let Some(metadata) = trace_metadata {
+                        record_shared_trace_success(tool_api, &metadata, &mut context);
+                    }
+                }
+                Err(error) => {
+                    if let Some(metadata) = trace_metadata {
+                        record_shared_trace_failure(tool_api, &metadata, &error, &mut context);
+                    }
+                    return Err(anyhow!(
+                        "step {} failed (action={} actor={}): {error}",
+                        state.id,
+                        semantic_action_label(&state.step.action),
+                        state
+                            .step
+                            .actor
+                            .as_ref()
+                            .map(|actor| actor.0.as_str())
+                            .unwrap_or("-")
+                    ));
+                }
+            }
+            step_metrics.push(StepMetricRecord {
+                step_id: state.id.clone(),
+                actor: state
+                    .step
+                    .actor
+                    .as_ref()
+                    .map(|actor| actor.0.clone())
+                    .unwrap_or_else(|| "-".to_string()),
+                action: semantic_action_label(&state.step.action).to_string(),
+                duration_ms: step_started.elapsed().as_millis() as u64,
+            });
+
+            let next = match self.mode {
+                ExecutionMode::Scripted => state.next_state.clone(),
+                ExecutionMode::Agent => state.next_state.clone(),
+            };
+
+            transitions.push(StateTransitionEvent {
+                from_state: state.id.clone(),
+                to_state: next.clone(),
+                reason: "step_complete".to_string(),
+            });
+
+            let Some(next_state) = next else {
+                break;
+            };
+            current = next_state;
+        }
+
+        Ok(ScenarioReport {
+            scenario_id: scenario.id.clone(),
+            execution_mode: self.mode,
+            states_visited: visited,
+            transitions,
+            canonical_trace: context.canonical_trace,
+            step_metrics,
+            total_duration_ms: scenario_started.elapsed().as_millis() as u64,
+            completed: true,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -661,6 +838,42 @@ impl StateMachine {
     }
 }
 
+#[derive(Debug, Clone)]
+struct SemanticScenarioState {
+    id: String,
+    step: SemanticStep,
+    next_state: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct SemanticStateMachine {
+    start_state: Option<String>,
+    states: BTreeMap<String, SemanticScenarioState>,
+}
+
+impl SemanticStateMachine {
+    fn from_steps(steps: &[SemanticStep]) -> Self {
+        let mut states = BTreeMap::new();
+
+        for (index, step) in steps.iter().enumerate() {
+            let next_state = steps.get(index + 1).map(|step| step.id.clone());
+            states.insert(
+                step.id.clone(),
+                SemanticScenarioState {
+                    id: step.id.clone(),
+                    step: step.clone(),
+                    next_state,
+                },
+            );
+        }
+
+        Self {
+            start_state: steps.first().map(|step| step.id.clone()),
+            states,
+        }
+    }
+}
+
 fn execute_step(
     step: &ScenarioStep,
     tool_api: &mut ToolApi,
@@ -674,6 +887,8 @@ fn execute_step(
         ensure_shared_flow_prerequisites(step, context, instance_id)?;
     }
     if let Some(binding) = SharedSemanticBinding::from_action(step.action) {
+        let instance_id = resolve_required_instance(step, context)?;
+        ensure_post_operation_convergence_satisfied(step, context, &instance_id)?;
         let intent = shared_intent_action(binding, step, context)?;
         enforce_action_preconditions(step, tool_api, context, &intent)?;
         return execute_shared_semantic_action(binding, step, tool_api, step_budget_ms, context);
@@ -1841,6 +2056,416 @@ fn execute_step(
     }
 }
 
+fn execute_semantic_shared_step(
+    step: &SemanticStep,
+    tool_api: &mut ToolApi,
+    step_budget_ms: u64,
+    scenario_rng: &mut DeterministicRng,
+    fault_rng: &mut DeterministicRng,
+    context: &mut ScenarioContext,
+) -> Result<()> {
+    let compat_step = semantic_execution_adapter_step(step)?;
+    match &step.action {
+        SemanticAction::Intent(IntentAction::OpenScreen(screen_id)) => {
+            enforce_request_order(&compat_step, context)?;
+            let instance_id = resolve_required_instance(&compat_step, context)?;
+            ensure_shared_flow_prerequisites(&compat_step, context, &instance_id)?;
+            dispatch(
+                tool_api,
+                plan_activate_control_request(&instance_id, nav_control_id_for_screen(*screen_id)),
+            )?;
+            Ok(())
+        }
+        SemanticAction::Intent(IntentAction::OpenSettingsSection(section)) => {
+            enforce_request_order(&compat_step, context)?;
+            let instance_id = resolve_required_instance(&compat_step, context)?;
+            ensure_shared_flow_prerequisites(&compat_step, context, &instance_id)?;
+            dispatch(
+                tool_api,
+                ToolRequest::ActivateListItem {
+                    instance_id,
+                    list_id: ListId::SettingsSections,
+                    item_id: settings_section_item_id(*section).to_string(),
+                },
+            )?;
+            Ok(())
+        }
+        SemanticAction::Variables(variable) => match variable {
+            aura_app::scenario_contract::VariableAction::Set { name, value } => {
+                let value = resolve_template(value, context)?;
+                context.vars.insert(name.clone(), value);
+                Ok(())
+            }
+            aura_app::scenario_contract::VariableAction::CaptureCurrentAuthorityId { name } => {
+                let instance_id = resolve_required_instance(&compat_step, context)?;
+                let payload =
+                    dispatch_payload(tool_api, ToolRequest::GetAuthorityId { instance_id })?;
+                let authority_id = payload
+                    .get("authority_id")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "step {} capture_current_authority_id missing authority_id",
+                            step.id
+                        )
+                    })?;
+                context
+                    .vars
+                    .insert(name.clone(), authority_id.to_string());
+                Ok(())
+            }
+            _ => execute_step(
+                &compat_step,
+                tool_api,
+                step_budget_ms,
+                scenario_rng,
+                fault_rng,
+                context,
+            ),
+        },
+        SemanticAction::Expect(expectation) => {
+            let instance_id = resolve_required_instance(&compat_step, context)?;
+            match expectation {
+                aura_app::scenario_contract::Expectation::ModalOpen(modal_id) => wait_for_modal(
+                    &compat_step,
+                    tool_api,
+                    &instance_id,
+                    step_budget_ms,
+                    *modal_id,
+                ),
+                aura_app::scenario_contract::Expectation::RuntimeEventOccurred { kind, .. } => {
+                    wait_for_runtime_event(
+                        &compat_step,
+                        tool_api,
+                        &instance_id,
+                        step_budget_ms,
+                        *kind,
+                    )
+                }
+                aura_app::scenario_contract::Expectation::ParityWithActor { actor } => {
+                    wait_for_parity(
+                        &compat_step,
+                        tool_api,
+                        &instance_id,
+                        &actor.0,
+                        step_budget_ms,
+                    )
+                }
+                _ => wait_for_semantic_state(
+                    &compat_step,
+                    tool_api,
+                    &instance_id,
+                    step_budget_ms,
+                ),
+            }
+        }
+        _ => execute_step(
+            &compat_step,
+            tool_api,
+            step_budget_ms,
+            scenario_rng,
+            fault_rng,
+            context,
+        ),
+    }
+}
+
+fn semantic_execution_adapter_step(step: &SemanticStep) -> Result<ScenarioStep> {
+    if matches!(step.action, SemanticAction::Ui(_)) {
+        bail!("canonical shared step {} may not use raw ui mechanics", step.id);
+    }
+
+    let SemanticStep {
+        id,
+        actor,
+        timeout_ms,
+        action,
+    } = step.clone();
+    let instance = actor.map(|actor| actor.0);
+    let mut compat_step = ScenarioStep {
+        id,
+        instance,
+        timeout_ms,
+        ..Default::default()
+    };
+
+    match action {
+        SemanticAction::Environment(EnvironmentAction::LaunchActors) => {
+            compat_step.action = ScenarioAction::LaunchInstances;
+        }
+        SemanticAction::Environment(EnvironmentAction::RestartActor { actor }) => {
+            compat_step.action = ScenarioAction::Restart;
+            compat_step.instance = Some(actor.0);
+        }
+        SemanticAction::Environment(EnvironmentAction::KillActor { actor }) => {
+            compat_step.action = ScenarioAction::Kill;
+            compat_step.instance = Some(actor.0);
+        }
+        SemanticAction::Environment(EnvironmentAction::FaultDelay { actor, delay_ms }) => {
+            compat_step.action = ScenarioAction::FaultDelay;
+            compat_step.instance = Some(actor.0);
+            compat_step.timeout_ms = Some(delay_ms);
+        }
+        SemanticAction::Environment(EnvironmentAction::FaultLoss {
+            actor,
+            loss_percent,
+        }) => {
+            compat_step.action = ScenarioAction::FaultLoss;
+            compat_step.instance = Some(actor.0);
+            compat_step.expect = Some(loss_percent.to_string());
+        }
+        SemanticAction::Environment(EnvironmentAction::FaultTunnelDrop { actor }) => {
+            compat_step.action = ScenarioAction::FaultTunnelDrop;
+            compat_step.instance = Some(actor.0);
+        }
+        SemanticAction::Intent(IntentAction::OpenScreen(screen_id)) => {
+            compat_step.action = ScenarioAction::ClickButton;
+            compat_step.control_id = Some(nav_control_id_for_screen(screen_id));
+        }
+        SemanticAction::Intent(IntentAction::CreateAccount { account_name }) => {
+            compat_step.action = ScenarioAction::CreateAccount;
+            compat_step.value = Some(account_name);
+        }
+        SemanticAction::Intent(IntentAction::CreateHome { home_name }) => {
+            compat_step.action = ScenarioAction::CreateHome;
+            compat_step.value = Some(home_name);
+        }
+        SemanticAction::Intent(IntentAction::StartDeviceEnrollment {
+            device_name,
+            code_name,
+        }) => {
+            compat_step.action = ScenarioAction::StartDeviceEnrollment;
+            compat_step.value = Some(device_name);
+            compat_step.var = Some(code_name);
+        }
+        SemanticAction::Intent(IntentAction::ImportDeviceEnrollmentCode { code }) => {
+            compat_step.action = ScenarioAction::ImportDeviceEnrollmentCode;
+            compat_step.value = Some(code);
+        }
+        SemanticAction::Intent(IntentAction::OpenSettingsSection(section)) => {
+            compat_step.action = ScenarioAction::ClickButton;
+            compat_step.list_id = Some(ListId::SettingsSections);
+            compat_step.item_id = Some(settings_section_item_id(section).to_string());
+        }
+        SemanticAction::Intent(IntentAction::RemoveSelectedDevice) => {
+            compat_step.action = ScenarioAction::RemoveSelectedDevice;
+        }
+        SemanticAction::Intent(IntentAction::CreateContactInvitation {
+            receiver_authority_id,
+            code_name,
+        }) => {
+            compat_step.action = ScenarioAction::CreateContactInvitation;
+            compat_step.value = Some(receiver_authority_id);
+            compat_step.var = Some(code_name);
+        }
+        SemanticAction::Intent(IntentAction::AcceptContactInvitation { code }) => {
+            compat_step.action = ScenarioAction::AcceptContactInvitation;
+            compat_step.value = Some(code);
+        }
+        SemanticAction::Intent(IntentAction::JoinChannel { channel_name }) => {
+            compat_step.action = ScenarioAction::JoinChannel;
+            compat_step.value = Some(channel_name);
+        }
+        SemanticAction::Intent(IntentAction::AcceptPendingChannelInvitation) => {
+            compat_step.action = ScenarioAction::AcceptPendingChannelInvitation;
+        }
+        SemanticAction::Intent(IntentAction::InviteActorToChannel { authority_id }) => {
+            compat_step.action = ScenarioAction::InviteActorToChannel;
+            compat_step.value = Some(authority_id);
+        }
+        SemanticAction::Intent(IntentAction::SendChatMessage { message }) => {
+            compat_step.action = ScenarioAction::SendChatMessage;
+            compat_step.value = Some(message);
+        }
+        SemanticAction::Ui(UiAction::Navigate(screen_id)) => {
+            compat_step.action = ScenarioAction::ClickButton;
+            compat_step.control_id = Some(nav_control_id_for_screen(screen_id));
+        }
+        SemanticAction::Ui(UiAction::Activate(control_id)) => {
+            compat_step.action = ScenarioAction::ClickButton;
+            compat_step.control_id = Some(control_id);
+        }
+        SemanticAction::Ui(UiAction::ActivateListItem { list, item_id }) => {
+            compat_step.action = ScenarioAction::ClickButton;
+            compat_step.list_id = Some(list);
+            compat_step.item_id = Some(item_id);
+        }
+        SemanticAction::Ui(UiAction::Fill(field_id, value)) => {
+            compat_step.action = ScenarioAction::FillInput;
+            compat_step.field_id = Some(field_id);
+            compat_step.value = Some(value);
+        }
+        SemanticAction::Ui(UiAction::InputText(value)) => {
+            compat_step.action = ScenarioAction::SendKeys;
+            compat_step.keys = Some(format_input_key_for_compat(value));
+        }
+        SemanticAction::Ui(UiAction::PressKey(key, repeat)) => {
+            compat_step.action = ScenarioAction::SendKey;
+            compat_step.key = Some(format_input_key(key));
+            compat_step.repeat = Some(repeat);
+        }
+        SemanticAction::Ui(UiAction::SendChatCommand(command)) => {
+            compat_step.action = ScenarioAction::SendChatCommand;
+            compat_step.command = Some(command);
+        }
+        SemanticAction::Ui(UiAction::PasteClipboard { source_actor }) => {
+            compat_step.action = ScenarioAction::SendClipboard;
+            compat_step.source_instance = source_actor.map(|actor| actor.0);
+        }
+        SemanticAction::Ui(UiAction::ReadClipboard { name }) => {
+            compat_step.action = ScenarioAction::ReadClipboard;
+            compat_step.var = Some(name);
+        }
+        SemanticAction::Ui(UiAction::DismissTransient) => {
+            compat_step.action = ScenarioAction::DismissTransient;
+        }
+        SemanticAction::Expect(Expectation::ScreenIs(screen_id)) => {
+            compat_step.action = ScenarioAction::WaitFor;
+            compat_step.screen_id = Some(screen_id);
+        }
+        SemanticAction::Expect(Expectation::ControlVisible(control_id)) => {
+            compat_step.action = ScenarioAction::WaitFor;
+            compat_step.control_id = Some(control_id);
+        }
+        SemanticAction::Expect(Expectation::ModalOpen(modal_id)) => {
+            compat_step.action = ScenarioAction::WaitFor;
+            compat_step.modal_id = Some(modal_id);
+        }
+        SemanticAction::Expect(Expectation::MessageContains { message_contains }) => {
+            compat_step.action = ScenarioAction::MessageContains;
+            compat_step.value = Some(message_contains);
+        }
+        SemanticAction::Expect(Expectation::ToastContains {
+            kind,
+            message_contains,
+        }) => {
+            compat_step.action = ScenarioAction::WaitFor;
+            compat_step.level = kind.map(format_toast_kind);
+            compat_step.contains = Some(message_contains);
+        }
+        SemanticAction::Expect(Expectation::ListContains { list, item_id }) => {
+            compat_step.action = ScenarioAction::WaitFor;
+            compat_step.list_id = Some(list);
+            compat_step.item_id = Some(item_id);
+        }
+        SemanticAction::Expect(Expectation::ListCountIs { list, count }) => {
+            compat_step.action = ScenarioAction::WaitFor;
+            compat_step.list_id = Some(list);
+            compat_step.count = Some(count);
+        }
+        SemanticAction::Expect(Expectation::ListItemConfirmation {
+            list,
+            item_id,
+            confirmation,
+        }) => {
+            compat_step.action = ScenarioAction::WaitFor;
+            compat_step.list_id = Some(list);
+            compat_step.item_id = Some(item_id);
+            compat_step.confirmation = Some(confirmation);
+        }
+        SemanticAction::Expect(Expectation::SelectionIs { list, item_id }) => {
+            compat_step.action = ScenarioAction::WaitFor;
+            compat_step.list_id = Some(list);
+            compat_step.item_id = Some(item_id);
+        }
+        SemanticAction::Expect(Expectation::ReadinessIs(readiness)) => {
+            compat_step.action = ScenarioAction::WaitFor;
+            compat_step.readiness = Some(readiness);
+        }
+        SemanticAction::Expect(Expectation::RuntimeEventOccurred {
+            kind,
+            detail_contains,
+        }) => {
+            compat_step.action = ScenarioAction::WaitFor;
+            compat_step.runtime_event_kind = Some(kind);
+            compat_step.contains = detail_contains;
+        }
+        SemanticAction::Expect(Expectation::OperationStateIs {
+            operation_id,
+            state,
+        }) => {
+            compat_step.action = ScenarioAction::WaitFor;
+            compat_step.operation_id = Some(operation_id);
+            compat_step.operation_state = Some(state);
+        }
+        SemanticAction::Expect(Expectation::ParityWithActor { actor }) => {
+            compat_step.action = ScenarioAction::AssertParity;
+            compat_step.peer_instance = Some(actor.0);
+        }
+        SemanticAction::Variables(VariableAction::Set { name, value }) => {
+            compat_step.action = ScenarioAction::SetVar;
+            compat_step.var = Some(name);
+            compat_step.value = Some(value);
+        }
+        SemanticAction::Variables(VariableAction::CaptureCurrentAuthorityId { name }) => {
+            compat_step.action = ScenarioAction::CaptureCurrentAuthorityId;
+            compat_step.var = Some(name);
+        }
+        SemanticAction::Variables(VariableAction::CaptureSelection { name, list }) => {
+            compat_step.action = ScenarioAction::CaptureSelection;
+            compat_step.var = Some(name);
+            compat_step.list_id = Some(list);
+        }
+        SemanticAction::Variables(VariableAction::Extract {
+            name,
+            regex,
+            group,
+            from,
+        }) => {
+            compat_step.action = ScenarioAction::ExtractVar;
+            compat_step.var = Some(name);
+            compat_step.regex = Some(regex);
+            compat_step.group = Some(group);
+            compat_step.from = Some(format_extract_source(from));
+        }
+    }
+
+    Ok(compat_step)
+}
+
+fn format_input_key(key: InputKey) -> String {
+    match key {
+        InputKey::Enter => "enter",
+        InputKey::Esc => "esc",
+        InputKey::Tab => "tab",
+        InputKey::BackTab => "backtab",
+        InputKey::Up => "up",
+        InputKey::Down => "down",
+        InputKey::Left => "left",
+        InputKey::Right => "right",
+        InputKey::Home => "home",
+        InputKey::End => "end",
+        InputKey::PageUp => "pageup",
+        InputKey::PageDown => "pagedown",
+        InputKey::Backspace => "backspace",
+        InputKey::Delete => "delete",
+    }
+    .to_string()
+}
+
+fn format_input_key_for_compat(value: String) -> String {
+    value
+}
+
+fn format_toast_kind(value: ToastKind) -> String {
+    match value {
+        ToastKind::Success => "success",
+        ToastKind::Info => "info",
+        ToastKind::Error => "error",
+    }
+    .to_string()
+}
+
+fn format_extract_source(value: ExtractSource) -> String {
+    match value {
+        ExtractSource::Screen => "screen",
+        ExtractSource::RawScreen => "raw_screen",
+        ExtractSource::AuthoritativeScreen => "authoritative_screen",
+        ExtractSource::NormalizedScreen => "normalized_screen",
+    }
+    .to_string()
+}
+
 fn execute_shared_semantic_action(
     binding: SharedSemanticBinding,
     step: &ScenarioStep,
@@ -1892,10 +2517,16 @@ fn execute_shared_semantic_action(
                 .var
                 .as_deref()
                 .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
+            let contract = IntentAction::StartDeviceEnrollment {
+                device_name: device_name.to_string(),
+                code_name: code_name.to_string(),
+            }
+            .contract();
             dispatch(
                 waits.tool_api,
                 plan_activate_control_request(&instance_id, ControlId::SettingsAddDeviceButton),
             )?;
+            ensure_wait_contract_declared(step, &contract, WaitContractRef::Modal(ModalId::AddDevice))?;
             waits.modal(
                 WaitContractRef::Modal(ModalId::AddDevice),
                 step,
@@ -1910,6 +2541,11 @@ fn execute_shared_semantic_action(
             dispatch(
                 waits.tool_api,
                 plan_activate_control_request(&instance_id, ControlId::ModalConfirmButton),
+            )?;
+            ensure_wait_contract_declared(
+                step,
+                &contract,
+                WaitContractRef::RuntimeEvent(RuntimeEventKind::DeviceEnrollmentCodeReady),
             )?;
             waits.runtime_event(
                 WaitContractRef::RuntimeEvent(RuntimeEventKind::DeviceEnrollmentCodeReady),
@@ -1939,6 +2575,10 @@ fn execute_shared_semantic_action(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
+            let contract = IntentAction::ImportDeviceEnrollmentCode {
+                code: code.to_string(),
+            }
+            .contract();
             dispatch(
                 waits.tool_api,
                 plan_fill_field_request(&instance_id, FieldId::DeviceImportCode, code),
@@ -1954,8 +2594,13 @@ fn execute_shared_semantic_action(
                 Instant::now() + Duration::from_millis(step.timeout_ms.unwrap_or(step_budget_ms));
             let mut neighborhood_step = semantic_wait_step(step);
             neighborhood_step.screen_id = Some(ScreenId::Neighborhood);
+            ensure_wait_contract_declared(
+                step,
+                &contract,
+                WaitContractRef::Screen(ScreenId::Neighborhood),
+            )?;
             waits.semantic_state(
-                WaitContractRef::Semantic("neighborhood_screen"),
+                WaitContractRef::Screen(ScreenId::Neighborhood),
                 &neighborhood_step,
                 &instance_id,
                 step.timeout_ms.unwrap_or(step_budget_ms),
@@ -1966,8 +2611,13 @@ fn execute_shared_semantic_action(
                 .max(1) as u64;
             let mut readiness_step = semantic_wait_step(step);
             readiness_step.readiness = Some(aura_app::ui::contract::UiReadiness::Ready);
+            ensure_wait_contract_declared(
+                step,
+                &contract,
+                WaitContractRef::Readiness(aura_app::ui::contract::UiReadiness::Ready),
+            )?;
             waits.semantic_state(
-                WaitContractRef::Semantic("ui_readiness_ready"),
+                WaitContractRef::Readiness(aura_app::ui::contract::UiReadiness::Ready),
                 &readiness_step,
                 &instance_id,
                 remaining_ms,
@@ -1977,9 +2627,15 @@ fn execute_shared_semantic_action(
         SharedSemanticBinding::RemoveSelectedDevice => {
             let instance_id = resolve_required_instance(step, context)?;
             let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
+            let contract = IntentAction::RemoveSelectedDevice.contract();
             dispatch(
                 waits.tool_api,
                 plan_activate_control_request(&instance_id, ControlId::SettingsRemoveDeviceButton),
+            )?;
+            ensure_wait_contract_declared(
+                step,
+                &contract,
+                WaitContractRef::Modal(ModalId::SelectDeviceToRemove),
             )?;
             waits.modal(
                 WaitContractRef::Modal(ModalId::SelectDeviceToRemove),
@@ -1991,6 +2647,11 @@ fn execute_shared_semantic_action(
             dispatch(
                 waits.tool_api,
                 plan_activate_control_request(&instance_id, ControlId::ModalConfirmButton),
+            )?;
+            ensure_wait_contract_declared(
+                step,
+                &contract,
+                WaitContractRef::Modal(ModalId::ConfirmRemoveDevice),
             )?;
             waits.modal(
                 WaitContractRef::Modal(ModalId::ConfirmRemoveDevice),
@@ -2114,20 +2775,27 @@ fn execute_shared_semantic_action(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
+            let contract = IntentAction::InviteActorToChannel {
+                authority_id: authority_id.to_string(),
+            }
+            .contract();
             let submission = issue_stage(
                 step,
                 tool_api.submit_invite_actor_to_channel(&instance_id, &authority_id),
             )?;
             record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            declare_post_operation_convergence(context, &instance_id, &contract);
             Ok(())
         }
         SharedSemanticBinding::AcceptPendingChannelInvitation => {
             let instance_id = resolve_required_instance(step, context)?;
+            let contract = IntentAction::AcceptPendingChannelInvitation.contract();
             let submission = issue_stage(
                 step,
                 tool_api.submit_accept_pending_channel_invitation(&instance_id),
             )?;
             record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            declare_post_operation_convergence(context, &instance_id, &contract);
             Ok(())
         }
         SharedSemanticBinding::SendChatMessage => {
@@ -2201,6 +2869,59 @@ fn enforce_action_preconditions(
     );
 }
 
+fn wait_contract_matches_barrier(
+    contract: &WaitContractRef<'_>,
+    barrier: &BarrierDeclaration,
+) -> bool {
+    match (contract, barrier) {
+        (WaitContractRef::Modal(actual), BarrierDeclaration::Modal(expected)) => *actual == *expected,
+        (WaitContractRef::RuntimeEvent(actual), BarrierDeclaration::RuntimeEvent(expected)) => {
+            *actual == *expected
+        }
+        (WaitContractRef::Screen(actual), BarrierDeclaration::Screen(expected)) => *actual == *expected,
+        (WaitContractRef::Readiness(actual), BarrierDeclaration::Readiness(expected)) => {
+            *actual == *expected
+        }
+        (WaitContractRef::Quiescence(actual), BarrierDeclaration::Quiescence(expected)) => {
+            *actual == *expected
+        }
+        (
+            WaitContractRef::OperationState {
+                operation_id: actual_id,
+                state: actual_state,
+                ..
+            },
+            BarrierDeclaration::OperationState {
+                operation_id: expected_id,
+                state: expected_state,
+            },
+        ) => *actual_id == *expected_id && *actual_state == *expected_state,
+        _ => false,
+    }
+}
+
+fn ensure_wait_contract_declared(
+    step: &ScenarioStep,
+    contract: &SharedActionContract,
+    wait_contract: WaitContractRef<'_>,
+) -> Result<()> {
+    if contract
+        .barriers
+        .before_issue
+        .iter()
+        .chain(contract.barriers.before_next_intent.iter())
+        .any(|declared| wait_contract_matches_barrier(&wait_contract, declared))
+    {
+        return Ok(());
+    }
+    bail!(
+        "step {} uses undeclared wait contract {:?} for {:?}",
+        step.id,
+        wait_contract,
+        contract.intent
+    );
+}
+
 fn build_shared_trace_metadata(
     step: &ScenarioStep,
     tool_api: &mut ToolApi,
@@ -2231,6 +2952,109 @@ fn build_shared_trace_metadata(
             baseline_revision,
         },
     }))
+}
+
+fn build_shared_trace_metadata_from_semantic(
+    step: &SemanticStep,
+    tool_api: &mut ToolApi,
+) -> Result<Option<SharedTraceMetadata>> {
+    let SemanticAction::Intent(intent) = &step.action else {
+        return Ok(None);
+    };
+    let instance_id = step
+        .actor
+        .as_ref()
+        .map(|actor| actor.0.clone())
+        .ok_or_else(|| anyhow!("step {} requires actor", step.id))?;
+    let contract = intent.contract();
+    let baseline_revision = fetch_ui_snapshot(tool_api, &instance_id)
+        .ok()
+        .map(|snapshot| snapshot.revision);
+    let actor = ActorId(instance_id.clone());
+    let request = SharedActionRequest {
+        actor: actor.clone(),
+        intent: intent.clone(),
+        contract: contract.clone(),
+    };
+    Ok(Some(SharedTraceMetadata {
+        instance_id,
+        request,
+        handle: SharedActionHandle {
+            action_id: SharedActionId(step.id.clone()),
+            actor,
+            intent: intent.kind(),
+            contract,
+            baseline_revision,
+        },
+    }))
+}
+
+fn semantic_action_label(action: &SemanticAction) -> &'static str {
+    match action {
+        SemanticAction::Environment(environment) => match environment {
+            aura_app::scenario_contract::EnvironmentAction::LaunchActors => "launch_actors",
+            aura_app::scenario_contract::EnvironmentAction::RestartActor { .. } => {
+                "restart_actor"
+            }
+            aura_app::scenario_contract::EnvironmentAction::KillActor { .. } => "kill_actor",
+            aura_app::scenario_contract::EnvironmentAction::FaultDelay { .. } => "fault_delay",
+            aura_app::scenario_contract::EnvironmentAction::FaultLoss { .. } => "fault_loss",
+            aura_app::scenario_contract::EnvironmentAction::FaultTunnelDrop { .. } => {
+                "fault_tunnel_drop"
+            }
+        },
+        SemanticAction::Intent(intent) => match intent {
+            IntentAction::OpenScreen(_) => "open_screen",
+            IntentAction::CreateAccount { .. } => "create_account",
+            IntentAction::CreateHome { .. } => "create_home",
+            IntentAction::StartDeviceEnrollment { .. } => "start_device_enrollment",
+            IntentAction::ImportDeviceEnrollmentCode { .. } => "import_device_enrollment_code",
+            IntentAction::OpenSettingsSection(_) => "open_settings_section",
+            IntentAction::RemoveSelectedDevice => "remove_selected_device",
+            IntentAction::CreateContactInvitation { .. } => "create_contact_invitation",
+            IntentAction::AcceptContactInvitation { .. } => "accept_contact_invitation",
+            IntentAction::AcceptPendingChannelInvitation => "accept_pending_channel_invitation",
+            IntentAction::JoinChannel { .. } => "join_channel",
+            IntentAction::InviteActorToChannel { .. } => "invite_actor_to_channel",
+            IntentAction::SendChatMessage { .. } => "send_chat_message",
+        },
+        SemanticAction::Variables(variable) => match variable {
+            aura_app::scenario_contract::VariableAction::Set { .. } => "set_var",
+            aura_app::scenario_contract::VariableAction::CaptureCurrentAuthorityId { .. } => {
+                "capture_current_authority_id"
+            }
+            aura_app::scenario_contract::VariableAction::CaptureSelection { .. } => {
+                "capture_selection"
+            }
+            aura_app::scenario_contract::VariableAction::Extract { .. } => "extract_var",
+        },
+        SemanticAction::Expect(expectation) => match expectation {
+            aura_app::scenario_contract::Expectation::ScreenIs(_) => "screen_is",
+            aura_app::scenario_contract::Expectation::ControlVisible(_) => "control_visible",
+            aura_app::scenario_contract::Expectation::ModalOpen(_) => "modal_open",
+            aura_app::scenario_contract::Expectation::MessageContains { .. } => {
+                "message_contains"
+            }
+            aura_app::scenario_contract::Expectation::ToastContains { .. } => "toast_contains",
+            aura_app::scenario_contract::Expectation::ListContains { .. } => "list_contains",
+            aura_app::scenario_contract::Expectation::ListCountIs { .. } => "list_count_is",
+            aura_app::scenario_contract::Expectation::ListItemConfirmation { .. } => {
+                "list_item_confirmation"
+            }
+            aura_app::scenario_contract::Expectation::SelectionIs { .. } => "selection_is",
+            aura_app::scenario_contract::Expectation::ReadinessIs(_) => "readiness_is",
+            aura_app::scenario_contract::Expectation::RuntimeEventOccurred { .. } => {
+                "runtime_event_occurred"
+            }
+            aura_app::scenario_contract::Expectation::OperationStateIs { .. } => {
+                "operation_state_is"
+            }
+            aura_app::scenario_contract::Expectation::ParityWithActor { .. } => {
+                "parity_with_actor"
+            }
+        },
+        SemanticAction::Ui(_) => "ui_mechanic",
+    }
 }
 
 fn shared_intent_action(
@@ -2683,6 +3507,7 @@ fn wait_for_home_bootstrap_ready(
     if home_bootstrap_ready(&last_snapshot) {
         return Ok(());
     }
+    let mut version = Some(last_snapshot.revision.semantic_seq);
     loop {
         if Instant::now() >= deadline {
             bail!(
@@ -2692,8 +3517,14 @@ fn wait_for_home_bootstrap_ready(
                 Some(last_snapshot)
             );
         }
-        std::thread::sleep(Duration::from_millis(40));
-        let snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let snapshot = match tool_api.wait_for_ui_snapshot_event(instance_id, remaining, version)? {
+            Some((event_snapshot, event_version)) => {
+                version = Some(event_version);
+                event_snapshot
+            }
+            None => fetch_ui_snapshot(tool_api, instance_id)?,
+        };
         if snapshot
             .selections
             .iter()
@@ -3205,6 +4036,77 @@ fn shared_flow_state_mut<'a>(
         .or_default()
 }
 
+fn pending_convergence_mut<'a>(
+    context: &'a mut ScenarioContext,
+    instance_id: &str,
+) -> &'a mut Vec<BarrierDeclaration> {
+    context
+        .pending_convergence
+        .entry(instance_id.to_string())
+        .or_default()
+}
+
+fn ensure_post_operation_convergence_satisfied(
+    step: &ScenarioStep,
+    context: &ScenarioContext,
+    instance_id: &str,
+) -> Result<()> {
+    let Some(pending) = context.pending_convergence.get(instance_id) else {
+        return Ok(());
+    };
+    if pending.is_empty() {
+        return Ok(());
+    }
+    bail!(
+        "step {} convergence-contract violation for {:?}: pending {:?}",
+        step.id,
+        step.action,
+        pending
+    );
+}
+
+fn declare_post_operation_convergence(
+    context: &mut ScenarioContext,
+    instance_id: &str,
+    contract: &SharedActionContract,
+) {
+    let Some(convergence) = contract.post_operation_convergence.as_ref() else {
+        return;
+    };
+    let pending = pending_convergence_mut(context, instance_id);
+    pending.extend(convergence.required_before_next_intent.iter().cloned());
+}
+
+fn clear_satisfied_post_operation_convergence(
+    context: &mut ScenarioContext,
+    instance_id: &str,
+    step: &ScenarioStep,
+) {
+    let Some(pending) = context.pending_convergence.get_mut(instance_id) else {
+        return;
+    };
+    pending.retain(|required| !step_satisfies_barrier(step, required));
+    if pending.is_empty() {
+        context.pending_convergence.remove(instance_id);
+    }
+}
+
+fn step_satisfies_barrier(step: &ScenarioStep, barrier: &BarrierDeclaration) -> bool {
+    match (step.action, barrier) {
+        (ScenarioAction::WaitFor, BarrierDeclaration::RuntimeEvent(expected)) => {
+            step.runtime_event_kind == Some(*expected)
+        }
+        (ScenarioAction::WaitFor, BarrierDeclaration::Readiness(expected)) => {
+            step.readiness == Some(*expected)
+        }
+        (ScenarioAction::WaitFor, BarrierDeclaration::Screen(expected)) => {
+            step.screen_id == Some(*expected)
+        }
+        (ScenarioAction::WaitFor, BarrierDeclaration::Quiescence(_)) => false,
+        _ => false,
+    }
+}
+
 fn ensure_shared_flow_prerequisites(
     step: &ScenarioStep,
     context: &mut ScenarioContext,
@@ -3225,6 +4127,7 @@ fn record_shared_flow_progress(
     context: &mut ScenarioContext,
     instance_id: &str,
 ) {
+    clear_satisfied_post_operation_convergence(context, instance_id, step);
     let state = shared_flow_state_mut(context, instance_id);
     let transition = match step.action {
         ScenarioAction::CreateAccount => Some(SharedFlowTransition::AccountReady),
@@ -3868,7 +4771,10 @@ fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, ScenarioAction};
+    use crate::config::{
+        InstanceConfig, InstanceMode, RunConfig, RunSection, ScenarioAction,
+        ScenarioCanonicalModel,
+    };
     use crate::coordinator::HarnessCoordinator;
     use aura_app::ui::contract::{
         ConfirmationState, ListId, ListItemSnapshot, ListSnapshot, OperationId,
@@ -3891,6 +4797,19 @@ mod tests {
             panic!("stop_all failed: {error}");
         }
         report
+    }
+
+    fn test_scenario_config(id: &str, goal: &str, steps: Vec<ScenarioStep>) -> ScenarioConfig {
+        ScenarioConfig {
+            schema_version: 1,
+            id: id.to_string(),
+            goal: goal.to_string(),
+            execution_mode: Some("scripted".to_string()),
+            required_capabilities: vec![],
+            steps,
+            canonical_model: ScenarioCanonicalModel::CompatibilityStepBridge,
+            canonical_semantic_steps: Vec::new(),
+        }
     }
 
     #[test]
@@ -4347,13 +5266,10 @@ mod tests {
             }],
         };
 
-        let scenario = ScenarioConfig {
-            schema_version: 1,
-            id: "executor-smoke".to_string(),
-            goal: "verify transitions".to_string(),
-            execution_mode: None,
-            required_capabilities: vec![],
-            steps: vec![ScenarioStep {
+        let mut scenario = test_scenario_config(
+            "executor-smoke",
+            "verify transitions",
+            vec![ScenarioStep {
                 id: "step-1".to_string(),
                 action: ScenarioAction::Noop,
                 instance: None,
@@ -4361,7 +5277,8 @@ mod tests {
                 timeout_ms: None,
                 ..Default::default()
             }],
-        };
+        );
+        scenario.execution_mode = None;
 
         let mut scripted_api = ToolApi::new(
             HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}")),
@@ -4438,13 +5355,10 @@ mod tests {
             }],
         };
 
-        let scenario = ScenarioConfig {
-            schema_version: 1,
-            id: "executor-determinism".to_string(),
-            goal: "verify repeated harness determinism".to_string(),
-            execution_mode: Some("scripted".to_string()),
-            required_capabilities: vec![],
-            steps: vec![ScenarioStep {
+        let scenario = test_scenario_config(
+            "executor-determinism",
+            "verify repeated harness determinism",
+            vec![ScenarioStep {
                 id: "step-1".to_string(),
                 action: ScenarioAction::Noop,
                 instance: None,
@@ -4452,7 +5366,7 @@ mod tests {
                 timeout_ms: None,
                 ..Default::default()
             }],
-        };
+        );
 
         let first = run_report_once(&run, &scenario);
         let second = run_report_once(&run, &scenario);
@@ -4511,13 +5425,10 @@ mod tests {
             }],
         };
 
-        let scenario = ScenarioConfig {
-            schema_version: 1,
-            id: "executor-chat-command".to_string(),
-            goal: "verify chat command action".to_string(),
-            execution_mode: Some("scripted".to_string()),
-            required_capabilities: vec![],
-            steps: vec![ScenarioStep {
+        let scenario = test_scenario_config(
+            "executor-chat-command",
+            "verify chat command action",
+            vec![ScenarioStep {
                 id: "step-1".to_string(),
                 action: ScenarioAction::SendChatCommand,
                 instance: Some("alice".to_string()),
@@ -4525,7 +5436,7 @@ mod tests {
                 timeout_ms: None,
                 ..Default::default()
             }],
-        };
+        );
 
         let mut api = ToolApi::new(
             HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}")),
@@ -4729,13 +5640,10 @@ mod tests {
             ],
         };
 
-        let scenario = ScenarioConfig {
-            schema_version: 1,
-            id: "executor-send-clipboard".to_string(),
-            goal: "verify send_clipboard retry".to_string(),
-            execution_mode: Some("scripted".to_string()),
-            required_capabilities: vec![],
-            steps: vec![ScenarioStep {
+        let scenario = test_scenario_config(
+            "executor-send-clipboard",
+            "verify send_clipboard retry",
+            vec![ScenarioStep {
                 id: "step-1".to_string(),
                 action: ScenarioAction::SendClipboard,
                 instance: Some("bob".to_string()),
@@ -4743,7 +5651,7 @@ mod tests {
                 timeout_ms: Some(2000),
                 ..Default::default()
             }],
-        };
+        );
 
         let mut api = ToolApi::new(
             HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}")),
@@ -4858,13 +5766,10 @@ mod tests {
             ],
         };
 
-        let scenario = ScenarioConfig {
-            schema_version: 1,
-            id: "executor-send-clipboard-chunked".to_string(),
-            goal: "verify long clipboard payload chunking".to_string(),
-            execution_mode: Some("scripted".to_string()),
-            required_capabilities: vec![],
-            steps: vec![ScenarioStep {
+        let scenario = test_scenario_config(
+            "executor-send-clipboard-chunked",
+            "verify long clipboard payload chunking",
+            vec![ScenarioStep {
                 id: "step-1".to_string(),
                 action: ScenarioAction::SendClipboard,
                 instance: Some("bob".to_string()),
@@ -4872,7 +5777,7 @@ mod tests {
                 timeout_ms: Some(2000),
                 ..Default::default()
             }],
-        };
+        );
 
         let long_payload = "aura:v1:".to_string()
             + &"x".repeat(CLIPBOARD_PASTE_CHUNK_CHARS * 3 + 7)
@@ -4920,22 +5825,117 @@ mod tests {
     fn wait_contract_refs_cover_all_parity_wait_kinds() {
         let modal = WaitContractRef::Modal(ModalId::AddDevice);
         let runtime = WaitContractRef::RuntimeEvent(RuntimeEventKind::MessageCommitted);
-        let semantic = WaitContractRef::Semantic("ui_readiness_ready");
-        let operation = WaitContractRef::Operation("accept_contact_invitation");
+        let screen = WaitContractRef::Screen(ScreenId::Chat);
+        let readiness = WaitContractRef::Readiness(aura_app::ui::contract::UiReadiness::Ready);
+        let quiescence =
+            WaitContractRef::Quiescence(aura_app::ui_contract::QuiescenceState::Settled);
+        let operation = WaitContractRef::OperationState {
+            operation_id: OperationId::invitation_accept(),
+            state: OperationState::Succeeded,
+            label: "accept_contact_invitation",
+        };
 
         assert!(matches!(modal, WaitContractRef::Modal(ModalId::AddDevice)));
         assert!(matches!(
             runtime,
             WaitContractRef::RuntimeEvent(RuntimeEventKind::MessageCommitted)
         ));
+        assert!(matches!(screen, WaitContractRef::Screen(ScreenId::Chat)));
         assert!(matches!(
-            semantic,
-            WaitContractRef::Semantic("ui_readiness_ready")
+            readiness,
+            WaitContractRef::Readiness(aura_app::ui::contract::UiReadiness::Ready)
+        ));
+        assert!(matches!(
+            quiescence,
+            WaitContractRef::Quiescence(aura_app::ui_contract::QuiescenceState::Settled)
         ));
         assert!(matches!(
             operation,
-            WaitContractRef::Operation("accept_contact_invitation")
+            WaitContractRef::OperationState {
+                operation_id: _,
+                state: OperationState::Succeeded,
+                label: "accept_contact_invitation"
+            }
         ));
+    }
+
+    #[test]
+    fn shared_intent_waits_bind_only_to_declared_barriers() {
+        let step = crate::config::ScenarioStep {
+            id: "declared-wait".to_string(),
+            ..Default::default()
+        };
+        let start_device_contract = IntentAction::StartDeviceEnrollment {
+            device_name: "phone".to_string(),
+            code_name: "device_code".to_string(),
+        }
+        .contract();
+        assert!(ensure_wait_contract_declared(
+            &step,
+            &start_device_contract,
+            WaitContractRef::Modal(ModalId::AddDevice),
+        )
+        .is_ok());
+        assert!(ensure_wait_contract_declared(
+            &step,
+            &start_device_contract,
+            WaitContractRef::RuntimeEvent(RuntimeEventKind::DeviceEnrollmentCodeReady),
+        )
+        .is_ok());
+        assert!(ensure_wait_contract_declared(
+            &step,
+            &start_device_contract,
+            WaitContractRef::RuntimeEvent(RuntimeEventKind::MessageCommitted),
+        )
+        .is_err());
+
+        let import_contract = IntentAction::ImportDeviceEnrollmentCode {
+            code: "invite".to_string(),
+        }
+        .contract();
+        assert!(ensure_wait_contract_declared(
+            &step,
+            &import_contract,
+            WaitContractRef::Screen(ScreenId::Neighborhood),
+        )
+        .is_ok());
+        assert!(ensure_wait_contract_declared(
+            &step,
+            &import_contract,
+            WaitContractRef::Readiness(aura_app::ui::contract::UiReadiness::Ready),
+        )
+        .is_ok());
+        assert!(ensure_wait_contract_declared(
+            &step,
+            &import_contract,
+            WaitContractRef::Modal(ModalId::AddDevice),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn missing_sync_prerequisites_fail_as_convergence_contract_violations() {
+        let mut context = ScenarioContext::default();
+        context.pending_convergence.insert(
+            "alice".to_string(),
+            vec![BarrierDeclaration::RuntimeEvent(
+                RuntimeEventKind::PendingHomeInvitationReady,
+            )],
+        );
+        let step = crate::config::ScenarioStep {
+            id: "send-too-early".to_string(),
+            instance: Some("alice".to_string()),
+            action: crate::config::ScenarioAction::SendChatMessage,
+            ..Default::default()
+        };
+
+        let error = ensure_post_operation_convergence_satisfied(&step, &context, "alice")
+            .expect_err("missing convergence must fail before the next shared intent");
+        assert!(error.to_string().contains("convergence-contract violation"));
+        assert!(
+            error.to_string().contains("PendingHomeInvitationReady"),
+            "error should surface the missing convergence requirement"
+        );
     }
 
     #[test]

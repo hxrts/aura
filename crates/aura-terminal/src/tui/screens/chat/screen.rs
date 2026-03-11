@@ -21,12 +21,10 @@ use aura_app::ui::signals::{CHAT_SIGNAL, CONTACTS_SIGNAL, NEIGHBORHOOD_SIGNAL};
 use aura_app::ui::types::{format_timestamp, ChatState};
 
 use crate::tui::callbacks::{
-    ChannelSelectCallback, CreateChannelCallback, RetryMessageCallback, SendCallback,
-    SetTopicCallback,
+    CreateChannelCallback, RetryMessageCallback, SendCallback, SetTopicCallback,
 };
 use crate::tui::chat_scope::{active_home_scope_id, scoped_channels};
 use crate::tui::components::{ListPanel, MessageInput, MessagePanel};
-use crate::tui::harness_state::{publish_channels_export, publish_messages_export};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::ChatViewProps;
@@ -103,10 +101,8 @@ pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
     }
 }
 
-/// Shared selected channel index for cross-component communication
-pub type SharedSelectedChannel = std::sync::Arc<std::sync::RwLock<usize>>;
-/// Shared selected channel id for dispatch-time fallback when channel snapshots lag.
-pub type SharedSelectedChannelId = std::sync::Arc<std::sync::RwLock<Option<String>>>;
+/// Shared selected channel identity for cross-component communication.
+pub type SharedSelectedChannel = std::sync::Arc<std::sync::RwLock<Option<String>>>;
 
 /// Props for ChatScreen
 ///
@@ -128,18 +124,14 @@ pub struct ChatScreenProps {
     pub view: ChatViewProps,
 
     // === Shared state for per-channel message tracking ===
-    /// Shared selected channel index - allows signal callback to compute per-channel message count
+    /// Shared selected channel identity - allows subscriptions to resolve messages against channel IDs
     pub selected_channel: Option<SharedSelectedChannel>,
-    /// Shared selected channel id - kept in sync from reactive chat data.
-    pub selected_channel_id: Option<SharedSelectedChannelId>,
     /// Shared scoped channels snapshot for dispatch-time channel resolution.
     pub shared_channels: Option<std::sync::Arc<std::sync::RwLock<Vec<Channel>>>>,
 
     // === Callbacks (still needed for effect dispatch) ===
     /// Callback when sending a message (channel_id, content)
     pub on_send: Option<SendCallback>,
-    /// Callback when selecting a channel (channel_id)
-    pub on_channel_select: Option<ChannelSelectCallback>,
     /// Callback when creating a new channel (name, topic)
     pub on_create_channel: Option<CreateChannelCallback>,
     /// Callback when retrying a failed message (message_id, channel, content)
@@ -217,7 +209,6 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         let app_core = app_ctx.app_core.clone();
         let update_tx = props.update_tx.clone();
         let shared_selected = props.selected_channel.clone();
-        let shared_selected_id = props.selected_channel_id.clone();
         let shared_channels = props.shared_channels.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
@@ -227,33 +218,17 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 if let Some(ref tx) = update_tx {
                     let scope = active_scope.read().ok().and_then(|g| g.clone());
                     let scoped = scoped_channels(&chat_state, scope.as_deref());
-
-                    let selected_channel_id = shared_selected_id.as_ref().and_then(|shared_id| {
-                        shared_id.read().ok().and_then(|guard| guard.clone())
-                    });
-
-                    let selected_idx = selected_channel_id
-                        .as_deref()
+                    let selected_channel_id = shared_selected
+                        .as_ref()
+                        .and_then(|selected| selected.read().ok().and_then(|guard| guard.clone()));
+                    let selected_channel_message_count = selected_channel_id
+                        .as_ref()
                         .and_then(|channel_id| {
                             scoped
                                 .iter()
-                                .position(|channel| channel.id.to_string() == channel_id)
+                                .find(|channel| channel.id.to_string() == *channel_id)
+                                .map(|channel| chat_state.messages_for_channel(&channel.id).len())
                         })
-                        .or_else(|| {
-                            shared_selected
-                                .as_ref()
-                                .and_then(|s| s.read().ok().map(|g| *g))
-                        })
-                        .unwrap_or(0);
-                    let selected_idx = if scoped.is_empty() {
-                        0
-                    } else {
-                        selected_idx.min(scoped.len().saturating_sub(1))
-                    };
-
-                    let selected_channel_message_count = scoped
-                        .get(selected_idx)
-                        .map(|ch| chat_state.messages_for_channel(&ch.id).len())
                         .unwrap_or(0);
 
                     if let Some(ref channels_ref) = shared_channels {
@@ -262,14 +237,11 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                         }
                     }
 
-                    if let Some(selected_channel_id) =
-                        scoped.get(selected_idx).map(|ch| ch.id.to_string())
-                    {
-                        if let Some(ref shared_id) = shared_selected_id {
-                            if let Ok(mut guard) = shared_id.write() {
-                                *guard = Some(selected_channel_id.clone());
-                            }
-                        }
+                    if let Some(selected_channel_id) = selected_channel_id.filter(|channel_id| {
+                        scoped
+                            .iter()
+                            .any(|channel| channel.id.to_string() == *channel_id)
+                    }) {
                         let _ = tx.try_send(UiUpdate::ChannelSelected(selected_channel_id));
                     }
 
@@ -322,8 +294,6 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 .with_finalized(m.is_finalized)
         })
         .collect();
-    publish_channels_export(&channels, selected_channel_id.as_deref());
-    publish_messages_export(&messages);
 
     let empty_message = if channels.is_empty() {
         "No channels available for this block.".to_string()

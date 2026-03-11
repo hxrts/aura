@@ -100,6 +100,9 @@ check_rule() {
     if [[ "$target" == .claude/* && ! -e "$target" ]]; then
       continue
     fi
+    if [[ "$target" == .claude/* ]] && ! git ls-files --error-unmatch "$target" >/dev/null 2>&1; then
+      continue
+    fi
     has_changed "$target" || missing+=("$target")
   done
 

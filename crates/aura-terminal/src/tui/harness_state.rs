@@ -3,37 +3,29 @@
 use crate::tui::screens::Screen;
 use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::state::toast::ToastLevel;
-use crate::tui::state::CreateInvitationField;
 use crate::tui::types::{
-    Channel as TuiChannel, Contact as TuiContact, Device as TuiDevice, Message as TuiMessage,
-    SettingsSection,
+    Channel as TuiChannel, Device as TuiDevice, SettingsSection,
 };
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
     ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId,
-    OperationId, OperationInstanceId, OperationSnapshot, OperationState, RuntimeEventId,
-    RuntimeEventSnapshot, ScreenId, SelectionSnapshot, ToastId, ToastKind, ToastSnapshot,
-    UiReadiness, UiSnapshot,
+    ScreenId, SelectionSnapshot, ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::types::StateSnapshot;
-use aura_app::ui::workflows::messaging as messaging_workflows;
-use aura_app::ui_contract::{
-    next_projection_revision, ChannelFactKey, QuiescenceSnapshot, RuntimeFact,
-};
+use aura_app::ui_contract::{next_projection_revision, QuiescenceSnapshot};
 use std::fs;
 use std::io;
+use std::io::Write;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 const UI_STATE_FILE_ENV: &str = "AURA_TUI_UI_STATE_FILE";
+const UI_STATE_SOCKET_ENV: &str = "AURA_TUI_UI_STATE_SOCKET";
 
 static UI_STATE_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
+static UI_STATE_SOCKET: OnceLock<Option<PathBuf>> = OnceLock::new();
 static LAST_WRITTEN_SNAPSHOT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-static CHANNELS_OVERRIDE: OnceLock<Mutex<Option<Vec<TuiChannel>>>> = OnceLock::new();
-static SELECTED_CHANNEL_ID_OVERRIDE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-static CONTACTS_OVERRIDE: OnceLock<Mutex<Option<Vec<TuiContact>>>> = OnceLock::new();
-static DEVICES_OVERRIDE: OnceLock<Mutex<Option<Vec<TuiDevice>>>> = OnceLock::new();
-static MESSAGES_OVERRIDE: OnceLock<Mutex<Option<Vec<TuiMessage>>>> = OnceLock::new();
 
 fn configured_ui_state_file() -> Option<&'static PathBuf> {
     UI_STATE_FILE
@@ -41,28 +33,20 @@ fn configured_ui_state_file() -> Option<&'static PathBuf> {
         .as_ref()
 }
 
+fn configured_ui_state_socket() -> Option<&'static PathBuf> {
+    UI_STATE_SOCKET
+        .get_or_init(|| std::env::var_os(UI_STATE_SOCKET_ENV).map(PathBuf::from))
+        .as_ref()
+}
+
 fn last_written_snapshot() -> &'static Mutex<Option<String>> {
     LAST_WRITTEN_SNAPSHOT.get_or_init(|| Mutex::new(None))
 }
 
-fn channels_override() -> &'static Mutex<Option<Vec<TuiChannel>>> {
-    CHANNELS_OVERRIDE.get_or_init(|| Mutex::new(None))
-}
-
-fn selected_channel_id_override() -> &'static Mutex<Option<String>> {
-    SELECTED_CHANNEL_ID_OVERRIDE.get_or_init(|| Mutex::new(None))
-}
-
-fn contacts_override() -> &'static Mutex<Option<Vec<TuiContact>>> {
-    CONTACTS_OVERRIDE.get_or_init(|| Mutex::new(None))
-}
-
-fn devices_override() -> &'static Mutex<Option<Vec<TuiDevice>>> {
-    DEVICES_OVERRIDE.get_or_init(|| Mutex::new(None))
-}
-
-fn messages_override() -> &'static Mutex<Option<Vec<TuiMessage>>> {
-    MESSAGES_OVERRIDE.get_or_init(|| Mutex::new(None))
+pub struct TuiSemanticInputs<'a> {
+    pub app_snapshot: &'a StateSnapshot,
+    pub settings_devices: &'a [TuiDevice],
+    pub chat_channels: &'a [TuiChannel],
 }
 
 fn map_screen(screen: Screen) -> ScreenId {
@@ -159,11 +143,11 @@ fn write_snapshot_file(path: &Path, snapshot_json: &str) -> io::Result<()> {
     Ok(())
 }
 
-pub fn semantic_ui_snapshot(
+pub fn authoritative_ui_snapshot(
     state: &TuiState,
-    app_snapshot: &StateSnapshot,
-    contacts_override_input: Option<&[TuiContact]>,
+    semantic_inputs: TuiSemanticInputs<'_>,
 ) -> UiSnapshot {
+    let app_snapshot = semantic_inputs.app_snapshot;
     let onboarding_active = matches!(
         state.modal_queue.current(),
         Some(QueuedModal::AccountSetup(_))
@@ -183,32 +167,16 @@ pub fn semantic_ui_snapshot(
     let focused_control = if onboarding_active {
         Some(ControlId::OnboardingRoot)
     } else if let Some(QueuedModal::ContactsCreate(modal_state)) = state.modal_queue.current() {
-        Some(ControlId::Field(match modal_state.focused_field {
-            CreateInvitationField::Receiver => aura_app::ui::contract::FieldId::InvitationReceiver,
-            CreateInvitationField::Type => aura_app::ui::contract::FieldId::InvitationType,
-            CreateInvitationField::Message => aura_app::ui::contract::FieldId::InvitationMessage,
-            CreateInvitationField::Ttl => aura_app::ui::contract::FieldId::InvitationTtl,
-        }))
+        let _ = modal_state;
+        Some(ControlId::ModalInput)
     } else if let Some(modal_id) = open_modal {
         Some(ControlId::Modal(modal_id))
     } else {
         match state.screen() {
-            Screen::Neighborhood => {
-                if state.neighborhood.insert_mode {
-                    Some(ControlId::Field(aura_app::ui::contract::FieldId::ChatInput))
-                } else {
-                    Some(ControlId::Screen(ScreenId::Neighborhood))
-                }
-            }
-            Screen::Chat => {
-                if state.chat.insert_mode {
-                    Some(ControlId::Field(aura_app::ui::contract::FieldId::ChatInput))
-                } else {
-                    Some(ControlId::Screen(ScreenId::Chat))
-                }
-            }
+            Screen::Neighborhood => Some(ControlId::Screen(ScreenId::Neighborhood)),
+            Screen::Chat => Some(ControlId::Screen(ScreenId::Chat)),
             Screen::Contacts => Some(ControlId::Screen(ScreenId::Contacts)),
-            Screen::Notifications => Some(ControlId::List(ListId::Notifications)),
+            Screen::Notifications => Some(ControlId::Screen(ScreenId::Notifications)),
             Screen::Settings => Some(ControlId::Screen(ScreenId::Settings)),
         }
     };
@@ -236,139 +204,47 @@ pub fn semantic_ui_snapshot(
         selected_navigation_id,
     );
 
-    let effective_channels = channels_override()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
-    let selected_channel_override = selected_channel_id_override()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
-    let channel_ids = if let Some(ref channels) = effective_channels {
-        channels
-            .iter()
-            .map(|channel| channel.id.clone())
-            .collect::<Vec<_>>()
-    } else {
-        app_snapshot
-            .chat
-            .all_channels()
-            .map(|channel| channel.id.to_string())
-            .collect::<Vec<_>>()
-    };
-    let selected_channel_index = selected_channel_override
-        .as_ref()
-        .and_then(|selected_id| {
-            channel_ids
-                .iter()
-                .position(|channel_id| channel_id == selected_id)
+    let selected_channel_id = semantic_inputs
+        .chat_channels
+        .get(state.chat.selected_channel)
+        .map(|channel| channel.id.clone());
+    let channel_items = semantic_inputs
+        .chat_channels
+        .iter()
+        .map(|channel| ListItemSnapshot {
+            id: channel.id.clone(),
+            selected: selected_channel_id.as_ref() == Some(&channel.id),
+            confirmation: ConfirmationState::Confirmed,
         })
-        .unwrap_or(state.chat.selected_channel);
-    let channel_items = if let Some(ref channels) = effective_channels {
-        channels
-            .iter()
-            .enumerate()
-            .map(|(idx, channel)| ListItemSnapshot {
-                id: channel.id.clone(),
-                selected: idx == selected_channel_index,
-                confirmation: ConfirmationState::Confirmed,
-            })
-            .collect::<Vec<_>>()
-    } else {
-        app_snapshot
-            .chat
-            .all_channels()
-            .enumerate()
-            .map(|(idx, channel)| ListItemSnapshot {
-                id: channel.id.to_string(),
-                selected: idx == selected_channel_index,
-                confirmation: ConfirmationState::Confirmed,
-            })
-            .collect::<Vec<_>>()
-    };
+        .collect::<Vec<_>>();
     push_list(
         &mut lists,
         &mut selections,
         ListId::Channels,
         channel_items,
-        selected_by_index(&channel_ids, selected_channel_index),
+        selected_channel_id.clone(),
     );
 
-    let effective_contacts = contacts_override_input
-        .filter(|contacts| !contacts.is_empty())
-        .map(|contacts| contacts.to_vec())
-        .unwrap_or_else(|| {
-            contacts_override()
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .clone()
-                .unwrap_or_default()
-        });
-    let contact_ids = if !effective_contacts.is_empty() {
-        effective_contacts
-            .iter()
-            .map(|contact| contact.id.clone())
-            .collect::<Vec<_>>()
-    } else {
-        app_snapshot
-            .contacts
-            .all_contacts()
-            .map(|contact| contact.id.to_string())
-            .collect::<Vec<_>>()
-    };
-    let contact_count = if !contact_ids.is_empty() {
-        contact_ids.len()
-    } else {
-        state.contacts.contact_count
-    };
-    let contact_ids = if contact_ids.is_empty() && contact_count > 0 {
-        (0..contact_count)
-            .map(|idx| format!("contact-{idx}"))
-            .collect::<Vec<_>>()
-    } else {
-        contact_ids
-    };
-    let contact_items = if !effective_contacts.is_empty() {
-        effective_contacts
-            .iter()
-            .enumerate()
-            .map(|(idx, contact)| ListItemSnapshot {
-                id: contact.id.clone(),
-                selected: idx == state.contacts.selected_index,
-                confirmation: ConfirmationState::Confirmed,
-            })
-            .collect::<Vec<_>>()
-    } else {
-        app_snapshot
-            .contacts
-            .all_contacts()
-            .enumerate()
-            .map(|(idx, contact)| ListItemSnapshot {
-                id: contact.id.to_string(),
-                selected: idx == state.contacts.selected_index,
-                confirmation: ConfirmationState::Confirmed,
-            })
-            .collect::<Vec<_>>()
-    };
-    let contact_items = if contact_items.is_empty() && contact_count > 0 {
-        contact_ids
-            .iter()
-            .enumerate()
-            .map(|(idx, id)| ListItemSnapshot {
-                id: id.clone(),
-                selected: idx == state.contacts.selected_index,
-                confirmation: ConfirmationState::Confirmed,
-            })
-            .collect::<Vec<_>>()
-    } else {
-        contact_items
-    };
+    let contact_items = app_snapshot
+        .contacts
+        .all_contacts()
+        .enumerate()
+        .map(|(idx, contact)| ListItemSnapshot {
+            id: contact.id.to_string(),
+            selected: idx == state.contacts.selected_index,
+            confirmation: ConfirmationState::Confirmed,
+        })
+        .collect::<Vec<_>>();
+    let selected_contact_id = contact_items
+        .iter()
+        .find(|item| item.selected)
+        .map(|item| item.id.clone());
     push_list(
         &mut lists,
         &mut selections,
         ListId::Contacts,
         contact_items,
-        selected_by_index(&contact_ids, state.contacts.selected_index),
+        selected_contact_id,
     );
 
     let notification_ids = app_snapshot
@@ -459,9 +335,6 @@ pub fn semantic_ui_snapshot(
         .filter(|home_id| !home_ids.iter().any(|existing| existing == home_id))
         .collect::<Vec<_>>();
     home_ids.extend(neighbor_home_ids);
-    if home_ids.is_empty() {
-        home_ids.push(aura_core::identifiers::ChannelId::default().to_string());
-    }
     let home_items = home_ids
         .iter()
         .enumerate()
@@ -531,12 +404,12 @@ pub fn semantic_ui_snapshot(
 
     let settings_section_ids = SettingsSection::all()
         .iter()
-        .map(|section| section.title().to_ascii_lowercase().replace(' ', "_"))
+        .map(|section| aura_app::ui_contract::settings_section_item_id(section.surface_id()).to_string())
         .collect::<Vec<_>>();
     let settings_items = SettingsSection::all()
         .iter()
         .map(|section| ListItemSnapshot {
-            id: section.title().to_ascii_lowercase().replace(' ', "_"),
+            id: aura_app::ui_contract::settings_section_item_id(section.surface_id()).to_string(),
             selected: *section == state.settings.section,
             confirmation: ConfirmationState::Confirmed,
         })
@@ -551,13 +424,9 @@ pub fn semantic_ui_snapshot(
             .cloned(),
     );
 
-    let effective_devices = devices_override()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone()
-        .unwrap_or_default();
     if state.settings.section == SettingsSection::Devices {
-        let device_items = effective_devices
+        let device_items = semantic_inputs
+            .settings_devices
             .iter()
             .map(|device| ListItemSnapshot {
                 id: device.id.clone(),
@@ -586,310 +455,29 @@ pub fn semantic_ui_snapshot(
         })
         .unwrap_or_default();
 
-    let effective_messages = messages_override()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone()
-        .unwrap_or_default();
-    let selected_channel_id =
-        selected_channel_override.or_else(|| channel_ids.get(selected_channel_index).cloned());
-    let messages = if !effective_messages.is_empty() {
-        effective_messages
-            .iter()
-            .map(|message| MessageSnapshot {
-                id: message.id.clone(),
-                content: message.content.clone(),
-            })
-            .collect::<Vec<_>>()
-    } else {
-        selected_channel_id
-            .as_ref()
-            .and_then(|channel_id| {
-                app_snapshot
-                    .chat
-                    .all_channels()
-                    .find(|channel| channel.id.to_string() == *channel_id)
-                    .map(|channel| {
-                        app_snapshot
-                            .chat
-                            .messages_for_channel(&channel.id)
-                            .iter()
-                            .map(|message| MessageSnapshot {
-                                id: message.id.clone(),
-                                content: message.content.clone(),
-                            })
-                            .collect::<Vec<_>>()
-                    })
-            })
-            .unwrap_or_default()
-    };
-
-    let mut operations = state.exported_operation_snapshots();
-    if matches!(
-        state.modal_queue.current(),
-        Some(QueuedModal::ContactsCode(_))
-    ) {
-        operations.retain(|operation| operation.id != OperationId::invitation_create());
-        operations.push(OperationSnapshot {
-            id: OperationId::invitation_create(),
-            instance_id: OperationInstanceId("tui-invitation-create".to_string()),
-            state: OperationState::Succeeded,
-        });
-    }
-    if let Some(QueuedModal::SettingsDeviceEnrollment(modal_state)) = state.modal_queue.current() {
-        let operation_state = if modal_state.ceremony.has_failed {
-            OperationState::Failed
-        } else if modal_state.ceremony.is_complete {
-            OperationState::Succeeded
-        } else {
-            OperationState::Submitting
-        };
-        operations.retain(|operation| operation.id != OperationId::device_enrollment());
-        operations.push(OperationSnapshot {
-            id: OperationId::device_enrollment(),
-            instance_id: OperationInstanceId("tui-device-enrollment".to_string()),
-            state: operation_state,
-        });
-    }
-    let mut runtime_events = Vec::new();
-    if state.last_exported_invitation_code.is_some()
-        || operations.iter().any(|operation| {
-            operation.id == OperationId::invitation_create()
-                && operation.state == OperationState::Succeeded
-        })
-    {
-        runtime_events.push(RuntimeEventSnapshot {
-            id: RuntimeEventId("tui-invitation-code-ready".to_string()),
-            fact: RuntimeFact::InvitationCodeReady {
-                receiver_authority_id: None,
-                source_operation: OperationId::invitation_create(),
-            },
-        });
-    }
-    if operations.iter().any(|operation| {
-        operation.id == OperationId::device_enrollment()
-            && matches!(
-                operation.state,
-                OperationState::Submitting | OperationState::Succeeded
-            )
-    }) {
-        let device_enrollment_modal = match state.modal_queue.current() {
-            Some(QueuedModal::SettingsDeviceEnrollment(modal_state)) => Some(modal_state),
-            _ => None,
-        };
-        runtime_events.push(RuntimeEventSnapshot {
-            id: RuntimeEventId("tui-device-enrollment-code-ready".to_string()),
-            fact: RuntimeFact::DeviceEnrollmentCodeReady {
-                device_name: device_enrollment_modal
-                    .map(|modal_state| modal_state.nickname_suggestion.clone())
-                    .filter(|value| !value.trim().is_empty()),
-                code_len: device_enrollment_modal
-                    .map(|modal_state| modal_state.enrollment_code.len())
-                    .filter(|len| *len > 0),
-            },
-        });
-    }
-    if !contact_ids.is_empty() {
-        runtime_events.push(RuntimeEventSnapshot {
-            id: RuntimeEventId("tui-contact-link-ready".to_string()),
-            fact: RuntimeFact::ContactLinkReady {
-                authority_id: None,
-                contact_count: Some(contact_ids.len()),
-            },
-        });
-    }
-    if app_snapshot
-        .invitations
-        .all_pending()
-        .iter()
-        .any(|invitation| {
-            invitation.direction == aura_app::ui::types::InvitationDirection::Received
-                && matches!(
-                    invitation.invitation_type,
-                    aura_app::ui::types::InvitationType::Home
-                        | aura_app::ui::types::InvitationType::Chat
-                )
-                && invitation.status == aura_app::ui::types::InvitationStatus::Pending
-        })
-    {
-        runtime_events.push(RuntimeEventSnapshot {
-            id: RuntimeEventId("tui-pending-home-invitation-ready".to_string()),
-            fact: RuntimeFact::PendingHomeInvitationReady,
-        });
-    }
-    let local_authority = app_snapshot
-        .homes
-        .current_home()
-        .and_then(|home| home.members.first().map(|member| member.id));
-    let authoritative_recipient_count_for_channel =
-        |authority_id: aura_app::ui::types::AuthorityId,
-         app_channel: &aura_app::ui::types::Channel| {
+    let messages = selected_channel_id
+        .as_ref()
+        .and_then(|channel_id| {
             app_snapshot
-                .homes
-                .home_state(&app_channel.id)
-                .map(|home| {
-                    home.members
-                        .iter()
-                        .filter(|member| member.id != authority_id)
-                        .count()
-                })
-                .or_else(|| {
-                    app_channel.context_id.and_then(|context_id| {
-                        app_snapshot.homes.iter().find_map(|(_, home)| {
-                            (home.context_id == Some(context_id)).then(|| {
-                                home.members
-                                    .iter()
-                                    .filter(|member| member.id != authority_id)
-                                    .count()
-                            })
-                        })
-                    })
-                })
-                .unwrap_or(0)
-        };
-    if let Some(ref channels) = effective_channels {
-        for channel in channels {
-            let channel_id = channel.id.clone();
-            let app_channel = app_snapshot
                 .chat
                 .all_channels()
-                .find(|candidate| candidate.id.to_string() == channel_id);
-            let resolved_recipient_count = local_authority
-                .zip(app_channel)
-                .map(|(authority_id, app_channel)| {
-                    messaging_workflows::resolved_recipient_peers_for_channel_view(
-                        app_channel,
-                        &app_snapshot.homes,
-                        &app_snapshot.contacts,
-                        &[],
-                        authority_id,
-                    )
-                    .len()
+                .find(|channel| channel.id.to_string() == *channel_id)
+                .map(|channel| {
+                    app_snapshot
+                        .chat
+                        .messages_for_channel(&channel.id)
+                        .iter()
+                        .map(|message| MessageSnapshot {
+                            id: message.id.clone(),
+                            content: message.content.clone(),
+                        })
+                        .collect::<Vec<_>>()
                 })
-                .unwrap_or(0);
-            let resolved_member_count = channel
-                .member_count
-                .max((resolved_recipient_count.saturating_add(1)) as u32);
-            let authoritative_recipient_count = local_authority
-                .zip(app_channel)
-                .map(|(authority_id, app_channel)| {
-                    authoritative_recipient_count_for_channel(authority_id, app_channel)
-                })
-                .unwrap_or(0);
-            let observed_channel_traffic = app_channel
-                .map(|app_channel| {
-                    if selected_channel_id.as_deref() == Some(channel_id.as_str()) {
-                        !messages.is_empty()
-                    } else {
-                        app_snapshot
-                            .chat
-                            .messages_for_channel(&app_channel.id)
-                            .iter()
-                            .any(|_| true)
-                    }
-                })
-                .unwrap_or(false);
-            let reply_ready_recipient_count =
-                authoritative_recipient_count.max(usize::from(observed_channel_traffic));
-            runtime_events.push(RuntimeEventSnapshot {
-                id: RuntimeEventId(format!("tui-channel-membership-ready:{channel_id}")),
-                fact: RuntimeFact::ChannelMembershipReady {
-                    channel: ChannelFactKey {
-                        id: Some(channel_id.clone()),
-                        name: Some(channel.name.clone()),
-                    },
-                    member_count: Some(resolved_member_count as usize),
-                },
-            });
-            if reply_ready_recipient_count > 0 {
-                runtime_events.push(RuntimeEventSnapshot {
-                    id: RuntimeEventId(format!("tui-recipient-peers-resolved:{channel_id}")),
-                    fact: RuntimeFact::RecipientPeersResolved {
-                        channel: ChannelFactKey {
-                            id: Some(channel_id.clone()),
-                            name: Some(channel.name.clone()),
-                        },
-                        member_count: reply_ready_recipient_count.saturating_add(1),
-                    },
-                });
-                runtime_events.push(RuntimeEventSnapshot {
-                    id: RuntimeEventId(format!("tui-message-delivery-ready:{channel_id}")),
-                    fact: RuntimeFact::MessageDeliveryReady {
-                        channel: ChannelFactKey {
-                            id: Some(channel_id.clone()),
-                            name: Some(channel.name.clone()),
-                        },
-                        member_count: reply_ready_recipient_count.saturating_add(1),
-                    },
-                });
-            }
-        }
-    } else {
-        for channel in app_snapshot.chat.all_channels() {
-            let channel_id = channel.id.to_string();
-            let resolved_recipient_count = local_authority
-                .map(|authority_id| {
-                    messaging_workflows::resolved_recipient_peers_for_channel_view(
-                        channel,
-                        &app_snapshot.homes,
-                        &app_snapshot.contacts,
-                        &[],
-                        authority_id,
-                    )
-                    .len()
-                })
-                .unwrap_or(0);
-            let resolved_member_count = channel
-                .member_count
-                .max((resolved_recipient_count.saturating_add(1)) as u32);
-            let authoritative_recipient_count = local_authority
-                .map(|authority_id| {
-                    authoritative_recipient_count_for_channel(authority_id, channel)
-                })
-                .unwrap_or(0);
-            let observed_channel_traffic = app_snapshot
-                .chat
-                .messages_for_channel(&channel.id)
-                .iter()
-                .any(|_| true)
-                || (selected_channel_id.as_deref() == Some(channel_id.as_str())
-                    && !messages.is_empty());
-            let reply_ready_recipient_count =
-                authoritative_recipient_count.max(usize::from(observed_channel_traffic));
-            runtime_events.push(RuntimeEventSnapshot {
-                id: RuntimeEventId(format!("tui-channel-membership-ready:{channel_id}")),
-                fact: RuntimeFact::ChannelMembershipReady {
-                    channel: ChannelFactKey {
-                        id: Some(channel_id.clone()),
-                        name: Some(channel.name.clone()),
-                    },
-                    member_count: Some(resolved_member_count as usize),
-                },
-            });
-            if reply_ready_recipient_count > 0 {
-                runtime_events.push(RuntimeEventSnapshot {
-                    id: RuntimeEventId(format!("tui-recipient-peers-resolved:{channel_id}")),
-                    fact: RuntimeFact::RecipientPeersResolved {
-                        channel: ChannelFactKey {
-                            id: Some(channel_id.clone()),
-                            name: Some(channel.name.clone()),
-                        },
-                        member_count: reply_ready_recipient_count.saturating_add(1),
-                    },
-                });
-                runtime_events.push(RuntimeEventSnapshot {
-                    id: RuntimeEventId(format!("tui-message-delivery-ready:{channel_id}")),
-                    fact: RuntimeFact::MessageDeliveryReady {
-                        channel: ChannelFactKey {
-                            id: Some(channel_id.clone()),
-                            name: Some(channel.name.clone()),
-                        },
-                        member_count: reply_ready_recipient_count.saturating_add(1),
-                    },
-                });
-            }
-        }
-    }
+        })
+        .unwrap_or_default();
+
+    let operations = state.exported_operation_snapshots();
+    let runtime_events = state.exported_runtime_events();
 
     let snapshot = UiSnapshot {
         screen,
@@ -913,14 +501,15 @@ pub fn semantic_ui_snapshot(
 
 pub fn maybe_export_ui_snapshot(
     state: &TuiState,
-    app_snapshot: &StateSnapshot,
-    contacts_override: Option<&[TuiContact]>,
+    semantic_inputs: TuiSemanticInputs<'_>,
 ) {
-    let Some(path) = configured_ui_state_file() else {
+    let socket_path = configured_ui_state_socket();
+    let file_path = configured_ui_state_file();
+    if socket_path.is_none() && file_path.is_none() {
         return;
-    };
+    }
 
-    let snapshot = semantic_ui_snapshot(state, app_snapshot, contacts_override);
+    let snapshot = authoritative_ui_snapshot(state, semantic_inputs);
     let Ok(snapshot_json) = serde_json::to_string_pretty(&snapshot) else {
         return;
     };
@@ -932,56 +521,42 @@ pub fn maybe_export_ui_snapshot(
         return;
     }
 
-    if write_snapshot_file(path, &snapshot_json).is_ok() {
+    let write_result = socket_path
+        .map(|path| {
+            UnixStream::connect(path).and_then(|mut stream| stream.write_all(snapshot_json.as_bytes()))
+        })
+        .or_else(|| file_path.map(|path| write_snapshot_file(path, &snapshot_json)));
+    if matches!(write_result, Some(Ok(()))) {
         *last_written = Some(snapshot_json);
     }
 }
 
-pub fn publish_contacts_list_export(contacts: &[TuiContact], selected_index: usize) {
-    *contacts_override()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(contacts.to_vec());
-    let _ = selected_index;
-}
-
-pub fn publish_devices_list_export(devices: &[TuiDevice]) {
-    *devices_override()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(devices.to_vec());
-}
-
-pub fn publish_channels_export(channels: &[TuiChannel], selected_channel_id: Option<&str>) {
-    *channels_override()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(channels.to_vec());
-    *selected_channel_id_override()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-        selected_channel_id.map(ToOwned::to_owned);
-}
-
-pub fn publish_messages_export(messages: &[TuiMessage]) {
-    *messages_override()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(messages.to_vec());
-}
-
 #[cfg(test)]
 mod tests {
-    use super::semantic_ui_snapshot;
+    use super::{authoritative_ui_snapshot, TuiSemanticInputs};
     use crate::tui::screens::Screen;
     use crate::tui::state::modal_queue::QueuedModal;
     use crate::tui::state::views::{AccountSetupModalState, DeviceEnrollmentCeremonyModalState};
     use crate::tui::TuiState;
     use aura_app::ui::contract::{ControlId, ListId, OperationId, OperationState, UiReadiness};
     use aura_app::ui::types::StateSnapshot;
+    use aura_app::ui_contract::RuntimeFact;
+    use std::path::Path;
 
     #[test]
     fn account_setup_maps_to_onboarding_state() {
         let mut state = TuiState::new();
         state.show_modal(QueuedModal::AccountSetup(AccountSetupModalState::default()));
 
-        let snapshot = semantic_ui_snapshot(&state, &StateSnapshot::default(), None);
+        let app_snapshot = StateSnapshot::default();
+        let snapshot = authoritative_ui_snapshot(
+            &state,
+            TuiSemanticInputs {
+                app_snapshot: &app_snapshot,
+                settings_devices: &[],
+                chat_channels: &[],
+            },
+        );
         assert_eq!(snapshot.readiness, UiReadiness::Loading);
         assert_eq!(snapshot.focused_control, Some(ControlId::OnboardingRoot));
         assert_eq!(snapshot.open_modal, None);
@@ -992,7 +567,15 @@ mod tests {
         let mut state = TuiState::new();
         state.router.go_to(Screen::Contacts);
 
-        let snapshot = semantic_ui_snapshot(&state, &StateSnapshot::default(), None);
+        let app_snapshot = StateSnapshot::default();
+        let snapshot = authoritative_ui_snapshot(
+            &state,
+            TuiSemanticInputs {
+                app_snapshot: &app_snapshot,
+                settings_devices: &[],
+                chat_channels: &[],
+            },
+        );
         let nav = snapshot
             .lists
             .iter()
@@ -1022,7 +605,15 @@ mod tests {
         );
         state.show_modal(QueuedModal::SettingsDeviceEnrollment(modal));
 
-        let snapshot = semantic_ui_snapshot(&state, &StateSnapshot::default(), None);
+        let app_snapshot = StateSnapshot::default();
+        let snapshot = authoritative_ui_snapshot(
+            &state,
+            TuiSemanticInputs {
+                app_snapshot: &app_snapshot,
+                settings_devices: &[],
+                chat_channels: &[],
+            },
+        );
         let operation_state = snapshot
             .operations
             .iter()
@@ -1030,5 +621,127 @@ mod tests {
             .map(|operation| operation.state);
 
         assert_eq!(operation_state, Some(OperationState::Submitting));
+    }
+
+    #[test]
+    fn semantic_snapshot_does_not_synthesize_placeholder_contact_ids() {
+        let mut state = TuiState::new();
+        state.contacts.contact_count = 3;
+
+        let app_snapshot = StateSnapshot::default();
+        let snapshot = authoritative_ui_snapshot(
+            &state,
+            TuiSemanticInputs {
+                app_snapshot: &app_snapshot,
+                settings_devices: &[],
+                chat_channels: &[],
+            },
+        );
+
+        let contacts = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Contacts)
+            .map(|list| list.items.clone())
+            .unwrap_or_default();
+
+        assert!(contacts.is_empty());
+        assert!(snapshot
+            .selections
+            .iter()
+            .filter(|selection| selection.list == ListId::Contacts)
+            .next()
+            .is_none());
+    }
+
+    #[test]
+    fn semantic_snapshot_exporter_does_not_depend_on_parity_override_caches() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let harness_state_path = repo_root.join("crates/aura-terminal/src/tui/harness_state.rs");
+        let source = std::fs::read_to_string(&harness_state_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", harness_state_path.display())
+        });
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(&source);
+
+        assert!(
+            !production_source.contains("static CONTACTS_OVERRIDE")
+                && !production_source.contains("static DEVICES_OVERRIDE")
+                && !production_source.contains("static MESSAGES_OVERRIDE"),
+            "parity-critical TUI exports may not depend on override caches"
+        );
+        assert!(
+            !production_source.contains("pub fn publish_contacts_list_export")
+                && !production_source.contains("pub fn publish_devices_list_export")
+                && !production_source.contains("pub fn publish_messages_export"),
+            "parity-critical TUI exports may not declare parity override helpers"
+        );
+    }
+
+    #[test]
+    fn semantic_snapshot_ready_state_is_projection_only() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let harness_state_path = repo_root.join("crates/aura-terminal/src/tui/harness_state.rs");
+        let source = std::fs::read_to_string(&harness_state_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", harness_state_path.display())
+        });
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(&source);
+
+        assert!(
+            !production_source.contains("contacts_override_input")
+                && !production_source.contains("contact_items.is_empty()")
+                && !production_source.contains("if home_ids.is_empty()"),
+            "ready-state TUI export must stay pure projection without reconstruction fallbacks"
+        );
+    }
+
+    #[test]
+    fn semantic_snapshot_exports_tui_owned_runtime_facts() {
+        let mut state = TuiState::new();
+        state.upsert_runtime_fact(RuntimeFact::InvitationCodeReady {
+            receiver_authority_id: None,
+            source_operation: OperationId::invitation_create(),
+        });
+
+        let app_snapshot = StateSnapshot::default();
+        let snapshot = authoritative_ui_snapshot(
+            &state,
+            TuiSemanticInputs {
+                app_snapshot: &app_snapshot,
+                settings_devices: &[],
+                chat_channels: &[],
+            },
+        );
+
+        assert!(snapshot.runtime_events.iter().any(|event| {
+            matches!(
+                &event.fact,
+                RuntimeFact::InvitationCodeReady { source_operation, .. }
+                    if *source_operation == OperationId::invitation_create()
+            )
+        }));
+    }
+
+    #[test]
+    fn semantic_snapshot_exporter_does_not_infer_parity_runtime_events() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let harness_state_path = repo_root.join("crates/aura-terminal/src/tui/harness_state.rs");
+        let source = std::fs::read_to_string(&harness_state_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", harness_state_path.display())
+        });
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(&source);
+
+        for forbidden in [
+            "RuntimeFact::ContactLinkReady",
+            "RuntimeFact::PendingHomeInvitationReady",
+            "RuntimeFact::ChannelMembershipReady",
+            "RuntimeFact::RecipientPeersResolved",
+            "RuntimeFact::MessageDeliveryReady",
+            "runtime_events.push(RuntimeEventSnapshot",
+        ] {
+            assert!(
+                !production_source.contains(forbidden),
+                "parity-critical runtime facts must not be synthesized during TUI snapshot export: {forbidden}"
+            );
+        }
     }
 }

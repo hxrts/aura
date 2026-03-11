@@ -587,7 +587,7 @@ impl HarnessCoordinator {
             Some(instance_id.to_string()),
             serde_json::json!({ "label": label }),
         );
-        backend.as_trait_mut().click_button(label)
+        backend.as_raw_ui_mut()?.click_button(label)
     }
 
     pub fn activate_control(&mut self, instance_id: &str, control_id: ControlId) -> Result<()> {
@@ -601,7 +601,7 @@ impl HarnessCoordinator {
             Some(instance_id.to_string()),
             serde_json::json!({ "control_id": control_id }),
         );
-        backend.as_trait_mut().activate_control(control_id)
+        backend.as_raw_ui_mut()?.activate_control(control_id)
     }
 
     pub fn click_target(&mut self, instance_id: &str, selector: &str) -> Result<()> {
@@ -615,7 +615,7 @@ impl HarnessCoordinator {
             Some(instance_id.to_string()),
             serde_json::json!({ "selector": selector }),
         );
-        backend.as_trait_mut().click_target(selector)
+        backend.as_raw_ui_mut()?.click_target(selector)
     }
 
     pub fn fill_input(&mut self, instance_id: &str, selector: &str, value: &str) -> Result<()> {
@@ -632,7 +632,7 @@ impl HarnessCoordinator {
                 "bytes": value.len()
             }),
         );
-        backend.as_trait_mut().fill_input(selector, value)
+        backend.as_raw_ui_mut()?.fill_input(selector, value)
     }
 
     pub fn fill_field(&mut self, instance_id: &str, field_id: FieldId, value: &str) -> Result<()> {
@@ -649,7 +649,7 @@ impl HarnessCoordinator {
                 "bytes": value.len()
             }),
         );
-        backend.as_trait_mut().fill_field(field_id, value)
+        backend.as_raw_ui_mut()?.fill_field(field_id, value)
     }
 
     pub fn activate_list_item(
@@ -671,7 +671,7 @@ impl HarnessCoordinator {
                 "item_id": item_id,
             }),
         );
-        backend.as_trait_mut().activate_list_item(list_id, item_id)
+        backend.as_raw_ui_mut()?.activate_list_item(list_id, item_id)
     }
 
     pub fn create_contact_invitation(
@@ -692,8 +692,9 @@ impl HarnessCoordinator {
             }),
         );
         backend
-            .as_trait_mut()
-            .create_contact_invitation(receiver_authority_id)
+            .as_shared_semantic_mut()?
+            .submit_create_contact_invitation(receiver_authority_id)
+            .map(|submitted| submitted.value.code)
     }
 
     pub fn create_account_via_ui(

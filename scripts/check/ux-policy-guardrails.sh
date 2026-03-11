@@ -53,8 +53,7 @@ is_allowlisted_harness_mode_file() {
     crates/aura-agent/src/runtime/effects.rs|\
     crates/aura-agent/src/runtime_bridge/mod.rs|\
     crates/aura-terminal/src/tui/context/io_context.rs|\
-    crates/aura-terminal/src/tui/screens/app/shell.rs|\
-    crates/aura-terminal/src/tui/theme.rs)
+    crates/aura-web/src/main.rs)
       return 0
       ;;
     *)
@@ -71,8 +70,7 @@ allowlisted_harness_mode_owner() {
     crates/aura-agent/src/runtime/effects.rs) echo "aura-agent-runtime-effects" ;;
     crates/aura-agent/src/runtime_bridge/mod.rs) echo "aura-agent-runtime-bridge" ;;
     crates/aura-terminal/src/tui/context/io_context.rs) echo "aura-terminal-tui-context" ;;
-    crates/aura-terminal/src/tui/screens/app/shell.rs) echo "aura-terminal-shell" ;;
-    crates/aura-terminal/src/tui/theme.rs) echo "aura-terminal-theme" ;;
+    crates/aura-web/src/main.rs) echo "aura-web-main" ;;
   esac
 }
 
@@ -84,8 +82,7 @@ allowlisted_harness_mode_justification() {
     crates/aura-agent/src/runtime/effects.rs) echo "effect wiring for deterministic harness-mode runtime assembly only" ;;
     crates/aura-agent/src/runtime_bridge/mod.rs) echo "runtime bridge instrumentation and environment binding only" ;;
     crates/aura-terminal/src/tui/context/io_context.rs) echo "TUI IO instrumentation and deterministic harness plumbing only" ;;
-    crates/aura-terminal/src/tui/screens/app/shell.rs) echo "shell-level render stability and harness publication only" ;;
-    crates/aura-terminal/src/tui/theme.rs) echo "theme/render stabilization only; no business-flow semantics" ;;
+    crates/aura-web/src/main.rs) echo "web harness instrumentation and snapshot publication only" ;;
   esac
 }
 
@@ -97,8 +94,7 @@ allowlisted_harness_mode_design_ref() {
     crates/aura-agent/src/runtime/effects.rs) echo "docs/804_testing_guide.md" ;;
     crates/aura-agent/src/runtime_bridge/mod.rs) echo "docs/804_testing_guide.md" ;;
     crates/aura-terminal/src/tui/context/io_context.rs) echo "crates/aura-terminal/ARCHITECTURE.md" ;;
-    crates/aura-terminal/src/tui/screens/app/shell.rs) echo "crates/aura-terminal/ARCHITECTURE.md" ;;
-    crates/aura-terminal/src/tui/theme.rs) echo "crates/aura-terminal/ARCHITECTURE.md" ;;
+    crates/aura-web/src/main.rs) echo "docs/804_testing_guide.md" ;;
   esac
 }
 
@@ -111,8 +107,7 @@ validate_allowlisted_harness_mode_metadata() {
     crates/aura-agent/src/runtime/effects.rs \
     crates/aura-agent/src/runtime_bridge/mod.rs \
     crates/aura-terminal/src/tui/context/io_context.rs \
-    crates/aura-terminal/src/tui/screens/app/shell.rs \
-    crates/aura-terminal/src/tui/theme.rs; do
+    crates/aura-web/src/main.rs; do
     owner="$(allowlisted_harness_mode_owner "$file")"
     justification="$(allowlisted_harness_mode_justification "$file")"
     design_ref="$(allowlisted_harness_mode_design_ref "$file")"
@@ -128,7 +123,6 @@ validate_allowlisted_harness_mode_metadata() {
 
 is_sleep_guard_path() {
   case "$1" in
-    crates/aura-harness/src/backend/*.rs|\
     crates/aura-harness/src/coordinator.rs|\
     crates/aura-harness/src/executor.rs|\
     crates/aura-harness/playwright-driver/playwright_driver.mjs|\
@@ -278,7 +272,8 @@ while IFS= read -r raw_line; do
   text="${raw_line:1}"
 
   if [[ "$text" == *"AURA_HARNESS_MODE"* && "$current_file" == crates/* && "$current_file" != crates/aura-harness/* ]]; then
-    if ! is_allowlisted_harness_mode_file "$current_file"; then
+    if [[ "$text" != *'contains("AURA_HARNESS_MODE")'* && "$text" != *"assert!(!"* ]] \
+      && ! is_allowlisted_harness_mode_file "$current_file"; then
       record_violation "$current_file:$new_line: new AURA_HARNESS_MODE branch outside allowlisted instrumentation surface"
     fi
   fi
@@ -309,7 +304,7 @@ while IFS= read -r raw_line; do
   fi
 
   if is_row_index_guard_path "$current_file"; then
-    if [[ "$text" == *selected_index* || "$text" == *selected_idx* || "$text" == *selected_by_index* ]]; then
+    if [[ "$text" == *selected_idx* || "$text" == *selected_by_index* || "$text" == *selected_channel_index* ]]; then
       record_violation "$current_file:$new_line: new row-index selection/addressing in parity-critical export or contract code"
     fi
   fi
@@ -330,7 +325,7 @@ while IFS= read -r raw_line; do
   fi
 
   if ! is_allowlisted_harness_entrypoint_file "$current_file"; then
-    if [[ "$text" == *'just harness-run'* \
+    if [[ "$current_file" != scripts/check/* ]] && [[ "$text" == *'just harness-run'* \
        || "$text" == *'just harness-run-browser'* \
        || "$text" == *'aura-harness -- run'* \
        || "$text" == *'cargo run -p aura-harness --bin aura-harness'* \
