@@ -47,7 +47,9 @@ const MIN_SYNC_PEER_RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_SYNC_PEER_RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
 #[cfg(not(target_arch = "wasm32"))]
 const CHAT_FACT_CONTENT_TYPE: &str = "application/aura-chat-fact";
+#[cfg(not(target_arch = "wasm32"))]
 const FACT_SYNC_REQUEST_CONTENT_TYPE: &str = "application/aura-fact-sync-request";
+#[cfg(not(target_arch = "wasm32"))]
 const FACT_SYNC_RESPONSE_CONTENT_TYPE: &str = "application/aura-fact-sync-response";
 
 fn sync_peer_reconcile_interval(sync_manager: &SyncServiceManager) -> Duration {

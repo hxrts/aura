@@ -19,7 +19,9 @@ use anyhow::{anyhow, bail, Result};
 use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
 use tokio::time::Instant;
 
-use crate::backend::{BackendHandle, ContactInvitationCode, SubmittedAction};
+use crate::backend::{
+    BackendHandle, ContactInvitationCode, SubmittedAction,
+};
 use crate::config::{InstanceMode, RunConfig, RuntimeSubstrate, ScreenSource};
 use crate::events::EventStream;
 use crate::runtime_substrate::RuntimeSubstrateController;
@@ -995,12 +997,12 @@ impl HarnessCoordinator {
         Ok(result)
     }
 
-    pub fn read_clipboard(&mut self, instance_id: &str) -> Result<String> {
+    pub fn read_clipboard(&self, instance_id: &str) -> Result<String> {
         let backend = self
             .backends
-            .get_mut(instance_id)
+            .get(instance_id)
             .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        let text = backend.as_trait_mut().read_clipboard()?;
+        let text = backend.as_trait().read_clipboard()?;
 
         self.events.push(
             "observation",

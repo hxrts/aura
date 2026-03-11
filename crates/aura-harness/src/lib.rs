@@ -15,6 +15,7 @@ pub mod introspection;
 pub mod network_lab;
 pub mod preflight;
 pub mod provisioning;
+pub mod recovery_registry;
 pub mod replay;
 pub mod residue_checks;
 pub mod resource_guards;

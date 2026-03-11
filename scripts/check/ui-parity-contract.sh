@@ -40,18 +40,26 @@ if ! diff -u "$tmp_variants" "$tmp_metadata" >/tmp/ui-parity-contract-diff.$$; t
 fi
 rm -f /tmp/ui-parity-contract-diff.$$ || true
 
-exception_count="$(rg -c 'exception: ParityException::' "$contract_file")"
-reason_count="$(rg -c 'reason_code:' "$contract_file")"
-scope_count="$(rg -c 'scope:' "$contract_file")"
-surface_count="$(rg -c 'affected_surface:' "$contract_file")"
-doc_count="$(rg -c 'doc_reference:' "$contract_file")"
+extract_parity_metadata_block() {
+  awk '
+    /pub const PARITY_EXCEPTION_METADATA/ { in_block=1 }
+    in_block { print }
+    in_block && /^\];/ { exit }
+  ' "$contract_file"
+}
+
+exception_count="$(extract_parity_metadata_block | rg -c 'exception: ParityException::')"
+reason_count="$(extract_parity_metadata_block | rg -c 'reason_code:')"
+scope_count="$(extract_parity_metadata_block | rg -c 'scope:')"
+surface_count="$(extract_parity_metadata_block | rg -c 'affected_surface:')"
+doc_count="$(extract_parity_metadata_block | rg -c 'doc_reference:')"
 
 [[ "$reason_count" == "$exception_count" ]] || fail "each parity exception metadata entry must declare reason_code"
 [[ "$scope_count" == "$exception_count" ]] || fail "each parity exception metadata entry must declare scope"
 [[ "$surface_count" == "$exception_count" ]] || fail "each parity exception metadata entry must declare affected_surface"
 [[ "$doc_count" == "$exception_count" ]] || fail "each parity exception metadata entry must declare doc_reference"
 
-rg -o 'doc_reference: "[^"]+"' "$contract_file" \
+extract_parity_metadata_block | rg -o 'doc_reference: "[^"]+"' \
   | sed 's/^doc_reference: "//; s/"$//' > "$tmp_docs"
 while IFS= read -r doc_path; do
   [[ -n "$doc_path" ]] || continue
@@ -64,5 +72,10 @@ cargo test -p aura-app shared_screen_modal_and_list_support_is_unique_and_addres
 cargo test -p aura-app shared_screen_module_map_uses_canonical_screen_names --quiet
 cargo test -p aura-app parity_module_map_points_to_existing_frontend_symbols --quiet
 cargo test -p aura-app parity_exception_metadata_is_complete_and_documented --quiet
+cargo test -p aura-app ui_snapshot_parity_ignores_occurrence_ids_but_catches_state_drift --quiet
+cargo test -p aura-app ui_snapshot_parity_detects_focus_semantic_drift --quiet
+cargo test -p aura-app ui_snapshot_parity_detects_runtime_event_shape_drift --quiet
+cargo test -p aura-app parity_ui_identity_helpers_match_contract_ids --quiet
+cargo test -p aura-app frontend_sources_reference_shared_identity_helpers --quiet
 
 echo "ui parity contract: clean"

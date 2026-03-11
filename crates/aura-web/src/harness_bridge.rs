@@ -3,30 +3,41 @@
 //! Exposes the UiController to JavaScript via window.harness, enabling the test
 //! harness to send keys, capture screenshots, and query UI state from Playwright.
 
-use aura_app::ui::contract::{ControlId, FieldId, RenderHeartbeat, ScreenId, UiReadiness, UiSnapshot};
+use aura_app::ui::contract::{ModalId, RenderHeartbeat, ScreenId, UiReadiness, UiSnapshot};
 use aura_app::ui_contract::RuntimeFact;
 use aura_app::ui::workflows::account as account_workflows;
+use aura_app::ui::workflows::context as context_workflows;
 use aura_app::ui::workflows::invitation as invitation_workflows;
 use aura_core::AuthorityId;
 use aura_ui::UiController;
 use aura_ui::UiScreen;
 use js_sys::{Array, Function, Object, Reflect, JSON};
 use serde_wasm_bindgen::to_value;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::{future_to_promise, spawn_local};
 
+struct PendingUiPublish {
+    value: JsValue,
+    json: String,
+    screen: ScreenId,
+    modal: Option<ModalId>,
+    operation_count: usize,
+}
+
 thread_local! {
     static CONTROLLER: RefCell<Option<Arc<UiController>>> = const { RefCell::new(None) };
     static LAST_PUBLISHED_UI_STATE_JSON: RefCell<Option<String>> = const { RefCell::new(None) };
+    static PENDING_UI_PUBLISH: RefCell<Option<PendingUiPublish>> = const { RefCell::new(None) };
     static RENDER_SEQ: RefCell<u64> = const { RefCell::new(0) };
-    static UI_PUBLISH_SEQ: RefCell<u64> = const { RefCell::new(0) };
+    static UI_PUBLISH_RAF_PENDING: Cell<bool> = const { Cell::new(false) };
 }
 
 const WEB_STORAGE_PREFIX: &str = "aura_";
 const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
+const HARNESS_PENDING_CREATE_ACCOUNT_KEY: &str = "__AURA_HARNESS_PENDING_CREATE_ACCOUNT__";
 
 fn sanitize_storage_segment(raw: &str) -> String {
     raw.chars()
@@ -56,12 +67,71 @@ fn harness_storage_prefix(window: &web_sys::Window) -> String {
     WEB_STORAGE_PREFIX.to_string()
 }
 
+fn install_pending_harness_command_loop(controller: Arc<UiController>) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let callback = Closure::wrap(Box::new(move || {
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let pending = Reflect::get(
+            window.as_ref(),
+            &JsValue::from_str(HARNESS_PENDING_CREATE_ACCOUNT_KEY),
+        )
+        .ok()
+        .and_then(|value| value.as_string())
+        .filter(|value| !value.trim().is_empty());
+        let Some(nickname) = pending else {
+            return;
+        };
+        let _ = Reflect::delete_property(
+            window.as_ref(),
+            &JsValue::from_str(HARNESS_PENDING_CREATE_ACCOUNT_KEY),
+        );
+        let controller = controller.clone();
+        spawn_local(async move {
+            web_sys::console::log_1(
+                &format!("[web-harness] create_account start nickname={nickname}").into(),
+            );
+            controller.set_account_setup_state(false, nickname.clone(), None);
+            if let Err(error) =
+                account_workflows::initialize_runtime_account(controller.app_core(), nickname.clone())
+                    .await
+            {
+                web_sys::console::error_1(
+                    &format!("[web-harness] create_account error {}", error).into(),
+                );
+                return;
+            }
+            if let Some(window) = web_sys::window() {
+                if let Ok(Some(storage)) = window.local_storage() {
+                    let storage_key = format!(
+                        "{}selected_authority",
+                        harness_storage_prefix(&window)
+                    );
+                    let _ = storage.set_item(&storage_key, &controller.authority_id());
+                }
+            }
+            controller.set_account_setup_state(true, "", None);
+            web_sys::console::log_1(
+                &format!("[web-harness] create_account ok nickname={nickname}").into(),
+            );
+        });
+    }) as Box<dyn FnMut()>);
+    let _ = window.set_interval_with_callback_and_timeout_and_arguments_0(
+        callback.as_ref().unchecked_ref(),
+        25,
+    );
+    callback.forget();
+}
+
 fn publish_ui_snapshot_now(
     window: &web_sys::Window,
     value: JsValue,
     json: String,
-    screen: aura_app::ui::contract::ScreenId,
-    modal: Option<aura_app::ui::contract::ModalId>,
+    screen: ScreenId,
+    modal: Option<ModalId>,
     operation_count: usize,
 ) {
     let should_publish = LAST_PUBLISHED_UI_STATE_JSON.with(|slot| {
@@ -95,7 +165,9 @@ fn publish_ui_snapshot_now(
     .ok()
     .and_then(|candidate| candidate.dyn_into::<Function>().ok())
     .map(|function| {
-        let _ = function.call1(window.as_ref(), &JsValue::from_str(&json));
+        if let Err(error) = function.call1(window.as_ref(), &JsValue::from_str(&json)) {
+            log_js_callback_error("driver UI state push", &error);
+        }
         "driver_push"
     })
     .unwrap_or("console_only");
@@ -138,7 +210,65 @@ fn publish_render_heartbeat(window: &web_sys::Window, heartbeat: &RenderHeartbea
     )
     .and_then(|candidate| candidate.dyn_into::<Function>())
     {
-        let _ = function.call1(window.as_ref(), &JsValue::from_str(&json));
+        if let Err(error) = function.call1(window.as_ref(), &JsValue::from_str(&json)) {
+            log_js_callback_error("driver render heartbeat push", &error);
+        }
+    }
+}
+
+fn log_js_callback_error(context: &str, error: &JsValue) {
+    let detail = error
+        .as_string()
+        .or_else(|| JSON::stringify(error).ok().and_then(|value| value.as_string()))
+        .unwrap_or_else(|| format!("{error:?}"));
+    web_sys::console::error_1(&JsValue::from_str(&format!(
+        "[web-harness] {context} failed: {detail}"
+    )));
+}
+
+fn flush_pending_ui_snapshot(window: &web_sys::Window) {
+    let Some(pending) = PENDING_UI_PUBLISH.with(|slot| slot.borrow_mut().take()) else {
+        return;
+    };
+    let render_seq = RENDER_SEQ.with(|slot| {
+        let mut seq = slot.borrow_mut();
+        *seq = seq.saturating_add(1);
+        *seq
+    });
+    publish_render_heartbeat(
+        window,
+        &RenderHeartbeat {
+            screen: pending.screen,
+            open_modal: pending.modal,
+            render_seq,
+        },
+    );
+    publish_ui_snapshot_now(
+        window,
+        pending.value,
+        pending.json,
+        pending.screen,
+        pending.modal,
+        pending.operation_count,
+    );
+}
+
+fn schedule_pending_ui_snapshot_flush(window: &web_sys::Window) {
+    let raf_window = window.clone();
+    let raf_callback = Closure::once_into_js(move || {
+        flush_pending_ui_snapshot(&raf_window);
+        let has_more_pending = PENDING_UI_PUBLISH.with(|slot| slot.borrow().is_some());
+        if has_more_pending {
+            schedule_pending_ui_snapshot_flush(&raf_window);
+        } else {
+            UI_PUBLISH_RAF_PENDING.with(|slot| slot.set(false));
+        }
+    });
+    let raf_function: &Function = raf_callback.unchecked_ref();
+    if let Err(error) = window.request_animation_frame(raf_function) {
+        UI_PUBLISH_RAF_PENDING.with(|slot| slot.set(false));
+        log_js_callback_error("requestAnimationFrame for UI snapshot publish", &error);
+        flush_pending_ui_snapshot(window);
     }
 }
 
@@ -161,38 +291,26 @@ pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
     let Some(json) = json.as_string() else {
         return;
     };
-    let screen = snapshot.screen;
-    let modal = snapshot.open_modal;
-    let operation_count = snapshot.operations.len();
-    let publish_seq = UI_PUBLISH_SEQ.with(|slot| {
-        let mut seq = slot.borrow_mut();
-        *seq = seq.saturating_add(1);
-        *seq
-    });
-
-    let raf_window = window.clone();
-    let raf_callback = Closure::once_into_js(move || {
-        let is_latest_publish = UI_PUBLISH_SEQ.with(|slot| *slot.borrow() == publish_seq);
-        if !is_latest_publish {
-            return;
-        }
-        let render_seq = RENDER_SEQ.with(|slot| {
-            let mut seq = slot.borrow_mut();
-            *seq = seq.saturating_add(1);
-            *seq
+    PENDING_UI_PUBLISH.with(|slot| {
+        *slot.borrow_mut() = Some(PendingUiPublish {
+            value,
+            json,
+            screen: snapshot.screen,
+            modal: snapshot.open_modal,
+            operation_count: snapshot.operations.len(),
         });
-        publish_render_heartbeat(
-            &raf_window,
-            &RenderHeartbeat {
-                screen,
-                open_modal: modal,
-                render_seq,
-            },
-        );
-        publish_ui_snapshot_now(&raf_window, value, json, screen, modal, operation_count);
     });
-    let raf_function: &Function = raf_callback.unchecked_ref();
-    let _ = window.request_animation_frame(raf_function);
+    let should_schedule = UI_PUBLISH_RAF_PENDING.with(|slot| {
+        if slot.get() {
+            false
+        } else {
+            slot.set(true);
+            true
+        }
+    });
+    if should_schedule {
+        schedule_pending_ui_snapshot_flush(&window);
+    }
 }
 
 fn serialize_ui_snapshot(snapshot: &UiSnapshot) -> JsValue {
@@ -245,6 +363,8 @@ fn serialized_published_ui_snapshot(
 
 pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), JsValue> {
     let harness = Object::new();
+    let observe = Object::new();
+    install_pending_harness_command_loop(controller.clone());
 
     let send_keys_controller = controller.clone();
     let send_keys = Closure::wrap(Box::new(move |keys: JsValue| -> JsValue {
@@ -333,7 +453,7 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
         payload.into()
     }) as Box<dyn FnMut() -> JsValue>);
     Reflect::set(
-        &harness,
+        &observe,
         &JsValue::from_str("snapshot"),
         snapshot.as_ref().unchecked_ref(),
     )?;
@@ -347,7 +467,7 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
         serialized_published_ui_snapshot(&window, &ui_state_controller)
     }) as Box<dyn FnMut() -> JsValue>);
     Reflect::set(
-        &harness,
+        &observe,
         &JsValue::from_str("ui_state"),
         ui_state.as_ref().unchecked_ref(),
     )?;
@@ -370,7 +490,7 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
         JsValue::from_str(&read_clipboard_controller.read_clipboard())
     }) as Box<dyn FnMut() -> JsValue>);
     Reflect::set(
-        &harness,
+        &observe,
         &JsValue::from_str("read_clipboard"),
         read_clipboard.as_ref().unchecked_ref(),
     )?;
@@ -416,41 +536,19 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
     )?;
     create_contact_invitation.forget();
 
-    let create_account_controller = controller.clone();
     let create_account = Closure::wrap(Box::new(move |account_name: JsValue| -> JsValue {
-        let controller = create_account_controller.clone();
         let Some(nickname) = account_name.as_string() else {
             return JsValue::FALSE;
         };
-        spawn_local(async move {
-            web_sys::console::log_1(
-                &format!("[web-harness] create_account start nickname={nickname}").into(),
+        if let Some(window) = web_sys::window() {
+            let _ = Reflect::set(
+                window.as_ref(),
+                &JsValue::from_str(HARNESS_PENDING_CREATE_ACCOUNT_KEY),
+                &JsValue::from_str(&nickname),
             );
-            controller.set_account_setup_state(false, nickname.clone(), None);
-            if let Err(error) =
-                account_workflows::initialize_runtime_account(controller.app_core(), nickname.clone())
-                    .await
-            {
-                web_sys::console::error_1(
-                    &format!("[web-harness] create_account error {}", error).into(),
-                );
-                return;
-            }
-            if let Some(window) = web_sys::window() {
-                if let Ok(Some(storage)) = window.local_storage() {
-                    let storage_key = format!(
-                        "{}selected_authority",
-                        harness_storage_prefix(&window)
-                    );
-                    let _ = storage.set_item(&storage_key, &controller.authority_id());
-                }
-            }
-            controller.set_account_setup_state(true, "", None);
-            web_sys::console::log_1(
-                &format!("[web-harness] create_account ok nickname={nickname}").into(),
-            );
-        });
-        JsValue::TRUE
+            return JsValue::TRUE;
+        }
+        JsValue::FALSE
     }) as Box<dyn FnMut(JsValue) -> JsValue>);
     Reflect::set(
         &harness,
@@ -459,12 +557,32 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
     )?;
     create_account.forget();
 
+    let create_home_controller = controller.clone();
+    let create_home = Closure::wrap(Box::new(move |home_name: JsValue| -> js_sys::Promise {
+        let controller = create_home_controller.clone();
+        future_to_promise(async move {
+            let home_name = home_name
+                .as_string()
+                .ok_or_else(|| JsValue::from_str("home_name must be a string"))?;
+            context_workflows::create_home(controller.app_core(), Some(home_name), None)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            Ok(JsValue::TRUE)
+        })
+    }) as Box<dyn FnMut(JsValue) -> js_sys::Promise>);
+    Reflect::set(
+        &harness,
+        &JsValue::from_str("create_home"),
+        create_home.as_ref().unchecked_ref(),
+    )?;
+    create_home.forget();
+
     let authority_id_controller = controller.clone();
     let get_authority_id = Closure::wrap(Box::new(move || -> JsValue {
         JsValue::from_str(&authority_id_controller.authority_id())
     }) as Box<dyn FnMut() -> JsValue>);
     Reflect::set(
-        &harness,
+        &observe,
         &JsValue::from_str("get_authority_id"),
         get_authority_id.as_ref().unchecked_ref(),
     )?;
@@ -483,7 +601,7 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
         array.into()
     }) as Box<dyn FnMut(JsValue) -> JsValue>);
     Reflect::set(
-        &harness,
+        &observe,
         &JsValue::from_str("tail_log"),
         tail_log.as_ref().unchecked_ref(),
     )?;
@@ -532,29 +650,34 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
         );
 
         let app_root_count = document
-            .query_selector_all(&app_root_selector)
+            .query_selector(&app_root_selector)
             .ok()
-            .map(|nodes| nodes.length())
+            .flatten()
+            .map(|_| 1)
             .unwrap_or(0);
         let modal_region_count = document
-            .query_selector_all(&modal_region_selector)
+            .query_selector(&modal_region_selector)
             .ok()
-            .map(|nodes| nodes.length())
+            .flatten()
+            .map(|_| 1)
             .unwrap_or(0);
         let onboarding_root_count = document
-            .query_selector_all(&onboarding_root_selector)
+            .query_selector(&onboarding_root_selector)
             .ok()
-            .map(|nodes| nodes.length())
+            .flatten()
+            .map(|_| 1)
             .unwrap_or(0);
         let toast_region_count = document
-            .query_selector_all(&toast_region_selector)
+            .query_selector(&toast_region_selector)
             .ok()
-            .map(|nodes| nodes.length())
+            .flatten()
+            .map(|_| 1)
             .unwrap_or(0);
         let active_screen_root_count = document
-            .query_selector_all(&screen_selector)
+            .query_selector(&screen_selector)
             .ok()
-            .map(|nodes| nodes.length())
+            .flatten()
+            .map(|_| 1)
             .unwrap_or(0);
 
         let _ = Reflect::set(
@@ -590,7 +713,7 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
         payload.into()
     }) as Box<dyn FnMut() -> JsValue>);
     Reflect::set(
-        &harness,
+        &observe,
         &JsValue::from_str("root_structure"),
         root_structure.as_ref().unchecked_ref(),
     )?;
@@ -615,6 +738,11 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
         window.as_ref(),
         &JsValue::from_str("__AURA_HARNESS__"),
         &harness,
+    )?;
+    Reflect::set(
+        window.as_ref(),
+        &JsValue::from_str("__AURA_HARNESS_OBSERVE__"),
+        &observe,
     )?;
     let read_only_ui_state_controller = controller;
     let read_only_ui_state = Closure::wrap(Box::new(move || -> JsValue {
@@ -641,6 +769,11 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
         )
         .unwrap_or(JsValue::NULL)
     }) as Box<dyn FnMut() -> JsValue>);
+    Reflect::set(
+        &observe,
+        &JsValue::from_str("render_heartbeat"),
+        render_heartbeat.as_ref().unchecked_ref(),
+    )?;
     Reflect::set(
         window.as_ref(),
         &JsValue::from_str("__AURA_RENDER_HEARTBEAT_STATE__"),

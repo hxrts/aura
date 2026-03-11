@@ -499,7 +499,7 @@ cfg_if! {
             let rerender = schedule_update();
             controller.set_rerender_callback(rerender.clone());
             let mut sync_loop_started = use_signal(|| false);
-            let mut bootstrap_account_ready = use_signal(|| state.account_ready);
+            let bootstrap_account_ready = use_signal(|| state.account_ready);
             let mut account_name = use_signal(String::new);
             let mut account_error = use_signal(|| Option::<String>::None);
             let creating_account = use_signal(|| false);
@@ -536,6 +536,12 @@ cfg_if! {
                         focused_control: Some(ControlId::OnboardingRoot),
                         open_modal: None,
                         readiness: UiReadiness::Loading,
+                        revision: aura_app::ui::contract::next_projection_revision(None),
+                        quiescence: aura_app::ui::contract::QuiescenceSnapshot::derive(
+                            UiReadiness::Loading,
+                            None,
+                            &operations,
+                        ),
                         selections: Vec::new(),
                         lists: Vec::new(),
                         messages: Vec::new(),

@@ -3,75 +3,75 @@
    ============================================================================= */
 
 @font-face {
-  font-family: "JetBrains Mono";
-  src: url("/fonts/JetBrainsMono-Regular.ttf") format("truetype");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
+    font-family: "JetBrains Mono";
+    src: url("/fonts/JetBrainsMono-Regular.ttf") format("truetype");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
 }
 
 @font-face {
-  font-family: "JetBrains Mono";
-  src: url("/fonts/JetBrainsMono-Italic.ttf") format("truetype");
-  font-weight: 400;
-  font-style: italic;
-  font-display: swap;
+    font-family: "JetBrains Mono";
+    src: url("/fonts/JetBrainsMono-Italic.ttf") format("truetype");
+    font-weight: 400;
+    font-style: italic;
+    font-display: swap;
 }
 
 @font-face {
-  font-family: "JetBrains Mono";
-  src: url("/fonts/JetBrainsMono-Medium.ttf") format("truetype");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
+    font-family: "JetBrains Mono";
+    src: url("/fonts/JetBrainsMono-Medium.ttf") format("truetype");
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
 }
 
 @font-face {
-  font-family: "JetBrains Mono";
-  src: url("/fonts/JetBrainsMono-SemiBold.ttf") format("truetype");
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
+    font-family: "JetBrains Mono";
+    src: url("/fonts/JetBrainsMono-SemiBold.ttf") format("truetype");
+    font-weight: 600;
+    font-style: normal;
+    font-display: swap;
 }
 
 @font-face {
-  font-family: "Perun";
-  src: url("/fonts/Perun-Regular.ttf") format("truetype");
-  font-weight: 400;
-  font-style: normal;
-  font-display: block;
+    font-family: "Perun";
+    src: url("/fonts/Perun-Regular.ttf") format("truetype");
+    font-weight: 400;
+    font-style: normal;
+    font-display: block;
 }
 
 @font-face {
-  font-family: "Perun";
-  src: url("/fonts/Perun-Italic.ttf") format("truetype");
-  font-weight: 400;
-  font-style: italic;
-  font-display: block;
+    font-family: "Perun";
+    src: url("/fonts/Perun-Italic.ttf") format("truetype");
+    font-weight: 400;
+    font-style: italic;
+    font-display: block;
 }
 
 @font-face {
-  font-family: "Perun";
-  src: url("/fonts/Perun-Medium.ttf") format("truetype");
-  font-weight: 500;
-  font-style: normal;
-  font-display: block;
+    font-family: "Perun";
+    src: url("/fonts/Perun-Medium.ttf") format("truetype");
+    font-weight: 500;
+    font-style: normal;
+    font-display: block;
 }
 
 @font-face {
-  font-family: "Perun";
-  src: url("/fonts/Perun-Bold.ttf") format("truetype");
-  font-weight: 700;
-  font-style: normal;
-  font-display: block;
+    font-family: "Perun";
+    src: url("/fonts/Perun-Bold.ttf") format("truetype");
+    font-weight: 700;
+    font-style: normal;
+    font-display: block;
 }
 
 @font-face {
-  font-family: "Perun";
-  src: url("/fonts/Perun-BoldItalic.ttf") format("truetype");
-  font-weight: 700;
-  font-style: italic;
-  font-display: block;
+    font-family: "Perun";
+    src: url("/fonts/Perun-BoldItalic.ttf") format("truetype");
+    font-weight: 700;
+    font-style: italic;
+    font-display: block;
 }
 
 @tailwind base;
@@ -79,139 +79,153 @@
 @tailwind utilities;
 
 @layer base {
-  /* Dark mode (default) */
-  :root {
-    /* Font families */
-    --font-sans: "Perun", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    --font-mono: "JetBrains Mono", "SF Mono", SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
-    --background: oklch(0.18 0 0);
-    --foreground: oklch(0.97 0 0);
-    --card: oklch(0.18 0 0);
-    --card-foreground: oklch(0.97 0 0);
-    --popover: oklch(0.18 0 0);
-    --popover-foreground: oklch(0.97 0 0);
-    --primary: oklch(0.78 0 0);
-    --primary-foreground: oklch(0.18 0 0);
-    --secondary: oklch(0.30 0 0);
-    --secondary-foreground: oklch(0.97 0 0);
-    --muted: oklch(0.30 0 0);
-    --muted-foreground: oklch(0.68 0 0);
-    --accent: oklch(0.30 0 0);
-    --accent-foreground: oklch(0.97 0 0);
-    --destructive: oklch(0.50 0.18 25);
-    --destructive-foreground: oklch(0.97 0 0);
-    --border: oklch(0.35 0 0);
-    --input: oklch(0.30 0 0);
-    --ring: oklch(0.55 0 0);
-    --radius: 3px;
-  }
+    /* Dark mode (default) */
+    :root {
+        /* Font families */
+        --font-sans:
+            "Perun", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+            "Helvetica Neue", Arial, sans-serif;
+        --font-mono:
+            "JetBrains Mono", "SF Mono", SFMono-Regular, Consolas,
+            "Liberation Mono", Menlo, monospace;
+        --background: oklch(0.18 0 0);
+        --foreground: oklch(0.97 0 0);
+        --card: oklch(0.18 0 0);
+        --card-foreground: oklch(0.97 0 0);
+        --popover: oklch(0.18 0 0);
+        --popover-foreground: oklch(0.97 0 0);
+        --primary: oklch(0.78 0 0);
+        --primary-foreground: oklch(0.18 0 0);
+        --secondary: oklch(0.3 0 0);
+        --secondary-foreground: oklch(0.97 0 0);
+        --muted: oklch(0.3 0 0);
+        --muted-foreground: oklch(0.68 0 0);
+        --accent: oklch(0.3 0 0);
+        --accent-foreground: oklch(0.97 0 0);
+        --destructive: oklch(0.5 0.18 25);
+        --destructive-foreground: oklch(0.97 0 0);
+        --border: oklch(0.35 0 0);
+        --input: oklch(0.3 0 0);
+        --ring: oklch(0.55 0 0);
+        --radius: 3px;
+    }
 
-  /* Light mode */
-  .light {
-    --background: oklch(1.0 0 0);
-    --foreground: oklch(0.18 0 0);
-    --card: oklch(1.0 0 0);
-    --card-foreground: oklch(0.18 0 0);
-    --popover: oklch(1.0 0 0);
-    --popover-foreground: oklch(0.18 0 0);
-    --primary: oklch(0.35 0 0);
-    --primary-foreground: oklch(1.0 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.18 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.47 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.18 0 0);
-    --destructive: oklch(0.50 0.18 25);
-    --destructive-foreground: oklch(1.0 0 0);
-    --border: oklch(0.90 0 0);
-    --input: oklch(0.90 0 0);
-    --ring: oklch(0.68 0 0);
-  }
+    /* Light mode */
+    .light {
+        --background: oklch(1 0 0);
+        --foreground: oklch(0.18 0 0);
+        --card: oklch(1 0 0);
+        --card-foreground: oklch(0.18 0 0);
+        --popover: oklch(1 0 0);
+        --popover-foreground: oklch(0.18 0 0);
+        --primary: oklch(0.35 0 0);
+        --primary-foreground: oklch(1 0 0);
+        --secondary: oklch(0.97 0 0);
+        --secondary-foreground: oklch(0.18 0 0);
+        --muted: oklch(0.97 0 0);
+        --muted-foreground: oklch(0.47 0 0);
+        --accent: oklch(0.97 0 0);
+        --accent-foreground: oklch(0.18 0 0);
+        --destructive: oklch(0.5 0.18 25);
+        --destructive-foreground: oklch(1 0 0);
+        --border: oklch(0.9 0 0);
+        --input: oklch(0.9 0 0);
+        --ring: oklch(0.68 0 0);
+    }
 
-  * {
-    @apply border-border;
-  }
+    * {
+        @apply border-border;
+    }
 
-  body {
-    @apply bg-background text-foreground;
-    font-family: var(--font-sans);
-    font-feature-settings: "liga" 0, "calt" 0;
-    font-kerning: normal;
-    text-rendering: optimizeLegibility;
-  }
+    body {
+        @apply bg-background text-foreground;
+        font-family: var(--font-sans);
+        font-feature-settings:
+            "liga" 0,
+            "calt" 0;
+        font-kerning: normal;
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
 
-  html[data-aura-harness-mode="1"] *,
-  html.aura-harness-mode * {
-    animation-duration: 0s !important;
-    animation-delay: 0s !important;
-    transition-duration: 0s !important;
-    transition-delay: 0s !important;
-    scroll-behavior: auto !important;
-  }
+    html[data-aura-harness-mode="1"] *,
+    html.aura-harness-mode * {
+        animation-duration: 0s !important;
+        animation-delay: 0s !important;
+        transition-duration: 0s !important;
+        transition-delay: 0s !important;
+        scroll-behavior: auto !important;
+    }
 }
 
 @layer utilities {
-  @keyframes aura-enter {
-    from {
-      opacity: var(--tw-enter-opacity, 1);
-      transform:
-        translate3d(var(--tw-enter-translate-x, 0), var(--tw-enter-translate-y, 0), 0)
-        scale3d(var(--tw-enter-scale, 1), var(--tw-enter-scale, 1), 1);
+    @keyframes aura-enter {
+        from {
+            opacity: var(--tw-enter-opacity, 1);
+            transform: translate3d(
+                    var(--tw-enter-translate-x, 0),
+                    var(--tw-enter-translate-y, 0),
+                    0
+                )
+                scale3d(var(--tw-enter-scale, 1), var(--tw-enter-scale, 1), 1);
+        }
     }
-  }
 
-  @keyframes aura-exit {
-    to {
-      opacity: var(--tw-exit-opacity, 1);
-      transform:
-        translate3d(var(--tw-exit-translate-x, 0), var(--tw-exit-translate-y, 0), 0)
-        scale3d(var(--tw-exit-scale, 1), var(--tw-exit-scale, 1), 1);
+    @keyframes aura-exit {
+        to {
+            opacity: var(--tw-exit-opacity, 1);
+            transform: translate3d(
+                    var(--tw-exit-translate-x, 0),
+                    var(--tw-exit-translate-y, 0),
+                    0
+                )
+                scale3d(var(--tw-exit-scale, 1), var(--tw-exit-scale, 1), 1);
+        }
     }
-  }
 
-  .animate-in {
-    animation: aura-enter 150ms ease-out;
-  }
+    .animate-in {
+        animation: aura-enter 150ms ease-out;
+    }
 
-  .animate-out {
-    animation: aura-exit 150ms ease-in forwards;
-  }
+    .animate-out {
+        animation: aura-exit 150ms ease-in forwards;
+    }
 
-  .fade-in-0 {
-    --tw-enter-opacity: 0;
-  }
+    .fade-in-0 {
+        --tw-enter-opacity: 0;
+    }
 
-  .fade-out-0 {
-    --tw-exit-opacity: 0;
-  }
+    .fade-out-0 {
+        --tw-exit-opacity: 0;
+    }
 
-  .slide-in-from-right-full {
-    --tw-enter-translate-x: 100%;
-  }
+    .slide-in-from-right-full {
+        --tw-enter-translate-x: 100%;
+    }
 
-  .slide-out-to-right-full {
-    --tw-exit-translate-x: 100%;
-  }
+    .slide-out-to-right-full {
+        --tw-exit-translate-x: 100%;
+    }
 
-  .aura-modal-fade[data-state="open"],
-  .aura-modal-fade[data-state="closed"] {
-    --tw-enter-scale: 1;
-    --tw-exit-scale: 1;
-    --tw-enter-translate-x: 0;
-    --tw-enter-translate-y: 0;
-    --tw-exit-translate-x: 0;
-    --tw-exit-translate-y: 0;
-  }
+    .aura-modal-fade[data-state="open"],
+    .aura-modal-fade[data-state="closed"] {
+        --tw-enter-scale: 1;
+        --tw-exit-scale: 1;
+        --tw-enter-translate-x: 0;
+        --tw-enter-translate-y: 0;
+        --tw-exit-translate-x: 0;
+        --tw-exit-translate-y: 0;
+    }
 
-  /* Override default border radius utilities to 3px */
-  .rounded,
-  .rounded-sm,
-  .rounded-md,
-  .rounded-lg,
-  .rounded-xl {
-    border-radius: 3px !important;
-  }
+    /* Override default border radius utilities to 3px */
+    .rounded,
+    .rounded-sm,
+    .rounded-md,
+    .rounded-lg,
+    .rounded-xl {
+        border-radius: 3px !important;
+    }
 }
 
 /* These rules are outside @layer to ensure they come after all Tailwind utilities */
@@ -219,86 +233,86 @@
 /* Toast container positioning - align with left panel, inside footer area */
 [data-slot="toaster"],
 div[data-slot="toaster"] {
-  z-index: 2147483647 !important;
-  isolation: isolate !important;
-  bottom: 0.875rem !important;
-  left: 1rem !important;
-  right: auto !important;
-  width: calc(100vw - 2rem) !important;
-  max-width: none !important;
-  padding: 0 !important;
+    z-index: 2147483647 !important;
+    isolation: isolate !important;
+    bottom: 0.875rem !important;
+    left: 1rem !important;
+    right: auto !important;
+    width: calc(100vw - 2rem) !important;
+    max-width: none !important;
+    padding: 0 !important;
 }
 
 @media (min-width: 640px) {
-  [data-slot="toaster"],
-  div[data-slot="toaster"] {
-    left: 1.5rem !important;
-    width: calc(100vw - 3rem) !important;
-  }
+    [data-slot="toaster"],
+    div[data-slot="toaster"] {
+        left: 1.5rem !important;
+        width: calc(100vw - 3rem) !important;
+    }
 }
 
 @media (min-width: 1024px) {
-  [data-slot="toaster"],
-  div[data-slot="toaster"] {
-    width: calc((100vw - 3rem) / 3 - 0.5rem) !important;
-  }
+    [data-slot="toaster"],
+    div[data-slot="toaster"] {
+        width: calc((100vw - 3rem) / 3 - 0.5rem) !important;
+    }
 }
 
 /* Individual toast styling - consistent size, compact for footer */
 [data-slot="toast"],
 div[data-slot="toast"],
 div[role="alert"][data-slot="toast"] {
-  z-index: 2147483647 !important;
-  padding: 0.625rem 0.75rem !important;
-  min-height: 2.5rem !important;
-  max-height: 2.5rem !important;
-  gap: 0.5rem !important;
-  border-radius: 3px !important;
+    z-index: 2147483647 !important;
+    padding: 0.625rem 0.75rem !important;
+    min-height: 2.5rem !important;
+    max-height: 2.5rem !important;
+    gap: 0.5rem !important;
+    border-radius: 3px !important;
 }
 
 /* Toast content layout */
 [data-slot="toast"] > div:first-child {
-  gap: 0.5rem !important;
+    gap: 0.5rem !important;
 }
 
 /* Toast icon size */
 [data-slot="toast-icon"] {
-  flex-shrink: 0 !important;
+    flex-shrink: 0 !important;
 }
 
 [data-slot="toast-icon"] svg {
-  width: 0.875rem !important;
-  height: 0.875rem !important;
+    width: 0.875rem !important;
+    height: 0.875rem !important;
 }
 
 /* Toast title - single line */
 [data-slot="toast-title"] {
-  font-size: 0.75rem !important;
-  line-height: 1rem !important;
-  white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
+    font-size: 0.75rem !important;
+    line-height: 1rem !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
 }
 
 /* Hide description in compact mode */
 [data-slot="toast-description"] {
-  display: none !important;
+    display: none !important;
 }
 
 /* Hide close button - toasts auto-dismiss */
 [data-slot="toast"] button[aria-label="Close"] {
-  display: none !important;
+    display: none !important;
 }
 
 /* Remove bottom border from last list item in flex column containers */
 div.aura-list > button:last-child > div.aura-list-item,
 div.aura-list > div.aura-list-item:last-child {
-  border-bottom: 0 !important;
+    border-bottom: 0 !important;
 }
 
 /* For 2-column grid layouts, remove borders from last row (last 2 items) */
-div.aura-list.grid > div.aura-list-item:nth-last-child(-n+2) {
-  border-bottom: 0 !important;
+div.aura-list.grid > div.aura-list-item:nth-last-child(-n + 2) {
+    border-bottom: 0 !important;
 }
 
 /* =============================================================================
@@ -307,21 +321,30 @@ div.aura-list.grid > div.aura-list-item:nth-last-child(-n+2) {
 
 /* Brand and navigation use sans-serif for contrast */
 #aura-nav-brand {
-  font-family: var(--font-sans) !important;
+    font-family: var(--font-sans) !important;
 }
 
-/* Buttons use sans-serif */
+/* Buttons use sans-serif with consistent font smoothing */
 button {
-  font-family: var(--font-sans);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 /* Code blocks and inputs use monospace with ligatures */
-code, pre, input, textarea {
-  font-family: var(--font-mono);
-  font-feature-settings: "liga" 1, "calt" 1, "zero" 1, "ss02" 1;
+code,
+pre,
+input,
+textarea {
+    font-family: var(--font-mono);
+    font-feature-settings:
+        "liga" 1,
+        "calt" 1,
+        "zero" 1,
+        "ss02" 1;
 }
 
 /* Chat conversation card - remove top padding from content wrapper */
 #aura-screen-chat > div > div.lg\:col-span-8 > div > div.py-6 {
-  padding-top: 0 !important;
+    padding-top: 0 !important;
 }

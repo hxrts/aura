@@ -76,6 +76,7 @@ pub mod config;
 pub mod contacts;
 pub mod context;
 pub mod demo_config;
+pub mod harness_determinism;
 pub mod ids;
 pub mod invitation;
 pub(crate) mod journal;

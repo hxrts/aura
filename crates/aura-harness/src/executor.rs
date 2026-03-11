@@ -7,20 +7,27 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-use aura_app::ui::contract::{
-    compare_ui_snapshots_for_parity, ControlId, FieldId, ListId, ModalId, OperationId,
-    OperationState, RuntimeEventKind, ScreenId, UiSnapshot,
+use aura_app::scenario_contract::{
+    ActionPrecondition, ActorId, AuthoritativeTransitionFact, AuthoritativeTransitionKind,
+    CanonicalTraceEvent, IntentAction, SharedActionContract, SharedActionHandle, SharedActionId,
+    SharedActionRequest, TerminalFailureFact, TerminalSuccessFact, TerminalSuccessKind,
 };
+use aura_app::ui::contract::{
+    ControlId, FieldId, ListId, ModalId, OperationId, OperationState, RuntimeEventKind, ScreenId,
+    UiSnapshot,
+};
+use aura_app::ui_contract::uncovered_ui_parity_mismatches;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 
 use crate::backend::UiOperationHandle;
+use crate::backend::observe_operation;
 use crate::config::{ScenarioAction, ScenarioConfig, ScenarioStep, ScreenSource};
 use crate::introspection::{
-    extract_command_consistency, extract_command_reason, extract_command_status, extract_toast,
-    ToastLevel,
+    extract_command_metadata, extract_toast, CommandConsistency, CommandStatus, ToastLevel,
 };
+use crate::recovery_registry::{run_registered_recovery, RecoveryPath};
 use crate::tool_api::{ToolApi, ToolKey, ToolRequest, ToolResponse};
 
 const CLIPBOARD_PASTE_CHUNK_CHARS: usize = 48;
@@ -40,12 +47,13 @@ pub struct ScenarioReport {
     pub execution_mode: ExecutionMode,
     pub states_visited: Vec<String>,
     pub transitions: Vec<StateTransitionEvent>,
+    pub canonical_trace: Vec<CanonicalTraceEvent>,
     pub step_metrics: Vec<StepMetricRecord>,
     pub total_duration_ms: u64,
     pub completed: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StateTransitionEvent {
     pub from_state: String,
@@ -182,6 +190,7 @@ struct ScenarioContext {
     last_request_id: Option<u64>,
     last_chat_command: BTreeMap<String, String>,
     last_operation_handle: BTreeMap<String, UiOperationHandle>,
+    canonical_trace: Vec<CanonicalTraceEvent>,
     shared_flow_state: BTreeMap<String, SharedFlowState>,
 }
 
@@ -222,6 +231,92 @@ struct SharedFlowState {
     contact: ContactPhase,
     channel: ChannelPhase,
     messaging: MessagingPhase,
+}
+
+#[derive(Debug, Clone)]
+struct SharedTraceMetadata {
+    instance_id: String,
+    request: SharedActionRequest,
+    handle: SharedActionHandle,
+}
+
+struct WaitCoordinator<'a> {
+    tool_api: &'a mut ToolApi,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum WaitContractRef<'a> {
+    Modal(ModalId),
+    RuntimeEvent(RuntimeEventKind),
+    Semantic(&'a str),
+    Operation(&'a str),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FallbackObservationMode {
+    BoundedSecondary,
+    DiagnosticOnly,
+}
+
+impl<'a> WaitCoordinator<'a> {
+    fn new(tool_api: &'a mut ToolApi) -> Self {
+        Self { tool_api }
+    }
+
+    fn modal(
+        &mut self,
+        contract: WaitContractRef<'_>,
+        step: &ScenarioStep,
+        instance_id: &str,
+        timeout_ms: u64,
+        modal_id: ModalId,
+    ) -> Result<()> {
+        debug_assert!(matches!(contract, WaitContractRef::Modal(expected) if expected == modal_id));
+        wait_for_modal(step, self.tool_api, instance_id, timeout_ms, modal_id)
+    }
+
+    fn runtime_event(
+        &mut self,
+        contract: WaitContractRef<'_>,
+        step: &ScenarioStep,
+        instance_id: &str,
+        timeout_ms: u64,
+        kind: RuntimeEventKind,
+    ) -> Result<()> {
+        debug_assert!(matches!(contract, WaitContractRef::RuntimeEvent(expected) if expected == kind));
+        wait_for_runtime_event(step, self.tool_api, instance_id, timeout_ms, kind)
+    }
+
+    fn semantic_state(
+        &mut self,
+        contract: WaitContractRef<'_>,
+        step: &ScenarioStep,
+        instance_id: &str,
+        timeout_ms: u64,
+    ) -> Result<()> {
+        debug_assert!(matches!(contract, WaitContractRef::Semantic(name) if !name.is_empty()));
+        wait_for_semantic_state(step, self.tool_api, instance_id, timeout_ms)
+    }
+
+    fn operation_state(
+        &mut self,
+        contract: WaitContractRef<'_>,
+        step: &ScenarioStep,
+        instance_id: &str,
+        timeout_ms: u64,
+        handle: &UiOperationHandle,
+        state: OperationState,
+    ) -> Result<()> {
+        debug_assert!(matches!(contract, WaitContractRef::Operation(name) if !name.is_empty()));
+        wait_for_operation_handle_state(
+            step,
+            self.tool_api,
+            instance_id,
+            timeout_ms,
+            handle,
+            state,
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -449,22 +544,46 @@ impl ScenarioExecutor {
             }
             visited.push(state.id.clone());
             let step_started = Instant::now();
-            execute_step(
+            let trace_metadata = build_shared_trace_metadata(&state.step, tool_api, &context)?;
+            if let Some(metadata) = &trace_metadata {
+                context
+                    .canonical_trace
+                    .push(CanonicalTraceEvent::ActionRequested {
+                        request: metadata.request.clone(),
+                        observed_revision: metadata.handle.baseline_revision,
+                    });
+                context
+                    .canonical_trace
+                    .push(CanonicalTraceEvent::ActionIssued {
+                        handle: metadata.handle.clone(),
+                    });
+            }
+            let step_result = execute_step(
                 &state.step,
                 tool_api,
                 step_budget,
                 &mut scenario_rng,
                 &mut fault_rng,
                 &mut context,
-            )
-            .map_err(|error| {
-                anyhow!(
-                    "step {} failed (action={} actor={}): {error}",
-                    state.id,
-                    state.step.action,
-                    state.step.instance.as_deref().unwrap_or("-")
-                )
-            })?;
+            );
+            match step_result {
+                Ok(()) => {
+                    if let Some(metadata) = trace_metadata {
+                        record_shared_trace_success(tool_api, &metadata, &mut context);
+                    }
+                }
+                Err(error) => {
+                    if let Some(metadata) = trace_metadata {
+                        record_shared_trace_failure(tool_api, &metadata, &error, &mut context);
+                    }
+                    return Err(anyhow!(
+                        "step {} failed (action={} actor={}): {error}",
+                        state.id,
+                        state.step.action,
+                        state.step.instance.as_deref().unwrap_or("-")
+                    ));
+                }
+            }
             step_metrics.push(StepMetricRecord {
                 step_id: state.id.clone(),
                 actor: state
@@ -500,6 +619,7 @@ impl ScenarioExecutor {
             execution_mode: self.mode,
             states_visited: visited,
             transitions,
+            canonical_trace: context.canonical_trace,
             step_metrics,
             total_duration_ms: scenario_started.elapsed().as_millis() as u64,
             completed: true,
@@ -556,6 +676,8 @@ fn execute_step(
         ensure_shared_flow_prerequisites(step, context, instance_id)?;
     }
     if let Some(binding) = SharedSemanticBinding::from_action(step.action) {
+        let intent = shared_intent_action(binding, step, context)?;
+        enforce_action_preconditions(step, tool_api, context, &intent)?;
         return execute_shared_semantic_action(binding, step, tool_api, step_budget_ms, context);
     }
     match step.action {
@@ -878,10 +1000,20 @@ fn execute_step(
                 let mut contacts_step = semantic_wait_step(step);
                 contacts_step.list_id = Some(ListId::Contacts);
                 contacts_step.count = Some(1);
-                convergence_stage(
-                    step,
-                    "contacts_list",
-                    wait_for_semantic_state(&contacts_step, tool_api, &instance_id, remaining_ms),
+                run_registered_recovery(
+                    RecoveryPath::AcceptContactInvitationContactsFallback,
+                    || {
+                        convergence_stage(
+                            step,
+                            "contacts_list",
+                            wait_for_semantic_state(
+                                &contacts_step,
+                                tool_api,
+                                &instance_id,
+                                remaining_ms,
+                            ),
+                        )
+                    },
                 )?;
             }
             record_shared_flow_progress(step, context, &instance_id);
@@ -933,7 +1065,13 @@ fn execute_step(
                 resolve_optional_field(step.keys.as_deref().or(step.expect.as_deref()), context)?
                     .unwrap_or_else(|| "\n".to_string());
             if should_escape_insert_before_send_keys(&keys)
-                && screen_contains(tool_api, &instance_id, "mode: insert").unwrap_or(false)
+                && diagnostic_screen_contains(
+                    tool_api,
+                    &instance_id,
+                    "mode: insert",
+                    FallbackObservationMode::DiagnosticOnly,
+                )
+                .unwrap_or(false)
             {
                 let _ = dispatch(
                     tool_api,
@@ -1419,29 +1557,35 @@ fn execute_step(
                         }
                     }
                     if let Some(status) = expected_status {
-                        let Some(found) = extract_command_status(&toast.message) else {
+                        let Some(found) = extract_command_metadata(&toast.message).status else {
                             return false;
                         };
-                        if !found.eq_ignore_ascii_case(status.as_str()) {
+                        if found.as_str() != status.as_str() {
                             return false;
                         }
                     }
                     if let Some(consistency) = expected_consistency {
-                        let Some(found) = extract_command_consistency(&toast.message) else {
+                        let Some(found) = extract_command_metadata(&toast.message).consistency
+                        else {
                             return false;
                         };
-                        let Ok(found) = ExpectedConsistency::parse(&found) else {
-                            return false;
+                        let found = match found {
+                            CommandConsistency::Accepted => ExpectedConsistency::Accepted,
+                            CommandConsistency::Replicated => ExpectedConsistency::Replicated,
+                            CommandConsistency::Enforced => ExpectedConsistency::Enforced,
+                            CommandConsistency::PartialTimeout => {
+                                ExpectedConsistency::PartialTimeout
+                            }
                         };
                         if !consistency.is_satisfied_by(found) {
                             return false;
                         }
                     }
                     if let Some(ref reason_code) = expected_reason_code {
-                        let Some(found) = extract_command_reason(&toast.message) else {
+                        let Some(found) = extract_command_metadata(&toast.message).reason else {
                             return false;
                         };
-                        if !found.eq_ignore_ascii_case(reason_code) {
+                        if found.as_str() != reason_code {
                             return false;
                         }
                     }
@@ -1511,20 +1655,21 @@ fn execute_step(
                     }
                     let lowered = toast.message.to_ascii_lowercase();
                     if let Some(expected_status) = expected_status {
-                        let Some(found_status) = extract_command_status(&toast.message) else {
+                        let Some(found_status) = extract_command_metadata(&toast.message).status
+                        else {
                             return false;
                         };
-                        if !found_status.eq_ignore_ascii_case(expected_status.as_str()) {
+                        if found_status.as_str() != expected_status.as_str() {
                             return false;
                         }
-                    } else if let Some(status) = extract_command_status(&toast.message) {
-                        if !status.eq_ignore_ascii_case("denied") {
+                    } else if let Some(status) = extract_command_metadata(&toast.message).status {
+                        if status != CommandStatus::Denied {
                             return false;
                         }
                     }
                     if let Some(reason) = reason {
-                        if let Some(found_code) = extract_command_reason(&toast.message) {
-                            if !found_code.eq_ignore_ascii_case(reason.reason_code()) {
+                        if let Some(found_code) = extract_command_metadata(&toast.message).reason {
+                            if found_code.as_str() != reason.reason_code() {
                                 return false;
                             }
                         } else if !reason
@@ -1536,10 +1681,11 @@ fn execute_step(
                         }
                     }
                     if let Some(ref reason_code) = expected_reason_code {
-                        let Some(found_code) = extract_command_reason(&toast.message) else {
+                        let Some(found_code) = extract_command_metadata(&toast.message).reason
+                        else {
                             return false;
                         };
-                        if !found_code.eq_ignore_ascii_case(reason_code) {
+                        if found_code.as_str() != reason_code {
                             return false;
                         }
                     }
@@ -1702,6 +1848,7 @@ fn execute_shared_semantic_action(
     step_budget_ms: u64,
     context: &mut ScenarioContext,
 ) -> Result<()> {
+    let mut waits = WaitCoordinator::new(tool_api);
     match binding {
         SharedSemanticBinding::CreateAccount => {
             let instance_id = resolve_required_instance(step, context)?;
@@ -1746,37 +1893,37 @@ fn execute_shared_semantic_action(
                 .as_deref()
                 .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
             dispatch(
-                tool_api,
+                waits.tool_api,
                 plan_activate_control_request(&instance_id, ControlId::SettingsAddDeviceButton),
             )?;
-            wait_for_modal(
+            waits.modal(
+                WaitContractRef::Modal(ModalId::AddDevice),
                 step,
-                tool_api,
                 &instance_id,
                 step.timeout_ms.unwrap_or(step_budget_ms),
                 ModalId::AddDevice,
             )?;
             dispatch(
-                tool_api,
+                waits.tool_api,
                 plan_fill_field_request(&instance_id, FieldId::DeviceName, device_name),
             )?;
             dispatch(
-                tool_api,
+                waits.tool_api,
                 plan_activate_control_request(&instance_id, ControlId::ModalConfirmButton),
             )?;
-            wait_for_runtime_event(
+            waits.runtime_event(
+                WaitContractRef::RuntimeEvent(RuntimeEventKind::DeviceEnrollmentCodeReady),
                 step,
-                tool_api,
                 &instance_id,
                 step.timeout_ms.unwrap_or(step_budget_ms),
                 RuntimeEventKind::DeviceEnrollmentCodeReady,
             )?;
             dispatch(
-                tool_api,
+                waits.tool_api,
                 plan_activate_control_request(&instance_id, ControlId::ModalCopyButton),
             )?;
             let clipboard_text = read_clipboard_value(
-                tool_api,
+                waits.tool_api,
                 &instance_id,
                 &step.id,
                 step.timeout_ms.unwrap_or(step_budget_ms),
@@ -1793,11 +1940,11 @@ fn execute_shared_semantic_action(
                 context,
             )?;
             dispatch(
-                tool_api,
+                waits.tool_api,
                 plan_fill_field_request(&instance_id, FieldId::DeviceImportCode, code),
             )?;
             dispatch(
-                tool_api,
+                waits.tool_api,
                 plan_activate_control_request(
                     &instance_id,
                     ControlId::OnboardingImportDeviceButton,
@@ -1807,9 +1954,9 @@ fn execute_shared_semantic_action(
                 Instant::now() + Duration::from_millis(step.timeout_ms.unwrap_or(step_budget_ms));
             let mut neighborhood_step = semantic_wait_step(step);
             neighborhood_step.screen_id = Some(ScreenId::Neighborhood);
-            wait_for_semantic_state(
+            waits.semantic_state(
+                WaitContractRef::Semantic("neighborhood_screen"),
                 &neighborhood_step,
-                tool_api,
                 &instance_id,
                 step.timeout_ms.unwrap_or(step_budget_ms),
             )?;
@@ -1819,30 +1966,35 @@ fn execute_shared_semantic_action(
                 .max(1) as u64;
             let mut readiness_step = semantic_wait_step(step);
             readiness_step.readiness = Some(aura_app::ui::contract::UiReadiness::Ready);
-            wait_for_semantic_state(&readiness_step, tool_api, &instance_id, remaining_ms)?;
+            waits.semantic_state(
+                WaitContractRef::Semantic("ui_readiness_ready"),
+                &readiness_step,
+                &instance_id,
+                remaining_ms,
+            )?;
             Ok(())
         }
         SharedSemanticBinding::RemoveSelectedDevice => {
             let instance_id = resolve_required_instance(step, context)?;
             let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
             dispatch(
-                tool_api,
+                waits.tool_api,
                 plan_activate_control_request(&instance_id, ControlId::SettingsRemoveDeviceButton),
             )?;
-            wait_for_modal(
+            waits.modal(
+                WaitContractRef::Modal(ModalId::SelectDeviceToRemove),
                 step,
-                tool_api,
                 &instance_id,
                 timeout_ms,
                 ModalId::SelectDeviceToRemove,
             )?;
             dispatch(
-                tool_api,
+                waits.tool_api,
                 plan_activate_control_request(&instance_id, ControlId::ModalConfirmButton),
             )?;
-            wait_for_modal(
+            waits.modal(
+                WaitContractRef::Modal(ModalId::ConfirmRemoveDevice),
                 step,
-                tool_api,
                 &instance_id,
                 timeout_ms,
                 ModalId::ConfirmRemoveDevice,
@@ -1993,6 +2145,325 @@ fn execute_shared_semantic_action(
             record_submission_handle(context, &instance_id, submission.handle.ui_operation);
             Ok(())
         }
+    }
+}
+
+fn unsatisfied_action_preconditions(
+    contract: &SharedActionContract,
+    snapshot: &UiSnapshot,
+) -> Vec<String> {
+    contract
+        .preconditions
+        .iter()
+        .filter_map(|precondition| match precondition {
+            ActionPrecondition::Readiness(expected) if snapshot.readiness != *expected => Some(
+                format!("readiness={:?} expected={expected:?}", snapshot.readiness),
+            ),
+            ActionPrecondition::Quiescence(expected)
+                if snapshot.quiescence.state != *expected =>
+            {
+                Some(format!(
+                    "quiescence={:?} expected={expected:?}",
+                    snapshot.quiescence.state
+                ))
+            }
+            ActionPrecondition::Screen(expected) if snapshot.screen != *expected => {
+                Some(format!("screen={:?} expected={expected:?}", snapshot.screen))
+            }
+            ActionPrecondition::RuntimeEvent(kind) if !snapshot.has_runtime_event(*kind, None) => {
+                Some(format!("runtime_event={kind:?} missing"))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn enforce_action_preconditions(
+    step: &ScenarioStep,
+    tool_api: &mut ToolApi,
+    context: &ScenarioContext,
+    intent: &IntentAction,
+) -> Result<()> {
+    let contract = intent.contract();
+    if contract.preconditions.is_empty() {
+        return Ok(());
+    }
+    let instance_id = resolve_required_instance(step, context)?;
+    let snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
+    let failures = unsatisfied_action_preconditions(&contract, &snapshot);
+    if failures.is_empty() {
+        return Ok(());
+    }
+    bail!(
+        "step {} precondition failed before issuing {:?}: {}",
+        step.id,
+        intent.kind(),
+        failures.join(", ")
+    );
+}
+
+fn build_shared_trace_metadata(
+    step: &ScenarioStep,
+    tool_api: &mut ToolApi,
+    context: &ScenarioContext,
+) -> Result<Option<SharedTraceMetadata>> {
+    let Some(binding) = SharedSemanticBinding::from_action(step.action) else {
+        return Ok(None);
+    };
+    let instance_id = resolve_required_instance(step, context)?;
+    let intent = shared_intent_action(binding, step, context)?;
+    let contract = intent.contract();
+    let baseline_revision = fetch_ui_snapshot(tool_api, &instance_id)
+        .ok()
+        .map(|snapshot| snapshot.revision);
+    let actor = ActorId(instance_id.clone());
+    Ok(Some(SharedTraceMetadata {
+        instance_id,
+        request: SharedActionRequest {
+            actor: actor.clone(),
+            intent: intent.clone(),
+            contract: contract.clone(),
+        },
+        handle: SharedActionHandle {
+            action_id: SharedActionId(step.id.clone()),
+            actor,
+            intent: intent.kind(),
+            contract,
+            baseline_revision,
+        },
+    }))
+}
+
+fn shared_intent_action(
+    binding: SharedSemanticBinding,
+    step: &ScenarioStep,
+    context: &ScenarioContext,
+) -> Result<IntentAction> {
+    Ok(match binding {
+        SharedSemanticBinding::CreateAccount => IntentAction::CreateAccount {
+            account_name: resolve_required_field(
+                step,
+                "value",
+                step.value.as_deref().or(step.expect.as_deref()),
+                context,
+            )?,
+        },
+        SharedSemanticBinding::CreateHome => IntentAction::CreateHome {
+            home_name: resolve_required_field(
+                step,
+                "value",
+                step.value.as_deref().or(step.expect.as_deref()),
+                context,
+            )?,
+        },
+        SharedSemanticBinding::StartDeviceEnrollment => IntentAction::StartDeviceEnrollment {
+            device_name: resolve_required_field(
+                step,
+                "value",
+                step.value.as_deref().or(step.expect.as_deref()),
+                context,
+            )?,
+            code_name: step
+                .var
+                .clone()
+                .ok_or_else(|| anyhow!("step {} missing var", step.id))?,
+        },
+        SharedSemanticBinding::ImportDeviceEnrollmentCode => {
+            IntentAction::ImportDeviceEnrollmentCode {
+                code: resolve_required_field(
+                    step,
+                    "value",
+                    step.value.as_deref().or(step.expect.as_deref()),
+                    context,
+                )?,
+            }
+        }
+        SharedSemanticBinding::RemoveSelectedDevice => IntentAction::RemoveSelectedDevice,
+        SharedSemanticBinding::CreateContactInvitation => IntentAction::CreateContactInvitation {
+            receiver_authority_id: resolve_required_field(
+                step,
+                "value",
+                step.value.as_deref().or(step.expect.as_deref()),
+                context,
+            )?,
+            code_name: step
+                .var
+                .clone()
+                .ok_or_else(|| anyhow!("step {} missing var", step.id))?,
+        },
+        SharedSemanticBinding::AcceptContactInvitation => IntentAction::AcceptContactInvitation {
+            code: resolve_required_field(
+                step,
+                "value",
+                step.value.as_deref().or(step.expect.as_deref()),
+                context,
+            )?,
+        },
+        SharedSemanticBinding::JoinChannel => IntentAction::JoinChannel {
+            channel_name: resolve_required_field(
+                step,
+                "value",
+                step.value.as_deref().or(step.expect.as_deref()),
+                context,
+            )?,
+        },
+        SharedSemanticBinding::InviteActorToChannel => IntentAction::InviteActorToChannel {
+            authority_id: resolve_required_field(
+                step,
+                "value",
+                step.value.as_deref().or(step.expect.as_deref()),
+                context,
+            )?,
+        },
+        SharedSemanticBinding::AcceptPendingChannelInvitation => {
+            IntentAction::AcceptPendingChannelInvitation
+        }
+        SharedSemanticBinding::SendChatMessage => IntentAction::SendChatMessage {
+            message: resolve_required_field(
+                step,
+                "value",
+                step.value.as_deref().or(step.expect.as_deref()),
+                context,
+            )?,
+        },
+    })
+}
+
+fn record_shared_trace_success(
+    tool_api: &mut ToolApi,
+    metadata: &SharedTraceMetadata,
+    context: &mut ScenarioContext,
+) {
+    let snapshot = fetch_ui_snapshot(tool_api, &metadata.instance_id).ok();
+    if let Some(snapshot) = snapshot.as_ref() {
+        if let Some(transition) = infer_transition(&metadata.handle.contract, snapshot) {
+            context
+                .canonical_trace
+                .push(CanonicalTraceEvent::TransitionObserved {
+                    fact: AuthoritativeTransitionFact {
+                        handle: metadata.handle.clone(),
+                        transition,
+                        observed_revision: Some(snapshot.revision),
+                    },
+                });
+        }
+    }
+    context
+        .canonical_trace
+        .push(CanonicalTraceEvent::ActionSucceeded {
+            fact: TerminalSuccessFact {
+                handle: metadata.handle.clone(),
+                success: snapshot
+                    .as_ref()
+                    .map(|snapshot| infer_terminal_success(&metadata.handle.contract, snapshot))
+                    .unwrap_or_else(|| metadata.handle.contract.terminal_success[0].clone()),
+                observed_revision: snapshot.as_ref().map(|snapshot| snapshot.revision),
+            },
+        });
+}
+
+fn record_shared_trace_failure(
+    tool_api: &mut ToolApi,
+    metadata: &SharedTraceMetadata,
+    error: &anyhow::Error,
+    context: &mut ScenarioContext,
+) {
+    let observed_revision = fetch_ui_snapshot(tool_api, &metadata.instance_id)
+        .ok()
+        .map(|snapshot| snapshot.revision);
+    context.canonical_trace.push(CanonicalTraceEvent::ActionFailed {
+        fact: TerminalFailureFact {
+            handle: metadata.handle.clone(),
+            code: "shared_action_failed".to_string(),
+            detail: Some(error.to_string()),
+            observed_revision,
+        },
+    });
+}
+
+fn infer_transition(contract: &SharedActionContract, snapshot: &UiSnapshot) -> Option<AuthoritativeTransitionKind> {
+    contract
+        .transitions
+        .iter()
+        .find(|transition| transition_matches_snapshot(transition, snapshot))
+        .cloned()
+        .or_else(|| contract.transitions.first().cloned())
+}
+
+fn infer_terminal_success(contract: &SharedActionContract, snapshot: &UiSnapshot) -> TerminalSuccessKind {
+    contract
+        .terminal_success
+        .iter()
+        .find(|success| success_matches_snapshot(success, snapshot))
+        .cloned()
+        .unwrap_or_else(|| contract.terminal_success[0].clone())
+}
+
+fn transition_matches_snapshot(transition: &AuthoritativeTransitionKind, snapshot: &UiSnapshot) -> bool {
+    match transition {
+        AuthoritativeTransitionKind::RuntimeEvent(kind) => snapshot
+            .runtime_events
+            .iter()
+            .any(|event| event.kind() == *kind),
+        AuthoritativeTransitionKind::Operation(operation_id) => {
+            observe_operation(snapshot, operation_id).is_some()
+        }
+        AuthoritativeTransitionKind::Screen(screen) => snapshot.screen == *screen,
+        AuthoritativeTransitionKind::Modal(modal) => snapshot.open_modal == Some(*modal),
+    }
+}
+
+fn success_matches_snapshot(success: &TerminalSuccessKind, snapshot: &UiSnapshot) -> bool {
+    match success {
+        TerminalSuccessKind::RuntimeEvent(kind) => snapshot
+            .runtime_events
+            .iter()
+            .any(|event| event.kind() == *kind),
+        TerminalSuccessKind::OperationState { operation_id, state } => observe_operation(snapshot, operation_id)
+            .is_some_and(|operation| operation.state == *state),
+        TerminalSuccessKind::Screen(screen) => snapshot.screen == *screen,
+        TerminalSuccessKind::Readiness(readiness) => snapshot.readiness == *readiness,
+    }
+}
+
+fn compare_canonical_traces_for_parity(
+    local: &[CanonicalTraceEvent],
+    peer: &[CanonicalTraceEvent],
+) -> Result<()> {
+    let local = local.iter().map(normalize_trace_event).collect::<Vec<_>>();
+    let peer = peer.iter().map(normalize_trace_event).collect::<Vec<_>>();
+    if local == peer {
+        return Ok(());
+    }
+    bail!("canonical trace mismatch local={local:?} peer={peer:?}");
+}
+
+fn normalize_trace_event(event: &CanonicalTraceEvent) -> String {
+    match event {
+        CanonicalTraceEvent::ActionRequested { request, .. } => {
+            format!("requested:{:?}", request.intent.kind())
+        }
+        CanonicalTraceEvent::ActionIssued { handle } => format!("issued:{:?}", handle.intent),
+        CanonicalTraceEvent::TransitionObserved { fact } => match &fact.transition {
+            AuthoritativeTransitionKind::RuntimeEvent(kind) => format!("transition:event:{kind:?}"),
+            AuthoritativeTransitionKind::Operation(operation_id) => {
+                format!("transition:operation:{}", operation_id.0)
+            }
+            AuthoritativeTransitionKind::Screen(screen) => format!("transition:screen:{screen:?}"),
+            AuthoritativeTransitionKind::Modal(modal) => format!("transition:modal:{modal:?}"),
+        },
+        CanonicalTraceEvent::ActionSucceeded { fact } => match &fact.success {
+            TerminalSuccessKind::RuntimeEvent(kind) => format!("success:event:{kind:?}"),
+            TerminalSuccessKind::OperationState {
+                operation_id,
+                state,
+            } => format!("success:operation:{}:{state:?}", operation_id.0),
+            TerminalSuccessKind::Screen(screen) => format!("success:screen:{screen:?}"),
+            TerminalSuccessKind::Readiness(readiness) => {
+                format!("success:readiness:{readiness:?}")
+            }
+        },
+        CanonicalTraceEvent::ActionFailed { fact } => format!("failed:{}", fact.code),
     }
 }
 
@@ -2886,7 +3357,7 @@ fn wait_for_parity(
     let mut peer_version = None;
     let mut wait_local_next = true;
     let (last_local, last_peer, last_mismatches) = loop {
-        let mismatches = compare_ui_snapshots_for_parity(&local, &peer);
+        let mismatches = uncovered_ui_parity_mismatches(&local, &peer);
         if mismatches.is_empty() {
             return Ok(());
         }
@@ -2938,7 +3409,13 @@ fn wait_for_parity(
     )
 }
 
-fn screen_contains(tool_api: &mut ToolApi, instance_id: &str, needle: &str) -> Result<bool> {
+fn diagnostic_screen_contains(
+    tool_api: &mut ToolApi,
+    instance_id: &str,
+    needle: &str,
+    mode: FallbackObservationMode,
+) -> Result<bool> {
+    debug_assert_eq!(mode, FallbackObservationMode::DiagnosticOnly);
     let payload = dispatch_payload(
         tool_api,
         ToolRequest::Screen {
@@ -3385,6 +3862,23 @@ mod tests {
         OperationInstanceId, OperationSnapshot, OperationState, ScreenId, SelectionSnapshot,
         UiReadiness, UiSnapshot,
     };
+    use aura_app::ui_contract::{next_projection_revision, QuiescenceSnapshot};
+
+    fn run_report_once(run: &RunConfig, scenario: &ScenarioConfig) -> ScenarioReport {
+        let mut tool_api = ToolApi::new(
+            HarnessCoordinator::from_run_config(run).unwrap_or_else(|error| panic!("{error}")),
+        );
+        if let Err(error) = tool_api.start_all() {
+            panic!("start_all failed: {error}");
+        }
+        let report = ScenarioExecutor::new(ExecutionMode::Scripted)
+            .execute(scenario, &mut tool_api)
+            .unwrap_or_else(|error| panic!("execute failed: {error}"));
+        if let Err(error) = tool_api.stop_all() {
+            panic!("stop_all failed: {error}");
+        }
+        report
+    }
 
     #[test]
     fn expected_consistency_accepts_stronger_observed_levels() {
@@ -3402,6 +3896,157 @@ mod tests {
         assert!(!ExpectedConsistency::Enforced.is_satisfied_by(ExpectedConsistency::Accepted));
         assert!(!ExpectedConsistency::Enforced.is_satisfied_by(ExpectedConsistency::Replicated));
         assert!(!ExpectedConsistency::Accepted.is_satisfied_by(ExpectedConsistency::PartialTimeout));
+    }
+
+    #[test]
+    fn canonical_trace_parity_ignores_actor_ids_and_revisions() {
+        let local = vec![
+            CanonicalTraceEvent::ActionRequested {
+                request: SharedActionRequest {
+                    actor: ActorId("alice".to_string()),
+                    intent: IntentAction::JoinChannel {
+                        channel_name: "shared".to_string(),
+                    },
+                    contract: IntentAction::JoinChannel {
+                        channel_name: "shared".to_string(),
+                    }
+                    .contract(),
+                },
+                observed_revision: Some(UiSnapshot::loading(ScreenId::Chat).revision),
+            },
+            CanonicalTraceEvent::ActionSucceeded {
+                fact: TerminalSuccessFact {
+                    handle: SharedActionHandle {
+                        action_id: SharedActionId("alice-join".to_string()),
+                        actor: ActorId("alice".to_string()),
+                        intent: IntentAction::JoinChannel {
+                            channel_name: "shared".to_string(),
+                        }
+                        .kind(),
+                        contract: IntentAction::JoinChannel {
+                            channel_name: "shared".to_string(),
+                        }
+                        .contract(),
+                        baseline_revision: None,
+                    },
+                    success: TerminalSuccessKind::RuntimeEvent(
+                        RuntimeEventKind::ChannelJoined,
+                    ),
+                    observed_revision: None,
+                },
+            },
+        ];
+        let peer = vec![
+            CanonicalTraceEvent::ActionRequested {
+                request: SharedActionRequest {
+                    actor: ActorId("bob".to_string()),
+                    intent: IntentAction::JoinChannel {
+                        channel_name: "shared".to_string(),
+                    },
+                    contract: IntentAction::JoinChannel {
+                        channel_name: "shared".to_string(),
+                    }
+                    .contract(),
+                },
+                observed_revision: None,
+            },
+            CanonicalTraceEvent::ActionSucceeded {
+                fact: TerminalSuccessFact {
+                    handle: SharedActionHandle {
+                        action_id: SharedActionId("bob-join".to_string()),
+                        actor: ActorId("bob".to_string()),
+                        intent: IntentAction::JoinChannel {
+                            channel_name: "shared".to_string(),
+                        }
+                        .kind(),
+                        contract: IntentAction::JoinChannel {
+                            channel_name: "shared".to_string(),
+                        }
+                        .contract(),
+                        baseline_revision: Some(UiSnapshot::loading(ScreenId::Chat).revision),
+                    },
+                    success: TerminalSuccessKind::RuntimeEvent(
+                        RuntimeEventKind::ChannelJoined,
+                    ),
+                    observed_revision: Some(UiSnapshot::loading(ScreenId::Neighborhood).revision),
+                },
+            },
+        ];
+
+        compare_canonical_traces_for_parity(&local, &peer)
+            .unwrap_or_else(|error| panic!("trace parity should hold: {error}"));
+    }
+
+    #[test]
+    fn canonical_trace_parity_rejects_shape_mismatch() {
+        let local = vec![CanonicalTraceEvent::ActionSucceeded {
+            fact: TerminalSuccessFact {
+                handle: SharedActionHandle {
+                    action_id: SharedActionId("alice-send".to_string()),
+                    actor: ActorId("alice".to_string()),
+                    intent: IntentAction::SendChatMessage {
+                        message: "hello".to_string(),
+                    }
+                    .kind(),
+                    contract: IntentAction::SendChatMessage {
+                        message: "hello".to_string(),
+                    }
+                    .contract(),
+                    baseline_revision: None,
+                },
+                success: TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::MessageCommitted),
+                observed_revision: None,
+            },
+        }];
+        let peer = vec![CanonicalTraceEvent::ActionSucceeded {
+            fact: TerminalSuccessFact {
+                handle: SharedActionHandle {
+                    action_id: SharedActionId("bob-send".to_string()),
+                    actor: ActorId("bob".to_string()),
+                    intent: IntentAction::SendChatMessage {
+                        message: "hello".to_string(),
+                    }
+                    .kind(),
+                    contract: IntentAction::SendChatMessage {
+                        message: "hello".to_string(),
+                    }
+                    .contract(),
+                    baseline_revision: None,
+                },
+                success: TerminalSuccessKind::Readiness(UiReadiness::Ready),
+                observed_revision: None,
+            },
+        }];
+
+        let error = compare_canonical_traces_for_parity(&local, &peer)
+            .expect_err("trace mismatch must fail");
+        assert!(error.to_string().contains("canonical trace mismatch"));
+    }
+
+    #[test]
+    fn action_preconditions_fail_diagnostically_before_issue() {
+        let snapshot = UiSnapshot::loading(ScreenId::Chat);
+        let failures = unsatisfied_action_preconditions(
+            &IntentAction::SendChatMessage {
+                message: "hello".to_string(),
+            }
+            .contract(),
+            &snapshot,
+        );
+        assert!(
+            failures.iter().any(|failure| failure.contains("readiness=")),
+            "expected readiness failure, got {failures:?}"
+        );
+        assert!(
+            failures.iter().any(|failure| failure.contains("quiescence=")),
+            "expected quiescence failure, got {failures:?}"
+        );
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("runtime_event=MessageDeliveryReady")),
+            "expected runtime-event failure, got {failures:?}"
+        );
     }
 
     #[test]
@@ -3476,6 +4121,8 @@ mod tests {
             focused_control: None,
             open_modal: None,
             readiness: UiReadiness::Ready,
+            revision: next_projection_revision(None),
+            quiescence: QuiescenceSnapshot::settled(),
             selections: vec![SelectionSnapshot {
                 list: ListId::Contacts,
                 item_id: "authority-1".to_string(),
@@ -3512,6 +4159,8 @@ mod tests {
             focused_control: None,
             open_modal: None,
             readiness: UiReadiness::Ready,
+            revision: next_projection_revision(None),
+            quiescence: QuiescenceSnapshot::settled(),
             selections: vec![SelectionSnapshot {
                 list: ListId::Contacts,
                 item_id: "authority-1".to_string(),
@@ -3546,6 +4195,8 @@ mod tests {
             focused_control: None,
             open_modal: None,
             readiness: UiReadiness::Ready,
+            revision: next_projection_revision(None),
+            quiescence: QuiescenceSnapshot::settled(),
             selections: Vec::new(),
             lists: Vec::new(),
             messages: Vec::new(),
@@ -3571,6 +4222,8 @@ mod tests {
             focused_control: None,
             open_modal: None,
             readiness: UiReadiness::Ready,
+            revision: next_projection_revision(None),
+            quiescence: QuiescenceSnapshot::settled(),
             selections: Vec::new(),
             lists: Vec::new(),
             messages: Vec::new(),
@@ -3724,6 +4377,79 @@ mod tests {
         }
 
         assert_eq!(scripted.states_visited, agent.states_visited);
+    }
+
+    #[test]
+    fn repeated_runs_with_same_seed_share_same_report_shape() {
+        let temp_root = std::env::temp_dir().join("aura-harness-determinism-test");
+        let _ = std::fs::create_dir_all(&temp_root);
+
+        let run = RunConfig {
+            schema_version: 1,
+            run: RunSection {
+                name: "executor-determinism".to_string(),
+                pty_rows: Some(40),
+                pty_cols: Some(120),
+                artifact_dir: None,
+                global_budget_ms: None,
+                step_budget_ms: None,
+                seed: Some(11),
+                max_cpu_percent: None,
+                max_memory_bytes: None,
+                max_open_files: None,
+                require_remote_artifact_sync: false,
+                runtime_substrate: crate::config::RuntimeSubstrate::default(),
+            },
+            instances: vec![InstanceConfig {
+                id: "alice".to_string(),
+                mode: InstanceMode::Local,
+                data_dir: temp_root,
+                device_id: None,
+                bind_address: "127.0.0.1:45011".to_string(),
+                demo_mode: false,
+                command: Some("bash".to_string()),
+                args: vec!["-lc".to_string(), "cat".to_string()],
+                env: vec![],
+                log_path: None,
+                ssh_host: None,
+                ssh_user: None,
+                ssh_port: None,
+                ssh_strict_host_key_checking: true,
+                ssh_known_hosts_file: None,
+                ssh_fingerprint: None,
+                ssh_require_fingerprint: false,
+                ssh_dry_run: true,
+                remote_workdir: None,
+                lan_discovery: None,
+                tunnel: None,
+            }],
+        };
+
+        let scenario = ScenarioConfig {
+            schema_version: 1,
+            id: "executor-determinism".to_string(),
+            goal: "verify repeated harness determinism".to_string(),
+            execution_mode: Some("scripted".to_string()),
+            required_capabilities: vec![],
+            steps: vec![ScenarioStep {
+                id: "step-1".to_string(),
+                action: ScenarioAction::Noop,
+                instance: None,
+                expect: None,
+                timeout_ms: None,
+                ..Default::default()
+            }],
+        };
+
+        let first = run_report_once(&run, &scenario);
+        let second = run_report_once(&run, &scenario);
+
+        assert_eq!(first.scenario_id, second.scenario_id);
+        assert_eq!(first.execution_mode, second.execution_mode);
+        assert_eq!(first.states_visited, second.states_visited);
+        assert_eq!(first.transitions, second.transitions);
+        assert_eq!(first.canonical_trace, second.canonical_trace);
+        assert_eq!(first.completed, second.completed);
     }
 
     #[test]
@@ -4175,5 +4901,67 @@ mod tests {
         );
         let reassembled = chunks.join("");
         assert_eq!(reassembled, long_payload);
+    }
+
+    #[test]
+    fn wait_contract_refs_cover_all_parity_wait_kinds() {
+        let modal = WaitContractRef::Modal(ModalId::AddDevice);
+        let runtime = WaitContractRef::RuntimeEvent(RuntimeEventKind::MessageCommitted);
+        let semantic = WaitContractRef::Semantic("ui_readiness_ready");
+        let operation = WaitContractRef::Operation("accept_contact_invitation");
+
+        assert!(matches!(modal, WaitContractRef::Modal(ModalId::AddDevice)));
+        assert!(matches!(
+            runtime,
+            WaitContractRef::RuntimeEvent(RuntimeEventKind::MessageCommitted)
+        ));
+        assert!(matches!(semantic, WaitContractRef::Semantic("ui_readiness_ready")));
+        assert!(matches!(
+            operation,
+            WaitContractRef::Operation("accept_contact_invitation")
+        ));
+    }
+
+    #[test]
+    fn semantic_wait_helpers_do_not_use_raw_dom_or_text_fallbacks() {
+        let source = include_str!("executor.rs");
+        for helper in [
+            "fn wait_for_semantic_state(",
+            "fn wait_for_runtime_event(",
+            "fn wait_for_operation_handle_state(",
+        ] {
+            let start = source
+                .find(helper)
+                .unwrap_or_else(|| panic!("missing helper source for {helper}"));
+            let tail = &source[start..];
+            let end = tail.find("\nfn ").unwrap_or(tail.len());
+            let body = &tail[..end];
+            assert!(
+                !body.contains("wait_for_dom_patterns("),
+                "{helper} must not resolve through DOM pattern fallbacks"
+            );
+            assert!(
+                !body.contains("snapshot_dom("),
+                "{helper} must not resolve through raw DOM snapshots"
+            );
+            assert!(
+                !body.contains("diagnostic_screen_contains("),
+                "{helper} must not resolve through raw text fallbacks"
+            );
+            assert!(
+                !body.contains("tail_log("),
+                "{helper} must not resolve through diagnostic log fallbacks"
+            );
+        }
+    }
+
+    #[test]
+    fn raw_text_fallbacks_are_explicitly_diagnostic_only() {
+        let source = include_str!("executor.rs");
+        assert!(source.contains("enum FallbackObservationMode"));
+        assert!(source.contains("FallbackObservationMode::BoundedSecondary"));
+        assert!(source.contains("FallbackObservationMode::DiagnosticOnly"));
+        assert!(source.contains("fn diagnostic_screen_contains("));
+        assert!(source.contains("debug_assert_eq!(mode, FallbackObservationMode::DiagnosticOnly)"));
     }
 }

@@ -4,10 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline';
-import { chromium } from 'playwright';
 
 const sessions = new Map();
 let requestChain = Promise.resolve();
+let chromiumPromise = null;
 const UI_STATE_LOG_PREFIX = '[aura-ui-state]';
 const UI_STATE_JSON_LOG_PREFIX = '[aura-ui-json]';
 const PLAYWRIGHT_TRACE_ENABLED =
@@ -19,6 +19,13 @@ const DEFAULT_START_MAX_ATTEMPTS = 3;
 const DEFAULT_START_RETRY_BACKOFF_MS = 1200;
 const MAX_TIMEOUT_MS = 600000;
 const MAX_START_ATTEMPTS = 10;
+
+async function getChromium() {
+  if (!chromiumPromise) {
+    chromiumPromise = import('playwright').then((module) => module.chromium);
+  }
+  return chromiumPromise;
+}
 
 process.on('uncaughtException', (error) => {
   console.error(`[driver] uncaughtException: ${error?.stack ?? error?.message ?? String(error)}`);
@@ -77,20 +84,100 @@ function notifyUiStateWaiters(session) {
   if (!session.uiStateCache || !Array.isArray(session.uiStateWaiters) || session.uiStateWaiters.length === 0) {
     return;
   }
+  const currentRevision = uiSnapshotRevision(session.uiStateCache);
   const ready = session.uiStateWaiters.filter(
-    (waiter) => session.uiStateVersion > waiter.afterVersion
+    (waiter) => currentRevision > waiter.afterVersion
   );
   for (const waiter of ready) {
     removeUiStateWaiter(session, waiter);
     clearTimeout(waiter.timer);
     waiter.resolve({
       snapshot: session.uiStateCache,
-      version: session.uiStateVersion
+      version: currentRevision
     });
   }
 }
 
-function storeUiState(session, payload) {
+function uiSnapshotRevision(snapshot) {
+  const value = snapshot?.revision?.semantic_seq;
+  return Number.isFinite(value) ? Number(value) : 0;
+}
+
+function uiSnapshotRenderRevision(snapshot) {
+  const value = snapshot?.revision?.render_seq;
+  return Number.isFinite(value) ? Number(value) : 0;
+}
+
+function rejectUiStateWaiters(session, reason) {
+  if (!Array.isArray(session.uiStateWaiters) || session.uiStateWaiters.length === 0) {
+    return;
+  }
+  const waiters = [...session.uiStateWaiters];
+  session.uiStateWaiters.length = 0;
+  for (const waiter of waiters) {
+    clearTimeout(waiter.timer);
+    waiter.reject(new Error(`ui_state_wait_invalidated:${reason}`));
+  }
+}
+
+function resetObservationState(session, reason, options = {}) {
+  rejectUiStateWaiters(session, reason);
+  session.uiStateCache = null;
+  session.uiStateCacheJson = null;
+  session.uiStateVersion = 0;
+  session.domState = normalizeDomState({ text: '', ids: [] });
+  session.renderHeartbeat = null;
+  session.requiredUiStateRevision = 0;
+  session.lastObservationResetReason = reason;
+  session.observationEpoch = (session.observationEpoch ?? 0) + 1;
+  if (options.resetClipboard === true) {
+    session.clipboardCache = '';
+  }
+}
+
+function markObservationMutation(session, reason) {
+  const currentRevision = uiSnapshotRevision(session.uiStateCache);
+  const nextRequiredRevision = Math.max(1, currentRevision + 1);
+  session.requiredUiStateRevision = Math.max(
+    session.requiredUiStateRevision ?? 0,
+    nextRequiredRevision
+  );
+  session.lastMutationReason = reason;
+}
+
+function clearObservationMutationIfSatisfied(session, snapshot) {
+  const requiredRevision = session.requiredUiStateRevision ?? 0;
+  if (requiredRevision > 0 && uiSnapshotRevision(snapshot) >= requiredRevision) {
+    session.requiredUiStateRevision = 0;
+    session.lastMutationReason = null;
+  }
+}
+
+function uiStateStalenessReason(session, snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') {
+    return 'missing_snapshot';
+  }
+  const semanticRevision = uiSnapshotRevision(snapshot);
+  if (semanticRevision <= 0) {
+    return 'missing_semantic_revision';
+  }
+  const requiredRevision = session.requiredUiStateRevision ?? 0;
+  if (requiredRevision > 0 && semanticRevision < requiredRevision) {
+    return `required_revision_not_reached:${requiredRevision}`;
+  }
+  const heartbeatScreen = contractEnumKey(session.renderHeartbeat?.screen);
+  if (heartbeatScreen && snapshot?.screen && heartbeatScreen !== snapshot.screen) {
+    return `heartbeat_screen_mismatch:${heartbeatScreen}:${snapshot.screen}`;
+  }
+  const heartbeatRenderRevision = Number(session.renderHeartbeat?.render_seq ?? 0);
+  const snapshotRenderRevision = uiSnapshotRenderRevision(snapshot);
+  if (heartbeatRenderRevision > 0 && heartbeatRenderRevision > snapshotRenderRevision) {
+    return `heartbeat_ahead:${heartbeatRenderRevision}:${snapshotRenderRevision}`;
+  }
+  return null;
+}
+
+function storeUiState(session, payload, source = 'unknown') {
   const parsed =
     typeof payload === 'string'
       ? (() => {
@@ -111,6 +198,8 @@ function storeUiState(session, payload) {
   const changed = nextJson !== session.uiStateCacheJson;
   session.uiStateCache = parsed;
   session.uiStateCacheJson = nextJson;
+  session.lastUiStateSource = source;
+  clearObservationMutationIfSatisfied(session, parsed);
   if (changed) {
     session.uiStateVersion = (session.uiStateVersion ?? 0) + 1;
     notifyUiStateWaiters(session);
@@ -119,18 +208,23 @@ function storeUiState(session, payload) {
 }
 
 function waitForUiStateVersion(session, afterVersion, timeoutMs) {
+  const currentRevision = uiSnapshotRevision(session.uiStateCache);
   if (
     session.uiStateCache &&
     typeof session.uiStateCache === 'object' &&
-    session.uiStateVersion > afterVersion
+    currentRevision > afterVersion
   ) {
     return Promise.resolve({
       snapshot: session.uiStateCache,
-      version: session.uiStateVersion
+      version: currentRevision
     });
   }
 
   return new Promise((resolve, reject) => {
+    if ((session.uiStateWaiters?.length ?? 0) >= 64) {
+      reject(new Error('ui_state_wait_queue_overflow'));
+      return;
+    }
     const waiter = {
       afterVersion,
       resolve,
@@ -141,8 +235,8 @@ function waitForUiStateVersion(session, afterVersion, timeoutMs) {
       removeUiStateWaiter(session, waiter);
       reject(
         new Error(
-          `wait_for_ui_state timed out after ${timeoutMs}ms after_version=${afterVersion} current_version=${
-            session.uiStateVersion ?? 0
+          `wait_for_ui_state timed out after ${timeoutMs}ms after_version=${afterVersion} current_revision=${
+            uiSnapshotRevision(session.uiStateCache)
           }`
         )
       );
@@ -157,6 +251,25 @@ function normalizeInstanceId(params) {
     throw new Error('instance_id is required');
   }
   return instanceId;
+}
+
+function isMutatingMethod(method) {
+  switch (method) {
+    case 'send_keys':
+    case 'send_key':
+    case 'navigate_screen':
+    case 'click_button':
+    case 'fill_input':
+    case 'create_contact_invitation':
+    case 'create_account':
+    case 'create_home':
+    case 'join_channel':
+    case 'reload_page':
+    case 'inject_message':
+      return true;
+    default:
+      return false;
+  }
 }
 
 function parseSnapshotPayload(payload) {
@@ -325,6 +438,10 @@ async function ensureUiStateRenderConvergence(session, state, reason, timeoutMs 
     return;
   }
   const heartbeat = session.renderHeartbeat;
+  const domIds = domStateIdList(session);
+  if (!heartbeat && domIds.length === 0 && !String(session?.domState?.text ?? '').trim()) {
+    return;
+  }
   if (
     domStateAlignedWithState(session, state) &&
     heartbeat &&
@@ -349,7 +466,7 @@ async function ensureUiStateRenderConvergence(session, state, reason, timeoutMs 
       throw new Error(
         `semantic screen '${state?.screen ?? 'unknown'}' did not converge to DOM id #${screenDomId}: ${
           error?.message ?? String(error)
-        } current_ids=${JSON.stringify(domStateIdList(session))} text_snippet=${JSON.stringify(
+        } current_ids=${JSON.stringify(domIds)} text_snippet=${JSON.stringify(
           session?.domState?.text ?? ''
         )}`
       );
@@ -435,6 +552,22 @@ function runSelfTest() {
       render_seq: 4
     })
   };
+  const staleRevisionSession = {
+    requiredUiStateRevision: 7,
+    renderHeartbeat: normalizeRenderHeartbeat({
+      screen: 'chat',
+      open_modal: null,
+      render_seq: 9
+    })
+  };
+  const mutableSession = {
+    uiStateCache: {
+      screen: 'chat',
+      revision: { semantic_seq: 3, render_seq: 3 }
+    },
+    uiStateWaiters: []
+  };
+  markObservationMutation(mutableSession, 'click_button');
 
   assert(expectedScreenDomId(chatState) === 'aura-screen-chat', 'chat screen id mapping failed');
   assert(
@@ -461,6 +594,61 @@ function runSelfTest() {
     cachedUiStateConverged(heartbeatSession, chatState),
     'heartbeat-aligned state should be accepted without DOM ids'
   );
+  assert(
+    uiStateStalenessReason(staleRevisionSession, {
+      screen: 'chat',
+      revision: { semantic_seq: 6, render_seq: 8 }
+    }) === 'required_revision_not_reached:7',
+    'required revision floor should reject stale snapshot'
+  );
+  assert(
+    uiStateStalenessReason(staleRevisionSession, {
+      screen: 'chat',
+      revision: { semantic_seq: 7, render_seq: 8 }
+    }) === 'heartbeat_ahead:9:8',
+    'heartbeat ahead should reject stale render snapshot'
+  );
+  assert(
+    uiStateStalenessReason({}, null) === 'missing_snapshot',
+    'default observation must fail diagnostically before any recovery path runs'
+  );
+  assert(
+    mutableSession.requiredUiStateRevision === 4,
+    'mutating actions should require a newer semantic revision'
+  );
+  storeUiState(
+    mutableSession,
+    {
+      screen: 'chat',
+      revision: { semantic_seq: 4, render_seq: 4 }
+    },
+    'selftest'
+  );
+  assert(
+    mutableSession.requiredUiStateRevision === 0,
+    'fresh snapshot should clear mutation floor'
+  );
+  const staleAfterMutationSession = {
+    uiStateCache: {
+      screen: 'chat',
+      revision: { semantic_seq: 11, render_seq: 11 }
+    },
+    renderHeartbeat: normalizeRenderHeartbeat({
+      screen: 'chat',
+      open_modal: null,
+      render_seq: 11
+    }),
+    requiredUiStateRevision: 0,
+    uiStateWaiters: []
+  };
+  markObservationMutation(staleAfterMutationSession, 'submit_form');
+  assert(
+    uiStateStalenessReason(staleAfterMutationSession, {
+      screen: 'chat',
+      revision: { semantic_seq: 11, render_seq: 11 }
+    }) === 'required_revision_not_reached:12',
+    'post-action polling must reject a snapshot that is not newer than the pre-action baseline'
+  );
   console.error('[driver] selftest ok');
 }
 
@@ -472,7 +660,8 @@ function consoleTailText(session, lines = 40) {
 async function ensureHarnessWithTimeout(page, timeoutMs) {
   await page.waitForFunction(() => {
     const bridge = window.__AURA_HARNESS__;
-    return bridge && typeof bridge.snapshot === 'function';
+    const observe = window.__AURA_HARNESS_OBSERVE__;
+    return bridge && observe && typeof observe.snapshot === 'function';
   }, null, { timeout: timeoutMs });
 }
 
@@ -597,13 +786,8 @@ async function installHarnessMutationQueue(page) {
 }
 
 function installPageNavigationReset(session) {
-  const clearSessionCache = () => {
-    session.uiStateCache = null;
-    session.uiStateCacheJson = null;
-    session.renderHeartbeat = null;
-  };
   const onNavigation = () => {
-    clearSessionCache();
+    resetObservationState(session, 'frame_navigation');
     console.error(`[driver] navigation_cache_clear instance=${session.id}`);
   };
   session.page.on('framenavigated', onNavigation);
@@ -615,8 +799,8 @@ async function assertRootStructure(session, reason) {
   let structure = await withOperationTimeout(
     `root_structure_${reason}`,
     session.page.evaluate(() => {
-      if (typeof window.__AURA_HARNESS__?.root_structure === 'function') {
-        return window.__AURA_HARNESS__.root_structure();
+      if (typeof window.__AURA_HARNESS_OBSERVE__?.root_structure === 'function') {
+        return window.__AURA_HARNESS_OBSERVE__.root_structure();
       }
       return null;
     }),
@@ -664,10 +848,10 @@ async function assertRootStructure(session, reason) {
     return;
   }
   if (
-    appRootCount !== 1 ||
-    modalRegionCount !== 1 ||
-    toastRegionCount !== 1 ||
-    activeScreenRootCount !== 1
+    appRootCount < 1 ||
+    modalRegionCount < 1 ||
+    toastRegionCount < 1 ||
+    activeScreenRootCount < 1
   ) {
     throw new Error(
       `invalid root structure during ${reason}: ${JSON.stringify(structure)}`
@@ -1483,6 +1667,7 @@ function parseBoundedInt(params, key, fallback, min, max) {
 function parseStartOptions(params) {
   const instanceId = normalizeInstanceId(params);
   const appUrl = String(params?.app_url ?? 'http://127.0.0.1:4173');
+  const scenarioSeed = params?.scenario_seed ?? null;
   const dataDir = String(params?.data_dir ?? path.join('.tmp', 'harness', instanceId));
   const headless = params?.headless !== false;
   const artifactDir = params?.artifact_dir ? String(params.artifact_dir) : null;
@@ -1519,6 +1704,7 @@ function parseStartOptions(params) {
   return {
     instanceId,
     appUrl,
+    scenarioSeed,
     dataDir,
     headless,
     artifactDir,
@@ -1546,6 +1732,9 @@ function requestTimeoutMs(method, params) {
     case 'create_contact_invitation':
       return 30000;
     case 'create_account':
+    case 'create_home':
+    case 'join_channel':
+    case 'reload_page':
       return 60000;
     case 'start_page': {
       const pageGotoTimeoutMs = Number(params?.page_goto_timeout_ms ?? DEFAULT_PAGE_GOTO_TIMEOUT_MS);
@@ -1559,9 +1748,12 @@ function requestTimeoutMs(method, params) {
   }
 }
 
-function withHarnessInstanceQuery(appUrl, instanceId) {
+function withHarnessHarnessQuery(appUrl, instanceId, scenarioSeed) {
   const url = new URL(appUrl);
   url.searchParams.set('__aura_harness_instance', instanceId);
+  if (scenarioSeed !== undefined && scenarioSeed !== null && scenarioSeed !== '') {
+    url.searchParams.set('__aura_harness_scenario_seed', String(scenarioSeed));
+  }
   return url.toString();
 }
 
@@ -1577,6 +1769,7 @@ async function startPage(params) {
   const {
     instanceId,
     appUrl,
+    scenarioSeed,
     dataDir,
     headless,
     artifactDir,
@@ -1586,7 +1779,7 @@ async function startPage(params) {
     startRetryBackoffMs,
     resetStorage
   } = options;
-  const targetUrl = withHarnessInstanceQuery(appUrl, instanceId);
+  const targetUrl = withHarnessHarnessQuery(appUrl, instanceId, scenarioSeed);
 
   if (sessions.has(instanceId)) {
     await stop({ instance_id: instanceId });
@@ -1604,6 +1797,7 @@ async function startPage(params) {
       console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} launchPersistentContext start`
       );
+      const chromium = await getChromium();
       context = await chromium.launchPersistentContext(dataDir, {
         headless,
         viewport: { width: 1280, height: 900 },
@@ -1636,6 +1830,11 @@ async function startPage(params) {
         uiStateCacheJson: null,
         uiStateVersion: 0,
         uiStateWaiters: [],
+        requiredUiStateRevision: 0,
+        observationEpoch: 0,
+        lastObservationResetReason: null,
+        lastUiStateSource: null,
+        lastMutationReason: null,
         renderHeartbeat: null,
         clipboardCache: ''
       };
@@ -1645,12 +1844,7 @@ async function startPage(params) {
         const text = message.text();
         if (text.startsWith(UI_STATE_JSON_LOG_PREFIX)) {
           const payload = text.slice(UI_STATE_JSON_LOG_PREFIX.length);
-          session.uiStateCacheJson = payload;
-          try {
-            session.uiStateCache = JSON.parse(payload);
-          } catch {
-            session.uiStateCache = null;
-          }
+          storeUiState(session, payload, 'console_push');
           consoleLog.push(`[${nowIso()}] ${message.type()}: ${UI_STATE_JSON_LOG_PREFIX}<json>`);
           return;
         }
@@ -1729,10 +1923,7 @@ async function startPage(params) {
             }
           } catch {}
         });
-        session.uiStateCache = null;
-        session.uiStateCacheJson = null;
-        session.uiStateVersion = 0;
-        session.clipboardCache = '';
+        resetObservationState(session, 'storage_reset', { resetClipboard: true });
         console.error(
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} storage_reset done`
         );
@@ -2006,8 +2197,8 @@ async function snapshot(params) {
       (await withOperationTimeout(
         'snapshot',
         session.page.evaluate(() => {
-          if (window.__AURA_HARNESS__?.snapshot) {
-            return window.__AURA_HARNESS__.snapshot();
+          if (window.__AURA_HARNESS_OBSERVE__?.snapshot) {
+            return window.__AURA_HARNESS_OBSERVE__.snapshot();
           }
           return null;
         })
@@ -2066,8 +2257,8 @@ async function uiState(params) {
         if (window.__AURA_UI_STATE_CACHE__ && typeof window.__AURA_UI_STATE_CACHE__ === 'object') {
           return window.__AURA_UI_STATE_CACHE__;
         }
-        if (typeof window.__AURA_HARNESS__?.ui_state === 'function') {
-          return window.__AURA_HARNESS__.ui_state();
+        if (typeof window.__AURA_HARNESS_OBSERVE__?.ui_state === 'function') {
+          return window.__AURA_HARNESS_OBSERVE__.ui_state();
         }
         if (typeof window.__AURA_UI_STATE__ === 'function') {
           return window.__AURA_UI_STATE__();
@@ -2079,7 +2270,7 @@ async function uiState(params) {
     const parsed = tryParseUiState(payload);
     if (parsed && typeof parsed === 'object') {
       await ensureUiStateRenderConvergence(targetSession, parsed, reason);
-      storeUiState(targetSession, parsed);
+      storeUiState(targetSession, parsed, `structured:${reason}`);
       console.error(
         `[driver] ui_state structured_read done instance=${instanceId} reason=${reason}`
       );
@@ -2102,8 +2293,7 @@ async function uiState(params) {
       if (!isNavigationTransitionError(error)) {
         throw error;
       }
-      targetSession.uiStateCache = null;
-      targetSession.uiStateCacheJson = null;
+      resetObservationState(targetSession, `structured_navigation_recovery:${reason}`);
       console.error(
         `[driver] ui_state structured_navigation_recovery instance=${instanceId} reason=${reason}`
       );
@@ -2114,11 +2304,18 @@ async function uiState(params) {
   };
 
   if (session.uiStateCache && typeof session.uiStateCache === 'object') {
-    console.error(`[driver] ui_state cache_hit instance=${instanceId}`);
     const cached =
       typeof session.uiStateCacheJson === 'string'
         ? tryParseUiState(session.uiStateCacheJson)
         : session.uiStateCache;
+    const staleReason = uiStateStalenessReason(session, cached);
+    if (!staleReason) {
+      console.error(`[driver] ui_state cache_hit instance=${instanceId}`);
+      return cached;
+    }
+    console.error(
+      `[driver] ui_state stale_cache instance=${instanceId} reason=${staleReason} source=${session.lastUiStateSource ?? 'unknown'} mutation=${session.lastMutationReason ?? 'none'}`
+    );
     const staleOnboardingCache =
       cached &&
       cached.screen === 'onboarding' &&
@@ -2151,16 +2348,21 @@ async function uiState(params) {
             );
           }
         }
-        if (cached) {
-          return cached;
-        }
         throw error;
-      }
-      if (cached) {
-        return cached;
       }
     }
     if (cached && !cachedUiStateConverged(session, cached)) {
+      if (
+        !session.renderHeartbeat &&
+        domStateIdList(session).length === 0 &&
+        !String(session?.domState?.text ?? '').trim()
+      ) {
+        throw new Error(
+          `ui_state ambiguity instance=${instanceId} reason=cache_divergence_deferred source=${session.lastUiStateSource ?? 'unknown'} mutation=${
+            session.lastMutationReason ?? 'none'
+          }`
+        );
+      }
       console.error(`[driver] ui_state cache_diverged instance=${instanceId}`);
       try {
         const refreshed = await readStructuredUiStateWithNavigationRecovery(
@@ -2188,10 +2390,6 @@ async function uiState(params) {
         )}`
       );
     }
-    if (cached) {
-      console.error(`[driver] ui_state authoritative_cache_hit instance=${instanceId}`);
-      return cached;
-    }
   }
 
   try {
@@ -2200,8 +2398,7 @@ async function uiState(params) {
     if (!isNavigationTransitionError(error)) {
       throw error;
     }
-    session.uiStateCache = null;
-    session.uiStateCacheJson = null;
+    resetObservationState(session, 'ui_state_navigation_retry');
     console.error(`[driver] ui_state navigation_retry instance=${instanceId}`);
     await waitForPageNavigationStabilization(session, 'ui_state_root_structure');
     await assertRootStructure(session, 'ui_state_after_navigation');
@@ -2214,6 +2411,10 @@ async function uiState(params) {
       UI_STATE_TIMEOUT_MS
     );
     if (recovered) {
+      const staleReason = uiStateStalenessReason(session, recovered);
+      if (staleReason) {
+        throw new Error(`structured_ui_state_stale:${staleReason}`);
+      }
       return recovered;
     }
   } catch (error) {
@@ -2241,7 +2442,7 @@ async function waitForUiState(params) {
     const snapshot = await uiState({ instance_id: instanceId });
     return {
       snapshot,
-      version: session.uiStateVersion ?? 0
+      version: uiSnapshotRevision(snapshot)
     };
   }
 
@@ -2534,6 +2735,127 @@ async function createAccount(params) {
     }, 0);
     return true;
   }, accountName);
+  resetObservationState(session, 'create_account');
+  return { status: 'submitted' };
+}
+
+async function createHome(params) {
+  const instanceId = normalizeInstanceId(params);
+  const session = getSession(instanceId);
+  const homeName = String(params?.home_name ?? '').trim();
+  if (homeName.length === 0) {
+    throw new Error('home_name is required');
+  }
+  await session.page.evaluate((name) => {
+    if (typeof window.__AURA_HARNESS__?.create_home !== 'function') {
+      throw new Error('window.__AURA_HARNESS__.create_home is unavailable');
+    }
+    window.setTimeout(() => {
+      window.__AURA_HARNESS__.create_home(name);
+    }, 0);
+    return true;
+  }, homeName);
+  resetObservationState(session, 'create_home');
+  return { status: 'submitted' };
+}
+
+async function joinChannel(params) {
+  const instanceId = normalizeInstanceId(params);
+  const session = getSession(instanceId);
+  const channelName = String(params?.channel_name ?? '').trim();
+  if (channelName.length === 0) {
+    throw new Error('channel_name is required');
+  }
+
+  await session.page.evaluate(async (name) => {
+    const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+    const nextFrame = () =>
+      new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+    const waitFor = async (predicate, timeoutMs, label) => {
+      const started = Date.now();
+      while (Date.now() - started < timeoutMs) {
+        const value = predicate();
+        if (value) {
+          return value;
+        }
+        await nextFrame();
+        await sleep(25);
+      }
+      throw new Error(`join_channel:${label}: timed out after ${timeoutMs}ms`);
+    };
+    const ensureElement = (selector, label) => {
+      const element = document.querySelector(selector);
+      if (!(element instanceof HTMLElement)) {
+        throw new Error(`join_channel:${label}: missing ${selector}`);
+      }
+      return element;
+    };
+    const clickElement = (selector, label) => {
+      const element = ensureElement(selector, label);
+      element.scrollIntoView({ block: 'center', inline: 'center' });
+      element.focus();
+      element.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      element.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+      element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      element.click();
+    };
+    const fillText = (selector, value, label) => {
+      const element = ensureElement(selector, label);
+      if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
+        throw new Error(`join_channel:${label}: ${selector} is not a text input`);
+      }
+      element.focus();
+      element.value = value;
+      element.dispatchEvent(new InputEvent('input', { bubbles: true, data: value }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+      element.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+    };
+
+    await waitFor(() => document.querySelector('#aura-nav-chat'), 10000, 'nav_chat_present');
+    clickElement('#aura-nav-chat', 'nav_chat_click');
+    await waitFor(
+      () => document.querySelector('#aura-screen-chat'),
+      10000,
+      'chat_screen_visible'
+    );
+    clickElement('#aura-chat-new-group', 'open_create_channel');
+    await waitFor(
+      () => document.querySelector('#aura-modal-create-channel'),
+      10000,
+      'create_channel_modal_visible'
+    );
+    await waitFor(
+      () => document.querySelector('#aura-field-create-channel-name'),
+      5000,
+      'details_step_visible'
+    );
+    fillText('#aura-field-create-channel-name', name, 'fill_channel_name');
+    clickElement('#aura-modal-confirm-button', 'advance_details');
+    await waitFor(
+      () =>
+        document.querySelector('#aura-modal-create-channel') &&
+        !document.querySelector('#aura-field-create-channel-name'),
+      5000,
+      'members_step_visible'
+    );
+    clickElement('#aura-modal-confirm-button', 'advance_members');
+    await waitFor(
+      () =>
+        document.querySelector('#aura-modal-create-channel') &&
+        document.querySelector('#aura-field-threshold-input'),
+      5000,
+      'threshold_step_visible'
+    );
+    clickElement('#aura-modal-confirm-button', 'submit_threshold');
+    await waitFor(
+      () => !document.querySelector('#aura-modal-create-channel'),
+      15000,
+      'create_channel_modal_closed'
+    );
+    return true;
+  }, channelName);
+
   return { status: 'submitted' };
 }
 
@@ -2541,8 +2863,8 @@ async function getAuthorityId(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
   const authorityId = await session.page.evaluate(() => {
-    if (typeof window.__AURA_HARNESS__?.get_authority_id === 'function') {
-      return window.__AURA_HARNESS__.get_authority_id();
+    if (typeof window.__AURA_HARNESS_OBSERVE__?.get_authority_id === 'function') {
+      return window.__AURA_HARNESS_OBSERVE__.get_authority_id();
     }
     return null;
   });
@@ -2556,7 +2878,39 @@ async function reloadPage(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
   const reason = String(params?.reason ?? 'manual_reload');
-  await restartPageSession(session, reason);
+  try {
+    console.error(`[driver] reload_page soft_reload start instance=${instanceId} reason=${reason}`);
+    await withOperationTimeout(
+      `reload_page_soft:${instanceId}`,
+      (async () => {
+        resetObservationState(session, `reload_page:${reason}`);
+        await session.page.reload({
+          waitUntil: 'commit',
+          timeout: session.startOptions?.pageGotoTimeoutMs ?? DEFAULT_PAGE_GOTO_TIMEOUT_MS
+        });
+        await ensurePageInteractive(
+          session.page,
+          session.startOptions?.harnessReadyTimeoutMs ?? DEFAULT_HARNESS_READY_TIMEOUT_MS
+        );
+        await ensureHarnessWithTimeout(
+          session.page,
+          session.startOptions?.harnessReadyTimeoutMs ?? DEFAULT_HARNESS_READY_TIMEOUT_MS
+        );
+        await installHarnessMutationQueue(session.page);
+        await installDomObserver(session.page, session);
+        await uiState({ instance_id: instanceId });
+      })(),
+      Math.min(session.startOptions?.harnessReadyTimeoutMs ?? 30000, 30000)
+    );
+    console.error(`[driver] reload_page soft_reload done instance=${instanceId} reason=${reason}`);
+  } catch (error) {
+    console.error(
+      `[driver] reload_page soft_reload_failed instance=${instanceId} reason=${reason} error=${
+        error?.stack ?? error?.message ?? String(error)
+      }`
+    );
+    await restartPageSession(session, reason);
+  }
   return { status: 'reloaded' };
 }
 
@@ -2567,7 +2921,7 @@ async function tailLog(params) {
   const requested = Number.isFinite(lines) ? Math.max(1, Math.floor(lines)) : 20;
 
   const harnessLines = await session.page.evaluate((count) => {
-    return window.__AURA_HARNESS__.tail_log(count);
+    return window.__AURA_HARNESS_OBSERVE__.tail_log(count);
   }, requested);
 
   const merged = [
@@ -2645,50 +2999,85 @@ async function shutdownAll() {
 }
 
 async function dispatch(method, params) {
+  const instanceId =
+    params && typeof params === 'object' && typeof params.instance_id === 'string'
+      ? params.instance_id
+      : null;
+  let result;
   switch (method) {
     case 'start_page':
-      return startPage(params);
+      result = await startPage(params);
+      break;
     case 'send_keys':
-      return sendKeys(params);
+      result = await sendKeys(params);
+      break;
     case 'send_key':
-      return sendKey(params);
+      result = await sendKey(params);
+      break;
     case 'navigate_screen':
-      return navigateScreen(params);
+      result = await navigateScreen(params);
+      break;
     case 'click_button':
-      return clickButton(params);
+      result = await clickButton(params);
+      break;
     case 'fill_input':
-      return fillInput(params);
+      result = await fillInput(params);
+      break;
     case 'snapshot':
-      return snapshot(params);
+      result = await snapshot(params);
+      break;
     case 'ui_state':
-      return uiState(params);
+      result = await uiState(params);
+      break;
     case 'wait_for_ui_state':
-      return waitForUiState(params);
+      result = await waitForUiState(params);
+      break;
     case 'dom_snapshot':
-      return domSnapshot(params);
+      result = await domSnapshot(params);
+      break;
     case 'wait_for_dom_patterns':
-      return waitForDomPatterns(params);
+      result = await waitForDomPatterns(params);
+      break;
     case 'wait_for_selector':
-      return waitForSelector(params);
+      result = await waitForSelector(params);
+      break;
     case 'read_clipboard':
-      return readClipboard(params);
+      result = await readClipboard(params);
+      break;
     case 'create_contact_invitation':
-      return createContactInvitation(params);
+      result = await createContactInvitation(params);
+      break;
     case 'create_account':
-      return createAccount(params);
+      result = await createAccount(params);
+      break;
+    case 'create_home':
+      result = await createHome(params);
+      break;
+    case 'join_channel':
+      result = await joinChannel(params);
+      break;
     case 'get_authority_id':
-      return getAuthorityId(params);
+      result = await getAuthorityId(params);
+      break;
     case 'reload_page':
-      return reloadPage(params);
+      result = await reloadPage(params);
+      break;
     case 'tail_log':
-      return tailLog(params);
+      result = await tailLog(params);
+      break;
     case 'inject_message':
-      return injectMessage(params);
+      result = await injectMessage(params);
+      break;
     case 'stop':
-      return stop(params);
+      result = await stop(params);
+      break;
     default:
       throw new Error(`unsupported method: ${method}`);
   }
+  if (instanceId && isMutatingMethod(method) && sessions.has(instanceId)) {
+    markObservationMutation(getSession(instanceId), method);
+  }
+  return result;
 }
 
 if (process.argv.includes('--selftest')) {

@@ -14,7 +14,17 @@ use aura_core::AuraError;
 const DEFAULT_HARNESS_CONVERGENCE_ROUNDS: usize = 8;
 const DEFAULT_HARNESS_CONVERGENCE_BACKOFF_MS: u64 = 150;
 
+#[cfg(test)]
+static HARNESS_MODE_OVERRIDE: std::sync::atomic::AtomicU8 =
+    std::sync::atomic::AtomicU8::new(0);
+
 fn harness_mode_enabled() -> bool {
+    #[cfg(test)]
+    match HARNESS_MODE_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => return false,
+        2 => return true,
+        _ => {}
+    }
     std::env::var_os("AURA_HARNESS_MODE").is_some()
 }
 
@@ -112,7 +122,24 @@ mod tests {
     use super::ensure_runtime_peer_connectivity;
     use crate::runtime_bridge::{OfflineRuntimeBridge, RuntimeBridge};
     use aura_core::identifiers::AuthorityId;
-    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    fn harness_env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn with_harness_mode_env<T>(enabled: bool, f: impl FnOnce() -> T) -> T {
+        let _guard = harness_env_lock().lock().expect("env lock poisoned");
+        let previous = super::HARNESS_MODE_OVERRIDE.swap(
+            if enabled { 2 } else { 1 },
+            Ordering::Relaxed,
+        );
+        let result = f();
+        super::HARNESS_MODE_OVERRIDE.store(previous, Ordering::Relaxed);
+        result
+    }
 
     #[tokio::test]
     async fn connectivity_check_fails_when_no_peers_exist() {
@@ -127,5 +154,37 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("Missing connectivity prerequisite"));
         assert!(message.contains("test_flow"));
+    }
+
+    #[test]
+    fn connectivity_check_is_harness_mode_neutral() {
+        let runtime_handle = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("failed to build tokio runtime");
+        let runtime: Arc<dyn RuntimeBridge> = Arc::new(OfflineRuntimeBridge::new(
+            AuthorityId::new_from_entropy([9_u8; 32]),
+        ));
+
+        let normal = with_harness_mode_env(false, || {
+            runtime_handle.block_on(async {
+                ensure_runtime_peer_connectivity(&runtime, "neutral_flow")
+                    .await
+                    .expect_err("offline runtime should fail without harness mode")
+                    .to_string()
+            })
+        })
+        ;
+        let harness = with_harness_mode_env(true, || {
+            runtime_handle.block_on(async {
+                ensure_runtime_peer_connectivity(&runtime, "neutral_flow")
+                    .await
+                    .expect_err("offline runtime should fail with harness mode")
+                    .to_string()
+            })
+        })
+        ;
+
+        assert_eq!(normal, harness);
     }
 }

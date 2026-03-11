@@ -56,13 +56,18 @@ where
 
 struct DebouncedNetworkChangeStream {
     inner: Box<dyn NetworkChangeStream>,
+    #[cfg(not(target_arch = "wasm32"))]
     unusable_debounce: Duration,
 }
 
 impl DebouncedNetworkChangeStream {
     fn new(inner: Box<dyn NetworkChangeStream>, unusable_debounce: Duration) -> Self {
+        #[cfg(target_arch = "wasm32")]
+        let _ = unusable_debounce;
+
         Self {
             inner,
+            #[cfg(not(target_arch = "wasm32"))]
             unusable_debounce,
         }
     }
@@ -86,6 +91,8 @@ impl NetworkChangeStream for DebouncedNetworkChangeStream {
             return Ok(Some(change));
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
+        {
         let mut pending_unusable = change;
         let timer = tokio::time::sleep(self.unusable_debounce);
         tokio::pin!(timer);
@@ -108,6 +115,7 @@ impl NetworkChangeStream for DebouncedNetworkChangeStream {
                     }
                 }
             }
+        }
         }
     }
 }

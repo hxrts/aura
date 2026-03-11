@@ -6,6 +6,8 @@
 #![allow(missing_docs)] // Shared contract surface - refined incrementally during migration.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -156,6 +158,44 @@ fn sanitize_dom_segment(raw: &str) -> String {
         .collect()
 }
 
+fn is_placeholder_semantic_id(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    if trimmed.starts_with("placeholder:") {
+        return true;
+    }
+    trimmed
+        .rsplit_once(':')
+        .map(|(_, suffix)| suffix.len() >= 8 && suffix.chars().all(|ch| ch == '0'))
+        .unwrap_or(false)
+}
+
+fn is_override_semantic_id(raw: &str) -> bool {
+    raw.trim().starts_with("override:")
+}
+
+fn is_row_index_semantic_id(raw: &str) -> bool {
+    let trimmed = raw.trim().to_ascii_lowercase();
+    if trimmed.is_empty() {
+        return false;
+    }
+    trimmed.chars().all(|ch| ch.is_ascii_digit())
+        || trimmed
+            .strip_prefix("row-")
+            .or_else(|| trimmed.strip_prefix("row_"))
+            .or_else(|| trimmed.strip_prefix("row:"))
+            .or_else(|| trimmed.strip_prefix("idx-"))
+            .or_else(|| trimmed.strip_prefix("idx_"))
+            .or_else(|| trimmed.strip_prefix("idx:"))
+            .or_else(|| trimmed.strip_prefix("index-"))
+            .or_else(|| trimmed.strip_prefix("index_"))
+            .or_else(|| trimmed.strip_prefix("index:"))
+            .map(|suffix| !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()))
+            .unwrap_or(false)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ListId {
@@ -217,6 +257,35 @@ pub fn list_item_dom_id(list_id: ListId, item_id: &str) -> String {
 #[must_use]
 pub fn list_item_selector(list_id: ListId, item_id: &str) -> String {
     format!("#{}", list_item_dom_id(list_id, item_id))
+}
+
+pub struct ParityUiIdentity;
+
+impl ParityUiIdentity {
+    #[must_use]
+    pub const fn control_dom_id(control_id: ControlId) -> Option<&'static str> {
+        control_id.web_dom_id()
+    }
+
+    #[must_use]
+    pub const fn field_dom_id(field_id: FieldId) -> Option<&'static str> {
+        field_id.web_dom_id()
+    }
+
+    #[must_use]
+    pub const fn list_dom_id(list_id: ListId) -> &'static str {
+        list_id.web_dom_id()
+    }
+
+    #[must_use]
+    pub const fn modal_dom_id(modal_id: ModalId) -> &'static str {
+        modal_id.web_dom_id()
+    }
+
+    #[must_use]
+    pub fn list_item_dom_id(list_id: ListId, item_id: &str) -> String {
+        list_item_dom_id(list_id, item_id)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -825,12 +894,549 @@ pub struct RenderHeartbeat {
     pub render_seq: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectionRevision {
+    pub semantic_seq: u64,
+    pub render_seq: Option<u64>,
+}
+
+impl ProjectionRevision {
+    #[must_use]
+    pub const fn has_sequence_metadata(self) -> bool {
+        self.semantic_seq > 0 || self.render_seq.is_some()
+    }
+
+    #[must_use]
+    pub const fn is_newer_than(self, previous: Self) -> bool {
+        let self_render_seq = match self.render_seq {
+            Some(value) => value,
+            None => 0,
+        };
+        let previous_render_seq = match previous.render_seq {
+            Some(value) => value,
+            None => 0,
+        };
+        self.semantic_seq > previous.semantic_seq
+            || (self.semantic_seq == previous.semantic_seq
+                && self_render_seq > previous_render_seq)
+    }
+
+    #[must_use]
+    pub const fn is_stale_against(self, baseline: Self) -> bool {
+        !self.is_newer_than(baseline)
+    }
+}
+
+fn semantic_revision_counter() -> &'static Mutex<u64> {
+    static COUNTER: OnceLock<Mutex<u64>> = OnceLock::new();
+    COUNTER.get_or_init(|| Mutex::new(0))
+}
+
+#[must_use]
+pub fn next_projection_revision(render_seq: Option<u64>) -> ProjectionRevision {
+    let mut counter = semantic_revision_counter()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *counter = counter.saturating_add(1);
+    ProjectionRevision {
+        semantic_seq: *counter,
+        render_seq,
+    }
+}
+
+pub fn validate_render_convergence(
+    snapshot: &UiSnapshot,
+    heartbeat: &RenderHeartbeat,
+) -> Result<(), String> {
+    let Some(snapshot_render_seq) = snapshot.revision.render_seq else {
+        return Err(format!(
+            "semantic snapshot {:?} is missing render_seq metadata",
+            snapshot.screen
+        ));
+    };
+    if heartbeat.render_seq < snapshot_render_seq {
+        return Err(format!(
+            "semantic snapshot {:?} is ahead of renderer heartbeat {} < {}",
+            snapshot.screen, heartbeat.render_seq, snapshot_render_seq
+        ));
+    }
+    if heartbeat.screen != snapshot.screen {
+        return Err(format!(
+            "semantic snapshot screen {:?} diverges from renderer {:?}",
+            snapshot.screen, heartbeat.screen
+        ));
+    }
+    if heartbeat.open_modal != snapshot.open_modal {
+        return Err(format!(
+            "semantic snapshot modal {:?} diverges from renderer {:?}",
+            snapshot.open_modal, heartbeat.open_modal
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuiescenceState {
+    Settled,
+    Busy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuiescenceSnapshot {
+    pub state: QuiescenceState,
+    pub reason_codes: Vec<String>,
+}
+
+impl QuiescenceSnapshot {
+    #[must_use]
+    pub fn settled() -> Self {
+        Self {
+            state: QuiescenceState::Settled,
+            reason_codes: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn derive(
+        readiness: UiReadiness,
+        open_modal: Option<ModalId>,
+        operations: &[OperationSnapshot],
+    ) -> Self {
+        let mut reason_codes = Vec::new();
+        if readiness != UiReadiness::Ready {
+            reason_codes.push("readiness_loading".to_string());
+        }
+        if let Some(modal_id) = open_modal {
+            reason_codes.push(format!("modal_open:{modal_id:?}").to_ascii_lowercase());
+        }
+        for operation in operations {
+            if operation.state == OperationState::Submitting {
+                reason_codes.push(format!("operation_submitting:{}", operation.id.0));
+            }
+        }
+        if reason_codes.is_empty() {
+            Self::settled()
+        } else {
+            Self {
+                state: QuiescenceState::Busy,
+                reason_codes,
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FrontendId {
     Web,
     Tui,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserCacheBoundary {
+    SessionStart,
+    AuthoritySwitch,
+    DeviceImport,
+    StorageReset,
+    NavigationRecovery,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrowserCacheBoundaryMetadata {
+    pub boundary: BrowserCacheBoundary,
+    pub reason_code: &'static str,
+}
+
+pub const BROWSER_CACHE_BOUNDARIES: &[BrowserCacheBoundaryMetadata] = &[
+    BrowserCacheBoundaryMetadata {
+        boundary: BrowserCacheBoundary::SessionStart,
+        reason_code: "session_start",
+    },
+    BrowserCacheBoundaryMetadata {
+        boundary: BrowserCacheBoundary::AuthoritySwitch,
+        reason_code: "authority_switch",
+    },
+    BrowserCacheBoundaryMetadata {
+        boundary: BrowserCacheBoundary::DeviceImport,
+        reason_code: "device_import",
+    },
+    BrowserCacheBoundaryMetadata {
+        boundary: BrowserCacheBoundary::StorageReset,
+        reason_code: "storage_reset",
+    },
+    BrowserCacheBoundaryMetadata {
+        boundary: BrowserCacheBoundary::NavigationRecovery,
+        reason_code: "navigation_recovery",
+    },
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserHarnessBridgeMethodKind {
+    Action,
+    ReadState,
+    Diagnostic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrowserHarnessBridgeMethod {
+    pub name: &'static str,
+    pub kind: BrowserHarnessBridgeMethodKind,
+    pub deterministic: bool,
+    pub returns_semantic_state: bool,
+    pub returns_render_signal: bool,
+}
+
+pub const BROWSER_HARNESS_BRIDGE_API_VERSION: u32 = 1;
+
+pub const BROWSER_HARNESS_BRIDGE_METHODS: &[BrowserHarnessBridgeMethod] = &[
+    BrowserHarnessBridgeMethod {
+        name: "send_keys",
+        kind: BrowserHarnessBridgeMethodKind::Action,
+        deterministic: false,
+        returns_semantic_state: false,
+        returns_render_signal: false,
+    },
+    BrowserHarnessBridgeMethod {
+        name: "send_key",
+        kind: BrowserHarnessBridgeMethodKind::Action,
+        deterministic: false,
+        returns_semantic_state: false,
+        returns_render_signal: false,
+    },
+    BrowserHarnessBridgeMethod {
+        name: "navigate_screen",
+        kind: BrowserHarnessBridgeMethodKind::Action,
+        deterministic: false,
+        returns_semantic_state: false,
+        returns_render_signal: false,
+    },
+    BrowserHarnessBridgeMethod {
+        name: "snapshot",
+        kind: BrowserHarnessBridgeMethodKind::ReadState,
+        deterministic: true,
+        returns_semantic_state: false,
+        returns_render_signal: true,
+    },
+    BrowserHarnessBridgeMethod {
+        name: "ui_state",
+        kind: BrowserHarnessBridgeMethodKind::ReadState,
+        deterministic: true,
+        returns_semantic_state: true,
+        returns_render_signal: false,
+    },
+    BrowserHarnessBridgeMethod {
+        name: "read_clipboard",
+        kind: BrowserHarnessBridgeMethodKind::ReadState,
+        deterministic: true,
+        returns_semantic_state: false,
+        returns_render_signal: false,
+    },
+    BrowserHarnessBridgeMethod {
+        name: "create_contact_invitation",
+        kind: BrowserHarnessBridgeMethodKind::Action,
+        deterministic: false,
+        returns_semantic_state: false,
+        returns_render_signal: false,
+    },
+    BrowserHarnessBridgeMethod {
+        name: "create_account",
+        kind: BrowserHarnessBridgeMethodKind::Action,
+        deterministic: false,
+        returns_semantic_state: false,
+        returns_render_signal: false,
+    },
+    BrowserHarnessBridgeMethod {
+        name: "create_home",
+        kind: BrowserHarnessBridgeMethodKind::Action,
+        deterministic: false,
+        returns_semantic_state: false,
+        returns_render_signal: false,
+    },
+    BrowserHarnessBridgeMethod {
+        name: "get_authority_id",
+        kind: BrowserHarnessBridgeMethodKind::ReadState,
+        deterministic: true,
+        returns_semantic_state: false,
+        returns_render_signal: false,
+    },
+    BrowserHarnessBridgeMethod {
+        name: "tail_log",
+        kind: BrowserHarnessBridgeMethodKind::Diagnostic,
+        deterministic: true,
+        returns_semantic_state: false,
+        returns_render_signal: false,
+    },
+    BrowserHarnessBridgeMethod {
+        name: "root_structure",
+        kind: BrowserHarnessBridgeMethodKind::Diagnostic,
+        deterministic: true,
+        returns_semantic_state: false,
+        returns_render_signal: true,
+    },
+    BrowserHarnessBridgeMethod {
+        name: "inject_message",
+        kind: BrowserHarnessBridgeMethodKind::Diagnostic,
+        deterministic: false,
+        returns_semantic_state: false,
+        returns_render_signal: false,
+    },
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HarnessObservationSurface {
+    Browser,
+    Tui,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationMethodKind {
+    SemanticState,
+    RenderSignal,
+    Clipboard,
+    Diagnostic,
+    Identity,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObservationSurfaceMethod {
+    pub name: &'static str,
+    pub kind: ObservationMethodKind,
+    pub deterministic: bool,
+    pub returns_semantic_state: bool,
+    pub returns_render_signal: bool,
+}
+
+pub const BROWSER_OBSERVATION_SURFACE_GLOBAL: &str = "__AURA_HARNESS_OBSERVE__";
+pub const BROWSER_OBSERVATION_SURFACE_API_VERSION: u32 = 1;
+
+pub const BROWSER_OBSERVATION_SURFACE_METHODS: &[ObservationSurfaceMethod] = &[
+    ObservationSurfaceMethod {
+        name: "snapshot",
+        kind: ObservationMethodKind::RenderSignal,
+        deterministic: true,
+        returns_semantic_state: false,
+        returns_render_signal: true,
+    },
+    ObservationSurfaceMethod {
+        name: "ui_state",
+        kind: ObservationMethodKind::SemanticState,
+        deterministic: true,
+        returns_semantic_state: true,
+        returns_render_signal: false,
+    },
+    ObservationSurfaceMethod {
+        name: "render_heartbeat",
+        kind: ObservationMethodKind::RenderSignal,
+        deterministic: true,
+        returns_semantic_state: false,
+        returns_render_signal: true,
+    },
+    ObservationSurfaceMethod {
+        name: "read_clipboard",
+        kind: ObservationMethodKind::Clipboard,
+        deterministic: true,
+        returns_semantic_state: false,
+        returns_render_signal: false,
+    },
+    ObservationSurfaceMethod {
+        name: "get_authority_id",
+        kind: ObservationMethodKind::Identity,
+        deterministic: true,
+        returns_semantic_state: false,
+        returns_render_signal: false,
+    },
+    ObservationSurfaceMethod {
+        name: "tail_log",
+        kind: ObservationMethodKind::Diagnostic,
+        deterministic: true,
+        returns_semantic_state: false,
+        returns_render_signal: false,
+    },
+    ObservationSurfaceMethod {
+        name: "root_structure",
+        kind: ObservationMethodKind::Diagnostic,
+        deterministic: true,
+        returns_semantic_state: false,
+        returns_render_signal: true,
+    },
+];
+
+pub const TUI_OBSERVATION_SURFACE_API_VERSION: u32 = 1;
+
+pub const TUI_OBSERVATION_SURFACE_METHODS: &[ObservationSurfaceMethod] = &[
+    ObservationSurfaceMethod {
+        name: "snapshot",
+        kind: ObservationMethodKind::RenderSignal,
+        deterministic: true,
+        returns_semantic_state: false,
+        returns_render_signal: true,
+    },
+    ObservationSurfaceMethod {
+        name: "snapshot_dom",
+        kind: ObservationMethodKind::RenderSignal,
+        deterministic: true,
+        returns_semantic_state: false,
+        returns_render_signal: true,
+    },
+    ObservationSurfaceMethod {
+        name: "ui_snapshot",
+        kind: ObservationMethodKind::SemanticState,
+        deterministic: true,
+        returns_semantic_state: true,
+        returns_render_signal: false,
+    },
+    ObservationSurfaceMethod {
+        name: "wait_for_ui_snapshot_event",
+        kind: ObservationMethodKind::SemanticState,
+        deterministic: true,
+        returns_semantic_state: true,
+        returns_render_signal: false,
+    },
+    ObservationSurfaceMethod {
+        name: "wait_for_dom_patterns",
+        kind: ObservationMethodKind::Diagnostic,
+        deterministic: true,
+        returns_semantic_state: false,
+        returns_render_signal: true,
+    },
+    ObservationSurfaceMethod {
+        name: "wait_for_target",
+        kind: ObservationMethodKind::Diagnostic,
+        deterministic: true,
+        returns_semantic_state: false,
+        returns_render_signal: true,
+    },
+    ObservationSurfaceMethod {
+        name: "tail_log",
+        kind: ObservationMethodKind::Diagnostic,
+        deterministic: true,
+        returns_semantic_state: false,
+        returns_render_signal: false,
+    },
+    ObservationSurfaceMethod {
+        name: "read_clipboard",
+        kind: ObservationMethodKind::Clipboard,
+        deterministic: true,
+        returns_semantic_state: false,
+        returns_render_signal: false,
+    },
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HarnessModeChangeKind {
+    Observation,
+    TimingDiscipline,
+    RenderingStability,
+    Instrumentation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnessModeAllowance {
+    pub path: &'static str,
+    pub kind: HarnessModeChangeKind,
+    pub owner: &'static str,
+    pub design_ref: &'static str,
+}
+
+pub const HARNESS_MODE_ALLOWLIST: &[HarnessModeAllowance] = &[
+    HarnessModeAllowance {
+        path: "crates/aura-app/src/workflows/runtime.rs",
+        kind: HarnessModeChangeKind::TimingDiscipline,
+        owner: "aura-app-runtime",
+        design_ref: "docs/804_testing_guide.md",
+    },
+    HarnessModeAllowance {
+        path: "crates/aura-app/src/workflows/invitation.rs",
+        kind: HarnessModeChangeKind::Instrumentation,
+        owner: "aura-app-invitation",
+        design_ref: "docs/804_testing_guide.md",
+    },
+    HarnessModeAllowance {
+        path: "crates/aura-agent/src/handlers/invitation.rs",
+        kind: HarnessModeChangeKind::Instrumentation,
+        owner: "aura-agent-invitation",
+        design_ref: "docs/804_testing_guide.md",
+    },
+    HarnessModeAllowance {
+        path: "crates/aura-agent/src/runtime/effects.rs",
+        kind: HarnessModeChangeKind::Instrumentation,
+        owner: "aura-agent-runtime-effects",
+        design_ref: "docs/804_testing_guide.md",
+    },
+    HarnessModeAllowance {
+        path: "crates/aura-agent/src/runtime_bridge/mod.rs",
+        kind: HarnessModeChangeKind::Instrumentation,
+        owner: "aura-agent-runtime-bridge",
+        design_ref: "docs/804_testing_guide.md",
+    },
+    HarnessModeAllowance {
+        path: "crates/aura-terminal/src/tui/context/io_context.rs",
+        kind: HarnessModeChangeKind::Instrumentation,
+        owner: "aura-terminal-tui-context",
+        design_ref: "crates/aura-terminal/ARCHITECTURE.md",
+    },
+    HarnessModeAllowance {
+        path: "crates/aura-terminal/src/tui/screens/app/shell.rs",
+        kind: HarnessModeChangeKind::RenderingStability,
+        owner: "aura-terminal-shell",
+        design_ref: "crates/aura-terminal/ARCHITECTURE.md",
+    },
+    HarnessModeAllowance {
+        path: "crates/aura-terminal/src/tui/theme.rs",
+        kind: HarnessModeChangeKind::RenderingStability,
+        owner: "aura-terminal-theme",
+        design_ref: "crates/aura-terminal/ARCHITECTURE.md",
+    },
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrontendExecutionBoundaryKind {
+    DriverBackend,
+    ScenarioExecutor,
+    ScenarioEntrypoint,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FrontendExecutionBoundary {
+    pub path: &'static str,
+    pub kind: FrontendExecutionBoundaryKind,
+    pub owner: &'static str,
+}
+
+pub const FRONTEND_EXECUTION_BOUNDARIES: &[FrontendExecutionBoundary] = &[
+    FrontendExecutionBoundary {
+        path: "crates/aura-harness/src/backend/local_pty.rs",
+        kind: FrontendExecutionBoundaryKind::DriverBackend,
+        owner: "aura-harness-backend-local-pty",
+    },
+    FrontendExecutionBoundary {
+        path: "crates/aura-harness/src/backend/playwright_browser.rs",
+        kind: FrontendExecutionBoundaryKind::DriverBackend,
+        owner: "aura-harness-backend-playwright",
+    },
+    FrontendExecutionBoundary {
+        path: "crates/aura-harness/src/executor.rs",
+        kind: FrontendExecutionBoundaryKind::ScenarioExecutor,
+        owner: "aura-harness-executor",
+    },
+    FrontendExecutionBoundary {
+        path: "scripts/harness/run-matrix.sh",
+        kind: FrontendExecutionBoundaryKind::ScenarioEntrypoint,
+        owner: "aura-harness-matrix",
+    },
+    FrontendExecutionBoundary {
+        path: ".github/workflows/harness.yml",
+        kind: FrontendExecutionBoundaryKind::ScenarioEntrypoint,
+        owner: "aura-harness-ci",
+    },
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -909,6 +1515,12 @@ pub struct SharedFlowSupport {
 pub struct SharedFlowScenarioCoverage {
     pub flow: SharedFlowId,
     pub scenario_id: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharedFlowSourceArea {
+    pub flow: SharedFlowId,
+    pub path: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1287,6 +1899,237 @@ pub const SHARED_FLOW_SCENARIO_COVERAGE: &[SharedFlowScenarioCoverage] = &[
     },
 ];
 
+pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateNeighborhood,
+        path: "crates/aura-app/src/workflows/context.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateNeighborhood,
+        path: "crates/aura-terminal/src/tui/screens/neighborhood/screen.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateNeighborhood,
+        path: "crates/aura-ui/src/app.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateNeighborhood,
+        path: "crates/aura-web/src/main.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateChat,
+        path: "crates/aura-app/src/workflows/messaging.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateChat,
+        path: "crates/aura-terminal/src/tui/screens/chat/screen.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateChat,
+        path: "crates/aura-ui/src/app.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateChat,
+        path: "crates/aura-web/src/main.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateContacts,
+        path: "crates/aura-app/src/workflows/invitation.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateContacts,
+        path: "crates/aura-terminal/src/tui/screens/contacts/screen.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateContacts,
+        path: "crates/aura-ui/src/app.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateContacts,
+        path: "crates/aura-web/src/main.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateNotifications,
+        path: "crates/aura-app/src/workflows/recovery.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateNotifications,
+        path: "crates/aura-terminal/src/tui/screens/notifications/screen.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateNotifications,
+        path: "crates/aura-ui/src/app.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateNotifications,
+        path: "crates/aura-web/src/main.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateSettings,
+        path: "crates/aura-app/src/workflows/settings.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateSettings,
+        path: "crates/aura-terminal/src/tui/screens/settings/screen.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateSettings,
+        path: "crates/aura-ui/src/app.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::NavigateSettings,
+        path: "crates/aura-web/src/main.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::CreateInvitation,
+        path: "crates/aura-app/src/workflows/invitation.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::CreateInvitation,
+        path: "crates/aura-terminal/src/tui/screens/contacts/screen.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::CreateInvitation,
+        path: "crates/aura-ui/src/app.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::CreateInvitation,
+        path: "crates/aura-web/src/main.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::AcceptInvitation,
+        path: "crates/aura-app/src/workflows/invitation.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::AcceptInvitation,
+        path: "crates/aura-terminal/src/tui/screens/contacts/screen.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::AcceptInvitation,
+        path: "crates/aura-terminal/src/tui/screens/notifications/screen.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::AcceptInvitation,
+        path: "crates/aura-ui/src/app.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::AcceptInvitation,
+        path: "crates/aura-web/src/main.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::CreateHome,
+        path: "crates/aura-app/src/workflows/context.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::CreateHome,
+        path: "crates/aura-terminal/src/tui/screens/neighborhood/screen.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::CreateHome,
+        path: "crates/aura-ui/src/app.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::CreateHome,
+        path: "crates/aura-web/src/main.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::JoinChannel,
+        path: "crates/aura-app/src/workflows/messaging.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::JoinChannel,
+        path: "crates/aura-terminal/src/tui/screens/chat/screen.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::JoinChannel,
+        path: "crates/aura-ui/src/app.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::JoinChannel,
+        path: "crates/aura-web/src/main.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::SendChatMessage,
+        path: "crates/aura-app/src/workflows/messaging.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::SendChatMessage,
+        path: "crates/aura-terminal/src/tui/screens/chat/screen.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::SendChatMessage,
+        path: "crates/aura-ui/src/app.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::SendChatMessage,
+        path: "crates/aura-web/src/main.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::AddDevice,
+        path: "crates/aura-app/src/workflows/settings.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::AddDevice,
+        path: "crates/aura-terminal/src/tui/screens/settings/screen.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::AddDevice,
+        path: "crates/aura-ui/src/app.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::AddDevice,
+        path: "crates/aura-web/src/main.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::RemoveDevice,
+        path: "crates/aura-app/src/workflows/settings.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::RemoveDevice,
+        path: "crates/aura-terminal/src/tui/screens/settings/screen.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::RemoveDevice,
+        path: "crates/aura-ui/src/app.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::RemoveDevice,
+        path: "crates/aura-web/src/main.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::SwitchAuthority,
+        path: "crates/aura-app/src/workflows/settings.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::SwitchAuthority,
+        path: "crates/aura-terminal/src/tui/screens/settings/screen.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::SwitchAuthority,
+        path: "crates/aura-ui/src/app.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::SwitchAuthority,
+        path: "crates/aura-web/src/main.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::ThemeAppearance,
+        path: "crates/aura-app/src/workflows/settings.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::ThemeAppearance,
+        path: "crates/aura-terminal/src/tui/screens/settings/screen.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::ThemeAppearance,
+        path: "crates/aura-ui/src/app.rs",
+    },
+    SharedFlowSourceArea {
+        flow: SharedFlowId::ThemeAppearance,
+        path: "crates/aura-web/src/main.rs",
+    },
+];
+
 #[must_use]
 pub fn shared_flow_support(flow: SharedFlowId) -> &'static SharedFlowSupport {
     SHARED_FLOW_SUPPORT
@@ -1311,6 +2154,15 @@ pub fn shared_flow_scenarios(flow: SharedFlowId) -> Vec<&'static str> {
         .iter()
         .filter(|coverage| coverage.flow == flow)
         .map(|coverage| coverage.scenario_id)
+        .collect()
+}
+
+#[must_use]
+pub fn shared_flow_source_areas(flow: SharedFlowId) -> Vec<&'static str> {
+    SHARED_FLOW_SOURCE_AREAS
+        .iter()
+        .filter(|area| area.flow == flow)
+        .map(|area| area.path)
         .collect()
 }
 
@@ -1352,6 +2204,8 @@ pub struct UiSnapshot {
     pub focused_control: Option<ControlId>,
     pub open_modal: Option<ModalId>,
     pub readiness: UiReadiness,
+    pub revision: ProjectionRevision,
+    pub quiescence: QuiescenceSnapshot,
     pub selections: Vec<SelectionSnapshot>,
     pub lists: Vec<ListSnapshot>,
     pub messages: Vec<MessageSnapshot>,
@@ -1368,6 +2222,14 @@ impl UiSnapshot {
             focused_control: None,
             open_modal: None,
             readiness: UiReadiness::Loading,
+            revision: ProjectionRevision {
+                semantic_seq: 0,
+                render_seq: None,
+            },
+            quiescence: QuiescenceSnapshot {
+                state: QuiescenceState::Busy,
+                reason_codes: vec!["readiness_loading".to_string()],
+            },
             selections: Vec::new(),
             lists: Vec::new(),
             messages: Vec::new(),
@@ -1375,6 +2237,92 @@ impl UiSnapshot {
             toasts: Vec::new(),
             runtime_events: Vec::new(),
         }
+    }
+
+    pub fn validate_invariants(&self) -> Result<(), String> {
+        let mut list_ids = HashSet::new();
+        for list in &self.lists {
+            if !list_ids.insert(list.id) {
+                return Err(format!("duplicate list snapshot for {:?}", list.id));
+            }
+            if list.items.iter().any(|item| item.id.trim().is_empty()) {
+                return Err(format!("list {:?} contains empty item id", list.id));
+            }
+            if let Some(item) = list
+                .items
+                .iter()
+                .find(|item| {
+                    is_placeholder_semantic_id(&item.id)
+                        || is_override_semantic_id(&item.id)
+                        || is_row_index_semantic_id(&item.id)
+                })
+            {
+                return Err(format!(
+                    "list {:?} contains placeholder, override, or row-index item id {}",
+                    list.id, item.id
+                ));
+            }
+            if list.items.iter().filter(|item| item.selected).count() > 1 {
+                return Err(format!(
+                    "list {:?} exported multiple selected items",
+                    list.id
+                ));
+            }
+        }
+
+        for selection in &self.selections {
+            let Some(list) = self.lists.iter().find(|list| list.id == selection.list) else {
+                return Err(format!(
+                    "selection for {:?} has no corresponding list export",
+                    selection.list
+                ));
+            };
+            if !list.items.iter().any(|item| item.id == selection.item_id) {
+                return Err(format!(
+                    "selection for {:?} references missing item {}",
+                    selection.list, selection.item_id
+                ));
+            }
+            if is_placeholder_semantic_id(&selection.item_id)
+                || is_override_semantic_id(&selection.item_id)
+                || is_row_index_semantic_id(&selection.item_id)
+            {
+                return Err(format!(
+                    "selection for {:?} references placeholder, override, or row-index item {}",
+                    selection.list, selection.item_id
+                ));
+            }
+        }
+
+        if let Some(ControlId::Modal(modal)) = self.focused_control {
+            if self.open_modal != Some(modal) {
+                return Err(format!(
+                    "focused modal {:?} does not match open modal {:?}",
+                    modal, self.open_modal
+                ));
+            }
+        }
+        if let Some(ControlId::Screen(focused_screen)) = self.focused_control {
+            if focused_screen != self.screen {
+                return Err(format!(
+                    "focused screen {:?} does not match current screen {:?}",
+                    focused_screen, self.screen
+                ));
+            }
+        }
+        if self.open_modal.is_some() && matches!(self.focused_control, Some(ControlId::Screen(_))) {
+            return Err("modal cannot be open while focus remains on a screen root".to_string());
+        }
+        if let Some(event) = self.runtime_events.iter().find(|event| {
+            event.id.0.starts_with("inferred:") || event.id.0.starts_with("synthetic:")
+        }) {
+            return Err(format!(
+                "runtime event {} uses inferred/synthetic success id",
+                event.id.0
+            ));
+        }
+
+        Ok(())
     }
 
     #[must_use]
@@ -1523,6 +2471,20 @@ fn parity_message_signature(snapshot: &UiSnapshot) -> Vec<String> {
     messages
 }
 
+fn parity_runtime_event_signature(snapshot: &UiSnapshot) -> Vec<(RuntimeEventKind, String)> {
+    let mut events = snapshot
+        .runtime_events
+        .iter()
+        .map(|event| (event.kind(), event.key()))
+        .collect::<Vec<_>>();
+    events.sort_by(|left, right| {
+        format!("{:?}", left.0)
+            .cmp(&format!("{:?}", right.0))
+            .then_with(|| left.1.cmp(&right.1))
+    });
+    events
+}
+
 #[must_use]
 pub fn compare_ui_snapshots_for_parity(
     web: &UiSnapshot,
@@ -1549,6 +2511,13 @@ pub fn compare_ui_snapshots_for_parity(
             field: "open_modal",
             web: format!("{:?}", web.open_modal),
             tui: format!("{:?}", tui.open_modal),
+        });
+    }
+    if web.focused_control != tui.focused_control {
+        mismatches.push(UiParityMismatch {
+            field: "focused_control",
+            web: format!("{:?}", web.focused_control),
+            tui: format!("{:?}", tui.focused_control),
         });
     }
 
@@ -1592,7 +2561,51 @@ pub fn compare_ui_snapshots_for_parity(
         });
     }
 
+    let web_runtime_events = parity_runtime_event_signature(web);
+    let tui_runtime_events = parity_runtime_event_signature(tui);
+    if web_runtime_events != tui_runtime_events {
+        mismatches.push(UiParityMismatch {
+            field: "runtime_events",
+            web: format!("{web_runtime_events:?}"),
+            tui: format!("{tui_runtime_events:?}"),
+        });
+    }
+
     mismatches
+}
+
+fn parity_mismatch_is_covered_by_exception(
+    web: &UiSnapshot,
+    tui: &UiSnapshot,
+    mismatch: &UiParityMismatch,
+) -> bool {
+    matches!(
+        (mismatch.field, web.screen, tui.screen, web.focused_control, tui.focused_control),
+        (
+            "focused_control",
+            ScreenId::Settings,
+            ScreenId::Settings,
+            Some(ControlId::SettingsToggleThemeButton),
+            _
+        ) | (
+            "focused_control",
+            ScreenId::Settings,
+            ScreenId::Settings,
+            _,
+            Some(ControlId::SettingsToggleThemeButton)
+        )
+    )
+}
+
+#[must_use]
+pub fn uncovered_ui_parity_mismatches(
+    web: &UiSnapshot,
+    tui: &UiSnapshot,
+) -> Vec<UiParityMismatch> {
+    compare_ui_snapshots_for_parity(web, tui)
+        .into_iter()
+        .filter(|mismatch| !parity_mismatch_is_covered_by_exception(web, tui, mismatch))
+        .collect()
 }
 
 #[cfg(test)]
@@ -1600,16 +2613,26 @@ mod tests {
     use super::{
         compare_ui_snapshots_for_parity, list_item_dom_id, list_item_selector,
         shared_flow_scenarios, shared_flow_support, shared_list_support, shared_modal_support,
-        shared_screen_module_map, shared_screen_support, ConfirmationState, ControlId, FieldId,
-        FlowAvailability, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId,
-        OperationId, OperationInstanceId, OperationSnapshot, OperationState, ParityException,
-        RenderHeartbeat, ScreenId, SelectionSnapshot, SharedFlowId, UiParityMismatch,
-        UiReadiness, UiSnapshot, ALL_SHARED_FLOW_IDS,
+        shared_flow_source_areas, shared_screen_module_map, shared_screen_support,
+        uncovered_ui_parity_mismatches, validate_render_convergence, ChannelFactKey,
+        ConfirmationState, ControlId, FieldId, FlowAvailability, ListId, ListItemSnapshot,
+        ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId,
+        OperationSnapshot, OperationState, ParityException, ParityUiIdentity, ProjectionRevision,
+        QuiescenceSnapshot, RenderHeartbeat, RuntimeEventId, RuntimeEventSnapshot, RuntimeFact,
+        ScreenId, SelectionSnapshot, SharedFlowId, UiParityMismatch, UiReadiness, UiSnapshot,
+        ALL_SHARED_FLOW_IDS, BROWSER_CACHE_BOUNDARIES, BROWSER_HARNESS_BRIDGE_API_VERSION,
+        BROWSER_HARNESS_BRIDGE_METHODS, BROWSER_OBSERVATION_SURFACE_API_VERSION,
+        BROWSER_OBSERVATION_SURFACE_GLOBAL, BROWSER_OBSERVATION_SURFACE_METHODS,
+        FRONTEND_EXECUTION_BOUNDARIES, HARNESS_MODE_ALLOWLIST,
+        SHARED_FLOW_SOURCE_AREAS,
+        TUI_OBSERVATION_SURFACE_API_VERSION, TUI_OBSERVATION_SURFACE_METHODS,
+        BrowserHarnessBridgeMethodKind, FrontendExecutionBoundaryKind, HarnessModeChangeKind,
         PARITY_EXCEPTION_METADATA, SHARED_FLOW_SCENARIO_COVERAGE, SHARED_FLOW_SUPPORT,
         SHARED_LIST_SUPPORT, SHARED_MODAL_SUPPORT, SHARED_SCREEN_MODULE_MAP, SHARED_SCREEN_SUPPORT,
     };
     use std::collections::HashSet;
     use std::path::Path;
+    use super::next_projection_revision;
 
     #[test]
     fn screen_ids_have_stable_help_labels() {
@@ -1633,6 +2656,421 @@ mod tests {
         assert!(snapshot.messages.is_empty());
         assert!(snapshot.operations.is_empty());
         assert!(snapshot.toasts.is_empty());
+    }
+
+    #[test]
+    fn snapshot_invariants_reject_placeholder_ids() {
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Chat,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: next_projection_revision(Some(1)),
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: vec![SelectionSnapshot {
+                list: ListId::Channels,
+                item_id: "channel:0000000000000000".to_string(),
+            }],
+            lists: vec![ListSnapshot {
+                id: ListId::Channels,
+                items: vec![ListItemSnapshot {
+                    id: "channel:0000000000000000".to_string(),
+                    selected: true,
+                    confirmation: ConfirmationState::Confirmed,
+                }],
+            }],
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+
+        assert!(
+            snapshot
+                .validate_invariants()
+                .expect_err("placeholder ids must be rejected")
+                .contains("placeholder or override item id")
+        );
+    }
+
+    #[test]
+    fn snapshot_invariants_reject_override_backed_ids() {
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Chat,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: next_projection_revision(Some(4)),
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: vec![SelectionSnapshot {
+                list: ListId::Channels,
+                item_id: "override:channel-list".to_string(),
+            }],
+            lists: vec![ListSnapshot {
+                id: ListId::Channels,
+                items: vec![ListItemSnapshot {
+                    id: "override:channel-list".to_string(),
+                    selected: true,
+                    confirmation: ConfirmationState::Confirmed,
+                }],
+            }],
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+
+        assert!(
+            snapshot
+                .validate_invariants()
+                .expect_err("override-backed ids must be rejected")
+                .contains("placeholder or override")
+        );
+    }
+
+    #[test]
+    fn snapshot_invariants_reject_row_index_ids() {
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Contacts,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: next_projection_revision(Some(7)),
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: vec![SelectionSnapshot {
+                list: ListId::Contacts,
+                item_id: "row-2".to_string(),
+            }],
+            lists: vec![ListSnapshot {
+                id: ListId::Contacts,
+                items: vec![ListItemSnapshot {
+                    id: "row-2".to_string(),
+                    selected: true,
+                    confirmation: ConfirmationState::Confirmed,
+                }],
+            }],
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+
+        assert!(
+            snapshot
+                .validate_invariants()
+                .expect_err("row-index ids must be rejected")
+                .contains("row-index item")
+        );
+    }
+
+    #[test]
+    fn snapshot_invariants_reject_inferred_runtime_events() {
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Contacts,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: next_projection_revision(Some(2)),
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: Vec::new(),
+            lists: Vec::new(),
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: vec![RuntimeEventSnapshot {
+                id: RuntimeEventId("inferred:contact_link_ready".to_string()),
+                fact: RuntimeFact::ContactLinkReady {
+                    authority_id: Some("alice".to_string()),
+                    contact_count: Some(1),
+                },
+            }],
+        };
+
+        assert!(
+            snapshot
+                .validate_invariants()
+                .expect_err("inferred runtime events must be rejected")
+                .contains("inferred/synthetic")
+        );
+    }
+
+    #[test]
+    fn snapshot_invariants_reject_contradictory_focus_and_modal_state() {
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Neighborhood,
+            focused_control: Some(ControlId::Screen(ScreenId::Chat)),
+            open_modal: Some(ModalId::CreateHome),
+            readiness: UiReadiness::Ready,
+            revision: next_projection_revision(Some(3)),
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: Vec::new(),
+            lists: Vec::new(),
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+
+        let error = snapshot
+            .validate_invariants()
+            .expect_err("contradictory focus must be rejected");
+        assert!(
+            error.contains("focused screen") || error.contains("modal cannot be open"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn browser_cache_boundaries_are_declared() {
+        assert_eq!(BROWSER_CACHE_BOUNDARIES.len(), 5);
+        assert!(BROWSER_CACHE_BOUNDARIES
+            .iter()
+            .any(|boundary| boundary.reason_code == "authority_switch"));
+        assert!(BROWSER_CACHE_BOUNDARIES
+            .iter()
+            .any(|boundary| boundary.reason_code == "device_import"));
+    }
+
+    #[test]
+    fn projection_revision_detects_stale_snapshots_by_revision() {
+        let baseline = next_projection_revision(Some(10));
+        let newer = next_projection_revision(Some(11));
+        let render_only_newer = super::ProjectionRevision {
+            semantic_seq: newer.semantic_seq,
+            render_seq: Some(12),
+        };
+
+        assert!(newer.has_sequence_metadata());
+        assert!(newer.is_newer_than(baseline));
+        assert!(baseline.is_stale_against(newer));
+        assert!(render_only_newer.is_newer_than(newer));
+    }
+
+    #[test]
+    fn onboarding_is_declared_in_the_shared_snapshot_model() {
+        assert_eq!(ScreenId::Onboarding.help_label(), "Onboarding");
+        assert_eq!(
+            shared_screen_support(ScreenId::Onboarding).web,
+            FlowAvailability::Supported
+        );
+        assert_eq!(
+            shared_screen_support(ScreenId::Onboarding).tui,
+            FlowAvailability::Supported
+        );
+        assert_eq!(UiSnapshot::loading(ScreenId::Onboarding).screen, ScreenId::Onboarding);
+    }
+
+    #[test]
+    fn shared_flow_source_area_metadata_points_to_existing_paths() {
+        let source_area_unique: HashSet<_> = SHARED_FLOW_SOURCE_AREAS
+            .iter()
+            .map(|area| (area.flow, area.path))
+            .collect();
+        assert_eq!(source_area_unique.len(), SHARED_FLOW_SOURCE_AREAS.len());
+
+        for flow in ALL_SHARED_FLOW_IDS {
+            assert!(
+                !shared_flow_source_areas(*flow).is_empty(),
+                "shared flow {:?} must declare at least one owned source area",
+                flow
+            );
+        }
+
+        for area in SHARED_FLOW_SOURCE_AREAS {
+            assert!(
+                Path::new(area.path).exists(),
+                "shared flow {:?} source area path does not exist: {}",
+                area.flow,
+                area.path
+            );
+        }
+    }
+
+    #[test]
+    fn browser_harness_bridge_contract_is_versioned_and_complete() {
+        assert!(BROWSER_HARNESS_BRIDGE_API_VERSION >= 1);
+        let names = BROWSER_HARNESS_BRIDGE_METHODS
+            .iter()
+            .map(|method| method.name)
+            .collect::<HashSet<_>>();
+        assert_eq!(names.len(), BROWSER_HARNESS_BRIDGE_METHODS.len());
+        for required in [
+            "send_keys",
+            "send_key",
+            "navigate_screen",
+            "snapshot",
+            "ui_state",
+            "read_clipboard",
+            "create_contact_invitation",
+            "create_account",
+            "create_home",
+            "get_authority_id",
+            "tail_log",
+            "root_structure",
+            "inject_message",
+        ] {
+            assert!(names.contains(required), "missing bridge method {required}");
+        }
+    }
+
+    #[test]
+    fn browser_harness_bridge_read_methods_are_declared_deterministic() {
+        for method in BROWSER_HARNESS_BRIDGE_METHODS {
+            if method.returns_semantic_state || method.returns_render_signal {
+                assert!(
+                    method.deterministic,
+                    "bridge method {} must be deterministic for semantic or render observation",
+                    method.name
+                );
+                assert_ne!(method.kind, BrowserHarnessBridgeMethodKind::Action);
+            }
+        }
+    }
+
+    #[test]
+    fn browser_observation_surface_contract_is_versioned_and_read_only() {
+        assert!(BROWSER_OBSERVATION_SURFACE_API_VERSION >= 1);
+        assert_eq!(BROWSER_OBSERVATION_SURFACE_GLOBAL, "__AURA_HARNESS_OBSERVE__");
+        let names = BROWSER_OBSERVATION_SURFACE_METHODS
+            .iter()
+            .map(|method| method.name)
+            .collect::<HashSet<_>>();
+        assert_eq!(names.len(), BROWSER_OBSERVATION_SURFACE_METHODS.len());
+        for required in [
+            "snapshot",
+            "ui_state",
+            "render_heartbeat",
+            "read_clipboard",
+            "get_authority_id",
+            "tail_log",
+            "root_structure",
+        ] {
+            assert!(names.contains(required), "missing observation method {required}");
+        }
+        for method in BROWSER_OBSERVATION_SURFACE_METHODS {
+            assert!(method.deterministic, "observation method {} must be deterministic", method.name);
+        }
+    }
+
+    #[test]
+    fn tui_observation_surface_contract_is_versioned_and_read_only() {
+        assert!(TUI_OBSERVATION_SURFACE_API_VERSION >= 1);
+        let names = TUI_OBSERVATION_SURFACE_METHODS
+            .iter()
+            .map(|method| method.name)
+            .collect::<HashSet<_>>();
+        assert_eq!(names.len(), TUI_OBSERVATION_SURFACE_METHODS.len());
+        for required in [
+            "snapshot",
+            "snapshot_dom",
+            "ui_snapshot",
+            "wait_for_ui_snapshot_event",
+            "wait_for_dom_patterns",
+            "wait_for_target",
+            "tail_log",
+            "read_clipboard",
+        ] {
+            assert!(names.contains(required), "missing TUI observation method {required}");
+        }
+        for method in TUI_OBSERVATION_SURFACE_METHODS {
+            assert!(method.deterministic, "TUI observation method {} must be deterministic", method.name);
+        }
+    }
+
+    #[test]
+    fn observation_surface_methods_do_not_overlap_action_surface() {
+        let action_methods = BROWSER_HARNESS_BRIDGE_METHODS
+            .iter()
+            .filter(|method| method.kind == BrowserHarnessBridgeMethodKind::Action)
+            .map(|method| method.name)
+            .collect::<HashSet<_>>();
+        for method in BROWSER_OBSERVATION_SURFACE_METHODS {
+            assert!(
+                !action_methods.contains(method.name),
+                "browser observation method {} must not also be exported on the action surface",
+                method.name
+            );
+        }
+    }
+
+    #[test]
+    fn harness_mode_allowlist_is_scoped_to_non_semantic_categories() {
+        assert!(!HARNESS_MODE_ALLOWLIST.is_empty());
+        for entry in HARNESS_MODE_ALLOWLIST {
+            assert!(Path::new(entry.path).exists(), "missing harness-mode allowlist path {}", entry.path);
+            assert!(Path::new(entry.design_ref).exists(), "missing harness-mode design reference {}", entry.design_ref);
+            assert!(
+                matches!(
+                    entry.kind,
+                    HarnessModeChangeKind::Observation
+                        | HarnessModeChangeKind::TimingDiscipline
+                        | HarnessModeChangeKind::RenderingStability
+                        | HarnessModeChangeKind::Instrumentation
+                ),
+                "invalid harness-mode allowlist kind for {}",
+                entry.path
+            );
+            assert!(!entry.owner.trim().is_empty(), "missing harness-mode owner for {}", entry.path);
+        }
+    }
+
+    #[test]
+    fn frontend_execution_boundaries_are_defined_and_exist() {
+        assert!(!FRONTEND_EXECUTION_BOUNDARIES.is_empty());
+        assert!(FRONTEND_EXECUTION_BOUNDARIES.iter().any(|entry| {
+            entry.kind == FrontendExecutionBoundaryKind::DriverBackend
+        }));
+        assert!(FRONTEND_EXECUTION_BOUNDARIES.iter().any(|entry| {
+            entry.kind == FrontendExecutionBoundaryKind::ScenarioExecutor
+        }));
+        assert!(FRONTEND_EXECUTION_BOUNDARIES.iter().any(|entry| {
+            entry.kind == FrontendExecutionBoundaryKind::ScenarioEntrypoint
+        }));
+        for entry in FRONTEND_EXECUTION_BOUNDARIES {
+            assert!(Path::new(entry.path).exists(), "missing frontend execution boundary path {}", entry.path);
+            assert!(!entry.owner.trim().is_empty(), "missing frontend execution boundary owner for {}", entry.path);
+        }
+    }
+
+    #[test]
+    fn parity_ui_identity_helpers_match_contract_ids() {
+        assert_eq!(
+            ParityUiIdentity::control_dom_id(ControlId::AppRoot),
+            ControlId::AppRoot.web_dom_id()
+        );
+        assert_eq!(
+            ParityUiIdentity::field_dom_id(FieldId::InvitationCode),
+            FieldId::InvitationCode.web_dom_id()
+        );
+        assert_eq!(
+            ParityUiIdentity::list_dom_id(ListId::Contacts),
+            ListId::Contacts.web_dom_id()
+        );
+        assert_eq!(
+            ParityUiIdentity::modal_dom_id(ModalId::CreateInvitation),
+            ModalId::CreateInvitation.web_dom_id()
+        );
+        assert_eq!(
+            ParityUiIdentity::list_item_dom_id(ListId::Contacts, "authority:abc/DEF"),
+            list_item_dom_id(ListId::Contacts, "authority:abc/DEF")
+        );
+    }
+
+    #[test]
+    fn frontend_sources_reference_shared_identity_helpers() {
+        let web_source = std::fs::read_to_string("crates/aura-web/src/harness_bridge.rs")
+            .unwrap_or_else(|error| panic!("failed to read harness bridge source: {error}"));
+        let ui_source = std::fs::read_to_string("crates/aura-ui/src/app.rs")
+            .unwrap_or_else(|error| panic!("failed to read aura-ui source: {error}"));
+
+        assert!(
+            web_source.contains(".web_dom_id()"),
+            "web harness bridge must reference shared contract DOM id helpers"
+        );
+        assert!(
+            ui_source.contains("list_item_dom_id(") && ui_source.contains(".web_dom_id()"),
+            "aura-ui must reference shared identity helpers for parity-critical ids"
+        );
     }
 
     #[test]
@@ -1874,6 +3312,65 @@ mod tests {
     }
 
     #[test]
+    fn render_convergence_accepts_matching_snapshot_and_heartbeat() {
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Chat,
+            focused_control: Some(ControlId::Screen(ScreenId::Chat)),
+            open_modal: Some(ModalId::AcceptInvitation),
+            readiness: UiReadiness::Ready,
+            revision: ProjectionRevision {
+                semantic_seq: 1,
+                render_seq: Some(7),
+            },
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: Vec::new(),
+            lists: Vec::new(),
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+        let heartbeat = RenderHeartbeat {
+            screen: ScreenId::Chat,
+            open_modal: Some(ModalId::AcceptInvitation),
+            render_seq: 7,
+        };
+
+        validate_render_convergence(&snapshot, &heartbeat)
+            .unwrap_or_else(|error| panic!("render convergence should hold: {error}"));
+    }
+
+    #[test]
+    fn render_convergence_rejects_semantic_state_published_ahead_of_renderer() {
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Settings,
+            focused_control: Some(ControlId::Screen(ScreenId::Settings)),
+            open_modal: Some(ModalId::CreateInvitation),
+            readiness: UiReadiness::Ready,
+            revision: ProjectionRevision {
+                semantic_seq: 2,
+                render_seq: Some(9),
+            },
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: Vec::new(),
+            lists: Vec::new(),
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+        let heartbeat = RenderHeartbeat {
+            screen: ScreenId::Settings,
+            open_modal: None,
+            render_seq: 8,
+        };
+
+        let error = validate_render_convergence(&snapshot, &heartbeat)
+            .expect_err("semantic state ahead of renderer must fail");
+        assert!(error.contains("ahead of renderer") || error.contains("diverges from renderer"));
+    }
+
+    #[test]
     fn list_item_dom_ids_are_stable_and_sanitized() {
         assert_eq!(
             list_item_dom_id(ListId::Contacts, "authority:abc/DEF"),
@@ -2086,6 +3583,11 @@ mod tests {
             focused_control: Some(ControlId::Screen(ScreenId::Chat)),
             open_modal: None,
             readiness: UiReadiness::Ready,
+            revision: ProjectionRevision {
+                semantic_seq: 1,
+                render_seq: Some(1),
+            },
+            quiescence: QuiescenceSnapshot::settled(),
             selections: vec![SelectionSnapshot {
                 list: ListId::Channels,
                 item_id: "amp-bridge".to_string(),
@@ -2111,7 +3613,6 @@ mod tests {
             runtime_events: Vec::new(),
         };
         let mut tui = web.clone();
-        tui.focused_control = Some(ControlId::List(ListId::Channels));
         tui.messages[0].id = "tui-1".to_string();
         tui.operations[0].instance_id = OperationInstanceId("tui-op".to_string());
 
@@ -2125,6 +3626,150 @@ mod tests {
                 field: "messages",
                 web: "[\"hello\"]".to_string(),
                 tui: "[\"different\"]".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn ui_snapshot_parity_detects_focus_semantic_drift() {
+        let web = UiSnapshot {
+            screen: ScreenId::Chat,
+            focused_control: Some(ControlId::Screen(ScreenId::Chat)),
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: ProjectionRevision {
+                semantic_seq: 1,
+                render_seq: Some(1),
+            },
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: Vec::new(),
+            lists: Vec::new(),
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+        let mut tui = web.clone();
+        tui.focused_control = Some(ControlId::List(ListId::Channels));
+
+        let mismatches = compare_ui_snapshots_for_parity(&web, &tui);
+        assert_eq!(
+            mismatches,
+            vec![UiParityMismatch {
+                field: "focused_control",
+                web: "Some(Screen(Chat))".to_string(),
+                tui: "Some(List(Channels))".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn ui_snapshot_parity_ignores_declared_theme_exception() {
+        let web = UiSnapshot {
+            screen: ScreenId::Settings,
+            focused_control: Some(ControlId::SettingsToggleThemeButton),
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: ProjectionRevision {
+                semantic_seq: 1,
+                render_seq: Some(1),
+            },
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: Vec::new(),
+            lists: Vec::new(),
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+        let mut tui = web.clone();
+        tui.focused_control = Some(ControlId::Screen(ScreenId::Settings));
+
+        assert_eq!(
+            compare_ui_snapshots_for_parity(&web, &tui),
+            vec![UiParityMismatch {
+                field: "focused_control",
+                web: "Some(SettingsToggleThemeButton)".to_string(),
+                tui: "Some(Screen(Settings))".to_string(),
+            }]
+        );
+        assert!(uncovered_ui_parity_mismatches(&web, &tui).is_empty());
+    }
+
+    #[test]
+    fn ui_snapshot_parity_reports_undeclared_drift() {
+        let web = UiSnapshot {
+            screen: ScreenId::Chat,
+            focused_control: Some(ControlId::Screen(ScreenId::Chat)),
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: ProjectionRevision {
+                semantic_seq: 1,
+                render_seq: Some(1),
+            },
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: Vec::new(),
+            lists: Vec::new(),
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+        let mut tui = web.clone();
+        tui.screen = ScreenId::Contacts;
+        tui.focused_control = Some(ControlId::Screen(ScreenId::Contacts));
+
+        let mismatches = uncovered_ui_parity_mismatches(&web, &tui);
+        assert!(mismatches.iter().any(|mismatch| mismatch.field == "screen"));
+    }
+
+    #[test]
+    fn ui_snapshot_parity_detects_runtime_event_shape_drift() {
+        let web = UiSnapshot {
+            screen: ScreenId::Chat,
+            focused_control: Some(ControlId::Screen(ScreenId::Chat)),
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: ProjectionRevision {
+                semantic_seq: 1,
+                render_seq: Some(1),
+            },
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: Vec::new(),
+            lists: Vec::new(),
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: vec![RuntimeEventSnapshot {
+                id: RuntimeEventId("event-1".to_string()),
+                fact: RuntimeFact::MessageCommitted {
+                    channel: ChannelFactKey {
+                        id: Some("channel:shared".to_string()),
+                        name: Some("shared".to_string()),
+                    },
+                    content: "hello".to_string(),
+                },
+            }],
+        };
+        let mut tui = web.clone();
+        tui.runtime_events[0] = RuntimeEventSnapshot {
+            id: RuntimeEventId("event-2".to_string()),
+            fact: RuntimeFact::MessageDeliveryReady {
+                channel: ChannelFactKey {
+                    id: Some("channel:shared".to_string()),
+                    name: Some("shared".to_string()),
+                },
+                member_count: 2,
+            },
+        };
+
+        let mismatches = compare_ui_snapshots_for_parity(&web, &tui);
+        assert_eq!(
+            mismatches,
+            vec![UiParityMismatch {
+                field: "runtime_events",
+                web: "[(MessageCommitted, \"message_committed:shared:hello\")]".to_string(),
+                tui: "[(MessageDeliveryReady, \"message_delivery_ready:shared\")]".to_string(),
             }]
         );
     }
@@ -2179,6 +3824,11 @@ mod tests {
             focused_control: Some(ControlId::Screen(ScreenId::Settings)),
             open_modal: None,
             readiness: UiReadiness::Ready,
+            revision: ProjectionRevision {
+                semantic_seq: 1,
+                render_seq: Some(1),
+            },
+            quiescence: QuiescenceSnapshot::settled(),
             selections: vec![
                 SelectionSnapshot {
                     list: ListId::Navigation,
@@ -2236,6 +3886,11 @@ mod tests {
             focused_control: Some(ControlId::Screen(ScreenId::Settings)),
             open_modal: None,
             readiness: UiReadiness::Ready,
+            revision: ProjectionRevision {
+                semantic_seq: 1,
+                render_seq: Some(1),
+            },
+            quiescence: QuiescenceSnapshot::settled(),
             selections: vec![
                 SelectionSnapshot {
                     list: ListId::Navigation,

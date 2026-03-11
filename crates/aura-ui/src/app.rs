@@ -516,7 +516,7 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
     let selected_name = controller
         .ui_model()
         .and_then(|model| model.selected_channel_name().map(str::to_string));
-    let runtime = build_chat_runtime_view(chat, selected_name.as_deref());
+    let runtime = build_chat_runtime_view(chat.clone(), selected_name.as_deref());
     controller.push_log(&format!(
         "load_chat_runtime_view: selected={:?} active={} channels={}",
         selected_name,
@@ -529,10 +529,9 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
         message_count: runtime.messages.len(),
     }];
     if let (Some(channel), Some(authority_id)) = (
-        runtime
-        .channels
-        .iter()
-        .find(|channel| channel.name.eq_ignore_ascii_case(&runtime.active_channel)),
+        chat
+            .all_channels()
+            .find(|channel| channel.name.eq_ignore_ascii_case(&runtime.active_channel)),
         authority_id,
     ) {
         let resolved_recipient_count =
@@ -5771,6 +5770,11 @@ fn runtime_semantic_snapshot(
             content: message.content.clone(),
         })
         .collect();
+    snapshot.quiescence = aura_app::ui::contract::QuiescenceSnapshot::derive(
+        snapshot.readiness,
+        snapshot.open_modal,
+        &snapshot.operations,
+    );
 
     snapshot
 }

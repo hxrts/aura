@@ -153,6 +153,78 @@ use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
 use aura_core::AuraError;
 use std::sync::Arc;
 
+#[cfg(feature = "signals")]
+async fn reconcile_accepted_channel_invitation(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    channel_id: ContextId,
+    sender_id: AuthorityId,
+    channel_name_hint: Option<&str>,
+) -> Result<(), AuraError> {
+    const CHANNEL_CONTEXT_ATTEMPTS: usize = 60;
+    const CHANNEL_CONTEXT_BACKOFF_MS: u64 = 100;
+
+    let mut authoritative_context = None;
+    for attempt in 0..CHANNEL_CONTEXT_ATTEMPTS {
+        authoritative_context =
+            crate::workflows::messaging::authoritative_context_id_for_channel(app_core, channel_id)
+                .await;
+        if authoritative_context.is_some() {
+            break;
+        }
+        if attempt + 1 < CHANNEL_CONTEXT_ATTEMPTS {
+            converge_runtime(runtime).await;
+            runtime.sleep_ms(CHANNEL_CONTEXT_BACKOFF_MS).await;
+        }
+    }
+    if authoritative_context.is_none() {
+        let channel_visible = crate::workflows::snapshot_policy::chat_snapshot(app_core)
+            .await
+            .channel(&channel_id)
+            .is_some();
+        if !channel_visible {
+            let _ = crate::workflows::messaging::join_channel(app_core, channel_id).await;
+        }
+        authoritative_context =
+            crate::workflows::messaging::authoritative_context_id_for_channel(app_core, channel_id)
+                .await;
+    }
+    let authoritative_context = authoritative_context.ok_or_else(|| {
+        AuraError::agent(format!(
+            "Accepted channel invitation for {channel_id} but no authoritative context was materialized"
+        ))
+    })?;
+    crate::workflows::messaging::project_channel_peer_membership_with_context(
+        app_core,
+        channel_id,
+        Some(authoritative_context),
+        sender_id,
+        channel_name_hint,
+    )
+    .await?;
+    if crate::workflows::snapshot_policy::chat_snapshot(app_core)
+        .await
+        .channel(&channel_id)
+        .is_none()
+    {
+        let _ = crate::workflows::messaging::join_channel(app_core, channel_id).await;
+    }
+    converge_runtime(runtime).await;
+    Ok(())
+}
+
+#[cfg(not(feature = "signals"))]
+async fn reconcile_accepted_channel_invitation(
+    _app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    _channel_id: ContextId,
+    _sender_id: AuthorityId,
+    _channel_name_hint: Option<&str>,
+) -> Result<(), AuraError> {
+    converge_runtime(runtime).await;
+    Ok(())
+}
+
 // ============================================================================
 // Invitation Creation via RuntimeBridge
 // ============================================================================
@@ -665,8 +737,6 @@ pub async fn accept_pending_home_invitation(
     let our_authority = runtime.authority_id();
     const HOME_ACCEPT_ATTEMPTS: usize = 200;
     const HOME_ACCEPT_BACKOFF_MS: u64 = 150;
-    const CHANNEL_CONTEXT_ATTEMPTS: usize = 60;
-    const CHANNEL_CONTEXT_BACKOFF_MS: u64 = 100;
 
     for attempt in 0..HOME_ACCEPT_ATTEMPTS {
         let pending = runtime.list_pending_invitations().await;
@@ -687,62 +757,14 @@ pub async fn accept_pending_home_invitation(
                 Ok(()) => {
                     converge_runtime(&runtime).await;
                     if let Some(channel_id) = invited_channel_id {
-                        let mut authoritative_context = None;
-                        for attempt in 0..CHANNEL_CONTEXT_ATTEMPTS {
-                            authoritative_context =
-                                crate::workflows::messaging::authoritative_context_id_for_channel(
-                                    app_core, channel_id,
-                                )
-                                .await;
-                            if authoritative_context.is_some() {
-                                break;
-                            }
-                            if attempt + 1 < CHANNEL_CONTEXT_ATTEMPTS {
-                                converge_runtime(&runtime).await;
-                                runtime.sleep_ms(CHANNEL_CONTEXT_BACKOFF_MS).await;
-                            }
-                        }
-                        if authoritative_context.is_none() {
-                            let channel_visible = crate::workflows::snapshot_policy::chat_snapshot(
-                                app_core,
-                            )
-                            .await
-                            .channel(&channel_id)
-                            .is_some();
-                            if !channel_visible {
-                                let _ =
-                                    crate::workflows::messaging::join_channel(app_core, channel_id)
-                                        .await;
-                            }
-                            authoritative_context =
-                                crate::workflows::messaging::authoritative_context_id_for_channel(
-                                    app_core, channel_id,
-                                )
-                                .await;
-                        }
-                        let authoritative_context = authoritative_context.ok_or_else(|| {
-                            AuraError::agent(format!(
-                                "Accepted channel invitation for {channel_id} but no authoritative context was materialized"
-                            ))
-                        })?;
-                        crate::workflows::messaging::project_channel_peer_membership_with_context(
+                        reconcile_accepted_channel_invitation(
                             app_core,
+                            &runtime,
                             channel_id,
-                            Some(authoritative_context),
                             inv.sender_id,
                             channel_name_hint.as_deref(),
                         )
                         .await?;
-                        if crate::workflows::snapshot_policy::chat_snapshot(app_core)
-                            .await
-                            .channel(&channel_id)
-                            .is_none()
-                        {
-                            let _ =
-                                crate::workflows::messaging::join_channel(app_core, channel_id)
-                                    .await;
-                        }
-                        converge_runtime(&runtime).await;
                     }
                     return Ok(inv.invitation_id.clone());
                 }
@@ -753,53 +775,14 @@ pub async fn accept_pending_home_invitation(
                     // Treat these races as idempotent success for `/homeaccept`.
                     if lowered.contains("already accepted") || lowered.contains("not pending") {
                         if let Some(channel_id) = invited_channel_id {
-                            let mut authoritative_context = None;
-                            for attempt in 0..CHANNEL_CONTEXT_ATTEMPTS {
-                                authoritative_context =
-                                    crate::workflows::messaging::authoritative_context_id_for_channel(
-                                        app_core, channel_id,
-                                    )
-                                    .await;
-                                if authoritative_context.is_some() {
-                                    break;
-                                }
-                                if attempt + 1 < CHANNEL_CONTEXT_ATTEMPTS {
-                                    converge_runtime(&runtime).await;
-                                    runtime.sleep_ms(CHANNEL_CONTEXT_BACKOFF_MS).await;
-                                }
-                            }
-                            if authoritative_context.is_none() {
-                                let channel_visible = crate::workflows::snapshot_policy::chat_snapshot(
-                                    app_core,
-                                )
-                                .await
-                                .channel(&channel_id)
-                                .is_some();
-                                if !channel_visible {
-                                    let _ =
-                                        crate::workflows::messaging::join_channel(app_core, channel_id)
-                                            .await;
-                                }
-                                authoritative_context =
-                                    crate::workflows::messaging::authoritative_context_id_for_channel(
-                                        app_core, channel_id,
-                                    )
-                                    .await;
-                            }
-                            let authoritative_context = authoritative_context.ok_or_else(|| {
-                                AuraError::agent(format!(
-                                    "Accepted channel invitation for {channel_id} but no authoritative context was materialized"
-                                ))
-                            })?;
-                            crate::workflows::messaging::project_channel_peer_membership_with_context(
+                            reconcile_accepted_channel_invitation(
                                 app_core,
+                                &runtime,
                                 channel_id,
-                                Some(authoritative_context),
                                 inv.sender_id,
                                 channel_name_hint.as_deref(),
                             )
                             .await?;
-                            converge_runtime(&runtime).await;
                         }
                         return Ok(inv.invitation_id.clone());
                     }

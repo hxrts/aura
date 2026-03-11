@@ -50,6 +50,8 @@ The documents below cover theory, technical components, implementation guidance,
 
 [Runtime](120_runtime.md) describes lifecycle management, guard chain execution, and service composition.
 
+[Harness UX Determinism Design Note](121_harness_ux_determinism.md) defines the shared UX contract, authoritative observation rules, and browser freshness model for parity-critical harness flows.
+
 [Consensus](106_consensus.md) specifies single-shot agreement for non-monotone operations with witness attestation.
 
 [Operation Categories](107_operation_categories.md) defines A/B/C operation tiers, K1/K2/K3 key generation, and agreement levels.
@@ -87,6 +89,8 @@ The documents below cover theory, technical components, implementation guidance,
 [Choreography Development Guide](803_choreography_guide.md) explains choreographic protocol design, CRDTs, and distributed coordination.
 
 [Testing Guide](804_testing_guide.md) covers test patterns, fixtures, conformance testing, and runtime harness.
+
+[Harness UX Determinism Design Note](121_harness_ux_determinism.md) explains the determinism model for shared-flow harness execution, revisioned observation, and trace conformance.
 
 [Simulation Guide](805_simulation_guide.md) explains deterministic simulation for debugging and property verification.
 

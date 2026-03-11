@@ -24,6 +24,7 @@ use crate::backend::{
     SubmittedAction, UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
+use crate::recovery_registry::{run_registered_recovery, RecoveryPath};
 use crate::tool_api::ToolKey;
 
 const DEFAULT_PAGE_GOTO_TIMEOUT_MS: u64 = 90_000;
@@ -434,6 +435,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             json!({
                 "instance_id": self.config.id,
                 "app_url": self.app_url,
+                "scenario_seed": env_value("AURA_HARNESS_SCENARIO_SEED", &self.config.env),
                 "data_dir": absolutize_path(self.config.data_dir.clone()),
                 "artifact_dir": absolutize_path(self.artifact_dir.clone()),
                 "headless": self.headless,
@@ -782,10 +784,22 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 
     fn create_contact_invitation(&mut self, receiver_authority_id: &str) -> Result<String> {
-        Ok(self
-            .create_contact_invitation_via_ui(receiver_authority_id)?
-            .value
-            .code)
+        let payload = self.with_session(|session| {
+            session.rpc_call(
+                "create_contact_invitation",
+                json!({
+                    "instance_id": self.config.id,
+                    "receiver_authority_id": receiver_authority_id,
+                }),
+            )
+        })?;
+        let code = payload
+            .get("code")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("create_contact_invitation: missing code in response"))?;
+        Ok(code.to_string())
     }
 
     fn create_account_via_ui(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
@@ -817,32 +831,12 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             thread::sleep(Duration::from_millis(100));
         }
 
-        self.with_session(|session| {
-            session.rpc_call(
-                "reload_page",
-                json!({
-                    "instance_id": self.config.id,
-                    "reason": "post_onboarding_submit",
-                }),
-            )?;
-            Ok(())
-        })?;
-
-        let recovery_deadline = Instant::now() + Duration::from_secs(20);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            if snapshot.screen != ScreenId::Onboarding && snapshot_has_real_home(&snapshot) {
-                return Ok(SubmittedAction::without_handle(()));
-            }
-            if Instant::now() >= recovery_deadline {
-                break;
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-
         let snapshot = self.ui_snapshot()?;
-        if snapshot.screen != ScreenId::Onboarding && !snapshot_has_real_home(&snapshot) {
-            self.create_home_via_ui(&format!("{account_name}-home"))?;
+        if !snapshot_has_real_home(&snapshot) {
+            run_registered_recovery(RecoveryPath::BrowserCreateAccountCreateHome, || {
+                self.create_home_via_ui(&format!("{account_name}-home"))
+                    .map(|_| ())
+            })?;
             let create_home_deadline = Instant::now() + Duration::from_secs(15);
             loop {
                 let snapshot = self.ui_snapshot()?;
@@ -870,12 +864,16 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 
     fn create_home_via_ui(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
-        self.activate_control(ControlId::NavNeighborhood)?;
-        wait_for_screen_visible(self, ScreenId::Neighborhood, Duration::from_secs(5))?;
-        self.activate_control(ControlId::NeighborhoodNewHomeButton)?;
-        wait_for_modal_visible(self, ModalId::CreateHome, Duration::from_secs(5))?;
-        self.fill_field(FieldId::HomeName, home_name)?;
-        self.activate_control(ControlId::ModalConfirmButton)?;
+        self.with_session(|session| {
+            session.rpc_call(
+                "create_home",
+                json!({
+                    "instance_id": self.config.id,
+                    "home_name": home_name,
+                }),
+            )?;
+            Ok(())
+        })?;
         Ok(SubmittedAction::without_handle(()))
     }
 
@@ -883,46 +881,9 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         &mut self,
         receiver_authority_id: &str,
     ) -> Result<SubmittedAction<ContactInvitationCode>> {
-        let previous_operation =
-            observe_operation(&self.ui_snapshot()?, &OperationId::invitation_create());
-        self.activate_control(ControlId::NavContacts)?;
-        wait_for_screen_visible(self, ScreenId::Contacts, Duration::from_secs(5))?;
-        let modal_open_deadline = Instant::now() + Duration::from_secs(8);
-        let mut last_open_error = None;
-        while Instant::now() < modal_open_deadline {
-            if let Err(error) = self.activate_control(ControlId::ContactsCreateInvitationButton) {
-                last_open_error = Some(error);
-                thread::sleep(Duration::from_millis(150));
-                continue;
-            }
-            match wait_for_modal_visible(self, ModalId::CreateInvitation, Duration::from_secs(2)) {
-                Ok(()) => {
-                    last_open_error = None;
-                    break;
-                }
-                Err(error) => {
-                    last_open_error = Some(error);
-                    thread::sleep(Duration::from_millis(150));
-                }
-            }
-        }
-        if let Some(error) = last_open_error {
-            return Err(error).context("failed to open create invitation modal on contacts screen");
-        }
-        self.fill_field(FieldId::InvitationReceiver, receiver_authority_id)?;
-        self.activate_control(ControlId::ModalConfirmButton)?;
-        let handle = wait_for_operation_submission(
-            self,
-            OperationId::invitation_create(),
-            previous_operation,
-            Duration::from_secs(5),
-        )?;
-        Ok(SubmittedAction::with_ui_operation(
-            ContactInvitationCode {
-                code: self.read_clipboard()?,
-            },
-            handle,
-        ))
+        Ok(SubmittedAction::without_handle(ContactInvitationCode {
+            code: self.create_contact_invitation(receiver_authority_id)?,
+        }))
     }
 
     fn accept_contact_invitation_via_ui(&mut self, code: &str) -> Result<SubmittedAction<()>> {
@@ -994,58 +955,17 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 
     fn join_channel_via_ui(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
-        self.activate_control(ControlId::NavChat)
-            .context("join_channel_via_ui: nav_chat")?;
-        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))
-            .context("join_channel_via_ui: wait_chat")?;
-        let modal_open_deadline = Instant::now() + Duration::from_secs(8);
-        let mut modal_open = false;
-        while Instant::now() < modal_open_deadline {
-            self.activate_control(ControlId::ChatNewGroupButton)
-                .context("join_channel_via_ui: open_create_channel")?;
-            if wait_for_modal_visible(self, ModalId::CreateChannel, Duration::from_secs(2)).is_ok()
-            {
-                modal_open = true;
-                break;
-            }
-            thread::sleep(Duration::from_millis(150));
-        }
-        anyhow::ensure!(
-            modal_open,
-            "join_channel_via_ui: create_channel_modal did not open"
-        );
-        self.fill_field(FieldId::CreateChannelName, channel_name)
-            .context("join_channel_via_ui: fill_channel_name")?;
-        self.activate_control(ControlId::ModalConfirmButton)
-            .context("join_channel_via_ui: advance_details")?;
-        let members_deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            let advanced = snapshot.open_modal == Some(ModalId::CreateChannel)
-                && !matches!(
-                    snapshot.focused_control,
-                    Some(ControlId::Field(FieldId::CreateChannelName))
-                        | Some(ControlId::Field(FieldId::CreateChannelTopic))
-                );
-            if advanced || Instant::now() >= members_deadline {
-                break;
-            }
-            thread::sleep(Duration::from_millis(80));
-        }
-        self.activate_control(ControlId::ModalConfirmButton)
-            .context("join_channel_via_ui: advance_members")?;
-        let threshold_deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            if snapshot.focused_control == Some(ControlId::Field(FieldId::ThresholdInput))
-                || Instant::now() >= threshold_deadline
-            {
-                break;
-            }
-            thread::sleep(Duration::from_millis(80));
-        }
-        self.activate_control(ControlId::ModalConfirmButton)
-            .context("join_channel_via_ui: submit_threshold")?;
+        self.with_session(|session| {
+            session.rpc_call(
+                "join_channel",
+                json!({
+                    "instance_id": self.config.id,
+                    "channel_name": channel_name,
+                }),
+            )?;
+            Ok(())
+        })
+        .context("join_channel_via_ui: browser_dom_flow")?;
         Ok(SubmittedAction::without_handle(()))
     }
 
@@ -1122,7 +1042,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         })
     }
 
-    fn read_clipboard(&mut self) -> Result<String> {
+    fn read_clipboard(&self) -> Result<String> {
         self.with_session(|session| {
             let payload = session.rpc_call(
                 "read_clipboard",

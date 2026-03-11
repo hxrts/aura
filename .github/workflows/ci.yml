@@ -123,6 +123,24 @@ jobs:
           name: ci-fast
           replay-command: nix develop --command just ci-ux-policy
 
+  shared-flow-policy:
+    name: Shared Flow Policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: shared-flow-policy
+      - run: nix develop --command just ci-shared-flow-policy
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: ci-fast
+          replay-command: nix develop --command just ci-shared-flow-policy
+
   test:
     name: Tests + Protocol Compat
     runs-on: ubuntu-latest

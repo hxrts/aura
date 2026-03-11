@@ -41,6 +41,89 @@ pub struct SelectionSnapshot {
     pub value: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandStatus {
+    Ok,
+    Denied,
+    Invalid,
+    Failed,
+}
+
+impl CommandStatus {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Denied => "denied",
+            Self::Invalid => "invalid",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandConsistency {
+    Accepted,
+    Replicated,
+    Enforced,
+    PartialTimeout,
+}
+
+impl CommandConsistency {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Replicated => "replicated",
+            Self::Enforced => "enforced",
+            Self::PartialTimeout => "partial-timeout",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandReason {
+    None,
+    MissingActiveContext,
+    PermissionDenied,
+    NotMember,
+    NotFound,
+    InvalidArgument,
+    InvalidState,
+    Muted,
+    Banned,
+    Internal,
+}
+
+impl CommandReason {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::MissingActiveContext => "missing_active_context",
+            Self::PermissionDenied => "permission_denied",
+            Self::NotMember => "not_member",
+            Self::NotFound => "not_found",
+            Self::InvalidArgument => "invalid_argument",
+            Self::InvalidState => "invalid_state",
+            Self::Muted => "muted",
+            Self::Banned => "banned",
+            Self::Internal => "internal",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct CommandMetadata {
+    pub status: Option<CommandStatus>,
+    pub reason: Option<CommandReason>,
+    pub consistency: Option<CommandConsistency>,
+}
+
 pub fn extract_authority_id(screen: &str) -> Option<String> {
     let right_panel = screen
         .lines()
@@ -180,7 +263,7 @@ pub fn extract_toast(screen: &str) -> Option<ToastSnapshot> {
     None
 }
 
-pub fn extract_command_consistency(message: &str) -> Option<String> {
+pub fn extract_command_consistency(message: &str) -> Option<CommandConsistency> {
     if let Some(consistency) = extract_command_field(message, "consistency") {
         if let Some(normalized) = normalize_consistency(&consistency) {
             return Some(normalized);
@@ -190,15 +273,23 @@ pub fn extract_command_consistency(message: &str) -> Option<String> {
         .ok()?
         .captures(message)?
         .get(1)
-        .map(|m| m.as_str().to_string())
+        .and_then(|m| normalize_consistency(m.as_str()))
 }
 
-pub fn extract_command_status(message: &str) -> Option<String> {
+pub fn extract_command_status(message: &str) -> Option<CommandStatus> {
     extract_command_field(message, "status").and_then(|status| normalize_status(&status))
 }
 
-pub fn extract_command_reason(message: &str) -> Option<String> {
+pub fn extract_command_reason(message: &str) -> Option<CommandReason> {
     extract_command_field(message, "reason").and_then(|reason| normalize_reason(&reason))
+}
+
+pub fn extract_command_metadata(message: &str) -> CommandMetadata {
+    CommandMetadata {
+        status: extract_command_status(message),
+        reason: extract_command_reason(message),
+        consistency: extract_command_consistency(message),
+    }
 }
 
 fn extract_command_field(message: &str, field: &str) -> Option<String> {
@@ -223,42 +314,52 @@ fn extract_command_field(message: &str, field: &str) -> Option<String> {
     None
 }
 
-fn normalize_status(value: &str) -> Option<String> {
+fn normalize_status(value: &str) -> Option<CommandStatus> {
     let value = value.trim().to_ascii_lowercase();
-    for status in ["ok", "denied", "invalid", "failed"] {
-        if status.starts_with(value.as_str()) {
-            return Some(status.to_string());
+    for status in [
+        CommandStatus::Ok,
+        CommandStatus::Denied,
+        CommandStatus::Invalid,
+        CommandStatus::Failed,
+    ] {
+        if status.as_str().starts_with(value.as_str()) {
+            return Some(status);
         }
     }
     None
 }
 
-fn normalize_consistency(value: &str) -> Option<String> {
+fn normalize_consistency(value: &str) -> Option<CommandConsistency> {
     let value = value.trim().to_ascii_lowercase();
-    for consistency in ["accepted", "replicated", "enforced", "partial-timeout"] {
-        if consistency.starts_with(value.as_str()) {
-            return Some(consistency.to_string());
+    for consistency in [
+        CommandConsistency::Accepted,
+        CommandConsistency::Replicated,
+        CommandConsistency::Enforced,
+        CommandConsistency::PartialTimeout,
+    ] {
+        if consistency.as_str().starts_with(value.as_str()) {
+            return Some(consistency);
         }
     }
     None
 }
 
-fn normalize_reason(value: &str) -> Option<String> {
+fn normalize_reason(value: &str) -> Option<CommandReason> {
     let value = value.trim().to_ascii_lowercase();
     for reason in [
-        "none",
-        "missing_active_context",
-        "permission_denied",
-        "not_member",
-        "not_found",
-        "invalid_argument",
-        "invalid_state",
-        "muted",
-        "banned",
-        "internal",
+        CommandReason::None,
+        CommandReason::MissingActiveContext,
+        CommandReason::PermissionDenied,
+        CommandReason::NotMember,
+        CommandReason::NotFound,
+        CommandReason::InvalidArgument,
+        CommandReason::InvalidState,
+        CommandReason::Muted,
+        CommandReason::Banned,
+        CommandReason::Internal,
     ] {
-        if reason.starts_with(value.as_str()) {
-            return Some(reason.to_string());
+        if reason.as_str().starts_with(value.as_str()) {
+            return Some(reason);
         }
     }
     None
@@ -359,8 +460,8 @@ mod tests {
         assert_eq!(toast.level, ToastLevel::Info);
         assert_eq!(toast.message, "kick applied (enforced)");
         assert_eq!(
-            extract_command_consistency(&toast.message).as_deref(),
-            Some("enforced")
+            extract_command_consistency(&toast.message),
+            Some(CommandConsistency::Enforced)
         );
     }
 
@@ -375,12 +476,12 @@ mod tests {
         assert_eq!(toast.level, ToastLevel::Error);
         assert!(toast.message.contains("s=denied"));
         assert_eq!(
-            extract_command_status(&toast.message).as_deref(),
-            Some("denied")
+            extract_command_status(&toast.message),
+            Some(CommandStatus::Denied)
         );
         assert_eq!(
-            extract_command_reason(&toast.message).as_deref(),
-            Some("permission_denied")
+            extract_command_reason(&toast.message),
+            Some(CommandReason::PermissionDenied)
         );
     }
 
@@ -394,25 +495,38 @@ mod tests {
     #[test]
     fn extracts_command_metadata_fields() {
         let message = "updated [s=ok r=none c=replicated]";
-        assert_eq!(extract_command_status(message).as_deref(), Some("ok"));
-        assert_eq!(extract_command_reason(message).as_deref(), Some("none"));
+        assert_eq!(extract_command_status(message), Some(CommandStatus::Ok));
+        assert_eq!(extract_command_reason(message), Some(CommandReason::None));
         assert_eq!(
-            extract_command_consistency(message).as_deref(),
-            Some("replicated")
+            extract_command_consistency(message),
+            Some(CommandConsistency::Replicated)
         );
     }
 
     #[test]
     fn normalizes_truncated_command_metadata_fields() {
         let message = "updated [s=den r=permission_de c=acce]";
-        assert_eq!(extract_command_status(message).as_deref(), Some("denied"));
+        assert_eq!(extract_command_status(message), Some(CommandStatus::Denied));
         assert_eq!(
-            extract_command_reason(message).as_deref(),
-            Some("permission_denied")
+            extract_command_reason(message),
+            Some(CommandReason::PermissionDenied)
         );
         assert_eq!(
-            extract_command_consistency(message).as_deref(),
-            Some("accepted")
+            extract_command_consistency(message),
+            Some(CommandConsistency::Accepted)
+        );
+    }
+
+    #[test]
+    fn extracts_structured_command_metadata() {
+        let message = "updated [s=ok r=none c=replicated]";
+        assert_eq!(
+            extract_command_metadata(message),
+            CommandMetadata {
+                status: Some(CommandStatus::Ok),
+                reason: Some(CommandReason::None),
+                consistency: Some(CommandConsistency::Replicated),
+            }
         );
     }
 }

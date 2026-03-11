@@ -76,6 +76,25 @@ pub struct ObservedOperation {
     pub state: OperationState,
 }
 
+pub trait ObservationBackend {
+    fn snapshot(&self) -> Result<String>;
+    fn snapshot_dom(&self) -> Result<String>;
+    fn ui_snapshot(&self) -> Result<UiSnapshot>;
+    fn wait_for_ui_snapshot_event(
+        &self,
+        timeout: Duration,
+        after_version: Option<u64>,
+    ) -> Option<Result<UiSnapshotEvent>>;
+    fn wait_for_dom_patterns(
+        &self,
+        patterns: &[String],
+        timeout_ms: u64,
+    ) -> Option<Result<String>>;
+    fn wait_for_target(&self, selector: &str, timeout_ms: u64) -> Option<Result<String>>;
+    fn tail_log(&self, lines: usize) -> Result<Vec<String>>;
+    fn read_clipboard(&self) -> Result<String>;
+}
+
 pub trait InstanceBackend {
     fn id(&self) -> &str;
     fn backend_kind(&self) -> &'static str;
@@ -232,7 +251,7 @@ pub trait InstanceBackend {
     fn inject_message(&mut self, _message: &str) -> Result<()> {
         Ok(())
     }
-    fn read_clipboard(&mut self) -> Result<String> {
+    fn read_clipboard(&self) -> Result<String> {
         bail!(
             "clipboard reads are not supported by backend {}",
             self.backend_kind()
@@ -252,6 +271,48 @@ pub trait InstanceBackend {
         self.start()
     }
     fn is_healthy(&self) -> bool;
+}
+
+impl<T: InstanceBackend + ?Sized> ObservationBackend for T {
+    fn snapshot(&self) -> Result<String> {
+        InstanceBackend::snapshot(self)
+    }
+
+    fn snapshot_dom(&self) -> Result<String> {
+        InstanceBackend::snapshot_dom(self)
+    }
+
+    fn ui_snapshot(&self) -> Result<UiSnapshot> {
+        InstanceBackend::ui_snapshot(self)
+    }
+
+    fn wait_for_ui_snapshot_event(
+        &self,
+        timeout: Duration,
+        after_version: Option<u64>,
+    ) -> Option<Result<UiSnapshotEvent>> {
+        InstanceBackend::wait_for_ui_snapshot_event(self, timeout, after_version)
+    }
+
+    fn wait_for_dom_patterns(
+        &self,
+        patterns: &[String],
+        timeout_ms: u64,
+    ) -> Option<Result<String>> {
+        InstanceBackend::wait_for_dom_patterns(self, patterns, timeout_ms)
+    }
+
+    fn wait_for_target(&self, selector: &str, timeout_ms: u64) -> Option<Result<String>> {
+        InstanceBackend::wait_for_target(self, selector, timeout_ms)
+    }
+
+    fn tail_log(&self, lines: usize) -> Result<Vec<String>> {
+        InstanceBackend::tail_log(self, lines)
+    }
+
+    fn read_clipboard(&self) -> Result<String> {
+        InstanceBackend::read_clipboard(self)
+    }
 }
 
 pub trait SharedSemanticBackend {
@@ -426,10 +487,14 @@ impl BackendHandle {
 
 #[cfg(test)]
 mod tests {
-    use super::BackendHandle;
+    use super::{BackendHandle, InstanceBackend, ObservationBackend, UiSnapshotEvent};
     use crate::config::{InstanceConfig, InstanceMode};
     use anyhow::Result;
+    use aura_app::ui::contract::{ScreenId, UiReadiness, UiSnapshot};
+    use aura_app::ui_contract::{ProjectionRevision, QuiescenceSnapshot};
+    use std::cell::Cell;
     use std::path::PathBuf;
+    use std::time::Duration;
 
     #[test]
     fn backend_handle_constructs_browser_variant() -> Result<()> {
@@ -462,6 +527,147 @@ mod tests {
             BackendHandle::Browser(_) => {}
             _ => panic!("expected browser backend"),
         }
+        Ok(())
+    }
+
+    struct ReadOnlyBackend {
+        mutation_calls: Cell<u32>,
+    }
+
+    impl ReadOnlyBackend {
+        fn new() -> Self {
+            Self {
+                mutation_calls: Cell::new(0),
+            }
+        }
+
+        fn snapshot_value() -> UiSnapshot {
+            UiSnapshot {
+                screen: ScreenId::Chat,
+                focused_control: None,
+                open_modal: None,
+                readiness: UiReadiness::Ready,
+                revision: ProjectionRevision {
+                    semantic_seq: 7,
+                    render_seq: Some(7),
+                },
+                quiescence: QuiescenceSnapshot::settled(),
+                selections: Vec::new(),
+                lists: Vec::new(),
+                messages: Vec::new(),
+                operations: Vec::new(),
+                toasts: Vec::new(),
+                runtime_events: Vec::new(),
+            }
+        }
+    }
+
+    impl InstanceBackend for ReadOnlyBackend {
+        fn id(&self) -> &str {
+            "read-only"
+        }
+
+        fn backend_kind(&self) -> &'static str {
+            "test"
+        }
+
+        fn supports_ui_snapshot(&self) -> bool {
+            true
+        }
+
+        fn start(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        fn stop(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        fn snapshot(&self) -> Result<String> {
+            Ok("snapshot".to_string())
+        }
+
+        fn snapshot_dom(&self) -> Result<String> {
+            Ok("dom".to_string())
+        }
+
+        fn ui_snapshot(&self) -> Result<UiSnapshot> {
+            Ok(Self::snapshot_value())
+        }
+
+        fn wait_for_ui_snapshot_event(
+            &self,
+            _timeout: Duration,
+            after_version: Option<u64>,
+        ) -> Option<Result<UiSnapshotEvent>> {
+            Some(Ok(UiSnapshotEvent {
+                snapshot: Self::snapshot_value(),
+                version: after_version.unwrap_or(0) + 1,
+            }))
+        }
+
+        fn wait_for_dom_patterns(
+            &self,
+            _patterns: &[String],
+            _timeout_ms: u64,
+        ) -> Option<Result<String>> {
+            Some(Ok("dom-match".to_string()))
+        }
+
+        fn wait_for_target(&self, _selector: &str, _timeout_ms: u64) -> Option<Result<String>> {
+            Some(Ok("target-match".to_string()))
+        }
+
+        fn send_keys(&mut self, _keys: &str) -> Result<()> {
+            self.mutation_calls.set(self.mutation_calls.get() + 1);
+            Ok(())
+        }
+
+        fn tail_log(&self, _lines: usize) -> Result<Vec<String>> {
+            Ok(vec!["log".to_string()])
+        }
+
+        fn is_healthy(&self) -> bool {
+            true
+        }
+
+        fn read_clipboard(&self) -> Result<String> {
+            Ok("clipboard".to_string())
+        }
+    }
+
+    #[test]
+    fn observation_endpoints_are_side_effect_free() -> Result<()> {
+        let backend = ReadOnlyBackend::new();
+        let observer: &dyn ObservationBackend = &backend;
+
+        assert_eq!(observer.snapshot()?, "snapshot");
+        assert_eq!(observer.snapshot()?, "snapshot");
+        assert_eq!(observer.snapshot_dom()?, "dom");
+        assert_eq!(observer.ui_snapshot()?.revision.semantic_seq, 7);
+        assert_eq!(observer.ui_snapshot()?.revision.semantic_seq, 7);
+        assert_eq!(
+            observer
+                .wait_for_ui_snapshot_event(Duration::from_millis(1), Some(7))
+                .expect("event should be present")?
+                .version,
+            8
+        );
+        assert_eq!(
+            observer
+                .wait_for_dom_patterns(&["chat".to_string()], 1)
+                .expect("dom result should be present")?,
+            "dom-match"
+        );
+        assert_eq!(
+            observer
+                .wait_for_target("#aura-screen-chat", 1)
+                .expect("target result should be present")?,
+            "target-match"
+        );
+        assert_eq!(observer.tail_log(1)?, vec!["log".to_string()]);
+        assert_eq!(observer.read_clipboard()?, "clipboard");
+        assert_eq!(backend.mutation_calls.get(), 0);
         Ok(())
     }
 }

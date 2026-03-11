@@ -22,6 +22,7 @@ use crate::backend::{
     SubmittedAction, UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
+use crate::recovery_registry::{run_registered_recovery, RecoveryPath};
 use crate::screen_normalization::{authoritative_screen, has_nav_header};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -67,6 +68,12 @@ impl LocalPtyBackend {
             focused_control: Some(ControlId::OnboardingRoot),
             open_modal: None,
             readiness: UiReadiness::Loading,
+            revision: aura_app::ui_contract::next_projection_revision(None),
+            quiescence: aura_app::ui_contract::QuiescenceSnapshot::derive(
+                UiReadiness::Loading,
+                None,
+                &[],
+            ),
             selections: Vec::new(),
             lists: Vec::new(),
             messages: Vec::new(),
@@ -943,8 +950,10 @@ impl InstanceBackend for LocalPtyBackend {
             }
             thread::sleep(Duration::from_millis(80));
         }
-        self.submit_chat_command_via_ui(&format!("join {channel_name}"))
-            .context("join_channel_via_ui: join_fallback")?;
+        run_registered_recovery(RecoveryPath::LocalPtyJoinChannelSlashFallback, || {
+            self.submit_chat_command_via_ui(&format!("join {channel_name}"))
+                .context("join_channel_via_ui: join_fallback")
+        })?;
         Ok(SubmittedAction::without_handle(()))
     }
 
@@ -1063,7 +1072,7 @@ impl InstanceBackend for LocalPtyBackend {
         Ok(result)
     }
 
-    fn read_clipboard(&mut self) -> Result<String> {
+    fn read_clipboard(&self) -> Result<String> {
         let path = Self::env_value("AURA_CLIPBOARD_FILE", &self.config.env)
             .map(PathBuf::from)
             .map(Self::absolutize_path)
@@ -1089,8 +1098,6 @@ impl InstanceBackend for LocalPtyBackend {
             .and_then(|snapshot| snapshot.open_modal)
             == Some(ModalId::InvitationCode)
         {
-            self.send_keys("\r")?;
-            thread::sleep(Duration::from_millis(40));
         }
         Ok(text)
     }

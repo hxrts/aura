@@ -47,59 +47,71 @@ coverage_metadata_touched=false
 if echo "$changed_files" | rg -q '^crates/aura-app/src/ui_contract.rs$'; then
   coverage_metadata_touched=true
 fi
-
-flow_relevant=$(echo "$changed_files" | rg -n '^crates/aura-terminal/src/tui/|^crates/aura-web/src/|^crates/aura-ui/src/|^crates/aura-app/src/workflows/' || true)
-if [[ -z "$flow_relevant" ]]; then
-  echo "ux-flow-coverage: no flow-relevant source changes"
-  exit 0
+UI_CONTRACT="crates/aura-app/src/ui_contract.rs"
+if [[ ! -f "$UI_CONTRACT" ]]; then
+  echo "ux-flow-coverage: missing typed flow metadata source: $UI_CONTRACT"
+  exit 1
 fi
 
-declare -A FLOW_SCENARIOS
-FLOW_SCENARIOS[chat]='scenarios/harness/scenario13-mixed-contact-channel-message-e2e.toml'
-FLOW_SCENARIOS[contacts]='scenarios/harness/scenario13-mixed-contact-channel-message-e2e.toml'
-FLOW_SCENARIOS[settings]='scenarios/harness/shared-settings-parity.toml scenarios/harness/scenario12-mixed-device-enrollment-removal-e2e.toml'
-FLOW_SCENARIOS[neighborhood]='scenarios/harness/real-runtime-mixed-startup-smoke.toml'
-FLOW_SCENARIOS[notifications]='scenarios/harness/scenario10-recovery-and-notifications-e2e.toml'
+mapfile -t FLOW_SOURCE_AREAS < <(
+  awk '
+    /pub const SHARED_FLOW_SOURCE_AREAS/ { in_block=1; next }
+    in_block && /flow: SharedFlowId::/ {
+      flow=$0
+      sub(/.*SharedFlowId::/, "", flow)
+      sub(/,.*/, "", flow)
+    }
+    in_block && /path: "/ {
+      path=$0
+      sub(/.*path: "/, "", path)
+      sub(/".*/, "", path)
+      print flow "|" path
+    }
+    in_block && /^\];/ { in_block=0 }
+  ' "$UI_CONTRACT"
+)
+
+mapfile -t FLOW_SCENARIO_COVERAGE < <(
+  awk '
+    /pub const SHARED_FLOW_SCENARIO_COVERAGE/ { in_block=1; next }
+    in_block && /flow: SharedFlowId::/ {
+      flow=$0
+      sub(/.*SharedFlowId::/, "", flow)
+      sub(/,.*/, "", flow)
+    }
+    in_block && /scenario_id: "/ {
+      scenario=$0
+      sub(/.*scenario_id: "/, "", scenario)
+      sub(/".*/, "", scenario)
+      print flow "|" scenario
+    }
+    in_block && /^\];/ { in_block=0 }
+  ' "$UI_CONTRACT"
+)
+
+if [[ ${#FLOW_SOURCE_AREAS[@]} -eq 0 ]]; then
+  echo "ux-flow-coverage: no typed shared flow source metadata found"
+  exit 1
+fi
+
+if [[ ${#FLOW_SCENARIO_COVERAGE[@]} -eq 0 ]]; then
+  echo "ux-flow-coverage: no typed shared flow scenario coverage metadata found"
+  exit 1
+fi
 
 flows=()
 while IFS= read -r file; do
   [[ -n "$file" ]] || continue
-  case "$file" in
-    crates/aura-app/src/workflows/messaging.rs|\
-    crates/aura-terminal/src/tui/screens/chat/*|\
-    crates/aura-terminal/src/tui/state/views/chat.rs)
-      flows+=(chat)
-      ;;
-    crates/aura-app/src/workflows/invitation.rs|\
-    crates/aura-terminal/src/tui/screens/contacts/*|\
-    crates/aura-terminal/src/tui/state/views/contacts.rs)
-      flows+=(contacts)
-      ;;
-    crates/aura-app/src/workflows/settings.rs|\
-    crates/aura-app/src/workflows/recovery*|\
-    crates/aura-terminal/src/tui/screens/settings/*|\
-    crates/aura-terminal/src/tui/state/views/settings.rs|\
-    crates/aura-terminal/src/tui/screens/recovery/*|\
-    crates/aura-terminal/src/tui/state/views/recovery.rs)
-      flows+=(settings notifications)
-      ;;
-    crates/aura-terminal/src/tui/screens/neighborhood/*|\
-    crates/aura-terminal/src/tui/state/views/neighborhood.rs|\
-    crates/aura-app/src/workflows/context.rs)
-      flows+=(neighborhood)
-      ;;
-    crates/aura-terminal/src/tui/screens/notifications/*|\
-    crates/aura-terminal/src/tui/state/views/notifications.rs)
-      flows+=(notifications)
-      ;;
-    crates/aura-ui/src/*|crates/aura-web/src/*)
-      flows+=(chat contacts settings neighborhood notifications)
-      ;;
-  esac
+  while IFS='|' read -r flow path; do
+    [[ -n "$flow" && -n "$path" ]] || continue
+    if [[ "$file" == "$path" ]]; then
+      flows+=("$flow")
+    fi
+  done < <(printf '%s\n' "${FLOW_SOURCE_AREAS[@]}")
 done <<< "$changed_files"
 
 if [[ ${#flows[@]} -eq 0 ]]; then
-  echo "ux-flow-coverage: no mapped flow domains for changed files"
+  echo "ux-flow-coverage: no typed shared-flow source mappings for changed files"
   exit 0
 fi
 
@@ -110,15 +122,22 @@ mapfile -t flows < <(printf '%s
 violations=0
 
 for flow in "${flows[@]}"; do
-  scenarios="${FLOW_SCENARIOS[$flow]}"
-  if [[ -z "$scenarios" ]]; then
+  mapfile -t scenario_ids < <(
+    printf '%s\n' "${FLOW_SCENARIO_COVERAGE[@]}" \
+      | awk -F'|' -v flow="$flow" '$1 == flow { print $2 }'
+  )
+  scenarios=()
+  for scenario_id in "${scenario_ids[@]}"; do
+    scenarios+=("scenarios/harness/${scenario_id}.toml")
+  done
+  if [[ ${#scenarios[@]} -eq 0 ]]; then
     echo "✖ internal error: no scenario mapping for flow=$flow"
     violations=$((violations + 1))
     continue
   fi
 
   # Ensure mapping exists in docs.
-  for sf in $scenarios; do
+  for sf in "${scenarios[@]}"; do
     if ! rg -q "`$sf`|$sf" "$COVERAGE_DOC"; then
       echo "✖ docs mapping missing for flow=$flow scenario=$sf"
       violations=$((violations + 1))
@@ -126,7 +145,7 @@ for flow in "${flows[@]}"; do
   done
 
   scenarios_changed=false
-  for sf in $scenarios; do
+  for sf in "${scenarios[@]}"; do
     if echo "$changed_files" | rg -q "^${sf}$"; then
       scenarios_changed=true
       break
@@ -136,7 +155,7 @@ for flow in "${flows[@]}"; do
   if ! $scenarios_changed && ! $coverage_metadata_touched; then
     echo "✖ flow-relevant changes detected for '$flow' without scenario or shared coverage metadata update"
     echo "  fix: update one of:"
-    for sf in $scenarios; do
+    for sf in "${scenarios[@]}"; do
       echo "    - $sf"
     done
     echo "  or update crates/aura-app/src/ui_contract.rs coverage metadata"

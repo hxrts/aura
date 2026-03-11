@@ -26,6 +26,16 @@ pub fn materialize_run_config(mut config: RunConfig, _config_path: &Path) -> Res
         if matches!(instance.mode, InstanceMode::Local | InstanceMode::Browser) {
             ensure_env_value(&mut instance.env, "AURA_HARNESS_MODE", "1");
             ensure_env_value(&mut instance.env, "AURA_HARNESS_PROFILE", "deterministic");
+            ensure_env_value(
+                &mut instance.env,
+                "AURA_HARNESS_SCENARIO_SEED",
+                &seed_bundle.scenario_seed.to_string(),
+            );
+            ensure_env_value(
+                &mut instance.env,
+                "AURA_HARNESS_INSTANCE_ID",
+                &instance.id,
+            );
         }
 
         if matches!(instance.mode, InstanceMode::Browser) {

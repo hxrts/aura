@@ -10,6 +10,7 @@ use crate::{
         neighborhood::{NeighborHome, NeighborhoodState, OneHopLinkType, TraversalPosition},
     },
     workflows::channel_ref::HomeSelector,
+    workflows::harness_determinism,
     workflows::signals::read_signal,
     AppCore,
 };
@@ -25,6 +26,7 @@ use std::time::Duration;
 use crate::workflows::signals::emit_signal;
 pub use crate::workflows::time::current_time_ms;
 
+#[cfg(not(target_arch = "wasm32"))]
 const LOCAL_FIRST_TIME_BUDGET_MS: u64 = 50;
 const LOCAL_FIRST_WRITE_ATTEMPTS: usize = 100;
 const LOCAL_FIRST_WRITE_RETRY_MS: u64 = 10;
@@ -96,19 +98,28 @@ async fn homes_state_signal_fallback(app_core: &Arc<RwLock<AppCore>>) -> HomesSt
 }
 
 async fn local_first_timestamp_ms(app_core: &Arc<RwLock<AppCore>>) -> u64 {
-    #[cfg(target_arch = "wasm32")]
-    {
-        return current_time_ms(app_core).await.unwrap_or(0);
+    if harness_determinism::harness_mode_enabled() {
+        return harness_determinism::parity_timestamp_ms(app_core, "context-local-first", &[])
+            .await
+            .unwrap_or(0);
     }
 
-    match tokio::time::timeout(
-        Duration::from_millis(LOCAL_FIRST_TIME_BUDGET_MS),
-        current_time_ms(app_core),
-    )
-    .await
+    #[cfg(target_arch = "wasm32")]
     {
-        Ok(Ok(timestamp_ms)) => timestamp_ms,
-        Ok(Err(_)) | Err(_) => 0,
+        current_time_ms(app_core).await.unwrap_or(0)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        match tokio::time::timeout(
+            Duration::from_millis(LOCAL_FIRST_TIME_BUDGET_MS),
+            current_time_ms(app_core),
+        )
+        .await
+        {
+            Ok(Ok(timestamp_ms)) => timestamp_ms,
+            Ok(Err(_)) | Err(_) => 0,
+        }
     }
 }
 
@@ -502,6 +513,7 @@ async fn create_home_with_creator(
     Ok(home_id)
 }
 
+/// Create a home for the active authority and return its channel id.
 pub async fn create_home(
     app_core: &Arc<RwLock<AppCore>>,
     name: Option<String>,
@@ -518,6 +530,7 @@ pub async fn create_home(
     create_home_with_creator(app_core, creator, name, description).await
 }
 
+/// Create a home for a specific authority and return its channel id.
 pub async fn create_home_for_authority(
     app_core: &Arc<RwLock<AppCore>>,
     creator: AuthorityId,

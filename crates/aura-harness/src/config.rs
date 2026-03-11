@@ -87,7 +87,7 @@ pub enum RuntimeSubstrate {
     Simulator,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum InstanceMode {
     Local,
@@ -136,6 +136,12 @@ pub struct InstanceConfig {
     pub lan_discovery: Option<LanDiscoveryConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tunnel: Option<TunnelConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScenarioActorBinding {
+    pub actor: ActorId,
+    pub mode: InstanceMode,
 }
 
 const fn default_true() -> bool {
@@ -1213,6 +1219,17 @@ fn normalize_inventory_path_lossy(path: &Path) -> String {
 }
 
 impl RunConfig {
+    #[must_use]
+    pub fn actor_bindings(&self) -> Vec<ScenarioActorBinding> {
+        self.instances
+            .iter()
+            .map(|instance| ScenarioActorBinding {
+                actor: ActorId(instance.id.clone()),
+                mode: instance.mode.clone(),
+            })
+            .collect()
+    }
+
     pub fn validate(&self) -> Result<()> {
         if self.schema_version != RUN_SCHEMA_VERSION {
             bail!(
@@ -1247,6 +1264,12 @@ impl RunConfig {
         for instance in &self.instances {
             if instance.id.trim().is_empty() {
                 bail!("instance id must be non-empty");
+            }
+            if ActorId(instance.id.clone()).is_frontend_binding_label() {
+                bail!(
+                    "instance id '{}' is a frontend binding label; run configs must bind frontend modes through instance.mode, not instance.id",
+                    instance.id
+                );
             }
             if !instance_ids.insert(instance.id.clone()) {
                 bail!("duplicate instance id: {}", instance.id);

@@ -133,7 +133,7 @@ uniffi = { version = "0.25", optional = true }
 # Optional: WASM for web
 wasm-bindgen = { version = "0.2", optional = true }
 js-sys = { version = "0.3", optional = true }
-web-sys = { version = "0.3", optional = true, features = ["console", "WorkerGlobalScope"] }
+web-sys = { version = "0.3", optional = true, features = ["console", "Location", "Window", "WorkerGlobalScope"] }
 console_error_panic_hook = { version = "0.1", optional = true }
 
 # Optional: dominator for Rust web apps

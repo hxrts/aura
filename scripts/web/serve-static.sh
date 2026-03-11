@@ -17,6 +17,13 @@ mkdir -p \
     "$repo_root/target/dx/aura-web/release/web/public/fonts" \
     "$repo_root/target/dx/aura-web/debug/web/public/assets" \
     "$repo_root/target/dx/aura-web/debug/web/public/fonts"
+# Symlink CSS so changes are immediately visible without rebuild
+source_css="$web_root/public/assets/tailwind.css"
+for profile in debug release; do
+    target_css="$repo_root/target/dx/aura-web/$profile/web/public/assets/tailwind.css"
+    rm -f "$target_css"
+    ln -s "$source_css" "$target_css"
+done
 case "$build_profile" in
     release)
         NO_COLOR=true ../../scripts/web/dx.sh build --release --platform web --package aura-web --bin aura-web --features web

@@ -8,6 +8,7 @@ use crate::workflows::chat_commands::normalize_channel_name;
 use crate::workflows::context::{
     current_home_context_or_authority_default,
 };
+use crate::workflows::harness_determinism;
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::{
     converge_runtime, cooperative_yield, ensure_runtime_peer_connectivity, require_runtime,
@@ -46,10 +47,7 @@ use aura_journal::fact::{FactOptions, RelationalFact};
 use aura_journal::DomainFact;
 use aura_protocol::amp::{serialize_amp_message, AmpMessage};
 use std::collections::BTreeSet;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-
-static MESSAGE_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const CHAT_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
 const CHAT_FACT_CONNECTIVITY_ATTEMPTS: usize = 6;
@@ -144,8 +142,13 @@ fn next_message_id(
     timestamp_ms: u64,
     content: &str,
 ) -> String {
-    // Include a monotonic per-process counter to avoid same-millisecond collisions.
-    let local_nonce = MESSAGE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let channel_string = channel_id.to_string();
+    let sender_string = sender_id.to_string();
+    let timestamp_string = timestamp_ms.to_string();
+    let local_nonce = harness_determinism::parity_generated_nonce(
+        "message-id",
+        &[&channel_string, &sender_string, &timestamp_string, content],
+    );
     let digest =
         hash(format!("{channel_id}:{sender_id}:{timestamp_ms}:{local_nonce}:{content}").as_bytes());
     let suffix = hex_prefix(&digest, 8);

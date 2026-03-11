@@ -11,9 +11,9 @@ use crate::tui::types::{
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
     ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot,
-    ModalId, OperationId, OperationInstanceId, OperationSnapshot, OperationState, RuntimeEventId,
-    RuntimeEventSnapshot, ScreenId, SelectionSnapshot, ToastId, ToastKind, ToastSnapshot,
-    UiReadiness, UiSnapshot,
+    ModalId, OperationId, OperationInstanceId, OperationSnapshot, OperationState,
+    QuiescenceSnapshot, RuntimeEventId, RuntimeEventSnapshot, ScreenId, SelectionSnapshot,
+    ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot, next_projection_revision,
 };
 use aura_app::ui_contract::{ChannelFactKey, RuntimeFact};
 use aura_app::ui::types::StateSnapshot;
@@ -879,18 +879,24 @@ pub fn semantic_ui_snapshot(
         }
     }
 
-    UiSnapshot {
+    let snapshot = UiSnapshot {
         screen,
         focused_control,
         open_modal,
         readiness,
+        revision: next_projection_revision(None),
+        quiescence: QuiescenceSnapshot::derive(readiness, open_modal, &operations),
         selections,
         lists,
         messages,
         operations,
         toasts,
         runtime_events,
-    }
+    };
+    snapshot
+        .validate_invariants()
+        .unwrap_or_else(|error| panic!("invalid TUI semantic snapshot export: {error}"));
+    snapshot
 }
 
 pub fn maybe_export_ui_snapshot(

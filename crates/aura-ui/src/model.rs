@@ -14,8 +14,9 @@ use aura_app::{
     ui::contract::{
         ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot, ListSnapshot,
         MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
-        OperationState, RuntimeEventId, RuntimeEventSnapshot, SelectionSnapshot, ToastId,
-        ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
+        OperationState, QuiescenceSnapshot, RuntimeEventId, RuntimeEventSnapshot,
+        SelectionSnapshot, ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
+        next_projection_revision,
     },
     AppCore,
 };
@@ -1525,6 +1526,16 @@ impl UiModel {
             } else {
                 UiReadiness::Loading
             },
+            revision: next_projection_revision(None),
+            quiescence: QuiescenceSnapshot::derive(
+                if self.account_ready {
+                    UiReadiness::Ready
+                } else {
+                    UiReadiness::Loading
+                },
+                self.modal_state().map(ModalState::contract_id),
+                &self.operations,
+            ),
             selections,
             lists,
             messages,
@@ -2135,14 +2146,22 @@ impl UiController {
     }
 
     pub fn semantic_model_snapshot(&self) -> UiSnapshot {
-        self.model
+        let snapshot = self
+            .model
             .read()
             .ok()
             .map(|model| model.semantic_snapshot())
-            .unwrap_or_else(|| UiSnapshot::loading(UiScreen::Neighborhood))
+            .unwrap_or_else(|| UiSnapshot::loading(UiScreen::Neighborhood));
+        snapshot
+            .validate_invariants()
+            .unwrap_or_else(|error| panic!("invalid semantic model snapshot export: {error}"));
+        snapshot
     }
 
     pub fn publish_ui_snapshot(&self, snapshot: UiSnapshot) {
+        snapshot
+            .validate_invariants()
+            .unwrap_or_else(|error| panic!("invalid published UI snapshot: {error}"));
         if let Ok(slot) = self.ui_snapshot_sink.lock() {
             let sink = slot.as_ref().cloned();
             drop(slot);

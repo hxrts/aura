@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$repo_root"
+
+fail() {
+  echo "harness-bridge-contract: $*" >&2
+  exit 1
+}
+
+ui_contract="crates/aura-app/src/ui_contract.rs"
+bridge_impl="crates/aura-web/src/harness_bridge.rs"
+
+rg -q 'pub const BROWSER_HARNESS_BRIDGE_API_VERSION' "$ui_contract" \
+  || fail "missing browser harness bridge API version"
+rg -q 'pub const BROWSER_HARNESS_BRIDGE_METHODS' "$ui_contract" \
+  || fail "missing browser harness bridge method metadata"
+rg -q 'pub const BROWSER_OBSERVATION_SURFACE_API_VERSION' "$ui_contract" \
+  || fail "missing browser observation surface API version"
+rg -q 'pub const BROWSER_OBSERVATION_SURFACE_METHODS' "$ui_contract" \
+  || fail "missing browser observation surface method metadata"
+
+mapfile -t contract_methods < <(
+  awk '
+    /pub const BROWSER_HARNESS_BRIDGE_METHODS/ { in_block=1; next }
+    in_block && /name: "/ {
+      name=$0
+      sub(/.*name: "/, "", name)
+      sub(/".*/, "", name)
+      print name
+    }
+    in_block && /^\];/ { in_block=0 }
+  ' "$ui_contract" | sort -u
+)
+
+mapfile -t exported_methods < <(
+  rg -o '&JsValue::from_str\\("[a-z_]+"\\)' "$bridge_impl" \
+    | sed -E 's/.*"([a-z_]+)".*/\1/' \
+    | rg '^(send_keys|send_key|navigate_screen|create_contact_invitation|create_account|create_home|inject_message)$' \
+    | sort -u
+)
+
+if [[ "${contract_methods[*]}" != "${exported_methods[*]}" ]]; then
+  printf 'contract methods: %s\n' "${contract_methods[*]}" >&2
+  printf 'exported methods: %s\n' "${exported_methods[*]}" >&2
+  fail "browser harness bridge metadata does not match exported method surface"
+fi
+
+mapfile -t observation_methods < <(
+  awk '
+    /pub const BROWSER_OBSERVATION_SURFACE_METHODS/ { in_block=1; next }
+    in_block && /name: "/ {
+      name=$0
+      sub(/.*name: "/, "", name)
+      sub(/".*/, "", name)
+      print name
+    }
+    in_block && /^\];/ { in_block=0 }
+  ' "$ui_contract" | sort -u
+)
+
+mapfile -t exported_observation_methods < <(
+  sed -n '/let observe = Object::new()/,/let inject_controller = controller.clone()/p' "$bridge_impl" \
+    | rg -o '&JsValue::from_str\\("[a-z_]+"\\)' \
+    | sed -E 's/.*"([a-z_]+)".*/\1/' \
+    | rg '^(snapshot|ui_state|render_heartbeat|read_clipboard|get_authority_id|tail_log|root_structure)$' \
+    | sort -u
+)
+
+if [[ "${observation_methods[*]}" != "${exported_observation_methods[*]}" ]]; then
+  printf 'contract observation methods: %s\n' "${observation_methods[*]}" >&2
+  printf 'exported observation methods: %s\n' "${exported_observation_methods[*]}" >&2
+  fail "browser observation surface metadata does not match exported observation surface"
+fi
+
+rg -q '__AURA_HARNESS_OBSERVE__' "$bridge_impl" \
+  || fail "browser observation surface global is not exported"
+if sed -n '/let observe = Object::new()/,/let inject_controller = controller.clone()/p' "$bridge_impl" \
+  | rg -q '"(send_keys|send_key|navigate_screen|create_contact_invitation|create_account|create_home|inject_message)"'; then
+  fail "browser observation surface exports action methods"
+fi
+
+cargo test -p aura-app browser_harness_bridge_contract_is_versioned_and_complete --quiet
+cargo test -p aura-app browser_harness_bridge_read_methods_are_declared_deterministic --quiet
+cargo test -p aura-app browser_observation_surface_contract_is_versioned_and_read_only --quiet
+cargo test -p aura-app tui_observation_surface_contract_is_versioned_and_read_only --quiet
+
+echo "harness bridge contract: clean"
