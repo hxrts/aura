@@ -5,9 +5,7 @@
 
 use crate::workflows::channel_ref::ChannelRef;
 use crate::workflows::chat_commands::normalize_channel_name;
-use crate::workflows::context::{
-    current_home_context_or_authority_default,
-};
+use crate::workflows::context::current_home_context_or_authority_default;
 use crate::workflows::harness_determinism;
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::{
@@ -22,12 +20,12 @@ use crate::{
     signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME},
     thresholds::{default_channel_threshold, normalize_channel_threshold},
     views::{
-        contacts::ContactsState,
         chat::{
             is_note_to_self_channel_name, note_to_self_channel_id, note_to_self_context_id,
             Channel, ChannelType, ChatState, Message, MessageDeliveryStatus,
             NOTE_TO_SELF_CHANNEL_NAME, NOTE_TO_SELF_CHANNEL_TOPIC,
         },
+        contacts::ContactsState,
         home::{HomeMember, HomeRole, HomeState, HomesState},
     },
     AppCore,
@@ -174,7 +172,7 @@ async fn send_chat_fact_with_retry(
         }
 
         if attempt + 1 < CHAT_FACT_SEND_MAX_ATTEMPTS {
-            converge_runtime(&runtime).await;
+            converge_runtime(runtime).await;
             for _ in 0..CHAT_FACT_SEND_YIELDS_PER_RETRY {
                 cooperative_yield().await;
             }
@@ -587,7 +585,9 @@ pub async fn project_channel_peer_membership_with_context(
             if !channel.member_ids.contains(&peer_authority) {
                 channel.member_ids.push(peer_authority);
             }
-            channel.member_count = channel.member_count.max(channel.member_ids.len() as u32 + 1);
+            channel.member_count = channel
+                .member_count
+                .max(channel.member_ids.len() as u32 + 1);
             if channel.name == channel.id.to_string() && fallback_name != channel.name {
                 channel.name = fallback_name;
             }
@@ -612,14 +612,8 @@ pub async fn project_channel_peer_membership_with_context(
     })
     .await?;
 
-    project_home_peer_membership(
-        app_core,
-        channel_id,
-        context_id,
-        peer_authority,
-        name_hint,
-    )
-    .await?;
+    project_home_peer_membership(app_core, channel_id, context_id, peer_authority, name_hint)
+        .await?;
 
     Ok(())
 }
@@ -636,13 +630,16 @@ async fn project_home_peer_membership(
     let mut homes = core.views().get_homes();
     let local_authority = core.authority().copied();
 
-    let target_home_id = homes.home_state(&channel_id).map(|_| channel_id).or_else(|| {
-        context_id.and_then(|context_id| {
-            homes.iter().find_map(|(home_id, home)| {
-                (home.context_id == Some(context_id)).then_some(*home_id)
+    let target_home_id = homes
+        .home_state(&channel_id)
+        .map(|_| channel_id)
+        .or_else(|| {
+            context_id.and_then(|context_id| {
+                homes.iter().find_map(|(home_id, home)| {
+                    (home.context_id == Some(context_id)).then_some(*home_id)
+                })
             })
-        })
-    });
+        });
 
     let target_home_id = match target_home_id {
         Some(target_home_id) => target_home_id,
@@ -736,7 +733,9 @@ pub(crate) async fn authoritative_context_id_for_channel(
         }
     }
 
-    homes.home_state(&channel_id).and_then(|home| home.context_id)
+    homes
+        .home_state(&channel_id)
+        .and_then(|home| home.context_id)
 }
 
 async fn ensure_home_state_for_channel(
@@ -922,10 +921,8 @@ pub fn resolved_recipient_peers_for_channel_view(
         }
     }
 
-    if recipients.is_empty() {
-        if channel.is_dm || discovered.len() == 1 {
-            recipients.extend(discovered.iter().copied());
-        }
+    if recipients.is_empty() && (channel.is_dm || discovered.len() == 1) {
+        recipients.extend(discovered.iter().copied());
     }
 
     if recipients.is_empty() {
@@ -1333,8 +1330,7 @@ pub async fn join_channel_by_name(
 
             let runtime = require_runtime(app_core).await?;
             let (fallback_context, _) =
-                current_home_context_or_authority_default(app_core, runtime.authority_id())
-                    .await?;
+                current_home_context_or_authority_default(app_core, runtime.authority_id()).await?;
             enforce_home_join_allowed(
                 app_core,
                 fallback_context,
@@ -2107,8 +2103,14 @@ pub async fn invite_authority_to_channel(
     )
     .await?;
 
-    project_channel_peer_membership_with_context(app_core, channel_id, Some(context_id), receiver, None)
-        .await?;
+    project_channel_peer_membership_with_context(
+        app_core,
+        channel_id,
+        Some(context_id),
+        receiver,
+        None,
+    )
+    .await?;
     converge_runtime(&runtime).await;
 
     Ok(invitation.invitation_id)

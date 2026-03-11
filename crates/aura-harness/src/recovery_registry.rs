@@ -35,9 +35,7 @@ impl RecoveryPath {
     #[must_use]
     pub const fn owner_module(self) -> &'static str {
         match self {
-            Self::AcceptContactInvitationContactsFallback => {
-                "crates/aura-harness/src/executor.rs"
-            }
+            Self::AcceptContactInvitationContactsFallback => "crates/aura-harness/src/executor.rs",
             Self::BrowserCreateAccountCreateHome => {
                 "crates/aura-harness/src/backend/playwright_browser.rs"
             }
@@ -101,9 +99,9 @@ mod tests {
         assert!(REGISTERED_RECOVERIES
             .iter()
             .all(|metadata| !metadata.code.trim().is_empty()));
-        assert!(REGISTERED_RECOVERIES
-            .iter()
-            .all(|metadata| metadata.owner_module.starts_with("crates/aura-harness/src/")));
+        assert!(REGISTERED_RECOVERIES.iter().all(|metadata| metadata
+            .owner_module
+            .starts_with("crates/aura-harness/src/")));
         assert!(REGISTERED_RECOVERIES
             .iter()
             .all(|metadata| metadata.class == FallbackPathClass::BoundedSecondary));

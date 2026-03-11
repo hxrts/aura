@@ -9,18 +9,19 @@ use crate::clipboard::ClipboardPort;
 use crate::keyboard::{apply_named_key, apply_text_keys};
 use crate::snapshot::render_canonical_snapshot;
 use async_lock::RwLock as AsyncRwLock;
+use aura_app::ui_contract::{
+    next_projection_revision, InvitationFactKind, QuiescenceSnapshot, RuntimeFact,
+};
 use aura_app::views::chat::{NOTE_TO_SELF_CHANNEL_NAME, NOTE_TO_SELF_CHANNEL_TOPIC};
 use aura_app::{
     ui::contract::{
         ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot, ListSnapshot,
         MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
-        OperationState, QuiescenceSnapshot, RuntimeEventId, RuntimeEventSnapshot,
-        SelectionSnapshot, ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
-        next_projection_revision,
+        OperationState, RuntimeEventId, RuntimeEventSnapshot, SelectionSnapshot, ToastId,
+        ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
     },
     AppCore,
 };
-use aura_app::ui_contract::{InvitationFactKind, RuntimeFact};
 use aura_core::identifiers::{AuthorityId, CeremonyId};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -1508,6 +1509,16 @@ impl UiModel {
                 content: content.clone(),
             })
             .collect::<Vec<_>>();
+        let open_modal = self.modal_state().map(ModalState::contract_id);
+        let focused_control = if self.modal_field_id().is_some() {
+            Some(ControlId::ModalInput)
+        } else if let Some(open_modal) = open_modal {
+            Some(ControlId::Modal(open_modal))
+        } else if self.account_ready {
+            Some(ControlId::Screen(self.screen))
+        } else {
+            Some(ControlId::OnboardingRoot)
+        };
 
         UiSnapshot {
             screen: if self.account_ready {
@@ -1515,12 +1526,8 @@ impl UiModel {
             } else {
                 UiScreen::Onboarding
             },
-            focused_control: Some(if self.account_ready {
-                ControlId::Screen(self.screen)
-            } else {
-                ControlId::OnboardingRoot
-            }),
-            open_modal: self.modal_state().map(ModalState::contract_id),
+            focused_control,
+            open_modal,
             readiness: if self.account_ready {
                 UiReadiness::Ready
             } else {
@@ -1533,7 +1540,7 @@ impl UiModel {
                 } else {
                     UiReadiness::Loading
                 },
-                self.modal_state().map(ModalState::contract_id),
+                open_modal,
                 &self.operations,
             ),
             selections,
@@ -2256,9 +2263,8 @@ fn write_model(model: &RwLock<UiModel>) -> RwLockWriteGuard<'_, UiModel> {
 #[cfg(test)]
 mod tests {
     use super::{NeighborhoodMode, UiModel, UiScreen};
-    use aura_app::ui::contract::{
-        InvitationFactKind, OperationId, OperationState, RuntimeEventKind, RuntimeFact,
-    };
+    use aura_app::ui::contract::{OperationId, OperationState, RuntimeEventKind};
+    use aura_app::ui_contract::{InvitationFactKind, RuntimeFact};
 
     #[test]
     fn set_screen_clears_input_mode_and_buffer() {
@@ -2302,23 +2308,27 @@ mod tests {
     fn restarting_operation_generates_new_operation_instance_id() {
         let mut model = UiModel::new("authority-local".to_string());
         model.set_operation_state(OperationId::invitation_accept(), OperationState::Submitting);
-        let first_instance = model
+        let Some(first_instance) = model
             .semantic_snapshot()
             .operations
             .into_iter()
             .find(|operation| operation.id == OperationId::invitation_accept())
-            .expect("first operation should exist")
-            .instance_id;
+        else {
+            panic!("first operation should exist");
+        };
+        let first_instance = first_instance.instance_id;
 
         model.set_operation_state(OperationId::invitation_accept(), OperationState::Succeeded);
         model.set_operation_state(OperationId::invitation_accept(), OperationState::Submitting);
-        let second_instance = model
+        let Some(second_instance) = model
             .semantic_snapshot()
             .operations
             .into_iter()
             .find(|operation| operation.id == OperationId::invitation_accept())
-            .expect("second operation should exist")
-            .instance_id;
+        else {
+            panic!("second operation should exist");
+        };
+        let second_instance = second_instance.instance_id;
 
         assert_ne!(first_instance, second_instance);
     }
@@ -2333,10 +2343,9 @@ mod tests {
         });
 
         let snapshot = model.semantic_snapshot();
-        let event = snapshot
-            .runtime_events
-            .last()
-            .expect("runtime event should be present");
+        let Some(event) = snapshot.runtime_events.last() else {
+            panic!("runtime event should be present");
+        };
 
         assert_eq!(event.kind(), RuntimeEventKind::InvitationAccepted);
     }

@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -917,8 +917,7 @@ impl ProjectionRevision {
             None => 0,
         };
         self.semantic_seq > previous.semantic_seq
-            || (self.semantic_seq == previous.semantic_seq
-                && self_render_seq > previous_render_seq)
+            || (self.semantic_seq == previous.semantic_seq && self_render_seq > previous_render_seq)
     }
 
     #[must_use]
@@ -927,19 +926,13 @@ impl ProjectionRevision {
     }
 }
 
-fn semantic_revision_counter() -> &'static Mutex<u64> {
-    static COUNTER: OnceLock<Mutex<u64>> = OnceLock::new();
-    COUNTER.get_or_init(|| Mutex::new(0))
-}
+static SEMANTIC_REVISION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[must_use]
 pub fn next_projection_revision(render_seq: Option<u64>) -> ProjectionRevision {
-    let mut counter = semantic_revision_counter()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *counter = counter.saturating_add(1);
+    let counter = SEMANTIC_REVISION_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
     ProjectionRevision {
-        semantic_seq: *counter,
+        semantic_seq: counter,
         render_seq,
     }
 }
@@ -2132,20 +2125,24 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
 
 #[must_use]
 pub fn shared_flow_support(flow: SharedFlowId) -> &'static SharedFlowSupport {
-    SHARED_FLOW_SUPPORT
+    let Some(support) = SHARED_FLOW_SUPPORT
         .iter()
         .find(|support| support.flow == flow)
-        .expect("shared flow support must be declared")
+    else {
+        panic!("shared flow support must be declared for {flow:?}");
+    };
+    support
 }
 
 #[must_use]
-pub fn parity_exception_metadata(
-    exception: ParityException,
-) -> &'static ParityExceptionMetadata {
-    PARITY_EXCEPTION_METADATA
+pub fn parity_exception_metadata(exception: ParityException) -> &'static ParityExceptionMetadata {
+    let Some(metadata) = PARITY_EXCEPTION_METADATA
         .iter()
         .find(|metadata| metadata.exception == exception)
-        .expect("parity exception metadata must be declared")
+    else {
+        panic!("parity exception metadata must be declared for {exception:?}");
+    };
+    metadata
 }
 
 #[must_use]
@@ -2168,35 +2165,50 @@ pub fn shared_flow_source_areas(flow: SharedFlowId) -> Vec<&'static str> {
 
 #[must_use]
 pub fn shared_screen_support(screen: ScreenId) -> &'static SharedScreenSupport {
-    SHARED_SCREEN_SUPPORT
+    let Some(support) = SHARED_SCREEN_SUPPORT
         .iter()
         .find(|support| support.screen == screen)
-        .expect("shared screen support must be declared")
+    else {
+        panic!("shared screen support must be declared for {screen:?}");
+    };
+    support
 }
 
 #[must_use]
 pub fn shared_modal_support(modal: ModalId) -> &'static SharedModalSupport {
-    SHARED_MODAL_SUPPORT
+    let Some(support) = SHARED_MODAL_SUPPORT
         .iter()
         .find(|support| support.modal == modal)
-        .expect("shared modal support must be declared")
+    else {
+        panic!("shared modal support must be declared for {modal:?}");
+    };
+    support
 }
 
 #[must_use]
 pub fn shared_list_support(list: ListId) -> &'static SharedListSupport {
-    SHARED_LIST_SUPPORT
+    let Some(support) = SHARED_LIST_SUPPORT
         .iter()
         .find(|support| support.list == list)
-        .expect("shared list support must be declared")
+    else {
+        panic!("shared list support must be declared for {list:?}");
+    };
+    support
 }
 
 #[must_use]
 pub fn shared_screen_module_map(screen: ScreenId) -> &'static SharedScreenModuleMap {
-    SHARED_SCREEN_MODULE_MAP
+    let Some(mapping) = SHARED_SCREEN_MODULE_MAP
         .iter()
         .find(|mapping| mapping.screen == screen)
-        .expect("shared screen module mapping must be declared")
+    else {
+        panic!("shared screen module mapping must be declared for {screen:?}");
+    };
+    mapping
 }
+
+type ParityListItemSignature = (String, bool, ConfirmationState);
+type ParityListSignature = (ListId, Vec<ParityListItemSignature>);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiSnapshot {
@@ -2248,15 +2260,11 @@ impl UiSnapshot {
             if list.items.iter().any(|item| item.id.trim().is_empty()) {
                 return Err(format!("list {:?} contains empty item id", list.id));
             }
-            if let Some(item) = list
-                .items
-                .iter()
-                .find(|item| {
-                    is_placeholder_semantic_id(&item.id)
-                        || is_override_semantic_id(&item.id)
-                        || is_row_index_semantic_id(&item.id)
-                })
-            {
+            if let Some(item) = list.items.iter().find(|item| {
+                is_placeholder_semantic_id(&item.id)
+                    || is_override_semantic_id(&item.id)
+                    || is_row_index_semantic_id(&item.id)
+            }) {
                 return Err(format!(
                     "list {:?} contains placeholder, override, or row-index item id {}",
                     list.id, item.id
@@ -2397,9 +2405,7 @@ fn parity_relevant_lists(screen: ScreenId) -> &'static [ListId] {
     }
 }
 
-fn parity_list_signature(
-    snapshot: &UiSnapshot,
-) -> Vec<(ListId, Vec<(String, bool, ConfirmationState)>)> {
+fn parity_list_signature(snapshot: &UiSnapshot) -> Vec<ParityListSignature> {
     let relevant_lists = parity_relevant_lists(snapshot.screen);
     let mut lists = snapshot
         .lists
@@ -2580,7 +2586,13 @@ fn parity_mismatch_is_covered_by_exception(
     mismatch: &UiParityMismatch,
 ) -> bool {
     matches!(
-        (mismatch.field, web.screen, tui.screen, web.focused_control, tui.focused_control),
+        (
+            mismatch.field,
+            web.screen,
+            tui.screen,
+            web.focused_control,
+            tui.focused_control
+        ),
         (
             "focused_control",
             ScreenId::Settings,
@@ -2598,10 +2610,7 @@ fn parity_mismatch_is_covered_by_exception(
 }
 
 #[must_use]
-pub fn uncovered_ui_parity_mismatches(
-    web: &UiSnapshot,
-    tui: &UiSnapshot,
-) -> Vec<UiParityMismatch> {
+pub fn uncovered_ui_parity_mismatches(web: &UiSnapshot, tui: &UiSnapshot) -> Vec<UiParityMismatch> {
     compare_ui_snapshots_for_parity(web, tui)
         .into_iter()
         .filter(|mismatch| !parity_mismatch_is_covered_by_exception(web, tui, mismatch))
@@ -2610,29 +2619,27 @@ pub fn uncovered_ui_parity_mismatches(
 
 #[cfg(test)]
 mod tests {
+    use super::next_projection_revision;
     use super::{
         compare_ui_snapshots_for_parity, list_item_dom_id, list_item_selector,
-        shared_flow_scenarios, shared_flow_support, shared_list_support, shared_modal_support,
-        shared_flow_source_areas, shared_screen_module_map, shared_screen_support,
-        uncovered_ui_parity_mismatches, validate_render_convergence, ChannelFactKey,
-        ConfirmationState, ControlId, FieldId, FlowAvailability, ListId, ListItemSnapshot,
-        ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId,
+        shared_flow_scenarios, shared_flow_source_areas, shared_flow_support, shared_list_support,
+        shared_modal_support, shared_screen_module_map, shared_screen_support,
+        uncovered_ui_parity_mismatches, validate_render_convergence,
+        BrowserHarnessBridgeMethodKind, ChannelFactKey, ConfirmationState, ControlId, FieldId,
+        FlowAvailability, FrontendExecutionBoundaryKind, HarnessModeChangeKind, ListId,
+        ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId,
         OperationSnapshot, OperationState, ParityException, ParityUiIdentity, ProjectionRevision,
         QuiescenceSnapshot, RenderHeartbeat, RuntimeEventId, RuntimeEventSnapshot, RuntimeFact,
         ScreenId, SelectionSnapshot, SharedFlowId, UiParityMismatch, UiReadiness, UiSnapshot,
-        ALL_SHARED_FLOW_IDS, BROWSER_CACHE_BOUNDARIES, BROWSER_HARNESS_BRIDGE_API_VERSION,
-        BROWSER_HARNESS_BRIDGE_METHODS, BROWSER_OBSERVATION_SURFACE_API_VERSION,
+        ALL_SHARED_FLOW_IDS, BROWSER_CACHE_BOUNDARIES, BROWSER_HARNESS_BRIDGE_METHODS,
         BROWSER_OBSERVATION_SURFACE_GLOBAL, BROWSER_OBSERVATION_SURFACE_METHODS,
-        FRONTEND_EXECUTION_BOUNDARIES, HARNESS_MODE_ALLOWLIST,
-        SHARED_FLOW_SOURCE_AREAS,
-        TUI_OBSERVATION_SURFACE_API_VERSION, TUI_OBSERVATION_SURFACE_METHODS,
-        BrowserHarnessBridgeMethodKind, FrontendExecutionBoundaryKind, HarnessModeChangeKind,
-        PARITY_EXCEPTION_METADATA, SHARED_FLOW_SCENARIO_COVERAGE, SHARED_FLOW_SUPPORT,
+        FRONTEND_EXECUTION_BOUNDARIES, HARNESS_MODE_ALLOWLIST, PARITY_EXCEPTION_METADATA,
+        SHARED_FLOW_SCENARIO_COVERAGE, SHARED_FLOW_SOURCE_AREAS, SHARED_FLOW_SUPPORT,
         SHARED_LIST_SUPPORT, SHARED_MODAL_SUPPORT, SHARED_SCREEN_MODULE_MAP, SHARED_SCREEN_SUPPORT,
+        TUI_OBSERVATION_SURFACE_METHODS,
     };
     use std::collections::HashSet;
     use std::path::Path;
-    use super::next_projection_revision;
 
     #[test]
     fn screen_ids_have_stable_help_labels() {
@@ -2685,12 +2692,10 @@ mod tests {
             runtime_events: Vec::new(),
         };
 
-        assert!(
-            snapshot
-                .validate_invariants()
-                .expect_err("placeholder ids must be rejected")
-                .contains("placeholder or override item id")
-        );
+        assert!(snapshot
+            .validate_invariants()
+            .expect_err("placeholder ids must be rejected")
+            .contains("placeholder, override, or row-index item id"));
     }
 
     #[test]
@@ -2720,12 +2725,10 @@ mod tests {
             runtime_events: Vec::new(),
         };
 
-        assert!(
-            snapshot
-                .validate_invariants()
-                .expect_err("override-backed ids must be rejected")
-                .contains("placeholder or override")
-        );
+        assert!(snapshot
+            .validate_invariants()
+            .expect_err("override-backed ids must be rejected")
+            .contains("placeholder, override, or row-index"));
     }
 
     #[test]
@@ -2755,12 +2758,10 @@ mod tests {
             runtime_events: Vec::new(),
         };
 
-        assert!(
-            snapshot
-                .validate_invariants()
-                .expect_err("row-index ids must be rejected")
-                .contains("row-index item")
-        );
+        assert!(snapshot
+            .validate_invariants()
+            .expect_err("row-index ids must be rejected")
+            .contains("row-index item"));
     }
 
     #[test]
@@ -2786,12 +2787,10 @@ mod tests {
             }],
         };
 
-        assert!(
-            snapshot
-                .validate_invariants()
-                .expect_err("inferred runtime events must be rejected")
-                .contains("inferred/synthetic")
-        );
+        assert!(snapshot
+            .validate_invariants()
+            .expect_err("inferred runtime events must be rejected")
+            .contains("inferred/synthetic"));
     }
 
     #[test]
@@ -2857,7 +2856,10 @@ mod tests {
             shared_screen_support(ScreenId::Onboarding).tui,
             FlowAvailability::Supported
         );
-        assert_eq!(UiSnapshot::loading(ScreenId::Onboarding).screen, ScreenId::Onboarding);
+        assert_eq!(
+            UiSnapshot::loading(ScreenId::Onboarding).screen,
+            ScreenId::Onboarding
+        );
     }
 
     #[test]
@@ -2871,8 +2873,7 @@ mod tests {
         for flow in ALL_SHARED_FLOW_IDS {
             assert!(
                 !shared_flow_source_areas(*flow).is_empty(),
-                "shared flow {:?} must declare at least one owned source area",
-                flow
+                "shared flow {flow:?} must declare at least one owned source area"
             );
         }
 
@@ -2888,7 +2889,6 @@ mod tests {
 
     #[test]
     fn browser_harness_bridge_contract_is_versioned_and_complete() {
-        assert!(BROWSER_HARNESS_BRIDGE_API_VERSION >= 1);
         let names = BROWSER_HARNESS_BRIDGE_METHODS
             .iter()
             .map(|method| method.name)
@@ -2929,8 +2929,10 @@ mod tests {
 
     #[test]
     fn browser_observation_surface_contract_is_versioned_and_read_only() {
-        assert!(BROWSER_OBSERVATION_SURFACE_API_VERSION >= 1);
-        assert_eq!(BROWSER_OBSERVATION_SURFACE_GLOBAL, "__AURA_HARNESS_OBSERVE__");
+        assert_eq!(
+            BROWSER_OBSERVATION_SURFACE_GLOBAL,
+            "__AURA_HARNESS_OBSERVE__"
+        );
         let names = BROWSER_OBSERVATION_SURFACE_METHODS
             .iter()
             .map(|method| method.name)
@@ -2945,16 +2947,22 @@ mod tests {
             "tail_log",
             "root_structure",
         ] {
-            assert!(names.contains(required), "missing observation method {required}");
+            assert!(
+                names.contains(required),
+                "missing observation method {required}"
+            );
         }
         for method in BROWSER_OBSERVATION_SURFACE_METHODS {
-            assert!(method.deterministic, "observation method {} must be deterministic", method.name);
+            assert!(
+                method.deterministic,
+                "observation method {} must be deterministic",
+                method.name
+            );
         }
     }
 
     #[test]
     fn tui_observation_surface_contract_is_versioned_and_read_only() {
-        assert!(TUI_OBSERVATION_SURFACE_API_VERSION >= 1);
         let names = TUI_OBSERVATION_SURFACE_METHODS
             .iter()
             .map(|method| method.name)
@@ -2970,10 +2978,17 @@ mod tests {
             "tail_log",
             "read_clipboard",
         ] {
-            assert!(names.contains(required), "missing TUI observation method {required}");
+            assert!(
+                names.contains(required),
+                "missing TUI observation method {required}"
+            );
         }
         for method in TUI_OBSERVATION_SURFACE_METHODS {
-            assert!(method.deterministic, "TUI observation method {} must be deterministic", method.name);
+            assert!(
+                method.deterministic,
+                "TUI observation method {} must be deterministic",
+                method.name
+            );
         }
     }
 
@@ -2995,10 +3010,22 @@ mod tests {
 
     #[test]
     fn harness_mode_allowlist_is_scoped_to_non_semantic_categories() {
+        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root");
         assert!(!HARNESS_MODE_ALLOWLIST.is_empty());
         for entry in HARNESS_MODE_ALLOWLIST {
-            assert!(Path::new(entry.path).exists(), "missing harness-mode allowlist path {}", entry.path);
-            assert!(Path::new(entry.design_ref).exists(), "missing harness-mode design reference {}", entry.design_ref);
+            assert!(
+                workspace_root.join(entry.path).exists(),
+                "missing harness-mode allowlist path {}",
+                entry.path
+            );
+            assert!(
+                workspace_root.join(entry.design_ref).exists(),
+                "missing harness-mode design reference {}",
+                entry.design_ref
+            );
             assert!(
                 matches!(
                     entry.kind,
@@ -3010,25 +3037,41 @@ mod tests {
                 "invalid harness-mode allowlist kind for {}",
                 entry.path
             );
-            assert!(!entry.owner.trim().is_empty(), "missing harness-mode owner for {}", entry.path);
+            assert!(
+                !entry.owner.trim().is_empty(),
+                "missing harness-mode owner for {}",
+                entry.path
+            );
         }
     }
 
     #[test]
     fn frontend_execution_boundaries_are_defined_and_exist() {
+        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root");
         assert!(!FRONTEND_EXECUTION_BOUNDARIES.is_empty());
-        assert!(FRONTEND_EXECUTION_BOUNDARIES.iter().any(|entry| {
-            entry.kind == FrontendExecutionBoundaryKind::DriverBackend
-        }));
-        assert!(FRONTEND_EXECUTION_BOUNDARIES.iter().any(|entry| {
-            entry.kind == FrontendExecutionBoundaryKind::ScenarioExecutor
-        }));
-        assert!(FRONTEND_EXECUTION_BOUNDARIES.iter().any(|entry| {
-            entry.kind == FrontendExecutionBoundaryKind::ScenarioEntrypoint
-        }));
+        assert!(FRONTEND_EXECUTION_BOUNDARIES
+            .iter()
+            .any(|entry| { entry.kind == FrontendExecutionBoundaryKind::DriverBackend }));
+        assert!(FRONTEND_EXECUTION_BOUNDARIES
+            .iter()
+            .any(|entry| { entry.kind == FrontendExecutionBoundaryKind::ScenarioExecutor }));
+        assert!(FRONTEND_EXECUTION_BOUNDARIES
+            .iter()
+            .any(|entry| { entry.kind == FrontendExecutionBoundaryKind::ScenarioEntrypoint }));
         for entry in FRONTEND_EXECUTION_BOUNDARIES {
-            assert!(Path::new(entry.path).exists(), "missing frontend execution boundary path {}", entry.path);
-            assert!(!entry.owner.trim().is_empty(), "missing frontend execution boundary owner for {}", entry.path);
+            assert!(
+                workspace_root.join(entry.path).exists(),
+                "missing frontend execution boundary path {}",
+                entry.path
+            );
+            assert!(
+                !entry.owner.trim().is_empty(),
+                "missing frontend execution boundary owner for {}",
+                entry.path
+            );
         }
     }
 
@@ -3058,9 +3101,14 @@ mod tests {
 
     #[test]
     fn frontend_sources_reference_shared_identity_helpers() {
-        let web_source = std::fs::read_to_string("crates/aura-web/src/harness_bridge.rs")
-            .unwrap_or_else(|error| panic!("failed to read harness bridge source: {error}"));
-        let ui_source = std::fs::read_to_string("crates/aura-ui/src/app.rs")
+        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root");
+        let web_source =
+            std::fs::read_to_string(workspace_root.join("crates/aura-web/src/harness_bridge.rs"))
+                .unwrap_or_else(|error| panic!("failed to read harness bridge source: {error}"));
+        let ui_source = std::fs::read_to_string(workspace_root.join("crates/aura-ui/src/app.rs"))
             .unwrap_or_else(|error| panic!("failed to read aura-ui source: {error}"));
 
         assert!(

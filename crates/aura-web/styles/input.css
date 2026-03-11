@@ -79,6 +79,13 @@
 @tailwind utilities;
 
 @layer base {
+    /*
+     * Typography policy:
+     * - `--font-sans` (Perun) is the default for interface chrome, headings,
+     *   labels, buttons, and readable copy.
+     * - `--font-mono` (JetBrains Mono) is reserved for identifiers, codes,
+     *   commands, logs, and editable machine-like input.
+     */
     /* Dark mode (default) */
     :root {
         /* Font families */
@@ -327,21 +334,28 @@ div.aura-list.grid > div.aura-list-item:nth-last-child(-n + 2) {
 /* Buttons use sans-serif with consistent font smoothing */
 button {
     font-family: var(--font-sans);
+    line-height: 1;
+    padding-top: 1px;
+    padding-bottom: 0;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
 
-/* Code blocks and inputs use monospace with ligatures */
+/* Machine-like display content uses monospace with ligatures */
 code,
-pre,
-input,
-textarea {
+kbd,
+pre {
     font-family: var(--font-mono);
     font-feature-settings:
         "liga" 1,
         "calt" 1,
         "zero" 1,
         "ss02" 1;
+}
+
+input,
+textarea {
+    font-family: var(--font-sans);
 }
 
 /* Chat conversation card - remove top padding from content wrapper */

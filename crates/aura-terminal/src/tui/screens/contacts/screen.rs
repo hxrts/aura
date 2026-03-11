@@ -34,7 +34,7 @@ use crate::tui::components::{
     DetailPanel, DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState,
     InvitePeerCallback, KeyValue, ListPanel, StatusIndicator,
 };
-use crate::tui::harness_state::publish_contacts_list_override;
+use crate::tui::harness_state::publish_contacts_list_export;
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::ContactsViewProps;
@@ -403,7 +403,7 @@ pub fn ContactsScreen(
     let current_selected = props.view.selected_index;
     let selected_contact = display_contacts.get(current_selected).cloned();
 
-    publish_contacts_list_override(&display_contacts, current_selected);
+    publish_contacts_list_export(&display_contacts, current_selected);
 
     // === Pure view: No use_terminal_events ===
     // All event handling is done by IoApp (the shell) via the state machine.

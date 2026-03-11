@@ -347,8 +347,9 @@ impl<'a> EnrollmentHandler<'a> {
             .await
             .map_err(|e| format!("Failed to load ceremony state: {e}"))?;
 
-        let Some(device_id) = ceremony_state.enrollment_device_id else {
-            return Ok(None);
+        let device_id = match ceremony_state.enrollment_device_id {
+            Some(device_id) => device_id,
+            None => return Ok(None),
         };
 
         let tree_state = self
@@ -368,7 +369,7 @@ impl<'a> EnrollmentHandler<'a> {
                 device_id = %device_id,
                 "Enrollment leaf already present; skipping add-leaf op"
             );
-            return Ok(None);
+            Ok(None)
         } else {
             use aura_core::crypto::tree_signing::{
                 public_key_package_from_bytes, share_from_key_package_bytes,
@@ -479,7 +480,7 @@ impl<'a> EnrollmentHandler<'a> {
                 .apply_attested_op(attested.clone())
                 .await
                 .map_err(|e| format!("Failed to apply device leaf op: {e}"))?;
-            return Ok(Some(attested));
+            Ok(Some(attested))
         }
     }
 

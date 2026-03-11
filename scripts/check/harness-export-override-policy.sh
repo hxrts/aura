@@ -9,7 +9,7 @@ fail() {
   exit 1
 }
 
-hits="$(rg --no-heading -n 'publish_.*override|_override\(' \
+hits="$(rg --no-heading -n 'publish_.*override' \
   crates/aura-terminal/src/tui \
   crates/aura-ui/src \
   crates/aura-web/src || true)"

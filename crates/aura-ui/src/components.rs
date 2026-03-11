@@ -15,6 +15,19 @@ use dioxus_shadcn::components::dialog::{
     DialogTitle as LbDialogTitle,
 };
 
+trait RequiredDomId {
+    fn required_dom_id(self, context: &'static str) -> &'static str;
+}
+
+impl RequiredDomId for Option<&'static str> {
+    fn required_dom_id(self, context: &'static str) -> &'static str {
+        let Some(id) = self else {
+            panic!("{context} must define a web DOM id");
+        };
+        id
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ButtonVariant {
     Primary,
@@ -56,10 +69,10 @@ pub struct AuthorityPickerItem {
 fn ui_button_class(variant: ButtonVariant) -> &'static str {
     match variant {
         ButtonVariant::Primary => {
-            "inline-flex h-8 shrink-0 items-center justify-center rounded-sm bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            "inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-sm bg-primary px-3 text-sm font-medium leading-none text-primary-foreground transition-colors hover:bg-primary/90"
         }
         ButtonVariant::Secondary => {
-            "inline-flex h-8 shrink-0 items-center justify-center rounded-sm border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            "inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-sm border border-border bg-background px-3 text-sm font-medium leading-none text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
         }
     }
 }
@@ -157,13 +170,21 @@ pub fn UiButton(
     id: Option<String>,
     label: String,
     variant: ButtonVariant,
+    width_class: Option<String>,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
+    let class = match width_class {
+        Some(width_class) if !width_class.is_empty() => {
+            format!("{} {}", ui_button_class(variant), width_class)
+        }
+        _ => ui_button_class(variant).to_string(),
+    };
+
     rsx! {
         button {
             r#type: "button",
             id,
-            class: ui_button_class(variant),
+            class: "{class}",
             onclick: move |evt| onclick.call(evt),
             "{label}"
         }
@@ -175,12 +196,17 @@ pub fn UiListButton(
     id: Option<String>,
     label: String,
     active: bool,
+    extra_class: Option<String>,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
-    let class = if active {
-        "inline-flex h-9 w-full items-center justify-start rounded-sm bg-accent pl-4 text-left text-sm font-medium text-foreground"
+    let base_class = if active {
+        "inline-flex h-9 w-full items-center justify-start rounded-sm bg-accent pl-4 text-left text-sm font-medium leading-none text-foreground"
     } else {
-        "inline-flex h-9 w-full items-center justify-start rounded-sm pl-4 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+        "inline-flex h-9 w-full items-center justify-start rounded-sm pl-4 text-left text-sm font-medium leading-none text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+    };
+    let class = match extra_class {
+        Some(extra_class) if !extra_class.is_empty() => format!("{base_class} {extra_class}"),
+        _ => base_class.to_string(),
     };
 
     rsx! {
@@ -200,7 +226,7 @@ pub fn UiPill(label: String, tone: PillTone) -> Element {
     rsx! {
         LbBadge {
             variant: pill_tone_variant(tone),
-            class: Some("h-6 rounded-full px-2 text-[0.65rem] uppercase tracking-[0.06em]".to_string()),
+            class: Some("h-6 rounded-full px-2 font-sans text-[0.65rem] uppercase tracking-[0.06em]".to_string()),
             "{label}"
         }
     }
@@ -260,7 +286,7 @@ pub fn UiModal(
                     }
                 }
                 div {
-                    class: "bg-card px-4 py-5 space-y-4 text-sm text-card-foreground",
+                    class: "bg-card px-4 pt-4 pb-6 space-y-4 text-sm text-card-foreground",
                     p {
                         id: "aura-modal-description",
                         class: "sr-only",
@@ -276,7 +302,7 @@ pub fn UiModal(
                                 div {
                                     class: "flex items-center justify-between gap-3 px-3 py-2",
                                     kbd {
-                                        class: "rounded-sm border border-border bg-muted px-2 py-1 text-[0.68rem] uppercase tracking-[0.08em] text-foreground whitespace-nowrap",
+                                        class: "rounded-sm border border-border bg-muted px-2 py-1 font-mono text-[0.68rem] uppercase tracking-[0.08em] text-foreground whitespace-nowrap",
                                         "{keys}"
                                     }
                                     span {
@@ -294,13 +320,13 @@ pub fn UiModal(
                                 div {
                                     class: "space-y-2",
                                     label {
-                                        r#for: "{input_view.field_id.web_dom_id().or_else(|| ControlId::ModalInput.web_dom_id()).expect(\"modal input field identifier must be defined\")}",
+                                        r#for: "{input_view.field_id.web_dom_id().or_else(|| ControlId::ModalInput.web_dom_id()).required_dom_id(\"modal input field identifier must be defined\")}",
                                         class: "text-[0.7rem] uppercase tracking-[0.06em] text-muted-foreground",
                                         "{input_view.label}"
                                     }
                                     input {
-                                        id: "{input_view.field_id.web_dom_id().or_else(|| ControlId::ModalInput.web_dom_id()).expect(\"modal input field identifier must be defined\")}",
-                                        class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring",
+                                        id: "{input_view.field_id.web_dom_id().or_else(|| ControlId::ModalInput.web_dom_id()).required_dom_id(\"modal input field identifier must be defined\")}",
+                                        class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring",
                                         autocomplete: "off",
                                         value: "{input_view.value}",
                                         onfocus: {
@@ -320,29 +346,31 @@ pub fn UiModal(
                     }
                 }
                 div {
-                    class: "bg-card px-4 py-3 border-t border-border flex items-center justify-end gap-2",
-                    UiButton {
-                        id: Some(
-                            ControlId::ModalCancelButton
+                    class: "bg-card px-4 pt-4 pb-3 border-t border-border flex items-center justify-end gap-2",
+                        UiButton {
+                            id: Some(
+                                ControlId::ModalCancelButton
+                                    .web_dom_id()
+                                    .required_dom_id("ControlId::ModalCancelButton must define a web DOM id")
+                                    .to_string(),
+                            ),
+                            label: "Cancel".to_string(),
+                            variant: ButtonVariant::Secondary,
+                            width_class: None,
+                            onclick: move |_| on_cancel.call(()),
+                        }
+                        UiButton {
+                            id: Some(
+                                ControlId::ModalConfirmButton
                                 .web_dom_id()
-                                .expect("ControlId::ModalCancelButton must define a web DOM id")
-                                .to_string(),
-                        ),
-                        label: "Cancel".to_string(),
-                        variant: ButtonVariant::Secondary,
-                        onclick: move |_| on_cancel.call(()),
-                    }
-                    UiButton {
-                        id: Some(
-                            ControlId::ModalConfirmButton
-                                .web_dom_id()
-                                .expect("ControlId::ModalConfirmButton must define a web DOM id")
-                                .to_string(),
-                        ),
-                        label: modal.enter_label.clone(),
-                        variant: ButtonVariant::Primary,
-                        onclick: move |_| on_confirm.call(()),
-                    }
+                                .required_dom_id("ControlId::ModalConfirmButton must define a web DOM id")
+                                    .to_string(),
+                            ),
+                            label: modal.enter_label.clone(),
+                            variant: ButtonVariant::Primary,
+                            width_class: None,
+                            onclick: move |_| on_confirm.call(()),
+                        }
                 }
             }
         }
@@ -427,7 +455,7 @@ pub fn UiDeviceEnrollmentModal(
                         class: "flex items-center gap-2",
                         LbBadge {
                             variant: status_tone,
-                            class: Some("h-6 rounded-full px-2 uppercase tracking-[0.08em] text-[0.62rem]".to_string()),
+                            class: Some("h-6 rounded-full px-2 font-sans uppercase tracking-[0.08em] text-[0.62rem]".to_string()),
                             "{status_label}"
                         }
                         button {
@@ -443,7 +471,7 @@ pub fn UiDeviceEnrollmentModal(
                     }
                 }
                 div {
-                    class: "bg-card px-4 py-4 space-y-4 text-sm text-card-foreground",
+                    class: "bg-card px-4 pt-3 pb-5 space-y-4 text-sm text-card-foreground",
                     div {
                         class: "grid gap-2 md:grid-cols-3",
                         div {
@@ -492,9 +520,9 @@ pub fn UiDeviceEnrollmentModal(
                     }
                 }
                 div {
-                    class: "bg-card px-4 py-3 border-t border-border flex flex-wrap items-center justify-between gap-2",
+                    class: "bg-card px-4 pt-4 pb-3 border-t border-border flex flex-wrap items-center justify-between gap-2",
                     div {
-                        class: "flex items-center gap-2 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground",
+                        class: "flex items-center gap-2 font-mono text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground",
                         span { "c copies" }
                         if !is_complete && !has_failed {
                             span { "esc cancels" }
@@ -506,7 +534,7 @@ pub fn UiDeviceEnrollmentModal(
                             id: Some(
                                 ControlId::DeviceEnrollmentCancelButton
                                     .web_dom_id()
-                                    .expect(
+                                    .required_dom_id(
                                         "ControlId::DeviceEnrollmentCancelButton must define a web DOM id",
                                     )
                                     .to_string(),
@@ -517,13 +545,14 @@ pub fn UiDeviceEnrollmentModal(
                                 "Cancel".to_string()
                             },
                             variant: ButtonVariant::Secondary,
+                            width_class: Some("w-[7.5rem]".to_string()),
                             onclick: move |_| on_cancel.call(()),
                         }
                         UiButton {
                             id: Some(
                                 ControlId::ModalCopyButton
                                     .web_dom_id()
-                                    .expect("ControlId::ModalCopyButton must define a web DOM id")
+                                    .required_dom_id("ControlId::ModalCopyButton must define a web DOM id")
                                     .to_string(),
                             ),
                             label: if copied {
@@ -532,19 +561,21 @@ pub fn UiDeviceEnrollmentModal(
                                 "Copy Code".to_string()
                             },
                             variant: ButtonVariant::Secondary,
+                            width_class: Some("w-[7.5rem]".to_string()),
                             onclick: move |_| on_copy.call(()),
                         }
                         UiButton {
                             id: Some(
                                 ControlId::DeviceEnrollmentPrimaryButton
                                     .web_dom_id()
-                                    .expect(
+                                    .required_dom_id(
                                         "ControlId::DeviceEnrollmentPrimaryButton must define a web DOM id",
                                     )
                                     .to_string(),
                             ),
                             label: primary_label,
                             variant: ButtonVariant::Primary,
+                            width_class: Some("w-[9rem]".to_string()),
                             onclick: move |_| on_primary.call(()),
                         }
                     }
@@ -608,7 +639,7 @@ pub fn UiAuthorityPickerModal(
                         class: "flex items-center gap-2",
                         LbBadge {
                             variant: LbBadgeVariant::Secondary,
-                            class: Some("h-6 rounded-full px-2 uppercase tracking-[0.08em] text-[0.62rem]".to_string()),
+                            class: Some("h-6 rounded-full px-2 font-sans uppercase tracking-[0.08em] text-[0.62rem]".to_string()),
                             "{authority_count} available"
                         }
                         button {
@@ -624,7 +655,7 @@ pub fn UiAuthorityPickerModal(
                     }
                 }
                 div {
-                    class: "bg-card px-4 py-4 space-y-4 text-sm text-card-foreground",
+                    class: "bg-card px-4 pt-3 pb-5 space-y-4 text-sm text-card-foreground",
                     div {
                         class: "grid gap-2 md:grid-cols-3",
                         div {
@@ -703,14 +734,14 @@ pub fn UiAuthorityPickerModal(
                                             if authority.is_current {
                                                 LbBadge {
                                                     variant: LbBadgeVariant::Secondary,
-                                                    class: Some("h-6 rounded-full px-2 uppercase tracking-[0.08em] text-[0.62rem]".to_string()),
+                                                    class: Some("h-6 rounded-full px-2 font-sans uppercase tracking-[0.08em] text-[0.62rem]".to_string()),
                                                     "Current"
                                                 }
                                             }
                                             if authority.is_selected {
                                                 LbBadge {
                                                     variant: LbBadgeVariant::Outline,
-                                                    class: Some("h-6 rounded-full px-2 uppercase tracking-[0.08em] text-[0.62rem]".to_string()),
+                                                    class: Some("h-6 rounded-full px-2 font-sans uppercase tracking-[0.08em] text-[0.62rem]".to_string()),
                                                     "Selected"
                                                 }
                                             }
@@ -722,9 +753,9 @@ pub fn UiAuthorityPickerModal(
                     }
                 }
                 div {
-                    class: "bg-card px-4 py-3 border-t border-border flex flex-wrap items-center justify-between gap-2",
+                    class: "bg-card px-4 pt-4 pb-3 border-t border-border flex flex-wrap items-center justify-between gap-2",
                     div {
-                        class: "flex items-center gap-2 text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground",
+                        class: "flex items-center gap-2 font-mono text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground",
                         span { "↑↓ choose" }
                         span { "enter reload" }
                         span { "esc cancel" }
@@ -735,26 +766,28 @@ pub fn UiAuthorityPickerModal(
                             id: Some(
                                 ControlId::AuthorityPickerCancelButton
                                     .web_dom_id()
-                                    .expect(
+                                    .required_dom_id(
                                         "ControlId::AuthorityPickerCancelButton must define a web DOM id",
                                     )
                                     .to_string(),
                             ),
                             label: "Cancel".to_string(),
                             variant: ButtonVariant::Secondary,
+                            width_class: None,
                             onclick: move |_| on_cancel.call(()),
                         }
                         UiButton {
                             id: Some(
                                 ControlId::AuthorityPickerConfirmButton
                                     .web_dom_id()
-                                    .expect(
+                                    .required_dom_id(
                                         "ControlId::AuthorityPickerConfirmButton must define a web DOM id",
                                     )
                                     .to_string(),
                             ),
                             label: "Switch".to_string(),
                             variant: ButtonVariant::Primary,
+                            width_class: None,
                             onclick: move |_| on_confirm.call(()),
                         }
                     }

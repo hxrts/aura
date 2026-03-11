@@ -148,7 +148,7 @@ function markObservationMutation(session, reason) {
 function clearObservationMutationIfSatisfied(session, snapshot) {
   const requiredRevision = session.requiredUiStateRevision ?? 0;
   if (requiredRevision > 0 && uiSnapshotRevision(snapshot) >= requiredRevision) {
-    session.requiredUiStateRevision = 0;
+    session.requiredUiStateRevision = null;
     session.lastMutationReason = null;
   }
 }
@@ -625,7 +625,7 @@ function runSelfTest() {
     'selftest'
   );
   assert(
-    mutableSession.requiredUiStateRevision === 0,
+    mutableSession.requiredUiStateRevision == null,
     'fresh snapshot should clear mutation floor'
   );
   const staleAfterMutationSession = {
@@ -638,7 +638,7 @@ function runSelfTest() {
       open_modal: null,
       render_seq: 11
     }),
-    requiredUiStateRevision: 0,
+    requiredUiStateRevision: null,
     uiStateWaiters: []
   };
   markObservationMutation(staleAfterMutationSession, 'submit_form');

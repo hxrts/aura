@@ -624,7 +624,9 @@ impl IoContext {
                 )
             })??
         } else {
-            self.account_files.create_account(&nickname_suggestion).await?
+            self.account_files
+                .create_account(&nickname_suggestion)
+                .await?
         };
 
         if !harness_mode {
@@ -674,10 +676,8 @@ impl IoContext {
                     .await;
                 }
                 if attempt + 1 < HOME_CONVERGENCE_ATTEMPTS {
-                    tokio::time::sleep(std::time::Duration::from_millis(
-                        HOME_CONVERGENCE_RETRY_MS,
-                    ))
-                    .await;
+                    tokio::time::sleep(std::time::Duration::from_millis(HOME_CONVERGENCE_RETRY_MS))
+                        .await;
                 }
             }
             if !home_ready {

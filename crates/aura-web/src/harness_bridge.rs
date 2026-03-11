@@ -4,10 +4,10 @@
 //! harness to send keys, capture screenshots, and query UI state from Playwright.
 
 use aura_app::ui::contract::{ModalId, RenderHeartbeat, ScreenId, UiReadiness, UiSnapshot};
-use aura_app::ui_contract::RuntimeFact;
 use aura_app::ui::workflows::account as account_workflows;
 use aura_app::ui::workflows::context as context_workflows;
 use aura_app::ui::workflows::invitation as invitation_workflows;
+use aura_app::ui_contract::RuntimeFact;
 use aura_core::AuthorityId;
 use aura_ui::UiController;
 use aura_ui::UiScreen;
@@ -95,9 +95,11 @@ fn install_pending_harness_command_loop(controller: Arc<UiController>) {
                 &format!("[web-harness] create_account start nickname={nickname}").into(),
             );
             controller.set_account_setup_state(false, nickname.clone(), None);
-            if let Err(error) =
-                account_workflows::initialize_runtime_account(controller.app_core(), nickname.clone())
-                    .await
+            if let Err(error) = account_workflows::initialize_runtime_account(
+                controller.app_core(),
+                nickname.clone(),
+            )
+            .await
             {
                 web_sys::console::error_1(
                     &format!("[web-harness] create_account error {}", error).into(),
@@ -106,10 +108,8 @@ fn install_pending_harness_command_loop(controller: Arc<UiController>) {
             }
             if let Some(window) = web_sys::window() {
                 if let Ok(Some(storage)) = window.local_storage() {
-                    let storage_key = format!(
-                        "{}selected_authority",
-                        harness_storage_prefix(&window)
-                    );
+                    let storage_key =
+                        format!("{}selected_authority", harness_storage_prefix(&window));
                     let _ = storage.set_item(&storage_key, &controller.authority_id());
                 }
             }
@@ -219,7 +219,11 @@ fn publish_render_heartbeat(window: &web_sys::Window, heartbeat: &RenderHeartbea
 fn log_js_callback_error(context: &str, error: &JsValue) {
     let detail = error
         .as_string()
-        .or_else(|| JSON::stringify(error).ok().and_then(|value| value.as_string()))
+        .or_else(|| {
+            JSON::stringify(error)
+                .ok()
+                .and_then(|value| value.as_string())
+        })
         .unwrap_or_else(|| format!("{error:?}"));
     web_sys::console::error_1(&JsValue::from_str(&format!(
         "[web-harness] {context} failed: {detail}"

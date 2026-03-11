@@ -21,8 +21,8 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 
-use crate::backend::UiOperationHandle;
 use crate::backend::observe_operation;
+use crate::backend::UiOperationHandle;
 use crate::config::{ScenarioAction, ScenarioConfig, ScenarioStep, ScreenSource};
 use crate::introspection::{
     extract_command_metadata, extract_toast, CommandConsistency, CommandStatus, ToastLevel,
@@ -283,7 +283,9 @@ impl<'a> WaitCoordinator<'a> {
         timeout_ms: u64,
         kind: RuntimeEventKind,
     ) -> Result<()> {
-        debug_assert!(matches!(contract, WaitContractRef::RuntimeEvent(expected) if expected == kind));
+        debug_assert!(
+            matches!(contract, WaitContractRef::RuntimeEvent(expected) if expected == kind)
+        );
         wait_for_runtime_event(step, self.tool_api, instance_id, timeout_ms, kind)
     }
 
@@ -308,14 +310,7 @@ impl<'a> WaitCoordinator<'a> {
         state: OperationState,
     ) -> Result<()> {
         debug_assert!(matches!(contract, WaitContractRef::Operation(name) if !name.is_empty()));
-        wait_for_operation_handle_state(
-            step,
-            self.tool_api,
-            instance_id,
-            timeout_ms,
-            handle,
-            state,
-        )
+        wait_for_operation_handle_state(step, self.tool_api, instance_id, timeout_ms, handle, state)
     }
 }
 
@@ -407,7 +402,10 @@ impl SharedFlowState {
                 }
             }
             ScenarioAction::AcceptPendingChannelInvitation => {
-                if !matches!(self.channel, ChannelPhase::None | ChannelPhase::InvitationPending) {
+                if !matches!(
+                    self.channel,
+                    ChannelPhase::None | ChannelPhase::InvitationPending
+                ) {
                     bail!(
                         "accept_pending_channel_invitation requires no completed channel membership"
                     );
@@ -682,7 +680,9 @@ fn execute_step(
     }
     match step.action {
         ScenarioAction::LaunchInstances | ScenarioAction::Noop => Ok(()),
-        ScenarioAction::CreateHome => unreachable!("shared semantic action should have been handled"),
+        ScenarioAction::CreateHome => {
+            unreachable!("shared semantic action should have been handled")
+        }
         ScenarioAction::SetVar => {
             let var = step
                 .var
@@ -2159,17 +2159,16 @@ fn unsatisfied_action_preconditions(
             ActionPrecondition::Readiness(expected) if snapshot.readiness != *expected => Some(
                 format!("readiness={:?} expected={expected:?}", snapshot.readiness),
             ),
-            ActionPrecondition::Quiescence(expected)
-                if snapshot.quiescence.state != *expected =>
-            {
+            ActionPrecondition::Quiescence(expected) if snapshot.quiescence.state != *expected => {
                 Some(format!(
                     "quiescence={:?} expected={expected:?}",
                     snapshot.quiescence.state
                 ))
             }
-            ActionPrecondition::Screen(expected) if snapshot.screen != *expected => {
-                Some(format!("screen={:?} expected={expected:?}", snapshot.screen))
-            }
+            ActionPrecondition::Screen(expected) if snapshot.screen != *expected => Some(format!(
+                "screen={:?} expected={expected:?}",
+                snapshot.screen
+            )),
             ActionPrecondition::RuntimeEvent(kind) if !snapshot.has_runtime_event(*kind, None) => {
                 Some(format!("runtime_event={kind:?} missing"))
             }
@@ -2371,17 +2370,22 @@ fn record_shared_trace_failure(
     let observed_revision = fetch_ui_snapshot(tool_api, &metadata.instance_id)
         .ok()
         .map(|snapshot| snapshot.revision);
-    context.canonical_trace.push(CanonicalTraceEvent::ActionFailed {
-        fact: TerminalFailureFact {
-            handle: metadata.handle.clone(),
-            code: "shared_action_failed".to_string(),
-            detail: Some(error.to_string()),
-            observed_revision,
-        },
-    });
+    context
+        .canonical_trace
+        .push(CanonicalTraceEvent::ActionFailed {
+            fact: TerminalFailureFact {
+                handle: metadata.handle.clone(),
+                code: "shared_action_failed".to_string(),
+                detail: Some(error.to_string()),
+                observed_revision,
+            },
+        });
 }
 
-fn infer_transition(contract: &SharedActionContract, snapshot: &UiSnapshot) -> Option<AuthoritativeTransitionKind> {
+fn infer_transition(
+    contract: &SharedActionContract,
+    snapshot: &UiSnapshot,
+) -> Option<AuthoritativeTransitionKind> {
     contract
         .transitions
         .iter()
@@ -2390,7 +2394,10 @@ fn infer_transition(contract: &SharedActionContract, snapshot: &UiSnapshot) -> O
         .or_else(|| contract.transitions.first().cloned())
 }
 
-fn infer_terminal_success(contract: &SharedActionContract, snapshot: &UiSnapshot) -> TerminalSuccessKind {
+fn infer_terminal_success(
+    contract: &SharedActionContract,
+    snapshot: &UiSnapshot,
+) -> TerminalSuccessKind {
     contract
         .terminal_success
         .iter()
@@ -2399,7 +2406,10 @@ fn infer_terminal_success(contract: &SharedActionContract, snapshot: &UiSnapshot
         .unwrap_or_else(|| contract.terminal_success[0].clone())
 }
 
-fn transition_matches_snapshot(transition: &AuthoritativeTransitionKind, snapshot: &UiSnapshot) -> bool {
+fn transition_matches_snapshot(
+    transition: &AuthoritativeTransitionKind,
+    snapshot: &UiSnapshot,
+) -> bool {
     match transition {
         AuthoritativeTransitionKind::RuntimeEvent(kind) => snapshot
             .runtime_events
@@ -2419,7 +2429,10 @@ fn success_matches_snapshot(success: &TerminalSuccessKind, snapshot: &UiSnapshot
             .runtime_events
             .iter()
             .any(|event| event.kind() == *kind),
-        TerminalSuccessKind::OperationState { operation_id, state } => observe_operation(snapshot, operation_id)
+        TerminalSuccessKind::OperationState {
+            operation_id,
+            state,
+        } => observe_operation(snapshot, operation_id)
             .is_some_and(|operation| operation.state == *state),
         TerminalSuccessKind::Screen(screen) => snapshot.screen == *screen,
         TerminalSuccessKind::Readiness(readiness) => snapshot.readiness == *readiness,
@@ -3929,9 +3942,7 @@ mod tests {
                         .contract(),
                         baseline_revision: None,
                     },
-                    success: TerminalSuccessKind::RuntimeEvent(
-                        RuntimeEventKind::ChannelJoined,
-                    ),
+                    success: TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::ChannelJoined),
                     observed_revision: None,
                 },
             },
@@ -3965,9 +3976,7 @@ mod tests {
                         .contract(),
                         baseline_revision: Some(UiSnapshot::loading(ScreenId::Chat).revision),
                     },
-                    success: TerminalSuccessKind::RuntimeEvent(
-                        RuntimeEventKind::ChannelJoined,
-                    ),
+                    success: TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::ChannelJoined),
                     observed_revision: Some(UiSnapshot::loading(ScreenId::Neighborhood).revision),
                 },
             },
@@ -4034,11 +4043,15 @@ mod tests {
             &snapshot,
         );
         assert!(
-            failures.iter().any(|failure| failure.contains("readiness=")),
+            failures
+                .iter()
+                .any(|failure| failure.contains("readiness=")),
             "expected readiness failure, got {failures:?}"
         );
         assert!(
-            failures.iter().any(|failure| failure.contains("quiescence=")),
+            failures
+                .iter()
+                .any(|failure| failure.contains("quiescence=")),
             "expected quiescence failure, got {failures:?}"
         );
         assert!(
@@ -4915,7 +4928,10 @@ mod tests {
             runtime,
             WaitContractRef::RuntimeEvent(RuntimeEventKind::MessageCommitted)
         ));
-        assert!(matches!(semantic, WaitContractRef::Semantic("ui_readiness_ready")));
+        assert!(matches!(
+            semantic,
+            WaitContractRef::Semantic("ui_readiness_ready")
+        ));
         assert!(matches!(
             operation,
             WaitContractRef::Operation("accept_contact_invitation")

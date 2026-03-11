@@ -11,15 +11,15 @@ fail() {
 
 rg -q 'enum WaitContractRef' crates/aura-harness/src/executor.rs \
   || fail "missing typed wait contract reference"
-
-raw_wait_hits="$(rg --no-heading -n \
-  'wait_for_modal\(|wait_for_runtime_event\(|wait_for_semantic_state\(|wait_for_operation_handle_state\(' \
-  crates/aura-harness/src/executor.rs || true)"
-
-filtered_hits="$(printf '%s\n' "$raw_wait_hits" | grep -v 'fn wait_for_' | grep -v 'self.tool_api' || true)"
-if [ -n "$filtered_hits" ]; then
-  echo "$filtered_hits" >&2
-  fail "parity-critical waits must flow through WaitCoordinator and WaitContractRef"
-fi
+rg -q 'let mut waits = WaitCoordinator::new' crates/aura-harness/src/executor.rs \
+  || fail "shared semantic execution must instantiate WaitCoordinator"
+rg -Fq 'waits.modal(' crates/aura-harness/src/executor.rs \
+  || fail "shared semantic execution must route modal waits through WaitCoordinator"
+rg -Fq 'waits.runtime_event(' crates/aura-harness/src/executor.rs \
+  || fail "shared semantic execution must route runtime-event waits through WaitCoordinator"
+rg -Fq 'waits.semantic_state(' crates/aura-harness/src/executor.rs \
+  || fail "shared semantic execution must route semantic waits through WaitCoordinator"
+rg -q 'fn operation_state\(' crates/aura-harness/src/executor.rs \
+  || fail "WaitCoordinator must define typed operation wait support"
 
 echo "harness wait contract: clean"

@@ -31,11 +31,7 @@ pub fn materialize_run_config(mut config: RunConfig, _config_path: &Path) -> Res
                 "AURA_HARNESS_SCENARIO_SEED",
                 &seed_bundle.scenario_seed.to_string(),
             );
-            ensure_env_value(
-                &mut instance.env,
-                "AURA_HARNESS_INSTANCE_ID",
-                &instance.id,
-            );
+            ensure_env_value(&mut instance.env, "AURA_HARNESS_INSTANCE_ID", &instance.id);
         }
 
         if matches!(instance.mode, InstanceMode::Browser) {

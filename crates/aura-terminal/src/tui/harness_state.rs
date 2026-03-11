@@ -10,14 +10,16 @@ use crate::tui::types::{
 };
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
-    ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot,
-    ModalId, OperationId, OperationInstanceId, OperationSnapshot, OperationState,
-    QuiescenceSnapshot, RuntimeEventId, RuntimeEventSnapshot, ScreenId, SelectionSnapshot,
-    ToastId, ToastKind, ToastSnapshot, UiReadiness, UiSnapshot, next_projection_revision,
+    ConfirmationState, ControlId, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId,
+    OperationId, OperationInstanceId, OperationSnapshot, OperationState, RuntimeEventId,
+    RuntimeEventSnapshot, ScreenId, SelectionSnapshot, ToastId, ToastKind, ToastSnapshot,
+    UiReadiness, UiSnapshot,
 };
-use aura_app::ui_contract::{ChannelFactKey, RuntimeFact};
 use aura_app::ui::types::StateSnapshot;
 use aura_app::ui::workflows::messaging as messaging_workflows;
+use aura_app::ui_contract::{
+    next_projection_revision, ChannelFactKey, QuiescenceSnapshot, RuntimeFact,
+};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -243,7 +245,10 @@ pub fn semantic_ui_snapshot(
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
     let channel_ids = if let Some(ref channels) = effective_channels {
-        channels.iter().map(|channel| channel.id.clone()).collect::<Vec<_>>()
+        channels
+            .iter()
+            .map(|channel| channel.id.clone())
+            .collect::<Vec<_>>()
     } else {
         app_snapshot
             .chat
@@ -253,7 +258,11 @@ pub fn semantic_ui_snapshot(
     };
     let selected_channel_index = selected_channel_override
         .as_ref()
-        .and_then(|selected_id| channel_ids.iter().position(|channel_id| channel_id == selected_id))
+        .and_then(|selected_id| {
+            channel_ids
+                .iter()
+                .position(|channel_id| channel_id == selected_id)
+        })
         .unwrap_or(state.chat.selected_channel);
     let channel_items = if let Some(ref channels) = effective_channels {
         channels
@@ -582,9 +591,8 @@ pub fn semantic_ui_snapshot(
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone()
         .unwrap_or_default();
-    let selected_channel_id = selected_channel_override
-        .clone()
-        .or_else(|| channel_ids.get(selected_channel_index).cloned());
+    let selected_channel_id =
+        selected_channel_override.or_else(|| channel_ids.get(selected_channel_index).cloned());
     let messages = if !effective_messages.is_empty() {
         effective_messages
             .iter()
@@ -714,7 +722,8 @@ pub fn semantic_ui_snapshot(
         .current_home()
         .and_then(|home| home.members.first().map(|member| member.id));
     let authoritative_recipient_count_for_channel =
-        |authority_id: aura_app::ui::types::AuthorityId, app_channel: &aura_app::ui::types::Channel| {
+        |authority_id: aura_app::ui::types::AuthorityId,
+         app_channel: &aura_app::ui::types::Channel| {
             app_snapshot
                 .homes
                 .home_state(&app_channel.id)
@@ -780,8 +789,8 @@ pub fn semantic_ui_snapshot(
                     }
                 })
                 .unwrap_or(false);
-            let reply_ready_recipient_count = authoritative_recipient_count
-                .max(usize::from(observed_channel_traffic));
+            let reply_ready_recipient_count =
+                authoritative_recipient_count.max(usize::from(observed_channel_traffic));
             runtime_events.push(RuntimeEventSnapshot {
                 id: RuntimeEventId(format!("tui-channel-membership-ready:{channel_id}")),
                 fact: RuntimeFact::ChannelMembershipReady {
@@ -834,16 +843,19 @@ pub fn semantic_ui_snapshot(
                 .member_count
                 .max((resolved_recipient_count.saturating_add(1)) as u32);
             let authoritative_recipient_count = local_authority
-                .map(|authority_id| authoritative_recipient_count_for_channel(authority_id, channel))
+                .map(|authority_id| {
+                    authoritative_recipient_count_for_channel(authority_id, channel)
+                })
                 .unwrap_or(0);
             let observed_channel_traffic = app_snapshot
                 .chat
                 .messages_for_channel(&channel.id)
                 .iter()
                 .any(|_| true)
-                || (selected_channel_id.as_deref() == Some(channel_id.as_str()) && !messages.is_empty());
-            let reply_ready_recipient_count = authoritative_recipient_count
-                .max(usize::from(observed_channel_traffic));
+                || (selected_channel_id.as_deref() == Some(channel_id.as_str())
+                    && !messages.is_empty());
+            let reply_ready_recipient_count =
+                authoritative_recipient_count.max(usize::from(observed_channel_traffic));
             runtime_events.push(RuntimeEventSnapshot {
                 id: RuntimeEventId(format!("tui-channel-membership-ready:{channel_id}")),
                 fact: RuntimeFact::ChannelMembershipReady {
@@ -925,20 +937,20 @@ pub fn maybe_export_ui_snapshot(
     }
 }
 
-pub fn publish_contacts_list_override(contacts: &[TuiContact], selected_index: usize) {
+pub fn publish_contacts_list_export(contacts: &[TuiContact], selected_index: usize) {
     *contacts_override()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(contacts.to_vec());
     let _ = selected_index;
 }
 
-pub fn publish_devices_list_override(devices: &[TuiDevice]) {
+pub fn publish_devices_list_export(devices: &[TuiDevice]) {
     *devices_override()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(devices.to_vec());
 }
 
-pub fn publish_channels_override(channels: &[TuiChannel], selected_channel_id: Option<&str>) {
+pub fn publish_channels_export(channels: &[TuiChannel], selected_channel_id: Option<&str>) {
     *channels_override()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(channels.to_vec());
@@ -948,7 +960,7 @@ pub fn publish_channels_override(channels: &[TuiChannel], selected_channel_id: O
         selected_channel_id.map(ToOwned::to_owned);
 }
 
-pub fn publish_messages_override(messages: &[TuiMessage]) {
+pub fn publish_messages_export(messages: &[TuiMessage]) {
     *messages_override()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(messages.to_vec());

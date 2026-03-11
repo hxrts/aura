@@ -127,6 +127,13 @@ name = "invite_code"
 timeout_ms = 30000
 
 [[steps]]
+id = "bob-invitation-code-ready"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "invitation_code_ready"
+timeout_ms = 30000
+
+[[steps]]
 id = "alice-accept-contact-invitation"
 action = "accept_contact_invitation"
 actor = "alice"
@@ -162,10 +169,24 @@ value = "${bob_authority_id}"
 timeout_ms = 6000
 
 [[steps]]
+id = "bob-pending-home-invitation-ready"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "pending_home_invitation_ready"
+timeout_ms = 30000
+
+[[steps]]
 id = "bob-join-shared-channel"
 action = "accept_pending_channel_invitation"
 actor = "bob"
 timeout_ms = 30000
+
+[[steps]]
+id = "alice-recipient-peers-resolved"
+action = "runtime_event_occurred"
+actor = "alice"
+runtime_event_kind = "recipient_peers_resolved"
+timeout_ms = 120000
 
 [[steps]]
 id = "alice-message-delivery-ready"
@@ -186,6 +207,13 @@ id = "bob-receives-alice-message"
 action = "message_contains"
 actor = "bob"
 value = "hello-from-tu1"
+timeout_ms = 120000
+
+[[steps]]
+id = "bob-recipient-peers-resolved"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "recipient_peers_resolved"
 timeout_ms = 120000
 
 [[steps]]

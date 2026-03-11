@@ -16,7 +16,7 @@ rg -q 'ActionPrecondition::Quiescence' "$scenario_contract" \
   || fail "shared action contracts must declare quiescence preconditions"
 rg -q 'fn enforce_action_preconditions' "$executor" \
   || fail "executor is missing typed action precondition enforcement"
-rg -q 'enforce_action_preconditions\\(step, tool_api, context, &intent\\)' "$executor" \
+rg -Fq 'enforce_action_preconditions(step, tool_api, context, &intent)' "$executor" \
   || fail "shared action execution does not enforce preconditions before issue"
 
 cargo test -p aura-harness action_preconditions_fail_diagnostically_before_issue --quiet

@@ -11,8 +11,6 @@ use crate::AppCore;
 const HARNESS_MODE_KEY: &str = "AURA_HARNESS_MODE";
 const HARNESS_SCENARIO_SEED_KEY: &str = "AURA_HARNESS_SCENARIO_SEED";
 const HARNESS_INSTANCE_ID_KEY: &str = "AURA_HARNESS_INSTANCE_ID";
-const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
-const HARNESS_SCENARIO_SEED_QUERY_KEY: &str = "__aura_harness_scenario_seed";
 const HARNESS_TIME_BASE_MS: u64 = 1_700_000_000_000;
 
 static HARNESS_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -32,7 +30,13 @@ fn next_sequence() -> u64 {
     HARNESS_SEQUENCE.fetch_add(1, Ordering::Relaxed)
 }
 
-fn derive_u64(seed: u64, instance_id: &str, scope: &str, sequence: u64, components: &[&str]) -> u64 {
+fn derive_u64(
+    seed: u64,
+    instance_id: &str,
+    scope: &str,
+    sequence: u64,
+    components: &[&str],
+) -> u64 {
     let mut state = hasher();
     state.update(&seed.to_le_bytes());
     state.update(instance_id.as_bytes());
@@ -60,9 +64,9 @@ fn harness_context() -> Option<HarnessContext> {
                 let Some((key, value)) = pair.split_once('=') else {
                     continue;
                 };
-                if key == HARNESS_INSTANCE_QUERY_KEY && !value.is_empty() {
+                if key == "__aura_harness_instance" && !value.is_empty() {
                     instance_id = Some(value.to_string());
-                } else if key == HARNESS_SCENARIO_SEED_QUERY_KEY {
+                } else if key == "__aura_harness_scenario_seed" {
                     scenario_seed = parse_seed(value);
                 }
             }
@@ -71,9 +75,7 @@ fn harness_context() -> Option<HarnessContext> {
                 instance_id: instance_id?,
             })
         } else {
-            if std::env::var_os(HARNESS_MODE_KEY).is_none() {
-                return None;
-            }
+            std::env::var_os(HARNESS_MODE_KEY)?;
             Some(HarnessContext {
                 scenario_seed: parse_seed(&std::env::var(HARNESS_SCENARIO_SEED_KEY).ok()?)?,
                 instance_id: std::env::var(HARNESS_INSTANCE_ID_KEY).ok()?,

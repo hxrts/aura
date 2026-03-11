@@ -19,7 +19,7 @@ use aura_app::ui::types::ChatState;
 use aura_core::AuthorityId;
 
 use crate::tui::chat_scope::{active_home_scope_id, is_dm_like_channel, scoped_channels};
-use crate::tui::harness_state::{publish_devices_list_override, publish_messages_override};
+use crate::tui::harness_state::{publish_devices_list_export, publish_messages_export};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::types::{Channel, Contact, Device, Invitation, Message, PendingRequest};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
@@ -351,7 +351,7 @@ pub fn use_devices_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -> 
                     .collect();
                 if let Ok(mut guard) = devices.write() {
                     *guard = list;
-                    publish_devices_list_override(&guard);
+                    publish_devices_list_export(&guard);
                 }
             })
             .await;
@@ -389,7 +389,6 @@ pub fn use_messages_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let messages = shared_messages.clone();
-        let selected_channel_id = selected_channel_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 let channel_id = selected_channel_id
@@ -436,7 +435,7 @@ pub fn use_messages_subscription(
 
                 if let Ok(mut guard) = messages.write() {
                     *guard = message_list;
-                    publish_messages_override(&guard);
+                    publish_messages_export(&guard);
                 }
             })
             .await;
@@ -622,7 +621,6 @@ pub fn use_channels_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let channels = shared_channels.clone();
-        let shared_authority_id = shared_authority_id.clone();
         let latest_chat_state = latest_chat_state.clone();
         let active_scope = active_scope.clone();
         let update_tx = update_tx.clone();
@@ -667,7 +665,6 @@ pub fn use_channels_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let channels = shared_channels.clone();
-        let last_channel_signature = last_channel_signature.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
                 let scope = active_home_scope_id(&neighborhood);

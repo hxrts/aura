@@ -143,7 +143,7 @@ pub enum GuardRequest {
     /// Sending an invitation
     SendInvitation {
         receiver_id: AuthorityId,
-        invitation_type: InvitationType,
+        invitation_type: Box<InvitationType>,
         expires_at_ms: Option<u64>,
     },
 

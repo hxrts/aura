@@ -21,7 +21,6 @@ use aura_app::ui::contract::{
     ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
     OperationState, ScreenId as ContractScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
 };
-use aura_app::ui_contract::{ChannelFactKey, RuntimeFact};
 use aura_app::ui::signals::{
     DiscoveredPeerMethod, NetworkStatus, CHAT_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL,
     ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL,
@@ -41,6 +40,7 @@ use aura_app::ui::workflows::{
     recovery as recovery_workflows, runtime as runtime_workflows, settings as settings_workflows,
     time as time_workflows,
 };
+use aura_app::ui_contract::{ChannelFactKey, RuntimeFact};
 use aura_app::views::chat::{is_note_to_self_channel_name, NOTE_TO_SELF_CHANNEL_NAME};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, CeremonyId};
@@ -54,6 +54,19 @@ use dioxus_shadcn::components::toast::{use_toast, ToastOptions, ToastPosition, T
 use dioxus_shadcn::theme::{themes, use_theme, ColorScheme, ThemeProvider};
 use std::sync::Arc;
 use std::time::Duration;
+
+trait RequiredDomId {
+    fn required_dom_id(self, context: &'static str) -> &'static str;
+}
+
+impl RequiredDomId for Option<&'static str> {
+    fn required_dom_id(self, context: &'static str) -> &'static str {
+        let Some(id) = self else {
+            panic!("{context} must define a web DOM id");
+        };
+        id
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct NeighborhoodRuntimeHome {
@@ -529,8 +542,7 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
         message_count: runtime.messages.len(),
     }];
     if let (Some(channel), Some(authority_id)) = (
-        chat
-            .all_channels()
+        chat.all_channels()
             .find(|channel| channel.name.eq_ignore_ascii_case(&runtime.active_channel)),
         authority_id,
     ) {
@@ -2454,7 +2466,7 @@ fn submit_runtime_chat_input(
             .map(|_| {
                 controller_for_task.push_runtime_fact(RuntimeFact::MessageCommitted {
                     channel: ChannelFactKey::named(channel_name.clone()),
-                    content: trimmed.to_string(),
+                    content: trimmed.clone(),
                 });
                 None
             })
@@ -2565,7 +2577,7 @@ pub fn AuraUiRoot(controller: Arc<UiController>) -> Element {
             div {
                 id: ControlId::ToastRegion
                     .web_dom_id()
-                    .expect("ToastRegion must define a web DOM id"),
+                    .required_dom_id("ToastRegion must define a web DOM id"),
                 style: "--normal-bg: var(--popover); --normal-text: var(--popover-foreground); --normal-border: var(--border); position: relative; z-index: 2147483647;",
                 ToastProvider {
                     default_duration: Duration::from_secs(5),
@@ -2986,9 +2998,9 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         main {
             id: ControlId::AppRoot
                 .web_dom_id()
-                .expect("AppRoot must define a web DOM id"),
+                .required_dom_id("AppRoot must define a web DOM id"),
             "data-render-tick": "{render_tick_value}",
-            class: "relative flex min-h-screen flex-col overflow-y-auto bg-background text-foreground font-mono outline-none lg:h-[100dvh] lg:min-h-[100dvh] lg:overflow-hidden",
+            class: "relative flex min-h-screen flex-col overflow-y-auto bg-background text-foreground font-sans outline-none lg:h-[100dvh] lg:min-h-[100dvh] lg:overflow-hidden",
             tabindex: 0,
             autofocus: true,
             onmounted: move |mounted| {
@@ -3065,7 +3077,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
             nav {
                 id: ControlId::NavRoot
                     .web_dom_id()
-                    .expect("NavRoot must define a web DOM id"),
+                    .required_dom_id("NavRoot must define a web DOM id"),
                 class: "bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80",
                 onclick: move |_| {
                     if should_exit_insert_mode_from_shell {
@@ -3080,9 +3092,8 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                         button {
                             r#type: "button",
                             id: "aura-nav-brand",
-                            class: "inline-flex h-8 items-center px-6 text-xs font-sans font-bold uppercase tracking-[0.12em] text-foreground cursor-pointer hover:text-muted-foreground transition-colors",
+                            class: "inline-flex h-8 items-center justify-center whitespace-nowrap px-6 text-xs font-sans font-bold uppercase leading-none tracking-[0.12em] text-foreground cursor-pointer hover:text-muted-foreground transition-colors",
                             onclick: {
-                                let controller = controller.clone();
                                 move |_| {
                                     controller.set_screen(UiScreen::Neighborhood);
                                     render_tick.set(render_tick() + 1);
@@ -3145,7 +3156,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
             div {
                 id: ControlId::ModalRegion
                     .web_dom_id()
-                    .expect("ModalRegion must define a web DOM id"),
+                    .required_dom_id("ModalRegion must define a web DOM id"),
                 class: "contents",
                 if let Some(modal) = modal {
                     if let Some(add_device_state) = model.add_device_modal() {
@@ -3835,6 +3846,7 @@ fn NeighborhoodScreen(
                                 UiButton {
                                     label: format!("Enter As: {access_label}"),
                                     variant: ButtonVariant::Secondary,
+                                    width_class: Some("w-[9rem]".to_string()),
                                     onclick: move |_| {
                                         detail_depth_controller.send_action_keys("d");
                                         render_tick.set(render_tick() + 1);
@@ -3848,6 +3860,7 @@ fn NeighborhoodScreen(
                                             "Assign Moderator".to_string()
                                         },
                                         variant: ButtonVariant::Secondary,
+                                        width_class: Some("w-[10rem]".to_string()),
                                         onclick: move |_| {
                                             detail_moderator_controller.send_action_keys("o");
                                             render_tick.set(render_tick() + 1);
@@ -3892,7 +3905,7 @@ fn NeighborhoodScreen(
                                 class: Some("flex-1 min-h-[16rem] border-0 bg-background/40".to_string()),
                                 EmptyHeader {
                                     EmptyTitle { "No home yet" }
-                                    EmptyDescription { "Create a new home or accept an invitation to join an existing one." }
+                                    EmptyDescription { "Create a new home or accept an invitation to join." }
                                 }
                             }
                         } else {
@@ -3996,7 +4009,7 @@ fn NeighborhoodScreen(
                                     }
                                 }
                                 UiButton {
-                                    id: Some(ControlId::NeighborhoodNewHomeButton.web_dom_id().expect("ControlId::NeighborhoodNewHomeButton must define a web DOM id").to_string()),
+                                    id: Some(ControlId::NeighborhoodNewHomeButton.web_dom_id().required_dom_id("ControlId::NeighborhoodNewHomeButton must define a web DOM id").to_string()),
                                     label: "New Home".to_string(),
                                     variant: ButtonVariant::Primary,
                                     onclick: move |_| {
@@ -4008,7 +4021,7 @@ fn NeighborhoodScreen(
                                     id: Some(
                                         ControlId::NeighborhoodAcceptInvitationButton
                                             .web_dom_id()
-                                            .expect("ControlId::NeighborhoodAcceptInvitationButton must define a web DOM id")
+                                            .required_dom_id("ControlId::NeighborhoodAcceptInvitationButton must define a web DOM id")
                                             .to_string(),
                                     ),
                                     label: "Accept Invitation".to_string(),
@@ -4022,11 +4035,12 @@ fn NeighborhoodScreen(
                                     id: Some(
                                         ControlId::NeighborhoodEnterAsButton
                                             .web_dom_id()
-                                            .expect("ControlId::NeighborhoodEnterAsButton must define a web DOM id")
+                                            .required_dom_id("ControlId::NeighborhoodEnterAsButton must define a web DOM id")
                                             .to_string(),
                                     ),
                                     label: format!("Enter As: {access_label}"),
                                     variant: ButtonVariant::Secondary,
+                                    width_class: Some("w-[9rem]".to_string()),
                                     onclick: move |_| {
                                         map_depth_controller.send_action_keys("d");
                                         render_tick.set(render_tick() + 1);
@@ -4184,6 +4198,7 @@ fn ChatScreen(
                                     id: Some(list_item_dom_id(ListId::Channels, &channel.id)),
                                     label: channel.name.clone(),
                                     active: channel.name.eq_ignore_ascii_case(&active_channel),
+                                    extra_class: Some("pt-px pb-0".to_string()),
                                     onclick: {
                                         let controller = controller.clone();
                                         let channel_name = channel.name.clone();
@@ -4203,7 +4218,7 @@ fn ChatScreen(
                                 id: Some(
                                     ControlId::ChatNewGroupButton
                                         .web_dom_id()
-                                        .expect("ControlId::ChatNewGroupButton must define a web DOM id")
+                                        .required_dom_id("ControlId::ChatNewGroupButton must define a web DOM id")
                                         .to_string(),
                                 ),
                                 label: "New Group".to_string(),
@@ -4223,7 +4238,7 @@ fn ChatScreen(
                 onclick: move |event| event.stop_propagation(),
                 UiCard {
                     title: active_channel.clone(),
-                    subtitle: Some(if topic.is_empty() { "No topic set".to_string() } else { topic.clone() }),
+                    subtitle: Some(if topic.is_empty() { "No topic set".to_string() } else { topic }),
                     extra_class: None,
                     UiCardBody {
                         extra_class: Some("!-mt-6".to_string()),
@@ -4261,14 +4276,14 @@ fn ChatScreen(
                                     textarea {
                                         id: FieldId::ChatInput
                                             .web_dom_id()
-                                            .expect("FieldId::ChatInput must define a web DOM id"),
+                                            .required_dom_id("FieldId::ChatInput must define a web DOM id"),
                                         class: "h-full w-full resize-none overflow-hidden border-0 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground",
                                         value: "{composer_value}",
                                         readonly: !is_input_mode,
                                         placeholder: if is_input_mode {
                                             "Type a message and press Enter to send"
                                         } else {
-                                            "Click here or press i to start typing"
+                                            "Click here or press 𝒊 to start typing"
                                         },
                                         onfocus: move |_| {
                                             if !is_input_mode {
@@ -4308,7 +4323,7 @@ fn ChatScreen(
                                         id: Some(
                                             ControlId::ChatSendMessageButton
                                                 .web_dom_id()
-                                                .expect("ControlId::ChatSendMessageButton must define a web DOM id")
+                                                .required_dom_id("ControlId::ChatSendMessageButton must define a web DOM id")
                                                 .to_string()
                                         ),
                                         label: "Send".to_string(),
@@ -4357,9 +4372,9 @@ fn render_chat_message_bubble(message: ChatRuntimeMessage) -> Element {
                 }
                 div {
                     class: if message.is_own {
-                        "rounded-[1.75rem] bg-primary px-4 py-2 text-sm text-primary-foreground shadow-sm"
+                        "rounded-[1.75rem] bg-primary px-4 pt-px pb-0 text-sm text-primary-foreground shadow-sm"
                     } else {
-                        "rounded-[1.75rem] border border-border bg-muted px-4 py-2 text-sm text-foreground shadow-sm"
+                        "rounded-[1.75rem] border border-border bg-muted px-4 pt-px pb-0 text-sm text-foreground shadow-sm"
                     },
                     p {
                         class: "m-0 whitespace-pre-wrap break-words leading-relaxed",
@@ -4452,6 +4467,7 @@ fn ContactsScreen(
                                             } else {
                                                 ButtonVariant::Primary
                                             },
+                                            width_class: Some("w-[6.5rem]".to_string()),
                                             onclick: {
                                                 let controller = controller.clone();
                                                 let authority_id = peer.authority_id;
@@ -4534,7 +4550,7 @@ fn ContactsScreen(
                                 id: Some(
                                     ControlId::ContactsAcceptInvitationButton
                                         .web_dom_id()
-                                        .expect("ControlId::ContactsAcceptInvitationButton must define a web DOM id")
+                                        .required_dom_id("ControlId::ContactsAcceptInvitationButton must define a web DOM id")
                                         .to_string(),
                                 ),
                                 label: "Accept Invitation".to_string(),
@@ -4548,7 +4564,7 @@ fn ContactsScreen(
                                 id: Some(
                                     ControlId::ContactsCreateInvitationButton
                                         .web_dom_id()
-                                        .expect("ControlId::ContactsCreateInvitationButton must define a web DOM id")
+                                        .required_dom_id("ControlId::ContactsCreateInvitationButton must define a web DOM id")
                                         .to_string(),
                                 ),
                                 label: "Create Invitation".to_string(),
@@ -4595,7 +4611,7 @@ fn ContactsScreen(
                                                         }
                                                     }
                                                     Err(error) => {
-                                                        controller.runtime_error_toast(error.to_string())
+                                                        controller.runtime_error_toast(error.to_string());
                                                     }
                                                 }
                                             });
@@ -4647,7 +4663,7 @@ fn ContactsScreen(
                                     id: Some(
                                         ControlId::ContactsStartChatButton
                                             .web_dom_id()
-                                            .expect("ControlId::ContactsStartChatButton must define a web DOM id")
+                                            .required_dom_id("ControlId::ContactsStartChatButton must define a web DOM id")
                                             .to_string(),
                                     ),
                                     label: "Start Chat".to_string(),
@@ -4685,7 +4701,7 @@ fn ContactsScreen(
                                     id: Some(
                                         ControlId::ContactsInviteToChannelButton
                                             .web_dom_id()
-                                            .expect(
+                                            .required_dom_id(
                                                 "ControlId::ContactsInviteToChannelButton must define a web DOM id",
                                             )
                                             .to_string(),
@@ -4729,7 +4745,7 @@ fn ContactsScreen(
                                     id: Some(
                                         ControlId::ContactsEditNicknameButton
                                             .web_dom_id()
-                                            .expect(
+                                            .required_dom_id(
                                                 "ControlId::ContactsEditNicknameButton must define a web DOM id",
                                             )
                                             .to_string(),
@@ -4745,7 +4761,7 @@ fn ContactsScreen(
                                     id: Some(
                                         ControlId::ContactsRemoveContactButton
                                             .web_dom_id()
-                                            .expect(
+                                            .required_dom_id(
                                                 "ControlId::ContactsRemoveContactButton must define a web DOM id",
                                             )
                                             .to_string(),
@@ -4998,6 +5014,7 @@ fn SettingsScreen(
                             id: Some(list_item_dom_id(ListId::SettingsSections, section.dom_id())),
                             label: section.title().to_string(),
                             active: section == model.settings_section,
+                            extra_class: Some("pt-px pb-0".to_string()),
                             onclick: {
                                 let controller = controller.clone();
                                 move |_| {
@@ -5037,7 +5054,7 @@ fn SettingsScreen(
                                 id: Some(
                                     ControlId::SettingsEditNicknameButton
                                         .web_dom_id()
-                                        .expect(
+                                        .required_dom_id(
                                             "ControlId::SettingsEditNicknameButton must define a web DOM id"
                                         )
                                         .to_string(),
@@ -5080,7 +5097,7 @@ fn SettingsScreen(
                                 id: Some(
                                     ControlId::SettingsConfigureThresholdButton
                                         .web_dom_id()
-                                        .expect(
+                                        .required_dom_id(
                                             "ControlId::SettingsConfigureThresholdButton must define a web DOM id"
                                         )
                                         .to_string(),
@@ -5118,7 +5135,7 @@ fn SettingsScreen(
                                 id: Some(
                                     ControlId::SettingsRequestRecoveryButton
                                         .web_dom_id()
-                                        .expect(
+                                        .required_dom_id(
                                             "ControlId::SettingsRequestRecoveryButton must define a web DOM id"
                                         )
                                         .to_string(),
@@ -5166,7 +5183,7 @@ fn SettingsScreen(
                                 id: Some(
                                     ControlId::SettingsAddDeviceButton
                                         .web_dom_id()
-                                        .expect("ControlId::SettingsAddDeviceButton must define a web DOM id")
+                                        .required_dom_id("ControlId::SettingsAddDeviceButton must define a web DOM id")
                                         .to_string(),
                                 ),
                                 label: "Add Device".to_string(),
@@ -5184,7 +5201,7 @@ fn SettingsScreen(
                                 id: Some(
                                     ControlId::SettingsImportDeviceCodeButton
                                         .web_dom_id()
-                                        .expect("ControlId::SettingsImportDeviceCodeButton must define a web DOM id")
+                                        .required_dom_id("ControlId::SettingsImportDeviceCodeButton must define a web DOM id")
                                         .to_string(),
                                 ),
                                 label: "Import Code".to_string(),
@@ -5202,7 +5219,7 @@ fn SettingsScreen(
                                 id: Some(
                                     ControlId::SettingsRemoveDeviceButton
                                         .web_dom_id()
-                                        .expect("ControlId::SettingsRemoveDeviceButton must define a web DOM id")
+                                        .required_dom_id("ControlId::SettingsRemoveDeviceButton must define a web DOM id")
                                         .to_string(),
                                 ),
                                 label: "Remove Device".to_string(),
@@ -5263,7 +5280,7 @@ fn SettingsScreen(
                                 id: Some(
                                     ControlId::SettingsSwitchAuthorityButton
                                         .web_dom_id()
-                                        .expect(
+                                        .required_dom_id(
                                             "ControlId::SettingsSwitchAuthorityButton must define a web DOM id"
                                         )
                                         .to_string(),
@@ -5283,7 +5300,7 @@ fn SettingsScreen(
                                 id: Some(
                                     ControlId::SettingsConfigureMfaButton
                                         .web_dom_id()
-                                        .expect(
+                                        .required_dom_id(
                                             "ControlId::SettingsConfigureMfaButton must define a web DOM id"
                                         )
                                         .to_string(),
@@ -5327,7 +5344,7 @@ fn SettingsScreen(
                                 id: Some(
                                     ControlId::SettingsToggleThemeButton
                                         .web_dom_id()
-                                        .expect(
+                                        .required_dom_id(
                                             "ControlId::SettingsToggleThemeButton must define a web DOM id"
                                         )
                                         .to_string(),
@@ -5337,6 +5354,7 @@ fn SettingsScreen(
                                     _ => "Switch to Light".to_string(),
                                 },
                                 variant: ButtonVariant::Primary,
+                                width_class: Some("w-[9.5rem]".to_string()),
                                 onclick: move |_| {
                                     theme.toggle_color_scheme();
                                     render_tick.set(render_tick() + 1);
@@ -5389,22 +5407,22 @@ fn nav_button_id(screen: UiScreen) -> &'static str {
     match screen {
         UiScreen::Onboarding => ControlId::OnboardingRoot
             .web_dom_id()
-            .expect("OnboardingRoot must define a web DOM id"),
+            .required_dom_id("OnboardingRoot must define a web DOM id"),
         UiScreen::Neighborhood => ControlId::NavNeighborhood
             .web_dom_id()
-            .expect("NavNeighborhood must define a web DOM id"),
+            .required_dom_id("NavNeighborhood must define a web DOM id"),
         UiScreen::Chat => ControlId::NavChat
             .web_dom_id()
-            .expect("NavChat must define a web DOM id"),
+            .required_dom_id("NavChat must define a web DOM id"),
         UiScreen::Contacts => ControlId::NavContacts
             .web_dom_id()
-            .expect("NavContacts must define a web DOM id"),
+            .required_dom_id("NavContacts must define a web DOM id"),
         UiScreen::Notifications => ControlId::NavNotifications
             .web_dom_id()
-            .expect("NavNotifications must define a web DOM id"),
+            .required_dom_id("NavNotifications must define a web DOM id"),
         UiScreen::Settings => ControlId::NavSettings
             .web_dom_id()
-            .expect("NavSettings must define a web DOM id"),
+            .required_dom_id("NavSettings must define a web DOM id"),
     }
 }
 
@@ -5425,9 +5443,9 @@ fn dom_slug(value: &str) -> String {
 
 fn nav_tab_class(is_active: bool) -> &'static str {
     if is_active {
-        "inline-flex h-8 items-center rounded-sm bg-accent px-3 text-xs font-sans uppercase tracking-[0.08em] text-foreground"
+        "inline-flex h-8 items-center justify-center whitespace-nowrap rounded-sm bg-accent px-3 text-xs font-sans uppercase leading-none tracking-[0.08em] text-foreground"
     } else {
-        "inline-flex h-8 items-center rounded-sm px-3 text-xs font-sans uppercase tracking-[0.08em] text-muted-foreground hover:bg-accent hover:text-foreground"
+        "inline-flex h-8 items-center justify-center whitespace-nowrap rounded-sm px-3 text-xs font-sans uppercase leading-none tracking-[0.08em] text-muted-foreground hover:bg-accent hover:text-foreground"
     }
 }
 
@@ -5448,7 +5466,7 @@ fn render_screen_content(
             div {
                 id: ControlId::Screen(ContractScreenId::Onboarding)
                     .web_dom_id()
-                    .expect("Screen(Onboarding) must define a web DOM id"),
+                    .required_dom_id("Screen(Onboarding) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
                 {OnboardingScreen()}
             }
@@ -5457,7 +5475,7 @@ fn render_screen_content(
             div {
                 id: ControlId::Screen(ContractScreenId::Neighborhood)
                     .web_dom_id()
-                    .expect("Screen(Neighborhood) must define a web DOM id"),
+                    .required_dom_id("Screen(Neighborhood) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
                 {NeighborhoodScreen(model, neighborhood_runtime, controller, render_tick)}
             }
@@ -5466,7 +5484,7 @@ fn render_screen_content(
             div {
                 id: ControlId::Screen(ContractScreenId::Chat)
                     .web_dom_id()
-                    .expect("Screen(Chat) must define a web DOM id"),
+                    .required_dom_id("Screen(Chat) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
                 {ChatScreen(model, chat_runtime, controller, render_tick)}
             }
@@ -5475,7 +5493,7 @@ fn render_screen_content(
             div {
                 id: ControlId::Screen(ContractScreenId::Contacts)
                     .web_dom_id()
-                    .expect("Screen(Contacts) must define a web DOM id"),
+                    .required_dom_id("Screen(Contacts) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
                 {ContactsScreen(model, contacts_runtime, controller, render_tick)}
             }
@@ -5484,7 +5502,7 @@ fn render_screen_content(
             div {
                 id: ControlId::Screen(ContractScreenId::Notifications)
                     .web_dom_id()
-                    .expect("Screen(Notifications) must define a web DOM id"),
+                    .required_dom_id("Screen(Notifications) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
                 {NotificationsScreen(model, notifications_runtime, controller, render_tick)}
             }
@@ -5493,7 +5511,7 @@ fn render_screen_content(
             div {
                 id: ControlId::Screen(ContractScreenId::Settings)
                     .web_dom_id()
-                    .expect("Screen(Settings) must define a web DOM id"),
+                    .required_dom_id("Screen(Settings) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
                 {SettingsScreen(
                     model,
@@ -5770,7 +5788,7 @@ fn runtime_semantic_snapshot(
             content: message.content.clone(),
         })
         .collect();
-    snapshot.quiescence = aura_app::ui::contract::QuiescenceSnapshot::derive(
+    snapshot.quiescence = aura_app::ui_contract::QuiescenceSnapshot::derive(
         snapshot.readiness,
         snapshot.open_modal,
         &snapshot.operations,

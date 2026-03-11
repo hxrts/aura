@@ -12,6 +12,20 @@ fail() {
 ui_contract="crates/aura-app/src/ui_contract.rs"
 bridge_impl="crates/aura-web/src/harness_bridge.rs"
 
+extract_bridge_methods() {
+  local surface="$1"
+  awk -v wanted_surface="$surface" '
+    /pub fn install_window_harness_api/ { in_fn=1 }
+    in_fn && /^[[:space:]]*&harness,[[:space:]]*$/ { target="harness"; next }
+    in_fn && /^[[:space:]]*&observe,[[:space:]]*$/ { target="observe"; next }
+    in_fn && target==wanted_surface && match($0, /&JsValue::from_str\("([a-z_]+)"\)/, m) {
+      print m[1]
+      target=""
+    }
+    in_fn && /^}$/ { in_fn=0; target="" }
+  ' "$bridge_impl" | sort -u
+}
+
 rg -q 'pub const BROWSER_HARNESS_BRIDGE_API_VERSION' "$ui_contract" \
   || fail "missing browser harness bridge API version"
 rg -q 'pub const BROWSER_HARNESS_BRIDGE_METHODS' "$ui_contract" \
@@ -34,10 +48,12 @@ mapfile -t contract_methods < <(
   ' "$ui_contract" | sort -u
 )
 
+mapfile -t exported_action_methods < <(extract_bridge_methods harness)
+mapfile -t exported_observation_methods < <(extract_bridge_methods observe)
 mapfile -t exported_methods < <(
-  rg -o '&JsValue::from_str\\("[a-z_]+"\\)' "$bridge_impl" \
-    | sed -E 's/.*"([a-z_]+)".*/\1/' \
-    | rg '^(send_keys|send_key|navigate_screen|create_contact_invitation|create_account|create_home|inject_message)$' \
+  printf '%s\n' "${exported_action_methods[@]}" "${exported_observation_methods[@]}" \
+    | awk 'NF { print }' \
+    | rg '^(send_keys|send_key|navigate_screen|snapshot|ui_state|read_clipboard|create_contact_invitation|create_account|create_home|get_authority_id|tail_log|root_structure|inject_message)$' \
     | sort -u
 )
 
@@ -60,14 +76,6 @@ mapfile -t observation_methods < <(
   ' "$ui_contract" | sort -u
 )
 
-mapfile -t exported_observation_methods < <(
-  sed -n '/let observe = Object::new()/,/let inject_controller = controller.clone()/p' "$bridge_impl" \
-    | rg -o '&JsValue::from_str\\("[a-z_]+"\\)' \
-    | sed -E 's/.*"([a-z_]+)".*/\1/' \
-    | rg '^(snapshot|ui_state|render_heartbeat|read_clipboard|get_authority_id|tail_log|root_structure)$' \
-    | sort -u
-)
-
 if [[ "${observation_methods[*]}" != "${exported_observation_methods[*]}" ]]; then
   printf 'contract observation methods: %s\n' "${observation_methods[*]}" >&2
   printf 'exported observation methods: %s\n' "${exported_observation_methods[*]}" >&2
@@ -76,8 +84,8 @@ fi
 
 rg -q '__AURA_HARNESS_OBSERVE__' "$bridge_impl" \
   || fail "browser observation surface global is not exported"
-if sed -n '/let observe = Object::new()/,/let inject_controller = controller.clone()/p' "$bridge_impl" \
-  | rg -q '"(send_keys|send_key|navigate_screen|create_contact_invitation|create_account|create_home|inject_message)"'; then
+if printf '%s\n' "${exported_observation_methods[@]}" \
+  | rg -q '^(send_keys|send_key|navigate_screen|create_contact_invitation|create_account|create_home|inject_message)$'; then
   fail "browser observation surface exports action methods"
 fi
 

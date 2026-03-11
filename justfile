@@ -119,13 +119,22 @@ web-serve port="4173":
     # dx serve copies assets at build time but doesn't re-copy on CSS changes.
     target_css_dir="../../target/dx/aura-web/debug/web/public/assets"
     source_css="$(pwd)/public/assets/tailwind.css"
-    mkdir -p "$target_css_dir"
-    rm -f "$target_css_dir/tailwind.css"
-    ln -s "$source_css" "$target_css_dir/tailwind.css"
+    sync_tailwind_link() {
+        mkdir -p "$target_css_dir"
+        rm -f "$target_css_dir/tailwind.css"
+        ln -s "$source_css" "$target_css_dir/tailwind.css"
+    }
+    sync_tailwind_link
     npm run tailwind:watch > ../../artifacts/aura-web-tailwind.log 2>&1 &
     tailwind_pid=$!
+    while true; do
+        sync_tailwind_link
+        sleep 1
+    done &
+    tailwind_link_pid=$!
     cleanup() {
         kill "$tailwind_pid" 2>/dev/null || true
+        kill "$tailwind_link_pid" 2>/dev/null || true
         # Restore terminal settings in case dx serve corrupted them
         stty sane 2>/dev/null || true
     }

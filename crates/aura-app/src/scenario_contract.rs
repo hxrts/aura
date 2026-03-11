@@ -15,14 +15,8 @@ use serde::{Deserialize, Serialize};
 #[serde(transparent)]
 pub struct ActorId(pub String);
 
-const RESERVED_FRONTEND_ACTOR_IDS: &[&str] = &[
-    "web",
-    "tui",
-    "browser",
-    "local",
-    "playwright",
-    "pty",
-];
+const RESERVED_FRONTEND_ACTOR_IDS: &[&str] =
+    &["web", "tui", "browser", "local", "playwright", "pty"];
 
 fn is_row_index_item_id(raw: &str) -> bool {
     let trimmed = raw.trim().to_ascii_lowercase();
@@ -1478,8 +1472,10 @@ mod tests {
             assert!(!contract.transitions.is_empty());
             assert!(!contract.terminal_success.is_empty());
             assert!(!contract.terminal_failure_codes.is_empty());
-            assert!(!matches!(contract.focus_semantics, FocusSemantics::None)
-                || !matches!(contract.selection_semantics, SelectionSemantics::None));
+            assert!(
+                !matches!(contract.focus_semantics, FocusSemantics::None)
+                    || !matches!(contract.selection_semantics, SelectionSemantics::None)
+            );
         }
     }
 }

@@ -93,29 +93,29 @@ impl NetworkChangeStream for DebouncedNetworkChangeStream {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-        let mut pending_unusable = change;
-        let timer = tokio::time::sleep(self.unusable_debounce);
-        tokio::pin!(timer);
+            let mut pending_unusable = change;
+            let timer = tokio::time::sleep(self.unusable_debounce);
+            tokio::pin!(timer);
 
-        loop {
-            tokio::select! {
-                _ = &mut timer => {
-                    return Ok(Some(pending_unusable));
-                }
-                next = self.inner.next_change() => {
-                    let Some(next_change) = next? else {
+            loop {
+                tokio::select! {
+                    _ = &mut timer => {
                         return Ok(Some(pending_unusable));
-                    };
+                    }
+                    next = self.inner.next_change() => {
+                        let Some(next_change) = next? else {
+                            return Ok(Some(pending_unusable));
+                        };
 
-                    match next_change.usability {
-                        NetworkUsability::Usable => return Ok(Some(next_change)),
-                        NetworkUsability::Unusable { .. } => {
-                            pending_unusable = next_change;
+                        match next_change.usability {
+                            NetworkUsability::Usable => return Ok(Some(next_change)),
+                            NetworkUsability::Unusable { .. } => {
+                                pending_unusable = next_change;
+                            }
                         }
                     }
                 }
             }
-        }
         }
     }
 }

@@ -22,6 +22,7 @@ cfg_if! {
         use aura_app::ui::workflows::settings as settings_workflows;
         use aura_app::ui::workflows::time as time_workflows;
         use aura_app::ui::types::InvitationBridgeType;
+        use aura_app::ui_contract::{QuiescenceSnapshot, next_projection_revision};
         use aura_core::{identifiers::AuthorityId, DeviceId};
         use aura_app::ui::contract::{
             ControlId, FieldId, OperationId, OperationInstanceId, OperationSnapshot,
@@ -536,8 +537,8 @@ cfg_if! {
                         focused_control: Some(ControlId::OnboardingRoot),
                         open_modal: None,
                         readiness: UiReadiness::Loading,
-                        revision: aura_app::ui::contract::next_projection_revision(None),
-                        quiescence: aura_app::ui::contract::QuiescenceSnapshot::derive(
+                        revision: next_projection_revision(None),
+                        quiescence: QuiescenceSnapshot::derive(
                             UiReadiness::Loading,
                             None,
                             &operations,

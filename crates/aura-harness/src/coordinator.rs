@@ -19,9 +19,7 @@ use anyhow::{anyhow, bail, Result};
 use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
 use tokio::time::Instant;
 
-use crate::backend::{
-    BackendHandle, ContactInvitationCode, SubmittedAction,
-};
+use crate::backend::{BackendHandle, ContactInvitationCode, SubmittedAction};
 use crate::config::{InstanceMode, RunConfig, RuntimeSubstrate, ScreenSource};
 use crate::events::EventStream;
 use crate::runtime_substrate::RuntimeSubstrateController;
@@ -733,7 +731,9 @@ impl HarnessCoordinator {
             Some(instance_id.to_string()),
             serde_json::json!({ "home_name": home_name }),
         );
-        backend.as_shared_semantic_mut()?.submit_create_home(home_name)
+        backend
+            .as_shared_semantic_mut()?
+            .submit_create_home(home_name)
     }
 
     pub fn create_contact_invitation_via_ui(

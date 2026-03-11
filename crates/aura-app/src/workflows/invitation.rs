@@ -149,6 +149,8 @@ use crate::workflows::time;
 use crate::{views::invitations::InvitationsState, AppCore};
 use async_lock::RwLock;
 use aura_core::effects::amp::ChannelBootstrapPackage;
+#[cfg(feature = "signals")]
+use aura_core::identifiers::ChannelId;
 use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
 use aura_core::AuraError;
 use std::sync::Arc;
@@ -157,7 +159,7 @@ use std::sync::Arc;
 async fn reconcile_accepted_channel_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
-    channel_id: ContextId,
+    channel_id: ChannelId,
     sender_id: AuthorityId,
     channel_name_hint: Option<&str>,
 ) -> Result<(), AuraError> {

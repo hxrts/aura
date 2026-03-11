@@ -85,11 +85,8 @@ pub trait ObservationBackend {
         timeout: Duration,
         after_version: Option<u64>,
     ) -> Option<Result<UiSnapshotEvent>>;
-    fn wait_for_dom_patterns(
-        &self,
-        patterns: &[String],
-        timeout_ms: u64,
-    ) -> Option<Result<String>>;
+    fn wait_for_dom_patterns(&self, patterns: &[String], timeout_ms: u64)
+        -> Option<Result<String>>;
     fn wait_for_target(&self, selector: &str, timeout_ms: u64) -> Option<Result<String>>;
     fn tail_log(&self, lines: usize) -> Result<Vec<String>>;
     fn read_clipboard(&self) -> Result<String>;

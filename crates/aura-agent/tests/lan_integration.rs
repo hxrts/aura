@@ -6,7 +6,7 @@ use aura_agent::{
     AgentBuilder, AgentConfig, AuraAgent, EffectContext, ExecutionMode, RendezvousManagerConfig,
     SyncManagerConfig,
 };
-use aura_app::runtime_bridge::{InvitationBridgeType, RuntimeBridge};
+use aura_app::runtime_bridge::InvitationBridgeType;
 use aura_app::ui::signals::{CHAT_SIGNAL, CONTACTS_SIGNAL};
 use aura_app::ui::workflows::{
     context as context_workflow, invitation as invitation_workflow,

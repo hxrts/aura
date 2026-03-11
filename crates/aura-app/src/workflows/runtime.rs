@@ -15,8 +15,7 @@ const DEFAULT_HARNESS_CONVERGENCE_ROUNDS: usize = 8;
 const DEFAULT_HARNESS_CONVERGENCE_BACKOFF_MS: u64 = 150;
 
 #[cfg(test)]
-static HARNESS_MODE_OVERRIDE: std::sync::atomic::AtomicU8 =
-    std::sync::atomic::AtomicU8::new(0);
+static HARNESS_MODE_OVERRIDE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
 fn harness_mode_enabled() -> bool {
     #[cfg(test)]
@@ -122,20 +121,33 @@ mod tests {
     use super::ensure_runtime_peer_connectivity;
     use crate::runtime_bridge::{OfflineRuntimeBridge, RuntimeBridge};
     use aura_core::identifiers::AuthorityId;
-    use std::sync::atomic::Ordering;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
-    fn harness_env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
+    struct HarnessEnvGuard;
+
+    impl Drop for HarnessEnvGuard {
+        fn drop(&mut self) {
+            HARNESS_ENV_LOCK.store(false, Ordering::Release);
+        }
+    }
+
+    static HARNESS_ENV_LOCK: AtomicBool = AtomicBool::new(false);
+
+    fn harness_env_lock() -> HarnessEnvGuard {
+        while HARNESS_ENV_LOCK
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            std::thread::yield_now();
+        }
+        HarnessEnvGuard
     }
 
     fn with_harness_mode_env<T>(enabled: bool, f: impl FnOnce() -> T) -> T {
-        let _guard = harness_env_lock().lock().expect("env lock poisoned");
-        let previous = super::HARNESS_MODE_OVERRIDE.swap(
-            if enabled { 2 } else { 1 },
-            Ordering::Relaxed,
-        );
+        let _guard = harness_env_lock();
+        let previous =
+            super::HARNESS_MODE_OVERRIDE.swap(if enabled { 2 } else { 1 }, Ordering::Relaxed);
         let result = f();
         super::HARNESS_MODE_OVERRIDE.store(previous, Ordering::Relaxed);
         result
@@ -173,8 +185,7 @@ mod tests {
                     .expect_err("offline runtime should fail without harness mode")
                     .to_string()
             })
-        })
-        ;
+        });
         let harness = with_harness_mode_env(true, || {
             runtime_handle.block_on(async {
                 ensure_runtime_peer_connectivity(&runtime, "neutral_flow")
@@ -182,8 +193,7 @@ mod tests {
                     .expect_err("offline runtime should fail with harness mode")
                     .to_string()
             })
-        })
-        ;
+        });
 
         assert_eq!(normal, harness);
     }

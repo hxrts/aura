@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use aura_app::ui::contract::{
-    list_item_selector, ControlId, FieldId, ListId, ModalId, OperationId, OperationState,
-    ScreenId, UiSnapshot,
+    list_item_selector, ControlId, FieldId, ListId, ModalId, OperationId, OperationState, ScreenId,
+    UiSnapshot,
 };
 use aura_app::ui_contract::RuntimeFact;
 use nix::poll::{poll, PollFd, PollFlags};
@@ -798,7 +798,9 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| anyhow::anyhow!("create_contact_invitation: missing code in response"))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("create_contact_invitation: missing code in response")
+            })?;
         Ok(code.to_string())
     }
 
@@ -932,18 +934,17 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                 .map(|list| list.items.len())
                 .unwrap_or(0);
             let joined = channel_count > previous_channel_count
-                || snapshot.runtime_events.iter().any(|event| {
-                    matches!(&event.fact, RuntimeFact::ChannelMembershipReady { .. })
-                });
+                || snapshot
+                    .runtime_events
+                    .iter()
+                    .any(|event| matches!(&event.fact, RuntimeFact::ChannelMembershipReady { .. }));
             if joined {
                 return Ok(SubmittedAction::without_handle(()));
             }
             if snapshot.operation_state(&OperationId::invitation_accept())
                 == Some(OperationState::Failed)
             {
-                anyhow::bail!(
-                    "accept_pending_channel_invitation_via_ui: invitation_accept failed"
-                );
+                anyhow::bail!("accept_pending_channel_invitation_via_ui: invitation_accept failed");
             }
             if Instant::now() >= deadline {
                 anyhow::bail!(
@@ -973,7 +974,11 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         self.activate_control(ControlId::NavChat)?;
         wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
         let snapshot = self.ui_snapshot()?;
-        if let Some(channels) = snapshot.lists.iter().find(|list| list.id == ListId::Channels) {
+        if let Some(channels) = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Channels)
+        {
             let selected = channels.items.iter().any(|item| item.selected);
             if !selected && channels.items.len() == 1 {
                 self.activate_list_item(ListId::Channels, &channels.items[0].id)?;

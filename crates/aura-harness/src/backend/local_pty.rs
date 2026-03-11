@@ -748,7 +748,10 @@ impl InstanceBackend for LocalPtyBackend {
             }
             thread::sleep(Duration::from_millis(150));
         }
-        anyhow::ensure!(modal_open, "create_home_via_ui: create_home_modal did not open");
+        anyhow::ensure!(
+            modal_open,
+            "create_home_via_ui: create_home_modal did not open"
+        );
         thread::sleep(Duration::from_millis(200));
         self.fill_field(FieldId::HomeName, home_name)
             .context("create_home_via_ui: fill_home_name")?;
@@ -873,18 +876,17 @@ impl InstanceBackend for LocalPtyBackend {
                 .map(|list| list.items.len())
                 .unwrap_or(0);
             let joined = channel_count > previous_channel_count
-                || snapshot.runtime_events.iter().any(|event| {
-                    matches!(&event.fact, RuntimeFact::ChannelMembershipReady { .. })
-                });
+                || snapshot
+                    .runtime_events
+                    .iter()
+                    .any(|event| matches!(&event.fact, RuntimeFact::ChannelMembershipReady { .. }));
             if joined {
                 return Ok(SubmittedAction::without_handle(()));
             }
             if snapshot.operation_state(&OperationId::invitation_accept())
                 == Some(OperationState::Failed)
             {
-                anyhow::bail!(
-                    "accept_pending_channel_invitation_via_ui: invitation_accept failed"
-                );
+                anyhow::bail!("accept_pending_channel_invitation_via_ui: invitation_accept failed");
             }
             if Instant::now() >= deadline {
                 anyhow::bail!(
@@ -961,7 +963,11 @@ impl InstanceBackend for LocalPtyBackend {
         self.activate_control(ControlId::NavChat)?;
         wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
         let snapshot = self.ui_snapshot()?;
-        if let Some(channels) = snapshot.lists.iter().find(|list| list.id == ListId::Channels) {
+        if let Some(channels) = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Channels)
+        {
             let selected = channels.items.iter().any(|item| item.selected);
             if !selected && channels.items.len() == 1 {
                 self.send_keys("h")?;
@@ -1097,8 +1103,7 @@ impl InstanceBackend for LocalPtyBackend {
             .ok()
             .and_then(|snapshot| snapshot.open_modal)
             == Some(ModalId::InvitationCode)
-        {
-        }
+        {}
         Ok(text)
     }
 
