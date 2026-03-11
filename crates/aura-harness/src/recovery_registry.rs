@@ -3,7 +3,6 @@ use anyhow::{Context, Result};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RecoveryPath {
     AcceptContactInvitationContactsFallback,
-    BrowserCreateAccountCreateHome,
     LocalPtyJoinChannelSlashFallback,
 }
 
@@ -15,9 +14,8 @@ pub enum FallbackPathClass {
 }
 
 impl RecoveryPath {
-    pub const ALL: [Self; 3] = [
+    pub const ALL: [Self; 2] = [
         Self::AcceptContactInvitationContactsFallback,
-        Self::BrowserCreateAccountCreateHome,
         Self::LocalPtyJoinChannelSlashFallback,
     ];
 
@@ -27,7 +25,6 @@ impl RecoveryPath {
             Self::AcceptContactInvitationContactsFallback => {
                 "accept_contact_invitation_contacts_fallback"
             }
-            Self::BrowserCreateAccountCreateHome => "browser_create_account_create_home",
             Self::LocalPtyJoinChannelSlashFallback => "local_pty_join_channel_slash_fallback",
         }
     }
@@ -36,9 +33,6 @@ impl RecoveryPath {
     pub const fn owner_module(self) -> &'static str {
         match self {
             Self::AcceptContactInvitationContactsFallback => "crates/aura-harness/src/executor.rs",
-            Self::BrowserCreateAccountCreateHome => {
-                "crates/aura-harness/src/backend/playwright_browser.rs"
-            }
             Self::LocalPtyJoinChannelSlashFallback => {
                 "crates/aura-harness/src/backend/local_pty.rs"
             }
@@ -59,12 +53,6 @@ pub const REGISTERED_RECOVERIES: &[RecoveryMetadata] = &[
         path: RecoveryPath::AcceptContactInvitationContactsFallback,
         code: RecoveryPath::AcceptContactInvitationContactsFallback.code(),
         owner_module: RecoveryPath::AcceptContactInvitationContactsFallback.owner_module(),
-        class: FallbackPathClass::BoundedSecondary,
-    },
-    RecoveryMetadata {
-        path: RecoveryPath::BrowserCreateAccountCreateHome,
-        code: RecoveryPath::BrowserCreateAccountCreateHome.code(),
-        owner_module: RecoveryPath::BrowserCreateAccountCreateHome.owner_module(),
         class: FallbackPathClass::BoundedSecondary,
     },
     RecoveryMetadata {

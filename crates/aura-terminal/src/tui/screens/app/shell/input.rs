@@ -12,20 +12,10 @@ pub(super) fn transition_from_terminal_event(
     shared_channels: &Arc<std::sync::RwLock<Vec<Channel>>>,
     shared_homes: &Arc<std::sync::RwLock<Vec<String>>>,
     shared_home_meta: &SharedNeighborhoodHomeMeta,
-    selected_channel_id: &Arc<std::sync::RwLock<Option<String>>>,
 ) -> Option<InputTransition> {
     let core_event = convert_iocraft_event(event)?;
 
     let mut current = tui.read_clone();
-    let current_channels = match shared_channels.read() {
-        Ok(guard) => guard.clone(),
-        Err(poisoned) => poisoned.into_inner().clone(),
-    };
-    if let Some(channel) = current_channels.get(current.chat.selected_channel) {
-        if let Ok(mut selected_id) = selected_channel_id.write() {
-            *selected_id = Some(channel.id.clone());
-        }
-    }
 
     sync_neighborhood_navigation_state(
         &mut current,

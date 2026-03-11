@@ -159,19 +159,19 @@ mod tests {
     use std::path::PathBuf;
 
     use super::materialize_run_config;
-    use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection};
+    use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, RuntimeSubstrate};
 
     #[test]
     fn materialize_assigns_deterministic_run_root_and_browser_artifacts() {
         let config = sample_run_config();
         let materialized = materialize_run_config(config, PathBuf::from("run.toml").as_path())
-            .expect("materialization should succeed");
+            .unwrap_or_else(|error| panic!("materialization should succeed: {error}"));
 
         let run_root = materialized
             .run
             .artifact_dir
             .clone()
-            .expect("artifact_dir should be assigned");
+            .unwrap_or_else(|| panic!("artifact_dir should be assigned"));
         assert!(run_root.is_absolute());
         assert!(run_root.to_string_lossy().contains(".tmp/harness/runs"));
 
@@ -179,7 +179,7 @@ mod tests {
             .instances
             .iter()
             .find(|instance| matches!(instance.mode, InstanceMode::Browser))
-            .expect("browser instance should exist");
+            .unwrap_or_else(|| panic!("browser instance should exist"));
         assert!(browser.data_dir.is_absolute());
         assert!(browser
             .env
@@ -199,9 +199,10 @@ mod tests {
     fn materialize_rewrites_zero_ports_deterministically() {
         let config = sample_run_config();
         let first = materialize_run_config(config.clone(), PathBuf::from("run.toml").as_path())
-            .expect("materialization should succeed");
+            .unwrap_or_else(|error| panic!("materialization should succeed: {error}"));
         let second =
-            materialize_run_config(config, PathBuf::from("run.toml").as_path()).expect("ok");
+            materialize_run_config(config, PathBuf::from("run.toml").as_path())
+                .unwrap_or_else(|error| panic!("materialization should succeed: {error}"));
 
         let first_port = first.instances[0].bind_address.clone();
         let second_port = second.instances[0].bind_address.clone();
@@ -224,7 +225,7 @@ mod tests {
                 max_memory_bytes: None,
                 max_open_files: None,
                 require_remote_artifact_sync: false,
-                runtime_substrate: Default::default(),
+                runtime_substrate: RuntimeSubstrate::default(),
             },
             instances: vec![
                 InstanceConfig {

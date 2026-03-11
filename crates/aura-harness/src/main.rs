@@ -15,6 +15,7 @@ use aura_harness::config::{require_existing_file, ScreenSource};
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::build_seed_bundle;
 use aura_harness::failure_attribution::attribute_failure;
+use aura_harness::governance::{self, GovernanceCheck};
 use aura_harness::load_and_validate_run_config;
 use aura_harness::network_lab::{resolve_backend_mode, NetworkBackendMode};
 use aura_harness::preflight::{run_preflight, PreflightReport};
@@ -47,6 +48,8 @@ enum Command {
     Tool(ToolArgs),
     /// Replay a previously recorded run bundle.
     Replay(ReplayArgs),
+    /// Run typed repository governance checks for harness UX policy.
+    Governance(GovernanceArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -92,6 +95,25 @@ struct ReplayArgs {
     bundle: PathBuf,
 }
 
+#[derive(Debug, Parser)]
+struct GovernanceArgs {
+    #[arg(value_enum)]
+    check: GovernanceCheckArg,
+}
+
+#[derive(Debug, Clone, clap::ValueEnum)]
+enum GovernanceCheckArg {
+    SharedScenarioContract,
+    ScenarioLegality,
+    CoreScenarioMechanics,
+    UxFlowCoverage,
+    UiParityContract,
+    SettingsSurfaceContract,
+    ScenarioCanonicalModel,
+    GovernanceWrappers,
+    LegacySharedQuarantine,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -99,7 +121,23 @@ fn main() -> Result<()> {
         Command::Lint(args) => lint(args),
         Command::Tool(args) => tool(args),
         Command::Replay(args) => replay(args),
+        Command::Governance(args) => governance_check(args),
     }
+}
+
+fn governance_check(args: GovernanceArgs) -> Result<()> {
+    let check = match args.check {
+        GovernanceCheckArg::SharedScenarioContract => GovernanceCheck::SharedScenarioContract,
+        GovernanceCheckArg::ScenarioLegality => GovernanceCheck::ScenarioLegality,
+        GovernanceCheckArg::CoreScenarioMechanics => GovernanceCheck::CoreScenarioMechanics,
+        GovernanceCheckArg::UxFlowCoverage => GovernanceCheck::UxFlowCoverage,
+        GovernanceCheckArg::UiParityContract => GovernanceCheck::UiParityContract,
+        GovernanceCheckArg::SettingsSurfaceContract => GovernanceCheck::SettingsSurfaceContract,
+        GovernanceCheckArg::ScenarioCanonicalModel => GovernanceCheck::ScenarioCanonicalModel,
+        GovernanceCheckArg::GovernanceWrappers => GovernanceCheck::GovernanceWrappers,
+        GovernanceCheckArg::LegacySharedQuarantine => GovernanceCheck::LegacySharedQuarantine,
+    };
+    governance::run(check)
 }
 
 fn run(args: RunArgs) -> Result<()> {
@@ -477,6 +515,7 @@ fn parse_failing_step(error_message: &str) -> Option<String> {
     (!candidate.is_empty()).then(|| candidate.to_string())
 }
 
+#[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod tests {
     use super::{parse_failing_step, sanitize_artifact_component};

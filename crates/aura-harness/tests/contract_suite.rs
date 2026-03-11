@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use aura_harness::config::{
-    InstanceConfig, InstanceMode, RunConfig, RunSection, ScreenSource, TunnelConfig,
+    InstanceConfig, InstanceMode, RunConfig, RunSection, RuntimeSubstrate, ScreenSource,
+    TunnelConfig,
 };
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::build_seed_bundle;
@@ -188,7 +189,7 @@ fn local_run_config(name: &str, port: u16) -> RunConfig {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
-            runtime_substrate: Default::default(),
+            runtime_substrate: RuntimeSubstrate::default(),
         },
         instances: vec![InstanceConfig {
             id: "alice".to_string(),
@@ -231,7 +232,7 @@ fn mixed_run_config(name: &str, local_port: u16, ssh_port: u16) -> RunConfig {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
-            runtime_substrate: Default::default(),
+            runtime_substrate: RuntimeSubstrate::default(),
         },
         instances: vec![
             InstanceConfig {

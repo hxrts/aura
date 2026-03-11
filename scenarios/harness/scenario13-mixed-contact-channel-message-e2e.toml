@@ -182,6 +182,13 @@ actor = "bob"
 timeout_ms = 30000
 
 [[steps]]
+id = "bob-channel-membership-ready"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "channel_membership_ready"
+timeout_ms = 120000
+
+[[steps]]
 id = "alice-recipient-peers-resolved"
 action = "runtime_event_occurred"
 actor = "alice"

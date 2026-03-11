@@ -5,11 +5,18 @@
   "type": "module",
   "description": "Playwright stdio RPC driver for aura-harness browser backend",
   "scripts": {
+    "build": "tsc -p tsconfig.json",
     "driver": "node ./playwright_driver.mjs",
-    "test": "node ./tests/smoke.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "npm run typecheck",
+    "test": "npm run build && node ./tests/smoke.mjs",
     "install-browsers": "playwright install --with-deps chromium"
   },
   "dependencies": {
     "playwright": "1.56.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.4.0",
+    "typescript": "^5.9.3"
   }
 }

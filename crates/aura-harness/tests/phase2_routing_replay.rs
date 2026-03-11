@@ -3,7 +3,8 @@
 use std::path::PathBuf;
 
 use aura_harness::config::{
-    InstanceConfig, InstanceMode, RunConfig, RunSection, ScreenSource, TunnelConfig,
+    InstanceConfig, InstanceMode, RunConfig, RunSection, RuntimeSubstrate, ScreenSource,
+    TunnelConfig,
 };
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::build_seed_bundle;
@@ -38,7 +39,7 @@ fn replay_runner_reexecutes_recorded_actions_without_llm() {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
-            runtime_substrate: Default::default(),
+            runtime_substrate: RuntimeSubstrate::default(),
         },
         instances: vec![local_instance(
             "alice",

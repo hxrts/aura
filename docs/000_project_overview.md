@@ -2,7 +2,7 @@
 
 [Aura](https://github.com/hxrts/aura) is a fully peer-to-peer, private communication system that operates without dedicated servers. It uses a web-of-trust architecture to provide discovery, data availability, account recovery, and graceful async protocol evolution.
 
-To accomplish this, Aura uses threshold cryptography so no single device holds complete keys. Network topology reflects social relationships, forming a web of trust that provides discovery, availability, and recovery. State converges through CRDT journals without central coordination. Session-typed choreographic protocols ensure safe multi-party execution.
+To accomplish this, Aura uses threshold cryptography to shard keys across devices. Network topology reflects social relationships, forming a web of trust that provides discovery, availability, and recovery. State converges through CRDT journals without central coordination, while session-typed choreographic protocols ensure safe multi-party execution.
 
 ## How Aura Works
 

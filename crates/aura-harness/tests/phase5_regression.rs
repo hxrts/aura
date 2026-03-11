@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 use aura_harness::api_version::TOOL_API_VERSIONS;
 use aura_harness::artifact_sync::RemoteArtifactSyncReport;
 use aura_harness::config::{
-    InstanceConfig, InstanceMode, RunConfig, RunSection, ScreenSource, TunnelConfig,
+    InstanceConfig, InstanceMode, RunConfig, RunSection, RuntimeSubstrate, ScreenSource,
+    TunnelConfig,
 };
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::{build_seed_bundle, SeedBundle};
@@ -40,7 +41,7 @@ fn phase5_run_emits_hardening_artifacts_with_seed_and_sync_metadata() {
             max_memory_bytes: Some(1),
             max_open_files: None,
             require_remote_artifact_sync: true,
-            runtime_substrate: Default::default(),
+            runtime_substrate: RuntimeSubstrate::default(),
         },
         instances: vec![
             InstanceConfig {

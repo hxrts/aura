@@ -16,10 +16,10 @@ use aura_app::ui::signals::{
     SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
 };
 use aura_app::ui::types::ChatState;
+use aura_app::ui_contract::{ChannelFactKey, RuntimeEventKind, RuntimeFact};
 use aura_core::AuthorityId;
 
 use crate::tui::chat_scope::{active_home_scope_id, is_dm_like_channel, scoped_channels};
-use crate::tui::harness_state::{publish_devices_list_export, publish_messages_export};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::types::{Channel, Contact, Device, Invitation, Message, PendingRequest};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
@@ -301,6 +301,18 @@ pub fn use_contacts_subscription(
                     if previous != new_count {
                         let _ = tx.try_send(UiUpdate::ContactCountChanged(new_count));
                     }
+                    let facts = if new_count > 0 {
+                        vec![RuntimeFact::ContactLinkReady {
+                            authority_id: None,
+                            contact_count: Some(new_count),
+                        }]
+                    } else {
+                        Vec::new()
+                    };
+                    let _ = tx.try_send(UiUpdate::RuntimeFactsUpdated {
+                        replace_kinds: vec![RuntimeEventKind::ContactLinkReady],
+                        facts,
+                    });
                 }
             })
             .await;
@@ -351,7 +363,6 @@ pub fn use_devices_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -> 
                     .collect();
                 if let Ok(mut guard) = devices.write() {
                     *guard = list;
-                    publish_devices_list_export(&guard);
                 }
             })
             .await;
@@ -378,8 +389,6 @@ pub type SharedMessages = Arc<RwLock<Vec<Message>>>;
 pub fn use_messages_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
-    shared_channels: SharedChannels,
-    tui_selected: Arc<RwLock<usize>>,
     selected_channel_id: Arc<RwLock<Option<String>>>,
 ) -> SharedMessages {
     // Create the shared messages holder - use_ref ensures it persists across renders.
@@ -391,17 +400,12 @@ pub fn use_messages_subscription(
         let messages = shared_messages.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                let channel_id = selected_channel_id
-                    .read()
-                    .ok()
-                    .and_then(|guard| guard.clone())
-                    .or_else(|| {
-                        let selected_idx = tui_selected.read().map(|g| *g).unwrap_or(0);
-                        shared_channels
-                            .read()
-                            .ok()
-                            .and_then(|guard| guard.get(selected_idx).map(|c| c.id.clone()))
-                    });
+                let channel_id = {
+                    selected_channel_id
+                        .read()
+                        .ok()
+                        .and_then(|guard| guard.clone())
+                };
 
                 // Get messages for that channel (or empty if none selected)
                 let message_list: Vec<Message> = if let Some(channel_id) = channel_id {
@@ -419,23 +423,11 @@ pub fn use_messages_subscription(
                         Vec::new()
                     }
                 } else {
-                    // Fallback: get messages for first channel if available
-                    chat_state
-                        .all_channels()
-                        .next()
-                        .map(|c| {
-                            chat_state
-                                .messages_for_channel(&c.id)
-                                .iter()
-                                .map(Message::from)
-                                .collect()
-                        })
-                        .unwrap_or_default()
+                    Vec::new()
                 };
 
                 if let Ok(mut guard) = messages.write() {
                     *guard = message_list;
-                    publish_messages_export(&guard);
                 }
             })
             .await;
@@ -506,12 +498,44 @@ fn publish_scoped_channels(
         .map(|channel| channel.id.as_str())
         .collect::<Vec<_>>()
         .join("|");
+    let runtime_facts = channel_list
+        .iter()
+        .flat_map(|channel| {
+            let channel_fact = ChannelFactKey {
+                id: Some(channel.id.clone()),
+                name: Some(channel.name.clone()),
+            };
+            let mut facts = vec![RuntimeFact::ChannelMembershipReady {
+                channel: channel_fact.clone(),
+                member_count: Some(channel.member_count as usize),
+            }];
+            if channel.member_count > 1 {
+                facts.push(RuntimeFact::RecipientPeersResolved {
+                    channel: channel_fact.clone(),
+                    member_count: channel.member_count as usize,
+                });
+                facts.push(RuntimeFact::MessageDeliveryReady {
+                    channel: channel_fact,
+                    member_count: channel.member_count as usize,
+                });
+            }
+            facts
+        })
+        .collect::<Vec<_>>();
 
     if let Ok(mut guard) = channels.write() {
         *guard = channel_list;
     }
 
     if let Some(tx) = update_tx {
+        let _ = tx.try_send(UiUpdate::RuntimeFactsUpdated {
+            replace_kinds: vec![
+                RuntimeEventKind::ChannelMembershipReady,
+                RuntimeEventKind::RecipientPeersResolved,
+                RuntimeEventKind::MessageDeliveryReady,
+            ],
+            facts: runtime_facts,
+        });
         let channel_signature_changed = {
             let mut guard = last_channel_signature
                 .write()
@@ -703,6 +727,7 @@ pub type SharedInvitations = Arc<RwLock<Vec<Invitation>>>;
 pub fn use_invitations_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
+    update_tx: Option<UiUpdateSender>,
 ) -> SharedInvitations {
     let shared_invitations_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
     let shared_invitations: SharedInvitations = shared_invitations_ref.read().clone();
@@ -722,6 +747,27 @@ pub fn use_invitations_subscription(
 
                 if let Ok(mut guard) = invitations.write() {
                     *guard = all;
+                }
+
+                if let Some(ref tx) = update_tx {
+                    let facts = if inv_state.all_pending().iter().any(|invitation| {
+                        invitation.direction == aura_app::ui::types::InvitationDirection::Received
+                            && matches!(
+                                invitation.invitation_type,
+                                aura_app::ui::types::InvitationType::Home
+                                    | aura_app::ui::types::InvitationType::Chat
+                            )
+                            && invitation.status
+                                == aura_app::ui::types::InvitationStatus::Pending
+                    }) {
+                        vec![RuntimeFact::PendingHomeInvitationReady]
+                    } else {
+                        Vec::new()
+                    };
+                    let _ = tx.try_send(UiUpdate::RuntimeFactsUpdated {
+                        replace_kinds: vec![RuntimeEventKind::PendingHomeInvitationReady],
+                        facts,
+                    });
                 }
             })
             .await;
@@ -931,6 +977,7 @@ mod tests {
     };
     use aura_core::crypto::hash::hash;
     use aura_core::identifiers::{AuthorityId, ChannelId};
+    use std::path::Path;
 
     fn test_channel_id(seed: &str) -> ChannelId {
         ChannelId::from_bytes(hash(seed.as_bytes()))
@@ -1005,6 +1052,18 @@ mod tests {
             epoch_hint: None,
             is_finalized: false,
         }
+    }
+
+    #[test]
+    fn message_subscription_requires_explicit_selected_channel_identity() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let source_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/subscriptions.rs");
+        let source = std::fs::read_to_string(&source_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", source_path.display()));
+
+        assert!(source.contains("selected_channel_id: Arc<RwLock<Option<String>>>"));
+        assert!(!source.contains("all_channels()\n                        .next()"));
+        assert!(!source.contains("guard.get(selected_idx)"));
     }
 
     #[test]

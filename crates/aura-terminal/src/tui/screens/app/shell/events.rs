@@ -27,7 +27,7 @@ pub(super) fn handle_channel_selection_change(
     };
     if let Some(channel) = channels.get(idx) {
         if let Ok(mut guard) = selected_channel_id.write() {
-            *guard = Some(channel.id.to_string());
+            *guard = Some(channel.id.clone());
         }
     } else if let Ok(mut guard) = selected_channel_id.write() {
         *guard = None;

@@ -17,7 +17,7 @@ use aura_app::scenario_contract::{
 };
 use aura_app::ui::contract::{
     ControlId, FieldId, ListId, ModalId, OperationId, OperationState, RuntimeEventKind, ScreenId,
-    ToastKind, UiSnapshot, UiReadiness,
+    ToastKind, UiSnapshot,
 };
 use aura_app::ui_contract::uncovered_ui_parity_mismatches;
 use regex::Regex;
@@ -251,6 +251,7 @@ struct WaitCoordinator<'a> {
     tool_api: &'a mut ToolApi,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 enum WaitContractRef<'a> {
     Modal(ModalId),
@@ -265,6 +266,7 @@ enum WaitContractRef<'a> {
     },
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FallbackObservationMode {
     BoundedSecondary,
@@ -318,25 +320,6 @@ impl<'a> WaitCoordinator<'a> {
         wait_for_semantic_state(step, self.tool_api, instance_id, timeout_ms)
     }
 
-    fn operation_state(
-        &mut self,
-        contract: WaitContractRef<'_>,
-        step: &ScenarioStep,
-        instance_id: &str,
-        timeout_ms: u64,
-        handle: &UiOperationHandle,
-        state: OperationState,
-    ) -> Result<()> {
-        debug_assert!(matches!(
-            contract,
-            WaitContractRef::OperationState {
-                operation_id: _,
-                state: expected_state,
-                label,
-            } if expected_state == state && !label.is_empty()
-        ));
-        wait_for_operation_handle_state(step, self.tool_api, instance_id, timeout_ms, handle, state)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2518,7 +2501,7 @@ fn execute_shared_semantic_action(
                 .as_deref()
                 .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
             let contract = IntentAction::StartDeviceEnrollment {
-                device_name: device_name.to_string(),
+                device_name: device_name.clone(),
                 code_name: code_name.to_string(),
             }
             .contract();
@@ -2576,7 +2559,7 @@ fn execute_shared_semantic_action(
                 context,
             )?;
             let contract = IntentAction::ImportDeviceEnrollmentCode {
-                code: code.to_string(),
+                code: code.clone(),
             }
             .contract();
             dispatch(
@@ -2776,7 +2759,7 @@ fn execute_shared_semantic_action(
                 context,
             )?;
             let contract = IntentAction::InviteActorToChannel {
-                authority_id: authority_id.to_string(),
+                authority_id: authority_id.clone(),
             }
             .contract();
             let submission = issue_stage(
@@ -3263,6 +3246,7 @@ fn success_matches_snapshot(success: &TerminalSuccessKind, snapshot: &UiSnapshot
     }
 }
 
+#[cfg(test)]
 fn compare_canonical_traces_for_parity(
     local: &[CanonicalTraceEvent],
     peer: &[CanonicalTraceEvent],
@@ -3275,6 +3259,7 @@ fn compare_canonical_traces_for_parity(
     bail!("canonical trace mismatch local={local:?} peer={peer:?}");
 }
 
+#[cfg(test)]
 fn normalize_trace_event(event: &CanonicalTraceEvent) -> String {
     match event {
         CanonicalTraceEvent::ActionRequested { request, .. } => {
@@ -3413,6 +3398,7 @@ fn plan_dismiss_transient_request(instance_id: &str) -> ToolRequest {
     }
 }
 
+#[cfg(test)]
 fn plan_tui_send_chat_message_request(instance_id: &str, message: &str) -> Vec<ToolRequest> {
     vec![ToolRequest::SendKeys {
         instance_id: instance_id.to_string(),
@@ -3470,18 +3456,6 @@ fn wait_for_modal(
     wait_for_semantic_state(&wait_step, tool_api, instance_id, timeout_ms)
 }
 
-fn wait_for_control(
-    step: &ScenarioStep,
-    tool_api: &mut ToolApi,
-    instance_id: &str,
-    timeout_ms: u64,
-    control_id: ControlId,
-) -> Result<()> {
-    let mut wait_step = semantic_wait_step(step);
-    wait_step.control_id = Some(control_id);
-    wait_for_semantic_state(&wait_step, tool_api, instance_id, timeout_ms)
-}
-
 fn wait_for_runtime_event(
     step: &ScenarioStep,
     tool_api: &mut ToolApi,
@@ -3491,77 +3465,6 @@ fn wait_for_runtime_event(
 ) -> Result<()> {
     let mut wait_step = semantic_wait_step(step);
     wait_step.runtime_event_kind = Some(runtime_event_kind);
-    wait_for_semantic_state(&wait_step, tool_api, instance_id, timeout_ms)
-}
-
-fn wait_for_home_bootstrap_ready(
-    step: &ScenarioStep,
-    tool_api: &mut ToolApi,
-    instance_id: &str,
-    timeout_ms: u64,
-) -> Result<()> {
-    const PLACEHOLDER_HOME_ID: &str =
-        "channel:0000000000000000000000000000000000000000000000000000000000000000";
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-    let mut last_snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
-    if home_bootstrap_ready(&last_snapshot) {
-        return Ok(());
-    }
-    let mut version = Some(last_snapshot.revision.semantic_seq);
-    loop {
-        if Instant::now() >= deadline {
-            bail!(
-                "step {} home bootstrap wait timed out on instance {} last_snapshot={:?}",
-                step.id,
-                instance_id,
-                Some(last_snapshot)
-            );
-        }
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        let snapshot = match tool_api.wait_for_ui_snapshot_event(instance_id, remaining, version)? {
-            Some((event_snapshot, event_version)) => {
-                version = Some(event_version);
-                event_snapshot
-            }
-            None => fetch_ui_snapshot(tool_api, instance_id)?,
-        };
-        if snapshot
-            .selections
-            .iter()
-            .find(|selection| selection.list == ListId::Homes)
-            .map(|selection| selection.item_id.as_str())
-            .filter(|item_id| *item_id != PLACEHOLDER_HOME_ID)
-            .is_some()
-        {
-            return Ok(());
-        }
-        last_snapshot = snapshot;
-    }
-}
-
-fn home_bootstrap_ready(snapshot: &UiSnapshot) -> bool {
-    const PLACEHOLDER_HOME_ID: &str =
-        "channel:0000000000000000000000000000000000000000000000000000000000000000";
-    snapshot
-        .selections
-        .iter()
-        .find(|selection| selection.list == ListId::Homes)
-        .map(|selection| selection.item_id.as_str())
-        .filter(|item_id| *item_id != PLACEHOLDER_HOME_ID)
-        .is_some()
-}
-
-fn wait_for_operation_state(
-    step: &ScenarioStep,
-    tool_api: &mut ToolApi,
-    instance_id: &str,
-    timeout_ms: u64,
-    operation_id: OperationId,
-    state: OperationState,
-) -> Result<()> {
-    let mut wait_step = semantic_wait_step(step);
-    wait_step.operation_id = Some(operation_id);
-    wait_step.operation_state = Some(state);
     wait_for_semantic_state(&wait_step, tool_api, instance_id, timeout_ms)
 }
 
@@ -3622,12 +3525,7 @@ fn read_clipboard_value(
         }
 
         if Instant::now() >= deadline {
-            bail!(
-                "step {} read_clipboard timed out on instance {} after {}ms",
-                step_id,
-                instance_id,
-                timeout_ms
-            );
+            bail!("step {step_id} read_clipboard timed out on instance {instance_id} after {timeout_ms}ms");
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -4947,7 +4845,8 @@ mod tests {
         }];
 
         let error = compare_canonical_traces_for_parity(&local, &peer)
-            .expect_err("trace mismatch must fail");
+            .err()
+            .unwrap_or_else(|| panic!("trace mismatch must fail"));
         assert!(error.to_string().contains("canonical trace mismatch"));
     }
 
@@ -5930,7 +5829,10 @@ mod tests {
         };
 
         let error = ensure_post_operation_convergence_satisfied(&step, &context, "alice")
-            .expect_err("missing convergence must fail before the next shared intent");
+            .err()
+            .unwrap_or_else(|| {
+                panic!("missing convergence must fail before the next shared intent")
+            });
         assert!(error.to_string().contains("convergence-contract violation"));
         assert!(
             error.to_string().contains("PendingHomeInvitationReady"),

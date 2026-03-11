@@ -1,6 +1,8 @@
 #![allow(missing_docs)]
 
-use aura_harness::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, ScreenSource};
+use aura_harness::config::{
+    InstanceConfig, InstanceMode, RunConfig, RunSection, RuntimeSubstrate, ScreenSource,
+};
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::tool_api::{ToolApi, ToolKey, ToolRequest, ToolResponse};
 
@@ -25,7 +27,7 @@ fn tool_api_primitives_control_local_pty_instance() {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
-            runtime_substrate: Default::default(),
+            runtime_substrate: RuntimeSubstrate::default(),
         },
         instances: vec![InstanceConfig {
             id: "alice".to_string(),

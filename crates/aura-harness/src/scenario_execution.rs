@@ -44,7 +44,8 @@ pub fn execute_with_run_budgets(
 mod tests {
     use super::*;
     use crate::config::{
-        InstanceConfig, InstanceMode, RunSection, RuntimeSubstrate, ScenarioAction, ScenarioStep,
+        InstanceConfig, InstanceMode, RunSection, RuntimeSubstrate, ScenarioAction,
+        ScenarioCanonicalModel, ScenarioStep,
     };
     use crate::coordinator::HarnessCoordinator;
     use std::path::PathBuf;
@@ -92,17 +93,27 @@ mod tests {
         }
     }
 
+    fn test_scenario_config(id: &str, goal: &str, steps: Vec<ScenarioStep>) -> ScenarioConfig {
+        ScenarioConfig {
+            schema_version: 1,
+            id: id.to_string(),
+            goal: goal.to_string(),
+            execution_mode: Some("scripted".to_string()),
+            required_capabilities: vec![],
+            steps,
+            canonical_model: ScenarioCanonicalModel::CompatibilityStepBridge,
+            canonical_semantic_steps: Vec::new(),
+        }
+    }
+
     #[test]
     fn lint_for_run_rejects_unknown_instance() {
         let temp_dir = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
         let run_config = test_run_config(temp_dir.path().join("alice"));
-        let scenario = ScenarioConfig {
-            schema_version: 1,
-            id: "lint-failure".to_string(),
-            goal: "unknown instance".to_string(),
-            execution_mode: Some("scripted".to_string()),
-            required_capabilities: vec![],
-            steps: vec![ScenarioStep {
+        let scenario = test_scenario_config(
+            "lint-failure",
+            "unknown instance",
+            vec![ScenarioStep {
                 id: "step-1".to_string(),
                 action: ScenarioAction::SendKeys,
                 instance: Some("bob".to_string()),
@@ -110,7 +121,7 @@ mod tests {
                 timeout_ms: Some(250),
                 ..Default::default()
             }],
-        };
+        );
 
         let error = match lint_for_run(&run_config, &scenario) {
             Ok(()) => panic!("unknown instance should fail lint"),
@@ -126,13 +137,10 @@ mod tests {
     fn execute_with_run_budgets_runs_noop_scenario() {
         let temp_dir = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
         let run_config = test_run_config(temp_dir.path().join("alice"));
-        let scenario = ScenarioConfig {
-            schema_version: 1,
-            id: "noop".to_string(),
-            goal: "noop".to_string(),
-            execution_mode: Some("scripted".to_string()),
-            required_capabilities: vec![],
-            steps: vec![ScenarioStep {
+        let scenario = test_scenario_config(
+            "noop",
+            "noop",
+            vec![ScenarioStep {
                 id: "step-1".to_string(),
                 action: ScenarioAction::Noop,
                 instance: None,
@@ -140,7 +148,7 @@ mod tests {
                 timeout_ms: Some(100),
                 ..Default::default()
             }],
-        };
+        );
 
         let coordinator = HarnessCoordinator::from_run_config(&run_config)
             .unwrap_or_else(|error| panic!("{error}"));
@@ -164,13 +172,10 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
         let mut run_config = test_run_config(temp_dir.path().join("alice"));
         run_config.run.runtime_substrate = RuntimeSubstrate::Simulator;
-        let scenario = ScenarioConfig {
-            schema_version: 1,
-            id: "sim-fault".to_string(),
-            goal: "simulator substrate fault".to_string(),
-            execution_mode: Some("scripted".to_string()),
-            required_capabilities: vec![],
-            steps: vec![ScenarioStep {
+        let scenario = test_scenario_config(
+            "sim-fault",
+            "simulator substrate fault",
+            vec![ScenarioStep {
                 id: "step-1".to_string(),
                 action: ScenarioAction::FaultDelay,
                 instance: Some("alice".to_string()),
@@ -178,7 +183,7 @@ mod tests {
                 timeout_ms: Some(10),
                 ..Default::default()
             }],
-        };
+        );
 
         let coordinator = HarnessCoordinator::from_run_config(&run_config)
             .unwrap_or_else(|error| panic!("{error}"));

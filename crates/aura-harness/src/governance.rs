@@ -200,7 +200,7 @@ pub fn validate_ux_flow_coverage() -> Result<()> {
     let doc_touched = changed_set.contains(COVERAGE_DOC);
     let coverage_metadata_touched = changed_set.contains("crates/aura-app/src/ui_contract.rs");
     let coverage_doc_body =
-        fs::read_to_string(coverage_doc).with_context(|| format!("failed to read {}", COVERAGE_DOC))?;
+        fs::read_to_string(coverage_doc).with_context(|| format!("failed to read {COVERAGE_DOC}"))?;
 
     let inventory = load_scenario_inventory(None)?;
     let inventory_ids = inventory
@@ -241,7 +241,7 @@ pub fn validate_ux_flow_coverage() -> Result<()> {
     for flow in affected_flows {
         let scenario_ids = flow_to_scenarios
             .get(&flow)
-            .ok_or_else(|| anyhow!("no scenario coverage mapping for shared flow {:?}", flow))?;
+            .ok_or_else(|| anyhow!("no scenario coverage mapping for shared flow {flow:?}"))?;
         let scenario_paths = scenario_ids
             .iter()
             .map(|scenario_id| format!("scenarios/harness/{scenario_id}.toml"))
@@ -454,7 +454,7 @@ pub fn validate_scenario_canonical_model() -> Result<()> {
     }
     if config
         .shared_execution_semantic_steps()
-        .is_none_or(|steps| steps.is_empty())
+        .map_or(true, |steps| steps.is_empty())
     {
         bail!("canonical shared scenarios must retain canonical semantic steps");
     }
@@ -599,9 +599,9 @@ fn ensure_shared_execution_is_strict(scenario: &ScenarioConfig, path: &Path) -> 
     {
         if matches!(step.action, SemanticAction::Ui(_)) {
             bail!(
-                "shared scenario {} contains raw ui mechanic action {}",
+                "shared scenario {} contains raw ui mechanic action {:?}",
                 path.display(),
-                format!("{:?}", step.action)
+                step.action
             );
         }
     }
@@ -697,7 +697,7 @@ fn changed_files() -> Result<Vec<String>> {
         .output()
         .with_context(|| format!("failed to run git diff for range {diff_range}"))?;
     if !output.status.success() {
-        bail!("git diff --name-only {} failed", diff_range);
+        bail!("git diff --name-only {diff_range} failed");
     }
     Ok(split_lines(&String::from_utf8_lossy(&output.stdout)))
 }

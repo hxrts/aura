@@ -34,6 +34,10 @@ rg -q 'pub const BROWSER_OBSERVATION_SURFACE_API_VERSION' "$ui_contract" \
   || fail "missing browser observation surface API version"
 rg -q 'pub const BROWSER_OBSERVATION_SURFACE_METHODS' "$ui_contract" \
   || fail "missing browser observation surface method metadata"
+rg -q 'pub struct HarnessShellStructureSnapshot' "$ui_contract" \
+  || fail "missing HarnessShellStructureSnapshot contract"
+rg -q 'pub fn validate_harness_shell_structure' "$ui_contract" \
+  || fail "missing harness shell structure validator"
 
 mapfile -t contract_methods < <(
   awk '
@@ -93,5 +97,8 @@ cargo test -p aura-app browser_harness_bridge_contract_is_versioned_and_complete
 cargo test -p aura-app browser_harness_bridge_read_methods_are_declared_deterministic --quiet
 cargo test -p aura-app browser_observation_surface_contract_is_versioned_and_read_only --quiet
 cargo test -p aura-app tui_observation_surface_contract_is_versioned_and_read_only --quiet
+cargo test -p aura-app harness_shell_structure_accepts_exactly_one_app_shell --quiet
+cargo test -p aura-app harness_shell_structure_accepts_single_onboarding_shell --quiet
+cargo test -p aura-app harness_shell_structure_rejects_duplicate_or_ambiguous_roots --quiet
 
 echo "harness bridge contract: clean"

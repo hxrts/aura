@@ -58,8 +58,8 @@ protocol correctness, and it does not replace conformance or verification lanes.
 | Chat channel + messaging | Scenario 1 | Scenarios 3, 5, 11, 13 | TUI + Web |
 | Slash commands and moderation | Scenario 3 | `moderation-and-modal-coverage.toml`, `moderator-assign.toml` | TUI-heavy |
 | Global navigation/help | Scenario 4 | Scenario 11 | TUI + Web |
-| Neighborhood/home operations | Scenario 2 | Scenarios 7, 11, `home-roles.toml` | TUI + Web |
-| Settings panels | Scenario 8 | Scenarios 9, 10, 12 | TUI + Web |
+| Neighborhood/home operations | `scenarios/harness/real-runtime-mixed-startup-smoke.toml` | Scenarios 2, 7, 11, `home-roles.toml` | TUI + Web |
+| Settings panels | `scenarios/harness/shared-settings-parity.toml` | Scenarios 8, 9, 10, 12 | TUI + Web |
 | Device add/remove | Scenario 12 | Scenario 8 | Mixed runtime |
 | Guardian/MFA ceremonies | Scenario 9 | Scenario 10 | TUI + Web |
 | Recovery + notifications | Scenario 10 | Scenario 8 | TUI + Web |

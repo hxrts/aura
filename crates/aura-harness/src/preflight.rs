@@ -402,19 +402,30 @@ fn require_binary(binary: &str) -> Result<()> {
 mod tests {
     use super::*;
     use crate::config::{
-        InstanceConfig, InstanceMode, RunSection, ScenarioAction, ScenarioConfig, ScenarioStep,
+        InstanceConfig, InstanceMode, RunSection, ScenarioAction, ScenarioCanonicalModel,
+        ScenarioConfig, ScenarioStep,
     };
+
+    fn test_scenario_config(id: &str, goal: &str, steps: Vec<ScenarioStep>) -> ScenarioConfig {
+        ScenarioConfig {
+            schema_version: 1,
+            id: id.to_string(),
+            goal: goal.to_string(),
+            execution_mode: Some("scripted".to_string()),
+            required_capabilities: vec![],
+            steps,
+            canonical_model: ScenarioCanonicalModel::CompatibilityStepBridge,
+            canonical_semantic_steps: Vec::new(),
+        }
+    }
 
     #[test]
     fn preflight_rejects_missing_required_capability() {
         let run = local_only_run();
-        let scenario = ScenarioConfig {
-            schema_version: 1,
-            id: "capability-fail".to_string(),
-            goal: "require ssh".to_string(),
-            execution_mode: Some("scripted".to_string()),
-            required_capabilities: vec!["ssh".to_string()],
-            steps: vec![ScenarioStep {
+        let mut scenario = test_scenario_config(
+            "capability-fail",
+            "require ssh",
+            vec![ScenarioStep {
                 id: "step-1".to_string(),
                 action: ScenarioAction::Noop,
                 instance: None,
@@ -422,7 +433,8 @@ mod tests {
                 timeout_ms: None,
                 ..Default::default()
             }],
-        };
+        );
+        scenario.required_capabilities = vec!["ssh".to_string()];
 
         let error = match run_preflight(&run, Some(&scenario)) {
             Ok(_) => panic!("preflight must fail"),

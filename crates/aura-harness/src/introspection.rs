@@ -316,37 +316,31 @@ fn extract_command_field(message: &str, field: &str) -> Option<String> {
 
 fn normalize_status(value: &str) -> Option<CommandStatus> {
     let value = value.trim().to_ascii_lowercase();
-    for status in [
+    [
         CommandStatus::Ok,
         CommandStatus::Denied,
         CommandStatus::Invalid,
         CommandStatus::Failed,
-    ] {
-        if status.as_str().starts_with(value.as_str()) {
-            return Some(status);
-        }
-    }
-    None
+    ]
+    .into_iter()
+    .find(|status| status.as_str().starts_with(value.as_str()))
 }
 
 fn normalize_consistency(value: &str) -> Option<CommandConsistency> {
     let value = value.trim().to_ascii_lowercase();
-    for consistency in [
+    [
         CommandConsistency::Accepted,
         CommandConsistency::Replicated,
         CommandConsistency::Enforced,
         CommandConsistency::PartialTimeout,
-    ] {
-        if consistency.as_str().starts_with(value.as_str()) {
-            return Some(consistency);
-        }
-    }
-    None
+    ]
+    .into_iter()
+    .find(|consistency| consistency.as_str().starts_with(value.as_str()))
 }
 
 fn normalize_reason(value: &str) -> Option<CommandReason> {
     let value = value.trim().to_ascii_lowercase();
-    for reason in [
+    [
         CommandReason::None,
         CommandReason::MissingActiveContext,
         CommandReason::PermissionDenied,
@@ -357,12 +351,9 @@ fn normalize_reason(value: &str) -> Option<CommandReason> {
         CommandReason::Muted,
         CommandReason::Banned,
         CommandReason::Internal,
-    ] {
-        if reason.as_str().starts_with(value.as_str()) {
-            return Some(reason);
-        }
-    }
-    None
+    ]
+    .into_iter()
+    .find(|reason| reason.as_str().starts_with(value.as_str()))
 }
 
 fn left_panel_text(line: &str) -> Option<&str> {

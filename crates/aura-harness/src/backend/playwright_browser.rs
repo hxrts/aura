@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use aura_app::ui::contract::{
-    list_item_selector, ControlId, FieldId, ListId, ModalId, OperationId, OperationState, ScreenId,
+    list_item_selector, ControlId, FieldId, ListId, OperationId, OperationState, ScreenId,
     UiSnapshot,
 };
 use aura_app::ui_contract::RuntimeFact;
@@ -19,12 +19,12 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use crate::backend::{
-    observe_operation, wait_for_modal_visible, wait_for_operation_submission,
-    wait_for_screen_visible, ContactInvitationCode, InstanceBackend, SharedSemanticBackend,
+    submit_accept_contact_invitation_via_shared_ui,
+    submit_invite_actor_to_channel_via_shared_ui, wait_for_screen_visible,
+    ContactInvitationCode, InstanceBackend, RawUiBackend, SharedSemanticBackend,
     SubmittedAction, UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
-use crate::recovery_registry::{run_registered_recovery, RecoveryPath};
 use crate::tool_api::ToolKey;
 
 const DEFAULT_PAGE_GOTO_TIMEOUT_MS: u64 = 90_000;
@@ -639,357 +639,6 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         })
     }
 
-    fn click_button(&mut self, label: &str) -> Result<()> {
-        self.with_session(|session| {
-            session.rpc_call(
-                "click_button",
-                json!({
-                    "instance_id": self.config.id,
-                    "label": label,
-                }),
-            )?;
-            Ok(())
-        })
-    }
-
-    fn activate_control(&mut self, control_id: ControlId) -> Result<()> {
-        if matches!(
-            control_id,
-            ControlId::SettingsAddDeviceButton | ControlId::SettingsRemoveDeviceButton
-        ) {
-            let snapshot = self.ui_snapshot()?;
-            if snapshot.screen == aura_app::ui::contract::ScreenId::Settings {
-                let needs_devices_section = snapshot
-                    .selections
-                    .iter()
-                    .find(|selection| selection.list == ListId::SettingsSections)
-                    .map(|selection| selection.item_id.as_str() != "devices")
-                    .unwrap_or(true);
-                if needs_devices_section {
-                    self.activate_list_item(ListId::SettingsSections, "devices")?;
-                }
-            }
-        }
-        let selector = control_selector(control_id)?;
-        let is_navigation_control = matches!(
-            control_id,
-            ControlId::NavNeighborhood
-                | ControlId::NavChat
-                | ControlId::NavContacts
-                | ControlId::NavNotifications
-                | ControlId::NavSettings,
-        );
-        if is_navigation_control {
-            let target_screen = match control_id {
-                ControlId::NavNeighborhood => Some("neighborhood"),
-                ControlId::NavChat => Some("chat"),
-                ControlId::NavContacts => Some("contacts"),
-                ControlId::NavNotifications => Some("notifications"),
-                ControlId::NavSettings => Some("settings"),
-                _ => None,
-            };
-            if let Some(target_screen) = target_screen {
-                let navigate_result = self.with_session(|session| {
-                    session.rpc_call(
-                        "navigate_screen",
-                        json!({
-                            "instance_id": self.config.id,
-                            "screen": target_screen,
-                        }),
-                    )?;
-                    Ok(())
-                });
-                if navigate_result.is_ok() {
-                    return Ok(());
-                }
-            }
-        }
-        let click_result = self.click_target(&selector);
-        if click_result.is_ok() {
-            return Ok(());
-        }
-        if is_navigation_control && control_id.activation_key().is_none() {
-            return Err(click_result
-                .err()
-                .unwrap_or_else(|| anyhow::anyhow!("control click failed")));
-        }
-        let click_error = click_result
-            .err()
-            .unwrap_or_else(|| anyhow::anyhow!("control click failed"));
-        if let Some(fallback_key) = control_id.activation_key() {
-            self.with_session(|session| {
-                session.rpc_call(
-                    "send_key",
-                    json!({
-                        "instance_id": self.config.id,
-                        "key": fallback_key,
-                        "repeat": 1,
-                    }),
-                )?;
-                Ok(())
-            })
-            .map_err(|send_error| {
-                anyhow::anyhow!(
-                    "preferred click failed for {control_id:?} via {selector}: {click_error}; \
-                     fallback key '{fallback_key}' failed: {send_error}"
-                )
-            })?;
-            return Ok(());
-        }
-        return Err(anyhow::anyhow!(
-            "control activation failed for {control_id:?} via {selector}: {click_error}"
-        ));
-    }
-
-    fn click_target(&mut self, selector: &str) -> Result<()> {
-        self.with_session(|session| {
-            session.rpc_call(
-                "click_button",
-                json!({
-                    "instance_id": self.config.id,
-                    "selector": selector,
-                }),
-            )?;
-            Ok(())
-        })
-    }
-
-    fn fill_input(&mut self, selector: &str, value: &str) -> Result<()> {
-        self.with_session(|session| {
-            session.rpc_call(
-                "fill_input",
-                json!({
-                    "instance_id": self.config.id,
-                    "selector": selector,
-                    "value": value,
-                }),
-            )?;
-            Ok(())
-        })
-    }
-
-    fn fill_field(&mut self, field_id: FieldId, value: &str) -> Result<()> {
-        let selector = field_selector(field_id)?;
-        self.fill_input(&selector, value)
-    }
-
-    fn activate_list_item(&mut self, list_id: ListId, item_id: &str) -> Result<()> {
-        if matches!(list_id, ListId::Navigation) {
-            let control_id = navigation_control_id(item_id)?;
-            return self.activate_control(control_id);
-        }
-
-        let selector = list_item_selector(list_id, item_id);
-        self.click_target(&selector)
-    }
-
-    fn create_contact_invitation(&mut self, receiver_authority_id: &str) -> Result<String> {
-        let payload = self.with_session(|session| {
-            session.rpc_call(
-                "create_contact_invitation",
-                json!({
-                    "instance_id": self.config.id,
-                    "receiver_authority_id": receiver_authority_id,
-                }),
-            )
-        })?;
-        let code = payload
-            .get("code")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                anyhow::anyhow!("create_contact_invitation: missing code in response")
-            })?;
-        Ok(code.to_string())
-    }
-
-    fn create_account_via_ui(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
-        self.with_session(|session| {
-            session.rpc_call(
-                "create_account",
-                json!({
-                    "instance_id": self.config.id,
-                    "account_name": account_name,
-                }),
-            )?;
-            Ok(())
-        })?;
-        let onboarding_deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            if snapshot.operations.iter().any(|operation| {
-                operation.id == OperationId::account_create()
-                    && operation.state == aura_app::ui::contract::OperationState::Failed
-            }) {
-                anyhow::bail!("create_account_via_ui: account creation failed");
-            }
-            if snapshot.screen != ScreenId::Onboarding && snapshot_has_real_home(&snapshot) {
-                return Ok(SubmittedAction::without_handle(()));
-            }
-            if Instant::now() >= onboarding_deadline {
-                break;
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-
-        let snapshot = self.ui_snapshot()?;
-        if !snapshot_has_real_home(&snapshot) {
-            run_registered_recovery(RecoveryPath::BrowserCreateAccountCreateHome, || {
-                self.create_home_via_ui(&format!("{account_name}-home"))
-                    .map(|_| ())
-            })?;
-            let create_home_deadline = Instant::now() + Duration::from_secs(15);
-            loop {
-                let snapshot = self.ui_snapshot()?;
-                if snapshot.operations.iter().any(|operation| {
-                    operation.id == OperationId::create_home()
-                        && operation.state == aura_app::ui::contract::OperationState::Failed
-                }) {
-                    anyhow::bail!("create_account_via_ui: create home recovery failed");
-                }
-                if snapshot_has_real_home(&snapshot) {
-                    return Ok(SubmittedAction::without_handle(()));
-                }
-                if Instant::now() >= create_home_deadline {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(100));
-            }
-        }
-
-        anyhow::ensure!(
-            snapshot_has_real_home(&self.ui_snapshot()?),
-            "create_account_via_ui: account creation did not converge a real home"
-        );
-        Ok(SubmittedAction::without_handle(()))
-    }
-
-    fn create_home_via_ui(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
-        self.with_session(|session| {
-            session.rpc_call(
-                "create_home",
-                json!({
-                    "instance_id": self.config.id,
-                    "home_name": home_name,
-                }),
-            )?;
-            Ok(())
-        })?;
-        Ok(SubmittedAction::without_handle(()))
-    }
-
-    fn create_contact_invitation_via_ui(
-        &mut self,
-        receiver_authority_id: &str,
-    ) -> Result<SubmittedAction<ContactInvitationCode>> {
-        Ok(SubmittedAction::without_handle(ContactInvitationCode {
-            code: self.create_contact_invitation(receiver_authority_id)?,
-        }))
-    }
-
-    fn accept_contact_invitation_via_ui(&mut self, code: &str) -> Result<SubmittedAction<()>> {
-        let previous_operation =
-            observe_operation(&self.ui_snapshot()?, &OperationId::invitation_accept());
-        self.activate_control(ControlId::ContactsAcceptInvitationButton)?;
-        wait_for_modal_visible(self, ModalId::AcceptInvitation, Duration::from_secs(5))?;
-        self.fill_field(FieldId::InvitationCode, code)?;
-        self.activate_control(ControlId::ModalConfirmButton)?;
-        let handle = wait_for_operation_submission(
-            self,
-            OperationId::invitation_accept(),
-            previous_operation,
-            Duration::from_secs(5),
-        )?;
-        Ok(SubmittedAction::with_ui_operation((), handle))
-    }
-
-    fn invite_actor_to_channel_via_ui(
-        &mut self,
-        authority_id: &str,
-    ) -> Result<SubmittedAction<()>> {
-        self.activate_control(ControlId::NavContacts)?;
-        wait_for_screen_visible(self, ScreenId::Contacts, Duration::from_secs(5))?;
-        self.activate_list_item(ListId::Contacts, authority_id)?;
-        self.activate_control(ControlId::ContactsInviteToChannelButton)?;
-        Ok(SubmittedAction::without_handle(()))
-    }
-
-    fn accept_pending_channel_invitation_via_ui(&mut self) -> Result<SubmittedAction<()>> {
-        let previous_channel_count = self
-            .ui_snapshot()?
-            .lists
-            .iter()
-            .find(|list| list.id == ListId::Channels)
-            .map(|list| list.items.len())
-            .unwrap_or(0);
-        self.submit_chat_command_via_ui("homeaccept")?;
-        let deadline = Instant::now() + Duration::from_secs(20);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            let channel_count = snapshot
-                .lists
-                .iter()
-                .find(|list| list.id == ListId::Channels)
-                .map(|list| list.items.len())
-                .unwrap_or(0);
-            let joined = channel_count > previous_channel_count
-                || snapshot
-                    .runtime_events
-                    .iter()
-                    .any(|event| matches!(&event.fact, RuntimeFact::ChannelMembershipReady { .. }));
-            if joined {
-                return Ok(SubmittedAction::without_handle(()));
-            }
-            if snapshot.operation_state(&OperationId::invitation_accept())
-                == Some(OperationState::Failed)
-            {
-                anyhow::bail!("accept_pending_channel_invitation_via_ui: invitation_accept failed");
-            }
-            if Instant::now() >= deadline {
-                anyhow::bail!(
-                    "accept_pending_channel_invitation_via_ui: timed out waiting for channel join"
-                );
-            }
-            thread::sleep(Duration::from_millis(80));
-        }
-    }
-
-    fn join_channel_via_ui(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
-        self.with_session(|session| {
-            session.rpc_call(
-                "join_channel",
-                json!({
-                    "instance_id": self.config.id,
-                    "channel_name": channel_name,
-                }),
-            )?;
-            Ok(())
-        })
-        .context("join_channel_via_ui: browser_dom_flow")?;
-        Ok(SubmittedAction::without_handle(()))
-    }
-
-    fn send_chat_message_via_ui(&mut self, message: &str) -> Result<SubmittedAction<()>> {
-        self.activate_control(ControlId::NavChat)?;
-        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
-        let snapshot = self.ui_snapshot()?;
-        if let Some(channels) = snapshot
-            .lists
-            .iter()
-            .find(|list| list.id == ListId::Channels)
-        {
-            let selected = channels.items.iter().any(|item| item.selected);
-            if !selected && channels.items.len() == 1 {
-                self.activate_list_item(ListId::Channels, &channels.items[0].id)?;
-                thread::sleep(Duration::from_millis(120));
-            }
-        }
-        self.fill_field(FieldId::ChatInput, message)?;
-        self.send_key(ToolKey::Enter, 1)?;
-        Ok(SubmittedAction::without_handle(()))
-    }
-
     fn tail_log(&self, lines: usize) -> Result<Vec<String>> {
         let payload = self.with_session(|session| {
             session.rpc_call(
@@ -1143,9 +792,155 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 }
 
+impl RawUiBackend for PlaywrightBrowserBackend {
+    fn click_button(&mut self, label: &str) -> Result<()> {
+        self.with_session(|session| {
+            session.rpc_call(
+                "click_button",
+                json!({
+                    "instance_id": self.config.id,
+                    "label": label,
+                }),
+            )?;
+            Ok(())
+        })
+    }
+
+    fn activate_control(&mut self, control_id: ControlId) -> Result<()> {
+        if matches!(
+            control_id,
+            ControlId::SettingsAddDeviceButton | ControlId::SettingsRemoveDeviceButton
+        ) {
+            let snapshot = self.ui_snapshot()?;
+            if snapshot.screen == aura_app::ui::contract::ScreenId::Settings {
+                let needs_devices_section = snapshot
+                    .selections
+                    .iter()
+                    .find(|selection| selection.list == ListId::SettingsSections)
+                    .map(|selection| selection.item_id.as_str() != "devices")
+                    .unwrap_or(true);
+                if needs_devices_section {
+                    self.activate_list_item(ListId::SettingsSections, "devices")?;
+                }
+            }
+        }
+        let selector = control_selector(control_id)?;
+        let is_navigation_control = matches!(
+            control_id,
+            ControlId::NavNeighborhood
+                | ControlId::NavChat
+                | ControlId::NavContacts
+                | ControlId::NavNotifications
+                | ControlId::NavSettings,
+        );
+        if is_navigation_control {
+            let target_screen = match control_id {
+                ControlId::NavNeighborhood => Some("neighborhood"),
+                ControlId::NavChat => Some("chat"),
+                ControlId::NavContacts => Some("contacts"),
+                ControlId::NavNotifications => Some("notifications"),
+                ControlId::NavSettings => Some("settings"),
+                _ => None,
+            };
+            if let Some(target_screen) = target_screen {
+                let navigate_result = self.with_session(|session| {
+                    session.rpc_call(
+                        "navigate_screen",
+                        json!({
+                            "instance_id": self.config.id,
+                            "screen": target_screen,
+                        }),
+                    )?;
+                    Ok(())
+                });
+                if navigate_result.is_ok() {
+                    return Ok(());
+                }
+            }
+        }
+        let click_result = self.click_target(&selector);
+        if click_result.is_ok() {
+            return Ok(());
+        }
+        if is_navigation_control && control_id.activation_key().is_none() {
+            return Err(click_result
+                .err()
+                .unwrap_or_else(|| anyhow::anyhow!("control click failed")));
+        }
+        let click_error = click_result
+            .err()
+            .unwrap_or_else(|| anyhow::anyhow!("control click failed"));
+        if let Some(fallback_key) = control_id.activation_key() {
+            self.with_session(|session| {
+                session.rpc_call(
+                    "send_key",
+                    json!({
+                        "instance_id": self.config.id,
+                        "key": fallback_key,
+                        "repeat": 1,
+                    }),
+                )?;
+                Ok(())
+            })
+            .map_err(|send_error| {
+                anyhow::anyhow!(
+                    "preferred click failed for {control_id:?} via {selector}: {click_error}; \
+                     fallback key '{fallback_key}' failed: {send_error}"
+                )
+            })?;
+            return Ok(());
+        }
+        Err(anyhow::anyhow!(
+            "control activation failed for {control_id:?} via {selector}: {click_error}"
+        ))
+    }
+
+    fn click_target(&mut self, selector: &str) -> Result<()> {
+        self.with_session(|session| {
+            session.rpc_call(
+                "click_button",
+                json!({
+                    "instance_id": self.config.id,
+                    "selector": selector,
+                }),
+            )?;
+            Ok(())
+        })
+    }
+
+    fn fill_input(&mut self, selector: &str, value: &str) -> Result<()> {
+        self.with_session(|session| {
+            session.rpc_call(
+                "fill_input",
+                json!({
+                    "instance_id": self.config.id,
+                    "selector": selector,
+                    "value": value,
+                }),
+            )?;
+            Ok(())
+        })
+    }
+
+    fn fill_field(&mut self, field_id: FieldId, value: &str) -> Result<()> {
+        let selector = field_selector(field_id)?;
+        self.fill_input(&selector, value)
+    }
+
+    fn activate_list_item(&mut self, list_id: ListId, item_id: &str) -> Result<()> {
+        if matches!(list_id, ListId::Navigation) {
+            let control_id = navigation_control_id(item_id)?;
+            return self.activate_control(control_id);
+        }
+
+        let selector = list_item_selector(list_id, item_id);
+        self.click_target(&selector)
+    }
+}
+
 impl SharedSemanticBackend for PlaywrightBrowserBackend {
     fn shared_projection(&self) -> Result<UiSnapshot> {
-        InstanceBackend::ui_snapshot(self)
+        self.ui_snapshot()
     }
 
     fn wait_for_shared_projection_event(
@@ -1153,45 +948,171 @@ impl SharedSemanticBackend for PlaywrightBrowserBackend {
         timeout: Duration,
         after_version: Option<u64>,
     ) -> Option<Result<UiSnapshotEvent>> {
-        InstanceBackend::wait_for_ui_snapshot_event(self, timeout, after_version)
+        self.wait_for_ui_snapshot_event(timeout, after_version)
     }
 
     fn submit_create_account(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
-        InstanceBackend::create_account_via_ui(self, account_name)
+        self.with_session(|session| {
+            session.rpc_call(
+                "create_account",
+                json!({
+                    "instance_id": self.config.id,
+                    "account_name": account_name,
+                }),
+            )?;
+            Ok(())
+        })?;
+        let onboarding_deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            if snapshot.operations.iter().any(|operation| {
+                operation.id == OperationId::account_create()
+                    && operation.state == aura_app::ui::contract::OperationState::Failed
+            }) {
+                anyhow::bail!("submit_create_account: account creation failed");
+            }
+            if snapshot.screen != ScreenId::Onboarding && snapshot_has_real_home(&snapshot) {
+                return Ok(SubmittedAction::without_handle(()));
+            }
+            if Instant::now() >= onboarding_deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+
+        anyhow::ensure!(
+            snapshot_has_real_home(&self.ui_snapshot()?),
+            "submit_create_account: account creation did not converge a real home"
+        );
+        Ok(SubmittedAction::without_handle(()))
     }
 
     fn submit_create_home(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
-        InstanceBackend::create_home_via_ui(self, home_name)
+        self.with_session(|session| {
+            session.rpc_call(
+                "create_home",
+                json!({
+                    "instance_id": self.config.id,
+                    "home_name": home_name,
+                }),
+            )?;
+            Ok(())
+        })?;
+        Ok(SubmittedAction::without_handle(()))
     }
 
     fn submit_create_contact_invitation(
         &mut self,
         receiver_authority_id: &str,
     ) -> Result<SubmittedAction<ContactInvitationCode>> {
-        InstanceBackend::create_contact_invitation_via_ui(self, receiver_authority_id)
+        let payload = self.with_session(|session| {
+            session.rpc_call(
+                "create_contact_invitation",
+                json!({
+                    "instance_id": self.config.id,
+                    "receiver_authority_id": receiver_authority_id,
+                }),
+            )
+        })?;
+        let code = payload
+            .get("code")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                anyhow::anyhow!("submit_create_contact_invitation: missing code in response")
+            })?;
+        Ok(SubmittedAction::without_handle(ContactInvitationCode {
+            code: code.to_string(),
+        }))
     }
 
     fn submit_accept_contact_invitation(&mut self, code: &str) -> Result<SubmittedAction<()>> {
-        InstanceBackend::accept_contact_invitation_via_ui(self, code)
+        submit_accept_contact_invitation_via_shared_ui(self, code)
     }
 
     fn submit_invite_actor_to_channel(
         &mut self,
         authority_id: &str,
     ) -> Result<SubmittedAction<()>> {
-        InstanceBackend::invite_actor_to_channel_via_ui(self, authority_id)
+        submit_invite_actor_to_channel_via_shared_ui(self, authority_id)
     }
 
     fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>> {
-        InstanceBackend::accept_pending_channel_invitation_via_ui(self)
+        let previous_channel_count = self
+            .ui_snapshot()?
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Channels)
+            .map(|list| list.items.len())
+            .unwrap_or(0);
+        self.submit_chat_command_via_ui("homeaccept")?;
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            let channel_count = snapshot
+                .lists
+                .iter()
+                .find(|list| list.id == ListId::Channels)
+                .map(|list| list.items.len())
+                .unwrap_or(0);
+            let joined = channel_count > previous_channel_count
+                || snapshot
+                    .runtime_events
+                    .iter()
+                    .any(|event| matches!(&event.fact, RuntimeFact::ChannelMembershipReady { .. }));
+            if joined {
+                return Ok(SubmittedAction::without_handle(()));
+            }
+            if snapshot.operation_state(&OperationId::invitation_accept())
+                == Some(OperationState::Failed)
+            {
+                anyhow::bail!(
+                    "submit_accept_pending_channel_invitation: invitation_accept failed"
+                );
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!(
+                    "submit_accept_pending_channel_invitation: timed out waiting for channel join"
+                );
+            }
+            thread::sleep(Duration::from_millis(80));
+        }
     }
 
     fn submit_join_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
-        InstanceBackend::join_channel_via_ui(self, channel_name)
+        self.with_session(|session| {
+            session.rpc_call(
+                "join_channel",
+                json!({
+                    "instance_id": self.config.id,
+                    "channel_name": channel_name,
+                }),
+            )?;
+            Ok(())
+        })
+        .context("submit_join_channel: browser_dom_flow")?;
+        Ok(SubmittedAction::without_handle(()))
     }
 
     fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>> {
-        InstanceBackend::send_chat_message_via_ui(self, message)
+        self.activate_control(ControlId::NavChat)?;
+        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
+        let snapshot = self.ui_snapshot()?;
+        if let Some(channels) = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Channels)
+        {
+            let selected = channels.items.iter().any(|item| item.selected);
+            if !selected && channels.items.len() == 1 {
+                self.activate_list_item(ListId::Channels, &channels.items[0].id)?;
+                thread::sleep(Duration::from_millis(120));
+            }
+        }
+        self.fill_field(FieldId::ChatInput, message)?;
+        self.send_key(ToolKey::Enter, 1)?;
+        Ok(SubmittedAction::without_handle(()))
     }
 }
 
@@ -1371,6 +1292,7 @@ mod tests {
         browser_app_url, control_selector, field_selector, navigation_control_id,
         parse_bool_setting, parse_u64_setting, tool_key_name, DEFAULT_PAGE_GOTO_TIMEOUT_MS,
     };
+    use crate::backend::SHARED_INTENT_UI_BYPASS_ALLOWLIST;
     use crate::tool_api::ToolKey;
     use aura_app::ui::contract::{ControlId, FieldId};
 
@@ -1451,5 +1373,50 @@ mod tests {
     #[test]
     fn browser_driver_maps_dismiss_key_name() {
         assert_eq!(tool_key_name(ToolKey::Esc), "esc");
+    }
+
+    #[test]
+    fn playwright_shared_intent_methods_use_visible_ui_controls() {
+        let source = include_str!("playwright_browser.rs");
+        let contract_source = include_str!("mod.rs");
+        assert!(source.contains("submit_accept_contact_invitation_via_shared_ui(self, code)"));
+        assert!(contract_source.contains(
+            "self.activate_control(ControlId::ContactsAcceptInvitationButton)?;"
+        ));
+        assert!(contract_source.contains(
+            "wait_for_modal_visible(self, ModalId::AcceptInvitation, Duration::from_secs(5))?;"
+        ));
+        assert!(contract_source.contains("backend.fill_field(FieldId::InvitationCode, code)?;"));
+        assert!(source.contains("submit_invite_actor_to_channel_via_shared_ui(self, authority_id)"));
+        assert!(contract_source.contains("backend.activate_control(ControlId::NavContacts)?;"));
+        assert!(contract_source.contains("backend.activate_list_item(ListId::Contacts, authority_id)?;"));
+        assert!(contract_source.contains(
+            "backend.activate_control(ControlId::ContactsInviteToChannelButton)?;"
+        ));
+        assert!(source.contains("fn submit_send_chat_message"));
+        assert!(source.contains("self.activate_control(ControlId::NavChat)?;"));
+        assert!(source.contains("self.fill_field(FieldId::ChatInput, message)?;"));
+        assert!(source.contains("self.send_key(ToolKey::Enter, 1)?;"));
+    }
+
+    #[test]
+    fn playwright_shortcut_bypasses_are_allowlisted() {
+        let unique: std::collections::HashSet<_> = SHARED_INTENT_UI_BYPASS_ALLOWLIST
+            .iter()
+            .map(|entry| (entry.backend_kind, entry.method_name))
+            .collect();
+        assert!(unique.contains(&("playwright_browser", "submit_create_account")));
+        assert!(unique.contains(&("playwright_browser", "submit_create_home")));
+        assert!(unique.contains(&(
+            "playwright_browser",
+            "submit_create_contact_invitation"
+        )));
+
+        let source = include_str!("playwright_browser.rs");
+        assert!(source.contains("session.rpc_call(\n                \"create_account\","));
+        assert!(source.contains("session.rpc_call(\n                \"create_home\","));
+        assert!(source.contains(
+            "session.rpc_call(\n                \"create_contact_invitation\","
+        ));
     }
 }

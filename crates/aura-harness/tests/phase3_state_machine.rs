@@ -87,7 +87,7 @@ fn execute_mode(
 }
 
 fn sample_mixed_run_config() -> aura_harness::config::RunConfig {
-    use aura_harness::config::{InstanceConfig, InstanceMode, RunConfig, RunSection};
+use aura_harness::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, RuntimeSubstrate};
 
     RunConfig {
         schema_version: 1,
@@ -103,7 +103,7 @@ fn sample_mixed_run_config() -> aura_harness::config::RunConfig {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
-            runtime_substrate: Default::default(),
+            runtime_substrate: RuntimeSubstrate::default(),
         },
         instances: vec![
             InstanceConfig {
@@ -157,7 +157,9 @@ fn sample_mixed_run_config() -> aura_harness::config::RunConfig {
 }
 
 fn sample_scripted_scenario() -> aura_harness::config::ScenarioConfig {
-    use aura_harness::config::{ScenarioAction, ScenarioConfig, ScenarioStep};
+    use aura_harness::config::{
+        ScenarioAction, ScenarioCanonicalModel, ScenarioConfig, ScenarioStep,
+    };
 
     ScenarioConfig {
         schema_version: 1,
@@ -196,11 +198,15 @@ fn sample_scripted_scenario() -> aura_harness::config::ScenarioConfig {
                 ..Default::default()
             },
         ],
+        canonical_model: ScenarioCanonicalModel::CompatibilityStepBridge,
+        canonical_semantic_steps: Vec::new(),
     }
 }
 
 fn sample_agent_scenario() -> aura_harness::config::ScenarioConfig {
-    use aura_harness::config::{ScenarioAction, ScenarioConfig, ScenarioStep};
+    use aura_harness::config::{
+        ScenarioAction, ScenarioCanonicalModel, ScenarioConfig, ScenarioStep,
+    };
 
     ScenarioConfig {
         schema_version: 1,
@@ -239,5 +245,7 @@ fn sample_agent_scenario() -> aura_harness::config::ScenarioConfig {
                 ..Default::default()
             },
         ],
+        canonical_model: ScenarioCanonicalModel::CompatibilityStepBridge,
+        canonical_semantic_steps: Vec::new(),
     }
 }

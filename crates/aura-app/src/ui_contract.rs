@@ -259,6 +259,104 @@ pub fn list_item_selector(list_id: ListId, item_id: &str) -> String {
     format!("#{}", list_item_dom_id(list_id, item_id))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SharedSettingsSectionId {
+    Profile,
+    GuardianThreshold,
+    RequestRecovery,
+    Devices,
+    Authority,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrontendSpecificSettingsSectionId {
+    Appearance,
+    Info,
+    Observability,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingsSectionSurfaceId {
+    Shared(SharedSettingsSectionId),
+    FrontendSpecific(FrontendSpecificSettingsSectionId),
+}
+
+pub const PARITY_CRITICAL_SETTINGS_SECTIONS: &[SharedSettingsSectionId] = &[
+    SharedSettingsSectionId::Profile,
+    SharedSettingsSectionId::GuardianThreshold,
+    SharedSettingsSectionId::RequestRecovery,
+    SharedSettingsSectionId::Devices,
+    SharedSettingsSectionId::Authority,
+];
+
+pub const FRONTEND_SPECIFIC_SETTINGS_SECTIONS: &[FrontendSpecificSettingsSectionId] = &[
+    FrontendSpecificSettingsSectionId::Appearance,
+    FrontendSpecificSettingsSectionId::Info,
+    FrontendSpecificSettingsSectionId::Observability,
+];
+
+#[must_use]
+pub const fn settings_section_item_id(surface: SettingsSectionSurfaceId) -> &'static str {
+    match surface {
+        SettingsSectionSurfaceId::Shared(SharedSettingsSectionId::Profile) => "profile",
+        SettingsSectionSurfaceId::Shared(SharedSettingsSectionId::GuardianThreshold) => {
+            "guardian-threshold"
+        }
+        SettingsSectionSurfaceId::Shared(SharedSettingsSectionId::RequestRecovery) => {
+            "request-recovery"
+        }
+        SettingsSectionSurfaceId::Shared(SharedSettingsSectionId::Devices) => "devices",
+        SettingsSectionSurfaceId::Shared(SharedSettingsSectionId::Authority) => "authority",
+        SettingsSectionSurfaceId::FrontendSpecific(FrontendSpecificSettingsSectionId::Appearance) => {
+            "appearance"
+        }
+        SettingsSectionSurfaceId::FrontendSpecific(FrontendSpecificSettingsSectionId::Info) => {
+            "info"
+        }
+        SettingsSectionSurfaceId::FrontendSpecific(
+            FrontendSpecificSettingsSectionId::Observability,
+        ) => "observability",
+    }
+}
+
+#[must_use]
+pub fn classify_settings_section_item_id(item_id: &str) -> Option<SettingsSectionSurfaceId> {
+    match item_id.trim() {
+        "profile" => Some(SettingsSectionSurfaceId::Shared(
+            SharedSettingsSectionId::Profile,
+        )),
+        "guardian-threshold" => {
+            Some(SettingsSectionSurfaceId::Shared(
+                SharedSettingsSectionId::GuardianThreshold,
+            ))
+        }
+        "request-recovery" => {
+            Some(SettingsSectionSurfaceId::Shared(
+                SharedSettingsSectionId::RequestRecovery,
+            ))
+        }
+        "devices" => Some(SettingsSectionSurfaceId::Shared(
+            SharedSettingsSectionId::Devices,
+        )),
+        "authority" => Some(SettingsSectionSurfaceId::Shared(
+            SharedSettingsSectionId::Authority,
+        )),
+        "appearance" => Some(SettingsSectionSurfaceId::FrontendSpecific(
+            FrontendSpecificSettingsSectionId::Appearance,
+        )),
+        "info" => Some(SettingsSectionSurfaceId::FrontendSpecific(
+            FrontendSpecificSettingsSectionId::Info,
+        )),
+        "observability" => Some(SettingsSectionSurfaceId::FrontendSpecific(
+            FrontendSpecificSettingsSectionId::Observability,
+        )),
+        _ => None,
+    }
+}
+
 pub struct ParityUiIdentity;
 
 impl ParityUiIdentity {
@@ -895,6 +993,23 @@ pub struct RenderHeartbeat {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HarnessShellMode {
+    App,
+    Onboarding,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnessShellStructureSnapshot {
+    pub screen: ScreenId,
+    pub app_root_count: u32,
+    pub modal_region_count: u32,
+    pub onboarding_root_count: u32,
+    pub toast_region_count: u32,
+    pub active_screen_root_count: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectionRevision {
     pub semantic_seq: u64,
     pub render_seq: Option<u64>,
@@ -966,6 +1081,38 @@ pub fn validate_render_convergence(
         ));
     }
     Ok(())
+}
+
+pub fn validate_harness_shell_structure(
+    snapshot: &HarnessShellStructureSnapshot,
+) -> Result<HarnessShellMode, String> {
+    let onboarding_valid = snapshot.onboarding_root_count == 1
+        && snapshot.app_root_count == 0
+        && snapshot.modal_region_count == 0
+        && snapshot.toast_region_count == 0
+        && snapshot.active_screen_root_count == 0;
+    if onboarding_valid {
+        return Ok(HarnessShellMode::Onboarding);
+    }
+
+    let app_shell_valid = snapshot.app_root_count == 1
+        && snapshot.modal_region_count == 1
+        && snapshot.toast_region_count == 1
+        && snapshot.active_screen_root_count == 1
+        && snapshot.onboarding_root_count == 0;
+    if app_shell_valid {
+        return Ok(HarnessShellMode::App);
+    }
+
+    Err(format!(
+        "invalid harness shell structure for {:?}: app_root_count={}, modal_region_count={}, onboarding_root_count={}, toast_region_count={}, active_screen_root_count={}",
+        snapshot.screen,
+        snapshot.app_root_count,
+        snapshot.modal_region_count,
+        snapshot.onboarding_root_count,
+        snapshot.toast_region_count,
+        snapshot.active_screen_root_count
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1375,16 +1522,10 @@ pub const HARNESS_MODE_ALLOWLIST: &[HarnessModeAllowance] = &[
         design_ref: "crates/aura-terminal/ARCHITECTURE.md",
     },
     HarnessModeAllowance {
-        path: "crates/aura-terminal/src/tui/screens/app/shell.rs",
-        kind: HarnessModeChangeKind::RenderingStability,
-        owner: "aura-terminal-shell",
-        design_ref: "crates/aura-terminal/ARCHITECTURE.md",
-    },
-    HarnessModeAllowance {
-        path: "crates/aura-terminal/src/tui/theme.rs",
-        kind: HarnessModeChangeKind::RenderingStability,
-        owner: "aura-terminal-theme",
-        design_ref: "crates/aura-terminal/ARCHITECTURE.md",
+        path: "crates/aura-web/src/main.rs",
+        kind: HarnessModeChangeKind::Instrumentation,
+        owner: "aura-web-main",
+        design_ref: "docs/804_testing_guide.md",
     },
 ];
 
@@ -1433,9 +1574,7 @@ pub const FRONTEND_EXECUTION_BOUNDARIES: &[FrontendExecutionBoundary] = &[
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ParityException {
-    BrowserThemeControl,
-}
+pub enum ParityException {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParityExceptionMetadata {
@@ -1469,7 +1608,6 @@ pub enum SharedFlowId {
     AddDevice,
     RemoveDevice,
     SwitchAuthority,
-    ThemeAppearance,
 }
 
 pub const ALL_SHARED_FLOW_IDS: &[SharedFlowId] = &[
@@ -1486,16 +1624,9 @@ pub const ALL_SHARED_FLOW_IDS: &[SharedFlowId] = &[
     SharedFlowId::AddDevice,
     SharedFlowId::RemoveDevice,
     SharedFlowId::SwitchAuthority,
-    SharedFlowId::ThemeAppearance,
 ];
 
-pub const PARITY_EXCEPTION_METADATA: &[ParityExceptionMetadata] = &[ParityExceptionMetadata {
-    exception: ParityException::BrowserThemeControl,
-    reason_code: "browser_only_theme_control",
-    scope: "flow:theme_appearance",
-    affected_surface: "screen:settings/control:settings_toggle_theme",
-    doc_reference: "docs/997_ux_flow_coverage.md",
-}];
+pub const PARITY_EXCEPTION_METADATA: &[ParityExceptionMetadata] = &[];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SharedFlowSupport {
@@ -1826,11 +1957,6 @@ pub const SHARED_FLOW_SUPPORT: &[SharedFlowSupport] = &[
         web: FlowAvailability::Supported,
         tui: FlowAvailability::Supported,
     },
-    SharedFlowSupport {
-        flow: SharedFlowId::ThemeAppearance,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Exception(ParityException::BrowserThemeControl),
-    },
 ];
 
 pub const SHARED_FLOW_SCENARIO_COVERAGE: &[SharedFlowScenarioCoverage] = &[
@@ -1885,10 +2011,6 @@ pub const SHARED_FLOW_SCENARIO_COVERAGE: &[SharedFlowScenarioCoverage] = &[
     SharedFlowScenarioCoverage {
         flow: SharedFlowId::SwitchAuthority,
         scenario_id: "scenario8-settings-devices-authority-e2e",
-    },
-    SharedFlowScenarioCoverage {
-        flow: SharedFlowId::ThemeAppearance,
-        scenario_id: "shared-settings-parity",
     },
 ];
 
@@ -2105,22 +2227,6 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
         flow: SharedFlowId::SwitchAuthority,
         path: "crates/aura-web/src/main.rs",
     },
-    SharedFlowSourceArea {
-        flow: SharedFlowId::ThemeAppearance,
-        path: "crates/aura-app/src/workflows/settings.rs",
-    },
-    SharedFlowSourceArea {
-        flow: SharedFlowId::ThemeAppearance,
-        path: "crates/aura-terminal/src/tui/screens/settings/screen.rs",
-    },
-    SharedFlowSourceArea {
-        flow: SharedFlowId::ThemeAppearance,
-        path: "crates/aura-ui/src/app.rs",
-    },
-    SharedFlowSourceArea {
-        flow: SharedFlowId::ThemeAppearance,
-        path: "crates/aura-web/src/main.rs",
-    },
 ];
 
 #[must_use]
@@ -2132,17 +2238,6 @@ pub fn shared_flow_support(flow: SharedFlowId) -> &'static SharedFlowSupport {
         panic!("shared flow support must be declared for {flow:?}");
     };
     support
-}
-
-#[must_use]
-pub fn parity_exception_metadata(exception: ParityException) -> &'static ParityExceptionMetadata {
-    let Some(metadata) = PARITY_EXCEPTION_METADATA
-        .iter()
-        .find(|metadata| metadata.exception == exception)
-    else {
-        panic!("parity exception metadata must be declared for {exception:?}");
-    };
-    metadata
 }
 
 #[must_use]
@@ -2380,16 +2475,6 @@ pub struct UiParityMismatch {
     pub tui: String,
 }
 
-fn normalize_parity_item_id(list_id: ListId, item_id: &str) -> Option<String> {
-    match list_id {
-        ListId::SettingsSections => match item_id.replace('_', "-").as_str() {
-            "appearance" | "observability" => None,
-            normalized => Some(normalized.to_string()),
-        },
-        _ => Some(item_id.to_string()),
-    }
-}
-
 fn parity_relevant_lists(screen: ScreenId) -> &'static [ListId] {
     match screen {
         ScreenId::Onboarding => &[],
@@ -2415,10 +2500,7 @@ fn parity_list_signature(snapshot: &UiSnapshot) -> Vec<ParityListSignature> {
             let mut items = list
                 .items
                 .iter()
-                .filter_map(|item| {
-                    normalize_parity_item_id(list.id, &item.id)
-                        .map(|normalized| (normalized, item.selected, item.confirmation))
-                })
+                .map(|item| (item.id.clone(), item.selected, item.confirmation))
                 .collect::<Vec<_>>();
             items.sort_by(|left, right| {
                 left.0
@@ -2439,10 +2521,7 @@ fn parity_selection_signature(snapshot: &UiSnapshot) -> Vec<(ListId, String)> {
         .selections
         .iter()
         .filter(|selection| relevant_lists.contains(&selection.list))
-        .filter_map(|selection| {
-            normalize_parity_item_id(selection.list, &selection.item_id)
-                .map(|normalized| (selection.list, normalized))
-        })
+        .map(|selection| (selection.list, selection.item_id.clone()))
         .collect::<Vec<_>>();
     selections.sort_by(|left, right| {
         left.0
@@ -2475,6 +2554,20 @@ fn parity_message_signature(snapshot: &UiSnapshot) -> Vec<String> {
         .collect::<Vec<_>>();
     messages.sort();
     messages
+}
+
+fn parity_toast_signature(snapshot: &UiSnapshot) -> Vec<(ToastKind, String)> {
+    let mut toasts = snapshot
+        .toasts
+        .iter()
+        .map(|toast| (toast.kind, toast.message.clone()))
+        .collect::<Vec<_>>();
+    toasts.sort_by(|left, right| {
+        format!("{:?}", left.0)
+            .cmp(&format!("{:?}", right.0))
+            .then_with(|| left.1.cmp(&right.1))
+    });
+    toasts
 }
 
 fn parity_runtime_event_signature(snapshot: &UiSnapshot) -> Vec<(RuntimeEventKind, String)> {
@@ -2567,6 +2660,16 @@ pub fn compare_ui_snapshots_for_parity(
         });
     }
 
+    let web_toasts = parity_toast_signature(web);
+    let tui_toasts = parity_toast_signature(tui);
+    if web_toasts != tui_toasts {
+        mismatches.push(UiParityMismatch {
+            field: "toasts",
+            web: format!("{web_toasts:?}"),
+            tui: format!("{tui_toasts:?}"),
+        });
+    }
+
     let web_runtime_events = parity_runtime_event_signature(web);
     let tui_runtime_events = parity_runtime_event_signature(tui);
     if web_runtime_events != tui_runtime_events {
@@ -2621,16 +2724,23 @@ pub fn uncovered_ui_parity_mismatches(web: &UiSnapshot, tui: &UiSnapshot) -> Vec
 mod tests {
     use super::next_projection_revision;
     use super::{
-        compare_ui_snapshots_for_parity, list_item_dom_id, list_item_selector,
-        shared_flow_scenarios, shared_flow_source_areas, shared_flow_support, shared_list_support,
+        classify_settings_section_item_id, compare_ui_snapshots_for_parity, list_item_dom_id,
+        list_item_selector, settings_section_item_id,
+        shared_flow_scenarios, shared_flow_source_areas, shared_list_support,
         shared_modal_support, shared_screen_module_map, shared_screen_support,
-        uncovered_ui_parity_mismatches, validate_render_convergence,
+        uncovered_ui_parity_mismatches, validate_harness_shell_structure,
+        validate_render_convergence,
         BrowserHarnessBridgeMethodKind, ChannelFactKey, ConfirmationState, ControlId, FieldId,
-        FlowAvailability, FrontendExecutionBoundaryKind, HarnessModeChangeKind, ListId,
-        ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId,
-        OperationSnapshot, OperationState, ParityException, ParityUiIdentity, ProjectionRevision,
-        QuiescenceSnapshot, RenderHeartbeat, RuntimeEventId, RuntimeEventSnapshot, RuntimeFact,
-        ScreenId, SelectionSnapshot, SharedFlowId, UiParityMismatch, UiReadiness, UiSnapshot,
+        FlowAvailability, FrontendExecutionBoundaryKind, FrontendSpecificSettingsSectionId,
+        HarnessModeChangeKind, HarnessShellMode, HarnessShellStructureSnapshot, ListId,
+        ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId, OperationId,
+        OperationInstanceId, OperationSnapshot, OperationState,
+        ParityUiIdentity, ProjectionRevision, QuiescenceSnapshot, RenderHeartbeat,
+        RuntimeEventId, RuntimeEventSnapshot, RuntimeFact, ScreenId, SelectionSnapshot,
+        SettingsSectionSurfaceId, SharedSettingsSectionId, ToastId, ToastKind,
+        ToastSnapshot, UiParityMismatch,
+        UiReadiness, UiSnapshot, FRONTEND_SPECIFIC_SETTINGS_SECTIONS,
+        PARITY_CRITICAL_SETTINGS_SECTIONS,
         ALL_SHARED_FLOW_IDS, BROWSER_CACHE_BOUNDARIES, BROWSER_HARNESS_BRIDGE_METHODS,
         BROWSER_OBSERVATION_SURFACE_GLOBAL, BROWSER_OBSERVATION_SURFACE_METHODS,
         FRONTEND_EXECUTION_BOUNDARIES, HARNESS_MODE_ALLOWLIST, PARITY_EXCEPTION_METADATA,
@@ -2859,6 +2969,54 @@ mod tests {
         assert_eq!(
             UiSnapshot::loading(ScreenId::Onboarding).screen,
             ScreenId::Onboarding
+        );
+    }
+
+    #[test]
+    fn onboarding_uses_canonical_snapshot_publication_path() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let web_main_path = repo_root.join("crates/aura-web/src/main.rs");
+        let web_main = std::fs::read_to_string(&web_main_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", web_main_path.display()));
+
+        assert!(
+            !web_main.contains("publish_onboarding_snapshot"),
+            "web onboarding must not use a bespoke snapshot publication path"
+        );
+        assert!(
+            web_main.contains("controller.set_account_setup_state("),
+            "web onboarding must publish through the canonical controller snapshot pipeline"
+        );
+    }
+
+    #[test]
+    fn onboarding_harness_paths_have_no_bespoke_recovery_logic() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let harness_bridge_path = repo_root.join("crates/aura-web/src/harness_bridge.rs");
+        let driver_path =
+            repo_root.join("crates/aura-harness/playwright-driver/playwright_driver.mjs");
+        let local_pty_path = repo_root.join("crates/aura-harness/src/backend/local_pty.rs");
+
+        let harness_bridge = std::fs::read_to_string(&harness_bridge_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", harness_bridge_path.display())
+        });
+        let driver = std::fs::read_to_string(&driver_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", driver_path.display()));
+        let local_pty = std::fs::read_to_string(&local_pty_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", local_pty_path.display()));
+
+        assert!(
+            !harness_bridge.contains("stale_onboarding_publish"),
+            "browser harness bridge must not repair stale onboarding publications"
+        );
+        assert!(
+            !driver.contains("staleOnboardingCache")
+                && !driver.contains("stale_onboarding_"),
+            "playwright driver must not carry stale-onboarding recovery heuristics"
+        );
+        assert!(
+            !local_pty.contains("synthetic_onboarding_snapshot"),
+            "local PTY backend must not fabricate onboarding snapshots"
         );
     }
 
@@ -3419,6 +3577,58 @@ mod tests {
     }
 
     #[test]
+    fn harness_shell_structure_accepts_exactly_one_app_shell() {
+        let shell = HarnessShellStructureSnapshot {
+            screen: ScreenId::Chat,
+            app_root_count: 1,
+            modal_region_count: 1,
+            onboarding_root_count: 0,
+            toast_region_count: 1,
+            active_screen_root_count: 1,
+        };
+
+        assert_eq!(
+            validate_harness_shell_structure(&shell)
+                .expect("single app shell should be valid"),
+            HarnessShellMode::App
+        );
+    }
+
+    #[test]
+    fn harness_shell_structure_accepts_single_onboarding_shell() {
+        let shell = HarnessShellStructureSnapshot {
+            screen: ScreenId::Onboarding,
+            app_root_count: 0,
+            modal_region_count: 0,
+            onboarding_root_count: 1,
+            toast_region_count: 0,
+            active_screen_root_count: 0,
+        };
+
+        assert_eq!(
+            validate_harness_shell_structure(&shell)
+                .expect("single onboarding shell should be valid"),
+            HarnessShellMode::Onboarding
+        );
+    }
+
+    #[test]
+    fn harness_shell_structure_rejects_duplicate_or_ambiguous_roots() {
+        let shell = HarnessShellStructureSnapshot {
+            screen: ScreenId::Settings,
+            app_root_count: 2,
+            modal_region_count: 1,
+            onboarding_root_count: 0,
+            toast_region_count: 1,
+            active_screen_root_count: 1,
+        };
+
+        let error = validate_harness_shell_structure(&shell)
+            .expect_err("duplicate app roots must fail the shell contract");
+        assert!(error.contains("invalid harness shell structure"));
+    }
+
+    #[test]
     fn list_item_dom_ids_are_stable_and_sanitized() {
         assert_eq!(
             list_item_dom_id(ListId::Contacts, "authority:abc/DEF"),
@@ -3464,13 +3674,6 @@ mod tests {
             }
         }
 
-        let theme_support = shared_flow_support(SharedFlowId::ThemeAppearance);
-        assert_eq!(theme_support.web, FlowAvailability::Supported);
-        assert_eq!(
-            theme_support.tui,
-            FlowAvailability::Exception(ParityException::BrowserThemeControl)
-        );
-
         let unique_exception_metadata: HashSet<_> = PARITY_EXCEPTION_METADATA
             .iter()
             .map(|metadata| metadata.exception)
@@ -3479,6 +3682,95 @@ mod tests {
             unique_exception_metadata.len(),
             PARITY_EXCEPTION_METADATA.len(),
             "parity exception metadata must stay unique"
+        );
+    }
+
+    #[test]
+    fn shared_settings_section_surface_is_explicit() {
+        assert_eq!(
+            PARITY_CRITICAL_SETTINGS_SECTIONS,
+            &[
+                SharedSettingsSectionId::Profile,
+                SharedSettingsSectionId::GuardianThreshold,
+                SharedSettingsSectionId::RequestRecovery,
+                SharedSettingsSectionId::Devices,
+                SharedSettingsSectionId::Authority,
+            ]
+        );
+        assert_eq!(
+            FRONTEND_SPECIFIC_SETTINGS_SECTIONS,
+            &[
+                FrontendSpecificSettingsSectionId::Appearance,
+                FrontendSpecificSettingsSectionId::Info,
+                FrontendSpecificSettingsSectionId::Observability,
+            ]
+        );
+
+        for shared in PARITY_CRITICAL_SETTINGS_SECTIONS {
+            let item_id = settings_section_item_id(SettingsSectionSurfaceId::Shared(*shared));
+            assert_eq!(
+                classify_settings_section_item_id(item_id),
+                Some(SettingsSectionSurfaceId::Shared(*shared))
+            );
+        }
+
+        for frontend_specific in FRONTEND_SPECIFIC_SETTINGS_SECTIONS {
+            let item_id =
+                settings_section_item_id(SettingsSectionSurfaceId::FrontendSpecific(*frontend_specific));
+            assert_eq!(
+                classify_settings_section_item_id(item_id),
+                Some(SettingsSectionSurfaceId::FrontendSpecific(*frontend_specific))
+            );
+        }
+    }
+
+    #[test]
+    fn frontend_settings_sources_use_shared_section_ids() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let web_model_path = repo_root.join("crates/aura-ui/src/model.rs");
+        let tui_types_path = repo_root.join("crates/aura-terminal/src/tui/types.rs");
+        let tui_export_path = repo_root.join("crates/aura-terminal/src/tui/harness_state.rs");
+
+        let web_model = std::fs::read_to_string(&web_model_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", web_model_path.display())
+        });
+        let tui_types = std::fs::read_to_string(&tui_types_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", tui_types_path.display())
+        });
+        let tui_export = std::fs::read_to_string(&tui_export_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", tui_export_path.display())
+        });
+
+        assert!(
+            web_model.contains("settings_section_item_id("),
+            "web settings must use shared settings_section_item_id helper"
+        );
+        assert!(
+            web_model.contains("SharedSettingsSectionId::GuardianThreshold")
+                && web_model.contains("SharedSettingsSectionId::RequestRecovery")
+                && web_model.contains("FrontendSpecificSettingsSectionId::Appearance")
+                && web_model.contains("FrontendSpecificSettingsSectionId::Info"),
+            "web settings must classify shared and frontend-specific sections explicitly"
+        );
+
+        assert!(
+            tui_types.contains("settings_section_item_id("),
+            "tui settings must use shared settings_section_item_id helper"
+        );
+        assert!(
+            tui_types.contains("SharedSettingsSectionId::GuardianThreshold")
+                && tui_types.contains("SharedSettingsSectionId::RequestRecovery")
+                && tui_types.contains("FrontendSpecificSettingsSectionId::Observability"),
+            "tui settings must classify shared and frontend-specific sections explicitly"
+        );
+
+        assert!(
+            tui_export.contains("settings_section_item_id(section.surface_id()).to_string()"),
+            "tui settings export must use the canonical parity item id"
+        );
+        assert!(
+            !tui_export.contains("to_ascii_lowercase().replace(' ', \"_\")"),
+            "tui settings export must not derive parity ids from section titles"
         );
     }
 
@@ -3712,39 +4004,6 @@ mod tests {
     }
 
     #[test]
-    fn ui_snapshot_parity_ignores_declared_theme_exception() {
-        let web = UiSnapshot {
-            screen: ScreenId::Settings,
-            focused_control: Some(ControlId::SettingsToggleThemeButton),
-            open_modal: None,
-            readiness: UiReadiness::Ready,
-            revision: ProjectionRevision {
-                semantic_seq: 1,
-                render_seq: Some(1),
-            },
-            quiescence: QuiescenceSnapshot::settled(),
-            selections: Vec::new(),
-            lists: Vec::new(),
-            messages: Vec::new(),
-            operations: Vec::new(),
-            toasts: Vec::new(),
-            runtime_events: Vec::new(),
-        };
-        let mut tui = web.clone();
-        tui.focused_control = Some(ControlId::Screen(ScreenId::Settings));
-
-        assert_eq!(
-            compare_ui_snapshots_for_parity(&web, &tui),
-            vec![UiParityMismatch {
-                field: "focused_control",
-                web: "Some(SettingsToggleThemeButton)".to_string(),
-                tui: "Some(Screen(Settings))".to_string(),
-            }]
-        );
-        assert!(uncovered_ui_parity_mismatches(&web, &tui).is_empty());
-    }
-
-    #[test]
     fn ui_snapshot_parity_reports_undeclared_drift() {
         let web = UiSnapshot {
             screen: ScreenId::Chat,
@@ -3818,6 +4077,43 @@ mod tests {
                 field: "runtime_events",
                 web: "[(MessageCommitted, \"message_committed:shared:hello\")]".to_string(),
                 tui: "[(MessageDeliveryReady, \"message_delivery_ready:shared\")]".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn ui_snapshot_parity_detects_toast_drift() {
+        let web = UiSnapshot {
+            screen: ScreenId::Chat,
+            focused_control: Some(ControlId::Screen(ScreenId::Chat)),
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: ProjectionRevision {
+                semantic_seq: 1,
+                render_seq: Some(1),
+            },
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: Vec::new(),
+            lists: Vec::new(),
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: vec![ToastSnapshot {
+                id: ToastId("toast-1".to_string()),
+                kind: ToastKind::Success,
+                message: "Saved".to_string(),
+            }],
+            runtime_events: Vec::new(),
+        };
+        let mut tui = web.clone();
+        tui.toasts[0].message = "Failed".to_string();
+
+        let mismatches = compare_ui_snapshots_for_parity(&web, &tui);
+        assert_eq!(
+            mismatches,
+            vec![UiParityMismatch {
+                field: "toasts",
+                web: "[(Success, \"Saved\")]".to_string(),
+                tui: "[(Success, \"Failed\")]".to_string(),
             }]
         );
     }
@@ -3946,7 +4242,7 @@ mod tests {
                 },
                 SelectionSnapshot {
                     list: ListId::SettingsSections,
-                    item_id: "guardian_threshold".to_string(),
+                    item_id: "guardian-threshold".to_string(),
                 },
                 SelectionSnapshot {
                     list: ListId::NeighborhoodMembers,
@@ -3966,7 +4262,7 @@ mod tests {
                     id: ListId::SettingsSections,
                     items: vec![
                         ListItemSnapshot {
-                            id: "guardian_threshold".to_string(),
+                            id: "guardian-threshold".to_string(),
                             selected: true,
                             confirmation: ConfirmationState::Confirmed,
                         },

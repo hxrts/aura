@@ -439,13 +439,41 @@ impl SettingsSection {
     #[must_use]
     pub const fn dom_id(self) -> &'static str {
         match self {
-            Self::Profile => "profile",
-            Self::GuardianThreshold => "guardian-threshold",
-            Self::RequestRecovery => "request-recovery",
-            Self::Devices => "devices",
-            Self::Authority => "authority",
-            Self::Appearance => "appearance",
-            Self::Info => "info",
+            Self::Profile => aura_app::ui_contract::settings_section_item_id(
+                aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
+                    aura_app::ui_contract::SharedSettingsSectionId::Profile,
+                ),
+            ),
+            Self::GuardianThreshold => aura_app::ui_contract::settings_section_item_id(
+                aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
+                    aura_app::ui_contract::SharedSettingsSectionId::GuardianThreshold,
+                ),
+            ),
+            Self::RequestRecovery => aura_app::ui_contract::settings_section_item_id(
+                aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
+                    aura_app::ui_contract::SharedSettingsSectionId::RequestRecovery,
+                ),
+            ),
+            Self::Devices => aura_app::ui_contract::settings_section_item_id(
+                aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
+                    aura_app::ui_contract::SharedSettingsSectionId::Devices,
+                ),
+            ),
+            Self::Authority => aura_app::ui_contract::settings_section_item_id(
+                aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
+                    aura_app::ui_contract::SharedSettingsSectionId::Authority,
+                ),
+            ),
+            Self::Appearance => aura_app::ui_contract::settings_section_item_id(
+                aura_app::ui_contract::SettingsSectionSurfaceId::FrontendSpecific(
+                    aura_app::ui_contract::FrontendSpecificSettingsSectionId::Appearance,
+                ),
+            ),
+            Self::Info => aura_app::ui_contract::settings_section_item_id(
+                aura_app::ui_contract::SettingsSectionSurfaceId::FrontendSpecific(
+                    aura_app::ui_contract::FrontendSpecificSettingsSectionId::Info,
+                ),
+            ),
         }
     }
 

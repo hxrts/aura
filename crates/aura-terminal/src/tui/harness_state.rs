@@ -646,12 +646,10 @@ mod tests {
             .unwrap_or_default();
 
         assert!(contacts.is_empty());
-        assert!(snapshot
+        assert!(!snapshot
             .selections
             .iter()
-            .filter(|selection| selection.list == ListId::Contacts)
-            .next()
-            .is_none());
+            .any(|selection| selection.list == ListId::Contacts));
     }
 
     #[test]

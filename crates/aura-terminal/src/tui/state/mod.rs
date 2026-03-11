@@ -51,7 +51,11 @@ pub use views::{ChatMemberCandidate, CreateChannelModalState, CreateChannelStep}
 
 use crate::tui::screens::{Router, Screen};
 use crate::tui::types::AuthorityInfo;
-use aura_app::ui::contract::{OperationId, OperationInstanceId, OperationSnapshot, OperationState};
+use aura_app::ui::contract::{
+    OperationId, OperationInstanceId, OperationSnapshot, OperationState, RuntimeEventId,
+    RuntimeEventKind, RuntimeEventSnapshot,
+};
+use aura_app::ui_contract::RuntimeFact;
 use std::collections::HashMap;
 
 /// Complete TUI state
@@ -129,6 +133,9 @@ pub struct TuiState {
 
     /// Last exported invite code for harness-visible semantic readiness.
     pub last_exported_invitation_code: Option<String>,
+
+    /// Runtime facts exported from owned TUI transitions.
+    pub runtime_facts: Vec<RuntimeFact>,
 }
 
 impl TuiState {
@@ -242,6 +249,16 @@ impl TuiState {
         self.operation_states.remove(operation_id);
     }
 
+    pub fn upsert_runtime_fact(&mut self, fact: RuntimeFact) {
+        let key = fact.key();
+        self.runtime_facts.retain(|existing| existing.key() != key);
+        self.runtime_facts.push(fact);
+    }
+
+    pub fn clear_runtime_fact_kind(&mut self, kind: RuntimeEventKind) {
+        self.runtime_facts.retain(|existing| existing.kind() != kind);
+    }
+
     #[must_use]
     pub fn exported_operation_snapshots(&self) -> Vec<OperationSnapshot> {
         self.operation_states
@@ -250,6 +267,18 @@ impl TuiState {
                 id: id.clone(),
                 instance_id: OperationInstanceId(format!("tui-op-{}", id.0)),
                 state: state.clone(),
+            })
+            .collect()
+    }
+
+    #[must_use]
+    pub fn exported_runtime_events(&self) -> Vec<RuntimeEventSnapshot> {
+        let mut facts = self.runtime_facts.clone();
+        facts.sort_by_key(|left| left.key());
+        facts.iter()
+            .map(|fact| RuntimeEventSnapshot {
+                id: RuntimeEventId(format!("tui-runtime-fact-{}", fact.key())),
+                fact: fact.clone(),
             })
             .collect()
     }

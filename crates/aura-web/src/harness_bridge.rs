@@ -354,14 +354,6 @@ fn serialized_published_ui_snapshot(
         return live_json;
     };
 
-    let stale_onboarding_publish = published_json.contains("\"screen\":\"onboarding\"")
-        && published_json.contains("\"readiness\":\"loading\"");
-    let live_is_ahead = live_snapshot.readiness == UiReadiness::Ready
-        || live_snapshot.screen != ScreenId::Onboarding;
-    if stale_onboarding_publish && live_is_ahead {
-        return live_json;
-    }
-
     published
 }
 
@@ -628,12 +620,6 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
                 .web_dom_id()
                 .expect("ControlId::AppRoot must define a web DOM id")
         );
-        let onboarding_root_selector = format!(
-            "#{}",
-            aura_app::ui::contract::ControlId::OnboardingRoot
-                .web_dom_id()
-                .expect("ControlId::OnboardingRoot must define a web DOM id")
-        );
         let modal_region_selector = format!(
             "#{}",
             aura_app::ui::contract::ControlId::ModalRegion
@@ -665,12 +651,6 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
             .flatten()
             .map(|_| 1)
             .unwrap_or(0);
-        let onboarding_root_count = document
-            .query_selector(&onboarding_root_selector)
-            .ok()
-            .flatten()
-            .map(|_| 1)
-            .unwrap_or(0);
         let toast_region_count = document
             .query_selector(&toast_region_selector)
             .ok()
@@ -698,11 +678,6 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
             &payload,
             &JsValue::from_str("modal_region_count"),
             &JsValue::from_f64(f64::from(modal_region_count)),
-        );
-        let _ = Reflect::set(
-            &payload,
-            &JsValue::from_str("onboarding_root_count"),
-            &JsValue::from_f64(f64::from(onboarding_root_count)),
         );
         let _ = Reflect::set(
             &payload,

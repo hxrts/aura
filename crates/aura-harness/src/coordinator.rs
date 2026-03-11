@@ -269,17 +269,14 @@ impl HarnessCoordinator {
                     let backend_kind = backend.as_trait().backend_kind();
                     let result = (|| -> Result<()> {
                         eprintln!(
-                            "[harness] startup phase=backend_start begin instance={} backend={}",
-                            instance_id, backend_kind
+                            "[harness] startup phase=backend_start begin instance={instance_id} backend={backend_kind}"
                         );
                         backend.as_trait_mut().start()?;
                         eprintln!(
-                            "[harness] startup phase=backend_start done instance={} backend={}",
-                            instance_id, backend_kind
+                            "[harness] startup phase=backend_start done instance={instance_id} backend={backend_kind}"
                         );
                         eprintln!(
-                            "[harness] startup phase=health_check begin instance={} backend={}",
-                            instance_id, backend_kind
+                            "[harness] startup phase=health_check begin instance={instance_id} backend={backend_kind}"
                         );
                         let deadline = Instant::now() + BACKEND_HEALTH_TIMEOUT;
                         loop {
@@ -288,15 +285,13 @@ impl HarnessCoordinator {
                             }
                             if Instant::now() >= deadline {
                                 bail!(
-                                    "instance {instance_id} failed startup health gate within {:?}",
-                                    BACKEND_HEALTH_TIMEOUT
+                                    "instance {instance_id} failed startup health gate within {BACKEND_HEALTH_TIMEOUT:?}"
                                 );
                             }
                             std::thread::sleep(BACKEND_POLL_INTERVAL);
                         }
                         eprintln!(
-                            "[harness] startup phase=health_check done instance={} backend={}",
-                            instance_id, backend_kind
+                            "[harness] startup phase=health_check done instance={instance_id} backend={backend_kind}"
                         );
                         Ok(())
                     })();

@@ -78,6 +78,11 @@ For failure analysis:
 - prefer canonical action/event/state traces and structured timeout diagnostics
 - treat final text or screenshot inspection as supporting evidence, not the primary oracle
 
+For migration and cleanup discipline:
+
+- every shared UX or harness contract hardening change should remove obsolete compatibility code, stale allowlist entries, and transitional comments in the same milestone or the next explicit cleanup pass
+- prefer extending typed governance in `cargo run -p aura-harness --bin aura-harness --quiet -- governance ...` over adding standalone shell policy logic
+
 The authoritative written update map for these surfaces lives in
 `scripts/check/ux-guidance-sync.sh` and is enforced by `just ci-ux-policy`.
 The authoritative frontend matrix for converted shared scenarios comes from

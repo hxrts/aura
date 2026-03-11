@@ -3,12 +3,14 @@ pub mod playwright_browser;
 pub mod ssh_tunnel;
 
 use anyhow::{bail, Result};
+use aura_app::scenario_contract::IntentKind;
 use aura_app::ui::contract::{
     ControlId, FieldId, ListId, ModalId, OperationId, OperationInstanceId, OperationState,
     ScreenId, UiSnapshot,
 };
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use tokio::time::Instant;
 
 use crate::config::{InstanceConfig, InstanceMode};
 use crate::tool_api::ToolKey;
@@ -76,6 +78,52 @@ pub struct ObservedOperation {
     pub state: OperationState,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SharedIntentUiBypassKind {
+    TemporaryHarnessBridgeShortcut,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharedIntentUiBypassException {
+    pub backend_kind: &'static str,
+    pub method_name: &'static str,
+    pub intent: IntentKind,
+    pub kind: SharedIntentUiBypassKind,
+    pub justification: &'static str,
+    pub design_ref: &'static str,
+}
+
+pub const SHARED_INTENT_UI_BYPASS_ALLOWLIST: &[SharedIntentUiBypassException] = &[
+    SharedIntentUiBypassException {
+        backend_kind: "playwright_browser",
+        method_name: "submit_create_account",
+        intent: IntentKind::CreateAccount,
+        kind: SharedIntentUiBypassKind::TemporaryHarnessBridgeShortcut,
+        justification:
+            "browser harness still relies on the onboarding bootstrap helper instead of the full visible form flow",
+        design_ref: "work/ux.md",
+    },
+    SharedIntentUiBypassException {
+        backend_kind: "playwright_browser",
+        method_name: "submit_create_home",
+        intent: IntentKind::CreateHome,
+        kind: SharedIntentUiBypassKind::TemporaryHarnessBridgeShortcut,
+        justification:
+            "browser harness still relies on the page-side create_home helper instead of the full visible modal flow",
+        design_ref: "work/ux.md",
+    },
+    SharedIntentUiBypassException {
+        backend_kind: "playwright_browser",
+        method_name: "submit_create_contact_invitation",
+        intent: IntentKind::CreateContactInvitation,
+        kind: SharedIntentUiBypassKind::TemporaryHarnessBridgeShortcut,
+        justification:
+            "browser harness still relies on the page-side invitation workflow helper instead of the full visible modal flow",
+        design_ref: "work/ux.md",
+    },
+];
+
 pub trait ObservationBackend {
     fn snapshot(&self) -> Result<String>;
     fn snapshot_dom(&self) -> Result<String>;
@@ -90,6 +138,15 @@ pub trait ObservationBackend {
     fn wait_for_target(&self, selector: &str, timeout_ms: u64) -> Option<Result<String>>;
     fn tail_log(&self, lines: usize) -> Result<Vec<String>>;
     fn read_clipboard(&self) -> Result<String>;
+}
+
+pub trait RawUiBackend {
+    fn click_button(&mut self, label: &str) -> Result<()>;
+    fn activate_control(&mut self, control_id: ControlId) -> Result<()>;
+    fn click_target(&mut self, selector: &str) -> Result<()>;
+    fn fill_input(&mut self, selector: &str, value: &str) -> Result<()>;
+    fn fill_field(&mut self, field_id: FieldId, value: &str) -> Result<()>;
+    fn activate_list_item(&mut self, list_id: ListId, item_id: &str) -> Result<()>;
 }
 
 pub trait InstanceBackend {
@@ -135,114 +192,6 @@ pub trait InstanceBackend {
             self.send_keys(sequence)?;
         }
         Ok(())
-    }
-    fn click_button(&mut self, _label: &str) -> Result<()> {
-        bail!(
-            "button clicks are not supported by backend {}",
-            self.backend_kind()
-        )
-    }
-    fn activate_control(&mut self, control_id: ControlId) -> Result<()> {
-        let _ = control_id;
-        bail!(
-            "semantic control activation is not supported by backend {}",
-            self.backend_kind()
-        )
-    }
-    fn click_target(&mut self, selector: &str) -> Result<()> {
-        let _ = selector;
-        bail!(
-            "selector clicks are not supported by backend {}",
-            self.backend_kind()
-        )
-    }
-    fn fill_input(&mut self, selector: &str, value: &str) -> Result<()> {
-        let _ = (selector, value);
-        bail!(
-            "input filling is not supported by backend {}",
-            self.backend_kind()
-        )
-    }
-    fn fill_field(&mut self, field_id: FieldId, value: &str) -> Result<()> {
-        let _ = (field_id, value);
-        bail!(
-            "semantic field filling is not supported by backend {}",
-            self.backend_kind()
-        )
-    }
-    fn activate_list_item(&mut self, list_id: ListId, item_id: &str) -> Result<()> {
-        let _ = (list_id, item_id);
-        bail!(
-            "semantic list activation is not supported by backend {}",
-            self.backend_kind()
-        )
-    }
-    fn create_contact_invitation(&mut self, receiver_authority_id: &str) -> Result<String> {
-        let _ = receiver_authority_id;
-        bail!(
-            "semantic contact invitation creation is not supported by backend {}",
-            self.backend_kind()
-        )
-    }
-    fn create_account_via_ui(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
-        let _ = account_name;
-        bail!(
-            "semantic create_account is not supported by backend {}",
-            self.backend_kind()
-        )
-    }
-    fn create_home_via_ui(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
-        let _ = home_name;
-        bail!(
-            "semantic create_home is not supported by backend {}",
-            self.backend_kind()
-        )
-    }
-    fn create_contact_invitation_via_ui(
-        &mut self,
-        receiver_authority_id: &str,
-    ) -> Result<SubmittedAction<ContactInvitationCode>> {
-        let code = self.create_contact_invitation(receiver_authority_id)?;
-        Ok(SubmittedAction::without_handle(ContactInvitationCode {
-            code,
-        }))
-    }
-    fn accept_contact_invitation_via_ui(&mut self, code: &str) -> Result<SubmittedAction<()>> {
-        let _ = code;
-        bail!(
-            "semantic accept_contact_invitation is not supported by backend {}",
-            self.backend_kind()
-        )
-    }
-    fn invite_actor_to_channel_via_ui(
-        &mut self,
-        authority_id: &str,
-    ) -> Result<SubmittedAction<()>> {
-        let _ = authority_id;
-        bail!(
-            "semantic invite_actor_to_channel is not supported by backend {}",
-            self.backend_kind()
-        )
-    }
-    fn accept_pending_channel_invitation_via_ui(&mut self) -> Result<SubmittedAction<()>> {
-        bail!(
-            "semantic accept_pending_channel_invitation is not supported by backend {}",
-            self.backend_kind()
-        )
-    }
-    fn join_channel_via_ui(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
-        let _ = channel_name;
-        bail!(
-            "semantic join_channel is not supported by backend {}",
-            self.backend_kind()
-        )
-    }
-    fn send_chat_message_via_ui(&mut self, message: &str) -> Result<SubmittedAction<()>> {
-        let _ = message;
-        bail!(
-            "semantic send_chat_message is not supported by backend {}",
-            self.backend_kind()
-        )
     }
     fn tail_log(&self, lines: usize) -> Result<Vec<String>>;
     fn inject_message(&mut self, _message: &str) -> Result<()> {
@@ -338,12 +287,12 @@ pub(crate) fn wait_for_modal_visible(
     modal_id: ModalId,
     timeout: Duration,
 ) -> Result<()> {
-    let deadline = std::time::Instant::now() + timeout;
+    let deadline = Instant::now() + timeout;
     loop {
         if backend.ui_snapshot()?.open_modal == Some(modal_id) {
             return Ok(());
         }
-        if std::time::Instant::now() >= deadline {
+        if Instant::now() >= deadline {
             bail!("timed out waiting for modal {modal_id:?}");
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -355,16 +304,51 @@ pub(crate) fn wait_for_screen_visible(
     screen_id: ScreenId,
     timeout: Duration,
 ) -> Result<()> {
-    let deadline = std::time::Instant::now() + timeout;
+    let deadline = Instant::now() + timeout;
     loop {
         if backend.ui_snapshot()?.screen == screen_id {
             return Ok(());
         }
-        if std::time::Instant::now() >= deadline {
+        if Instant::now() >= deadline {
             bail!("timed out waiting for screen {screen_id:?}");
         }
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+pub(crate) fn submit_accept_contact_invitation_via_shared_ui<B>(
+    backend: &mut B,
+    code: &str,
+) -> Result<SubmittedAction<()>>
+where
+    B: InstanceBackend + RawUiBackend,
+{
+    let previous_operation = observe_operation(&backend.ui_snapshot()?, &OperationId::invitation_accept());
+    backend.activate_control(ControlId::ContactsAcceptInvitationButton)?;
+    wait_for_modal_visible(backend, ModalId::AcceptInvitation, Duration::from_secs(5))?;
+    backend.fill_field(FieldId::InvitationCode, code)?;
+    backend.activate_control(ControlId::ModalConfirmButton)?;
+    let handle = wait_for_operation_submission(
+        backend,
+        OperationId::invitation_accept(),
+        previous_operation,
+        Duration::from_secs(5),
+    )?;
+    Ok(SubmittedAction::with_ui_operation((), handle))
+}
+
+pub(crate) fn submit_invite_actor_to_channel_via_shared_ui<B>(
+    backend: &mut B,
+    authority_id: &str,
+) -> Result<SubmittedAction<()>>
+where
+    B: InstanceBackend + RawUiBackend,
+{
+    backend.activate_control(ControlId::NavContacts)?;
+    wait_for_screen_visible(backend, ScreenId::Contacts, Duration::from_secs(5))?;
+    backend.activate_list_item(ListId::Contacts, authority_id)?;
+    backend.activate_control(ControlId::ContactsInviteToChannelButton)?;
+    Ok(SubmittedAction::without_handle(()))
 }
 
 #[must_use]
@@ -388,7 +372,7 @@ pub(crate) fn wait_for_operation_submission(
     previous: Option<ObservedOperation>,
     timeout: Duration,
 ) -> Result<UiOperationHandle> {
-    let deadline = std::time::Instant::now() + timeout;
+    let deadline = Instant::now() + timeout;
     loop {
         let snapshot = backend.ui_snapshot()?;
         if let Some(current) = observe_operation(&snapshot, &operation_id) {
@@ -402,11 +386,8 @@ pub(crate) fn wait_for_operation_submission(
                 });
             }
         }
-        if std::time::Instant::now() >= deadline {
-            bail!(
-                "timed out waiting for operation submission {:?}",
-                operation_id
-            );
+        if Instant::now() >= deadline {
+            bail!("timed out waiting for operation submission {operation_id:?}");
         }
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -470,6 +451,17 @@ impl BackendHandle {
         }
     }
 
+    pub fn as_raw_ui_mut(&mut self) -> Result<&mut dyn RawUiBackend> {
+        match self {
+            Self::Local(backend) => Ok(backend),
+            Self::Browser(backend) => Ok(backend.as_mut()),
+            Self::Ssh(backend) => bail!(
+                "backend {} does not implement the raw UI interaction contract",
+                backend.backend_kind()
+            ),
+        }
+    }
+
     pub fn as_shared_semantic_mut(&mut self) -> Result<&mut dyn SharedSemanticBackend> {
         match self {
             Self::Local(backend) => Ok(backend),
@@ -484,12 +476,16 @@ impl BackendHandle {
 
 #[cfg(test)]
 mod tests {
-    use super::{BackendHandle, InstanceBackend, ObservationBackend, UiSnapshotEvent};
+    use super::{
+        BackendHandle, InstanceBackend, ObservationBackend, SharedIntentUiBypassKind,
+        UiSnapshotEvent, SHARED_INTENT_UI_BYPASS_ALLOWLIST,
+    };
     use crate::config::{InstanceConfig, InstanceMode};
     use anyhow::Result;
     use aura_app::ui::contract::{ScreenId, UiReadiness, UiSnapshot};
     use aura_app::ui_contract::{ProjectionRevision, QuiescenceSnapshot};
     use std::cell::Cell;
+    use std::collections::HashSet;
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -525,6 +521,28 @@ mod tests {
             _ => panic!("expected browser backend"),
         }
         Ok(())
+    }
+
+    #[test]
+    fn shared_intent_ui_bypass_allowlist_is_explicit_and_unique() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .unwrap_or_else(|| panic!("workspace root"));
+        let unique: HashSet<_> = SHARED_INTENT_UI_BYPASS_ALLOWLIST
+            .iter()
+            .map(|entry| (entry.backend_kind, entry.method_name, entry.intent))
+            .collect();
+        assert_eq!(unique.len(), SHARED_INTENT_UI_BYPASS_ALLOWLIST.len());
+        for entry in SHARED_INTENT_UI_BYPASS_ALLOWLIST {
+            assert_eq!(
+                entry.kind,
+                SharedIntentUiBypassKind::TemporaryHarnessBridgeShortcut
+            );
+            assert!(!entry.justification.is_empty());
+            assert!(!entry.design_ref.is_empty());
+            assert!(workspace_root.join(entry.design_ref).exists());
+        }
     }
 
     struct ReadOnlyBackend {
@@ -646,20 +664,20 @@ mod tests {
         assert_eq!(
             observer
                 .wait_for_ui_snapshot_event(Duration::from_millis(1), Some(7))
-                .expect("event should be present")?
+                .ok_or_else(|| anyhow::anyhow!("event should be present"))??
                 .version,
             8
         );
         assert_eq!(
             observer
                 .wait_for_dom_patterns(&["chat".to_string()], 1)
-                .expect("dom result should be present")?,
+                .ok_or_else(|| anyhow::anyhow!("dom result should be present"))??,
             "dom-match"
         );
         assert_eq!(
             observer
                 .wait_for_target("#aura-screen-chat", 1)
-                .expect("target result should be present")?,
+                .ok_or_else(|| anyhow::anyhow!("target result should be present"))??,
             "target-match"
         );
         assert_eq!(observer.tail_log(1)?, vec!["log".to_string()]);

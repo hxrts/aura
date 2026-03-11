@@ -3342,6 +3342,7 @@ impl AuraAgent {
 }
 
 // ============================================================================
+#[allow(clippy::disallowed_types)]
 #[cfg(test)]
 mod tests {
     use super::*;

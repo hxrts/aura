@@ -16,14 +16,13 @@ rg -q 'UiSnapshot' crates/aura-web/src/main.rs \
 
 hits="$(rg --no-heading -n 'publish_onboarding_snapshot|stale_onboarding_publish|synthetic_onboarding_snapshot' \
   crates/aura-web/src crates/aura-harness/src || true)"
+if [ -n "$hits" ]; then
+  echo "$hits" >&2
+  fail "onboarding must not introduce bespoke publication or recovery hooks"
+fi
 
-filtered_hits="$(printf '%s\n' "$hits" \
-  | grep -v 'crates/aura-web/src/main.rs' \
-  | grep -v 'crates/aura-web/src/harness_bridge.rs' \
-  | grep -v 'crates/aura-harness/src/backend/local_pty.rs' || true)"
-if [ -n "$filtered_hits" ]; then
-  echo "$filtered_hits" >&2
-  fail "new onboarding-only publication paths are not allowed outside the current quarantine allowlist"
+if rg -q 'reset_harness_bootstrap_storage_once' crates/aura-web/src/main.rs; then
+  fail "web onboarding may not carry harness-only bootstrap reset shortcuts"
 fi
 
 echo "harness onboarding contract: clean"

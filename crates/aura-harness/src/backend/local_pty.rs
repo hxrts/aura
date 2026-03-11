@@ -1,15 +1,17 @@
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::io::{Read, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Condvar;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use aura_app::ui::contract::{
-    ControlId, FieldId, ListId, ModalId, OperationId, OperationState, ScreenId, UiReadiness,
-    UiSnapshot,
+    ControlId, FieldId, ListId, ModalId, OperationId, OperationState, ScreenId, UiSnapshot,
 };
 use aura_app::ui_contract::RuntimeFact;
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
@@ -18,7 +20,9 @@ use tokio::time::Instant;
 
 use crate::backend::{
     observe_operation, wait_for_modal_visible, wait_for_operation_submission,
-    wait_for_screen_visible, ContactInvitationCode, InstanceBackend, SharedSemanticBackend,
+    submit_accept_contact_invitation_via_shared_ui,
+    submit_invite_actor_to_channel_via_shared_ui, wait_for_screen_visible,
+    ContactInvitationCode, InstanceBackend, RawUiBackend, SharedSemanticBackend,
     SubmittedAction, UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
@@ -49,6 +53,22 @@ struct RunningSession {
     parser: Arc<Mutex<vt100::Parser>>,
     parse_generation: Arc<AtomicU64>,
     reader_thread: Option<thread::JoinHandle<()>>,
+    ui_snapshot_feed: Arc<UiSnapshotFeed>,
+    ui_snapshot_thread: Option<thread::JoinHandle<()>>,
+    ui_snapshot_stop: Arc<AtomicU64>,
+    ui_snapshot_socket_path: PathBuf,
+}
+
+#[derive(Default)]
+struct UiSnapshotFeedState {
+    latest: Option<UiSnapshot>,
+}
+
+#[allow(clippy::disallowed_types)]
+#[derive(Default)]
+struct UiSnapshotFeed {
+    state: std::sync::Mutex<UiSnapshotFeedState>,
+    ready: Condvar,
 }
 
 pub struct LocalPtyBackend {
@@ -58,31 +78,9 @@ pub struct LocalPtyBackend {
     pty_rows: u16,
     pty_cols: u16,
     last_authoritative_screen: Arc<Mutex<Option<String>>>,
-    last_ui_snapshot: Arc<StdMutex<Option<UiSnapshot>>>,
 }
 
 impl LocalPtyBackend {
-    fn synthetic_onboarding_snapshot() -> UiSnapshot {
-        UiSnapshot {
-            screen: ScreenId::Onboarding,
-            focused_control: Some(ControlId::OnboardingRoot),
-            open_modal: None,
-            readiness: UiReadiness::Loading,
-            revision: aura_app::ui_contract::next_projection_revision(None),
-            quiescence: aura_app::ui_contract::QuiescenceSnapshot::derive(
-                UiReadiness::Loading,
-                None,
-                &[],
-            ),
-            selections: Vec::new(),
-            lists: Vec::new(),
-            messages: Vec::new(),
-            operations: Vec::new(),
-            toasts: Vec::new(),
-            runtime_events: Vec::new(),
-        }
-    }
-
     fn is_cargo_program(program: &str) -> bool {
         std::path::Path::new(program)
             .file_name()
@@ -91,8 +89,11 @@ impl LocalPtyBackend {
             .unwrap_or(false)
     }
 
-    fn ui_state_file(&self) -> PathBuf {
-        self.config.data_dir.join(".ui-state.json")
+    fn ui_state_socket_path(&self) -> PathBuf {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.config.data_dir.hash(&mut hasher);
+        self.config.id.hash(&mut hasher);
+        std::env::temp_dir().join(format!("aura-ui-{:016x}.sock", hasher.finish()))
     }
 
     pub fn new(config: InstanceConfig, pty_rows: Option<u16>, pty_cols: Option<u16>) -> Self {
@@ -103,8 +104,47 @@ impl LocalPtyBackend {
             pty_rows: pty_rows.unwrap_or(40),
             pty_cols: pty_cols.unwrap_or(120),
             last_authoritative_screen: Arc::new(Mutex::new(None)),
-            last_ui_snapshot: Arc::new(StdMutex::new(None)),
         }
+    }
+
+    fn spawn_ui_snapshot_listener(
+        socket_path: &PathBuf,
+        feed: &Arc<UiSnapshotFeed>,
+        stop_flag: &Arc<AtomicU64>,
+    ) -> Result<thread::JoinHandle<()>> {
+        let _ = fs::remove_file(socket_path);
+        let listener = UnixListener::bind(socket_path)
+            .with_context(|| format!("failed to bind TUI UI snapshot socket {}", socket_path.display()))?;
+        let socket_path = socket_path.clone();
+        let feed = Arc::clone(feed);
+        let stop_flag = Arc::clone(stop_flag);
+        Ok(thread::spawn(move || {
+            for stream in listener.incoming() {
+                if stop_flag.load(Ordering::Acquire) > 0 {
+                    break;
+                }
+                let Ok(mut stream) = stream else {
+                    continue;
+                };
+                let mut payload = String::new();
+                if stream.read_to_string(&mut payload).is_err() {
+                    continue;
+                }
+                if payload.trim() == "__AURA_UI_STATE_SHUTDOWN__" {
+                    break;
+                }
+                let Ok(snapshot) = serde_json::from_str::<UiSnapshot>(&payload) else {
+                    continue;
+                };
+                let mut guard = feed
+                    .state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                guard.latest = Some(snapshot);
+                feed.ready.notify_all();
+            }
+            let _ = fs::remove_file(socket_path);
+        }))
     }
 
     fn submit_chat_command_via_ui(&mut self, command: &str) -> Result<()> {
@@ -295,11 +335,11 @@ impl InstanceBackend for LocalPtyBackend {
                 clipboard_file.to_string_lossy().to_string(),
             );
         }
-        if Self::env_value("AURA_TUI_UI_STATE_FILE", &self.config.env).is_none() {
-            let ui_state_file = Self::absolutize_path(self.ui_state_file());
+        if Self::env_value("AURA_TUI_UI_STATE_SOCKET", &self.config.env).is_none() {
+            let ui_state_socket = Self::absolutize_path(self.ui_state_socket_path());
             command.env(
-                "AURA_TUI_UI_STATE_FILE",
-                ui_state_file.to_string_lossy().to_string(),
+                "AURA_TUI_UI_STATE_SOCKET",
+                ui_state_socket.to_string_lossy().to_string(),
             );
         }
 
@@ -336,8 +376,6 @@ impl InstanceBackend for LocalPtyBackend {
                 self.config.data_dir.display()
             )
         })?;
-        let _ = fs::remove_file(self.ui_state_file());
-
         let child = pair
             .slave
             .spawn_command(command)
@@ -370,6 +408,14 @@ impl InstanceBackend for LocalPtyBackend {
                 }
             }
         });
+        let ui_snapshot_feed = Arc::new(UiSnapshotFeed::default());
+        let ui_snapshot_stop = Arc::new(AtomicU64::new(0));
+        let ui_snapshot_socket_path = Self::absolutize_path(self.ui_state_socket_path());
+        let ui_snapshot_thread = Self::spawn_ui_snapshot_listener(
+            &ui_snapshot_socket_path,
+            &ui_snapshot_feed,
+            &ui_snapshot_stop,
+        )?;
 
         self.session = Some(RunningSession {
             child,
@@ -377,6 +423,10 @@ impl InstanceBackend for LocalPtyBackend {
             parser,
             parse_generation,
             reader_thread: Some(reader_thread),
+            ui_snapshot_feed,
+            ui_snapshot_thread: Some(ui_snapshot_thread),
+            ui_snapshot_stop,
+            ui_snapshot_socket_path,
         });
         self.state = BackendState::Running;
         Ok(())
@@ -388,10 +438,17 @@ impl InstanceBackend for LocalPtyBackend {
         }
 
         if let Some(mut session) = self.session.take() {
+            session.ui_snapshot_stop.store(1, Ordering::Release);
+            if let Ok(mut stream) = UnixStream::connect(&session.ui_snapshot_socket_path) {
+                let _ = stream.write_all(b"__AURA_UI_STATE_SHUTDOWN__");
+            }
             let _ = session.child.kill();
             let _ = session.child.wait();
             drop(session.writer);
             if let Some(handle) = session.reader_thread.take() {
+                let _ = handle.join();
+            }
+            if let Some(handle) = session.ui_snapshot_thread.take() {
                 let _ = handle.join();
             }
         }
@@ -441,555 +498,58 @@ impl InstanceBackend for LocalPtyBackend {
     }
 
     fn ui_snapshot(&self) -> Result<UiSnapshot> {
-        let path = self.ui_state_file();
-        const SNAPSHOT_WAIT_ATTEMPTS: usize = 50;
-        const SNAPSHOT_WAIT_DELAY_MS: u64 = 100;
-
-        let mut last_error = None;
-        for _ in 0..SNAPSHOT_WAIT_ATTEMPTS {
-            match fs::read_to_string(&path) {
-                Ok(content) => match serde_json::from_str::<UiSnapshot>(&content) {
-                    Ok(snapshot) => {
-                        if let Ok(mut cached) = self.last_ui_snapshot.lock() {
-                            *cached = Some(snapshot.clone());
-                        }
-                        return Ok(snapshot);
-                    }
-                    Err(error) => last_error = Some(format!("parse error: {error}")),
-                },
-                Err(error) => last_error = Some(format!("read error: {error}")),
-            }
-            thread::sleep(Duration::from_millis(SNAPSHOT_WAIT_DELAY_MS));
-        }
-
-        let detail = last_error.unwrap_or_else(|| "no snapshot produced".to_string());
-        if let Ok(cached) = self.last_ui_snapshot.lock() {
-            if let Some(snapshot) = cached.clone() {
-                return Ok(snapshot);
-            }
-        }
-        if detail.contains("No such file or directory") {
-            return Ok(Self::synthetic_onboarding_snapshot());
-        }
-        anyhow::bail!(
-            "failed to read TUI UI snapshot {} after {} attempts: {}",
-            path.display(),
-            SNAPSHOT_WAIT_ATTEMPTS,
-            detail
-        )
-    }
-
-    fn activate_control(&mut self, control_id: ControlId) -> Result<()> {
-        match control_id {
-            ControlId::SettingsAddDeviceButton | ControlId::SettingsRemoveDeviceButton => {
-                let snapshot = self.ui_snapshot()?;
-                if snapshot.screen == aura_app::ui::contract::ScreenId::Settings {
-                    let needs_devices_section = snapshot
-                        .selections
-                        .iter()
-                        .find(|selection| selection.list == ListId::SettingsSections)
-                        .map(|selection| selection.item_id.as_str() != "devices")
-                        .unwrap_or(true);
-                    if needs_devices_section {
-                        self.activate_list_item(ListId::SettingsSections, "devices")?;
-                    }
-                }
-            }
-            _ => {}
-        }
-        if control_id == ControlId::ModalConfirmButton {
-            let snapshot = self.ui_snapshot()?;
-            if snapshot.open_modal == Some(ModalId::CreateInvitation) {
-                return self.send_keys("\r");
-            }
-        }
-        let sequence = control_id.activation_key().ok_or_else(|| {
-            anyhow::anyhow!("control {control_id:?} does not have a PTY activation mapping")
-        })?;
-        self.send_keys(sequence)
-    }
-
-    fn fill_field(&mut self, field_id: FieldId, value: &str) -> Result<()> {
-        if matches!(field_id, FieldId::DeviceImportCode) {
-            let snapshot = self.ui_snapshot()?;
-            if snapshot.screen == ScreenId::Onboarding {
-                self.send_keys("\t")?;
-                thread::sleep(Duration::from_millis(50));
-            }
-        }
-        match field_id {
-            FieldId::ChatInput => {
-                let snapshot = self.ui_snapshot()?;
-                if snapshot.screen == ScreenId::Chat
-                    && !matches!(
-                        snapshot.focused_control,
-                        Some(ControlId::Field(FieldId::ChatInput))
-                    )
-                {
-                    self.send_keys("\x1b")?;
-                    self.send_keys("i")?;
-                    thread::sleep(Duration::from_millis(120));
-                }
-                self.type_text(value, 4)
-            }
-            FieldId::InvitationCode | FieldId::DeviceImportCode => self.type_text(value, 3),
-            _ => self.type_text(value, 8),
-        }
-    }
-
-    fn activate_list_item(&mut self, list_id: ListId, item_id: &str) -> Result<()> {
-        let mut snapshot = self.ui_snapshot()?;
-        if matches!(list_id, ListId::SettingsSections)
-            && matches!(
-                snapshot.focused_control,
-                Some(ControlId::Screen(ScreenId::Settings))
+        let session = self
+            .session
+            .as_ref()
+            .with_context(|| format!("instance {} is not running", self.config.id))?;
+        let guard = session
+            .ui_snapshot_feed
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard.latest.clone().with_context(|| {
+            format!(
+                "TUI UI snapshot unavailable for instance {} via {}",
+                self.config.id,
+                session.ui_snapshot_socket_path.display()
             )
-        {
-            self.send_keys("\u{1b}[B")?;
-            thread::sleep(Duration::from_millis(80));
-            snapshot = self.ui_snapshot()?;
-        }
-        let list = snapshot
-            .lists
-            .iter()
-            .find(|candidate| candidate.id == list_id)
-            .ok_or_else(|| {
-                anyhow::anyhow!("list {list_id:?} is not visible in the current TUI snapshot")
-            })?;
-        let target_index = list
-            .items
-            .iter()
-            .position(|item| item.id == item_id)
-            .ok_or_else(|| anyhow::anyhow!("item {item_id} not found in list {list_id:?}"))?;
-        let current_index = list
-            .items
-            .iter()
-            .position(|item| item.selected)
-            .unwrap_or(0);
-        eprintln!(
-            "[local_pty activate_list_item] instance={} list={:?} item_id={} current_index={} target_index={} focused_control={:?}",
-            self.config.id,
-            list_id,
-            item_id,
-            current_index,
-            target_index,
-            snapshot.focused_control
-        );
-        if matches!(list_id, ListId::InvitationTypes) {
-            match snapshot.focused_control {
-                Some(ControlId::Field(FieldId::InvitationType)) => {}
-                Some(ControlId::Field(FieldId::InvitationMessage)) => self.send_keys("\u{1b}[A")?,
-                Some(ControlId::Field(FieldId::InvitationTtl)) => self.send_keys("\u{1b}[B")?,
-                Some(other) => anyhow::bail!(
-                    "invitation type selector is visible but focus is on incompatible control {other:?}"
-                ),
-                None => anyhow::bail!(
-                    "invitation type selector is visible but the TUI snapshot has no focused control"
-                ),
-            }
+        })
+    }
 
-            let len = list.items.len();
-            if len == 0 {
-                return Ok(());
-            }
-            let forward_steps = (target_index + len - current_index) % len;
-            let backward_steps = (current_index + len - target_index) % len;
-            if forward_steps <= backward_steps {
-                for _ in 0..forward_steps {
-                    self.send_keys("\u{1b}[C")?;
+    fn wait_for_ui_snapshot_event(
+        &self,
+        timeout: Duration,
+        after_version: Option<u64>,
+    ) -> Option<Result<UiSnapshotEvent>> {
+        let session = self.session.as_ref()?;
+        let deadline = Instant::now() + timeout;
+        let mut guard = session
+            .ui_snapshot_feed
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        loop {
+            if let Some(snapshot) = guard.latest.clone() {
+                let version = snapshot.revision.semantic_seq;
+                if after_version.map_or(true, |required| version > required) {
+                    return Some(Ok(UiSnapshotEvent { snapshot, version }));
                 }
-            } else {
-                for _ in 0..backward_steps {
-                    self.send_keys("\u{1b}[D")?;
-                }
             }
-            return Ok(());
-        }
-        if matches!(list_id, ListId::Navigation) {
-            let list_len = list.items.len();
-            if list_len == 0 {
-                return Ok(());
-            }
-            // Normalize back to command/navigation mode before cycling tabs.
-            self.send_keys("\x1b")?;
-            let forward_steps = (target_index + list_len - current_index) % list_len;
-            for _ in 0..forward_steps {
-                self.send_keys("\t")?;
-            }
-            return Ok(());
-        }
-        if matches!(list_id, ListId::SettingsSections) {
-            let max_attempts = list.items.len().saturating_mul(2).max(1);
-            for attempt in 0..max_attempts {
-                let current_snapshot = self.ui_snapshot()?;
-                let current_list = current_snapshot
-                    .lists
-                    .iter()
-                    .find(|candidate| candidate.id == list_id)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "list {list_id:?} is not visible in the current TUI snapshot"
-                        )
-                    })?;
-                let current_index = current_list
-                    .items
-                    .iter()
-                    .position(|item| item.selected)
-                    .unwrap_or(0);
-                if current_list
-                    .items
-                    .get(current_index)
-                    .map(|item| item.id.as_str() == item_id)
-                    .unwrap_or(false)
-                {
-                    return Ok(());
-                }
-                let sequence = if current_index > target_index {
-                    "\u{1b}[A"
-                } else {
-                    "\u{1b}[B"
-                };
-                eprintln!(
-                    "[local_pty activate_list_item stepwise] instance={} list={:?} item_id={} attempt={} current_index={} target_index={} sequence={}",
+            let now = Instant::now();
+            if now >= deadline {
+                return Some(Err(anyhow::anyhow!(
+                    "timed out waiting for TUI UI snapshot event on instance {} after_version={:?}",
                     self.config.id,
-                    list_id,
-                    item_id,
-                    attempt,
-                    current_index,
-                    target_index,
-                    sequence
-                );
-                self.send_keys(sequence)?;
-                thread::sleep(Duration::from_millis(80));
+                    after_version
+                )));
             }
-            let final_snapshot = self.ui_snapshot()?;
-            let final_selected = final_snapshot
-                .lists
-                .iter()
-                .find(|candidate| candidate.id == list_id)
-                .and_then(|candidate| candidate.items.iter().find(|item| item.selected))
-                .map(|item| item.id.clone())
-                .unwrap_or_else(|| "<none>".to_string());
-            anyhow::bail!(
-                "failed to select item {item_id} in list {list_id:?}; final selection was {final_selected}"
-            );
+            let timeout_result = session
+                .ui_snapshot_feed
+                .ready
+                .wait_timeout(guard, deadline.saturating_duration_since(now))
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard = timeout_result.0;
         }
-        let delta = target_index as isize - current_index as isize;
-        let sequence = if matches!(list_id, ListId::SettingsSections) {
-            if delta < 0 {
-                "\u{1b}[A"
-            } else {
-                "\u{1b}[B"
-            }
-        } else if delta < 0 {
-            "k"
-        } else {
-            "j"
-        };
-        for _ in 0..delta.unsigned_abs() {
-            eprintln!(
-                "[local_pty activate_list_item send] instance={} list={:?} item_id={} sequence={}",
-                self.config.id, list_id, item_id, sequence
-            );
-            self.send_keys(sequence)?;
-            thread::sleep(Duration::from_millis(60));
-        }
-        Ok(())
-    }
-
-    fn create_account_via_ui(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
-        self.fill_field(FieldId::AccountName, account_name)?;
-        self.activate_control(ControlId::OnboardingCreateAccountButton)?;
-        let convergence_deadline = Instant::now() + Duration::from_secs(20);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            if snapshot.operations.iter().any(|operation| {
-                operation.id == OperationId::account_create()
-                    && operation.state == aura_app::ui::contract::OperationState::Failed
-            }) {
-                anyhow::bail!("create_account_via_ui: account creation failed");
-            }
-            if snapshot.screen != ScreenId::Onboarding && snapshot_has_real_home(&snapshot) {
-                break;
-            }
-            if Instant::now() >= convergence_deadline {
-                break;
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-        let final_snapshot = self.ui_snapshot()?;
-        anyhow::ensure!(
-            final_snapshot.operations.iter().any(|operation| {
-                operation.id == OperationId::account_create()
-                    && operation.state == aura_app::ui::contract::OperationState::Submitting
-            }) == false,
-            "create_account_via_ui: account creation remained stuck submitting"
-        );
-        anyhow::ensure!(
-            snapshot_has_real_home(&final_snapshot),
-            "create_account_via_ui: account creation did not converge a real home"
-        );
-        Ok(SubmittedAction::without_handle(()))
-    }
-
-    fn create_home_via_ui(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
-        self.activate_control(ControlId::NavNeighborhood)
-            .context("create_home_via_ui: nav_neighborhood")?;
-        wait_for_screen_visible(self, ScreenId::Neighborhood, Duration::from_secs(5))
-            .context("create_home_via_ui: wait_neighborhood")?;
-        let modal_open_deadline = Instant::now() + Duration::from_secs(5);
-        let mut modal_open = false;
-        while Instant::now() < modal_open_deadline {
-            self.activate_control(ControlId::NeighborhoodNewHomeButton)
-                .context("create_home_via_ui: open_create_home")?;
-            if wait_for_modal_visible(self, ModalId::CreateHome, Duration::from_secs(2)).is_ok() {
-                modal_open = true;
-                break;
-            }
-            thread::sleep(Duration::from_millis(150));
-        }
-        anyhow::ensure!(
-            modal_open,
-            "create_home_via_ui: create_home_modal did not open"
-        );
-        thread::sleep(Duration::from_millis(200));
-        self.fill_field(FieldId::HomeName, home_name)
-            .context("create_home_via_ui: fill_home_name")?;
-        thread::sleep(Duration::from_millis(150));
-        for _ in 0..3 {
-            self.send_keys("\r")
-                .context("create_home_via_ui: submit_create_home")?;
-            let modal_close_deadline = Instant::now() + Duration::from_millis(800);
-            loop {
-                let snapshot = self.ui_snapshot()?;
-                if snapshot.open_modal != Some(ModalId::CreateHome) {
-                    break;
-                }
-                if Instant::now() >= modal_close_deadline {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(80));
-            }
-            if self.ui_snapshot()?.open_modal != Some(ModalId::CreateHome) {
-                break;
-            }
-        }
-        let deadline = Instant::now() + Duration::from_secs(8);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            let created_home = snapshot
-                .lists
-                .iter()
-                .find(|list| list.id == ListId::Homes)
-                .and_then(|list| {
-                    list.items
-                        .iter()
-                        .find(|item| item.id != PLACEHOLDER_HOME_ID)
-                        .map(|item| item.id.clone())
-                });
-            if let Some(home_id) = created_home {
-                self.activate_list_item(ListId::Homes, &home_id)?;
-                return Ok(SubmittedAction::without_handle(()));
-            }
-            if Instant::now() >= deadline {
-                break;
-            }
-            thread::sleep(Duration::from_millis(80));
-        }
-        anyhow::bail!("create_home_via_ui did not produce a non-placeholder home")
-    }
-
-    fn create_contact_invitation(&mut self, receiver_authority_id: &str) -> Result<String> {
-        Ok(self
-            .create_contact_invitation_via_ui(receiver_authority_id)?
-            .value
-            .code)
-    }
-
-    fn create_contact_invitation_via_ui(
-        &mut self,
-        receiver_authority_id: &str,
-    ) -> Result<SubmittedAction<ContactInvitationCode>> {
-        let previous_operation =
-            observe_operation(&self.ui_snapshot()?, &OperationId::invitation_create());
-        self.activate_control(ControlId::ContactsCreateInvitationButton)?;
-        wait_for_modal_visible(self, ModalId::CreateInvitation, Duration::from_secs(5))?;
-        self.fill_field(FieldId::InvitationReceiver, receiver_authority_id)?;
-        self.activate_control(ControlId::ModalConfirmButton)?;
-        let handle = wait_for_operation_submission(
-            self,
-            OperationId::invitation_create(),
-            previous_operation,
-            Duration::from_secs(5),
-        )?;
-        Ok(SubmittedAction::with_ui_operation(
-            ContactInvitationCode {
-                code: self.read_clipboard()?,
-            },
-            handle,
-        ))
-    }
-
-    fn accept_contact_invitation_via_ui(&mut self, code: &str) -> Result<SubmittedAction<()>> {
-        let previous_operation =
-            observe_operation(&self.ui_snapshot()?, &OperationId::invitation_accept());
-        self.activate_control(ControlId::ContactsAcceptInvitationButton)?;
-        wait_for_modal_visible(self, ModalId::AcceptInvitation, Duration::from_secs(5))?;
-        self.fill_field(FieldId::InvitationCode, code)?;
-        self.activate_control(ControlId::ModalConfirmButton)?;
-        let handle = wait_for_operation_submission(
-            self,
-            OperationId::invitation_accept(),
-            previous_operation,
-            Duration::from_secs(5),
-        )?;
-        Ok(SubmittedAction::with_ui_operation((), handle))
-    }
-
-    fn invite_actor_to_channel_via_ui(
-        &mut self,
-        authority_id: &str,
-    ) -> Result<SubmittedAction<()>> {
-        self.activate_control(ControlId::NavContacts)?;
-        wait_for_screen_visible(self, ScreenId::Contacts, Duration::from_secs(5))?;
-        self.activate_list_item(ListId::Contacts, authority_id)?;
-        self.activate_control(ControlId::ContactsInviteToChannelButton)?;
-        Ok(SubmittedAction::without_handle(()))
-    }
-
-    fn accept_pending_channel_invitation_via_ui(&mut self) -> Result<SubmittedAction<()>> {
-        let previous_channel_count = self
-            .ui_snapshot()?
-            .lists
-            .iter()
-            .find(|list| list.id == ListId::Channels)
-            .map(|list| list.items.len())
-            .unwrap_or(0);
-        self.submit_chat_command_via_ui("homeaccept")?;
-        let deadline = Instant::now() + Duration::from_secs(20);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            let channel_count = snapshot
-                .lists
-                .iter()
-                .find(|list| list.id == ListId::Channels)
-                .map(|list| list.items.len())
-                .unwrap_or(0);
-            let joined = channel_count > previous_channel_count
-                || snapshot
-                    .runtime_events
-                    .iter()
-                    .any(|event| matches!(&event.fact, RuntimeFact::ChannelMembershipReady { .. }));
-            if joined {
-                return Ok(SubmittedAction::without_handle(()));
-            }
-            if snapshot.operation_state(&OperationId::invitation_accept())
-                == Some(OperationState::Failed)
-            {
-                anyhow::bail!("accept_pending_channel_invitation_via_ui: invitation_accept failed");
-            }
-            if Instant::now() >= deadline {
-                anyhow::bail!(
-                    "accept_pending_channel_invitation_via_ui: timed out waiting for channel join"
-                );
-            }
-            thread::sleep(Duration::from_millis(80));
-        }
-    }
-
-    fn join_channel_via_ui(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
-        self.activate_control(ControlId::NavChat)
-            .context("join_channel_via_ui: nav_chat")?;
-        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))
-            .context("join_channel_via_ui: wait_chat")?;
-        let modal_open_deadline = Instant::now() + Duration::from_secs(5);
-        let mut modal_open = false;
-        while Instant::now() < modal_open_deadline {
-            self.activate_control(ControlId::ChatNewGroupButton)
-                .context("join_channel_via_ui: open_create_channel")?;
-            if wait_for_modal_visible(self, ModalId::CreateChannel, Duration::from_secs(2)).is_ok()
-            {
-                modal_open = true;
-                break;
-            }
-            thread::sleep(Duration::from_millis(150));
-        }
-        anyhow::ensure!(
-            modal_open,
-            "join_channel_via_ui: create_channel_modal did not open"
-        );
-        thread::sleep(Duration::from_millis(200));
-        self.fill_field(FieldId::CreateChannelName, channel_name)
-            .context("join_channel_via_ui: fill_channel_name")?;
-        thread::sleep(Duration::from_millis(200));
-        self.send_keys("\r")
-            .context("join_channel_via_ui: advance_details")?;
-        thread::sleep(Duration::from_millis(250));
-        self.send_keys("\r")
-            .context("join_channel_via_ui: advance_members")?;
-        thread::sleep(Duration::from_millis(250));
-        self.send_keys("\r")
-            .context("join_channel_via_ui: submit_threshold")?;
-        let joined_deadline = Instant::now() + Duration::from_secs(4);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            let joined = snapshot.runtime_events.iter().any(|event| {
-                matches!(
-                    &event.fact,
-                    RuntimeFact::ChannelMembershipReady { channel, .. }
-                    if channel
-                        .name
-                        .as_deref()
-                        .map(|name: &str| name.eq_ignore_ascii_case(channel_name))
-                        .unwrap_or(false)
-                )
-            });
-            if joined || Instant::now() >= joined_deadline {
-                if joined {
-                    return Ok(SubmittedAction::without_handle(()));
-                }
-                break;
-            }
-            thread::sleep(Duration::from_millis(80));
-        }
-        run_registered_recovery(RecoveryPath::LocalPtyJoinChannelSlashFallback, || {
-            self.submit_chat_command_via_ui(&format!("join {channel_name}"))
-                .context("join_channel_via_ui: join_fallback")
-        })?;
-        Ok(SubmittedAction::without_handle(()))
-    }
-
-    fn send_chat_message_via_ui(&mut self, message: &str) -> Result<SubmittedAction<()>> {
-        self.activate_control(ControlId::NavChat)?;
-        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
-        let snapshot = self.ui_snapshot()?;
-        if let Some(channels) = snapshot
-            .lists
-            .iter()
-            .find(|list| list.id == ListId::Channels)
-        {
-            let selected = channels.items.iter().any(|item| item.selected);
-            if !selected && channels.items.len() == 1 {
-                self.send_keys("h")?;
-                thread::sleep(Duration::from_millis(80));
-                for sequence in ["k", "j"] {
-                    self.send_keys(sequence)?;
-                    thread::sleep(Duration::from_millis(80));
-                    let updated = self.ui_snapshot()?;
-                    let visible_selected = updated
-                        .lists
-                        .iter()
-                        .find(|list| list.id == ListId::Channels)
-                        .is_some_and(|list| list.items.iter().any(|item| item.selected));
-                    if visible_selected {
-                        break;
-                    }
-                }
-            }
-        }
-        self.fill_field(FieldId::ChatInput, message)?;
-        self.send_key(crate::tool_api::ToolKey::Enter, 1)?;
-        Ok(SubmittedAction::without_handle(()))
     }
 
     fn send_keys(&mut self, keys: &str) -> Result<()> {
@@ -1098,12 +658,6 @@ impl InstanceBackend for LocalPtyBackend {
         if text.is_empty() {
             anyhow::bail!("clipboard for instance {} is empty", self.config.id);
         }
-        if self
-            .ui_snapshot()
-            .ok()
-            .and_then(|snapshot| snapshot.open_modal)
-            == Some(ModalId::InvitationCode)
-        {}
         Ok(text)
     }
 
@@ -1155,9 +709,249 @@ impl InstanceBackend for LocalPtyBackend {
     }
 }
 
+impl Drop for LocalPtyBackend {
+    fn drop(&mut self) {
+        let _ = self.stop();
+    }
+}
+
+impl RawUiBackend for LocalPtyBackend {
+    fn click_button(&mut self, label: &str) -> Result<()> {
+        let _ = label;
+        anyhow::bail!("local_pty does not support label-driven button clicks")
+    }
+
+    fn activate_control(&mut self, control_id: ControlId) -> Result<()> {
+        match control_id {
+            ControlId::SettingsAddDeviceButton | ControlId::SettingsRemoveDeviceButton => {
+                let snapshot = self.ui_snapshot()?;
+                if snapshot.screen == aura_app::ui::contract::ScreenId::Settings {
+                    let needs_devices_section = snapshot
+                        .selections
+                        .iter()
+                        .find(|selection| selection.list == ListId::SettingsSections)
+                        .map(|selection| selection.item_id.as_str() != "devices")
+                        .unwrap_or(true);
+                    if needs_devices_section {
+                        self.activate_list_item(ListId::SettingsSections, "devices")?;
+                    }
+                }
+            }
+            _ => {}
+        }
+        if control_id == ControlId::ModalConfirmButton {
+            let snapshot = self.ui_snapshot()?;
+            if snapshot.open_modal == Some(ModalId::CreateInvitation) {
+                return self.send_keys("\r");
+            }
+        }
+        let sequence = control_id.activation_key().ok_or_else(|| {
+            anyhow::anyhow!("control {control_id:?} does not have a PTY activation mapping")
+        })?;
+        self.send_keys(sequence)
+    }
+
+    fn click_target(&mut self, selector: &str) -> Result<()> {
+        let _ = selector;
+        anyhow::bail!("local_pty does not support selector-driven clicks")
+    }
+
+    fn fill_input(&mut self, selector: &str, value: &str) -> Result<()> {
+        let _ = selector;
+        self.type_text(value, 8)
+    }
+
+    fn fill_field(&mut self, field_id: FieldId, value: &str) -> Result<()> {
+        if matches!(field_id, FieldId::DeviceImportCode) {
+            let snapshot = self.ui_snapshot()?;
+            if snapshot.screen == ScreenId::Onboarding {
+                self.send_keys("\t")?;
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+        match field_id {
+            FieldId::ChatInput => {
+                let snapshot = self.ui_snapshot()?;
+                if snapshot.screen == ScreenId::Chat
+                    && !matches!(
+                        snapshot.focused_control,
+                        Some(ControlId::Field(FieldId::ChatInput))
+                    )
+                {
+                    self.send_keys("\x1b")?;
+                    self.send_keys("i")?;
+                    thread::sleep(Duration::from_millis(120));
+                }
+                self.type_text(value, 4)
+            }
+            FieldId::InvitationCode | FieldId::DeviceImportCode => self.type_text(value, 3),
+            _ => self.type_text(value, 8),
+        }
+    }
+
+    fn activate_list_item(&mut self, list_id: ListId, item_id: &str) -> Result<()> {
+        let mut snapshot = self.ui_snapshot()?;
+        if matches!(list_id, ListId::SettingsSections)
+            && matches!(
+                snapshot.focused_control,
+                Some(ControlId::Screen(ScreenId::Settings))
+            )
+        {
+            self.send_keys("\u{1b}[B")?;
+            thread::sleep(Duration::from_millis(80));
+            snapshot = self.ui_snapshot()?;
+        }
+        let list = snapshot
+            .lists
+            .iter()
+            .find(|candidate| candidate.id == list_id)
+            .ok_or_else(|| {
+                anyhow::anyhow!("list {list_id:?} is not visible in the current TUI snapshot")
+            })?;
+        let target_index = list
+            .items
+            .iter()
+            .position(|item| item.id == item_id)
+            .ok_or_else(|| anyhow::anyhow!("item {item_id} not found in list {list_id:?}"))?;
+        let current_index = list
+            .items
+            .iter()
+            .position(|item| item.selected)
+            .unwrap_or(0);
+        eprintln!(
+            "[local_pty activate_list_item] instance={} list={:?} item_id={} current_index={} target_index={} focused_control={:?}",
+            self.config.id,
+            list_id,
+            item_id,
+            current_index,
+            target_index,
+            snapshot.focused_control
+        );
+        if matches!(list_id, ListId::InvitationTypes) {
+            match snapshot.focused_control {
+                Some(ControlId::Field(FieldId::InvitationType)) => {}
+                Some(ControlId::Field(FieldId::InvitationMessage)) => self.send_keys("\u{1b}[A")?,
+                Some(ControlId::Field(FieldId::InvitationTtl)) => self.send_keys("\u{1b}[B")?,
+                Some(other) => anyhow::bail!(
+                    "invitation type selector is visible but focus is on incompatible control {other:?}"
+                ),
+                None => anyhow::bail!(
+                    "invitation type selector is visible but the TUI snapshot has no focused control"
+                ),
+            }
+
+            let len = list.items.len();
+            if len == 0 {
+                return Ok(());
+            }
+            let forward_steps = (target_index + len - current_index) % len;
+            let backward_steps = (current_index + len - target_index) % len;
+            if forward_steps <= backward_steps {
+                for _ in 0..forward_steps {
+                    self.send_keys("\u{1b}[C")?;
+                }
+            } else {
+                for _ in 0..backward_steps {
+                    self.send_keys("\u{1b}[D")?;
+                }
+            }
+            return Ok(());
+        }
+        if matches!(list_id, ListId::Navigation) {
+            let list_len = list.items.len();
+            if list_len == 0 {
+                return Ok(());
+            }
+            self.send_keys("\x1b")?;
+            let forward_steps = (target_index + list_len - current_index) % list_len;
+            for _ in 0..forward_steps {
+                self.send_keys("\t")?;
+            }
+            return Ok(());
+        }
+        if matches!(list_id, ListId::SettingsSections) {
+            let max_attempts = list.items.len().saturating_mul(2).max(1);
+            for attempt in 0..max_attempts {
+                let current_snapshot = self.ui_snapshot()?;
+                let current_list = current_snapshot
+                    .lists
+                    .iter()
+                    .find(|candidate| candidate.id == list_id)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "list {list_id:?} is not visible in the current TUI snapshot"
+                        )
+                    })?;
+                let current_index = current_list
+                    .items
+                    .iter()
+                    .position(|item| item.selected)
+                    .unwrap_or(0);
+                if current_list
+                    .items
+                    .get(current_index)
+                    .map(|item| item.id.as_str() == item_id)
+                    .unwrap_or(false)
+                {
+                    return Ok(());
+                }
+                let sequence = if current_index > target_index {
+                    "\u{1b}[A"
+                } else {
+                    "\u{1b}[B"
+                };
+                eprintln!(
+                    "[local_pty activate_list_item stepwise] instance={} list={:?} item_id={} attempt={} current_index={} target_index={} sequence={}",
+                    self.config.id,
+                    list_id,
+                    item_id,
+                    attempt,
+                    current_index,
+                    target_index,
+                    sequence
+                );
+                self.send_keys(sequence)?;
+                thread::sleep(Duration::from_millis(80));
+            }
+            let final_snapshot = self.ui_snapshot()?;
+            let final_selected = final_snapshot
+                .lists
+                .iter()
+                .find(|candidate| candidate.id == list_id)
+                .and_then(|candidate| candidate.items.iter().find(|item| item.selected))
+                .map(|item| item.id.clone())
+                .unwrap_or_else(|| "<none>".to_string());
+            anyhow::bail!(
+                "failed to select item {item_id} in list {list_id:?}; final selection was {final_selected}"
+            );
+        }
+        let delta = target_index as isize - current_index as isize;
+        let sequence = if matches!(list_id, ListId::SettingsSections) {
+            if delta < 0 {
+                "\u{1b}[A"
+            } else {
+                "\u{1b}[B"
+            }
+        } else if delta < 0 {
+            "k"
+        } else {
+            "j"
+        };
+        for _ in 0..delta.unsigned_abs() {
+            eprintln!(
+                "[local_pty activate_list_item send] instance={} list={:?} item_id={} sequence={}",
+                self.config.id, list_id, item_id, sequence
+            );
+            self.send_keys(sequence)?;
+            thread::sleep(Duration::from_millis(60));
+        }
+        Ok(())
+    }
+}
+
 impl SharedSemanticBackend for LocalPtyBackend {
     fn shared_projection(&self) -> Result<UiSnapshot> {
-        InstanceBackend::ui_snapshot(self)
+        self.ui_snapshot()
     }
 
     fn wait_for_shared_projection_event(
@@ -1165,57 +959,283 @@ impl SharedSemanticBackend for LocalPtyBackend {
         timeout: Duration,
         after_version: Option<u64>,
     ) -> Option<Result<UiSnapshotEvent>> {
-        InstanceBackend::wait_for_ui_snapshot_event(self, timeout, after_version)
+        self.wait_for_ui_snapshot_event(timeout, after_version)
     }
 
     fn submit_create_account(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
-        InstanceBackend::create_account_via_ui(self, account_name)
+        self.fill_field(FieldId::AccountName, account_name)?;
+        self.activate_control(ControlId::OnboardingCreateAccountButton)?;
+        let convergence_deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            if snapshot.operations.iter().any(|operation| {
+                operation.id == OperationId::account_create()
+                    && operation.state == aura_app::ui::contract::OperationState::Failed
+            }) {
+                anyhow::bail!("submit_create_account: account creation failed");
+            }
+            if snapshot.screen != ScreenId::Onboarding && snapshot_has_real_home(&snapshot) {
+                break;
+            }
+            if Instant::now() >= convergence_deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        let final_snapshot = self.ui_snapshot()?;
+        anyhow::ensure!(
+            final_snapshot.operations.iter().all(|operation| {
+                !(operation.id == OperationId::account_create()
+                    && operation.state == aura_app::ui::contract::OperationState::Submitting)
+            }),
+            "submit_create_account: account creation remained stuck submitting"
+        );
+        anyhow::ensure!(
+            snapshot_has_real_home(&final_snapshot),
+            "submit_create_account: account creation did not converge a real home"
+        );
+        Ok(SubmittedAction::without_handle(()))
     }
 
     fn submit_create_home(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
-        InstanceBackend::create_home_via_ui(self, home_name)
+        self.activate_control(ControlId::NavNeighborhood)
+            .context("submit_create_home: nav_neighborhood")?;
+        wait_for_screen_visible(self, ScreenId::Neighborhood, Duration::from_secs(5))
+            .context("submit_create_home: wait_neighborhood")?;
+        let modal_open_deadline = Instant::now() + Duration::from_secs(5);
+        let mut modal_open = false;
+        while Instant::now() < modal_open_deadline {
+            self.activate_control(ControlId::NeighborhoodNewHomeButton)
+                .context("submit_create_home: open_create_home")?;
+            if wait_for_modal_visible(self, ModalId::CreateHome, Duration::from_secs(2)).is_ok() {
+                modal_open = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(150));
+        }
+        anyhow::ensure!(modal_open, "submit_create_home: create_home_modal did not open");
+        thread::sleep(Duration::from_millis(200));
+        self.fill_field(FieldId::HomeName, home_name)
+            .context("submit_create_home: fill_home_name")?;
+        thread::sleep(Duration::from_millis(150));
+        for _ in 0..3 {
+            self.send_keys("\r")
+                .context("submit_create_home: submit_create_home")?;
+            let modal_close_deadline = Instant::now() + Duration::from_millis(800);
+            loop {
+                let snapshot = self.ui_snapshot()?;
+                if snapshot.open_modal != Some(ModalId::CreateHome) {
+                    break;
+                }
+                if Instant::now() >= modal_close_deadline {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(80));
+            }
+            if self.ui_snapshot()?.open_modal != Some(ModalId::CreateHome) {
+                break;
+            }
+        }
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            let created_home = snapshot
+                .lists
+                .iter()
+                .find(|list| list.id == ListId::Homes)
+                .and_then(|list| {
+                    list.items
+                        .iter()
+                        .find(|item| item.id != PLACEHOLDER_HOME_ID)
+                        .map(|item| item.id.clone())
+                });
+            if let Some(home_id) = created_home {
+                self.activate_list_item(ListId::Homes, &home_id)?;
+                return Ok(SubmittedAction::without_handle(()));
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(80));
+        }
+        anyhow::bail!("submit_create_home did not produce a non-placeholder home")
     }
 
     fn submit_create_contact_invitation(
         &mut self,
         receiver_authority_id: &str,
     ) -> Result<SubmittedAction<ContactInvitationCode>> {
-        InstanceBackend::create_contact_invitation_via_ui(self, receiver_authority_id)
+        let previous_operation =
+            observe_operation(&self.ui_snapshot()?, &OperationId::invitation_create());
+        self.activate_control(ControlId::ContactsCreateInvitationButton)?;
+        wait_for_modal_visible(self, ModalId::CreateInvitation, Duration::from_secs(5))?;
+        self.fill_field(FieldId::InvitationReceiver, receiver_authority_id)?;
+        self.activate_control(ControlId::ModalConfirmButton)?;
+        let handle = wait_for_operation_submission(
+            self,
+            OperationId::invitation_create(),
+            previous_operation,
+            Duration::from_secs(5),
+        )?;
+        Ok(SubmittedAction::with_ui_operation(
+            ContactInvitationCode {
+                code: self.read_clipboard()?,
+            },
+            handle,
+        ))
     }
 
     fn submit_accept_contact_invitation(&mut self, code: &str) -> Result<SubmittedAction<()>> {
-        InstanceBackend::accept_contact_invitation_via_ui(self, code)
+        submit_accept_contact_invitation_via_shared_ui(self, code)
     }
 
     fn submit_invite_actor_to_channel(
         &mut self,
         authority_id: &str,
     ) -> Result<SubmittedAction<()>> {
-        InstanceBackend::invite_actor_to_channel_via_ui(self, authority_id)
+        submit_invite_actor_to_channel_via_shared_ui(self, authority_id)
     }
 
     fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>> {
-        InstanceBackend::accept_pending_channel_invitation_via_ui(self)
+        let previous_channel_count = self
+            .ui_snapshot()?
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Channels)
+            .map(|list| list.items.len())
+            .unwrap_or(0);
+        self.submit_chat_command_via_ui("homeaccept")?;
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            let channel_count = snapshot
+                .lists
+                .iter()
+                .find(|list| list.id == ListId::Channels)
+                .map(|list| list.items.len())
+                .unwrap_or(0);
+            let joined = channel_count > previous_channel_count
+                || snapshot
+                    .runtime_events
+                    .iter()
+                    .any(|event| matches!(&event.fact, RuntimeFact::ChannelMembershipReady { .. }));
+            if joined {
+                return Ok(SubmittedAction::without_handle(()));
+            }
+            if snapshot.operation_state(&OperationId::invitation_accept())
+                == Some(OperationState::Failed)
+            {
+                anyhow::bail!("submit_accept_pending_channel_invitation: invitation_accept failed");
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!(
+                    "submit_accept_pending_channel_invitation: timed out waiting for channel join"
+                );
+            }
+            thread::sleep(Duration::from_millis(80));
+        }
     }
 
     fn submit_join_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
-        InstanceBackend::join_channel_via_ui(self, channel_name)
+        self.activate_control(ControlId::NavChat)
+            .context("submit_join_channel: nav_chat")?;
+        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))
+            .context("submit_join_channel: wait_chat")?;
+        let modal_open_deadline = Instant::now() + Duration::from_secs(5);
+        let mut modal_open = false;
+        while Instant::now() < modal_open_deadline {
+            self.activate_control(ControlId::ChatNewGroupButton)
+                .context("submit_join_channel: open_create_channel")?;
+            if wait_for_modal_visible(self, ModalId::CreateChannel, Duration::from_secs(2)).is_ok()
+            {
+                modal_open = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(150));
+        }
+        anyhow::ensure!(
+            modal_open,
+            "submit_join_channel: create_channel_modal did not open"
+        );
+        thread::sleep(Duration::from_millis(200));
+        self.fill_field(FieldId::CreateChannelName, channel_name)
+            .context("submit_join_channel: fill_channel_name")?;
+        thread::sleep(Duration::from_millis(200));
+        self.send_keys("\r")
+            .context("submit_join_channel: advance_details")?;
+        thread::sleep(Duration::from_millis(250));
+        self.send_keys("\r")
+            .context("submit_join_channel: advance_members")?;
+        thread::sleep(Duration::from_millis(250));
+        self.send_keys("\r")
+            .context("submit_join_channel: submit_threshold")?;
+        let joined_deadline = Instant::now() + Duration::from_secs(4);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            let joined = snapshot.runtime_events.iter().any(|event| {
+                matches!(
+                    &event.fact,
+                    RuntimeFact::ChannelMembershipReady { channel, .. }
+                    if channel
+                        .name
+                        .as_deref()
+                        .map(|name: &str| name.eq_ignore_ascii_case(channel_name))
+                        .unwrap_or(false)
+                )
+            });
+            if joined || Instant::now() >= joined_deadline {
+                if joined {
+                    return Ok(SubmittedAction::without_handle(()));
+                }
+                break;
+            }
+            thread::sleep(Duration::from_millis(80));
+        }
+        run_registered_recovery(RecoveryPath::LocalPtyJoinChannelSlashFallback, || {
+            self.submit_chat_command_via_ui(&format!("join {channel_name}"))
+                .context("submit_join_channel: join_fallback")
+        })?;
+        Ok(SubmittedAction::without_handle(()))
     }
 
     fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>> {
-        InstanceBackend::send_chat_message_via_ui(self, message)
-    }
-}
-
-impl Drop for LocalPtyBackend {
-    fn drop(&mut self) {
-        let _ = self.stop();
+        self.activate_control(ControlId::NavChat)?;
+        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
+        let snapshot = self.ui_snapshot()?;
+        if let Some(channels) = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Channels)
+        {
+            let selected = channels.items.iter().any(|item| item.selected);
+            if !selected && channels.items.len() == 1 {
+                self.send_keys("h")?;
+                thread::sleep(Duration::from_millis(80));
+                for sequence in ["k", "j"] {
+                    self.send_keys(sequence)?;
+                    thread::sleep(Duration::from_millis(80));
+                    let updated = self.ui_snapshot()?;
+                    let visible_selected = updated
+                        .lists
+                        .iter()
+                        .find(|list| list.id == ListId::Channels)
+                        .is_some_and(|list| list.items.iter().any(|item| item.selected));
+                    if visible_selected {
+                        break;
+                    }
+                }
+            }
+        }
+        self.fill_field(FieldId::ChatInput, message)?;
+        self.send_key(crate::tool_api::ToolKey::Enter, 1)?;
+        Ok(SubmittedAction::without_handle(()))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::Path;
     use std::thread;
     use std::time::Duration;
 
@@ -1310,6 +1330,23 @@ mod tests {
     }
 
     #[test]
+    fn local_shared_intent_methods_drive_visible_tui_controls() {
+        let source = include_str!("local_pty.rs");
+        assert!(source.contains("fn submit_create_account"));
+        assert!(source.contains("self.fill_field(FieldId::AccountName, account_name)?;"));
+        assert!(source.contains(
+            "self.activate_control(ControlId::OnboardingCreateAccountButton)?;"
+        ));
+        assert!(source.contains("fn submit_create_contact_invitation"));
+        assert!(source.contains(
+            "self.activate_control(ControlId::ContactsCreateInvitationButton)?;"
+        ));
+        assert!(source.contains(
+            "wait_for_modal_visible(self, ModalId::CreateInvitation, Duration::from_secs(5))?;"
+        ));
+    }
+
+    #[test]
     fn local_backend_default_command_targets_aura_tui() {
         let mut config = test_config();
         config.command = None;
@@ -1392,6 +1429,53 @@ mod tests {
         if let Err(error) = backend.stop() {
             panic!("backend must stop: {error}");
         }
+    }
+
+    #[test]
+    fn local_backend_uses_socket_driven_ui_snapshot_channel() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let backend_path = repo_root.join("crates/aura-harness/src/backend/local_pty.rs");
+        let source = std::fs::read_to_string(&backend_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", backend_path.display()));
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(&source);
+        let ui_snapshot_body = production_source
+            .split("fn ui_snapshot(&self) -> Result<UiSnapshot> {")
+            .nth(1)
+            .and_then(|body| body.split("\n    fn ").next())
+            .unwrap_or(production_source);
+
+        assert!(
+            production_source.contains("AURA_TUI_UI_STATE_SOCKET"),
+            "local PTY backend must provision an event-driven TUI snapshot socket"
+        );
+        assert!(
+            !ui_snapshot_body.contains("SNAPSHOT_WAIT_ATTEMPTS")
+                && !ui_snapshot_body.contains("fs::read_to_string(&path)")
+                && !production_source.contains("AURA_TUI_UI_STATE_FILE"),
+            "local PTY UI snapshot path may not poll the filesystem"
+        );
+    }
+
+    #[test]
+    fn missing_tui_ui_snapshot_fails_loudly() {
+        let mut config = test_config();
+        config.id = "local-test-missing-ui-snapshot".to_string();
+        config.data_dir = std::env::temp_dir().join("aura-harness-local-missing-ui-snapshot");
+
+        let mut backend = LocalPtyBackend::new(config, Some(20), Some(120));
+        backend.start().unwrap_or_else(|error| panic!("backend must start: {error}"));
+
+        let error = backend
+            .ui_snapshot()
+            .err()
+            .unwrap_or_else(|| panic!("missing UI snapshot publication must fail"));
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("TUI UI snapshot unavailable"),
+            "missing TUI snapshot publication must fail diagnostically, got: {message}"
+        );
+
+        backend.stop().unwrap_or_else(|error| panic!("backend must stop: {error}"));
     }
 
     #[test]

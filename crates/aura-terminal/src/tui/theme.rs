@@ -3,7 +3,6 @@
 //! Centralized color and style definitions for consistent UI.
 
 use iocraft::prelude::*;
-use std::sync::OnceLock;
 
 /// Theme constants for the Aura TUI
 pub struct Theme;
@@ -213,18 +212,9 @@ impl Icons {
     ];
 }
 
-fn harness_mode_enabled() -> bool {
-    static HARNESS_MODE: OnceLock<bool> = OnceLock::new();
-    *HARNESS_MODE.get_or_init(|| std::env::var_os("AURA_HARNESS_MODE").is_some())
-}
-
 #[must_use]
 pub fn spinner_frame(frame: usize) -> &'static str {
-    if harness_mode_enabled() {
-        Icons::SPINNER_1
-    } else {
-        Icons::SPINNER_FRAMES[frame % Icons::SPINNER_FRAMES.len()]
-    }
+    Icons::SPINNER_FRAMES[frame % Icons::SPINNER_FRAMES.len()]
 }
 
 // =============================================================================

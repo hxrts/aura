@@ -38,7 +38,6 @@ cfg_if! {
 
         const WEB_STORAGE_PREFIX: &str = "aura_";
         const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
-        const HARNESS_BOOTSTRAP_RESET_MARKER: &str = "__aura_harness_bootstrap_reset_done";
 
         fn selected_authority_key(storage_prefix: &str) -> String {
             format!("{storage_prefix}selected_authority")
@@ -150,43 +149,20 @@ cfg_if! {
                 .map_err(|error| format!("failed to persist selected device: {:?}", error))
         }
 
-        fn clear_storage_key(storage_key: &str) -> Result<(), String> {
-            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
-            let storage = window
-                .local_storage()
-                .map_err(|error| format!("localStorage unavailable: {:?}", error))?
-                .ok_or_else(|| "localStorage unavailable".to_string())?;
-            storage
-                .remove_item(storage_key)
-                .map_err(|error| format!("failed to clear storage key {storage_key}: {:?}", error))
-        }
-
-        fn reset_harness_bootstrap_storage_once(
-            authority_storage_key: &str,
-            device_storage_key: &str,
-            pending_device_code_key: &str,
-        ) -> Result<(), String> {
+        fn install_harness_instrumentation(controller: Arc<UiController>) {
             if !harness_mode_enabled() {
-                return Ok(());
+                return;
             }
-            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
-            let session_storage = window
-                .session_storage()
-                .map_err(|error| format!("sessionStorage unavailable: {:?}", error))?
-                .ok_or_else(|| "sessionStorage unavailable".to_string())?;
-            if session_storage
-                .get_item(HARNESS_BOOTSTRAP_RESET_MARKER)
-                .map_err(|error| format!("failed to inspect harness bootstrap marker: {:?}", error))?
-                .is_some()
-            {
-                return Ok(());
+            controller.set_ui_snapshot_sink(Arc::new(|snapshot| {
+                harness_bridge::publish_ui_snapshot(&snapshot);
+            }));
+
+            harness_bridge::set_controller(controller.clone());
+            if let Err(error) = harness_bridge::install_window_harness_api(controller) {
+                web_sys::console::error_1(
+                    &format!("failed to install harness API: {error:?}").into(),
+                );
             }
-            clear_storage_key(authority_storage_key)?;
-            clear_storage_key(device_storage_key)?;
-            clear_storage_key(pending_device_code_key)?;
-            session_storage
-                .set_item(HARNESS_BOOTSTRAP_RESET_MARKER, "1")
-                .map_err(|error| format!("failed to persist harness bootstrap marker: {:?}", error))
         }
 
         fn load_pending_device_enrollment_code(storage_key: &str) -> Option<String> {
@@ -228,23 +204,6 @@ cfg_if! {
                 .map_err(|error| format!("failed to reload page: {:?}", error))
         }
 
-        fn reload_page_deferred() -> Result<(), String> {
-            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
-            let callback = Closure::once(Box::new(move || {
-                if let Some(window) = web_sys::window() {
-                    let _ = window.location().reload();
-                }
-            }) as Box<dyn FnOnce()>);
-            window
-                .set_timeout_with_callback_and_timeout_and_arguments_0(
-                    callback.as_ref().unchecked_ref(),
-                    0,
-                )
-                .map_err(|error| format!("failed to schedule page reload: {:?}", error))?;
-            callback.forget();
-            Ok(())
-        }
-
         #[derive(Clone, PartialEq)]
         struct BootstrapState {
             controller: Arc<UiController>,
@@ -256,15 +215,6 @@ cfg_if! {
             let authority_storage_key = selected_authority_key(&storage_prefix);
             let device_storage_key = selected_device_key(&storage_prefix);
             let pending_device_code_key = pending_device_enrollment_code_key(&storage_prefix);
-            if let Err(error) = reset_harness_bootstrap_storage_once(
-                &authority_storage_key,
-                &device_storage_key,
-                &pending_device_code_key,
-            ) {
-                web_sys::console::warn_1(
-                    &format!("[web-bootstrap] harness bootstrap reset failed: {error}").into(),
-                );
-            }
             let selected_authority = load_selected_authority(&authority_storage_key);
             let selected_device = load_selected_device(&device_storage_key);
             web_sys::console::log_1(
@@ -365,18 +315,7 @@ cfg_if! {
                 })),
             ));
             controller.set_account_setup_state(account_ready, "", None);
-            if harness_mode_enabled() {
-                controller.set_ui_snapshot_sink(Arc::new(|snapshot| {
-                    harness_bridge::publish_ui_snapshot(&snapshot);
-                }));
-
-                harness_bridge::set_controller(controller.clone());
-                if let Err(error) = harness_bridge::install_window_harness_api(controller.clone()) {
-                    web_sys::console::error_1(
-                        &format!("failed to install harness API: {error:?}").into(),
-                    );
-                }
-            }
+            install_harness_instrumentation(controller.clone());
 
             if account_ready {
                 if let Err(error) = settings_workflows::refresh_settings_from_runtime(
@@ -513,46 +452,6 @@ cfg_if! {
                 && controller_snapshot.screen != ScreenId::Onboarding;
             let account_ready = bootstrap_account_ready() || controller_account_ready;
 
-            let publish_onboarding_snapshot = {
-                let controller = controller.clone();
-                move || {
-                    let base = controller.semantic_model_snapshot();
-                    if base.readiness == UiReadiness::Ready {
-                        return;
-                    }
-                    let mut operations = base.operations;
-                    if creating_account()
-                        && !operations
-                            .iter()
-                            .any(|operation| operation.id.0 == "account_bootstrap")
-                    {
-                        operations.push(OperationSnapshot {
-                            id: OperationId("account_bootstrap".to_string()),
-                            instance_id: OperationInstanceId("account-bootstrap".to_string()),
-                            state: OperationState::Submitting,
-                        });
-                    }
-                    controller.set_ui_snapshot(UiSnapshot {
-                        screen: ScreenId::Onboarding,
-                        focused_control: Some(ControlId::OnboardingRoot),
-                        open_modal: None,
-                        readiness: UiReadiness::Loading,
-                        revision: next_projection_revision(None),
-                        quiescence: QuiescenceSnapshot::derive(
-                            UiReadiness::Loading,
-                            None,
-                            &operations,
-                        ),
-                        selections: Vec::new(),
-                        lists: Vec::new(),
-                        messages: Vec::new(),
-                        operations,
-                        toasts: base.toasts,
-                        runtime_events: base.runtime_events,
-                    });
-                }
-            };
-
             if account_ready && !sync_loop_started() {
                 sync_loop_started.set(true);
                 let app_core = controller.app_core().clone();
@@ -576,8 +475,6 @@ cfg_if! {
                     }
                 };
             }
-
-            publish_onboarding_snapshot();
 
             let run_import: Arc<dyn Fn(String)> = Arc::new({
                 let controller = controller.clone();
@@ -813,31 +710,6 @@ cfg_if! {
                                 web_sys::console::log_1(
                                     &"[web-onboarding] submit_account ok".into(),
                                 );
-                                if harness_mode_enabled() {
-                                    let storage_prefix = active_storage_prefix();
-                                    let authority_storage_key =
-                                        selected_authority_key(&storage_prefix);
-                                    let selected_authority = {
-                                        let core = controller.app_core().read().await;
-                                        core.authority()
-                                            .copied()
-                                            .or_else(|| core.runtime().map(|runtime| runtime.authority_id()))
-                                    };
-                                    if let Some(authority_id) = selected_authority {
-                                        web_sys::console::log_1(&format!(
-                                            "[web-onboarding] harness_persist authority={authority_id}"
-                                        ).into());
-                                        let _ = persist_selected_authority(
-                                            &authority_storage_key,
-                                            &authority_id,
-                                        );
-                                        bootstrap_account_ready.set(true);
-                                        controller.set_account_setup_state(true, "", None);
-                                        creating_account.set(false);
-                                        let _ = reload_page_deferred();
-                                        return;
-                                    }
-                                }
                                 bootstrap_account_ready.set(true);
                                 controller.set_account_setup_state(true, "", None);
                                 creating_account.set(false);
@@ -874,96 +746,112 @@ cfg_if! {
 
             rsx! {
                 main {
-                    id: ControlId::OnboardingRoot
+                    id: ControlId::AppRoot
                         .web_dom_id()
-                        .expect("ControlId::OnboardingRoot must define a web DOM id"),
+                        .expect("ControlId::AppRoot must define a web DOM id"),
                     class: "min-h-screen bg-background text-foreground grid place-items-center px-6",
                     div {
-                        id: "aura-onboarding-card",
-                        class: "w-full max-w-md rounded-3xl border border-border bg-card px-6 py-8 shadow-sm",
+                        id: ControlId::OnboardingRoot
+                            .web_dom_id()
+                            .expect("ControlId::OnboardingRoot must define a web DOM id"),
+                        class: "grid place-items-center px-6",
                         div {
-                            class: "space-y-2",
-                            h1 { class: "text-sm font-semibold uppercase tracking-[0.12em]", "Aura" }
-                            h2 { class: "text-2xl font-semibold", "Welcome to Aura" }
-                            p {
-                                class: "text-sm text-muted-foreground",
-                                "Create the local account profile for this browser before entering the app."
+                            id: "aura-onboarding-card",
+                            class: "w-full max-w-md rounded-3xl border border-border bg-card px-6 py-8 shadow-sm",
+                            div {
+                                class: "space-y-2",
+                                h1 { class: "text-sm font-semibold uppercase tracking-[0.12em]", "Aura" }
+                                h2 { class: "text-2xl font-semibold", "Welcome to Aura" }
+                                p {
+                                    class: "text-sm text-muted-foreground",
+                                    "Create the local account profile for this browser before entering the app."
+                                }
+                            }
+                            div {
+                                class: "mt-6 space-y-4",
+                                label {
+                                    class: "block space-y-2",
+                                    span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Nickname" }
+                                    input {
+                                    id: FieldId::AccountName
+                                        .web_dom_id()
+                                        .expect("FieldId::AccountName must define a web DOM id"),
+                                        class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+                                        value: "{account_name()}",
+                                        disabled: creating_account(),
+                                        oninput: move |event| {
+                                            let value = event.value();
+                                            account_name.set(value.clone());
+                                            account_error.set(None);
+                                            controller.set_account_setup_state(false, value, None);
+                                        },
+                                    }
+                                }
+                                if let Some(error) = account_error() {
+                                    p { class: "text-sm text-destructive", "{error}" }
+                                }
+                                button {
+                                    id: ControlId::OnboardingCreateAccountButton
+                                        .web_dom_id()
+                                        .expect("ControlId::OnboardingCreateAccountButton must define a web DOM id"),
+                                    class: "inline-flex h-10 w-full items-center justify-center rounded-md bg-foreground px-4 text-sm font-medium text-background transition-colors disabled:pointer-events-none disabled:opacity-50",
+                                    disabled: creating_account() || account_name().trim().is_empty(),
+                                    onclick: submit_account,
+                                    if creating_account() {
+                                        "Creating Account..."
+                                    } else {
+                                        "Create Account"
+                                    }
+                                }
+                                div { class: "flex items-center gap-3 py-1",
+                                    div { class: "h-px flex-1 bg-border" }
+                                    span { class: "text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground", "or" }
+                                    div { class: "h-px flex-1 bg-border" }
+                                }
+                                label {
+                                    class: "block space-y-2",
+                                    span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Device Enrollment Code" }
+                                    input {
+                                    id: FieldId::DeviceImportCode
+                                        .web_dom_id()
+                                        .expect("FieldId::DeviceImportCode must define a web DOM id"),
+                                        class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+                                        value: "{import_code()}",
+                                        disabled: importing_code(),
+                                        oninput: move |event| {
+                                            import_code.set(event.value());
+                                            import_error.set(None);
+                                        },
+                                    }
+                                }
+                                if let Some(error) = import_error() {
+                                    p { class: "text-sm text-destructive", "{error}" }
+                                }
+                                button {
+                                    id: ControlId::OnboardingImportDeviceButton
+                                        .web_dom_id()
+                                        .expect("ControlId::OnboardingImportDeviceButton must define a web DOM id"),
+                                    class: "inline-flex h-10 w-full items-center justify-center rounded-md border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors disabled:pointer-events-none disabled:opacity-50",
+                                    disabled: importing_code() || import_code().trim().is_empty(),
+                                    onclick: submit_import,
+                                    if importing_code() {
+                                        "Importing Device..."
+                                    } else {
+                                        "Import Device"
+                                    }
+                                }
                             }
                         }
-                        div {
-                            class: "mt-6 space-y-4",
-                            label {
-                                class: "block space-y-2",
-                                span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Nickname" }
-                                input {
-                                id: FieldId::AccountName
-                                    .web_dom_id()
-                                    .expect("FieldId::AccountName must define a web DOM id"),
-                                    class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-                                    value: "{account_name()}",
-                                    disabled: creating_account(),
-                                    oninput: move |event| {
-                                        let value = event.value();
-                                        account_name.set(value.clone());
-                                        account_error.set(None);
-                                        controller.set_account_setup_state(false, value, None);
-                                    },
-                                }
-                            }
-                            if let Some(error) = account_error() {
-                                p { class: "text-sm text-destructive", "{error}" }
-                            }
-                            button {
-                                id: ControlId::OnboardingCreateAccountButton
-                                    .web_dom_id()
-                                    .expect("ControlId::OnboardingCreateAccountButton must define a web DOM id"),
-                                class: "inline-flex h-10 w-full items-center justify-center rounded-md bg-foreground px-4 text-sm font-medium text-background transition-colors disabled:pointer-events-none disabled:opacity-50",
-                                disabled: creating_account() || account_name().trim().is_empty(),
-                                onclick: submit_account,
-                                if creating_account() {
-                                    "Creating Account..."
-                                } else {
-                                    "Create Account"
-                                }
-                            }
-                            div { class: "flex items-center gap-3 py-1",
-                                div { class: "h-px flex-1 bg-border" }
-                                span { class: "text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground", "or" }
-                                div { class: "h-px flex-1 bg-border" }
-                            }
-                            label {
-                                class: "block space-y-2",
-                                span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Device Enrollment Code" }
-                                input {
-                                id: FieldId::DeviceImportCode
-                                    .web_dom_id()
-                                    .expect("FieldId::DeviceImportCode must define a web DOM id"),
-                                    class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-                                    value: "{import_code()}",
-                                    disabled: importing_code(),
-                                    oninput: move |event| {
-                                        import_code.set(event.value());
-                                        import_error.set(None);
-                                    },
-                                }
-                            }
-                            if let Some(error) = import_error() {
-                                p { class: "text-sm text-destructive", "{error}" }
-                            }
-                            button {
-                                id: ControlId::OnboardingImportDeviceButton
-                                    .web_dom_id()
-                                    .expect("ControlId::OnboardingImportDeviceButton must define a web DOM id"),
-                                class: "inline-flex h-10 w-full items-center justify-center rounded-md border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors disabled:pointer-events-none disabled:opacity-50",
-                                disabled: importing_code() || import_code().trim().is_empty(),
-                                onclick: submit_import,
-                                if importing_code() {
-                                    "Importing Device..."
-                                } else {
-                                    "Import Device"
-                                }
-                            }
-                        }
+                    }
+                    div {
+                        id: ControlId::ToastRegion
+                            .web_dom_id()
+                            .expect("ControlId::ToastRegion must define a web DOM id"),
+                    }
+                    div {
+                        id: ControlId::ModalRegion
+                            .web_dom_id()
+                            .expect("ControlId::ModalRegion must define a web DOM id"),
                     }
                 }
             }

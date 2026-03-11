@@ -3,7 +3,9 @@
 use std::fs;
 use std::process::Command;
 
-use aura_harness::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, ScreenSource};
+use aura_harness::config::{
+    InstanceConfig, InstanceMode, RunConfig, RunSection, RuntimeSubstrate, ScreenSource,
+};
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::tool_api::{ToolApi, ToolRequest, ToolResponse};
 
@@ -26,7 +28,7 @@ fn two_local_instances_are_controllable() {
             max_memory_bytes: None,
             max_open_files: None,
             require_remote_artifact_sync: false,
-            runtime_substrate: Default::default(),
+            runtime_substrate: RuntimeSubstrate::default(),
         },
         instances: vec![
             instance("alice", root.join("alice"), "127.0.0.1:42001"),

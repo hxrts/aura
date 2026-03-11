@@ -523,45 +523,6 @@ fn settings_section_from_item_id(item_id: &str) -> Option<SettingsSection> {
     }
 }
 
-fn format_input_key(value: InputKey) -> String {
-    match value {
-        InputKey::Enter => "enter",
-        InputKey::Esc => "esc",
-        InputKey::Tab => "tab",
-        InputKey::BackTab => "backtab",
-        InputKey::Up => "up",
-        InputKey::Down => "down",
-        InputKey::Left => "left",
-        InputKey::Right => "right",
-        InputKey::Home => "home",
-        InputKey::End => "end",
-        InputKey::PageUp => "pageup",
-        InputKey::PageDown => "pagedown",
-        InputKey::Backspace => "backspace",
-        InputKey::Delete => "delete",
-    }
-    .to_string()
-}
-
-fn format_toast_kind(value: ToastKind) -> String {
-    match value {
-        ToastKind::Success => "success",
-        ToastKind::Info => "info",
-        ToastKind::Error => "error",
-    }
-    .to_string()
-}
-
-fn format_extract_source(value: ExtractSource) -> String {
-    match value {
-        ExtractSource::Screen => "screen",
-        ExtractSource::RawScreen => "raw_screen",
-        ExtractSource::AuthoritativeScreen => "authoritative_screen",
-        ExtractSource::NormalizedScreen => "normalized_screen",
-    }
-    .to_string()
-}
-
 fn parse_extract_source(value: &str) -> Result<ExtractSource> {
     match value.trim().to_ascii_lowercase().as_str() {
         "screen" => Ok(ExtractSource::Screen),

@@ -647,6 +647,29 @@ impl SettingsSection {
         }
     }
 
+    pub fn surface_id(self) -> aura_app::ui_contract::SettingsSectionSurfaceId {
+        match self {
+            Self::Profile => aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
+                aura_app::ui_contract::SharedSettingsSectionId::Profile,
+            ),
+            Self::Threshold => aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
+                aura_app::ui_contract::SharedSettingsSectionId::GuardianThreshold,
+            ),
+            Self::Recovery => aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
+                aura_app::ui_contract::SharedSettingsSectionId::RequestRecovery,
+            ),
+            Self::Devices => aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
+                aura_app::ui_contract::SharedSettingsSectionId::Devices,
+            ),
+            Self::Authority => aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
+                aura_app::ui_contract::SharedSettingsSectionId::Authority,
+            ),
+            Self::Observability => aura_app::ui_contract::SettingsSectionSurfaceId::FrontendSpecific(
+                aura_app::ui_contract::FrontendSpecificSettingsSectionId::Observability,
+            ),
+        }
+    }
+
     pub fn next(self) -> Self {
         match self {
             Self::Profile => Self::Threshold,

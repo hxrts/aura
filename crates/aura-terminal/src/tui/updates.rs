@@ -43,6 +43,7 @@
 
 use crate::tui::components::ToastMessage;
 use crate::tui::types::{Device, MfaPolicy};
+use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact};
 use aura_core::types::Epoch;
 
 /// Channel sender type for UI updates
@@ -323,6 +324,12 @@ pub enum UiUpdate {
     // =========================================================================
     /// Notifications count changed (for keyboard navigation)
     NotificationsCountChanged(usize),
+
+    /// Replace the authoritative runtime facts for specific fact kinds.
+    RuntimeFactsUpdated {
+        replace_kinds: Vec<RuntimeEventKind>,
+        facts: Vec<RuntimeFact>,
+    },
 
     // =========================================================================
     // Home Operations

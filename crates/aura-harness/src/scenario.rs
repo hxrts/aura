@@ -36,7 +36,32 @@ impl ScenarioRunner {
             .map(|instance| instance.id.as_str())
             .collect();
 
-        for step in &scenario.steps {
+        if let Some(steps) = scenario.shared_execution_semantic_steps() {
+            for step in steps {
+                if let Some(instance) = step.actor.as_ref().map(|actor| actor.0.as_str()) {
+                    if !instance_ids.contains(instance) {
+                        errors.push(format!(
+                            "step {} references unknown instance {}",
+                            step.id, instance
+                        ));
+                    }
+                }
+            }
+            if steps.len() > 100 {
+                warnings.push("scenario has more than 100 steps; consider splitting".to_string());
+            }
+            return ScenarioLintReport { warnings, errors };
+        }
+
+        let steps = match scenario.execution_steps() {
+            Ok(steps) => steps,
+            Err(error) => {
+                errors.push(format!("scenario lowering failed: {error}"));
+                return ScenarioLintReport { warnings, errors };
+            }
+        };
+
+        for step in &steps {
             if let Some(instance) = step.instance.as_deref() {
                 if !instance_ids.contains(instance) {
                     errors.push(format!(
@@ -48,7 +73,7 @@ impl ScenarioRunner {
         }
 
         let mut previous_request_id: Option<u64> = None;
-        for step in &scenario.steps {
+        for step in &steps {
             let Some(request_id) = step.request_id else {
                 continue;
             };
@@ -63,7 +88,7 @@ impl ScenarioRunner {
             previous_request_id = Some(request_id);
         }
 
-        if scenario.steps.len() > 100 {
+        if steps.len() > 100 {
             warnings.push("scenario has more than 100 steps; consider splitting".to_string());
         }
 

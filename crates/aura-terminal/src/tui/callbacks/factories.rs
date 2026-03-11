@@ -183,7 +183,6 @@ fn command_outcome_message(
 pub struct ChatCallbacks {
     pub on_send: SendCallback,
     pub on_retry_message: RetryMessageCallback,
-    pub on_channel_select: ChannelSelectCallback,
     pub on_create_channel: CreateChannelCallback,
     pub on_set_topic: SetTopicCallback,
     pub on_close_channel: IdCallback,
@@ -195,12 +194,11 @@ impl ChatCallbacks {
     pub fn new(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
-        app_core: Arc<async_lock::RwLock<aura_app::ui::types::AppCore>>,
+        _app_core: Arc<async_lock::RwLock<aura_app::ui::types::AppCore>>,
     ) -> Self {
         Self {
             on_send: Self::make_send(ctx.clone(), tx.clone()),
             on_retry_message: Self::make_retry_message(ctx.clone(), tx.clone()),
-            on_channel_select: Self::make_channel_select(ctx.clone(), app_core, tx.clone()),
             on_create_channel: Self::make_create_channel(ctx.clone(), tx.clone()),
             on_set_topic: Self::make_set_topic(ctx.clone(), tx.clone()),
             on_close_channel: Self::make_close_channel(ctx.clone(), tx.clone()),
@@ -518,21 +516,6 @@ impl ChatCallbacks {
                 });
             },
         )
-    }
-
-    fn make_channel_select(
-        _ctx: Arc<IoContext>,
-        _app_core: Arc<async_lock::RwLock<aura_app::ui::types::AppCore>>,
-        _tx: UiUpdateSender,
-    ) -> ChannelSelectCallback {
-        // Channel selection is now UI-only state. The callback just needs to notify
-        // the UI that a channel was selected. The actual TUI state update happens
-        // in the shell via DispatchCommand::SelectChannel.
-        Arc::new(move |_channel_id: String| {
-            // Selection is handled synchronously by the TUI state machine now.
-            // This callback exists for interface compatibility but doesn't need
-            // to do async work since selection is UI-local state.
-        })
     }
 
     fn make_list_participants(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdCallback {

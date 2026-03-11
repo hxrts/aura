@@ -1,12 +1,11 @@
 # Justfile for Aura project automation
 #
 # Run `just` or `just --list` to see available commands
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Configuration
 # ═══════════════════════════════════════════════════════════════════════════════
-
 # Expected CI Rust version (update when GitHub CI updates)
+
 CI_RUST_VERSION := "1.92"
 SCENARIO_CLI := "cargo run --bin aura -- scenarios"
 SCENARIO_DIR := "scenarios"
@@ -20,17 +19,13 @@ default:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _nix-dev *ARGS:
-    nix develop --command {{ARGS}}
+    nix develop --command {{ ARGS }}
 
 _nix-nightly *ARGS:
-    nix develop .#nightly --command {{ARGS}}
+    nix develop .#nightly --command {{ ARGS }}
 
 _harness action *ARGS:
-    scripts/harness/cmd.sh {{action}} {{ARGS}}
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# USER-FACING COMMANDS
-# ═══════════════════════════════════════════════════════════════════════════════
+    scripts/harness/cmd.sh {{ action }} {{ ARGS }}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Build
@@ -83,7 +78,7 @@ web-tailwind-watch:
 web-serve port="4173":
     #!/usr/bin/env bash
     set -euo pipefail
-    selected_port="{{port}}"
+    selected_port="{{ port }}"
     if command -v lsof >/dev/null 2>&1; then
         mapfile -t existing_pids < <(lsof -PiTCP:"$selected_port" -sTCP:LISTEN -t 2>/dev/null || true)
         if [ "${#existing_pids[@]}" -gt 0 ]; then
@@ -145,10 +140,10 @@ web-serve port="4173":
 
 # Alias for the main web development workflow (`web-serve`)
 web-dev port="4173":
-    just web-serve {{port}}
+    just web-serve {{ port }}
 
 web-static port="4173":
-    ./scripts/web/serve-static.sh "{{port}}"
+    ./scripts/web/serve-static.sh "{{ port }}"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Browser Harness Shortcuts
@@ -158,16 +153,19 @@ web-static port="4173":
 browser-driver-smoke:
     cd crates/aura-harness/playwright-driver && npm test
 
+ci-harness-browser-driver-types:
+    bash scripts/check/harness-browser-driver-types.sh
+
 harness-browser-install-check:
     bash scripts/check/harness-browser-install.sh
 
 # Run harness scenario against browser backend config
 harness-run-browser scenario config="configs/harness/browser-loopback.toml" artifacts_dir="artifacts/harness/browser":
-    just harness-run -- --config {{config}} --scenario {{scenario}} --artifacts-dir {{artifacts_dir}}
+    just harness-run -- --config {{ config }} --scenario {{ scenario }} --artifacts-dir {{ artifacts_dir }}
 
 # Lint harness run/scenario files for browser backend workflows
 harness-lint-browser scenario config="configs/harness/browser-loopback.toml":
-    just harness-lint -- --config {{config}} --scenario {{scenario}}
+    just harness-lint -- --config {{ config }} --scenario {{ scenario }}
 
 # Audit semantic migration state for harness scenarios and legacy MBT executor paths
 harness-migration-audit:
@@ -189,22 +187,34 @@ harness-ui-state-evented-check:
     bash scripts/check/harness-ui-state-evented.sh
 
 harness-flake-metrics root="artifacts/harness":
-    bash scripts/check/harness-flake-metrics.sh {{root}}
+    bash scripts/check/harness-flake-metrics.sh {{ root }}
 
 harness-matrix lane="all" *ARGS:
-    bash scripts/harness/run-matrix.sh --lane {{lane}} {{ARGS}}
+    bash scripts/harness/run-matrix.sh --lane {{ lane }} {{ ARGS }}
 
 harness-matrix-tui *ARGS:
-    just harness-matrix tui {{ARGS}}
+    just harness-matrix tui {{ ARGS }}
 
 harness-matrix-web *ARGS:
-    just harness-matrix web {{ARGS}}
+    just harness-matrix web {{ ARGS }}
 
 harness-matrix-all *ARGS:
-    just harness-matrix all {{ARGS}}
+    just harness-matrix all {{ ARGS }}
 
 ci-shared-flow-policy:
     bash scripts/check/shared-flow-policy.sh
+
+ci-harness-scenario-canonical-model:
+    bash scripts/check/harness-scenario-canonical-model.sh
+
+ci-harness-runtime-events-authoritative:
+    bash scripts/check/harness-runtime-events-authoritative.sh
+
+ci-harness-browser-observation-recovery:
+    bash scripts/check/harness-browser-observation-recovery.sh
+
+ci-harness-tui-observation-channel:
+    bash scripts/check/harness-tui-observation-channel.sh
 
 ci-ui-parity-contract:
     bash scripts/check/ui-parity-contract.sh
@@ -214,7 +224,7 @@ quint-observation-scenario:
 
 # Replay latest browser harness bundle
 harness-replay-browser bundle="artifacts/harness/browser/harness/browser-loopback-smoke/replay_bundle.json":
-    just harness-replay -- --bundle {{bundle}}
+    just harness-replay -- --bundle {{ bundle }}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Test
@@ -230,13 +240,13 @@ test-verbose:
 
 # Run tests for a specific crate
 test-crate crate:
-    cargo test -p {{crate}} -q
+    cargo test -p {{ crate }} -q
 
 # Run tests for a specific crate in isolation (lib + unit tests only)
 test-crate-isolated crate:
     #!/usr/bin/env bash
-    echo "Testing {{crate}} in isolation (lib + unit tests only)..."
-    cd "crates/{{crate}}" && cargo test --lib --verbose
+    echo "Testing {{ crate }} in isolation (lib + unit tests only)..."
+    cd "crates/{{ crate }}" && cargo test --lib --verbose
 
 # Benchmark Telltale VM cooperative vs threaded backends for Category C shapes
 bench-choreo-parity:
@@ -283,7 +293,7 @@ audit:
 
 # Check architectural layer compliance (all checks)
 check-arch *FLAGS:
-    scripts/check/arch.sh {{FLAGS}}
+    scripts/check/arch.sh {{ FLAGS }}
 
 # Check invariant-focused lanes (docs + runtime property monitor)
 check-invariants:
@@ -291,16 +301,17 @@ check-invariants:
     just ci-property-monitor
 
 # Quick architecture checks by lane
+
 # Example: just check-arch-lane layers
 check-arch-lane lane:
     #!/usr/bin/env bash
     set -euo pipefail
-    case "{{lane}}" in
+    case "{{ lane }}" in
       layers|effects|deps|completeness|todos|concurrency|invariants|workflows)
-        scripts/check/arch.sh --{{lane}} || true
+        scripts/check/arch.sh --{{ lane }} || true
         ;;
       *)
-        echo "Unknown lane: {{lane}}"
+        echo "Unknown lane: {{ lane }}"
         echo "Valid lanes: layers, effects, deps, completeness, todos, concurrency, invariants, workflows"
         exit 2
         ;;
@@ -321,6 +332,7 @@ ci-format:
 
 # Clippy with effects enforcement (matches CI environment)
 # Note: CARGO_INCREMENTAL=0 forces fresh lint checking
+
 # Note: Nix clippy may not catch all implicit_clone cases; GitHub CI uses newer clippy
 ci-clippy:
     CARGO_INCREMENTAL=0 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets -- \
@@ -401,6 +413,7 @@ ci-holepunch-tier1:
 
 # Tier 2 Patchbay NAT traversal integration scenarios
 # Requires: Linux with unprivileged user namespaces enabled, tc, nft in PATH
+
 # CI enables userns via: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 ci-holepunch-tier2:
     ./scripts/ci/holepunch.sh tier2
@@ -449,6 +462,7 @@ ci-choreo-parity:
     cargo test -p aura-agent --features choreo-backend-telltale-vm --lib parity_policy::tests -q
 
 # WASM choreography backend matrix for aura-agent
+
 # Note: do not use `--all-features` for aura-agent because choreography backends are exclusive.
 ci-agent-wasm:
     cargo check -p aura-agent --target wasm32-unknown-unknown --features web
@@ -462,6 +476,7 @@ ci-agent-wasm:
 # - aura-agent: test suite currently assumes multi-thread tokio runtime
 # - aura-harness: native process/PTY/browser orchestration
 # - aura-testkit: native-heavy integration harness and differential suites
+
 # Note: intentionally no `-q` because wasm-bindgen-test-runner rejects forwarded `--quiet`.
 ci-workspace-wasm-test:
     #!/usr/bin/env bash
@@ -640,10 +655,10 @@ ci-lean-quint-bridge:
 # ═══════════════════════════════════════════════════════════════════════════════
 # CI Dry Run
 # ═══════════════════════════════════════════════════════════════════════════════
-
 # Run GitHub CI checks locally.
 # profile=pr  -> jobs that run on pull_request
 # profile=push -> jobs that run on push (default)
+
 # profile=all -> push jobs plus scheduled/manual lanes
 ci-dry-run profile="push":
     #!/usr/bin/env bash
@@ -668,30 +683,30 @@ ci-dry-run profile="push":
         fi
     }
 
-    case "{{profile}}" in
+    case "{{ profile }}" in
         pr) total=14 ;;
         push) total=27 ;;
         all) total=35 ;;
         *)
-            echo "Unknown ci-dry-run profile: {{profile}}"
+            echo "Unknown ci-dry-run profile: {{ profile }}"
             echo "Valid profiles: pr, push, all"
             exit 2
             ;;
     esac
 
-    echo "CI Dry Run (profile: {{profile}})"
+    echo "CI Dry Run (profile: {{ profile }})"
     echo "==============================="
     echo ""
 
     # Environment check
     LOCAL_RUST=$(rustc --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
     printf "[0/%d] Rust version... " "$total"
-    if [[ "$LOCAL_RUST" == "{{CI_RUST_VERSION}}" ]]; then
+    if [[ "$LOCAL_RUST" == "{{ CI_RUST_VERSION }}" ]]; then
         echo -e "${GREEN}$LOCAL_RUST${NC} (matches CI)"
-    elif [[ "$LOCAL_RUST" < "{{CI_RUST_VERSION}}" ]]; then
-        echo -e "${YELLOW}$LOCAL_RUST${NC} (CI uses {{CI_RUST_VERSION}} - newer lints may fail in CI)"
+    elif [[ "$LOCAL_RUST" < "{{ CI_RUST_VERSION }}" ]]; then
+        echo -e "${YELLOW}$LOCAL_RUST${NC} (CI uses {{ CI_RUST_VERSION }} - newer lints may fail in CI)"
     else
-        echo -e "${BLUE}$LOCAL_RUST${NC} (newer than CI {{CI_RUST_VERSION}})"
+        echo -e "${BLUE}$LOCAL_RUST${NC} (newer than CI {{ CI_RUST_VERSION }})"
     fi
     echo ""
 
@@ -713,7 +728,7 @@ ci-dry-run profile="push":
     run_step "Docs Semantic Drift"   "just ci-docs-semantic-drift"
     run_step "Docs Build"            "just ci-book"
 
-    if [[ "{{profile}}" != "pr" ]]; then
+    if [[ "{{ profile }}" != "pr" ]]; then
         # Harness workflow lanes that run on push
         run_step "Harness Build"         "just ci-harness-build"
         run_step "Harness Contract"      "just ci-harness-contract"
@@ -736,7 +751,7 @@ ci-dry-run profile="push":
         run_step "Kani Proofs"           "nix develop .#nightly --command just ci-kani"
     fi
 
-    if [[ "{{profile}}" == "all" ]]; then
+    if [[ "{{ profile }}" == "all" ]]; then
         # Scheduled/manual-only lanes
         run_step "Harness Replay"                    "just ci-harness-replay"
         run_step "LAN Deep"                          "just ci-lan-deep"
@@ -877,14 +892,14 @@ docs:
 # ═══════════════════════════════════════════════════════════════════════════════
 # Quickstart
 # ═══════════════════════════════════════════════════════════════════════════════
-
 # Quickstart helper for local onboarding and smoke coverage
 # Usage:
 #   just quickstart init
 #   just quickstart status
-#   just quickstart smoke
+
+# just quickstart smoke
 quickstart action="init":
-    ./scripts/dev/quickstart.sh "{{action}}"
+    ./scripts/dev/quickstart.sh "{{ action }}"
 
 # Run macOS Keychain integration tests
 test-macos-keychain:
@@ -899,34 +914,34 @@ test-macos-keychain:
 # ═══════════════════════════════════════════════════════════════════════════════
 # Quint Specifications
 # ═══════════════════════════════════════════════════════════════════════════════
-
 # Quint local workflows (canonical entry point)
 # Usage:
 #   just quint setup
 #   just quint check
-#   just quint models
+
+# just quint models
 quint mode="check":
-    ./scripts/verify/quint-workflow.sh "{{mode}}"
+    ./scripts/verify/quint-workflow.sh "{{ mode }}"
 
 # Parse Quint file to JSON
 quint-parse input output:
-    just _nix-dev -- quint parse --out {{output}} {{input}}
+    just _nix-dev -- quint parse --out {{ output }} {{ input }}
 
 # Parse and typecheck Quint file
 quint-compile input output:
-    just _nix-dev -- quint typecheck {{input}}
-    just _nix-dev -- quint parse --out {{output}} {{input}}
+    just _nix-dev -- quint typecheck {{ input }}
+    just _nix-dev -- quint parse --out {{ output }} {{ input }}
 
 # Verify a single Quint spec with specific invariants
 quint-verify spec invariants:
     #!/usr/bin/env bash
     set -uo pipefail
     mkdir -p verification/quint/traces
-    SPEC_NAME=$(basename "{{spec}}" .qnt)
+    SPEC_NAME=$(basename "{{ spec }}" .qnt)
     INV_FLAGS=""
-    IFS=',' read -ra INVS <<< "{{invariants}}"
+    IFS=',' read -ra INVS <<< "{{ invariants }}"
     for inv in "${INVS[@]}"; do INV_FLAGS="$INV_FLAGS --invariant=$inv"; done
-    quint verify "{{spec}}" $INV_FLAGS --max-steps=10 \
+    quint verify "{{ spec }}" $INV_FLAGS --max-steps=10 \
         --out-itf="verification/quint/traces/${SPEC_NAME}_counter.itf.json" --verbosity=3
 
 # Generate ITF traces from Quint specs
@@ -954,11 +969,11 @@ quint-generate-traces:
 
 # Check Quint-Rust type correspondence
 quint-check-types verbose="":
-    ./scripts/verify/workflow.sh quint-types {{verbose}}
+    ./scripts/verify/workflow.sh quint-types {{ verbose }}
 
 # Generate verification coverage report
 verification-coverage format="--md":
-    ./scripts/verify/workflow.sh coverage {{format}}
+    ./scripts/verify/workflow.sh coverage {{ format }}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Quint Semantic Traces
@@ -966,11 +981,11 @@ verification-coverage format="--md":
 
 # Regenerate a deterministic Quint semantic trace for harness / simulator workflows
 quint-semantic-trace spec="verification/quint/harness/flows.qnt" out="verification/quint/traces/harness_flows.itf.json" seed="424242" max_steps="50":
-    QUINT_TRACE_SEED={{seed}} QUINT_TRACE_MAX_STEPS={{max_steps}} just _nix-dev -- ./scripts/verify/quint-semantic-trace.sh generate {{spec}} {{out}}
+    QUINT_TRACE_SEED={{ seed }} QUINT_TRACE_MAX_STEPS={{ max_steps }} just _nix-dev -- ./scripts/verify/quint-semantic-trace.sh generate {{ spec }} {{ out }}
 
 # Check that the checked-in Quint semantic trace matches regeneration
 quint-semantic-trace-check spec="verification/quint/harness/flows.qnt" expected="verification/quint/traces/harness_flows.itf.json" seed="424242" max_steps="50":
-    QUINT_TRACE_SEED={{seed}} QUINT_TRACE_MAX_STEPS={{max_steps}} just _nix-dev -- ./scripts/verify/quint-semantic-trace.sh check {{spec}} {{expected}}
+    QUINT_TRACE_SEED={{ seed }} QUINT_TRACE_MAX_STEPS={{ max_steps }} just _nix-dev -- ./scripts/verify/quint-semantic-trace.sh check {{ spec }} {{ expected }}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Lean Formal Verification
@@ -988,8 +1003,8 @@ verify-lean jobs="2": lean-init
     GREEN='\033[0;32m' YELLOW='\033[1;33m' NC='\033[0m'
     echo "Lean Formal Verification"
     echo "========================"
-    echo "Building Lean verification modules (threads={{jobs}})..."
-    cd verification/lean && nice -n 15 lake build -K env.LEAN_THREADS={{jobs}}
+    echo "Building Lean verification modules (threads={{ jobs }})..."
+    cd verification/lean && nice -n 15 lake build -K env.LEAN_THREADS={{ jobs }}
     cd ../..
     if grep -r "sorry" verification/lean/Aura --include="*.lean" > /tmp/sorry-check.txt 2>/dev/null; then
         count=$(wc -l < /tmp/sorry-check.txt | tr -d ' ')
@@ -1049,7 +1064,7 @@ lean-translate jobs="1" crate="all":
     #!/usr/bin/env bash
     set -uo pipefail
     GREEN='\033[0;32m' RED='\033[0;31m' NC='\033[0m'
-    JOBS="{{jobs}}"; TARGET="{{crate}}"
+    JOBS="{{ jobs }}"; TARGET="{{ crate }}"
     export CARGO_BUILD_JOBS="$JOBS" RUSTFLAGS="${RUSTFLAGS:-} -C codegen-units=1"
 
     echo "Translating Rust to Lean (jobs=$JOBS)"
@@ -1078,11 +1093,11 @@ lean-translate jobs="1" crate="all":
 
 # Run Kani verification on a package
 kani package="aura-protocol" unwind="10":
-    just _nix-nightly -- cargo kani --package {{package}} --default-unwind {{unwind}}
+    just _nix-nightly -- cargo kani --package {{ package }} --default-unwind {{ unwind }}
 
 # Run a specific Kani harness
 kani-harness harness package="aura-protocol" unwind="10":
-    just _nix-nightly -- cargo kani --package {{package}} --harness {{harness}} --default-unwind {{unwind}}
+    just _nix-nightly -- cargo kani --package {{ package }} --harness {{ harness }} --default-unwind {{ unwind }}
 
 # Setup Kani (first time only)
 kani-setup:
@@ -1140,7 +1155,6 @@ verify-all: verify-lean
 # ═══════════════════════════════════════════════════════════════════════════════
 # Scenarios
 # ═══════════════════════════════════════════════════════════════════════════════
-
 # Unified scenario entry point
 # Examples:
 #   just scenario run
@@ -1148,22 +1162,23 @@ verify-all: verify-lean
 #   just scenario list --detailed
 #   just scenario validate --strictness standard
 #   just scenario discover --validate
-#   just scenario report --input outcomes/scenario_results.json --output outcomes/scenario_report.html --format html --detailed
+
+# just scenario report --input outcomes/scenario_results.json --output outcomes/scenario_report.html --format html --detailed
 scenario subcommand="run" *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
-    case "{{subcommand}}" in
+    case "{{ subcommand }}" in
       run|list|validate)
-        {{SCENARIO_CLI}} "{{subcommand}}" --directory {{SCENARIO_DIR}} {{ARGS}}
+        {{ SCENARIO_CLI }} "{{ subcommand }}" --directory {{ SCENARIO_DIR }} {{ ARGS }}
         ;;
       discover)
-        {{SCENARIO_CLI}} discover --root . {{ARGS}}
+        {{ SCENARIO_CLI }} discover --root . {{ ARGS }}
         ;;
       report)
-        {{SCENARIO_CLI}} report {{ARGS}}
+        {{ SCENARIO_CLI }} report {{ ARGS }}
         ;;
       *)
-        echo "Unknown scenario subcommand: {{subcommand}}"
+        echo "Unknown scenario subcommand: {{ subcommand }}"
         echo "Valid subcommands: run, list, validate, discover, report"
         exit 2
         ;;
@@ -1175,7 +1190,7 @@ scenario-suite:
     set -euo pipefail
     just scenario discover --validate
     just scenario validate --strictness standard
-    {{SCENARIO_CLI}} run --directory {{SCENARIO_DIR}} --output-file outcomes/scenario_results.json --detailed-report
+    {{ SCENARIO_CLI }} run --directory {{ SCENARIO_DIR }} --output-file outcomes/scenario_results.json --detailed-report
     just scenario report --input outcomes/scenario_results.json --output outcomes/scenario_report.html --format html --detailed
     echo "Report: outcomes/scenario_report.html"
 
@@ -1185,15 +1200,15 @@ scenario-suite:
 
 # Run harness coordinator with a TOML run config and optional scenario file
 harness-run *ARGS:
-    just _harness -- run {{ARGS}}
+    just _harness -- run {{ ARGS }}
 
 # Lint harness TOML run and scenario files
 harness-lint *ARGS:
-    just _harness -- lint {{ARGS}}
+    just _harness -- lint {{ ARGS }}
 
 # Replay a previously recorded harness bundle
 harness-replay *ARGS:
-    just _harness -- replay {{ARGS}}
+    just _harness -- replay {{ ARGS }}
 
 # Run harness crate tests
 harness-test:
@@ -1222,7 +1237,7 @@ build-nix:
 
 # Build specific package with hermetic Nix
 build-nix-package package:
-    nix build .#{{package}}
+    nix build .#{{ package }}
 
 # Run hermetic Nix checks
 check-nix:
@@ -1242,16 +1257,16 @@ test-nix-all:
 # ═══════════════════════════════════════════════════════════════════════════════
 # WASM / Console
 # ═══════════════════════════════════════════════════════════════════════════════
-
 # WASM DB test helper
 # Usage:
 #   just wasm-db build
 #   just wasm-db serve
-#   just wasm-db test
+
+# just wasm-db test
 wasm-db action="build":
     #!/usr/bin/env bash
     set -euo pipefail
-    case "{{action}}" in
+    case "{{ action }}" in
       build)
         cd crates/db-test
         wasm-pack build --target web --out-dir web/pkg
@@ -1267,7 +1282,7 @@ wasm-db action="build":
         just wasm-db serve
         ;;
       *)
-        echo "Unknown wasm-db action: {{action}}"
+        echo "Unknown wasm-db action: {{ action }}"
         echo "Valid actions: build, serve, test"
         exit 2
         ;;
@@ -1287,14 +1302,14 @@ demo-log log="/tmp/aura-demo.log":
     #!/usr/bin/env bash
     set -euo pipefail
     just build-dev
-    rm -f {{log}}
-    echo "Starting TUI demo with logging to {{log}}"
-    echo "After exiting, view logs with: grep -i ContactsSignalView {{log}}"
-    RUST_LOG=aura_agent=info,aura_app=info,aura_terminal=info AURA_TUI_ALLOW_STDIO=1 ./bin/aura tui --demo 2>{{log}}
+    rm -f {{ log }}
+    echo "Starting TUI demo with logging to {{ log }}"
+    echo "After exiting, view logs with: grep -i ContactsSignalView {{ log }}"
+    RUST_LOG=aura_agent=info,aura_app=info,aura_terminal=info AURA_TUI_ALLOW_STDIO=1 ./bin/aura tui --demo 2>{{ log }}
 
 # Execute any aura CLI command
 aura *ARGS='--help':
-    @AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command cargo run --bin aura -- {{ARGS}}
+    @AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command cargo run --bin aura -- {{ ARGS }}
 
 # Show project metrics
 metrics:
