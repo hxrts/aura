@@ -103,13 +103,18 @@ pub async fn ensure_runtime_peer_connectivity(
     runtime: &Arc<dyn RuntimeBridge>,
     flow: &str,
 ) -> Result<(), AuraError> {
+    let sync_status = runtime.get_sync_status().await;
+    let connected_peers = sync_status.connected_peers;
     let sync_peers = runtime.get_sync_peers().await;
     let discovered_peers = runtime.get_discovered_peers().await;
     let lan_peers = runtime.get_lan_peers().await;
 
-    if sync_peers.is_empty() && discovered_peers.is_empty() && lan_peers.is_empty() {
+    if connected_peers == 0 {
         return Err(AuraError::agent(format!(
-            "Missing connectivity prerequisite for {flow}: sync_peers=0 discovered_peers=0 lan_peers=0"
+            "Missing connectivity prerequisite for {flow}: connected_peers={connected_peers} sync_peers={} discovered_peers={} lan_peers={}",
+            sync_peers.len(),
+            discovered_peers.len(),
+            lan_peers.len()
         )));
     }
 
@@ -121,8 +126,28 @@ mod tests {
     use super::ensure_runtime_peer_connectivity;
     use crate::runtime_bridge::{OfflineRuntimeBridge, RuntimeBridge};
     use aura_core::identifiers::AuthorityId;
+    use std::future::Future;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::task::{Context, Poll, Wake, Waker};
+
+    fn block_on<F: Future>(future: F) -> F::Output {
+        struct NoopWake;
+
+        impl Wake for NoopWake {
+            fn wake(self: Arc<Self>) {}
+        }
+
+        let waker = Waker::from(Arc::new(NoopWake));
+        let mut future = std::pin::pin!(future);
+        let mut context = Context::from_waker(&waker);
+        loop {
+            match future.as_mut().poll(&mut context) {
+                Poll::Ready(value) => return value,
+                Poll::Pending => std::thread::yield_now(),
+            }
+        }
+    }
 
     struct HarnessEnvGuard;
 
@@ -170,16 +195,12 @@ mod tests {
 
     #[test]
     fn connectivity_check_is_harness_mode_neutral() {
-        let runtime_handle = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("failed to build tokio runtime");
         let runtime: Arc<dyn RuntimeBridge> = Arc::new(OfflineRuntimeBridge::new(
             AuthorityId::new_from_entropy([9_u8; 32]),
         ));
 
         let normal = with_harness_mode_env(false, || {
-            runtime_handle.block_on(async {
+            block_on(async {
                 ensure_runtime_peer_connectivity(&runtime, "neutral_flow")
                     .await
                     .expect_err("offline runtime should fail without harness mode")
@@ -187,7 +208,7 @@ mod tests {
             })
         });
         let harness = with_harness_mode_env(true, || {
-            runtime_handle.block_on(async {
+            block_on(async {
                 ensure_runtime_peer_connectivity(&runtime, "neutral_flow")
                     .await
                     .expect_err("offline runtime should fail with harness mode")

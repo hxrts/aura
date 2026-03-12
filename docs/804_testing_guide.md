@@ -461,6 +461,13 @@ just ci-shared-flow-policy
 
 `just ci-shared-flow-policy` validates the shared-flow contract end to end. It checks that `aura-app` shared-flow support declarations are internally consistent, that every fully shared flow has explicit parity-scenario coverage, and that required shell and modal ids still exist. It confirms browser control and field mappings still line up with the shared contract and that core shared scenarios have not drifted back to raw mechanics.
 
+When shared flows export data through runtime events, the event payload is part
+of the contract. Invitation and device-enrollment code capture should come from
+`RuntimeFact` payloads in `UiSnapshot.runtime_events`, not clipboard scraping or
+frontend-local heuristics. Shared chat waits should likewise bind to semantic
+selection state so the harness targets the single shared channel instead of
+falling back to incidental render order.
+
 Use `just ci-ui-parity-contract` for the narrower parity gate. That lane validates shared screen/module mappings, shared-flow scenario coverage, and parity-manifest consistency without running a full scenario matrix.
 
 ## 11. Test Organization
@@ -603,6 +610,11 @@ artifacts/harness/browser/
 When debugging browser failures, check `web-serve.log` for bundle and runtime startup issues. Check `preflight_report.json` for browser prerequisites including Node, Playwright, and app URL. Check `timeout_diagnostics.json` for authoritative and normalized snapshots and per-instance log tails. Playwright screenshots and traces are stored under each instance `data_dir` in `playwright-artifacts/`.
 
 `timeout_diagnostics.json` is now the primary authoritative failure bundle. In addition to `UiSnapshot`, it should be treated as the first source for runtime event history through `runtime_events`. It contains operation lifecycle and instance ids. It provides render and readiness diagnostics along with browser and TUI backend log tails.
+
+For mixed-runtime debugging, inspect `runtime_events` before logs when a code
+exchange or chat handoff fails. The expected evidence is a typed event payload,
+the selected semantic target in the snapshot, and only then supporting browser
+or TUI render diagnostics.
 
 For browser runs, the harness observes the semantic state contract first and
 uses DOM/text fallbacks only for diagnostics. If semantic state and rendered UI

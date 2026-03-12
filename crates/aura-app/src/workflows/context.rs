@@ -21,15 +21,9 @@ use aura_core::{
     AuraError,
 };
 use std::sync::Arc;
-use std::time::Duration;
 
 use crate::workflows::signals::emit_signal;
 pub use crate::workflows::time::current_time_ms;
-
-#[cfg(not(target_arch = "wasm32"))]
-const LOCAL_FIRST_TIME_BUDGET_MS: u64 = 50;
-const LOCAL_FIRST_WRITE_ATTEMPTS: usize = 100;
-const LOCAL_FIRST_WRITE_RETRY_MS: u64 = 10;
 
 const MISSING_ACTIVE_HOME_MESSAGE: &str =
     "No active home selected. Open Neighborhood and create or select a home.";
@@ -104,23 +98,7 @@ async fn local_first_timestamp_ms(app_core: &Arc<RwLock<AppCore>>) -> u64 {
             .unwrap_or(0);
     }
 
-    #[cfg(target_arch = "wasm32")]
-    {
-        current_time_ms(app_core).await.unwrap_or(0)
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        match tokio::time::timeout(
-            Duration::from_millis(LOCAL_FIRST_TIME_BUDGET_MS),
-            current_time_ms(app_core),
-        )
-        .await
-        {
-            Ok(Ok(timestamp_ms)) => timestamp_ms,
-            Ok(Err(_)) | Err(_) => 0,
-        }
-    }
+    current_time_ms(app_core).await.unwrap_or(0)
 }
 
 /// Set active context for navigation and command targeting
@@ -440,20 +418,7 @@ async fn create_home_with_creator(
     );
 
     let (homes_state, neighborhood_state) = {
-        let mut maybe_core = None;
-        for attempt in 0..LOCAL_FIRST_WRITE_ATTEMPTS {
-            if let Some(core) = app_core.try_write() {
-                maybe_core = Some(core);
-                break;
-            }
-            if attempt + 1 < LOCAL_FIRST_WRITE_ATTEMPTS {
-                tokio::time::sleep(Duration::from_millis(LOCAL_FIRST_WRITE_RETRY_MS)).await;
-            }
-        }
-        let mut core = maybe_core.ok_or_else(|| {
-            AuraError::internal("local-first create_home timed out acquiring app core write lock")
-        })?;
-
+        let mut core = app_core.write().await;
         let mut homes = core.views().get_homes();
         let should_promote_to_primary = homes.is_empty()
             || homes
@@ -553,21 +518,7 @@ pub async fn ensure_local_home_projection(
     let timestamp_ms = local_first_timestamp_ms(app_core).await;
 
     let (homes_state, neighborhood_state) = {
-        let mut maybe_core = None;
-        for attempt in 0..LOCAL_FIRST_WRITE_ATTEMPTS {
-            if let Some(core) = app_core.try_write() {
-                maybe_core = Some(core);
-                break;
-            }
-            if attempt + 1 < LOCAL_FIRST_WRITE_ATTEMPTS {
-                tokio::time::sleep(Duration::from_millis(LOCAL_FIRST_WRITE_RETRY_MS)).await;
-            }
-        }
-        let mut core = maybe_core.ok_or_else(|| {
-            AuraError::internal(
-                "local-first ensure_local_home_projection timed out acquiring app core write lock",
-            )
-        })?;
+        let mut core = app_core.write().await;
         let mut homes = core.views().get_homes();
         if !homes.has_home(&home_id) {
             let mut home = HomeState::new(

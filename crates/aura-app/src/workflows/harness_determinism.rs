@@ -14,6 +14,7 @@ const HARNESS_INSTANCE_ID_KEY: &str = "AURA_HARNESS_INSTANCE_ID";
 const HARNESS_TIME_BASE_MS: u64 = 1_700_000_000_000;
 
 static HARNESS_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+#[allow(dead_code)]
 static NON_HARNESS_NONCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,6 +109,7 @@ pub async fn parity_timestamp_ms(
     current_time_ms(app_core).await
 }
 
+#[allow(dead_code)]
 pub fn parity_generated_nonce(scope: &str, components: &[&str]) -> u64 {
     if let Some(context) = harness_context() {
         let sequence = next_sequence();

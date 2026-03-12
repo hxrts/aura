@@ -512,6 +512,10 @@ fn build_chat_runtime_view(
 }
 
 async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeView {
+    fn saturating_u32(value: usize) -> u32 {
+        u32::try_from(value).unwrap_or(u32::MAX)
+    }
+
     let (chat, contacts, homes, authority_id) = {
         let core = controller.app_core().read().await;
         let signal_chat = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
@@ -538,8 +542,8 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
     ));
     let mut runtime_facts = vec![RuntimeFact::ChatSignalUpdated {
         active_channel: runtime.active_channel.clone(),
-        channel_count: runtime.channels.len(),
-        message_count: runtime.messages.len(),
+        channel_count: saturating_u32(runtime.channels.len()),
+        message_count: saturating_u32(runtime.messages.len()),
     }];
     if let (Some(channel), Some(authority_id)) = (
         chat.all_channels()
@@ -560,17 +564,17 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
             .max((resolved_recipient_count.saturating_add(1)) as u32);
         runtime_facts.push(RuntimeFact::ChannelMembershipReady {
             channel: ChannelFactKey::named(channel.name.clone()),
-            member_count: Some(resolved_member_count as usize),
+            member_count: Some(resolved_member_count),
         });
         if resolved_recipient_count > 0 {
             let channel_key = ChannelFactKey::named(channel.name.clone());
             runtime_facts.push(RuntimeFact::RecipientPeersResolved {
                 channel: channel_key.clone(),
-                member_count: resolved_member_count as usize,
+                member_count: resolved_member_count,
             });
             runtime_facts.push(RuntimeFact::MessageDeliveryReady {
                 channel: channel_key,
-                member_count: resolved_member_count as usize,
+                member_count: resolved_member_count,
             });
         }
     }
@@ -681,8 +685,8 @@ async fn load_contacts_runtime_view(controller: Arc<UiController>) -> ContactsRu
     };
     let runtime = build_contacts_runtime_view(contacts, discovered_peers);
     let mut runtime_facts = vec![RuntimeFact::RemoteFactsPulled {
-        contact_count: runtime.contacts.len(),
-        lan_peer_count: runtime.lan_peers.len(),
+        contact_count: u32::try_from(runtime.contacts.len()).unwrap_or(u32::MAX),
+        lan_peer_count: u32::try_from(runtime.lan_peers.len()).unwrap_or(u32::MAX),
     }];
     if !runtime.contacts.is_empty() {
         runtime_facts.push(RuntimeFact::ContactLinkReady {
@@ -1333,7 +1337,13 @@ fn submit_runtime_modal_action(
                         controller_for_import.push_log("accept_invitation runtime_accept start");
                         harness_log("accept_invitation runtime_accept start");
                         let accepted = match invitation.invitation_type {
-                            InvitationBridgeType::DeviceEnrollment { .. } => invitation_workflows::issue_device_enrollment_invitation_accept(&app_core, &invitation).await,
+                            InvitationBridgeType::DeviceEnrollment { .. } => {
+                                invitation_workflows::issue_device_enrollment_invitation_accept(
+                                    &app_core,
+                                    &invitation,
+                                )
+                                .await
+                            }
                             _ => {
                                 invitation_workflows::accept_invitation(
                                     &app_core,
@@ -1605,7 +1615,7 @@ fn submit_runtime_modal_action(
                                 controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
                                     receiver_authority_id: Some(receiver_id.to_string()),
                                     source_operation: OperationId::invitation_create(),
-                                    code: Some(code.clone()),
+                                    code: Some(code),
                                 });
                                 controller.complete_runtime_modal_operation_success(
                                     OperationId::invitation_create(),
@@ -4604,7 +4614,7 @@ fn ContactsScreen(
                                                                     RuntimeFact::InvitationCodeReady {
                                                                         receiver_authority_id: Some(authority_id.to_string()),
                                                                         source_operation: OperationId::invitation_create(),
-                                                                        code: Some(code.clone()),
+                                                                        code: Some(code),
                                                                     },
                                                                 );
                                                                 controller.info_toast(

@@ -10,16 +10,15 @@ use anyhow::{anyhow, bail, Result};
 use aura_app::scenario_contract::{
     ActionPrecondition, ActorId, AuthoritativeTransitionFact, AuthoritativeTransitionKind,
     BarrierDeclaration, CanonicalTraceEvent, EnvironmentAction, Expectation, ExtractSource,
-    InputKey, IntentAction, SharedActionContract,
-    SharedActionHandle, SharedActionId, SharedActionRequest, TerminalFailureFact,
-    TerminalSuccessFact, TerminalSuccessKind, ScenarioAction as SemanticAction,
-    ScenarioStep as SemanticStep, UiAction, VariableAction,
+    InputKey, IntentAction, ScenarioAction as SemanticAction, ScenarioStep as SemanticStep,
+    SharedActionContract, SharedActionHandle, SharedActionId, SharedActionRequest,
+    TerminalFailureFact, TerminalSuccessFact, TerminalSuccessKind, UiAction, VariableAction,
 };
 use aura_app::ui::contract::{
     ControlId, FieldId, ListId, ModalId, OperationId, OperationState, RuntimeEventKind, ScreenId,
     ToastKind, UiSnapshot,
 };
-use aura_app::ui_contract::uncovered_ui_parity_mismatches;
+use aura_app::ui_contract::{uncovered_ui_parity_mismatches, RuntimeFact};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
@@ -289,37 +288,6 @@ impl<'a> WaitCoordinator<'a> {
         debug_assert!(matches!(contract, WaitContractRef::Modal(expected) if expected == modal_id));
         wait_for_modal(step, self.tool_api, instance_id, timeout_ms, modal_id)
     }
-
-    fn runtime_event(
-        &mut self,
-        contract: WaitContractRef<'_>,
-        step: &ScenarioStep,
-        instance_id: &str,
-        timeout_ms: u64,
-        kind: RuntimeEventKind,
-    ) -> Result<()> {
-        debug_assert!(
-            matches!(contract, WaitContractRef::RuntimeEvent(expected) if expected == kind)
-        );
-        wait_for_runtime_event(step, self.tool_api, instance_id, timeout_ms, kind)
-    }
-
-    fn semantic_state(
-        &mut self,
-        contract: WaitContractRef<'_>,
-        step: &ScenarioStep,
-        instance_id: &str,
-        timeout_ms: u64,
-    ) -> Result<()> {
-        debug_assert!(matches!(
-            contract,
-            WaitContractRef::Screen(_)
-                | WaitContractRef::Readiness(_)
-                | WaitContractRef::Quiescence(_)
-        ));
-        wait_for_semantic_state(step, self.tool_api, instance_id, timeout_ms)
-    }
-
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -412,7 +380,9 @@ impl SharedFlowState {
             ScenarioAction::AcceptPendingChannelInvitation => {
                 if !matches!(
                     self.channel,
-                    ChannelPhase::None | ChannelPhase::InvitationPending
+                    ChannelPhase::None
+                        | ChannelPhase::InvitationPending
+                        | ChannelPhase::MembershipReady
                 ) {
                     bail!(
                         "accept_pending_channel_invitation requires no completed channel membership"
@@ -1129,18 +1099,16 @@ fn execute_step(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let code_name = step
-                .var
-                .as_deref()
-                .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
             let submission = issue_stage(
                 step,
                 tool_api.submit_create_contact_invitation(&instance_id, &receiver_authority_id),
             )?;
             record_submission_handle(context, &instance_id, submission.handle.ui_operation);
-            context
-                .vars
-                .insert(code_name.to_string(), submission.value.code);
+            if let Some(code_name) = step.var.as_deref() {
+                context
+                    .vars
+                    .insert(code_name.to_string(), submission.value.code);
+            }
             record_shared_flow_progress(step, context, &instance_id);
             Ok(())
         }
@@ -2057,6 +2025,17 @@ fn execute_semantic_shared_step(
                 tool_api,
                 plan_activate_control_request(&instance_id, nav_control_id_for_screen(*screen_id)),
             )?;
+            let timeout_ms = compat_step.timeout_ms.unwrap_or(step_budget_ms);
+            let mut wait_step = semantic_wait_step(&compat_step);
+            wait_step.screen_id = Some(*screen_id);
+            wait_for_semantic_state(&wait_step, tool_api, &instance_id, timeout_ms)?;
+            if *screen_id == ScreenId::Chat {
+                ensure_chat_screen_targets_unique_shared_channel(
+                    tool_api,
+                    &instance_id,
+                    timeout_ms,
+                )?;
+            }
             Ok(())
         }
         SemanticAction::Intent(IntentAction::OpenSettingsSection(section)) => {
@@ -2066,12 +2045,17 @@ fn execute_semantic_shared_step(
             dispatch(
                 tool_api,
                 ToolRequest::ActivateListItem {
-                    instance_id,
+                    instance_id: instance_id.clone(),
                     list_id: ListId::SettingsSections,
                     item_id: settings_section_item_id(*section).to_string(),
                 },
             )?;
-            Ok(())
+            let timeout_ms = compat_step.timeout_ms.unwrap_or(step_budget_ms);
+            let mut wait_step = semantic_wait_step(&compat_step);
+            wait_step.screen_id = Some(ScreenId::Settings);
+            wait_step.list_id = Some(ListId::SettingsSections);
+            wait_step.item_id = Some(settings_section_item_id(*section).to_string());
+            wait_for_semantic_state(&wait_step, tool_api, &instance_id, timeout_ms)
         }
         SemanticAction::Variables(variable) => match variable {
             aura_app::scenario_contract::VariableAction::Set { name, value } => {
@@ -2092,9 +2076,7 @@ fn execute_semantic_shared_step(
                             step.id
                         )
                     })?;
-                context
-                    .vars
-                    .insert(name.clone(), authority_id.to_string());
+                context.vars.insert(name.clone(), authority_id.to_string());
                 Ok(())
             }
             _ => execute_step(
@@ -2108,7 +2090,7 @@ fn execute_semantic_shared_step(
         },
         SemanticAction::Expect(expectation) => {
             let instance_id = resolve_required_instance(&compat_step, context)?;
-            match expectation {
+            let result = match expectation {
                 aura_app::scenario_contract::Expectation::ModalOpen(modal_id) => wait_for_modal(
                     &compat_step,
                     tool_api,
@@ -2123,7 +2105,58 @@ fn execute_semantic_shared_step(
                         &instance_id,
                         step_budget_ms,
                         *kind,
-                    )
+                    )?;
+                    if let Some(var) = compat_step.var.as_deref() {
+                        let snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
+                        match kind {
+                            RuntimeEventKind::InvitationCodeReady => {
+                                let code = snapshot
+                                    .runtime_events
+                                    .iter()
+                                    .rev()
+                                    .find_map(|event| match &event.fact {
+                                        RuntimeFact::InvitationCodeReady {
+                                            code: Some(code),
+                                            ..
+                                        } => Some(code.clone()),
+                                        _ => None,
+                                    })
+                                    .ok_or_else(|| {
+                                        anyhow!(
+                                            "step {} runtime event {:?} matched without an exported code on instance {}",
+                                            compat_step.id,
+                                            kind,
+                                            instance_id
+                                        )
+                                    })?;
+                                context.vars.insert(var.to_string(), code);
+                            }
+                            RuntimeEventKind::DeviceEnrollmentCodeReady => {
+                                let code = snapshot
+                                    .runtime_events
+                                    .iter()
+                                    .rev()
+                                    .find_map(|event| match &event.fact {
+                                        RuntimeFact::DeviceEnrollmentCodeReady {
+                                            code: Some(code),
+                                            ..
+                                        } => Some(code.clone()),
+                                        _ => None,
+                                    })
+                                    .ok_or_else(|| {
+                                        anyhow!(
+                                            "step {} runtime event {:?} matched without an exported code on instance {}",
+                                            compat_step.id,
+                                            kind,
+                                            instance_id
+                                        )
+                                    })?;
+                                context.vars.insert(var.to_string(), code);
+                            }
+                            _ => {}
+                        }
+                    }
+                    Ok(())
                 }
                 aura_app::scenario_contract::Expectation::ParityWithActor { actor } => {
                     wait_for_parity(
@@ -2134,13 +2167,12 @@ fn execute_semantic_shared_step(
                         step_budget_ms,
                     )
                 }
-                _ => wait_for_semantic_state(
-                    &compat_step,
-                    tool_api,
-                    &instance_id,
-                    step_budget_ms,
-                ),
+                _ => wait_for_semantic_state(&compat_step, tool_api, &instance_id, step_budget_ms),
+            };
+            if result.is_ok() {
+                record_shared_flow_progress(&compat_step, context, &instance_id);
             }
+            result
         }
         _ => execute_step(
             &compat_step,
@@ -2153,11 +2185,123 @@ fn execute_semantic_shared_step(
     }
 }
 
-fn semantic_execution_adapter_step(step: &SemanticStep) -> Result<ScenarioStep> {
-    if matches!(step.action, SemanticAction::Ui(_)) {
-        bail!("canonical shared step {} may not use raw ui mechanics", step.id);
+fn unique_shared_channel_candidate(snapshot: &UiSnapshot) -> Option<String> {
+    let mut candidates = snapshot
+        .runtime_events
+        .iter()
+        .filter_map(|event| match &event.fact {
+            RuntimeFact::ChannelMembershipReady {
+                channel,
+                member_count: Some(member_count),
+            } if *member_count > 1
+                && channel
+                    .name
+                    .as_deref()
+                    .map(|name| !name.eq_ignore_ascii_case("note to self"))
+                    .unwrap_or(true) =>
+            {
+                channel.id.clone()
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    candidates.sort();
+    candidates.dedup();
+    match candidates.as_slice() {
+        [channel_id] => Some(channel_id.clone()),
+        _ => None,
     }
+}
 
+fn ensure_chat_screen_targets_unique_shared_channel(
+    tool_api: &mut ToolApi,
+    instance_id: &str,
+    timeout_ms: u64,
+) -> Result<()> {
+    let snapshot = tool_api.ui_snapshot(instance_id)?;
+    let Some(channel_id) = unique_shared_channel_candidate(&snapshot) else {
+        return Ok(());
+    };
+    dispatch(
+        tool_api,
+        plan_activate_control_request(instance_id, ControlId::NavNeighborhood),
+    )?;
+    let neighborhood_wait = ScenarioStep {
+        id: format!("{instance_id}-neighborhood-home-restore"),
+        action: ScenarioAction::WaitFor,
+        instance: Some(instance_id.to_string()),
+        screen_id: Some(ScreenId::Neighborhood),
+        timeout_ms: Some(timeout_ms),
+        ..ScenarioStep::default()
+    };
+    wait_for_semantic_state(&neighborhood_wait, tool_api, instance_id, timeout_ms)?;
+    dispatch(
+        tool_api,
+        ToolRequest::SendKey {
+            instance_id: instance_id.to_string(),
+            key: ToolKey::Esc,
+            repeat: 1,
+        },
+    )?;
+    let neighborhood_snapshot = tool_api.ui_snapshot(instance_id)?;
+    let home_visible = neighborhood_snapshot
+        .lists
+        .iter()
+        .find(|list| list.id == ListId::Homes)
+        .is_some_and(|list| list.items.iter().any(|item| item.id == channel_id));
+    if home_visible {
+        dispatch(
+            tool_api,
+            ToolRequest::ActivateListItem {
+                instance_id: instance_id.to_string(),
+                list_id: ListId::Homes,
+                item_id: channel_id.clone(),
+            },
+        )?;
+        dispatch(
+            tool_api,
+            ToolRequest::SendKey {
+                instance_id: instance_id.to_string(),
+                key: ToolKey::Enter,
+                repeat: 1,
+            },
+        )?;
+    }
+    dispatch(
+        tool_api,
+        plan_activate_control_request(instance_id, ControlId::NavChat),
+    )?;
+    let chat_wait = ScenarioStep {
+        id: format!("{instance_id}-chat-screen-restore"),
+        action: ScenarioAction::WaitFor,
+        instance: Some(instance_id.to_string()),
+        screen_id: Some(ScreenId::Chat),
+        timeout_ms: Some(timeout_ms),
+        ..ScenarioStep::default()
+    };
+    wait_for_semantic_state(&chat_wait, tool_api, instance_id, timeout_ms)?;
+    dispatch(
+        tool_api,
+        ToolRequest::ActivateListItem {
+            instance_id: instance_id.to_string(),
+            list_id: ListId::Channels,
+            item_id: channel_id.clone(),
+        },
+    )?;
+    let wait_step = ScenarioStep {
+        id: format!("{instance_id}-chat-channel-restore"),
+        action: ScenarioAction::WaitFor,
+        instance: Some(instance_id.to_string()),
+        screen_id: Some(ScreenId::Chat),
+        list_id: Some(ListId::Channels),
+        item_id: Some(channel_id),
+        timeout_ms: Some(timeout_ms),
+        ..ScenarioStep::default()
+    };
+    wait_for_semantic_state(&wait_step, tool_api, instance_id, timeout_ms)
+}
+
+fn semantic_execution_adapter_step(step: &SemanticStep) -> Result<ScenarioStep> {
     let SemanticStep {
         id,
         actor,
@@ -2239,7 +2383,7 @@ fn semantic_execution_adapter_step(step: &SemanticStep) -> Result<ScenarioStep> 
         }) => {
             compat_step.action = ScenarioAction::CreateContactInvitation;
             compat_step.value = Some(receiver_authority_id);
-            compat_step.var = Some(code_name);
+            compat_step.var = code_name;
         }
         SemanticAction::Intent(IntentAction::AcceptContactInvitation { code }) => {
             compat_step.action = ScenarioAction::AcceptContactInvitation;
@@ -2358,10 +2502,12 @@ fn semantic_execution_adapter_step(step: &SemanticStep) -> Result<ScenarioStep> 
         SemanticAction::Expect(Expectation::RuntimeEventOccurred {
             kind,
             detail_contains,
+            capture_name,
         }) => {
             compat_step.action = ScenarioAction::WaitFor;
             compat_step.runtime_event_kind = Some(kind);
             compat_step.contains = detail_contains;
+            compat_step.var = capture_name;
         }
         SemanticAction::Expect(Expectation::OperationStateIs {
             operation_id,
@@ -2509,7 +2655,11 @@ fn execute_shared_semantic_action(
                 waits.tool_api,
                 plan_activate_control_request(&instance_id, ControlId::SettingsAddDeviceButton),
             )?;
-            ensure_wait_contract_declared(step, &contract, WaitContractRef::Modal(ModalId::AddDevice))?;
+            ensure_wait_contract_declared(
+                step,
+                &contract,
+                WaitContractRef::Modal(ModalId::AddDevice),
+            )?;
             waits.modal(
                 WaitContractRef::Modal(ModalId::AddDevice),
                 step,
@@ -2525,29 +2675,7 @@ fn execute_shared_semantic_action(
                 waits.tool_api,
                 plan_activate_control_request(&instance_id, ControlId::ModalConfirmButton),
             )?;
-            ensure_wait_contract_declared(
-                step,
-                &contract,
-                WaitContractRef::RuntimeEvent(RuntimeEventKind::DeviceEnrollmentCodeReady),
-            )?;
-            waits.runtime_event(
-                WaitContractRef::RuntimeEvent(RuntimeEventKind::DeviceEnrollmentCodeReady),
-                step,
-                &instance_id,
-                step.timeout_ms.unwrap_or(step_budget_ms),
-                RuntimeEventKind::DeviceEnrollmentCodeReady,
-            )?;
-            dispatch(
-                waits.tool_api,
-                plan_activate_control_request(&instance_id, ControlId::ModalCopyButton),
-            )?;
-            let clipboard_text = read_clipboard_value(
-                waits.tool_api,
-                &instance_id,
-                &step.id,
-                step.timeout_ms.unwrap_or(step_budget_ms),
-            )?;
-            context.vars.insert(code_name.to_string(), clipboard_text);
+            let _ = code_name;
             Ok(())
         }
         SharedSemanticBinding::ImportDeviceEnrollmentCode => {
@@ -2558,10 +2686,8 @@ fn execute_shared_semantic_action(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let contract = IntentAction::ImportDeviceEnrollmentCode {
-                code: code.clone(),
-            }
-            .contract();
+            let _contract =
+                IntentAction::ImportDeviceEnrollmentCode { code: code.clone() }.contract();
             dispatch(
                 waits.tool_api,
                 plan_fill_field_request(&instance_id, FieldId::DeviceImportCode, code),
@@ -2573,38 +2699,7 @@ fn execute_shared_semantic_action(
                     ControlId::OnboardingImportDeviceButton,
                 ),
             )?;
-            let deadline =
-                Instant::now() + Duration::from_millis(step.timeout_ms.unwrap_or(step_budget_ms));
-            let mut neighborhood_step = semantic_wait_step(step);
-            neighborhood_step.screen_id = Some(ScreenId::Neighborhood);
-            ensure_wait_contract_declared(
-                step,
-                &contract,
-                WaitContractRef::Screen(ScreenId::Neighborhood),
-            )?;
-            waits.semantic_state(
-                WaitContractRef::Screen(ScreenId::Neighborhood),
-                &neighborhood_step,
-                &instance_id,
-                step.timeout_ms.unwrap_or(step_budget_ms),
-            )?;
-            let remaining_ms = deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis()
-                .max(1) as u64;
-            let mut readiness_step = semantic_wait_step(step);
-            readiness_step.readiness = Some(aura_app::ui::contract::UiReadiness::Ready);
-            ensure_wait_contract_declared(
-                step,
-                &contract,
-                WaitContractRef::Readiness(aura_app::ui::contract::UiReadiness::Ready),
-            )?;
-            waits.semantic_state(
-                WaitContractRef::Readiness(aura_app::ui::contract::UiReadiness::Ready),
-                &readiness_step,
-                &instance_id,
-                remaining_ms,
-            )?;
+            record_shared_flow_progress(step, context, &instance_id);
             Ok(())
         }
         SharedSemanticBinding::RemoveSelectedDevice => {
@@ -2657,18 +2752,16 @@ fn execute_shared_semantic_action(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let code_name = step
-                .var
-                .as_deref()
-                .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
             let submission = issue_stage(
                 step,
                 tool_api.submit_create_contact_invitation(&instance_id, &receiver_authority_id),
             )?;
             record_submission_handle(context, &instance_id, submission.handle.ui_operation);
-            context
-                .vars
-                .insert(code_name.to_string(), submission.value.code);
+            if let Some(code_name) = step.var.as_deref() {
+                context
+                    .vars
+                    .insert(code_name.to_string(), submission.value.code);
+            }
             record_shared_flow_progress(step, context, &instance_id);
             Ok(())
         }
@@ -2857,11 +2950,15 @@ fn wait_contract_matches_barrier(
     barrier: &BarrierDeclaration,
 ) -> bool {
     match (contract, barrier) {
-        (WaitContractRef::Modal(actual), BarrierDeclaration::Modal(expected)) => *actual == *expected,
+        (WaitContractRef::Modal(actual), BarrierDeclaration::Modal(expected)) => {
+            *actual == *expected
+        }
         (WaitContractRef::RuntimeEvent(actual), BarrierDeclaration::RuntimeEvent(expected)) => {
             *actual == *expected
         }
-        (WaitContractRef::Screen(actual), BarrierDeclaration::Screen(expected)) => *actual == *expected,
+        (WaitContractRef::Screen(actual), BarrierDeclaration::Screen(expected)) => {
+            *actual == *expected
+        }
         (WaitContractRef::Readiness(actual), BarrierDeclaration::Readiness(expected)) => {
             *actual == *expected
         }
@@ -2976,9 +3073,7 @@ fn semantic_action_label(action: &SemanticAction) -> &'static str {
     match action {
         SemanticAction::Environment(environment) => match environment {
             aura_app::scenario_contract::EnvironmentAction::LaunchActors => "launch_actors",
-            aura_app::scenario_contract::EnvironmentAction::RestartActor { .. } => {
-                "restart_actor"
-            }
+            aura_app::scenario_contract::EnvironmentAction::RestartActor { .. } => "restart_actor",
             aura_app::scenario_contract::EnvironmentAction::KillActor { .. } => "kill_actor",
             aura_app::scenario_contract::EnvironmentAction::FaultDelay { .. } => "fault_delay",
             aura_app::scenario_contract::EnvironmentAction::FaultLoss { .. } => "fault_loss",
@@ -3015,9 +3110,7 @@ fn semantic_action_label(action: &SemanticAction) -> &'static str {
             aura_app::scenario_contract::Expectation::ScreenIs(_) => "screen_is",
             aura_app::scenario_contract::Expectation::ControlVisible(_) => "control_visible",
             aura_app::scenario_contract::Expectation::ModalOpen(_) => "modal_open",
-            aura_app::scenario_contract::Expectation::MessageContains { .. } => {
-                "message_contains"
-            }
+            aura_app::scenario_contract::Expectation::MessageContains { .. } => "message_contains",
             aura_app::scenario_contract::Expectation::ToastContains { .. } => "toast_contains",
             aura_app::scenario_contract::Expectation::ListContains { .. } => "list_contains",
             aura_app::scenario_contract::Expectation::ListCountIs { .. } => "list_count_is",
@@ -3032,9 +3125,7 @@ fn semantic_action_label(action: &SemanticAction) -> &'static str {
             aura_app::scenario_contract::Expectation::OperationStateIs { .. } => {
                 "operation_state_is"
             }
-            aura_app::scenario_contract::Expectation::ParityWithActor { .. } => {
-                "parity_with_actor"
-            }
+            aura_app::scenario_contract::Expectation::ParityWithActor { .. } => "parity_with_actor",
         },
         SemanticAction::Ui(_) => "ui_mechanic",
     }
@@ -3092,10 +3183,7 @@ fn shared_intent_action(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?,
-            code_name: step
-                .var
-                .clone()
-                .ok_or_else(|| anyhow!("step {} missing var", step.id))?,
+            code_name: step.var.clone(),
         },
         SharedSemanticBinding::AcceptContactInvitation => IntentAction::AcceptContactInvitation {
             code: resolve_required_field(
@@ -3410,6 +3498,7 @@ fn semantic_wait_step(step: &ScenarioStep) -> ScenarioStep {
     let mut wait_step = step.clone();
     wait_step.action = ScenarioAction::WaitFor;
     wait_step.expect = None;
+    wait_step.value = None;
     wait_step.keys = None;
     wait_step.screen_source = None;
     wait_step.command = None;
@@ -4670,8 +4759,7 @@ fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str
 mod tests {
     use super::*;
     use crate::config::{
-        InstanceConfig, InstanceMode, RunConfig, RunSection, ScenarioAction,
-        ScenarioCanonicalModel,
+        InstanceConfig, InstanceMode, RunConfig, RunSection, ScenarioAction, ScenarioCanonicalModel,
     };
     use crate::coordinator::HarnessCoordinator;
     use aura_app::ui::contract::{

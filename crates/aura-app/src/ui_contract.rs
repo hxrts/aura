@@ -310,9 +310,9 @@ pub const fn settings_section_item_id(surface: SettingsSectionSurfaceId) -> &'st
         }
         SettingsSectionSurfaceId::Shared(SharedSettingsSectionId::Devices) => "devices",
         SettingsSectionSurfaceId::Shared(SharedSettingsSectionId::Authority) => "authority",
-        SettingsSectionSurfaceId::FrontendSpecific(FrontendSpecificSettingsSectionId::Appearance) => {
-            "appearance"
-        }
+        SettingsSectionSurfaceId::FrontendSpecific(
+            FrontendSpecificSettingsSectionId::Appearance,
+        ) => "appearance",
         SettingsSectionSurfaceId::FrontendSpecific(FrontendSpecificSettingsSectionId::Info) => {
             "info"
         }
@@ -328,16 +328,12 @@ pub fn classify_settings_section_item_id(item_id: &str) -> Option<SettingsSectio
         "profile" => Some(SettingsSectionSurfaceId::Shared(
             SharedSettingsSectionId::Profile,
         )),
-        "guardian-threshold" => {
-            Some(SettingsSectionSurfaceId::Shared(
-                SharedSettingsSectionId::GuardianThreshold,
-            ))
-        }
-        "request-recovery" => {
-            Some(SettingsSectionSurfaceId::Shared(
-                SharedSettingsSectionId::RequestRecovery,
-            ))
-        }
+        "guardian-threshold" => Some(SettingsSectionSurfaceId::Shared(
+            SharedSettingsSectionId::GuardianThreshold,
+        )),
+        "request-recovery" => Some(SettingsSectionSurfaceId::Shared(
+            SharedSettingsSectionId::RequestRecovery,
+        )),
         "devices" => Some(SettingsSectionSurfaceId::Shared(
             SharedSettingsSectionId::Devices,
         )),
@@ -713,11 +709,13 @@ pub enum RuntimeFact {
     InvitationCodeReady {
         receiver_authority_id: Option<String>,
         source_operation: OperationId,
+        code: Option<String>,
     },
     PendingHomeInvitationReady,
     DeviceEnrollmentCodeReady {
         device_name: Option<String>,
         code_len: Option<usize>,
+        code: Option<String>,
     },
     ContactLinkReady {
         authority_id: Option<String>,
@@ -736,11 +734,11 @@ pub enum RuntimeFact {
     },
     ChannelMembershipReady {
         channel: ChannelFactKey,
-        member_count: Option<usize>,
+        member_count: Option<u32>,
     },
     RecipientPeersResolved {
         channel: ChannelFactKey,
-        member_count: usize,
+        member_count: u32,
     },
     MessageCommitted {
         channel: ChannelFactKey,
@@ -748,16 +746,16 @@ pub enum RuntimeFact {
     },
     MessageDeliveryReady {
         channel: ChannelFactKey,
-        member_count: usize,
+        member_count: u32,
     },
     RemoteFactsPulled {
-        contact_count: usize,
-        lan_peer_count: usize,
+        contact_count: u32,
+        lan_peer_count: u32,
     },
     ChatSignalUpdated {
         active_channel: String,
-        channel_count: usize,
-        message_count: usize,
+        channel_count: u32,
+        message_count: u32,
     },
 }
 
@@ -796,6 +794,7 @@ impl RuntimeFact {
             Self::InvitationCodeReady {
                 receiver_authority_id,
                 source_operation,
+                ..
             } => format!(
                 "invitation_code_ready:{}:{}",
                 source_operation.0,
@@ -884,21 +883,25 @@ impl RuntimeFact {
             Self::InvitationCodeReady {
                 receiver_authority_id,
                 source_operation,
+                code,
             } => {
                 receiver_authority_id
                     .as_deref()
                     .is_some_and(|value| value.contains(needle))
                     || source_operation.0.contains(needle)
+                    || code.as_deref().is_some_and(|value| value.contains(needle))
             }
             Self::PendingHomeInvitationReady => needle.contains("pending_home_invitation"),
             Self::DeviceEnrollmentCodeReady {
                 device_name,
                 code_len,
+                code,
             } => {
                 device_name
                     .as_deref()
                     .is_some_and(|value| value.contains(needle))
                     || code_len.is_some_and(|value| value.to_string().contains(needle))
+                    || code.as_deref().is_some_and(|value| value.contains(needle))
             }
             Self::ContactLinkReady {
                 authority_id,
@@ -2725,25 +2728,22 @@ mod tests {
     use super::next_projection_revision;
     use super::{
         classify_settings_section_item_id, compare_ui_snapshots_for_parity, list_item_dom_id,
-        list_item_selector, settings_section_item_id,
-        shared_flow_scenarios, shared_flow_source_areas, shared_list_support,
-        shared_modal_support, shared_screen_module_map, shared_screen_support,
-        uncovered_ui_parity_mismatches, validate_harness_shell_structure,
-        validate_render_convergence,
+        list_item_selector, settings_section_item_id, shared_flow_scenarios,
+        shared_flow_source_areas, shared_list_support, shared_modal_support,
+        shared_screen_module_map, shared_screen_support, uncovered_ui_parity_mismatches,
+        validate_harness_shell_structure, validate_render_convergence,
         BrowserHarnessBridgeMethodKind, ChannelFactKey, ConfirmationState, ControlId, FieldId,
         FlowAvailability, FrontendExecutionBoundaryKind, FrontendSpecificSettingsSectionId,
         HarnessModeChangeKind, HarnessShellMode, HarnessShellStructureSnapshot, ListId,
-        ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId, OperationId,
-        OperationInstanceId, OperationSnapshot, OperationState,
-        ParityUiIdentity, ProjectionRevision, QuiescenceSnapshot, RenderHeartbeat,
-        RuntimeEventId, RuntimeEventSnapshot, RuntimeFact, ScreenId, SelectionSnapshot,
-        SettingsSectionSurfaceId, SharedSettingsSectionId, ToastId, ToastKind,
-        ToastSnapshot, UiParityMismatch,
-        UiReadiness, UiSnapshot, FRONTEND_SPECIFIC_SETTINGS_SECTIONS,
-        PARITY_CRITICAL_SETTINGS_SECTIONS,
-        ALL_SHARED_FLOW_IDS, BROWSER_CACHE_BOUNDARIES, BROWSER_HARNESS_BRIDGE_METHODS,
+        ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId,
+        OperationSnapshot, OperationState, ParityUiIdentity, ProjectionRevision,
+        QuiescenceSnapshot, RenderHeartbeat, RuntimeEventId, RuntimeEventSnapshot, RuntimeFact,
+        ScreenId, SelectionSnapshot, SettingsSectionSurfaceId, SharedSettingsSectionId, ToastId,
+        ToastKind, ToastSnapshot, UiParityMismatch, UiReadiness, UiSnapshot, ALL_SHARED_FLOW_IDS,
+        BROWSER_CACHE_BOUNDARIES, BROWSER_HARNESS_BRIDGE_METHODS,
         BROWSER_OBSERVATION_SURFACE_GLOBAL, BROWSER_OBSERVATION_SURFACE_METHODS,
-        FRONTEND_EXECUTION_BOUNDARIES, HARNESS_MODE_ALLOWLIST, PARITY_EXCEPTION_METADATA,
+        FRONTEND_EXECUTION_BOUNDARIES, FRONTEND_SPECIFIC_SETTINGS_SECTIONS, HARNESS_MODE_ALLOWLIST,
+        PARITY_CRITICAL_SETTINGS_SECTIONS, PARITY_EXCEPTION_METADATA,
         SHARED_FLOW_SCENARIO_COVERAGE, SHARED_FLOW_SOURCE_AREAS, SHARED_FLOW_SUPPORT,
         SHARED_LIST_SUPPORT, SHARED_MODAL_SUPPORT, SHARED_SCREEN_MODULE_MAP, SHARED_SCREEN_SUPPORT,
         TUI_OBSERVATION_SURFACE_METHODS,
@@ -2997,9 +2997,10 @@ mod tests {
             repo_root.join("crates/aura-harness/playwright-driver/playwright_driver.mjs");
         let local_pty_path = repo_root.join("crates/aura-harness/src/backend/local_pty.rs");
 
-        let harness_bridge = std::fs::read_to_string(&harness_bridge_path).unwrap_or_else(|error| {
-            panic!("failed to read {}: {error}", harness_bridge_path.display())
-        });
+        let harness_bridge =
+            std::fs::read_to_string(&harness_bridge_path).unwrap_or_else(|error| {
+                panic!("failed to read {}: {error}", harness_bridge_path.display())
+            });
         let driver = std::fs::read_to_string(&driver_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", driver_path.display()));
         let local_pty = std::fs::read_to_string(&local_pty_path)
@@ -3010,8 +3011,7 @@ mod tests {
             "browser harness bridge must not repair stale onboarding publications"
         );
         assert!(
-            !driver.contains("staleOnboardingCache")
-                && !driver.contains("stale_onboarding_"),
+            !driver.contains("staleOnboardingCache") && !driver.contains("stale_onboarding_"),
             "playwright driver must not carry stale-onboarding recovery heuristics"
         );
         assert!(
@@ -3588,8 +3588,7 @@ mod tests {
         };
 
         assert_eq!(
-            validate_harness_shell_structure(&shell)
-                .expect("single app shell should be valid"),
+            validate_harness_shell_structure(&shell).expect("single app shell should be valid"),
             HarnessShellMode::App
         );
     }
@@ -3715,11 +3714,14 @@ mod tests {
         }
 
         for frontend_specific in FRONTEND_SPECIFIC_SETTINGS_SECTIONS {
-            let item_id =
-                settings_section_item_id(SettingsSectionSurfaceId::FrontendSpecific(*frontend_specific));
+            let item_id = settings_section_item_id(SettingsSectionSurfaceId::FrontendSpecific(
+                *frontend_specific,
+            ));
             assert_eq!(
                 classify_settings_section_item_id(item_id),
-                Some(SettingsSectionSurfaceId::FrontendSpecific(*frontend_specific))
+                Some(SettingsSectionSurfaceId::FrontendSpecific(
+                    *frontend_specific
+                ))
             );
         }
     }
@@ -3731,12 +3733,10 @@ mod tests {
         let tui_types_path = repo_root.join("crates/aura-terminal/src/tui/types.rs");
         let tui_export_path = repo_root.join("crates/aura-terminal/src/tui/harness_state.rs");
 
-        let web_model = std::fs::read_to_string(&web_model_path).unwrap_or_else(|error| {
-            panic!("failed to read {}: {error}", web_model_path.display())
-        });
-        let tui_types = std::fs::read_to_string(&tui_types_path).unwrap_or_else(|error| {
-            panic!("failed to read {}: {error}", tui_types_path.display())
-        });
+        let web_model = std::fs::read_to_string(&web_model_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", web_model_path.display()));
+        let tui_types = std::fs::read_to_string(&tui_types_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", tui_types_path.display()));
         let tui_export = std::fs::read_to_string(&tui_export_path).unwrap_or_else(|error| {
             panic!("failed to read {}: {error}", tui_export_path.display())
         });

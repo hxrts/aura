@@ -322,16 +322,13 @@ async fn try_join_via_pending_channel_invitation(
         }
     }
 
-    for attempt in 0..16 {
+    for _ in 0..4 {
         converge_runtime(&runtime).await;
         if ensure_runtime_peer_connectivity(&runtime, "accept_pending_channel_invitation")
             .await
             .is_ok()
         {
             break;
-        }
-        if attempt + 1 < 16 {
-            runtime.sleep_ms(250).await;
         }
     }
 
@@ -2144,8 +2141,7 @@ pub async fn invite_authority_to_channel(
     }
     let bootstrap = maybe_bootstrap.ok_or_else(|| {
         AuraError::agent(format!(
-            "Failed to bootstrap channel invitation after {} retries: channel state not found",
-            AMP_SEND_RETRY_ATTEMPTS
+            "Failed to bootstrap channel invitation after {AMP_SEND_RETRY_ATTEMPTS} retries: channel state not found"
         ))
     })?;
 

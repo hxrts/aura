@@ -15,7 +15,8 @@ use aura_app::ui::signals::{
     INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL,
     SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
 };
-use aura_app::ui::types::ChatState;
+use aura_app::ui::types::{ChatState, ContactsState, HomesState};
+use aura_app::ui::workflows::messaging as messaging_workflows;
 use aura_app::ui_contract::{ChannelFactKey, RuntimeEventKind, RuntimeFact};
 use aura_core::AuthorityId;
 
@@ -469,6 +470,7 @@ fn merge_dm_like_channels(incoming: &ChatState, previous: &ChatState) -> ChatSta
     merged
 }
 
+#[cfg(test)]
 fn scoped_channel_snapshot(
     chat_state: &ChatState,
     active_scope: Option<&str>,
@@ -488,35 +490,62 @@ fn publish_scoped_channels(
     last_channel_count: &Arc<AtomicUsize>,
     last_message_count: &Arc<AtomicUsize>,
     last_channel_signature: &Arc<RwLock<Option<String>>>,
+    _transport_peer_count: usize,
+    self_authority: Option<AuthorityId>,
+    homes_state: &HomesState,
+    contacts_state: &ContactsState,
     chat_state: &ChatState,
     active_scope: Option<&str>,
 ) {
-    let (channel_list, message_count) = scoped_channel_snapshot(chat_state, active_scope);
+    let scoped = scoped_channels(chat_state, active_scope);
+    let message_count = scoped
+        .iter()
+        .map(|channel| chat_state.messages_for_channel(&channel.id).len())
+        .sum();
+    let channel_list: Vec<Channel> = scoped.iter().copied().map(Channel::from).collect();
     let channel_count = channel_list.len();
     let channel_signature = channel_list
         .iter()
         .map(|channel| channel.id.as_str())
         .collect::<Vec<_>>()
         .join("|");
-    let runtime_facts = channel_list
+    let runtime_facts = scoped
         .iter()
         .flat_map(|channel| {
             let channel_fact = ChannelFactKey {
-                id: Some(channel.id.clone()),
+                id: Some(channel.id.to_string()),
                 name: Some(channel.name.clone()),
             };
+            let resolved_recipient_count = self_authority
+                .map(|authority_id| {
+                    messaging_workflows::resolved_recipient_peers_for_channel_view(
+                        channel,
+                        homes_state,
+                        contacts_state,
+                        &[],
+                        authority_id,
+                    )
+                    .len()
+                })
+                .unwrap_or(0);
+            let resolved_member_count = channel
+                .member_count
+                .max((resolved_recipient_count.saturating_add(1)) as u32);
             let mut facts = vec![RuntimeFact::ChannelMembershipReady {
                 channel: channel_fact.clone(),
-                member_count: Some(channel.member_count as usize),
+                member_count: Some(resolved_member_count),
             }];
-            if channel.member_count > 1 {
+            let remote_delivery_ready = resolved_recipient_count > 0
+                && !channel.name.eq_ignore_ascii_case("note to self")
+                && !is_dm_like_channel(channel);
+            if remote_delivery_ready {
                 facts.push(RuntimeFact::RecipientPeersResolved {
                     channel: channel_fact.clone(),
-                    member_count: channel.member_count as usize,
+                    member_count: resolved_member_count,
                 });
                 facts.push(RuntimeFact::MessageDeliveryReady {
                     channel: channel_fact,
-                    member_count: channel.member_count as usize,
+                    member_count: resolved_member_count,
                 });
             }
             facts
@@ -578,6 +607,13 @@ pub fn use_channels_subscription(
     let last_message_count = last_message_count_ref.read().clone();
     let last_channel_signature_ref = hooks.use_ref(|| Arc::new(RwLock::new(None::<String>)));
     let last_channel_signature = last_channel_signature_ref.read().clone();
+    let latest_transport_peer_count_ref = hooks.use_ref(|| Arc::new(AtomicUsize::new(0)));
+    let latest_transport_peer_count = latest_transport_peer_count_ref.read().clone();
+    let latest_contacts_state_ref =
+        hooks.use_ref(|| Arc::new(RwLock::new(ContactsState::default())));
+    let latest_contacts_state = latest_contacts_state_ref.read().clone();
+    let latest_homes_state_ref = hooks.use_ref(|| Arc::new(RwLock::new(HomesState::default())));
+    let latest_homes_state = latest_homes_state_ref.read().clone();
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
@@ -589,6 +625,9 @@ pub fn use_channels_subscription(
         let last_channel_count = last_channel_count.clone();
         let last_message_count = last_message_count.clone();
         let last_channel_signature = last_channel_signature.clone();
+        let latest_transport_peer_count = latest_transport_peer_count.clone();
+        let latest_contacts_state = latest_contacts_state.clone();
+        let latest_homes_state = latest_homes_state.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 let mut stabilized = latest_chat_state
@@ -628,12 +667,28 @@ pub fn use_channels_subscription(
                 }
 
                 let scope = active_scope.read().ok().and_then(|g| g.clone());
+                let authority_id = shared_authority_id.read().ok().and_then(|guard| *guard);
+                let contacts_state = latest_contacts_state
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
+                let homes_state = latest_homes_state
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
                 publish_scoped_channels(
                     &channels,
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,
                     &last_channel_signature,
+                    transport_peer_count,
+                    authority_id,
+                    &homes_state,
+                    &contacts_state,
                     &stabilized,
                     scope.as_deref(),
                 );
@@ -651,6 +706,10 @@ pub fn use_channels_subscription(
         let last_channel_count = last_channel_count.clone();
         let last_message_count = last_message_count.clone();
         let last_channel_signature = last_channel_signature.clone();
+        let latest_transport_peer_count = latest_transport_peer_count.clone();
+        let latest_contacts_state = latest_contacts_state.clone();
+        let latest_homes_state = latest_homes_state.clone();
+        let shared_authority_id = shared_authority_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
                 let authority_id = settings_state.authority_id.parse::<AuthorityId>().ok();
@@ -672,12 +731,27 @@ pub fn use_channels_subscription(
                     *guard = chat_state.clone();
                 }
                 let scope = active_scope.read().ok().and_then(|g| g.clone());
+                let contacts_state = latest_contacts_state
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
+                let homes_state = latest_homes_state
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
                 publish_scoped_channels(
                     &channels,
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,
                     &last_channel_signature,
+                    transport_peer_count,
+                    Some(authority_id),
+                    &homes_state,
+                    &contacts_state,
                     &chat_state,
                     scope.as_deref(),
                 );
@@ -689,6 +763,16 @@ pub fn use_channels_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let channels = shared_channels.clone();
+        let latest_chat_state = latest_chat_state.clone();
+        let active_scope = active_scope.clone();
+        let update_tx = update_tx.clone();
+        let last_channel_count = last_channel_count.clone();
+        let last_message_count = last_message_count.clone();
+        let last_channel_signature = last_channel_signature.clone();
+        let latest_transport_peer_count = latest_transport_peer_count.clone();
+        let latest_contacts_state = latest_contacts_state.clone();
+        let latest_homes_state = latest_homes_state.clone();
+        let shared_authority_id = shared_authority_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
                 let scope = active_home_scope_id(&neighborhood);
@@ -701,14 +785,183 @@ pub fn use_channels_subscription(
                     .ok()
                     .map(|g| g.clone())
                     .unwrap_or_default();
+                let authority_id = shared_authority_id.read().ok().and_then(|guard| *guard);
+                let contacts_state = latest_contacts_state
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
+                let homes_state = latest_homes_state
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
                 publish_scoped_channels(
                     &channels,
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,
                     &last_channel_signature,
+                    transport_peer_count,
+                    authority_id,
+                    &homes_state,
+                    &contacts_state,
                     &chat_state,
                     Some(scope.as_str()),
+                );
+            })
+            .await;
+        }
+    });
+
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let channels = shared_channels.clone();
+        let latest_chat_state = latest_chat_state.clone();
+        let active_scope = active_scope.clone();
+        let update_tx = update_tx.clone();
+        let last_channel_count = last_channel_count.clone();
+        let last_message_count = last_message_count.clone();
+        let last_channel_signature = last_channel_signature.clone();
+        let latest_transport_peer_count = latest_transport_peer_count.clone();
+        let latest_contacts_state = latest_contacts_state.clone();
+        let latest_homes_state = latest_homes_state.clone();
+        let shared_authority_id = shared_authority_id.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
+                if let Ok(mut guard) = latest_contacts_state.write() {
+                    *guard = contacts_state.clone();
+                }
+                let chat_state = latest_chat_state
+                    .read()
+                    .ok()
+                    .map(|g| g.clone())
+                    .unwrap_or_default();
+                let scope = active_scope.read().ok().and_then(|g| g.clone());
+                let authority_id = shared_authority_id.read().ok().and_then(|guard| *guard);
+                let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
+                let homes_state = latest_homes_state
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                publish_scoped_channels(
+                    &channels,
+                    &update_tx,
+                    &last_channel_count,
+                    &last_message_count,
+                    &last_channel_signature,
+                    transport_peer_count,
+                    authority_id,
+                    &homes_state,
+                    &contacts_state,
+                    &chat_state,
+                    scope.as_deref(),
+                );
+            })
+            .await;
+        }
+    });
+
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let channels = shared_channels.clone();
+        let latest_chat_state_handle = latest_chat_state.clone();
+        let active_scope_handle = active_scope.clone();
+        let update_tx = update_tx.clone();
+        let last_channel_count_handle = last_channel_count.clone();
+        let last_message_count_handle = last_message_count.clone();
+        let last_channel_signature_handle = last_channel_signature.clone();
+        let latest_transport_peer_count_handle = latest_transport_peer_count.clone();
+        let latest_contacts_state_handle = latest_contacts_state.clone();
+        let latest_homes_state_handle = latest_homes_state.clone();
+        let shared_authority_id_handle = shared_authority_id.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |homes_state| {
+                if let Ok(mut guard) = latest_homes_state_handle.write() {
+                    *guard = homes_state.clone();
+                }
+                let chat_state = latest_chat_state_handle
+                    .read()
+                    .ok()
+                    .map(|g| g.clone())
+                    .unwrap_or_default();
+                let scope = active_scope_handle.read().ok().and_then(|g| g.clone());
+                let authority_id = shared_authority_id_handle
+                    .read()
+                    .ok()
+                    .and_then(|guard| *guard);
+                let transport_peer_count =
+                    latest_transport_peer_count_handle.load(Ordering::Relaxed);
+                let contacts_state = latest_contacts_state_handle
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                publish_scoped_channels(
+                    &channels,
+                    &update_tx,
+                    &last_channel_count_handle,
+                    &last_message_count_handle,
+                    &last_channel_signature_handle,
+                    transport_peer_count,
+                    authority_id,
+                    &homes_state,
+                    &contacts_state,
+                    &chat_state,
+                    scope.as_deref(),
+                );
+            })
+            .await;
+        }
+    });
+
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let channels = shared_channels.clone();
+        let latest_chat_state = latest_chat_state.clone();
+        let active_scope = active_scope.clone();
+        let update_tx = update_tx.clone();
+        let last_channel_count = last_channel_count.clone();
+        let last_message_count = last_message_count.clone();
+        let last_channel_signature = last_channel_signature.clone();
+        let latest_transport_peer_count = latest_transport_peer_count.clone();
+        let latest_contacts_state = latest_contacts_state.clone();
+        let latest_homes_state = latest_homes_state.clone();
+        let shared_authority_id = shared_authority_id.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*TRANSPORT_PEERS_SIGNAL, move |count| {
+                latest_transport_peer_count.store(count, Ordering::Relaxed);
+                let chat_state = latest_chat_state
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                let scope = active_scope.read().ok().and_then(|guard| guard.clone());
+                let authority_id = shared_authority_id.read().ok().and_then(|guard| *guard);
+                let contacts_state = latest_contacts_state
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                let homes_state = latest_homes_state
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                publish_scoped_channels(
+                    &channels,
+                    &update_tx,
+                    &last_channel_count,
+                    &last_message_count,
+                    &last_channel_signature,
+                    count,
+                    authority_id,
+                    &homes_state,
+                    &contacts_state,
+                    &chat_state,
+                    scope.as_deref(),
                 );
             })
             .await;
@@ -757,8 +1010,7 @@ pub fn use_invitations_subscription(
                                 aura_app::ui::types::InvitationType::Home
                                     | aura_app::ui::types::InvitationType::Chat
                             )
-                            && invitation.status
-                                == aura_app::ui::types::InvitationStatus::Pending
+                            && invitation.status == aura_app::ui::types::InvitationStatus::Pending
                     }) {
                         vec![RuntimeFact::PendingHomeInvitationReady]
                     } else {
@@ -1057,7 +1309,8 @@ mod tests {
     #[test]
     fn message_subscription_requires_explicit_selected_channel_identity() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let source_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/subscriptions.rs");
+        let source_path =
+            repo_root.join("crates/aura-terminal/src/tui/screens/app/subscriptions.rs");
         let source = std::fs::read_to_string(&source_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", source_path.display()));
 

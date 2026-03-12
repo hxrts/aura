@@ -100,6 +100,10 @@ of the portability contract unless explicitly promoted into the shared contract.
 1. Changes to global navigation, settings, chat, contacts, neighborhood, or ceremonies should have at least one impacted canonical scenario updated or re-validated.
 2. Changes that affect both TUI and web behavior should be validated against parity-critical scenarios (1-11) in both runtimes.
 3. Changes to mixed-instance behavior should include scenario 12 and/or 13 coverage.
+4. Mixed-runtime code exchange and chat routing changes should preserve the
+   event-driven contract used by scenarios 12 and 13: invitation/device codes
+   come from typed runtime-event payloads, and chat assertions bind to the
+   selected shared channel rather than frontend-specific ordering.
 
 ### CI Enforcement
 

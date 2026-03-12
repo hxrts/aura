@@ -1,7 +1,8 @@
 //! Chat scoping helpers tied to neighborhood traversal state.
 
-use aura_app::ui::types::{Channel as AppChannel, ChatState, NeighborhoodState};
-use aura_app::views::chat::is_note_to_self_channel_name;
+use aura_app::ui::types::{
+    chat::is_note_to_self_channel_name, Channel as AppChannel, ChatState, NeighborhoodState,
+};
 use aura_core::identifiers::ChannelId;
 
 /// Resolve the active home scope for chat from neighborhood traversal state.

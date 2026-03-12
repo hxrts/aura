@@ -33,7 +33,6 @@ use aura_app::ceremonies::{
 use aura_app::ui::contract::OperationState;
 use aura_app::ui::prelude::*;
 use aura_app::ui::signals::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
-use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact};
 use aura_app::ui::workflows::access as access_workflows;
 use aura_app::ui::workflows::ceremonies::{
     cancel_key_rotation_ceremony, monitor_key_rotation_ceremony, start_device_threshold_ceremony,
@@ -41,6 +40,7 @@ use aura_app::ui::workflows::ceremonies::{
 };
 use aura_app::ui::workflows::network as network_workflows;
 use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
+use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::CeremonyId;
 use aura_core::types::FrostThreshold;
@@ -332,11 +332,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Used to look up failed messages by ID for retry operations.
     // The Arc is kept up-to-date by a reactive subscription to CHAT_SIGNAL.
-    let shared_messages = use_messages_subscription(
-        &mut hooks,
-        &app_ctx,
-        tui_selected.clone(),
-    );
+    let shared_messages = use_messages_subscription(&mut hooks, &app_ctx, tui_selected.clone());
 
     // Clone for ChatScreen to compute per-channel message counts
     let tui_selected_for_chat_screen = tui_selected.clone();
@@ -509,7 +505,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let app_core = app_ctx.app_core.raw().clone();
         async move {
             loop {
-                let _ = network_workflows::refresh_discovered_peers(&app_core).await;
+                let timestamp_ms = aura_app::ui::workflows::time::current_time_ms(&app_core)
+                    .await
+                    .unwrap_or(0);
+                let _ = network_workflows::discover_peers(&app_core, timestamp_ms).await;
                 tokio::time::sleep(network_workflows::DISCOVERED_PEERS_REFRESH_INTERVAL).await;
             }
         }
@@ -938,14 +937,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         == Some(channel.as_str());
                                 if should_append {
                                     let already_visible = messages.iter().any(|message| {
-                                        message.channel_id.to_string() == channel
+                                        message.channel_id == channel.as_str()
                                             && message.is_own
                                             && message.content == content
                                     });
                                     if !already_visible {
                                         let message_idx = messages.len();
                                         messages.push(crate::tui::types::Message::sending(
-                                            format!("local-accepted-{}-{}", channel, message_idx),
+                                            format!("local-accepted-{channel}-{message_idx}"),
                                             channel.clone(),
                                             "You",
                                             content.clone(),

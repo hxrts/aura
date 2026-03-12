@@ -13,7 +13,7 @@
 //! Account backup operations (encode/decode/validate) are portable business
 //! logic. The actual file I/O for export/import remains in aura-terminal.
 
-use crate::workflows::{context, runtime::require_runtime, settings, system};
+use crate::workflows::{context, runtime::require_runtime, settings, system, time};
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::identifiers::{AuthorityId, ContextId};
@@ -296,18 +296,29 @@ pub async fn initialize_runtime_account(
         const SIGNING_KEY_ATTEMPTS: usize = 40;
         const BOOTSTRAP_RETRY_MS: u64 = 250;
         for attempt in 0..SIGNING_KEY_ATTEMPTS {
-            if app_core.read().await.bootstrap_signing_keys().await.is_ok() {
-                break;
+            let runtime = {
+                let core = app_core.read().await;
+                core.runtime().cloned()
+            };
+            if let Some(runtime) = runtime {
+                if runtime.bootstrap_signing_keys().await.is_ok() {
+                    break;
+                }
             }
             if attempt + 1 < SIGNING_KEY_ATTEMPTS {
-                tokio::time::sleep(std::time::Duration::from_millis(BOOTSTRAP_RETRY_MS)).await;
+                let _ = time::sleep_ms(app_core, BOOTSTRAP_RETRY_MS).await;
             }
         }
     }
 
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = app_core.read().await.bootstrap_signing_keys().await;
+        if let Some(runtime) = {
+            let core = app_core.read().await;
+            core.runtime().cloned()
+        } {
+            let _ = runtime.bootstrap_signing_keys().await;
+        }
     }
 
     settings::refresh_settings_from_runtime(app_core).await?;

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 use aura_app::ui::prelude::*;
+use aura_app::ui::types::RuntimeBridge;
 use aura_core::AuraError;
 
 /// A TUI-local wrapper that guarantees `AppCore::init_signals()` has been called.
@@ -12,6 +13,7 @@ use aura_core::AuraError;
 #[derive(Clone)]
 pub struct InitializedAppCore {
     app_core: Arc<RwLock<AppCore>>,
+    runtime: Option<Arc<dyn RuntimeBridge>>,
 }
 
 impl InitializedAppCore {
@@ -20,12 +22,23 @@ impl InitializedAppCore {
             .await
             .map_err(|e| AuraError::internal(format!("Failed to init signals: {e}")))?;
 
-        Ok(Self { app_core })
+        let runtime = {
+            let core = app_core.read().await;
+            core.runtime().cloned()
+        };
+
+        Ok(Self { app_core, runtime })
     }
 
     #[inline]
     #[must_use]
     pub fn raw(&self) -> &Arc<RwLock<AppCore>> {
         &self.app_core
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn runtime(&self) -> Option<Arc<dyn RuntimeBridge>> {
+        self.runtime.clone()
     }
 }

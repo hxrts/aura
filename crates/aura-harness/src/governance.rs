@@ -69,12 +69,14 @@ pub fn validate_shared_scenario_contract() -> Result<()> {
             );
         }
         let definition = load_semantic_scenario_definition(&entry.path)?;
-        definition.validate_shared_intent_contract().map_err(|error| {
-            anyhow!(
-                "shared scenario {} violates intent contract: {error}",
-                entry.path.display()
-            )
-        })?;
+        definition
+            .validate_shared_intent_contract()
+            .map_err(|error| {
+                anyhow!(
+                    "shared scenario {} violates intent contract: {error}",
+                    entry.path.display()
+                )
+            })?;
         let scenario = ScenarioConfig::try_from(definition.clone()).with_context(|| {
             format!(
                 "shared scenario {} failed strict canonical lowering",
@@ -109,7 +111,10 @@ pub fn validate_scenario_legality() -> Result<()> {
         }
         let normalized_path = normalize_rel_path(&entry.path);
         if !paths.insert(normalized_path.clone()) {
-            bail!("duplicate scenario path in inventory: {}", entry.path.display());
+            bail!(
+                "duplicate scenario path in inventory: {}",
+                entry.path.display()
+            );
         }
         if !entry.path.exists() {
             bail!("missing scenario file: {}", entry.path.display());
@@ -118,12 +123,14 @@ pub fn validate_scenario_legality() -> Result<()> {
         if entry.migration_status == "converted" {
             let definition = load_semantic_scenario_definition(&entry.path)?;
             if entry.classification == ScenarioClassification::Shared {
-                definition.validate_shared_intent_contract().map_err(|error| {
-                    anyhow!(
-                        "shared scenario {} violates intent contract: {error}",
-                        entry.path.display()
-                    )
-                })?;
+                definition
+                    .validate_shared_intent_contract()
+                    .map_err(|error| {
+                        anyhow!(
+                            "shared scenario {} violates intent contract: {error}",
+                            entry.path.display()
+                        )
+                    })?;
             }
         }
     }
@@ -138,7 +145,9 @@ pub fn validate_core_scenario_mechanics() -> Result<()> {
         let entry = inventory
             .iter()
             .find(|entry| entry.id == *required_id)
-            .ok_or_else(|| anyhow!("missing core shared scenario inventory entry: {required_id}"))?;
+            .ok_or_else(|| {
+                anyhow!("missing core shared scenario inventory entry: {required_id}")
+            })?;
         if entry.classification != ScenarioClassification::Shared {
             bail!(
                 "core shared scenario {} must be classified as shared",
@@ -152,12 +161,14 @@ pub fn validate_core_scenario_mechanics() -> Result<()> {
             );
         }
         let definition = load_semantic_scenario_definition(&entry.path)?;
-        definition.validate_shared_intent_contract().map_err(|error| {
-            anyhow!(
-                "core shared scenario {} violates intent contract: {error}",
-                entry.path.display()
-            )
-        })?;
+        definition
+            .validate_shared_intent_contract()
+            .map_err(|error| {
+                anyhow!(
+                    "core shared scenario {} violates intent contract: {error}",
+                    entry.path.display()
+                )
+            })?;
         let scenario = ScenarioConfig::try_from(definition.clone()).with_context(|| {
             format!(
                 "core shared scenario {} failed strict canonical lowering",
@@ -199,8 +210,8 @@ pub fn validate_ux_flow_coverage() -> Result<()> {
     let changed_set = changed_files.iter().cloned().collect::<BTreeSet<_>>();
     let doc_touched = changed_set.contains(COVERAGE_DOC);
     let coverage_metadata_touched = changed_set.contains("crates/aura-app/src/ui_contract.rs");
-    let coverage_doc_body =
-        fs::read_to_string(coverage_doc).with_context(|| format!("failed to read {COVERAGE_DOC}"))?;
+    let coverage_doc_body = fs::read_to_string(coverage_doc)
+        .with_context(|| format!("failed to read {COVERAGE_DOC}"))?;
 
     let inventory = load_scenario_inventory(None)?;
     let inventory_ids = inventory
@@ -279,15 +290,24 @@ pub fn validate_ux_flow_coverage() -> Result<()> {
 pub fn validate_ui_parity_contract() -> Result<()> {
     let contract_path = Path::new("crates/aura-app/src/ui_contract.rs");
     if !contract_path.exists() {
-        bail!("missing parity contract source: {}", contract_path.display());
+        bail!(
+            "missing parity contract source: {}",
+            contract_path.display()
+        );
     }
 
     for metadata in PARITY_EXCEPTION_METADATA {
         if metadata.reason_code.trim().is_empty() {
-            bail!("parity exception {:?} must declare reason_code", metadata.exception);
+            bail!(
+                "parity exception {:?} must declare reason_code",
+                metadata.exception
+            );
         }
         if metadata.scope.trim().is_empty() {
-            bail!("parity exception {:?} must declare scope", metadata.exception);
+            bail!(
+                "parity exception {:?} must declare scope",
+                metadata.exception
+            );
         }
         if metadata.affected_surface.trim().is_empty() {
             bail!(
@@ -324,7 +344,10 @@ pub fn validate_ui_parity_contract() -> Result<()> {
         "aura-app",
         "shared_screen_module_map_uses_canonical_screen_names",
     )?;
-    run_cargo_test("aura-app", "parity_module_map_points_to_existing_frontend_symbols")?;
+    run_cargo_test(
+        "aura-app",
+        "parity_module_map_points_to_existing_frontend_symbols",
+    )?;
     run_cargo_test(
         "aura-app",
         "parity_exception_metadata_is_complete_and_documented",
@@ -342,7 +365,10 @@ pub fn validate_ui_parity_contract() -> Result<()> {
         "ui_snapshot_parity_detects_runtime_event_shape_drift",
     )?;
     run_cargo_test("aura-app", "parity_ui_identity_helpers_match_contract_ids")?;
-    run_cargo_test("aura-app", "frontend_sources_reference_shared_identity_helpers")?;
+    run_cargo_test(
+        "aura-app",
+        "frontend_sources_reference_shared_identity_helpers",
+    )?;
 
     println!("ui parity contract: clean");
     Ok(())
@@ -402,7 +428,10 @@ pub fn validate_settings_surface_contract() -> Result<()> {
     }
 
     run_cargo_test("aura-app", "shared_settings_section_surface_is_explicit")?;
-    run_cargo_test("aura-app", "frontend_settings_sources_use_shared_section_ids")?;
+    run_cargo_test(
+        "aura-app",
+        "frontend_settings_sources_use_shared_section_ids",
+    )?;
 
     println!("harness settings surface contract: clean");
     Ok(())
@@ -486,7 +515,10 @@ pub fn validate_governance_wrappers() -> Result<()> {
             "scripts/check/harness-shared-scenario-contract.sh",
             "shared-scenario-contract",
         ),
-        ("scripts/check/harness-scenario-legality.sh", "scenario-legality"),
+        (
+            "scripts/check/harness-scenario-legality.sh",
+            "scenario-legality",
+        ),
         (
             "scripts/check/harness-core-scenario-mechanics.sh",
             "core-scenario-mechanics",
@@ -514,9 +546,8 @@ pub fn validate_governance_wrappers() -> Result<()> {
     for (path, check) in WRAPPERS {
         let body =
             fs::read_to_string(path).with_context(|| format!("failed to read wrapper {path}"))?;
-        let expected = format!(
-            "cargo run -p aura-harness --bin aura-harness --quiet -- governance {check}"
-        );
+        let expected =
+            format!("cargo run -p aura-harness --bin aura-harness --quiet -- governance {check}");
         if !body.contains(&expected) {
             bail!("wrapper does not call typed governance entry point: {path}");
         }
@@ -557,12 +588,14 @@ pub fn validate_legacy_shared_quarantine() -> Result<()> {
                     );
                 }
                 let definition = load_semantic_scenario_definition(&entry.path)?;
-                definition.validate_shared_intent_contract().map_err(|error| {
-                    anyhow!(
-                        "shared scenario {} violates semantic shared contract: {error}",
-                        entry.path.display()
-                    )
-                })?;
+                definition
+                    .validate_shared_intent_contract()
+                    .map_err(|error| {
+                        anyhow!(
+                            "shared scenario {} violates semantic shared contract: {error}",
+                            entry.path.display()
+                        )
+                    })?;
             }
             ScenarioClassification::TuiOnly
             | ScenarioClassification::WebOnly
@@ -640,14 +673,23 @@ fn validate_declared_barriers(definition: &ScenarioDefinition) -> Result<()> {
 
 fn action_satisfies_barrier(action: &SemanticAction, barrier: &BarrierDeclaration) -> bool {
     match (action, barrier) {
-        (SemanticAction::Expect(Expectation::ScreenIs(actual)), BarrierDeclaration::Screen(expected)) => actual == expected,
-        (SemanticAction::Expect(Expectation::ReadinessIs(actual)), BarrierDeclaration::Readiness(expected)) => actual == expected,
+        (
+            SemanticAction::Expect(Expectation::ScreenIs(actual)),
+            BarrierDeclaration::Screen(expected),
+        ) => actual == expected,
+        (
+            SemanticAction::Expect(Expectation::ReadinessIs(actual)),
+            BarrierDeclaration::Readiness(expected),
+        ) => actual == expected,
         (
             SemanticAction::Expect(Expectation::RuntimeEventOccurred { kind, .. }),
             BarrierDeclaration::RuntimeEvent(expected),
         ) => kind == expected,
         (
-            SemanticAction::Expect(Expectation::OperationStateIs { operation_id, state }),
+            SemanticAction::Expect(Expectation::OperationStateIs {
+                operation_id,
+                state,
+            }),
             BarrierDeclaration::OperationState {
                 operation_id: expected_id,
                 state: expected_state,
@@ -664,7 +706,10 @@ fn barrier_label(barrier: BarrierDeclaration) -> String {
         BarrierDeclaration::Screen(screen) => format!("screen:{screen:?}"),
         BarrierDeclaration::Readiness(readiness) => format!("readiness:{readiness:?}"),
         BarrierDeclaration::Quiescence(quiescence) => format!("quiescence:{quiescence:?}"),
-        BarrierDeclaration::OperationState { operation_id, state } => {
+        BarrierDeclaration::OperationState {
+            operation_id,
+            state,
+        } => {
             format!("operation:{operation_id:?}:{state:?}")
         }
     }
@@ -742,7 +787,9 @@ fn is_ci() -> bool {
 mod tests {
     use super::*;
     use aura_app::scenario_contract::{ActorId, ScenarioStep};
-    use aura_app::ui::contract::{OperationId, OperationState, RuntimeEventKind, ScreenId, UiReadiness};
+    use aura_app::ui::contract::{
+        OperationId, OperationState, RuntimeEventKind, ScreenId, UiReadiness,
+    };
     use aura_app::ui_contract::QuiescenceState;
 
     #[test]
@@ -768,7 +815,9 @@ mod tests {
             ],
         };
 
-        let error = validate_declared_barriers(&definition).unwrap_err().to_string();
+        let error = validate_declared_barriers(&definition)
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("ChannelMembershipReady"));
     }
 
@@ -791,6 +840,7 @@ mod tests {
                     action: SemanticAction::Expect(Expectation::RuntimeEventOccurred {
                         kind: RuntimeEventKind::ChannelMembershipReady,
                         detail_contains: None,
+                        capture_name: None,
                     }),
                 },
                 ScenarioStep {
@@ -835,6 +885,7 @@ mod tests {
             &SemanticAction::Expect(Expectation::RuntimeEventOccurred {
                 kind: RuntimeEventKind::MessageCommitted,
                 detail_contains: None,
+                capture_name: None,
             }),
             &BarrierDeclaration::RuntimeEvent(RuntimeEventKind::MessageCommitted)
         ));
