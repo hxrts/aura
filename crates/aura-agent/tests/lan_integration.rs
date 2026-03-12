@@ -70,10 +70,11 @@ async fn bootstrap_agent(agent: &AuraAgent, authority_id: AuthorityId) -> TestRe
 
 async fn create_lan_agent(seed: u8, lan_port: u16) -> TestResult<Arc<AuraAgent>> {
     let authority_id = AuthorityId::new_from_entropy([seed; 32]);
+    let device_id = DeviceId::new_from_entropy([seed.wrapping_add(0x40); 32]);
     let ctx = test_context(authority_id);
 
     let mut config = AgentConfig {
-        device_id: DeviceId::for_authority(authority_id),
+        device_id,
         ..Default::default()
     };
     config.network.bind_address = "0.0.0.0:0".to_string();
@@ -1027,6 +1028,7 @@ async fn test_lan_leave_then_join_reuses_channel_id_cross_instance() -> TestResu
 /// chain in production mode.
 async fn create_production_lan_agent(seed: u8, lan_port: u16) -> TestResult<Arc<AuraAgent>> {
     let authority_id = AuthorityId::new_from_entropy([seed; 32]);
+    let device_id = DeviceId::new_from_entropy([seed.wrapping_add(0x60); 32]);
     let context_entropy = hash(&authority_id.to_bytes());
     let ctx = EffectContext::new(
         authority_id,
@@ -1039,7 +1041,7 @@ async fn create_production_lan_agent(seed: u8, lan_port: u16) -> TestResult<Arc<
     let _ = std::fs::create_dir_all(&temp_dir);
 
     let mut config = AgentConfig {
-        device_id: DeviceId::for_authority(authority_id),
+        device_id,
         ..Default::default()
     };
     config.network.bind_address = "0.0.0.0:0".to_string();
@@ -1113,12 +1115,12 @@ async fn test_lan_sync_roundtrip() -> TestResult {
     )?;
     effects_a.persist_journal(&journal).await?;
 
-    let peer_device_id = DeviceId::for_authority(agent_b.authority_id());
+    let peer_device_id = agent_b.runtime().device_id();
     let sync_a = agent_a
         .runtime()
         .sync()
         .ok_or_else(|| anyhow!("sync service not enabled"))?;
-    let peer_device_id_b = DeviceId::for_authority(agent_a.authority_id());
+    let peer_device_id_b = agent_a.runtime().device_id();
     let sync_b = agent_b
         .runtime()
         .sync()

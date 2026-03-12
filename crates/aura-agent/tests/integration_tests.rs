@@ -25,7 +25,7 @@ use tokio::time::timeout;
 async fn test_agent_runtime_composition() -> AuraResult<()> {
     let fixture = DeviceTestFixture::new(0);
     let device_id = fixture.device_id();
-    let authority_id = AuthorityId::for_device(device_id);
+    let authority_id = fixture.authority_id();
 
     // Create a composite handler using the testing factory
     let handler = CompositeHandler::for_testing(device_id);
@@ -71,8 +71,8 @@ async fn test_multiple_authority_runtime() -> AuraResult<()> {
     let fixture1 = DeviceTestFixture::new(100);
     let fixture2 = DeviceTestFixture::new(101);
 
-    let authority1 = AuthorityId::for_device(fixture1.device_id());
-    let authority2 = AuthorityId::for_device(fixture2.device_id());
+    let authority1 = fixture1.authority_id();
+    let authority2 = fixture2.authority_id();
 
     let handler1 = CompositeHandler::for_testing(fixture1.device_id());
     let handler2 = CompositeHandler::for_testing(fixture2.device_id());
@@ -154,8 +154,8 @@ async fn test_authority_identity_model() -> AuraResult<()> {
     let device_id2 = fixture2.device_id();
 
     // Create authorities from device IDs
-    let authority1 = AuthorityId::for_device(device_id1);
-    let authority2 = AuthorityId::for_device(device_id2);
+    let authority1 = fixture1.authority_id();
+    let authority2 = fixture2.authority_id();
 
     // Test authority properties
     assert_ne!(authority1.uuid(), authority2.uuid());
@@ -170,7 +170,7 @@ async fn test_authority_identity_model() -> AuraResult<()> {
     assert_eq!(bytes2.len(), 16);
 
     // Test that the same device always produces the same authority
-    let authority1_again = AuthorityId::for_device(device_id1);
+    let authority1_again = fixture1.authority_id();
     assert_eq!(authority1, authority1_again);
 
     println!("Authority identity model test passed");

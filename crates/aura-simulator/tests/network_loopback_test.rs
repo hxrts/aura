@@ -46,13 +46,14 @@ async fn create_simulation_agent(
     shared_transport: SharedTransport,
 ) -> TestResult<Arc<AuraAgent>> {
     let authority_id = AuthorityId::new_from_entropy([seed; 32]);
+    let device_id = DeviceId::new_from_entropy([seed.wrapping_add(0x20); 32]);
     let ctx = test_context(
         authority_id,
         ExecutionMode::Simulation { seed: seed as u64 },
     );
 
     let config = AgentConfig {
-        device_id: DeviceId::for_authority(authority_id),
+        device_id,
         ..AgentConfig::default()
     };
 

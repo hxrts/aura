@@ -4,12 +4,12 @@
   "role_bindings": [
     {
       "role": "Receiver",
-      "authority": "authority-16161616-1616-1616-1616-161616161616",
+      "authority": "authority-72727272-7272-7272-7272-727272727272",
       "role_index": 1
     },
     {
       "role": "Sender",
-      "authority": "authority-15151515-1515-1515-1515-151515151515",
+      "authority": "authority-71717171-7171-7171-7171-717171717171",
       "role_index": 0
     }
   ],

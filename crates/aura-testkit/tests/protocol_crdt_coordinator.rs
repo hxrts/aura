@@ -198,7 +198,7 @@ fn test_builder_chaining() {
 #[tokio::test]
 async fn test_sync_request_creation() -> AuraResult<()> {
     let fixture = TestFixture::new().await?;
-    let authority_id = AuthorityId::for_device(fixture.device_id());
+    let authority_id = fixture.authority_id();
     let mut coordinator: CrdtCoordinator<
         TestCounter,
         DummyCmState,
@@ -219,7 +219,7 @@ async fn test_sync_request_creation() -> AuraResult<()> {
 #[tokio::test]
 async fn test_cv_sync_request_handling() -> AuraResult<()> {
     let fixture = TestFixture::new().await?;
-    let authority_id = AuthorityId::for_device(fixture.device_id());
+    let authority_id = fixture.authority_id();
     let mut coordinator: CrdtCoordinator<
         TestCounter,
         DummyCmState,
@@ -247,7 +247,7 @@ async fn test_cv_sync_request_handling() -> AuraResult<()> {
 #[tokio::test]
 async fn test_cv_sync_response_handling() -> AuraResult<()> {
     let fixture = TestFixture::new().await?;
-    let authority_id = AuthorityId::for_device(fixture.device_id());
+    let authority_id = fixture.authority_id();
     let mut coordinator: CrdtCoordinator<
         TestCounter,
         DummyCmState,

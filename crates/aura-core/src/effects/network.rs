@@ -313,7 +313,9 @@ impl<T: NetworkChangeEffects + ?Sized> NetworkChangeEffects for Arc<T> {
 /// - Simulation: Network scenarios with partitions and faults
 #[async_trait]
 pub trait NetworkCoreEffects: Send + Sync {
-    /// Send a message to a specific peer
+    /// Send a message to a specific peer.
+    ///
+    /// `peer_id` is the wire UUID form of an `AuthorityId`, not a `DeviceId`.
     async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError>;
 
     /// Broadcast a message to all connected peers
@@ -326,17 +328,17 @@ pub trait NetworkCoreEffects: Send + Sync {
 /// Optional network effects that build on the core interface.
 #[async_trait]
 pub trait NetworkExtendedEffects: NetworkCoreEffects + Send + Sync {
-    /// Receive message from a specific peer
+    /// Receive message from a specific peer authority UUID on the wire.
     async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
         Err(NetworkError::NotImplemented)
     }
 
-    /// Get list of currently connected peers
+    /// Get currently connected peer authority UUIDs on the wire.
     async fn connected_peers(&self) -> Vec<Uuid> {
         Vec::new()
     }
 
-    /// Check if a peer is connected
+    /// Check if a peer authority UUID is connected.
     async fn is_peer_connected(&self, _peer_id: Uuid) -> bool {
         false
     }

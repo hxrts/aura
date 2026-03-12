@@ -4,17 +4,17 @@
   "role_bindings": [
     {
       "role": "Account",
-      "authority": "authority-1f1f1f1f-1f1f-1f1f-1f1f-1f1f1f1f1f1f",
+      "authority": "authority-81818181-8181-8181-8181-818181818181",
       "role_index": 0
     },
     {
       "role": "Coordinator",
-      "authority": "authority-21212121-2121-2121-2121-212121212121",
+      "authority": "authority-83838383-8383-8383-8383-838383838383",
       "role_index": 2
     },
     {
       "role": "Guardian",
-      "authority": "authority-20202020-2020-2020-2020-202020202020",
+      "authority": "authority-82828282-8282-8282-8282-828282828282",
       "role_index": 1
     }
   ],

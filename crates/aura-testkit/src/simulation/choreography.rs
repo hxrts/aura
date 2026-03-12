@@ -10,7 +10,7 @@ use crate::foundation::CompositeTestHandler;
 use crate::{DeviceTestFixture, TestEffectsBuilder, TestExecutionMode};
 use async_channel::{unbounded, Receiver, Sender};
 use async_lock::RwLock;
-use aura_core::DeviceId;
+use aura_core::{AuthorityId, DeviceId};
 use std::collections::HashMap;
 use std::sync::Arc;
 // No futures import needed for sequential execution
@@ -297,6 +297,14 @@ impl ChoreographyTestHarness {
         self.devices
             .iter()
             .map(|(fixture, _)| fixture.device_id())
+            .collect()
+    }
+
+    /// List all authority IDs paired with the harness devices.
+    pub fn authority_ids(&self) -> Vec<AuthorityId> {
+        self.devices
+            .iter()
+            .map(|(fixture, _)| fixture.authority_id())
             .collect()
     }
 }

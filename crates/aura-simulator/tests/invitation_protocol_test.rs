@@ -35,8 +35,8 @@ async fn invitation_exchange_adapter_setup() {
     let sender_device = DeviceId::from_uuid(Uuid::from_bytes([11; 16]));
     let receiver_device = DeviceId::from_uuid(Uuid::from_bytes([12; 16]));
 
-    let sender_auth = AuthorityId::for_device(sender_device);
-    let receiver_auth = AuthorityId::for_device(receiver_device);
+    let sender_auth = AuthorityId::new_from_entropy([31u8; 32]);
+    let receiver_auth = AuthorityId::new_from_entropy([32u8; 32]);
 
     let mut role_map = HashMap::new();
     role_map.insert(InvitationExchangeRole::Sender, sender_auth);

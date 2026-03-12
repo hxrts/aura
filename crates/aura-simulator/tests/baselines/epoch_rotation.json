@@ -4,17 +4,17 @@
   "role_bindings": [
     {
       "role": "Coordinator",
-      "authority": "authority-33333333-3333-3333-3333-333333333333",
+      "authority": "authority-a1a1a1a1-a1a1-a1a1-a1a1-a1a1a1a1a1a1",
       "role_index": 0
     },
     {
       "role": "Participant1",
-      "authority": "authority-34343434-3434-3434-3434-343434343434",
+      "authority": "authority-a2a2a2a2-a2a2-a2a2-a2a2-a2a2a2a2a2a2",
       "role_index": 1
     },
     {
       "role": "Participant2",
-      "authority": "authority-35353535-3535-3535-3535-353535353535",
+      "authority": "authority-a3a3a3a3-a3a3-a3a3-a3a3-a3a3a3a3a3a3",
       "role_index": 2
     }
   ],

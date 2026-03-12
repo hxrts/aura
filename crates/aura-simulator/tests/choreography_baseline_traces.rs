@@ -59,6 +59,10 @@ fn authority_label(authority: AuthorityId) -> String {
     authority.to_string()
 }
 
+fn authority(seed: u8) -> AuthorityId {
+    AuthorityId::from_uuid(Uuid::from_bytes([seed; 16]))
+}
+
 fn sorted_role_bindings(mut bindings: Vec<RoleBindingBaseline>) -> Vec<RoleBindingBaseline> {
     bindings.sort_by(|a, b| a.role.cmp(&b.role));
     bindings
@@ -102,9 +106,9 @@ async fn consensus_baseline() -> ProtocolBaseline {
     let witness_a = DeviceId::from_uuid(Uuid::from_bytes([12; 16]));
     let witness_b = DeviceId::from_uuid(Uuid::from_bytes([13; 16]));
 
-    let coordinator_auth = AuthorityId::for_device(coordinator_device);
-    let witness_auth_a = AuthorityId::from_uuid(witness_a.uuid());
-    let witness_auth_b = AuthorityId::from_uuid(witness_b.uuid());
+    let coordinator_auth = authority(0x61);
+    let witness_auth_a = authority(0x62);
+    let witness_auth_b = authority(0x63);
 
     let mut role_map = HashMap::new();
     role_map.insert(AuraConsensusRole::Coordinator, coordinator_auth);
@@ -223,8 +227,8 @@ async fn consensus_baseline() -> ProtocolBaseline {
 async fn invitation_baseline() -> ProtocolBaseline {
     let sender_device = DeviceId::from_uuid(Uuid::from_bytes([21; 16]));
     let receiver_device = DeviceId::from_uuid(Uuid::from_bytes([22; 16]));
-    let sender_auth = AuthorityId::for_device(sender_device);
-    let receiver_auth = AuthorityId::for_device(receiver_device);
+    let sender_auth = authority(0x71);
+    let receiver_auth = authority(0x72);
 
     let mut role_map = HashMap::new();
     role_map.insert(InvitationExchangeRole::Sender, sender_auth);
@@ -300,9 +304,9 @@ async fn recovery_baseline() -> ProtocolBaseline {
     let account_device = DeviceId::from_uuid(Uuid::from_bytes([31; 16]));
     let guardian_device = DeviceId::from_uuid(Uuid::from_bytes([32; 16]));
     let coordinator_device = DeviceId::from_uuid(Uuid::from_bytes([33; 16]));
-    let account_auth = AuthorityId::for_device(account_device);
-    let guardian_auth = AuthorityId::for_device(guardian_device);
-    let coordinator_auth = AuthorityId::for_device(coordinator_device);
+    let account_auth = authority(0x81);
+    let guardian_auth = authority(0x82);
+    let coordinator_auth = authority(0x83);
 
     let mut role_map = HashMap::new();
     role_map.insert(RecoveryProtocolRole::Account, account_auth);
@@ -405,8 +409,8 @@ async fn recovery_baseline() -> ProtocolBaseline {
 async fn rendezvous_baseline() -> ProtocolBaseline {
     let initiator_device = DeviceId::from_uuid(Uuid::from_bytes([41; 16]));
     let responder_device = DeviceId::from_uuid(Uuid::from_bytes([42; 16]));
-    let initiator_auth = AuthorityId::for_device(initiator_device);
-    let responder_auth = AuthorityId::for_device(responder_device);
+    let initiator_auth = authority(0x91);
+    let responder_auth = authority(0x92);
 
     let mut role_map = HashMap::new();
     role_map.insert(RendezvousExchangeRole::Initiator, initiator_auth);
@@ -488,9 +492,9 @@ async fn epoch_rotation_baseline() -> ProtocolBaseline {
     let coordinator_device = DeviceId::from_uuid(Uuid::from_bytes([51; 16]));
     let participant1_device = DeviceId::from_uuid(Uuid::from_bytes([52; 16]));
     let participant2_device = DeviceId::from_uuid(Uuid::from_bytes([53; 16]));
-    let coordinator_auth = AuthorityId::for_device(coordinator_device);
-    let participant1_auth = AuthorityId::for_device(participant1_device);
-    let participant2_auth = AuthorityId::for_device(participant2_device);
+    let coordinator_auth = authority(0xa1);
+    let participant1_auth = authority(0xa2);
+    let participant2_auth = authority(0xa3);
 
     let mut role_map = HashMap::new();
     role_map.insert(EpochRotationProtocolRole::Coordinator, coordinator_auth);

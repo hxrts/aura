@@ -4,7 +4,7 @@
 //! across the Aura test suite.
 
 use aura_core::hash::hash;
-use aura_core::DeviceId;
+use aura_core::{AuthorityId, DeviceId};
 use uuid::Uuid;
 
 /// Device test fixture for consistent test device creation
@@ -57,6 +57,14 @@ impl DeviceTestFixture {
     /// Get the device ID
     pub fn device_id(&self) -> DeviceId {
         self.device_id
+    }
+
+    /// Get a deterministic authority ID distinct from the device ID.
+    pub fn authority_id(&self) -> AuthorityId {
+        let hash_input = format!("authority-fixture-{}-{}", self.index, self.label);
+        let hash_bytes = hash(hash_input.as_bytes());
+        let uuid = Uuid::from_bytes(hash_bytes[..16].try_into().unwrap());
+        AuthorityId(uuid)
     }
 
     /// Get the device index (for ordering)

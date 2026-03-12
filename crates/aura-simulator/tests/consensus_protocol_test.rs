@@ -35,12 +35,12 @@ async fn consensus_adapter_setup() {
     // Test that protocol adapters can be created and sessions started
     let coordinator_device = DeviceId::from_uuid(Uuid::from_bytes([11; 16]));
     let witness_a = DeviceId::from_uuid(Uuid::from_bytes([12; 16]));
-    let witness_b = DeviceId::from_uuid(Uuid::from_bytes([13; 16]));
+    let _witness_b = DeviceId::from_uuid(Uuid::from_bytes([13; 16]));
 
-    let coordinator_auth = AuthorityId::for_device(coordinator_device);
+    let coordinator_auth = AuthorityId::new_from_entropy([31u8; 32]);
     let witness_auths = vec![
-        AuthorityId::from_uuid(witness_a.uuid()),
-        AuthorityId::from_uuid(witness_b.uuid()),
+        AuthorityId::new_from_entropy([32u8; 32]),
+        AuthorityId::new_from_entropy([33u8; 32]),
     ];
 
     let mut role_map = HashMap::new();

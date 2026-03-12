@@ -35,11 +35,11 @@ async fn epoch_rotation_adapter_setup() {
     // Test that protocol adapters can be created and sessions started
     let coordinator_device = DeviceId::from_uuid(Uuid::from_bytes([11; 16]));
     let participant1_device = DeviceId::from_uuid(Uuid::from_bytes([12; 16]));
-    let participant2_device = DeviceId::from_uuid(Uuid::from_bytes([13; 16]));
+    let _participant2_device = DeviceId::from_uuid(Uuid::from_bytes([13; 16]));
 
-    let coordinator_auth = AuthorityId::for_device(coordinator_device);
-    let participant1_auth = AuthorityId::for_device(participant1_device);
-    let participant2_auth = AuthorityId::for_device(participant2_device);
+    let coordinator_auth = AuthorityId::new_from_entropy([31u8; 32]);
+    let participant1_auth = AuthorityId::new_from_entropy([32u8; 32]);
+    let participant2_auth = AuthorityId::new_from_entropy([33u8; 32]);
 
     let mut role_map = HashMap::new();
     role_map.insert(EpochRotationProtocolRole::Coordinator, coordinator_auth);

@@ -4,17 +4,17 @@
   "role_bindings": [
     {
       "role": "Coordinator",
-      "authority": "authority-0b0b0b0b-0b0b-0b0b-0b0b-0b0b0b0b0b0b",
+      "authority": "authority-61616161-6161-6161-6161-616161616161",
       "role_index": 0
     },
     {
       "role": "Witness[0]",
-      "authority": "authority-0c0c0c0c-0c0c-0c0c-0c0c-0c0c0c0c0c0c",
+      "authority": "authority-62626262-6262-6262-6262-626262626262",
       "role_index": 0
     },
     {
       "role": "Witness[1]",
-      "authority": "authority-0d0d0d0d-0d0d-0d0d-0d0d-0d0d0d0d0d0d",
+      "authority": "authority-63636363-6363-6363-6363-636363636363",
       "role_index": 1
     }
   ],

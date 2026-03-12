@@ -6,7 +6,7 @@
 use super::test_time;
 use super::test_utils::*;
 use aura_core::types::Epoch;
-use aura_core::{AuraError, AuraResult, AuthorityId, Hash32};
+use aura_core::{AuraError, AuraResult, Hash32};
 use aura_sync::protocols::{EpochConfirmation, OTAConfig, UpgradeKind, UpgradeProposal};
 use aura_testkit::simulation::network::NetworkCondition;
 use aura_testkit::test_utils::wrap_test_error;
@@ -33,9 +33,9 @@ async fn test_basic_ota_coordination() -> AuraResult<()> {
         "Need at least 3 devices for threshold test"
     );
 
-    let coordinator = AuthorityId::for_device(fixture.devices[0]);
-    let approver1 = AuthorityId::for_device(fixture.devices[1]);
-    let approver2 = AuthorityId::for_device(fixture.devices[2]);
+    let coordinator = fixture.authorities[0];
+    let approver1 = fixture.authorities[1];
+    let approver2 = fixture.authorities[2];
 
     let session = fixture
         .create_coordinated_session("ota_coordination")
@@ -108,8 +108,8 @@ async fn test_ota_insufficient_approvals() -> AuraResult<()> {
     let fixture = MultiDeviceTestFixture::threshold_group().await?;
     let _protocol = create_ota_protocol();
 
-    let coordinator = AuthorityId::for_device(fixture.devices[0]);
-    let approver1 = AuthorityId::for_device(fixture.devices[1]);
+    let coordinator = fixture.authorities[0];
+    let approver1 = fixture.authorities[1];
     // approver2 will not approve (simulating rejection/unavailability)
 
     let session = fixture
@@ -269,7 +269,7 @@ async fn test_ota_rollback() -> AuraResult<()> {
     let fixture = MultiDeviceTestFixture::threshold_group().await?;
     let _protocol = create_ota_protocol();
 
-    let coordinator = AuthorityId::for_device(fixture.devices[0]);
+    let coordinator = fixture.authorities[0];
 
     let session = fixture.create_coordinated_session("ota_rollback").await?;
 

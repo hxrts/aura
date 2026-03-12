@@ -6,7 +6,7 @@
 use super::test_device_id;
 use aura_core::time::PhysicalTime;
 use aura_core::types::Epoch;
-use aura_core::{AuraError, AuraResult, DeviceId};
+use aura_core::{AuraError, AuraResult, AuthorityId, DeviceId};
 use aura_sync::{
     core::{SessionManager, SyncConfig, SyncResult},
     protocols::{
@@ -34,6 +34,8 @@ pub struct MultiDeviceTestFixture {
     pub network: NetworkSimulator,
     /// List of device IDs in the test scenario
     pub devices: Vec<DeviceId>,
+    /// List of authority IDs paired with the test devices
+    pub authorities: Vec<AuthorityId>,
     /// Session managers for each device
     pub session_managers: HashMap<DeviceId, SessionManager<()>>,
     /// Sync configuration for the test
@@ -49,6 +51,7 @@ impl MultiDeviceTestFixture {
         let harness = ChoreographyTestHarness::with_labeled_devices(device_labels_refs);
         let network = NetworkSimulator::new();
         let devices = harness.device_ids();
+        let authorities = harness.authority_ids();
         let config = test_sync_config();
 
         let mut session_managers = HashMap::new();
@@ -62,6 +65,7 @@ impl MultiDeviceTestFixture {
             harness,
             network,
             devices,
+            authorities,
             session_managers,
             config,
         })

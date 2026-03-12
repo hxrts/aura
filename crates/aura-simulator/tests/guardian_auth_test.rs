@@ -38,9 +38,9 @@ async fn guardian_auth_adapter_setup() {
     let guardian_device = DeviceId::from_uuid(Uuid::from_bytes([12; 16]));
     let coordinator_device = DeviceId::from_uuid(Uuid::from_bytes([13; 16]));
 
-    let account_auth = AuthorityId::for_device(account_device);
-    let guardian_auth = AuthorityId::for_device(guardian_device);
-    let coordinator_auth = AuthorityId::for_device(coordinator_device);
+    let account_auth = AuthorityId::new_from_entropy([31u8; 32]);
+    let guardian_auth = AuthorityId::new_from_entropy([32u8; 32]);
+    let coordinator_auth = AuthorityId::new_from_entropy([33u8; 32]);
 
     let mut role_map = HashMap::new();
     role_map.insert(GuardianAuthRelationalRole::Account, account_auth);

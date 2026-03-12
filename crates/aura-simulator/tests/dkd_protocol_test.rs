@@ -35,8 +35,8 @@ async fn dkd_choreography_adapter_setup() {
     let initiator_device = DeviceId::from_uuid(Uuid::from_bytes([11; 16]));
     let participant_device = DeviceId::from_uuid(Uuid::from_bytes([12; 16]));
 
-    let initiator_auth = AuthorityId::for_device(initiator_device);
-    let participant_auth = AuthorityId::for_device(participant_device);
+    let initiator_auth = AuthorityId::new_from_entropy([31u8; 32]);
+    let participant_auth = AuthorityId::new_from_entropy([32u8; 32]);
 
     let mut role_map = HashMap::new();
     role_map.insert(DkdChoreographyRole::Initiator, initiator_auth);
