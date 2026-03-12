@@ -388,6 +388,7 @@ mod tests {
     ) -> RendezvousDescriptor {
         RendezvousDescriptor {
             authority_id,
+            device_id: None,
             context_id,
             transport_hints,
             handshake_psk_commitment: [0u8; 32],

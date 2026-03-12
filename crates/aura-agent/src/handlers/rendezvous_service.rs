@@ -678,6 +678,7 @@ mod tests {
 
         let descriptor = RendezvousDescriptor {
             authority_id: peer,
+            device_id: None,
             context_id,
             transport_hints: vec![TransportHint::quic_direct("10.0.0.1:8443").unwrap()],
             handshake_psk_commitment: [0u8; 32],
@@ -709,6 +710,7 @@ mod tests {
         // Cache peer descriptor first
         let descriptor = RendezvousDescriptor {
             authority_id: peer,
+            device_id: None,
             context_id,
             transport_hints: vec![TransportHint::quic_direct("10.0.0.2:8443").unwrap()],
             handshake_psk_commitment: [0u8; 32],

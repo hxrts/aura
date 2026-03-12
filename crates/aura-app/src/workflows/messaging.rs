@@ -1609,8 +1609,13 @@ pub async fn send_message_ref(
             (sender_id, message_id)
         } else {
             let message_id = next_message_id(channel_id, sender_id, timestamp_ms, content);
-            let context_id =
-                context_id_for_channel(app_core, channel_id, Some(runtime.authority_id())).await?;
+            let context_id = authoritative_context_id_for_channel(app_core, channel_id)
+                .await
+                .ok_or_else(|| {
+                    AuraError::agent(format!(
+                        "Missing authoritative context for channel {channel_id}"
+                    ))
+                })?;
             enforce_home_moderation_for_sender(
                 app_core,
                 context_id,
@@ -1705,12 +1710,8 @@ pub async fn send_message_ref(
                     .await
                     .map_err(|e| AuraError::agent(format!("Failed to persist message: {e}")))?;
 
-                let channel_requires_remote_delivery = chat_snapshot(app_core)
-                    .await
-                    .channel(&channel_id)
-                    .map(|channel| channel.is_dm || channel.member_count > 1)
-                    .unwrap_or(false);
-                let mut delivered_remote = !channel_requires_remote_delivery;
+                let channel_requires_remote_delivery = true;
+                let mut delivered_remote = false;
                 let mut recipients =
                     recipient_peers_for_channel(app_core, channel_id, sender_id).await;
                 let mut failed_fanout = Vec::new();
@@ -1754,15 +1755,14 @@ pub async fn send_message_ref(
 
                     if !delivered_remote {
                         if recipients.is_empty() {
-                            messaging_warn!(
-                                "No recipient peers resolved for channel {channel_id} after extended retries; treating send as locally persisted"
-                            );
+                            return Err(AuraError::agent(format!(
+                                "No recipient peers resolved for channel {channel_id} after extended retries"
+                            )));
                         } else if !failed_fanout.is_empty() {
-                            messaging_warn!(
-                                "Message fanout unavailable for all recipients on {} after extended retries: {}; treating send as locally persisted",
-                                channel_id,
+                            return Err(AuraError::agent(format!(
+                                "Message fanout unavailable for all recipients on {channel_id} after extended retries: {}",
                                 failed_fanout.join("; ")
-                            );
+                            )));
                         }
                     }
                 }

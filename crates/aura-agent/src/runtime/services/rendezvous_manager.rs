@@ -18,7 +18,7 @@ use aura_core::effects::secure::{
 };
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::{CryptoEffects, NoiseEffects};
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_rendezvous::{
     DiscoveredPeer, LanDiscoveryConfig, LocalInterfaces, RendezvousConfig, RendezvousDescriptor,
     RendezvousFact, RendezvousService, TransportHint,
@@ -536,9 +536,17 @@ impl RendezvousManager {
     /// Cache a peer's descriptor
     pub async fn cache_descriptor(&self, descriptor: RendezvousDescriptor) -> Result<(), String> {
         with_state_mut(&self.state, |state| {
-            state
-                .descriptor_cache
-                .insert((descriptor.context_id, descriptor.authority_id), descriptor);
+            let key = (descriptor.context_id, descriptor.authority_id);
+            let descriptor = if let Some(existing) = state.descriptor_cache.get(&key) {
+                let mut merged = descriptor.clone();
+                if merged.device_id.is_none() {
+                    merged.device_id = existing.device_id;
+                }
+                merged
+            } else {
+                descriptor
+            };
+            state.descriptor_cache.insert(key, descriptor);
         })
         .await;
         Ok(())
@@ -705,6 +713,23 @@ impl RendezvousManager {
             .keys()
             .filter(|(_, auth)| *auth != self.authority_id)
             .map(|(_, auth)| *auth)
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    /// List cached peer devices with explicit device identity.
+    pub async fn list_cached_peer_devices(&self) -> Vec<DeviceId> {
+        self.state
+            .read()
+            .await
+            .descriptor_cache
+            .values()
+            .filter_map(|descriptor| {
+                (descriptor.authority_id != self.authority_id)
+                    .then_some(descriptor.device_id)
+                    .flatten()
+            })
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect()
@@ -900,6 +925,50 @@ impl RendezvousManager {
             .values()
             .cloned()
             .collect()
+    }
+
+    /// List LAN-discovered peer devices with explicit device identity.
+    pub async fn list_lan_discovered_peer_devices(&self) -> Vec<DeviceId> {
+        self.state
+            .read()
+            .await
+            .lan_discovered_peers
+            .values()
+            .filter_map(|peer| {
+                (peer.authority_id != self.authority_id)
+                    .then_some(peer.descriptor.device_id)
+                    .flatten()
+            })
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    /// List all reachable peer devices known to rendezvous.
+    ///
+    /// This is the authoritative device-level view for transport/sync wiring.
+    /// Higher-level social semantics remain authority-based, but endpoint
+    /// selection must operate only on explicit device identities.
+    pub async fn list_reachable_peer_devices(&self) -> Vec<DeviceId> {
+        let state = self.state.read().await;
+        let mut devices = state
+            .descriptor_cache
+            .values()
+            .filter_map(|descriptor| {
+                (descriptor.authority_id != self.authority_id)
+                    .then_some(descriptor.device_id)
+                    .flatten()
+            })
+            .chain(state.lan_discovered_peers.values().filter_map(|peer| {
+                (peer.authority_id != self.authority_id)
+                    .then_some(peer.descriptor.device_id)
+                    .flatten()
+            }))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        devices.sort();
+        devices
     }
 
     /// Get a specific LAN-discovered peer

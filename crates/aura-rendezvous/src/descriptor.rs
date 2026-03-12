@@ -206,6 +206,7 @@ impl DescriptorBuilder {
 
         RendezvousDescriptor {
             authority_id: self.authority_id,
+            device_id: None,
             context_id,
             transport_hints,
             handshake_psk_commitment: psk_commitment,

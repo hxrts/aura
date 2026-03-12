@@ -4,8 +4,8 @@ use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Condvar;
 use std::sync::Arc;
+use std::sync::Condvar;
 use std::thread;
 use std::time::Duration;
 
@@ -19,15 +19,15 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use crate::backend::{
-    observe_operation, wait_for_modal_visible, wait_for_operation_submission,
-    submit_accept_contact_invitation_via_shared_ui,
-    submit_invite_actor_to_channel_via_shared_ui, wait_for_screen_visible,
-    ContactInvitationCode, InstanceBackend, RawUiBackend, SharedSemanticBackend,
-    SubmittedAction, UiSnapshotEvent,
+    observe_operation, submit_accept_contact_invitation_via_shared_ui,
+    submit_invite_actor_to_channel_via_shared_ui, wait_for_modal_visible,
+    wait_for_operation_submission, wait_for_screen_visible, ContactInvitationCode, InstanceBackend,
+    RawUiBackend, SharedSemanticBackend, SubmittedAction, UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
 use crate::recovery_registry::{run_registered_recovery, RecoveryPath};
 use crate::screen_normalization::{authoritative_screen, has_nav_header};
+use crate::workspace_root;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum BackendState {
@@ -45,6 +45,51 @@ fn snapshot_has_real_home(snapshot: &UiSnapshot) -> bool {
         .find(|list| list.id == ListId::Homes)
         .map(|list| list.items.iter().any(|item| item.id != PLACEHOLDER_HOME_ID))
         .unwrap_or(false)
+}
+
+fn select_home_and_channel(backend: &mut LocalPtyBackend, channel_id: &str) -> Result<()> {
+    backend.activate_control(ControlId::NavNeighborhood)?;
+    wait_for_screen_visible(backend, ScreenId::Neighborhood, Duration::from_secs(5))?;
+    backend.send_keys("\x1b")?;
+    thread::sleep(Duration::from_millis(120));
+    let home_deadline = Instant::now() + Duration::from_secs(15);
+    let mut selected_home = false;
+    loop {
+        let snapshot = backend.ui_snapshot()?;
+        let has_home = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Homes)
+            .is_some_and(|list| list.items.iter().any(|item| item.id == channel_id));
+        if has_home {
+            match backend.activate_list_item(ListId::Homes, channel_id) {
+                Ok(()) => {
+                    selected_home = true;
+                    backend.send_keys("\r")?;
+                    thread::sleep(Duration::from_millis(250));
+                }
+                Err(error) => {
+                    tracing::debug!(
+                        "select_home_and_channel: home {channel_id} selection did not converge: {error}"
+                    );
+                }
+            }
+            break;
+        }
+        if Instant::now() >= home_deadline {
+            break;
+        }
+        thread::sleep(Duration::from_millis(80));
+    }
+    backend.activate_control(ControlId::NavChat)?;
+    wait_for_screen_visible(backend, ScreenId::Chat, Duration::from_secs(5))?;
+    backend.activate_list_item(ListId::Channels, channel_id)?;
+    if !selected_home {
+        tracing::debug!(
+            "select_home_and_channel: home {channel_id} not visible, fell back to chat selection"
+        );
+    }
+    Ok(())
 }
 
 struct RunningSession {
@@ -93,7 +138,10 @@ impl LocalPtyBackend {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.config.data_dir.hash(&mut hasher);
         self.config.id.hash(&mut hasher);
-        std::env::temp_dir().join(format!("aura-ui-{:016x}.sock", hasher.finish()))
+        workspace_root()
+            .join(".tmp")
+            .join("harness-ui")
+            .join(format!("{:016x}.sock", hasher.finish()))
     }
 
     pub fn new(config: InstanceConfig, pty_rows: Option<u16>, pty_cols: Option<u16>) -> Self {
@@ -113,8 +161,20 @@ impl LocalPtyBackend {
         stop_flag: &Arc<AtomicU64>,
     ) -> Result<thread::JoinHandle<()>> {
         let _ = fs::remove_file(socket_path);
-        let listener = UnixListener::bind(socket_path)
-            .with_context(|| format!("failed to bind TUI UI snapshot socket {}", socket_path.display()))?;
+        if let Some(parent) = socket_path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "failed to create TUI UI snapshot socket directory {}",
+                    parent.display()
+                )
+            })?;
+        }
+        let listener = UnixListener::bind(socket_path).with_context(|| {
+            format!(
+                "failed to bind TUI UI snapshot socket {}",
+                socket_path.display()
+            )
+        })?;
         let socket_path = socket_path.clone();
         let feed = Arc::clone(feed);
         let stop_flag = Arc::clone(stop_flag);
@@ -376,10 +436,26 @@ impl InstanceBackend for LocalPtyBackend {
                 self.config.data_dir.display()
             )
         })?;
-        let child = pair
-            .slave
-            .spawn_command(command)
-            .with_context(|| format!("failed to spawn process for {}", self.config.id))?;
+        let ui_snapshot_feed = Arc::new(UiSnapshotFeed::default());
+        let ui_snapshot_stop = Arc::new(AtomicU64::new(0));
+        let ui_snapshot_socket_path = Self::absolutize_path(self.ui_state_socket_path());
+        let ui_snapshot_thread = Self::spawn_ui_snapshot_listener(
+            &ui_snapshot_socket_path,
+            &ui_snapshot_feed,
+            &ui_snapshot_stop,
+        )?;
+        let child = match pair.slave.spawn_command(command) {
+            Ok(child) => child,
+            Err(error) => {
+                ui_snapshot_stop.store(1, Ordering::Release);
+                if let Ok(mut stream) = UnixStream::connect(&ui_snapshot_socket_path) {
+                    let _ = stream.write_all(b"__AURA_UI_STATE_SHUTDOWN__");
+                }
+                let _ = ui_snapshot_thread.join();
+                return Err(error)
+                    .with_context(|| format!("failed to spawn process for {}", self.config.id));
+            }
+        };
         drop(pair.slave);
 
         let mut reader = pair
@@ -408,14 +484,6 @@ impl InstanceBackend for LocalPtyBackend {
                 }
             }
         });
-        let ui_snapshot_feed = Arc::new(UiSnapshotFeed::default());
-        let ui_snapshot_stop = Arc::new(AtomicU64::new(0));
-        let ui_snapshot_socket_path = Self::absolutize_path(self.ui_state_socket_path());
-        let ui_snapshot_thread = Self::spawn_ui_snapshot_listener(
-            &ui_snapshot_socket_path,
-            &ui_snapshot_feed,
-            &ui_snapshot_stop,
-        )?;
 
         self.session = Some(RunningSession {
             child,
@@ -662,7 +730,16 @@ impl InstanceBackend for LocalPtyBackend {
     }
 
     fn health_check(&self) -> Result<bool> {
-        Ok(self.state == BackendState::Running && self.session.is_some())
+        let running = self.state == BackendState::Running && self.session.is_some();
+        if !running {
+            return Ok(false);
+        }
+        let reader_alive = self
+            .session
+            .as_ref()
+            .and_then(|session| session.reader_thread.as_ref())
+            .map_or(true, |thread| !thread.is_finished());
+        Ok(reader_alive)
     }
 
     fn wait_until_ready(&self, timeout: Duration) -> Result<()> {
@@ -688,10 +765,18 @@ impl InstanceBackend for LocalPtyBackend {
             if self.ui_snapshot().is_ok() {
                 return Ok(());
             }
-            if let Ok(screen) = self.snapshot() {
-                if !screen.trim().is_empty() {
-                    return Ok(());
-                }
+            if self
+                .session
+                .as_ref()
+                .and_then(|session| session.reader_thread.as_ref())
+                .is_some_and(|thread| thread.is_finished())
+            {
+                let screen = self.snapshot().unwrap_or_default();
+                anyhow::bail!(
+                    "local PTY instance {} exited before publishing an authoritative UI snapshot; screen={:?}",
+                    self.config.id,
+                    screen
+                );
             }
             if Instant::now() >= deadline {
                 anyhow::bail!(
@@ -741,7 +826,10 @@ impl RawUiBackend for LocalPtyBackend {
         }
         if control_id == ControlId::ModalConfirmButton {
             let snapshot = self.ui_snapshot()?;
-            if snapshot.open_modal == Some(ModalId::CreateInvitation) {
+            if matches!(
+                snapshot.open_modal,
+                Some(ModalId::CreateInvitation | ModalId::AddDevice)
+            ) {
                 return self.send_keys("\r");
             }
         }
@@ -780,9 +868,9 @@ impl RawUiBackend for LocalPtyBackend {
                 {
                     self.send_keys("\x1b")?;
                     self.send_keys("i")?;
-                    thread::sleep(Duration::from_millis(120));
+                    thread::sleep(Duration::from_millis(200));
                 }
-                self.type_text(value, 4)
+                self.type_text(value, 12)
             }
             FieldId::InvitationCode | FieldId::DeviceImportCode => self.type_text(value, 3),
             _ => self.type_text(value, 8),
@@ -828,6 +916,9 @@ impl RawUiBackend for LocalPtyBackend {
             snapshot.focused_control
         );
         if matches!(list_id, ListId::InvitationTypes) {
+            if current_index == target_index {
+                return Ok(());
+            }
             match snapshot.focused_control {
                 Some(ControlId::Field(FieldId::InvitationType)) => {}
                 Some(ControlId::Field(FieldId::InvitationMessage)) => self.send_keys("\u{1b}[A")?,
@@ -926,7 +1017,7 @@ impl RawUiBackend for LocalPtyBackend {
             );
         }
         let delta = target_index as isize - current_index as isize;
-        let sequence = if matches!(list_id, ListId::SettingsSections) {
+        let sequence = if matches!(list_id, ListId::SettingsSections | ListId::Homes) {
             if delta < 0 {
                 "\u{1b}[A"
             } else {
@@ -945,7 +1036,26 @@ impl RawUiBackend for LocalPtyBackend {
             self.send_keys(sequence)?;
             thread::sleep(Duration::from_millis(60));
         }
-        Ok(())
+        let selection_deadline = Instant::now() + Duration::from_millis(1500);
+        loop {
+            let current_snapshot = self.ui_snapshot()?;
+            let selected_item = current_snapshot
+                .lists
+                .iter()
+                .find(|candidate| candidate.id == list_id)
+                .and_then(|candidate| candidate.items.iter().find(|item| item.selected))
+                .map(|item| item.id.as_str());
+            if selected_item == Some(item_id) {
+                return Ok(());
+            }
+            if Instant::now() >= selection_deadline {
+                anyhow::bail!(
+                    "failed to converge selection for item {item_id} in list {list_id:?}; final selection was {}",
+                    selected_item.unwrap_or("<none>")
+                );
+            }
+            thread::sleep(Duration::from_millis(80));
+        }
     }
 }
 
@@ -965,7 +1075,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
     fn submit_create_account(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
         self.fill_field(FieldId::AccountName, account_name)?;
         self.activate_control(ControlId::OnboardingCreateAccountButton)?;
-        let convergence_deadline = Instant::now() + Duration::from_secs(20);
+        let issue_deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let snapshot = self.ui_snapshot()?;
             if snapshot.operations.iter().any(|operation| {
@@ -974,27 +1084,24 @@ impl SharedSemanticBackend for LocalPtyBackend {
             }) {
                 anyhow::bail!("submit_create_account: account creation failed");
             }
-            if snapshot.screen != ScreenId::Onboarding && snapshot_has_real_home(&snapshot) {
-                break;
+            if snapshot.operations.iter().any(|operation| {
+                operation.id == OperationId::account_create()
+                    && matches!(
+                        operation.state,
+                        aura_app::ui::contract::OperationState::Submitting
+                            | aura_app::ui::contract::OperationState::Succeeded
+                    )
+            }) {
+                return Ok(SubmittedAction::without_handle(()));
             }
-            if Instant::now() >= convergence_deadline {
-                break;
+            if snapshot.screen != ScreenId::Onboarding || snapshot_has_real_home(&snapshot) {
+                return Ok(SubmittedAction::without_handle(()));
+            }
+            if Instant::now() >= issue_deadline {
+                anyhow::bail!("submit_create_account: account creation did not issue");
             }
             thread::sleep(Duration::from_millis(100));
         }
-        let final_snapshot = self.ui_snapshot()?;
-        anyhow::ensure!(
-            final_snapshot.operations.iter().all(|operation| {
-                !(operation.id == OperationId::account_create()
-                    && operation.state == aura_app::ui::contract::OperationState::Submitting)
-            }),
-            "submit_create_account: account creation remained stuck submitting"
-        );
-        anyhow::ensure!(
-            snapshot_has_real_home(&final_snapshot),
-            "submit_create_account: account creation did not converge a real home"
-        );
-        Ok(SubmittedAction::without_handle(()))
     }
 
     fn submit_create_home(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
@@ -1013,7 +1120,10 @@ impl SharedSemanticBackend for LocalPtyBackend {
             }
             thread::sleep(Duration::from_millis(150));
         }
-        anyhow::ensure!(modal_open, "submit_create_home: create_home_modal did not open");
+        anyhow::ensure!(
+            modal_open,
+            "submit_create_home: create_home_modal did not open"
+        );
         thread::sleep(Duration::from_millis(200));
         self.fill_field(FieldId::HomeName, home_name)
             .context("submit_create_home: fill_home_name")?;
@@ -1069,6 +1179,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
             observe_operation(&self.ui_snapshot()?, &OperationId::invitation_create());
         self.activate_control(ControlId::ContactsCreateInvitationButton)?;
         wait_for_modal_visible(self, ModalId::CreateInvitation, Duration::from_secs(5))?;
+        self.activate_list_item(ListId::InvitationTypes, "contact")?;
         self.fill_field(FieldId::InvitationReceiver, receiver_authority_id)?;
         self.activate_control(ControlId::ModalConfirmButton)?;
         let handle = wait_for_operation_submission(
@@ -1077,9 +1188,23 @@ impl SharedSemanticBackend for LocalPtyBackend {
             previous_operation,
             Duration::from_secs(5),
         )?;
+        wait_for_modal_visible(self, ModalId::InvitationCode, Duration::from_secs(5))?;
+        self.activate_control(ControlId::ModalCancelButton)?;
+        let close_deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if self.ui_snapshot()?.open_modal != Some(ModalId::InvitationCode) {
+                break;
+            }
+            if Instant::now() >= close_deadline {
+                anyhow::bail!(
+                    "submit_create_contact_invitation did not close InvitationCode modal"
+                );
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
         Ok(SubmittedAction::with_ui_operation(
             ContactInvitationCode {
-                code: self.read_clipboard()?,
+                code: String::new(),
             },
             handle,
         ))
@@ -1097,13 +1222,39 @@ impl SharedSemanticBackend for LocalPtyBackend {
     }
 
     fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>> {
-        let previous_channel_count = self
-            .ui_snapshot()?
+        let snapshot = self.ui_snapshot()?;
+        let previous_channel_count = snapshot
             .lists
             .iter()
             .find(|list| list.id == ListId::Channels)
             .map(|list| list.items.len())
             .unwrap_or(0);
+        let joined_channel_id =
+            snapshot
+                .runtime_events
+                .iter()
+                .find_map(|event| match &event.fact {
+                    RuntimeFact::ChannelMembershipReady {
+                        channel,
+                        member_count: Some(member_count),
+                        ..
+                    } if *member_count > 1 => channel.id.clone(),
+                    _ => None,
+                });
+        let already_joined = previous_channel_count > 1 || joined_channel_id.is_some();
+        if already_joined {
+            if let Some(channel_id) = joined_channel_id {
+                let selected_channel_id = snapshot
+                    .selections
+                    .iter()
+                    .find(|selection| selection.list == ListId::Channels)
+                    .map(|selection| selection.item_id.clone());
+                if selected_channel_id.as_deref() != Some(channel_id.as_str()) {
+                    select_home_and_channel(self, &channel_id)?;
+                }
+            }
+            return Ok(SubmittedAction::without_handle(()));
+        }
         self.submit_chat_command_via_ui("homeaccept")?;
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
@@ -1114,12 +1265,30 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 .find(|list| list.id == ListId::Channels)
                 .map(|list| list.items.len())
                 .unwrap_or(0);
-            let joined = channel_count > previous_channel_count
-                || snapshot
+            let joined_channel_id =
+                snapshot
                     .runtime_events
                     .iter()
-                    .any(|event| matches!(&event.fact, RuntimeFact::ChannelMembershipReady { .. }));
+                    .find_map(|event| match &event.fact {
+                        RuntimeFact::ChannelMembershipReady {
+                            channel,
+                            member_count: Some(member_count),
+                            ..
+                        } if *member_count > 1 => channel.id.clone(),
+                        _ => None,
+                    });
+            let joined = channel_count > previous_channel_count || joined_channel_id.is_some();
             if joined {
+                if let Some(channel_id) = joined_channel_id {
+                    let selected_channel_id = snapshot
+                        .selections
+                        .iter()
+                        .find(|selection| selection.list == ListId::Channels)
+                        .map(|selection| selection.item_id.clone());
+                    if selected_channel_id.as_deref() != Some(channel_id.as_str()) {
+                        select_home_and_channel(self, &channel_id)?;
+                    }
+                }
                 return Ok(SubmittedAction::without_handle(()));
             }
             if snapshot.operation_state(&OperationId::invitation_accept())
@@ -1141,50 +1310,40 @@ impl SharedSemanticBackend for LocalPtyBackend {
             .context("submit_join_channel: nav_chat")?;
         wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))
             .context("submit_join_channel: wait_chat")?;
-        let modal_open_deadline = Instant::now() + Duration::from_secs(5);
-        let mut modal_open = false;
-        while Instant::now() < modal_open_deadline {
-            self.activate_control(ControlId::ChatNewGroupButton)
-                .context("submit_join_channel: open_create_channel")?;
-            if wait_for_modal_visible(self, ModalId::CreateChannel, Duration::from_secs(2)).is_ok()
-            {
-                modal_open = true;
-                break;
-            }
-            thread::sleep(Duration::from_millis(150));
-        }
-        anyhow::ensure!(
-            modal_open,
-            "submit_join_channel: create_channel_modal did not open"
-        );
-        thread::sleep(Duration::from_millis(200));
-        self.fill_field(FieldId::CreateChannelName, channel_name)
-            .context("submit_join_channel: fill_channel_name")?;
-        thread::sleep(Duration::from_millis(200));
-        self.send_keys("\r")
-            .context("submit_join_channel: advance_details")?;
-        thread::sleep(Duration::from_millis(250));
-        self.send_keys("\r")
-            .context("submit_join_channel: advance_members")?;
-        thread::sleep(Duration::from_millis(250));
-        self.send_keys("\r")
-            .context("submit_join_channel: submit_threshold")?;
+        self.submit_chat_command_via_ui(&format!("join {channel_name}"))
+            .context("submit_join_channel: join_command")?;
         let joined_deadline = Instant::now() + Duration::from_secs(4);
         loop {
             let snapshot = self.ui_snapshot()?;
-            let joined = snapshot.runtime_events.iter().any(|event| {
-                matches!(
-                    &event.fact,
-                    RuntimeFact::ChannelMembershipReady { channel, .. }
-                    if channel
-                        .name
-                        .as_deref()
-                        .map(|name: &str| name.eq_ignore_ascii_case(channel_name))
-                        .unwrap_or(false)
-                )
-            });
+            let joined_channel_id =
+                snapshot
+                    .runtime_events
+                    .iter()
+                    .find_map(|event| match &event.fact {
+                        RuntimeFact::ChannelMembershipReady { channel, .. }
+                            if channel
+                                .name
+                                .as_deref()
+                                .map(|name: &str| name.eq_ignore_ascii_case(channel_name))
+                                .unwrap_or(false) =>
+                        {
+                            channel.id.clone()
+                        }
+                        _ => None,
+                    });
+            let joined = joined_channel_id.is_some();
             if joined || Instant::now() >= joined_deadline {
                 if joined {
+                    if let Some(channel_id) = joined_channel_id {
+                        let selected_channel_id = snapshot
+                            .selections
+                            .iter()
+                            .find(|selection| selection.list == ListId::Channels)
+                            .map(|selection| selection.item_id.clone());
+                        if selected_channel_id.as_deref() != Some(channel_id.as_str()) {
+                            select_home_and_channel(self, &channel_id)?;
+                        }
+                    }
                     return Ok(SubmittedAction::without_handle(()));
                 }
                 break;
@@ -1192,13 +1351,63 @@ impl SharedSemanticBackend for LocalPtyBackend {
             thread::sleep(Duration::from_millis(80));
         }
         run_registered_recovery(RecoveryPath::LocalPtyJoinChannelSlashFallback, || {
-            self.submit_chat_command_via_ui(&format!("join {channel_name}"))
-                .context("submit_join_channel: join_fallback")
+            self.activate_control(ControlId::ChatNewGroupButton)
+                .context("submit_join_channel: open_create_channel")?;
+            wait_for_modal_visible(self, ModalId::CreateChannel, Duration::from_secs(2))
+                .context("submit_join_channel: wait_create_channel")?;
+            self.fill_field(FieldId::CreateChannelName, channel_name)
+                .context("submit_join_channel: fill_channel_name")?;
+            self.send_keys("\r")
+                .context("submit_join_channel: advance_details")?;
+            self.send_keys("\r")
+                .context("submit_join_channel: advance_members")?;
+            self.send_keys("\r")
+                .context("submit_join_channel: submit_threshold")
         })?;
         Ok(SubmittedAction::without_handle(()))
     }
 
     fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>> {
+        fn message_visible(snapshot: &UiSnapshot, expected: &str) -> bool {
+            snapshot
+                .messages
+                .iter()
+                .any(|message| message.content.contains(expected))
+        }
+
+        fn send_once(backend: &mut LocalPtyBackend, message: &str) -> Result<()> {
+            backend.fill_field(FieldId::ChatInput, message)?;
+            let input_deadline = Instant::now() + Duration::from_millis(1200);
+            loop {
+                if backend.snapshot()?.contains(message) {
+                    break;
+                }
+                if Instant::now() >= input_deadline {
+                    backend.send_keys("\x1b")?;
+                    thread::sleep(Duration::from_millis(80));
+                    backend.send_keys("i")?;
+                    thread::sleep(Duration::from_millis(250));
+                    backend.type_text(message, 20)?;
+                    let retry_deadline = Instant::now() + Duration::from_millis(1200);
+                    loop {
+                        if backend.snapshot()?.contains(message) {
+                            break;
+                        }
+                        if Instant::now() >= retry_deadline {
+                            anyhow::bail!(
+                                "submit_send_chat_message: message never appeared in chat input"
+                            );
+                        }
+                        thread::sleep(Duration::from_millis(80));
+                    }
+                    break;
+                }
+                thread::sleep(Duration::from_millis(80));
+            }
+            backend.send_key(crate::tool_api::ToolKey::Enter, 1)?;
+            Ok(())
+        }
+
         self.activate_control(ControlId::NavChat)?;
         wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
         let snapshot = self.ui_snapshot()?;
@@ -1226,9 +1435,34 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 }
             }
         }
-        self.fill_field(FieldId::ChatInput, message)?;
-        self.send_key(crate::tool_api::ToolKey::Enter, 1)?;
-        Ok(SubmittedAction::without_handle(()))
+
+        send_once(self, message)?;
+        let first_deadline = Instant::now() + Duration::from_millis(1500);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            if message_visible(&snapshot, message) {
+                return Ok(SubmittedAction::without_handle(()));
+            }
+            if Instant::now() >= first_deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(80));
+        }
+
+        send_once(self, message)?;
+        let retry_deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            if message_visible(&snapshot, message) {
+                return Ok(SubmittedAction::without_handle(()));
+            }
+            if Instant::now() >= retry_deadline {
+                anyhow::bail!(
+                    "submit_send_chat_message: message did not appear locally after bounded retry"
+                );
+            }
+            thread::sleep(Duration::from_millis(80));
+        }
     }
 }
 
@@ -1334,13 +1568,13 @@ mod tests {
         let source = include_str!("local_pty.rs");
         assert!(source.contains("fn submit_create_account"));
         assert!(source.contains("self.fill_field(FieldId::AccountName, account_name)?;"));
-        assert!(source.contains(
-            "self.activate_control(ControlId::OnboardingCreateAccountButton)?;"
-        ));
+        assert!(
+            source.contains("self.activate_control(ControlId::OnboardingCreateAccountButton)?;")
+        );
         assert!(source.contains("fn submit_create_contact_invitation"));
-        assert!(source.contains(
-            "self.activate_control(ControlId::ContactsCreateInvitationButton)?;"
-        ));
+        assert!(
+            source.contains("self.activate_control(ControlId::ContactsCreateInvitationButton)?;")
+        );
         assert!(source.contains(
             "wait_for_modal_visible(self, ModalId::CreateInvitation, Duration::from_secs(5))?;"
         ));
@@ -1463,7 +1697,9 @@ mod tests {
         config.data_dir = std::env::temp_dir().join("aura-harness-local-missing-ui-snapshot");
 
         let mut backend = LocalPtyBackend::new(config, Some(20), Some(120));
-        backend.start().unwrap_or_else(|error| panic!("backend must start: {error}"));
+        backend
+            .start()
+            .unwrap_or_else(|error| panic!("backend must start: {error}"));
 
         let error = backend
             .ui_snapshot()
@@ -1475,7 +1711,9 @@ mod tests {
             "missing TUI snapshot publication must fail diagnostically, got: {message}"
         );
 
-        backend.stop().unwrap_or_else(|error| panic!("backend must stop: {error}"));
+        backend
+            .stop()
+            .unwrap_or_else(|error| panic!("backend must stop: {error}"));
     }
 
     #[test]

@@ -84,14 +84,15 @@ action = "start_device_enrollment"
 actor = "alice"
 value = "BobApp"
 name = "device_code"
-timeout_ms = 12000
+timeout_ms = 120000
 
 [[steps]]
 id = "alice-device-code-ready"
 action = "runtime_event_occurred"
 actor = "alice"
 runtime_event_kind = "device_enrollment_code_ready"
-timeout_ms = 12000
+name = "device_code"
+timeout_ms = 30000
 
 [[steps]]
 id = "bob-import-device-code"

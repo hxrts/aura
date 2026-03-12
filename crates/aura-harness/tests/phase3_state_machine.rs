@@ -87,7 +87,9 @@ fn execute_mode(
 }
 
 fn sample_mixed_run_config() -> aura_harness::config::RunConfig {
-use aura_harness::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, RuntimeSubstrate};
+    use aura_harness::config::{
+        InstanceConfig, InstanceMode, RunConfig, RunSection, RuntimeSubstrate,
+    };
 
     RunConfig {
         schema_version: 1,

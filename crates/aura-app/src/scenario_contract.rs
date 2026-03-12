@@ -345,7 +345,7 @@ pub enum IntentAction {
     RemoveSelectedDevice,
     CreateContactInvitation {
         receiver_authority_id: String,
-        code_name: String,
+        code_name: Option<String>,
     },
     AcceptContactInvitation {
         code: String,
@@ -416,17 +416,9 @@ impl IntentAction {
             },
             Self::CreateAccount { .. } => SharedActionContract {
                 intent: IntentKind::CreateAccount,
-                preconditions: vec![
-                    ActionPrecondition::Screen(ScreenId::Onboarding),
-                    ActionPrecondition::Readiness(UiReadiness::Ready),
-                    ActionPrecondition::Quiescence(QuiescenceState::Settled),
-                ],
+                preconditions: vec![ActionPrecondition::Screen(ScreenId::Onboarding)],
                 barriers: SharedActionBarrierMetadata {
-                    before_issue: vec![
-                        BarrierDeclaration::Screen(ScreenId::Onboarding),
-                        BarrierDeclaration::Readiness(UiReadiness::Ready),
-                        BarrierDeclaration::Quiescence(QuiescenceState::Settled),
-                    ],
+                    before_issue: vec![BarrierDeclaration::Screen(ScreenId::Onboarding)],
                     before_next_intent: vec![
                         BarrierDeclaration::OperationState {
                             operation_id: OperationId::account_create(),
@@ -538,17 +530,9 @@ impl IntentAction {
             },
             Self::ImportDeviceEnrollmentCode { .. } => SharedActionContract {
                 intent: IntentKind::ImportDeviceEnrollmentCode,
-                preconditions: vec![
-                    ActionPrecondition::Screen(ScreenId::Onboarding),
-                    ActionPrecondition::Readiness(UiReadiness::Ready),
-                    ActionPrecondition::Quiescence(QuiescenceState::Settled),
-                ],
+                preconditions: vec![ActionPrecondition::Screen(ScreenId::Onboarding)],
                 barriers: SharedActionBarrierMetadata {
-                    before_issue: vec![
-                        BarrierDeclaration::Screen(ScreenId::Onboarding),
-                        BarrierDeclaration::Readiness(UiReadiness::Ready),
-                        BarrierDeclaration::Quiescence(QuiescenceState::Settled),
-                    ],
+                    before_issue: vec![BarrierDeclaration::Screen(ScreenId::Onboarding)],
                     before_next_intent: vec![
                         BarrierDeclaration::Screen(ScreenId::Neighborhood),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
@@ -725,28 +709,17 @@ impl IntentAction {
             Self::AcceptPendingChannelInvitation => SharedActionContract {
                 intent: IntentKind::AcceptPendingChannelInvitation,
                 preconditions: vec![
-                    ActionPrecondition::Screen(ScreenId::Notifications),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
                     ActionPrecondition::Quiescence(QuiescenceState::Settled),
-                    ActionPrecondition::RuntimeEvent(RuntimeEventKind::PendingHomeInvitationReady),
                 ],
                 barriers: SharedActionBarrierMetadata {
                     before_issue: vec![
-                        BarrierDeclaration::Screen(ScreenId::Notifications),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
                         BarrierDeclaration::Quiescence(QuiescenceState::Settled),
-                        BarrierDeclaration::RuntimeEvent(
-                            RuntimeEventKind::PendingHomeInvitationReady,
-                        ),
                     ],
-                    before_next_intent: vec![
-                        BarrierDeclaration::OperationState {
-                            operation_id: OperationId::invitation_accept(),
-                            state: OperationState::Succeeded,
-                        },
-                        BarrierDeclaration::RuntimeEvent(RuntimeEventKind::InvitationAccepted),
-                        BarrierDeclaration::RuntimeEvent(RuntimeEventKind::ChannelJoined),
-                    ],
+                    before_next_intent: vec![BarrierDeclaration::RuntimeEvent(
+                        RuntimeEventKind::ChannelMembershipReady,
+                    )],
                 },
                 post_operation_convergence: Some(PostOperationConvergenceContract {
                     required_before_next_intent: vec![BarrierDeclaration::RuntimeEvent(
@@ -754,8 +727,8 @@ impl IntentAction {
                     )],
                     violation_code: "channel_membership_convergence_required".to_string(),
                 }),
-                focus_semantics: FocusSemantics::Screen(ScreenId::Notifications),
-                selection_semantics: SelectionSemantics::List(ListId::Notifications),
+                focus_semantics: FocusSemantics::None,
+                selection_semantics: SelectionSemantics::PreservesCurrent,
                 transitions: vec![AuthoritativeTransitionKind::Operation(
                     OperationId::invitation_accept(),
                 )],
@@ -766,6 +739,7 @@ impl IntentAction {
                     },
                     TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::InvitationAccepted),
                     TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::ChannelJoined),
+                    TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::ChannelMembershipReady),
                 ],
                 terminal_failure_codes: vec![
                     "pending_channel_invitation_issue_failed".to_string(),
@@ -787,9 +761,7 @@ impl IntentAction {
                     ],
                     before_next_intent: vec![
                         BarrierDeclaration::RuntimeEvent(RuntimeEventKind::ChannelJoined),
-                        BarrierDeclaration::RuntimeEvent(
-                            RuntimeEventKind::ChannelMembershipReady,
-                        ),
+                        BarrierDeclaration::RuntimeEvent(RuntimeEventKind::ChannelMembershipReady),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
                     ],
                 },
@@ -833,12 +805,7 @@ impl IntentAction {
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
                     ],
                 },
-                post_operation_convergence: Some(PostOperationConvergenceContract {
-                    required_before_next_intent: vec![BarrierDeclaration::RuntimeEvent(
-                        RuntimeEventKind::PendingHomeInvitationReady,
-                    )],
-                    violation_code: "pending_channel_invitation_convergence_required".to_string(),
-                }),
+                post_operation_convergence: None,
                 focus_semantics: FocusSemantics::Control(ControlId::ContactsInviteToChannelButton),
                 selection_semantics: SelectionSemantics::List(ListId::Contacts),
                 transitions: vec![AuthoritativeTransitionKind::Operation(
@@ -1011,6 +978,7 @@ pub enum Expectation {
     RuntimeEventOccurred {
         kind: RuntimeEventKind,
         detail_contains: Option<String>,
+        capture_name: Option<String>,
     },
     OperationStateIs {
         operation_id: OperationId,
@@ -1207,7 +1175,7 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
             SemanticActionKind::CreateContactInvitation => {
                 ScenarioAction::Intent(IntentAction::CreateContactInvitation {
                     receiver_authority_id: required(value.value, "value", value.action)?,
-                    code_name: required(value.name, "name", value.action)?,
+                    code_name: value.name,
                 })
             }
             SemanticActionKind::AcceptContactInvitation => {
@@ -1320,6 +1288,7 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                 ScenarioAction::Expect(Expectation::RuntimeEventOccurred {
                     kind: required(value.runtime_event_kind, "runtime_event_kind", value.action)?,
                     detail_contains: value.value,
+                    capture_name: value.name,
                 })
             }
             SemanticActionKind::OperationStateIs => {
@@ -1676,7 +1645,7 @@ mod tests {
             IntentAction::RemoveSelectedDevice,
             IntentAction::CreateContactInvitation {
                 receiver_authority_id: "authority:peer".to_string(),
-                code_name: "contact_code".to_string(),
+                code_name: Some("contact_code".to_string()),
             },
             IntentAction::AcceptContactInvitation {
                 code: "invite-code".to_string(),
@@ -1729,7 +1698,7 @@ mod tests {
             IntentAction::RemoveSelectedDevice,
             IntentAction::CreateContactInvitation {
                 receiver_authority_id: "authority:peer".to_string(),
-                code_name: "contact_code".to_string(),
+                code_name: Some("contact_code".to_string()),
             },
             IntentAction::AcceptContactInvitation {
                 code: "invite-code".to_string(),
@@ -1781,7 +1750,7 @@ mod tests {
             IntentAction::RemoveSelectedDevice,
             IntentAction::CreateContactInvitation {
                 receiver_authority_id: "authority:peer".to_string(),
-                code_name: "contact_code".to_string(),
+                code_name: Some("contact_code".to_string()),
             },
             IntentAction::AcceptContactInvitation {
                 code: "invite-code".to_string(),

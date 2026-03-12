@@ -664,9 +664,11 @@ impl SettingsSection {
             Self::Authority => aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
                 aura_app::ui_contract::SharedSettingsSectionId::Authority,
             ),
-            Self::Observability => aura_app::ui_contract::SettingsSectionSurfaceId::FrontendSpecific(
-                aura_app::ui_contract::FrontendSpecificSettingsSectionId::Observability,
-            ),
+            Self::Observability => {
+                aura_app::ui_contract::SettingsSectionSurfaceId::FrontendSpecific(
+                    aura_app::ui_contract::FrontendSpecificSettingsSectionId::Observability,
+                )
+            }
         }
     }
 

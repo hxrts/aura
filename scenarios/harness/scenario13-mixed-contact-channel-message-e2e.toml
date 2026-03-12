@@ -123,7 +123,6 @@ id = "bob-create-contact-invitation"
 action = "create_contact_invitation"
 actor = "bob"
 value = "${alice_authority_id}"
-name = "invite_code"
 timeout_ms = 30000
 
 [[steps]]
@@ -131,6 +130,7 @@ id = "bob-invitation-code-ready"
 action = "runtime_event_occurred"
 actor = "bob"
 runtime_event_kind = "invitation_code_ready"
+name = "invite_code"
 timeout_ms = 30000
 
 [[steps]]
@@ -148,6 +148,13 @@ runtime_event_kind = "contact_link_ready"
 timeout_ms = 30000
 
 [[steps]]
+id = "alice-open-chat-before-join"
+action = "open_screen"
+actor = "alice"
+screen_id = "chat"
+timeout_ms = 6000
+
+[[steps]]
 id = "alice-join-shared-channel"
 action = "join_channel"
 actor = "alice"
@@ -162,18 +169,18 @@ runtime_event_kind = "channel_membership_ready"
 timeout_ms = 120000
 
 [[steps]]
+id = "alice-open-contacts-before-invite"
+action = "open_screen"
+actor = "alice"
+screen_id = "contacts"
+timeout_ms = 6000
+
+[[steps]]
 id = "alice-invite-bob-to-shared-channel"
 action = "invite_actor_to_channel"
 actor = "alice"
 value = "${bob_authority_id}"
 timeout_ms = 6000
-
-[[steps]]
-id = "bob-pending-home-invitation-ready"
-action = "runtime_event_occurred"
-actor = "bob"
-runtime_event_kind = "pending_home_invitation_ready"
-timeout_ms = 30000
 
 [[steps]]
 id = "bob-join-shared-channel"
@@ -203,10 +210,24 @@ runtime_event_kind = "message_delivery_ready"
 timeout_ms = 120000
 
 [[steps]]
+id = "alice-open-chat-before-send"
+action = "open_screen"
+actor = "alice"
+screen_id = "chat"
+timeout_ms = 6000
+
+[[steps]]
 id = "alice-send-message"
 action = "send_chat_message"
 actor = "alice"
 value = "hello-from-tu1"
+timeout_ms = 6000
+
+[[steps]]
+id = "bob-open-chat-before-receive"
+action = "open_screen"
+actor = "bob"
+screen_id = "chat"
 timeout_ms = 6000
 
 [[steps]]
@@ -229,6 +250,13 @@ action = "runtime_event_occurred"
 actor = "bob"
 runtime_event_kind = "message_delivery_ready"
 timeout_ms = 120000
+
+[[steps]]
+id = "bob-open-chat-before-send"
+action = "open_screen"
+actor = "bob"
+screen_id = "chat"
+timeout_ms = 6000
 
 [[steps]]
 id = "bob-send-message"

@@ -56,7 +56,10 @@ mod tests {
         );
 
         state.chat.selected_channel = 4;
-        assert_eq!(resolve_committed_selected_channel_id(&state, &channels), None);
+        assert_eq!(
+            resolve_committed_selected_channel_id(&state, &channels),
+            None
+        );
     }
 
     #[test]

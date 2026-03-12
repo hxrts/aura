@@ -33,7 +33,7 @@ demo_mode = false
 enabled = true
 bind_addr = "127.0.0.1"
 broadcast_addr = "127.0.0.1"
-port = 19542
+port = 19541
 
 [[instances]]
 id = "carol"
@@ -47,4 +47,4 @@ demo_mode = false
 enabled = true
 bind_addr = "127.0.0.1"
 broadcast_addr = "127.0.0.1"
-port = 19543
+port = 19541

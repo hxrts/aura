@@ -490,7 +490,8 @@ fn publish_scoped_channels(
     last_channel_count: &Arc<AtomicUsize>,
     last_message_count: &Arc<AtomicUsize>,
     last_channel_signature: &Arc<RwLock<Option<String>>>,
-    _transport_peer_count: usize,
+    transport_peer_count: usize,
+    discovered_peer_ids: &[AuthorityId],
     self_authority: Option<AuthorityId>,
     homes_state: &HomesState,
     contacts_state: &ContactsState,
@@ -516,7 +517,7 @@ fn publish_scoped_channels(
                 id: Some(channel.id.to_string()),
                 name: Some(channel.name.clone()),
             };
-            let resolved_recipient_count = self_authority
+            let resolved_recipients = self_authority
                 .map(|authority_id| {
                     messaging_workflows::resolved_recipient_peers_for_channel_view(
                         channel,
@@ -525,9 +526,13 @@ fn publish_scoped_channels(
                         &[],
                         authority_id,
                     )
-                    .len()
                 })
-                .unwrap_or(0);
+                .unwrap_or_default();
+            let resolved_recipient_count = resolved_recipients.len();
+            let reachable_recipient_count = resolved_recipients
+                .iter()
+                .filter(|authority_id| discovered_peer_ids.contains(authority_id))
+                .count();
             let resolved_member_count = channel
                 .member_count
                 .max((resolved_recipient_count.saturating_add(1)) as u32);
@@ -536,6 +541,7 @@ fn publish_scoped_channels(
                 member_count: Some(resolved_member_count),
             }];
             let remote_delivery_ready = resolved_recipient_count > 0
+                && (transport_peer_count > 0 || reachable_recipient_count > 0)
                 && !channel.name.eq_ignore_ascii_case("note to self")
                 && !is_dm_like_channel(channel);
             if remote_delivery_ready {
@@ -614,6 +620,9 @@ pub fn use_channels_subscription(
     let latest_contacts_state = latest_contacts_state_ref.read().clone();
     let latest_homes_state_ref = hooks.use_ref(|| Arc::new(RwLock::new(HomesState::default())));
     let latest_homes_state = latest_homes_state_ref.read().clone();
+    let latest_discovered_peers_ref =
+        hooks.use_ref(|| Arc::new(RwLock::new(Vec::<AuthorityId>::new())));
+    let latest_discovered_peers = latest_discovered_peers_ref.read().clone();
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
@@ -628,6 +637,7 @@ pub fn use_channels_subscription(
         let latest_transport_peer_count = latest_transport_peer_count.clone();
         let latest_contacts_state = latest_contacts_state.clone();
         let latest_homes_state = latest_homes_state.clone();
+        let latest_discovered_peers = latest_discovered_peers.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 let mut stabilized = latest_chat_state
@@ -674,6 +684,11 @@ pub fn use_channels_subscription(
                     .map(|guard| guard.clone())
                     .unwrap_or_default();
                 let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
+                let discovered_peer_ids = latest_discovered_peers
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
                 let homes_state = latest_homes_state
                     .read()
                     .ok()
@@ -686,6 +701,7 @@ pub fn use_channels_subscription(
                     &last_message_count,
                     &last_channel_signature,
                     transport_peer_count,
+                    &discovered_peer_ids,
                     authority_id,
                     &homes_state,
                     &contacts_state,
@@ -709,6 +725,7 @@ pub fn use_channels_subscription(
         let latest_transport_peer_count = latest_transport_peer_count.clone();
         let latest_contacts_state = latest_contacts_state.clone();
         let latest_homes_state = latest_homes_state.clone();
+        let latest_discovered_peers = latest_discovered_peers.clone();
         let shared_authority_id = shared_authority_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
@@ -737,6 +754,11 @@ pub fn use_channels_subscription(
                     .map(|guard| guard.clone())
                     .unwrap_or_default();
                 let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
+                let discovered_peer_ids = latest_discovered_peers
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
                 let homes_state = latest_homes_state
                     .read()
                     .ok()
@@ -749,6 +771,7 @@ pub fn use_channels_subscription(
                     &last_message_count,
                     &last_channel_signature,
                     transport_peer_count,
+                    &discovered_peer_ids,
                     Some(authority_id),
                     &homes_state,
                     &contacts_state,
@@ -772,6 +795,7 @@ pub fn use_channels_subscription(
         let latest_transport_peer_count = latest_transport_peer_count.clone();
         let latest_contacts_state = latest_contacts_state.clone();
         let latest_homes_state = latest_homes_state.clone();
+        let latest_discovered_peers = latest_discovered_peers.clone();
         let shared_authority_id = shared_authority_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
@@ -792,6 +816,11 @@ pub fn use_channels_subscription(
                     .map(|guard| guard.clone())
                     .unwrap_or_default();
                 let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
+                let discovered_peer_ids = latest_discovered_peers
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
                 let homes_state = latest_homes_state
                     .read()
                     .ok()
@@ -804,6 +833,7 @@ pub fn use_channels_subscription(
                     &last_message_count,
                     &last_channel_signature,
                     transport_peer_count,
+                    &discovered_peer_ids,
                     authority_id,
                     &homes_state,
                     &contacts_state,
@@ -827,6 +857,7 @@ pub fn use_channels_subscription(
         let latest_transport_peer_count = latest_transport_peer_count.clone();
         let latest_contacts_state = latest_contacts_state.clone();
         let latest_homes_state = latest_homes_state.clone();
+        let latest_discovered_peers = latest_discovered_peers.clone();
         let shared_authority_id = shared_authority_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
@@ -841,6 +872,11 @@ pub fn use_channels_subscription(
                 let scope = active_scope.read().ok().and_then(|g| g.clone());
                 let authority_id = shared_authority_id.read().ok().and_then(|guard| *guard);
                 let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
+                let discovered_peer_ids = latest_discovered_peers
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
                 let homes_state = latest_homes_state
                     .read()
                     .ok()
@@ -853,6 +889,7 @@ pub fn use_channels_subscription(
                     &last_message_count,
                     &last_channel_signature,
                     transport_peer_count,
+                    &discovered_peer_ids,
                     authority_id,
                     &homes_state,
                     &contacts_state,
@@ -876,6 +913,7 @@ pub fn use_channels_subscription(
         let latest_transport_peer_count_handle = latest_transport_peer_count.clone();
         let latest_contacts_state_handle = latest_contacts_state.clone();
         let latest_homes_state_handle = latest_homes_state.clone();
+        let latest_discovered_peers_handle = latest_discovered_peers.clone();
         let shared_authority_id_handle = shared_authority_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |homes_state| {
@@ -894,6 +932,11 @@ pub fn use_channels_subscription(
                     .and_then(|guard| *guard);
                 let transport_peer_count =
                     latest_transport_peer_count_handle.load(Ordering::Relaxed);
+                let discovered_peer_ids = latest_discovered_peers_handle
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
                 let contacts_state = latest_contacts_state_handle
                     .read()
                     .ok()
@@ -906,6 +949,7 @@ pub fn use_channels_subscription(
                     &last_message_count_handle,
                     &last_channel_signature_handle,
                     transport_peer_count,
+                    &discovered_peer_ids,
                     authority_id,
                     &homes_state,
                     &contacts_state,
@@ -929,6 +973,7 @@ pub fn use_channels_subscription(
         let latest_transport_peer_count = latest_transport_peer_count.clone();
         let latest_contacts_state = latest_contacts_state.clone();
         let latest_homes_state = latest_homes_state.clone();
+        let latest_discovered_peers = latest_discovered_peers.clone();
         let shared_authority_id = shared_authority_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*TRANSPORT_PEERS_SIGNAL, move |count| {
@@ -950,6 +995,11 @@ pub fn use_channels_subscription(
                     .ok()
                     .map(|guard| guard.clone())
                     .unwrap_or_default();
+                let discovered_peer_ids = latest_discovered_peers
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
                 publish_scoped_channels(
                     &channels,
                     &update_tx,
@@ -957,6 +1007,69 @@ pub fn use_channels_subscription(
                     &last_message_count,
                     &last_channel_signature,
                     count,
+                    &discovered_peer_ids,
+                    authority_id,
+                    &homes_state,
+                    &contacts_state,
+                    &chat_state,
+                    scope.as_deref(),
+                );
+            })
+            .await;
+        }
+    });
+
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let channels = shared_channels.clone();
+        let latest_chat_state = latest_chat_state.clone();
+        let active_scope = active_scope.clone();
+        let update_tx = update_tx.clone();
+        let last_channel_count = last_channel_count.clone();
+        let last_message_count = last_message_count.clone();
+        let last_channel_signature = last_channel_signature.clone();
+        let latest_transport_peer_count = latest_transport_peer_count.clone();
+        let latest_contacts_state = latest_contacts_state.clone();
+        let latest_homes_state = latest_homes_state.clone();
+        let latest_discovered_peers = latest_discovered_peers.clone();
+        let shared_authority_id = shared_authority_id.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*DISCOVERED_PEERS_SIGNAL, move |peers_state| {
+                let discovered_peer_ids = peers_state
+                    .peers
+                    .iter()
+                    .map(|peer| peer.authority_id)
+                    .collect::<Vec<_>>();
+                if let Ok(mut guard) = latest_discovered_peers.write() {
+                    *guard = discovered_peer_ids.clone();
+                }
+
+                let chat_state = latest_chat_state
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                let scope = active_scope.read().ok().and_then(|guard| guard.clone());
+                let authority_id = shared_authority_id.read().ok().and_then(|guard| *guard);
+                let contacts_state = latest_contacts_state
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                let homes_state = latest_homes_state
+                    .read()
+                    .ok()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
+                publish_scoped_channels(
+                    &channels,
+                    &update_tx,
+                    &last_channel_count,
+                    &last_message_count,
+                    &last_channel_signature,
+                    transport_peer_count,
+                    &discovered_peer_ids,
                     authority_id,
                     &homes_state,
                     &contacts_state,

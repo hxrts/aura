@@ -400,6 +400,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
             receipt: None,
         };
 
+        eprintln!(
+            "[send-chat-fact] source={};destination={};context={}",
+            self.agent.authority_id(),
+            peer,
+            context
+        );
+
         self.agent
             .runtime()
             .effects()
@@ -972,9 +979,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
             return true;
         }
 
-        // Fallback: check if peer is discovered on LAN (handles descriptor cache
-        // eviction or timing races where the descriptor hasn't been dual-cached yet)
         if let Some(rendezvous) = self.agent.runtime().rendezvous() {
+            if rendezvous.get_descriptor(context, peer).await.is_some() {
+                return true;
+            }
+
+            let fallback_context = default_context_id_for_authority(peer);
+            if fallback_context != context && rendezvous.get_descriptor(fallback_context, peer).await.is_some() {
+                return true;
+            }
+
+            // Fallback: check if peer is discovered on LAN (handles descriptor cache
+            // eviction or timing races where the descriptor hasn't been dual-cached yet)
             if rendezvous.get_lan_discovered_peer(peer).await.is_some() {
                 return true;
             }
@@ -1004,6 +1020,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
             for round in 0..rounds {
                 if harness_mode_enabled() {
                     let _ = rendezvous::trigger_discovery(self).await;
+                }
+
+                if let Some(rendezvous) = self.agent.runtime().rendezvous() {
+                    let peer_devices = rendezvous.list_reachable_peer_devices().await;
+                    for peer_device in peer_devices {
+                        sync.add_peer(peer_device).await;
+                    }
                 }
 
                 #[cfg(target_arch = "wasm32")]

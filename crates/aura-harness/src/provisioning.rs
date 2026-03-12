@@ -200,9 +200,8 @@ mod tests {
         let config = sample_run_config();
         let first = materialize_run_config(config.clone(), PathBuf::from("run.toml").as_path())
             .unwrap_or_else(|error| panic!("materialization should succeed: {error}"));
-        let second =
-            materialize_run_config(config, PathBuf::from("run.toml").as_path())
-                .unwrap_or_else(|error| panic!("materialization should succeed: {error}"));
+        let second = materialize_run_config(config, PathBuf::from("run.toml").as_path())
+            .unwrap_or_else(|error| panic!("materialization should succeed: {error}"));
 
         let first_port = first.instances[0].bind_address.clone();
         let second_port = second.instances[0].bind_address.clone();

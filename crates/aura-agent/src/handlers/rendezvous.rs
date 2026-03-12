@@ -1047,6 +1047,7 @@ mod tests {
 
         let descriptor = RendezvousDescriptor {
             authority_id: authority.authority_id(),
+            device_id: None,
             context_id,
             transport_hints: vec![TransportHint::quic_direct("127.0.0.1:8443").unwrap()],
             handshake_psk_commitment: [0u8; 32],

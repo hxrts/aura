@@ -666,7 +666,9 @@ impl HarnessCoordinator {
                 "item_id": item_id,
             }),
         );
-        backend.as_raw_ui_mut()?.activate_list_item(list_id, item_id)
+        backend
+            .as_raw_ui_mut()?
+            .activate_list_item(list_id, item_id)
     }
 
     pub fn create_contact_invitation(

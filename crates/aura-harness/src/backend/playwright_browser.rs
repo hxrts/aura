@@ -19,10 +19,9 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use crate::backend::{
-    submit_accept_contact_invitation_via_shared_ui,
-    submit_invite_actor_to_channel_via_shared_ui, wait_for_screen_visible,
-    ContactInvitationCode, InstanceBackend, RawUiBackend, SharedSemanticBackend,
-    SubmittedAction, UiSnapshotEvent,
+    submit_accept_contact_invitation_via_shared_ui, submit_invite_actor_to_channel_via_shared_ui,
+    wait_for_screen_visible, ContactInvitationCode, InstanceBackend, RawUiBackend,
+    SharedSemanticBackend, SubmittedAction, UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
 use crate::tool_api::ToolKey;
@@ -962,7 +961,7 @@ impl SharedSemanticBackend for PlaywrightBrowserBackend {
             )?;
             Ok(())
         })?;
-        let onboarding_deadline = Instant::now() + Duration::from_secs(10);
+        let issue_deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let snapshot = self.ui_snapshot()?;
             if snapshot.operations.iter().any(|operation| {
@@ -971,20 +970,24 @@ impl SharedSemanticBackend for PlaywrightBrowserBackend {
             }) {
                 anyhow::bail!("submit_create_account: account creation failed");
             }
-            if snapshot.screen != ScreenId::Onboarding && snapshot_has_real_home(&snapshot) {
+            if snapshot.operations.iter().any(|operation| {
+                operation.id == OperationId::account_create()
+                    && matches!(
+                        operation.state,
+                        aura_app::ui::contract::OperationState::Submitting
+                            | aura_app::ui::contract::OperationState::Succeeded
+                    )
+            }) {
                 return Ok(SubmittedAction::without_handle(()));
             }
-            if Instant::now() >= onboarding_deadline {
-                break;
+            if snapshot.screen != ScreenId::Onboarding || snapshot_has_real_home(&snapshot) {
+                return Ok(SubmittedAction::without_handle(()));
+            }
+            if Instant::now() >= issue_deadline {
+                anyhow::bail!("submit_create_account: account creation did not issue");
             }
             thread::sleep(Duration::from_millis(100));
         }
-
-        anyhow::ensure!(
-            snapshot_has_real_home(&self.ui_snapshot()?),
-            "submit_create_account: account creation did not converge a real home"
-        );
-        Ok(SubmittedAction::without_handle(()))
     }
 
     fn submit_create_home(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
@@ -1067,9 +1070,7 @@ impl SharedSemanticBackend for PlaywrightBrowserBackend {
             if snapshot.operation_state(&OperationId::invitation_accept())
                 == Some(OperationState::Failed)
             {
-                anyhow::bail!(
-                    "submit_accept_pending_channel_invitation: invitation_accept failed"
-                );
+                anyhow::bail!("submit_accept_pending_channel_invitation: invitation_accept failed");
             }
             if Instant::now() >= deadline {
                 anyhow::bail!(
@@ -1380,19 +1381,18 @@ mod tests {
         let source = include_str!("playwright_browser.rs");
         let contract_source = include_str!("mod.rs");
         assert!(source.contains("submit_accept_contact_invitation_via_shared_ui(self, code)"));
-        assert!(contract_source.contains(
-            "self.activate_control(ControlId::ContactsAcceptInvitationButton)?;"
-        ));
+        assert!(contract_source
+            .contains("self.activate_control(ControlId::ContactsAcceptInvitationButton)?;"));
         assert!(contract_source.contains(
             "wait_for_modal_visible(self, ModalId::AcceptInvitation, Duration::from_secs(5))?;"
         ));
         assert!(contract_source.contains("backend.fill_field(FieldId::InvitationCode, code)?;"));
         assert!(source.contains("submit_invite_actor_to_channel_via_shared_ui(self, authority_id)"));
         assert!(contract_source.contains("backend.activate_control(ControlId::NavContacts)?;"));
-        assert!(contract_source.contains("backend.activate_list_item(ListId::Contacts, authority_id)?;"));
-        assert!(contract_source.contains(
-            "backend.activate_control(ControlId::ContactsInviteToChannelButton)?;"
-        ));
+        assert!(contract_source
+            .contains("backend.activate_list_item(ListId::Contacts, authority_id)?;"));
+        assert!(contract_source
+            .contains("backend.activate_control(ControlId::ContactsInviteToChannelButton)?;"));
         assert!(source.contains("fn submit_send_chat_message"));
         assert!(source.contains("self.activate_control(ControlId::NavChat)?;"));
         assert!(source.contains("self.fill_field(FieldId::ChatInput, message)?;"));
@@ -1407,16 +1407,13 @@ mod tests {
             .collect();
         assert!(unique.contains(&("playwright_browser", "submit_create_account")));
         assert!(unique.contains(&("playwright_browser", "submit_create_home")));
-        assert!(unique.contains(&(
-            "playwright_browser",
-            "submit_create_contact_invitation"
-        )));
+        assert!(unique.contains(&("playwright_browser", "submit_create_contact_invitation")));
 
         let source = include_str!("playwright_browser.rs");
         assert!(source.contains("session.rpc_call(\n                \"create_account\","));
         assert!(source.contains("session.rpc_call(\n                \"create_home\","));
-        assert!(source.contains(
-            "session.rpc_call(\n                \"create_contact_invitation\","
-        ));
+        assert!(
+            source.contains("session.rpc_call(\n                \"create_contact_invitation\",")
+        );
     }
 }

@@ -243,29 +243,12 @@ pub async fn create_contact_invitation(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationInfo, AuraError> {
-    let harness_mode = std::env::var_os("AURA_HARNESS_MODE").is_some();
-    let runtime = if harness_mode {
-        tokio::time::timeout(std::time::Duration::from_secs(2), require_runtime(app_core))
-            .await
-            .map_err(|_| AuraError::agent("Timed out acquiring runtime for contact invitation"))??
-    } else {
-        require_runtime(app_core).await?
-    };
+    let runtime = require_runtime(app_core).await?;
 
-    if harness_mode {
-        tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            runtime.create_contact_invitation(receiver, nickname, message, ttl_ms),
-        )
+    runtime
+        .create_contact_invitation(receiver, nickname, message, ttl_ms)
         .await
-        .map_err(|_| AuraError::agent("Timed out in runtime.create_contact_invitation"))?
         .map_err(|e| AuraError::agent(format!("Failed to create contact invitation: {e}")))
-    } else {
-        runtime
-            .create_contact_invitation(receiver, nickname, message, ttl_ms)
-            .await
-            .map_err(|e| AuraError::agent(format!("Failed to create contact invitation: {e}")))
-    }
 }
 
 /// Create a guardian invitation
@@ -409,28 +392,30 @@ pub async fn accept_invitation(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {e}")))?;
 
-    converge_runtime(&runtime).await;
-    if let Err(_error) = ensure_runtime_peer_connectivity(&runtime, "invitation_accept").await {
-        #[cfg(feature = "instrumented")]
-        tracing::warn!(
-            error = %_error,
-            invitation_id = %invitation_id,
-            "invitation acceptance completed without reachable peers"
-        );
+    for _ in 0..4 {
+        converge_runtime(&runtime).await;
+        if ensure_runtime_peer_connectivity(&runtime, "invitation_accept")
+            .await
+            .is_ok()
+        {
+            break;
+        }
     }
+
+    let _ = crate::workflows::system::refresh_account(app_core).await;
 
     Ok(())
 }
 
 /// Accept a device-enrollment invitation and wait for the imported device list
 /// to converge far enough that the enrolled peer is visible in settings.
-pub async fn accept_device_enrollment_invitation(
+pub async fn issue_device_enrollment_invitation_accept(
     app_core: &Arc<RwLock<AppCore>>,
     invitation: &InvitationInfo,
 ) -> Result<(), AuraError> {
     let InvitationBridgeType::DeviceEnrollment { .. } = &invitation.invitation_type else {
         return Err(AuraError::invalid(
-            "accept_device_enrollment_invitation requires a device enrollment invitation",
+            "issue_device_enrollment_invitation_accept requires a device enrollment invitation",
         ));
     };
 
@@ -441,6 +426,22 @@ pub async fn accept_device_enrollment_invitation(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {e}")))?;
 
+    converge_runtime(&runtime).await;
+    Ok(())
+}
+
+/// Finish convergence after a device-enrollment invitation was accepted.
+pub async fn converge_device_enrollment_invitation_accept(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation: &InvitationInfo,
+) -> Result<(), AuraError> {
+    let InvitationBridgeType::DeviceEnrollment { .. } = &invitation.invitation_type else {
+        return Err(AuraError::invalid(
+            "converge_device_enrollment_invitation_accept requires a device enrollment invitation",
+        ));
+    };
+
+    let runtime = require_runtime(app_core).await?;
     let expected_min_devices = 2_usize;
 
     for attempt in 0..16 {
@@ -497,6 +498,15 @@ pub async fn accept_device_enrollment_invitation(
         "device enrollment acceptance completed before local device list convergence"
     );
     Ok(())
+}
+
+/// Accept a device-enrollment invitation and wait for the local device view to converge.
+pub async fn accept_device_enrollment_invitation(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation: &InvitationInfo,
+) -> Result<(), AuraError> {
+    issue_device_enrollment_invitation_accept(app_core, invitation).await?;
+    converge_device_enrollment_invitation_accept(app_core, invitation).await
 }
 
 /// Accept an invitation by string ID (legacy/convenience API).

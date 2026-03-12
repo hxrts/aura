@@ -2026,6 +2026,7 @@ impl UiController {
         model.push_runtime_fact(RuntimeFact::DeviceEnrollmentCodeReady {
             device_name: Some(name.to_string()),
             code_len: Some(enrollment_code.len()),
+            code: Some(enrollment_code.to_string()),
         });
         drop(model);
         self.request_rerender();

@@ -227,6 +227,10 @@ impl ToolApi {
         self.coordinator.supports_ui_snapshot(instance_id)
     }
 
+    pub fn ui_snapshot(&self, instance_id: &str) -> anyhow::Result<UiSnapshot> {
+        self.coordinator.ui_snapshot(instance_id)
+    }
+
     pub fn submit_create_account(
         &mut self,
         instance_id: &str,

@@ -420,9 +420,14 @@ impl InvitationServiceApi {
             sender_hint = ?sender_hint,
             "export invitation sender websocket hint"
         );
-        if let Some(sender_hint) = sender_hint {
-            let encoded_addr = URL_SAFE_NO_PAD.encode(sender_hint.as_bytes());
-            code = format!("{code}:{encoded_addr}");
+        let sender_hint_segment = sender_hint
+            .as_deref()
+            .map(|hint| URL_SAFE_NO_PAD.encode(hint.as_bytes()))
+            .unwrap_or_else(|| URL_SAFE_NO_PAD.encode("".as_bytes()));
+        let encoded_device_id =
+            URL_SAFE_NO_PAD.encode(self.effects.device_id().to_string().as_bytes());
+        if sender_hint.is_some() || std::env::var_os("AURA_HARNESS_MODE").is_some() {
+            code = format!("{code}:{sender_hint_segment}:{encoded_device_id}");
         }
 
         code

@@ -33,7 +33,7 @@ use aura_journal::fact::{FactContent, RelationalFact};
 use aura_journal::DomainFact;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_protocol::amp::get_channel_state;
-use aura_rendezvous::TransportHint;
+use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 #[cfg(not(target_arch = "wasm32"))]
 use futures::{SinkExt, StreamExt};
 use std::sync::Arc;
@@ -402,10 +402,9 @@ impl RuntimeSystem {
                 let rendezvous_manager = rendezvous_manager.clone();
                 async move {
                     let desired_peers: std::collections::HashSet<DeviceId> = rendezvous_manager
-                        .list_cached_peers()
+                        .list_reachable_peer_devices()
                         .await
                         .into_iter()
-                        .map(|peer| DeviceId::from_uuid(peer.uuid()))
                         .collect();
 
                     let current_peers = sync_manager.peers().await;
@@ -1029,6 +1028,12 @@ async fn handle_inbound_transport_envelope(
         .get("content-type")
         .is_some_and(|content_type| content_type == CHAT_FACT_CONTENT_TYPE)
     {
+        eprintln!(
+            "[recv-chat-fact] source={};destination={};context={}",
+            envelope.source,
+            envelope.destination,
+            envelope.context
+        );
         match from_slice::<RelationalFact>(&envelope.payload) {
             Ok(fact) => {
                 if let RelationalFact::Generic {
@@ -1173,6 +1178,10 @@ async fn publish_lan_descriptor_with(
 
     if result.success {
         if let Some(descriptor) = result.descriptor {
+            let descriptor = RendezvousDescriptor {
+                device_id: Some(device_id),
+                ..descriptor
+            };
             rendezvous_manager
                 .cache_descriptor(descriptor.clone())
                 .await

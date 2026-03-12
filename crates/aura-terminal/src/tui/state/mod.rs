@@ -256,7 +256,8 @@ impl TuiState {
     }
 
     pub fn clear_runtime_fact_kind(&mut self, kind: RuntimeEventKind) {
-        self.runtime_facts.retain(|existing| existing.kind() != kind);
+        self.runtime_facts
+            .retain(|existing| existing.kind() != kind);
     }
 
     #[must_use]
@@ -275,7 +276,8 @@ impl TuiState {
     pub fn exported_runtime_events(&self) -> Vec<RuntimeEventSnapshot> {
         let mut facts = self.runtime_facts.clone();
         facts.sort_by_key(|left| left.key());
-        facts.iter()
+        facts
+            .iter()
             .map(|fact| RuntimeEventSnapshot {
                 id: RuntimeEventId(format!("tui-runtime-fact-{}", fact.key())),
                 fact: fact.clone(),

@@ -3,7 +3,7 @@
 //! Fact types for peer discovery and channel establishment.
 //! These facts are stored in context journals and propagated via `aura-sync`.
 
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_journal::extensibility::FactReducer;
 use aura_journal::reduction::{RelationalBinding, RelationalBindingType};
 use aura_journal::DomainFact;
@@ -133,6 +133,12 @@ impl RendezvousFact {
 pub struct RendezvousDescriptor {
     /// Authority publishing this descriptor
     pub authority_id: AuthorityId,
+    /// Concrete device endpoint publishing this descriptor, when known.
+    ///
+    /// This is optional for backward compatibility with older cached descriptors
+    /// and legacy invite codes that only carried authority identity.
+    #[serde(default)]
+    pub device_id: Option<DeviceId>,
     /// Context this descriptor is for
     pub context_id: ContextId,
     /// Available transport endpoints

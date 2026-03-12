@@ -58,8 +58,14 @@ pub async fn start_device_enrollment_ceremony(
     nickname_suggestion: String,
     invitee_authority_id: Option<AuthorityId>,
 ) -> Result<crate::runtime_bridge::DeviceEnrollmentStart, AuraError> {
-    let core = app_core.read().await;
-    core.initiate_device_enrollment_ceremony(nickname_suggestion, invitee_authority_id)
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime().cloned().ok_or_else(|| {
+            AuraError::agent("Failed to start device enrollment: runtime unavailable")
+        })?
+    };
+    runtime
+        .initiate_device_enrollment_ceremony(nickname_suggestion, invitee_authority_id)
         .await
         .map_err(|e| AuraError::agent(format!("Failed to start device enrollment: {e}")))
 }
@@ -68,8 +74,14 @@ pub async fn start_device_removal_ceremony(
     app_core: &Arc<RwLock<AppCore>>,
     device_id: String,
 ) -> Result<CeremonyId, AuraError> {
-    let core = app_core.read().await;
-    core.initiate_device_removal_ceremony(device_id)
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime().cloned().ok_or_else(|| {
+            AuraError::agent("Failed to start device removal: runtime unavailable")
+        })?
+    };
+    runtime
+        .initiate_device_removal_ceremony(device_id)
         .await
         .map_err(|e| AuraError::agent(format!("Failed to start device removal: {e}")))
 }

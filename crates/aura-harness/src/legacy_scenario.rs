@@ -297,7 +297,7 @@ impl ScenarioStep {
                         "value",
                         self.action,
                     )?,
-                    code_name: required_field(self.var.clone(), "var", self.action)?,
+                    code_name: self.var.clone(),
                 },
             )),
             ScenarioAction::AcceptContactInvitation => Some(SemanticAction::Intent(
@@ -607,6 +607,7 @@ fn expectation_from_step(step: &ScenarioStep) -> Result<Option<SemanticAction>> 
             Expectation::RuntimeEventOccurred {
                 kind,
                 detail_contains: step.contains.clone().or_else(|| step.expect.clone()),
+                capture_name: step.var.clone(),
             },
         )));
     }

@@ -294,41 +294,14 @@ pub fn authoritative_ui_snapshot(
         );
     }
 
-    let current_home_id = app_snapshot
-        .homes
-        .current_home()
-        .map(|home| home.id)
-        .filter(|home_id| *home_id != aura_core::identifiers::ChannelId::default());
-    let neighborhood_home_id = (app_snapshot.neighborhood.home_home_id
-        != aura_core::identifiers::ChannelId::default())
-    .then_some(app_snapshot.neighborhood.home_home_id);
-    let mut home_ids = app_snapshot
-        .homes
-        .iter()
-        .map(|(home_id, _)| *home_id)
-        .filter(|home_id| *home_id != aura_core::identifiers::ChannelId::default())
-        .map(|home_id| home_id.to_string())
-        .collect::<Vec<_>>();
-    home_ids.sort();
-    home_ids.dedup();
-    if let Some(current_home_id) = current_home_id {
-        let current_home_id = current_home_id.to_string();
-        home_ids.retain(|home_id| home_id != &current_home_id);
-        home_ids.insert(0, current_home_id);
-    } else if let Some(neighborhood_home_id) = neighborhood_home_id {
-        let neighborhood_home_id = neighborhood_home_id.to_string();
-        if !home_ids
-            .iter()
-            .any(|home_id| home_id == &neighborhood_home_id)
-        {
-            home_ids.insert(0, neighborhood_home_id);
-        }
+    let mut home_ids = Vec::new();
+    if app_snapshot.neighborhood.home_home_id != aura_core::identifiers::ChannelId::default() {
+        home_ids.push(app_snapshot.neighborhood.home_home_id.to_string());
     }
-    let selected_home_id = current_home_id.or(neighborhood_home_id);
     let neighbor_home_ids = app_snapshot
         .neighborhood
         .all_neighbors()
-        .filter(|home| Some(home.id) != selected_home_id)
+        .filter(|home| home.id != aura_core::identifiers::ChannelId::default())
         .map(|home| home.id.to_string())
         .filter(|home_id| !home_ids.iter().any(|existing| existing == home_id))
         .collect::<Vec<_>>();
@@ -402,7 +375,9 @@ pub fn authoritative_ui_snapshot(
 
     let settings_section_ids = SettingsSection::all()
         .iter()
-        .map(|section| aura_app::ui_contract::settings_section_item_id(section.surface_id()).to_string())
+        .map(|section| {
+            aura_app::ui_contract::settings_section_item_id(section.surface_id()).to_string()
+        })
         .collect::<Vec<_>>();
     let settings_items = SettingsSection::all()
         .iter()
@@ -513,10 +488,7 @@ pub fn authoritative_ui_snapshot(
     snapshot
 }
 
-pub fn maybe_export_ui_snapshot(
-    state: &TuiState,
-    semantic_inputs: TuiSemanticInputs<'_>,
-) {
+pub fn maybe_export_ui_snapshot(state: &TuiState, semantic_inputs: TuiSemanticInputs<'_>) {
     let socket_path = configured_ui_state_socket();
     let file_path = configured_ui_state_file();
     if socket_path.is_none() && file_path.is_none() {
@@ -537,7 +509,8 @@ pub fn maybe_export_ui_snapshot(
 
     let write_result = socket_path
         .map(|path| {
-            UnixStream::connect(path).and_then(|mut stream| stream.write_all(snapshot_json.as_bytes()))
+            UnixStream::connect(path)
+                .and_then(|mut stream| stream.write_all(snapshot_json.as_bytes()))
         })
         .or_else(|| file_path.map(|path| write_snapshot_file(path, &snapshot_json)));
     if matches!(write_result, Some(Ok(()))) {

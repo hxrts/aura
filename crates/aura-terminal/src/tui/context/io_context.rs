@@ -608,27 +608,36 @@ impl IoContext {
     // =========================================================================
 
     pub async fn create_account(&self, nickname_suggestion: &str) -> TerminalResult<()> {
+        tracing::info!(
+            nickname = nickname_suggestion,
+            "io_context create_account begin"
+        );
         let app_core = self.app_core_raw().clone();
         let nickname_suggestion = nickname_suggestion.to_string();
         let home_name = format!("{nickname_suggestion}'s Home");
-        let (authority_id, _context_id) =
-            self.account_files.create_account(&nickname_suggestion).await?;
-        {
-            let mut core = app_core.write().await;
-            core.set_authority(authority_id);
-        }
-
-        const SIGNING_KEY_ATTEMPTS: usize = 40;
-        const BOOTSTRAP_RETRY_MS: u64 = 250;
+        let (authority_id, _context_id) = self
+            .account_files
+            .create_account(&nickname_suggestion)
+            .await?;
+        tracing::info!(%authority_id, "io_context create_account persisted account");
+        let app_core_for_bootstrap = app_core.clone();
         tokio::spawn(async move {
+            {
+                let mut core = app_core_for_bootstrap.write().await;
+                core.set_authority(authority_id);
+            }
+            tracing::info!("io_context create_account authority set");
+            const SIGNING_KEY_ATTEMPTS: usize = 40;
+            const BOOTSTRAP_RETRY_MS: u64 = 250;
             for attempt in 0..SIGNING_KEY_ATTEMPTS {
-                let bootstrap_ready = {
-                    let core = app_core.read().await;
-                    if core.has_runtime() {
-                        core.bootstrap_signing_keys().await.is_ok()
-                    } else {
-                        false
-                    }
+                let runtime = {
+                    let core = app_core_for_bootstrap.read().await;
+                    core.runtime().cloned()
+                };
+                let bootstrap_ready = if let Some(runtime) = runtime {
+                    runtime.bootstrap_signing_keys().await.is_ok()
+                } else {
+                    false
                 };
                 if bootstrap_ready {
                     break;
@@ -638,11 +647,28 @@ impl IoContext {
                 }
             }
 
-            let _ = settings_workflows::refresh_settings_from_runtime(&app_core).await;
-            let _ = system_workflows::refresh_account(&app_core).await;
-            let _ = context_workflows::create_home(&app_core, Some(home_name.clone()), None).await;
+            let created_home_id = context_workflows::create_home_for_authority(
+                &app_core_for_bootstrap,
+                authority_id,
+                Some(home_name.clone()),
+                None,
+            )
+            .await;
+            let _ =
+                settings_workflows::refresh_settings_from_runtime(&app_core_for_bootstrap).await;
+            let _ = system_workflows::refresh_account(&app_core_for_bootstrap).await;
+            if let Ok(home_id) = created_home_id {
+                let _ = context_workflows::ensure_local_home_projection(
+                    &app_core_for_bootstrap,
+                    home_id,
+                    home_name.clone(),
+                    authority_id,
+                )
+                .await;
+            }
         });
 
+        tracing::info!("io_context create_account queued convergence and returning success");
         Ok(())
     }
 
@@ -894,7 +920,7 @@ impl IoContext {
             ));
         }
 
-        aura_app::ui::workflows::invitation::accept_device_enrollment_invitation(
+        aura_app::ui::workflows::invitation::issue_device_enrollment_invitation_accept(
             app_core,
             &invitation,
         )
@@ -903,7 +929,20 @@ impl IoContext {
             TerminalError::Operation(format!(
                 "Failed to accept device enrollment invitation: {e}"
             ))
-        })
+        })?;
+
+        let app_core_for_convergence = app_core.clone();
+        let invitation_for_convergence = invitation.clone();
+        tokio::spawn(async move {
+            let _ =
+                aura_app::ui::workflows::invitation::converge_device_enrollment_invitation_accept(
+                    &app_core_for_convergence,
+                    &invitation_for_convergence,
+                )
+                .await;
+        });
+
+        Ok(())
     }
 
     pub async fn dispatch_send_message(

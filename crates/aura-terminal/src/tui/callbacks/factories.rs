@@ -475,18 +475,23 @@ impl ChatCallbacks {
                     content: content_clone.clone(),
                 };
 
+                send_ui_update_reliable(
+                    &tx,
+                    UiUpdate::MessageSent {
+                        channel: channel_id_clone.clone(),
+                        content: content_clone.clone(),
+                    },
+                )
+                .await;
+
                 match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::MessageSent {
-                            channel: channel_id_clone,
-                            content: content_clone,
-                        });
-                    }
+                    Ok(_) => {}
                     Err(e) => {
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                            "send",
-                            e.to_string(),
-                        )));
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::error("send", e.to_string())),
+                        )
+                        .await;
                     }
                 }
             });
@@ -929,29 +934,47 @@ impl InvitationsCallbacks {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
                 let app_core = ctx.app_core_raw().clone();
+                let runtime = ctx.app_core().runtime();
                 spawn_ctx(ctx.clone(), async move {
-                    let result = if invitation_type.eq_ignore_ascii_case("contact")
+                    let result: crate::error::TerminalResult<String> = if invitation_type
+                        .eq_ignore_ascii_case("contact")
                         || invitation_type.eq_ignore_ascii_case("personal")
                     {
                         let ttl_ms = ttl_secs.map(|secs| secs.saturating_mul(1000));
-                        match aura_app::ui::workflows::invitation::create_contact_invitation(
-                            &app_core,
-                            receiver_id,
-                            None,
-                            message,
-                            ttl_ms,
-                        )
-                        .await
-                        {
-                            Ok(invitation) => {
-                                aura_app::ui::workflows::invitation::export_invitation(
+                        let result: crate::error::TerminalResult<_> =
+                            if let Some(runtime) = runtime.clone() {
+                                runtime
+                                    .create_contact_invitation(receiver_id, None, message, ttl_ms)
+                                    .await
+                                    .map_err(crate::error::TerminalError::from)
+                            } else {
+                                aura_app::ui::workflows::invitation::create_contact_invitation(
                                     &app_core,
-                                    &invitation.invitation_id,
+                                    receiver_id,
+                                    None,
+                                    message,
+                                    ttl_ms,
                                 )
                                 .await
-                                .map_err(|error| error.into())
+                                .map_err(crate::error::TerminalError::from)
+                            };
+                        match result {
+                            Ok(invitation) => {
+                                if let Some(runtime) = runtime.clone() {
+                                    runtime
+                                        .export_invitation(&invitation.invitation_id.to_string())
+                                        .await
+                                        .map_err(crate::error::TerminalError::from)
+                                } else {
+                                    aura_app::ui::workflows::invitation::export_invitation(
+                                        &app_core,
+                                        &invitation.invitation_id,
+                                    )
+                                    .await
+                                    .map_err(crate::error::TerminalError::from)
+                                }
                             }
-                            Err(error) => Err(error.into()),
+                            Err(error) => Err(error),
                         }
                     } else {
                         ctx.create_invitation_code(receiver_id, &invitation_type, message, ttl_secs)
@@ -1247,19 +1270,30 @@ impl SettingsCallbacks {
                         .await
                     {
                         Ok(start) => start,
-                        Err(_e) => {
-                            // Error already emitted to ERROR_SIGNAL by operational layer.
+                        Err(error) => {
+                            send_ui_update_reliable(
+                                &tx,
+                                UiUpdate::OperationFailed {
+                                    operation: "AddDevice".to_string(),
+                                    error: error.to_string(),
+                                },
+                            )
+                            .await;
                             return;
                         }
                     };
 
-                    let _ = tx.try_send(UiUpdate::DeviceEnrollmentStarted {
-                        ceremony_id: start.ceremony_id.clone(),
-                        nickname_suggestion: nickname_suggestion.clone(),
-                        enrollment_code: start.enrollment_code.clone(),
-                        pending_epoch: start.pending_epoch,
-                        device_id: start.device_id.clone(),
-                    });
+                    send_ui_update_reliable(
+                        &tx,
+                        UiUpdate::DeviceEnrollmentStarted {
+                            ceremony_id: start.ceremony_id.clone(),
+                            nickname_suggestion: nickname_suggestion.clone(),
+                            enrollment_code: start.enrollment_code.clone(),
+                            pending_epoch: start.pending_epoch,
+                            device_id: start.device_id.clone(),
+                        },
+                    )
+                    .await;
 
                     // Prime status quickly (best-effort) so the modal has counters immediately.
                     let ceremony_id_typed = CeremonyId::new(start.ceremony_id.clone());
@@ -1718,6 +1752,7 @@ impl AppCallbacks {
 
                 match account_result {
                     Ok(Ok(())) => {
+                        tracing::info!("tui create_account callback succeeded");
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::NicknameSuggestionChanged(nickname_suggestion.clone()),
@@ -1740,6 +1775,7 @@ impl AppCallbacks {
                         });
                     }
                     Ok(Err(e)) => {
+                        tracing::error!("tui create_account callback failed: {e}");
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::OperationFailed {
@@ -1750,6 +1786,7 @@ impl AppCallbacks {
                         .await;
                     }
                     Err(_) => {
+                        tracing::error!("tui create_account callback panicked");
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::OperationFailed {

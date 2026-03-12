@@ -53,24 +53,31 @@ impl<'a> InvitationContactHandler<'a> {
             invitation.invitation_id.to_string(),
         );
         metadata.insert("acceptor-id".to_string(), acceptor_id.to_string());
-        // Only publish a browser-direct hint when we have an actual websocket
-        // listener address. Falling back to the raw bind address poisons the
-        // sender cache with the TCP envelope port, which is not a websocket
-        // endpoint.
-        let acceptor_addr = effects
-            .lan_transport()
-            .and_then(|transport| transport.websocket_addrs().first().cloned());
-        let acceptor_hint = acceptor_addr.as_deref().map(|addr| {
-            if addr.starts_with("ws://") || addr.starts_with("wss://") {
-                addr.to_string()
-            } else {
-                format!("ws://{addr}")
-            }
+        metadata.insert(
+            "acceptor-device-id".to_string(),
+            effects.device_id().to_string(),
+        );
+        let acceptor_hint = effects.lan_transport().and_then(|transport| {
+            transport
+                .websocket_addrs()
+                .first()
+                .map(|addr| {
+                    if addr.starts_with("ws://") || addr.starts_with("wss://") {
+                        addr.to_string()
+                    } else {
+                        format!("ws://{addr}")
+                    }
+                })
+                .or_else(|| {
+                    transport
+                        .advertised_addrs()
+                        .first()
+                        .map(|addr| format!("tcp://{addr}"))
+                })
         });
         tracing::info!(
             invitation_id = %invitation.invitation_id,
             acceptor_id = %acceptor_id,
-            acceptor_addr = ?acceptor_addr,
             acceptor_hint = ?acceptor_hint,
             "contact invitation acceptance websocket hint"
         );
@@ -139,13 +146,19 @@ impl<'a> InvitationContactHandler<'a> {
                     continue;
                 }
 
-                if let Some(addr) = envelope.metadata.get("acceptor-addr") {
+                let acceptor_addr = envelope.metadata.get("acceptor-addr").map(String::as_str);
+                let acceptor_device_id = envelope
+                    .metadata
+                    .get("acceptor-device-id")
+                    .and_then(|value| value.parse().ok());
+                if acceptor_addr.is_some() || acceptor_device_id.is_some() {
                     let now_ms = effects.current_timestamp().await.unwrap_or(0);
                     self.handler
-                        .cache_direct_descriptor_for_peer(
+                        .cache_peer_descriptor_for_peer(
                             effects.as_ref(),
                             acceptance.acceptor_id,
-                            addr,
+                            acceptor_device_id,
+                            acceptor_addr,
                             now_ms,
                         )
                         .await;

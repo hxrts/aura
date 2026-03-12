@@ -13,8 +13,8 @@ use aura_app::scenario_contract::{
 };
 use serde::{Deserialize, Serialize};
 
-pub use crate::legacy_scenario::{ScenarioAction, ScenarioStep, ScreenSource};
 pub(crate) use crate::legacy_scenario::{nav_control_id_for_screen, settings_section_item_id};
+pub use crate::legacy_scenario::{ScenarioAction, ScenarioStep, ScreenSource};
 
 pub const RUN_SCHEMA_VERSION: u32 = 1;
 pub const SCENARIO_SCHEMA_VERSION: u32 = 1;
@@ -556,9 +556,9 @@ impl ScenarioConfig {
     pub fn execution_steps(&self) -> Result<Vec<ScenarioStep>> {
         match self.canonical_model {
             ScenarioCanonicalModel::CompatibilityStepBridge => Ok(self.steps.clone()),
-            ScenarioCanonicalModel::SemanticSharedFlow => bail!(
-                "canonical shared scenarios do not lower into legacy ScenarioStep graphs"
-            ),
+            ScenarioCanonicalModel::SemanticSharedFlow => {
+                bail!("canonical shared scenarios do not lower into legacy ScenarioStep graphs")
+            }
         }
     }
 
@@ -888,7 +888,10 @@ mod tests {
             ],
         );
 
-        assert_eq!(config.canonical_model, ScenarioCanonicalModel::CompatibilityStepBridge);
+        assert_eq!(
+            config.canonical_model,
+            ScenarioCanonicalModel::CompatibilityStepBridge
+        );
         let semantic = config
             .execution_steps()
             .unwrap_or_else(|error| panic!("execution step lowering failed: {error}"));
@@ -1014,7 +1017,10 @@ mod tests {
             .unwrap_or_else(|error| panic!("semantic scenario translation failed: {error}"));
 
         assert!(scenario.steps.is_empty());
-        assert_eq!(scenario.canonical_model, ScenarioCanonicalModel::SemanticSharedFlow);
+        assert_eq!(
+            scenario.canonical_model,
+            ScenarioCanonicalModel::SemanticSharedFlow
+        );
         assert_eq!(scenario.canonical_semantic_steps.len(), 2);
         let shared_steps = scenario
             .shared_execution_semantic_steps()
@@ -1059,7 +1065,10 @@ mod tests {
             SemanticAction::Expect(Expectation::ParityWithActor { actor })
                 if actor.0 == "tui"
         ));
-        assert_eq!(shared_steps[0].actor.as_ref().map(|actor| actor.0.as_str()), Some("web"));
+        assert_eq!(
+            shared_steps[0].actor.as_ref().map(|actor| actor.0.as_str()),
+            Some("web")
+        );
         assert!(scenario.execution_steps().is_err());
     }
 
@@ -1305,7 +1314,10 @@ mod tests {
         let scenario = ScenarioConfig::try_from(definition)
             .unwrap_or_else(|error| panic!("semantic scenario translation failed: {error}"));
         assert!(scenario.steps.is_empty());
-        assert_eq!(scenario.canonical_model, ScenarioCanonicalModel::SemanticSharedFlow);
+        assert_eq!(
+            scenario.canonical_model,
+            ScenarioCanonicalModel::SemanticSharedFlow
+        );
         assert!(scenario.validate().is_ok());
     }
 

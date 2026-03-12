@@ -36,7 +36,7 @@ use aura_core::effects::{
 };
 use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
+use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId, InvitationId};
 use aura_core::time::PhysicalTime;
 use aura_core::Hash32;
 use aura_core::FlowCost;
@@ -570,7 +570,6 @@ impl InvitationHandler {
                         .await
                         .map_err(|e| AgentError::effects(format!("commit contact fact: {e}")))?;
                 }
-                effects.await_next_view_update().await;
             }
         }
 
@@ -1331,10 +1330,12 @@ impl InvitationHandler {
         let shareable = ShareableInvitation::from_code(code)
             .map_err(|e| crate::core::AgentError::invalid(format!("{e}")))?;
         let sender_hint_addr = ShareableInvitation::sender_addr_from_code(code);
+        let sender_device_id = ShareableInvitation::sender_device_id_from_code(code);
         tracing::info!(
             invitation_id = %shareable.invitation_id,
             sender = %shareable.sender_id,
             sender_hint_addr = ?sender_hint_addr,
+            sender_device_id = ?sender_device_id,
             "import_invitation_code parsed sender hint"
         );
 
@@ -1368,9 +1369,15 @@ impl InvitationHandler {
         }
 
         let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
-        if let Some(addr) = sender_hint_addr {
-            self.cache_direct_descriptor_for_peer(effects, shareable.sender_id, &addr, now_ms)
-                .await;
+        if let Some(addr) = sender_hint_addr.as_deref() {
+            self.cache_peer_descriptor_for_peer(
+                effects,
+                shareable.sender_id,
+                sender_device_id,
+                Some(addr),
+                now_ms,
+            )
+            .await;
             let cached_descriptor = if let Some(manager) = effects.rendezvous_manager() {
                 manager
                     .get_descriptor(
@@ -1397,6 +1404,15 @@ impl InvitationHandler {
                 websocket_hint_count,
                 "import_invitation_code cached direct descriptor"
             );
+        } else if sender_device_id.is_some() {
+            self.cache_peer_descriptor_for_peer(
+                effects,
+                shareable.sender_id,
+                sender_device_id,
+                None,
+                now_ms,
+            )
+            .await;
         } else if let Some(manager) = effects.rendezvous_manager() {
             if let Some(peer) = manager.get_lan_discovered_peer(shareable.sender_id).await {
                 let _ = manager.cache_descriptor(peer.descriptor.clone()).await;
@@ -1441,47 +1457,47 @@ impl InvitationHandler {
         Ok(invitation)
     }
 
-    pub(super) async fn cache_direct_descriptor_for_peer(
+    pub(super) async fn cache_peer_descriptor_for_peer(
         &self,
         effects: &AuraEffectSystem,
         peer: AuthorityId,
-        addr: &str,
+        device_id: Option<DeviceId>,
+        addr: Option<&str>,
         now_ms: u64,
     ) {
+        fn descriptor_hint_from_addr(addr: Option<&str>) -> Option<TransportHint> {
+            let addr = addr?;
+            if addr.starts_with("ws://") || addr.starts_with("wss://") {
+                let normalized = addr
+                    .trim_start_matches("ws://")
+                    .trim_start_matches("wss://");
+                TransportHint::websocket_direct(normalized).ok()
+            } else if addr.starts_with("tcp://") {
+                let normalized = addr.trim_start_matches("tcp://");
+                TransportHint::tcp_direct(normalized).ok()
+            } else {
+                // Treat bare host:port hints as TCP. WebSocket hints must carry an
+                // explicit scheme so browser runtimes never misclassify raw TCP
+                // listener addresses as websocket endpoints.
+                TransportHint::tcp_direct(addr).ok()
+            }
+        }
+
         let Some(manager) = effects.rendezvous_manager() else {
             return;
         };
-        let hint = if addr.starts_with("ws://") || addr.starts_with("wss://") {
-            let normalized = addr
-                .trim_start_matches("ws://")
-                .trim_start_matches("wss://");
-            let Ok(hint) = TransportHint::websocket_direct(normalized) else {
-                return;
-            };
-            hint
-        } else if addr.starts_with("tcp://") {
-            let normalized = addr.trim_start_matches("tcp://");
-            let Ok(hint) = TransportHint::tcp_direct(normalized) else {
-                return;
-            };
-            hint
-        } else {
-            // Treat bare host:port hints as TCP. WebSocket hints must carry an
-            // explicit scheme so browser runtimes never misclassify raw TCP
-            // listener addresses as websocket endpoints.
-            let Ok(hint) = TransportHint::tcp_direct(addr) else {
-                return;
-            };
-            hint
-        };
-        let context_id = default_context_id_for_authority(peer);
-        let descriptor = if let Some(existing) = manager.get_descriptor(context_id, peer).await {
+        let peer_context_id = default_context_id_for_authority(peer);
+        let descriptor = if let Some(existing) = manager.get_descriptor(peer_context_id, peer).await
+        {
             let mut transport_hints = existing.transport_hints.clone();
-            if !transport_hints.contains(&hint) {
-                transport_hints.push(hint);
+            if let Some(hint) = descriptor_hint_from_addr(addr) {
+                if !transport_hints.contains(&hint) {
+                    transport_hints.push(hint);
+                }
             }
             RendezvousDescriptor {
                 authority_id: existing.authority_id,
+                device_id: device_id.or(existing.device_id),
                 context_id: existing.context_id,
                 transport_hints,
                 handshake_psk_commitment: existing.handshake_psk_commitment,
@@ -1494,8 +1510,9 @@ impl InvitationHandler {
         } else {
             RendezvousDescriptor {
                 authority_id: peer,
-                context_id,
-                transport_hints: vec![hint],
+                device_id,
+                context_id: peer_context_id,
+                transport_hints: descriptor_hint_from_addr(addr).into_iter().collect(),
                 handshake_psk_commitment: [0u8; 32],
                 public_key: [0u8; 32],
                 valid_from: now_ms.saturating_sub(1),
@@ -1505,6 +1522,49 @@ impl InvitationHandler {
             }
         };
         let _ = manager.cache_descriptor(descriptor).await;
+
+        let local_context_id = self.context.authority.default_context_id();
+        if local_context_id != peer_context_id {
+            let mut local_descriptor = manager
+                .get_descriptor(local_context_id, peer)
+                .await
+                .unwrap_or_else(|| RendezvousDescriptor {
+                    authority_id: peer,
+                    device_id,
+                    context_id: local_context_id,
+                    transport_hints: Vec::new(),
+                    handshake_psk_commitment: [0u8; 32],
+                    public_key: [0u8; 32],
+                    valid_from: now_ms.saturating_sub(1),
+                    valid_until: now_ms.saturating_add(86_400_000),
+                    nonce: [0u8; 32],
+                    nickname_suggestion: None,
+                });
+            if local_descriptor.device_id.is_none() {
+                local_descriptor.device_id = device_id;
+            }
+            if let Some(hint) = descriptor_hint_from_addr(addr) {
+                if !local_descriptor.transport_hints.contains(&hint) {
+                    local_descriptor.transport_hints.push(hint);
+                }
+            }
+            local_descriptor.valid_from = local_descriptor.valid_from.min(now_ms.saturating_sub(1));
+            local_descriptor.valid_until =
+                local_descriptor.valid_until.max(now_ms.saturating_add(86_400_000));
+            let _ = manager.cache_descriptor(local_descriptor).await;
+        }
+    }
+
+    pub(super) async fn cache_direct_descriptor_for_peer(
+        &self,
+        effects: &AuraEffectSystem,
+        peer: AuthorityId,
+        device_id: Option<DeviceId>,
+        addr: &str,
+        now_ms: u64,
+    ) {
+        self.cache_peer_descriptor_for_peer(effects, peer, device_id, Some(addr), now_ms)
+            .await;
     }
 
     /// Decline an invitation
@@ -2176,7 +2236,7 @@ impl ShareableInvitation {
         use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
         let parts: Vec<&str> = code.split(':').collect();
-        if parts.len() != 3 && parts.len() != 4 {
+        if !(3..=5).contains(&parts.len()) {
             return Err(ShareableInvitationError::InvalidFormat);
         }
 
@@ -2212,7 +2272,7 @@ impl ShareableInvitation {
         use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
         let parts: Vec<&str> = code.split(':').collect();
-        if parts.len() != 4 {
+        if parts.len() != 4 && parts.len() != 5 {
             return None;
         }
         if parts[0] != Self::PREFIX {
@@ -2226,6 +2286,26 @@ impl ShareableInvitation {
             return None;
         }
         Some(trimmed.to_string())
+    }
+
+    /// Extract optional sender device identity from a code.
+    ///
+    /// Codes may include an optional 5th segment:
+    /// `aura:v1:<payload-b64>:<sender-addr-b64>:<sender-device-id-b64>`.
+    pub fn sender_device_id_from_code(code: &str) -> Option<DeviceId> {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+        let parts: Vec<&str> = code.split(':').collect();
+        if parts.len() != 5 {
+            return None;
+        }
+        if parts[0] != Self::PREFIX {
+            return None;
+        }
+
+        let decoded = URL_SAFE_NO_PAD.decode(parts[4]).ok()?;
+        let device_id = String::from_utf8(decoded).ok()?;
+        device_id.trim().parse().ok()
     }
 }
 
@@ -4147,10 +4227,11 @@ mod tests {
     }
 
     #[test]
-    fn shareable_invitation_parses_optional_sender_addr_segment() {
+    fn shareable_invitation_parses_optional_sender_addr_and_device_segments() {
         use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
         let sender_id = AuthorityId::new_from_entropy([46u8; 32]);
+        let sender_device_id = DeviceId::new_from_entropy([47u8; 32]);
         let shareable = ShareableInvitation {
             version: ShareableInvitation::CURRENT_VERSION,
             invitation_id: InvitationId::new("inv-addr-001"),
@@ -4162,8 +4243,9 @@ mod tests {
         };
         let base = shareable.to_code();
         let code = format!(
-            "{base}:{}",
-            URL_SAFE_NO_PAD.encode("127.0.0.1:43501".as_bytes())
+            "{base}:{}:{}",
+            URL_SAFE_NO_PAD.encode("127.0.0.1:43501".as_bytes()),
+            URL_SAFE_NO_PAD.encode(sender_device_id.to_string().as_bytes())
         );
 
         let decoded = ShareableInvitation::from_code(&code).unwrap();
@@ -4172,6 +4254,10 @@ mod tests {
         assert_eq!(
             ShareableInvitation::sender_addr_from_code(&code),
             Some("127.0.0.1:43501".to_string())
+        );
+        assert_eq!(
+            ShareableInvitation::sender_device_id_from_code(&code),
+            Some(sender_device_id)
         );
     }
 

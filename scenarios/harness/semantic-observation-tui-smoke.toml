@@ -26,19 +26,11 @@ control_id = "onboarding_root"
 timeout_ms = 30000
 
 [[steps]]
-id = "alice-fill-account-name"
-action = "fill"
+id = "alice-create-account"
+action = "create_account"
 actor = "alice"
-field_id = "account_name"
 value = "Alice"
-timeout_ms = 3000
-
-[[steps]]
-id = "alice-submit-account"
-action = "activate"
-actor = "alice"
-control_id = "onboarding_create_account_button"
-timeout_ms = 3000
+timeout_ms = 4000
 
 [[steps]]
 id = "alice-neighborhood-visible"
