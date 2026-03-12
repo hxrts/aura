@@ -35,8 +35,8 @@ async fn rendezvous_exchange_adapter_setup() {
     let initiator_device = DeviceId::from_uuid(Uuid::from_bytes([11; 16]));
     let responder_device = DeviceId::from_uuid(Uuid::from_bytes([12; 16]));
 
-    let initiator_auth = AuthorityId::from_uuid(initiator_device.uuid());
-    let responder_auth = AuthorityId::from_uuid(responder_device.uuid());
+    let initiator_auth = AuthorityId::for_device(initiator_device);
+    let responder_auth = AuthorityId::for_device(responder_device);
 
     let mut role_map = HashMap::new();
     role_map.insert(RendezvousExchangeRole::Initiator, initiator_auth);

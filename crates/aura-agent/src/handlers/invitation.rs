@@ -1171,7 +1171,7 @@ impl InvitationHandler {
             }
             changed = true;
         } else if let Some(home) = homes.home_mut(&invite.channel_id) {
-            if home.context_id.is_none() {
+            if home.context_id != Some(invite.context_id) {
                 home.context_id = Some(invite.context_id);
                 changed = true;
             }
@@ -1266,7 +1266,7 @@ impl InvitationHandler {
             homes.add_home(home);
             changed = true;
         } else if let Some(home) = homes.home_mut(home_id) {
-            if home.context_id.is_none() {
+            if home.context_id != Some(invitation.context_id) {
                 home.context_id = Some(invitation.context_id);
                 changed = true;
             }
@@ -1549,22 +1549,11 @@ impl InvitationHandler {
                 }
             }
             local_descriptor.valid_from = local_descriptor.valid_from.min(now_ms.saturating_sub(1));
-            local_descriptor.valid_until =
-                local_descriptor.valid_until.max(now_ms.saturating_add(86_400_000));
+            local_descriptor.valid_until = local_descriptor
+                .valid_until
+                .max(now_ms.saturating_add(86_400_000));
             let _ = manager.cache_descriptor(local_descriptor).await;
         }
-    }
-
-    pub(super) async fn cache_direct_descriptor_for_peer(
-        &self,
-        effects: &AuraEffectSystem,
-        peer: AuthorityId,
-        device_id: Option<DeviceId>,
-        addr: &str,
-        now_ms: u64,
-    ) {
-        self.cache_peer_descriptor_for_peer(effects, peer, device_id, Some(addr), now_ms)
-            .await;
     }
 
     /// Decline an invitation
@@ -1780,10 +1769,8 @@ impl InvitationHandler {
     ) -> (ChoreographicRole, ChoreographicRole, Vec<ChoreographicRole>) {
         let sender_index = RoleIndex::new(0).expect("sender role index");
         let receiver_index = RoleIndex::new(0).expect("receiver role index");
-        let local_role =
-            ChoreographicRole::new(aura_core::DeviceId::from_uuid(authority_id.0), sender_index);
-        let peer_role =
-            ChoreographicRole::new(aura_core::DeviceId::from_uuid(peer_id.0), receiver_index);
+        let local_role = ChoreographicRole::for_authority(authority_id, sender_index);
+        let peer_role = ChoreographicRole::for_authority(peer_id, receiver_index);
         (local_role, peer_role, vec![local_role, peer_role])
     }
 

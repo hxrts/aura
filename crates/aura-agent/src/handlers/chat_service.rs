@@ -89,10 +89,7 @@ impl ChatServiceApi {
     }
 
     fn amp_role(authority_id: AuthorityId) -> ChoreographicRole {
-        ChoreographicRole::new(
-            aura_core::DeviceId::from_uuid(authority_id.0),
-            RoleIndex::new(0).expect("role index"),
-        )
+        ChoreographicRole::for_authority(authority_id, RoleIndex::new(0).expect("role index"))
     }
 
     async fn run_amp_transport_vm(

@@ -22,12 +22,9 @@ pub(crate) fn participant_identity_to_authority_id(
     match identity {
         ParticipantIdentity::Guardian(id) => Ok(*id),
         ParticipantIdentity::GroupMember { member, .. } => Ok(*member),
-        ParticipantIdentity::Device(device_id) => {
-            let bytes = device_id.to_bytes().map_err(|_| {
-                AuraError::internal("Failed to convert device id to bytes".to_string())
-            })?;
-            Ok(AuthorityId::new_from_entropy(hash(&bytes)))
-        }
+        ParticipantIdentity::Device(device_id) => Err(AuraError::invalid(format!(
+            "Consensus participants must carry explicit authorities; device participant {device_id} is not valid here"
+        ))),
     }
 }
 

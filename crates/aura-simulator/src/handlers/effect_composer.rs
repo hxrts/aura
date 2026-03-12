@@ -44,7 +44,7 @@ use tracing::info;
 /// simulation effects while respecting the 8-layer architecture.
 pub struct SimulationEffectComposer {
     device_id: DeviceId,
-    authority_id: Option<AuthorityId>,
+    authority_id: AuthorityId,
     effect_system: Option<Arc<AuraEffectSystem>>,
     time_handler: Option<Arc<SimulationTimeHandler>>,
     fault_handler: Option<Arc<SimulationFaultHandler>>,
@@ -57,10 +57,10 @@ pub struct SimulationEffectComposer {
 
 impl SimulationEffectComposer {
     /// Create a new effect composer for the given device
-    pub fn new(device_id: DeviceId) -> Self {
+    pub fn new(device_id: DeviceId, authority_id: AuthorityId) -> Self {
         Self {
             device_id,
-            authority_id: None,
+            authority_id,
             effect_system: None,
             time_handler: None,
             fault_handler: None,
@@ -74,12 +74,6 @@ impl SimulationEffectComposer {
     /// Set the seed for deterministic simulation
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
-        self
-    }
-
-    /// Set the authority ID used for routing and authority-scoped effects
-    pub fn with_authority(mut self, authority_id: AuthorityId) -> Self {
-        self.authority_id = Some(authority_id);
         self
     }
 
@@ -116,11 +110,7 @@ impl SimulationEffectComposer {
 
     /// Build a SimulationEnvironmentConfig from the composer's current state
     fn build_simulation_config(&self) -> SimulationEnvironmentConfig {
-        let mut config = SimulationEnvironmentConfig::new(self.seed, self.device_id);
-        if let Some(authority_id) = self.authority_id {
-            config = config.with_authority(authority_id);
-        }
-        config
+        SimulationEnvironmentConfig::new(self.seed, self.device_id, self.authority_id)
     }
 
     /// Add simulation-specific time control
@@ -191,8 +181,9 @@ impl SimulationEffectComposer {
     /// Create a typical testing environment with all handlers
     pub async fn for_testing(
         device_id: DeviceId,
+        authority_id: AuthorityId,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        Self::new(device_id)
+        Self::new(device_id, authority_id)
             .with_seed(42) // Deterministic for testing
             .with_effect_system_async()
             .await?
@@ -205,9 +196,10 @@ impl SimulationEffectComposer {
     /// Create a simulation environment with specific seed
     pub async fn for_simulation(
         device_id: DeviceId,
+        authority_id: AuthorityId,
         seed: u64,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        Self::new(device_id)
+        Self::new(device_id, authority_id)
             .with_seed(seed)
             .with_effect_system_async()
             .await?
@@ -221,9 +213,10 @@ impl SimulationEffectComposer {
     #[deprecated(since = "0.1.0", note = "Use for_simulation instead")]
     pub async fn for_simulation_async(
         device_id: DeviceId,
+        authority_id: AuthorityId,
         seed: u64,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        Self::for_simulation(device_id, seed).await
+        Self::for_simulation(device_id, authority_id, seed).await
     }
 
     /// Create a simulation environment with shared transport inbox for multi-agent simulations
@@ -232,10 +225,11 @@ impl SimulationEffectComposer {
     /// by providing a shared transport layer that routes messages based on destination authority.
     pub async fn for_simulation_async_with_shared_transport(
         device_id: DeviceId,
+        authority_id: AuthorityId,
         seed: u64,
         shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        Self::new(device_id)
+        Self::new(device_id, authority_id)
             .with_seed(seed)
             .with_shared_transport_inbox(shared_inbox)
             .with_effect_system_async()
@@ -805,33 +799,37 @@ pub mod factory {
     /// Create a testing simulation environment with all handlers
     pub async fn create_testing_environment(
         device_id: DeviceId,
+        authority_id: AuthorityId,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        SimulationEffectComposer::for_testing(device_id).await
+        SimulationEffectComposer::for_testing(device_id, authority_id).await
     }
 
     /// Deprecated: Use `create_testing_environment` instead
     #[deprecated(since = "0.1.0", note = "Use create_testing_environment instead")]
     pub async fn create_testing_environment_async(
         device_id: DeviceId,
+        authority_id: AuthorityId,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        create_testing_environment(device_id).await
+        create_testing_environment(device_id, authority_id).await
     }
 
     /// Create a deterministic simulation environment for reproducible testing
     pub async fn create_deterministic_environment(
         device_id: DeviceId,
+        authority_id: AuthorityId,
         seed: u64,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        SimulationEffectComposer::for_simulation(device_id, seed).await
+        SimulationEffectComposer::for_simulation(device_id, authority_id, seed).await
     }
 
     /// Deprecated: Use `create_deterministic_environment` instead
     #[deprecated(since = "0.1.0", note = "Use create_deterministic_environment instead")]
     pub async fn create_deterministic_environment_async(
         device_id: DeviceId,
+        authority_id: AuthorityId,
         seed: u64,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        create_deterministic_environment(device_id, seed).await
+        create_deterministic_environment(device_id, authority_id, seed).await
     }
 }
 
@@ -844,9 +842,10 @@ mod tests {
         use aura_testkit::DeviceTestFixture;
         let fixture = DeviceTestFixture::new(0);
         let device_id = fixture.device_id();
+        let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
 
         // Test that we can build without effect system should fail
-        let result = SimulationEffectComposer::new(device_id).build();
+        let result = SimulationEffectComposer::new(device_id, authority_id).build();
         assert!(result.is_err());
 
         if let Err(SimulationComposerError::MissingRequiredComponent(component)) = result {
@@ -861,7 +860,8 @@ mod tests {
         use aura_testkit::DeviceTestFixture;
         let fixture = DeviceTestFixture::new(1);
         let device_id = fixture.device_id();
-        let composer = SimulationEffectComposer::new(device_id).with_seed(999);
+        let authority_id = AuthorityId::new_from_entropy([2u8; 32]);
+        let composer = SimulationEffectComposer::new(device_id, authority_id).with_seed(999);
         assert_eq!(composer.seed, 999);
     }
 
@@ -870,9 +870,10 @@ mod tests {
         use aura_testkit::DeviceTestFixture;
         let fixture = DeviceTestFixture::new(2);
         let device_id = fixture.device_id();
+        let authority_id = AuthorityId::new_from_entropy([3u8; 32]);
 
         // Build with handlers but no effect system
-        let composer = SimulationEffectComposer::new(device_id)
+        let composer = SimulationEffectComposer::new(device_id, authority_id)
             .with_seed(123)
             .with_time_control()
             .with_fault_injection()
@@ -956,7 +957,8 @@ mod tests {
 
         let fixture = DeviceTestFixture::new(3);
         let device_id = fixture.device_id();
-        let env = SimulationEffectComposer::for_testing(device_id)
+        let authority_id = AuthorityId::new_from_entropy([4u8; 32]);
+        let env = SimulationEffectComposer::for_testing(device_id, authority_id)
             .await
             .expect("create simulation environment");
 
@@ -1007,7 +1009,8 @@ mod tests {
 
         let fixture = DeviceTestFixture::new(4);
         let device_id = fixture.device_id();
-        let env = SimulationEffectComposer::for_testing(device_id)
+        let authority_id = AuthorityId::new_from_entropy([5u8; 32]);
+        let env = SimulationEffectComposer::for_testing(device_id, authority_id)
             .await
             .expect("create simulation environment");
 

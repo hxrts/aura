@@ -192,11 +192,22 @@ async fn resolve_peer_addr(
 
     let fallback_context = default_context_id_for_authority(peer);
     if fallback_context == context {
-        return None;
+        return manager
+            .get_any_descriptor_for_authority(peer)
+            .await
+            .and_then(descriptor_transport_addr);
+    }
+
+    if let Some(addr) = manager
+        .get_descriptor(fallback_context, peer)
+        .await
+        .and_then(descriptor_transport_addr)
+    {
+        return Some(addr);
     }
 
     manager
-        .get_descriptor(fallback_context, peer)
+        .get_any_descriptor_for_authority(peer)
         .await
         .and_then(descriptor_transport_addr)
 }

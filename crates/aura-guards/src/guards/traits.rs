@@ -19,6 +19,27 @@ pub trait GuardContextProvider {
     }
 }
 
+impl<T> GuardContextProvider for std::sync::Arc<T>
+where
+    T: GuardContextProvider + ?Sized,
+{
+    fn authority_id(&self) -> AuthorityId {
+        (**self).authority_id()
+    }
+
+    fn get_metadata(&self, key: &str) -> Option<String> {
+        (**self).get_metadata(key)
+    }
+
+    fn execution_mode(&self) -> ExecutionMode {
+        (**self).execution_mode()
+    }
+
+    fn can_perform_operation(&self, operation: &str) -> bool {
+        (**self).can_perform_operation(operation)
+    }
+}
+
 pub const META_BISCUIT_TOKEN: &str = "biscuit_token";
 pub const META_BISCUIT_ROOT_PK: &str = "biscuit_root_pk";
 

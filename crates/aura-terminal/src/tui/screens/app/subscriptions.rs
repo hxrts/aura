@@ -20,7 +20,9 @@ use aura_app::ui::workflows::messaging as messaging_workflows;
 use aura_app::ui_contract::{ChannelFactKey, RuntimeEventKind, RuntimeFact};
 use aura_core::AuthorityId;
 
-use crate::tui::chat_scope::{active_home_scope_id, is_dm_like_channel, scoped_channels};
+use crate::tui::chat_scope::{
+    active_home_scope_id, effective_home_scope_id, is_dm_like_channel, scoped_channels,
+};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::types::{Channel, Contact, Device, Invitation, Message, PendingRequest};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
@@ -486,6 +488,7 @@ fn scoped_channel_snapshot(
 
 fn publish_scoped_channels(
     channels: &SharedChannels,
+    selected_channel_id: Option<&str>,
     update_tx: &Option<UiUpdateSender>,
     last_channel_count: &Arc<AtomicUsize>,
     last_message_count: &Arc<AtomicUsize>,
@@ -498,7 +501,8 @@ fn publish_scoped_channels(
     chat_state: &ChatState,
     active_scope: Option<&str>,
 ) {
-    let scoped = scoped_channels(chat_state, active_scope);
+    let effective_scope = effective_home_scope_id(chat_state, active_scope, selected_channel_id);
+    let scoped = scoped_channels(chat_state, effective_scope.as_deref());
     let message_count = scoped
         .iter()
         .map(|channel| chat_state.messages_for_channel(&channel.id).len())
@@ -533,6 +537,10 @@ fn publish_scoped_channels(
                 .iter()
                 .filter(|authority_id| discovered_peer_ids.contains(authority_id))
                 .count();
+            let observed_remote_message = chat_state
+                .messages_for_channel(&channel.id)
+                .iter()
+                .any(|message| !message.is_own);
             let resolved_member_count = channel
                 .member_count
                 .max((resolved_recipient_count.saturating_add(1)) as u32);
@@ -541,7 +549,9 @@ fn publish_scoped_channels(
                 member_count: Some(resolved_member_count),
             }];
             let remote_delivery_ready = resolved_recipient_count > 0
-                && (transport_peer_count > 0 || reachable_recipient_count > 0)
+                && (transport_peer_count > 0
+                    || reachable_recipient_count > 0
+                    || observed_remote_message)
                 && !channel.name.eq_ignore_ascii_case("note to self")
                 && !is_dm_like_channel(channel);
             if remote_delivery_ready {
@@ -599,6 +609,7 @@ pub fn use_channels_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
     shared_authority_id: SharedAuthorityId,
+    selected_channel_id: Arc<RwLock<Option<String>>>,
     update_tx: Option<UiUpdateSender>,
 ) -> SharedChannels {
     let shared_channels_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
@@ -638,6 +649,7 @@ pub fn use_channels_subscription(
         let latest_contacts_state = latest_contacts_state.clone();
         let latest_homes_state = latest_homes_state.clone();
         let latest_discovered_peers = latest_discovered_peers.clone();
+        let selected_channel_id = selected_channel_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 let mut stabilized = latest_chat_state
@@ -694,8 +706,13 @@ pub fn use_channels_subscription(
                     .ok()
                     .map(|guard| guard.clone())
                     .unwrap_or_default();
+                let selected_channel = selected_channel_id
+                    .read()
+                    .ok()
+                    .and_then(|guard| guard.clone());
                 publish_scoped_channels(
                     &channels,
+                    selected_channel.as_deref(),
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,
@@ -727,6 +744,7 @@ pub fn use_channels_subscription(
         let latest_homes_state = latest_homes_state.clone();
         let latest_discovered_peers = latest_discovered_peers.clone();
         let shared_authority_id = shared_authority_id.clone();
+        let selected_channel_id = selected_channel_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
                 let authority_id = settings_state.authority_id.parse::<AuthorityId>().ok();
@@ -764,8 +782,13 @@ pub fn use_channels_subscription(
                     .ok()
                     .map(|guard| guard.clone())
                     .unwrap_or_default();
+                let selected_channel = selected_channel_id
+                    .read()
+                    .ok()
+                    .and_then(|guard| guard.clone());
                 publish_scoped_channels(
                     &channels,
+                    selected_channel.as_deref(),
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,
@@ -797,6 +820,7 @@ pub fn use_channels_subscription(
         let latest_homes_state = latest_homes_state.clone();
         let latest_discovered_peers = latest_discovered_peers.clone();
         let shared_authority_id = shared_authority_id.clone();
+        let selected_channel_id = selected_channel_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
                 let scope = active_home_scope_id(&neighborhood);
@@ -826,8 +850,13 @@ pub fn use_channels_subscription(
                     .ok()
                     .map(|guard| guard.clone())
                     .unwrap_or_default();
+                let selected_channel = selected_channel_id
+                    .read()
+                    .ok()
+                    .and_then(|guard| guard.clone());
                 publish_scoped_channels(
                     &channels,
+                    selected_channel.as_deref(),
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,
@@ -859,6 +888,7 @@ pub fn use_channels_subscription(
         let latest_homes_state = latest_homes_state.clone();
         let latest_discovered_peers = latest_discovered_peers.clone();
         let shared_authority_id = shared_authority_id.clone();
+        let selected_channel_id = selected_channel_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 if let Ok(mut guard) = latest_contacts_state.write() {
@@ -882,8 +912,13 @@ pub fn use_channels_subscription(
                     .ok()
                     .map(|guard| guard.clone())
                     .unwrap_or_default();
+                let selected_channel = selected_channel_id
+                    .read()
+                    .ok()
+                    .and_then(|guard| guard.clone());
                 publish_scoped_channels(
                     &channels,
+                    selected_channel.as_deref(),
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,
@@ -915,6 +950,7 @@ pub fn use_channels_subscription(
         let latest_homes_state_handle = latest_homes_state.clone();
         let latest_discovered_peers_handle = latest_discovered_peers.clone();
         let shared_authority_id_handle = shared_authority_id.clone();
+        let selected_channel_id_handle = selected_channel_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |homes_state| {
                 if let Ok(mut guard) = latest_homes_state_handle.write() {
@@ -942,8 +978,13 @@ pub fn use_channels_subscription(
                     .ok()
                     .map(|guard| guard.clone())
                     .unwrap_or_default();
+                let selected_channel = selected_channel_id_handle
+                    .read()
+                    .ok()
+                    .and_then(|guard| guard.clone());
                 publish_scoped_channels(
                     &channels,
+                    selected_channel.as_deref(),
                     &update_tx,
                     &last_channel_count_handle,
                     &last_message_count_handle,
@@ -975,6 +1016,7 @@ pub fn use_channels_subscription(
         let latest_homes_state = latest_homes_state.clone();
         let latest_discovered_peers = latest_discovered_peers.clone();
         let shared_authority_id = shared_authority_id.clone();
+        let selected_channel_id = selected_channel_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*TRANSPORT_PEERS_SIGNAL, move |count| {
                 latest_transport_peer_count.store(count, Ordering::Relaxed);
@@ -1000,8 +1042,13 @@ pub fn use_channels_subscription(
                     .ok()
                     .map(|guard| guard.clone())
                     .unwrap_or_default();
+                let selected_channel = selected_channel_id
+                    .read()
+                    .ok()
+                    .and_then(|guard| guard.clone());
                 publish_scoped_channels(
                     &channels,
+                    selected_channel.as_deref(),
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,
@@ -1033,6 +1080,7 @@ pub fn use_channels_subscription(
         let latest_homes_state = latest_homes_state.clone();
         let latest_discovered_peers = latest_discovered_peers.clone();
         let shared_authority_id = shared_authority_id.clone();
+        let selected_channel_id = selected_channel_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*DISCOVERED_PEERS_SIGNAL, move |peers_state| {
                 let discovered_peer_ids = peers_state
@@ -1062,8 +1110,13 @@ pub fn use_channels_subscription(
                     .map(|guard| guard.clone())
                     .unwrap_or_default();
                 let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
+                let selected_channel = selected_channel_id
+                    .read()
+                    .ok()
+                    .and_then(|guard| guard.clone());
                 publish_scoped_channels(
                     &channels,
+                    selected_channel.as_deref(),
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,

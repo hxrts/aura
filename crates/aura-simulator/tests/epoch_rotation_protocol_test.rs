@@ -37,9 +37,9 @@ async fn epoch_rotation_adapter_setup() {
     let participant1_device = DeviceId::from_uuid(Uuid::from_bytes([12; 16]));
     let participant2_device = DeviceId::from_uuid(Uuid::from_bytes([13; 16]));
 
-    let coordinator_auth = AuthorityId::from_uuid(coordinator_device.uuid());
-    let participant1_auth = AuthorityId::from_uuid(participant1_device.uuid());
-    let participant2_auth = AuthorityId::from_uuid(participant2_device.uuid());
+    let coordinator_auth = AuthorityId::for_device(coordinator_device);
+    let participant1_auth = AuthorityId::for_device(participant1_device);
+    let participant2_auth = AuthorityId::for_device(participant2_device);
 
     let mut role_map = HashMap::new();
     role_map.insert(EpochRotationProtocolRole::Coordinator, coordinator_auth);

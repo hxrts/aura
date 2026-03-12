@@ -10,7 +10,7 @@ use aura_agent::{
     RecoveryState,
 };
 use aura_core::hash::hash;
-use aura_core::identifiers::{ContextId, RecoveryId};
+use aura_core::identifiers::{ContextId, DeviceId, RecoveryId};
 
 /// Create a test effect context for async tests
 fn test_context(authority_id: AuthorityId) -> EffectContext {
@@ -319,7 +319,8 @@ async fn test_recovery_execution_requires_consensus_in_production(
     config.storage.encryption_enabled = false;
 
     let effects = AuraEffectSystem::production_for_authority(config, authority_id)?;
-    let handler = RecoveryHandler::new(AuthorityContext::new(authority_id))?;
+    let device_id = DeviceId::new_from_entropy([121u8; 32]);
+    let handler = RecoveryHandler::new(AuthorityContext::new_with_device(authority_id, device_id))?;
 
     let err = handler
         .complete(&effects, &RecoveryId::new("recovery-missing"))

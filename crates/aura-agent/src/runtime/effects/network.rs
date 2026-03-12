@@ -458,7 +458,8 @@ mod tests {
 
     #[tokio::test]
     async fn send_rejects_invalid_connection_handle() {
-        let effects = AuraEffectSystem::production(production_config_for_tests())
+        let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
+        let effects = AuraEffectSystem::production(production_config_for_tests(), authority_id)
             .expect("create production effects");
         let err = effects
             .send("not-a-connection-id", vec![1, 2, 3])
@@ -486,7 +487,8 @@ mod tests {
             payload
         });
 
-        let effects = AuraEffectSystem::production(production_config_for_tests())
+        let authority_id = AuthorityId::new_from_entropy([2u8; 32]);
+        let effects = AuraEffectSystem::production(production_config_for_tests(), authority_id)
             .expect("create production effects");
         let connection_id = effects
             .open(&addr.to_string())

@@ -73,7 +73,7 @@ async fn create_lan_agent(seed: u8, lan_port: u16) -> TestResult<Arc<AuraAgent>>
     let ctx = test_context(authority_id);
 
     let mut config = AgentConfig {
-        device_id: DeviceId::from_uuid(authority_id.uuid()),
+        device_id: DeviceId::for_authority(authority_id),
         ..Default::default()
     };
     config.network.bind_address = "0.0.0.0:0".to_string();
@@ -1039,7 +1039,7 @@ async fn create_production_lan_agent(seed: u8, lan_port: u16) -> TestResult<Arc<
     let _ = std::fs::create_dir_all(&temp_dir);
 
     let mut config = AgentConfig {
-        device_id: DeviceId::from_uuid(authority_id.uuid()),
+        device_id: DeviceId::for_authority(authority_id),
         ..Default::default()
     };
     config.network.bind_address = "0.0.0.0:0".to_string();
@@ -1113,12 +1113,12 @@ async fn test_lan_sync_roundtrip() -> TestResult {
     )?;
     effects_a.persist_journal(&journal).await?;
 
-    let peer_device_id = DeviceId::from_uuid(agent_b.authority_id().uuid());
+    let peer_device_id = DeviceId::for_authority(agent_b.authority_id());
     let sync_a = agent_a
         .runtime()
         .sync()
         .ok_or_else(|| anyhow!("sync service not enabled"))?;
-    let peer_device_id_b = DeviceId::from_uuid(agent_a.authority_id().uuid());
+    let peer_device_id_b = DeviceId::for_authority(agent_a.authority_id());
     let sync_b = agent_b
         .runtime()
         .sync()

@@ -589,8 +589,12 @@ pub async fn project_channel_peer_membership_with_context(
             .unwrap_or_else(|| channel_id.to_string());
         let channel = chat.channel_mut(&channel_id);
         if let Some(channel) = channel {
-            if channel.context_id.is_none() {
-                channel.context_id = context_id;
+            if let Some(context_id) = context_id {
+                if channel.context_id != Some(context_id) {
+                    channel.context_id = Some(context_id);
+                }
+            } else if channel.context_id.is_none() {
+                channel.context_id = None;
             }
             if !channel.member_ids.contains(&peer_authority) {
                 channel.member_ids.push(peer_authority);
@@ -693,7 +697,17 @@ async fn project_home_peer_membership(
         return Ok(());
     };
 
+    if let Some(context_id) = context_id {
+        if home.context_id != Some(context_id) {
+            home.context_id = Some(context_id);
+        }
+    }
+
     if home.member(&peer_authority).is_some() {
+        let homes_state = homes.clone();
+        core.views_mut().set_homes(homes);
+        drop(core);
+        emit_signal(app_core, &*HOMES_SIGNAL, homes_state, HOMES_SIGNAL_NAME).await?;
         return Ok(());
     }
 
@@ -1715,13 +1729,11 @@ pub async fn send_message_ref(
                 let mut recipients =
                     recipient_peers_for_channel(app_core, channel_id, sender_id).await;
                 let mut failed_fanout = Vec::new();
+                let mut attempted_fanout_total = 0usize;
+                let mut last_connectivity_error: Option<String> = None;
                 if channel_requires_remote_delivery {
                     for attempt in 0..REMOTE_DELIVERY_RETRY_ATTEMPTS {
-                        if recipients.is_empty()
-                            || ensure_runtime_peer_connectivity(&runtime, "send_message_ref")
-                                .await
-                                .is_err()
-                        {
+                        if recipients.is_empty() {
                             converge_runtime(&runtime).await;
                             runtime.sleep_ms(REMOTE_DELIVERY_RETRY_BACKOFF_MS).await;
                             recipients =
@@ -1729,10 +1741,30 @@ pub async fn send_message_ref(
                             continue;
                         }
 
+                        let mut channel_setup_errors = Vec::new();
+                        for peer in recipients.iter().copied() {
+                            if let Err(error) = runtime.ensure_peer_channel(context_id, peer).await
+                            {
+                                channel_setup_errors.push(format!("{peer}: {error}"));
+                            }
+                        }
+
+                        if let Err(error) =
+                            ensure_runtime_peer_connectivity(&runtime, "send_message_ref").await
+                        {
+                            let mut detail = error.to_string();
+                            if !channel_setup_errors.is_empty() {
+                                detail.push_str("; channel_setup=");
+                                detail.push_str(&channel_setup_errors.join(", "));
+                            }
+                            last_connectivity_error = Some(detail);
+                        }
+
                         failed_fanout.clear();
                         let mut attempted_fanout = 0usize;
                         for peer in recipients.iter().copied() {
                             attempted_fanout = attempted_fanout.saturating_add(1);
+                            attempted_fanout_total = attempted_fanout_total.saturating_add(1);
                             if let Err(error) =
                                 send_chat_fact_with_retry(&runtime, peer, context_id, &fact).await
                             {
@@ -1757,6 +1789,13 @@ pub async fn send_message_ref(
                         if recipients.is_empty() {
                             return Err(AuraError::agent(format!(
                                 "No recipient peers resolved for channel {channel_id} after extended retries"
+                            )));
+                        } else if attempted_fanout_total == 0 {
+                            return Err(AuraError::agent(format!(
+                                "Remote delivery prerequisites never converged for channel {channel_id}: {}",
+                                last_connectivity_error.unwrap_or_else(|| {
+                                    "no recipient fanout attempt executed".to_string()
+                                })
                             )));
                         } else if !failed_fanout.is_empty() {
                             return Err(AuraError::agent(format!(

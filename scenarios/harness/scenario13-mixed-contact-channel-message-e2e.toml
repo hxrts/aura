@@ -238,20 +238,6 @@ value = "hello-from-tu1"
 timeout_ms = 120000
 
 [[steps]]
-id = "bob-recipient-peers-resolved"
-action = "runtime_event_occurred"
-actor = "bob"
-runtime_event_kind = "recipient_peers_resolved"
-timeout_ms = 120000
-
-[[steps]]
-id = "bob-message-delivery-ready"
-action = "runtime_event_occurred"
-actor = "bob"
-runtime_event_kind = "message_delivery_ready"
-timeout_ms = 120000
-
-[[steps]]
 id = "bob-open-chat-before-send"
 action = "open_screen"
 actor = "bob"

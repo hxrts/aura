@@ -8,7 +8,7 @@
 //! `Result<HandlerResult, CliError>` to drive structured output.
 
 // Import types from aura-agent (runtime layer)
-use aura_core::identifiers::{ContextId, DeviceId};
+use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
 
 // Import agent types from aura-agent (runtime layer)
 pub use aura_agent::{AuraAgent, AuraEffectSystem, EffectContext};
@@ -67,6 +67,12 @@ impl<'a> HandlerContext<'a> {
     #[must_use]
     pub fn device_id(&self) -> DeviceId {
         self.device_id
+    }
+
+    /// Get the authority ID bound to the current runtime.
+    #[must_use]
+    pub fn authority_id(&self) -> AuthorityId {
+        self.effect_ctx.authority_id()
     }
 
     /// Get the context ID from the effect context

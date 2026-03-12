@@ -5,7 +5,6 @@
 //! - `application/aura-device-enrollment-acceptance`: Acceptance acknowledgment
 
 use super::ProcessResult;
-use crate::core::default_context_id_for_authority;
 use crate::runtime::effects::AuraEffectSystem;
 use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyRunner};
 use crate::runtime::services::{CeremonyTracker, ReconfigurationManager};
@@ -496,7 +495,7 @@ impl<'a> EnrollmentHandler<'a> {
                 return;
             }
         };
-        let Some(device_id) = ceremony_state.enrollment_device_id else {
+        let Some(_device_id) = ceremony_state.enrollment_device_id else {
             return;
         };
 
@@ -524,43 +523,12 @@ impl<'a> EnrollmentHandler<'a> {
             );
         }
 
-        // Delegate the enrollment session to the newly enrolled device authority.
-        let device_authority = match device_id.to_bytes() {
-            Ok(device_bytes) => AuthorityId::new_from_entropy(hash::hash(&device_bytes)),
-            Err(e) => {
-                tracing::warn!(
-                    ceremony_id = %ceremony_id,
-                    device_id = %device_id,
-                    error = %e,
-                    "failed to derive device authority for delegation"
-                );
-                return;
-            }
-        };
-
+        // Enrollment adds a new device under the existing authority. Do not
+        // model this as a cross-authority session handoff.
         let session_id = ceremony_runtime_session_id(ceremony_id).into_aura_session_id();
         self.reconfiguration
             .record_native_session(self.authority_id, session_id)
             .await;
-        if let Err(e) = self
-            .reconfiguration
-            .delegate_session(
-                self.effects,
-                Some(default_context_id_for_authority(self.authority_id)),
-                session_id,
-                self.authority_id,
-                device_authority,
-                Some("device_migration".to_string()),
-            )
-            .await
-        {
-            tracing::warn!(
-                ceremony_id = %ceremony_id,
-                session_id = %session_id,
-                error = %e,
-                "device migration delegation failed after enrollment commit"
-            );
-        }
     }
 
     /// Send commit messages to all ceremony participants

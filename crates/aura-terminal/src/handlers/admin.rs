@@ -45,8 +45,7 @@ async fn replace_admin(
         "Replacing admin for account {account_id} with {new_admin_id} (activation epoch {activation_epoch})"
     ));
 
-    // Convert DeviceId to AuthorityId (1:1 mapping for single-device authorities)
-    let authority_id = AuthorityId(ctx.device_id().0);
+    let authority_id = ctx.authority_id();
 
     admin::replace_admin(
         ctx.effects(),

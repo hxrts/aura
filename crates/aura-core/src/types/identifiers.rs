@@ -24,6 +24,19 @@ fn derived_uuid(label: &[u8]) -> Uuid {
     Uuid::from_bytes(uuid_bytes)
 }
 
+fn derived_uuid_with_bytes(domain: &[u8], bytes: &[u8]) -> Uuid {
+    let mut h = hash::hasher();
+    h.update(domain);
+    h.update(bytes);
+    let digest = h.finalize();
+    let mut uuid_bytes = [0u8; 16];
+    uuid_bytes.copy_from_slice(&digest[..16]);
+    Uuid::from_bytes(uuid_bytes)
+}
+
+const DEVICE_FOR_AUTHORITY_DOMAIN: &[u8] = b"aura/device-for-authority/v1";
+const AUTHORITY_FOR_DEVICE_DOMAIN: &[u8] = b"aura/authority-for-device/v1";
+
 // ============================================================================
 // Identifier Generation Macros
 // ============================================================================
@@ -406,6 +419,17 @@ impl DeviceId {
     pub fn uuid(&self) -> Uuid {
         self.0
     }
+
+    /// Derive a stable, domain-separated device identifier for an authority.
+    ///
+    /// This exists for legacy authority-scoped contexts that still need a
+    /// device-shaped identifier without reusing the authority UUID directly.
+    pub fn for_authority(authority_id: AuthorityId) -> Self {
+        Self(derived_uuid_with_bytes(
+            DEVICE_FOR_AUTHORITY_DOMAIN,
+            &authority_id.to_bytes(),
+        ))
+    }
 }
 
 impl fmt::Display for DeviceId {
@@ -485,6 +509,14 @@ impl AuthorityId {
     /// Convert to bytes
     pub fn to_bytes(&self) -> [u8; 16] {
         self.0.into_bytes()
+    }
+
+    /// Derive the device-owned authority for a concrete device identifier.
+    pub fn for_device(device_id: DeviceId) -> Self {
+        Self(derived_uuid_with_bytes(
+            AUTHORITY_FOR_DEVICE_DOMAIN,
+            device_id.0.as_bytes(),
+        ))
     }
 }
 

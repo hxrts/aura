@@ -135,6 +135,12 @@ pub enum UiUpdate {
     // Chat/Messages
     // =========================================================================
     /// A message was successfully sent
+    MessageSendSubmitting,
+
+    /// The runtime send path completed successfully
+    MessageSendCompleted,
+
+    /// A message was successfully sent
     MessageSent {
         /// The channel the message was sent to
         channel: String,

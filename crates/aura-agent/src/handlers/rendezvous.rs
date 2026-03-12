@@ -310,10 +310,18 @@ impl RendezvousHandler {
         let peer_descriptor = match self.cache_manager.get_descriptor(context_id, peer).await {
             Some(descriptor) => descriptor,
             None => match self.rendezvous_manager.as_ref() {
-                Some(manager) => manager
-                    .get_descriptor(context_id, peer)
-                    .await
-                    .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?,
+                Some(manager) => {
+                    let descriptor = manager
+                        .get_descriptor(context_id, peer)
+                        .await
+                        .or_else(|| None);
+                    let descriptor = match descriptor {
+                        Some(value) => Some(value),
+                        None => manager.get_any_descriptor_for_authority(peer).await,
+                    };
+                    descriptor
+                        .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?
+                }
                 None => return Err(AgentError::invalid("Peer descriptor not found in cache")),
             },
         };
@@ -1148,6 +1156,7 @@ mod tests {
 
         let descriptor = RendezvousDescriptor {
             authority_id: peer,
+            device_id: None,
             context_id,
             transport_hints: vec![TransportHint::quic_direct("192.168.1.1:8443").unwrap()],
             handshake_psk_commitment: [0u8; 32],
@@ -1179,6 +1188,7 @@ mod tests {
         // First cache the peer's descriptor
         let descriptor = RendezvousDescriptor {
             authority_id: peer,
+            device_id: None,
             context_id,
             transport_hints: vec![TransportHint::quic_direct("192.168.1.1:8443").unwrap()],
             handshake_psk_commitment: [0u8; 32],

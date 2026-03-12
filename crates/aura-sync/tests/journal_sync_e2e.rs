@@ -7,6 +7,7 @@ use aura_core::effects::{PhysicalTimeEffects, TimeError};
 use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::time::PhysicalTime;
 use aura_core::{FlowBudget, FlowCost, Journal};
+use aura_guards::GuardContextProvider;
 use aura_sync::protocols::{JournalSyncConfig, JournalSyncProtocol};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -41,6 +42,16 @@ impl TestEffects {
 
     async fn add_peer(&self, peer_id: Uuid, sender: PeerSender) {
         self.peers.lock().await.insert(peer_id, sender);
+    }
+}
+
+impl GuardContextProvider for TestEffects {
+    fn authority_id(&self) -> AuthorityId {
+        AuthorityId::from_uuid(self.id)
+    }
+
+    fn get_metadata(&self, _key: &str) -> Option<String> {
+        None
     }
 }
 

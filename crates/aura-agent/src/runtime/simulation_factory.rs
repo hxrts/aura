@@ -32,8 +32,6 @@ cfg_if::cfg_if! {
             SimulationEnvironmentConfig, SimulationEnvironmentError, SimulationEnvironmentFactory,
             TransportEnvelope,
         };
-        use aura_core::hash::hash;
-        use aura_core::identifiers::AuthorityId;
         use std::sync::Arc;
 
         use super::effects::AuraEffectSystem;
@@ -55,7 +53,7 @@ cfg_if::cfg_if! {
 /// use aura_core::effects::{SimulationEnvironmentFactory, SimulationEnvironmentConfig};
 ///
 /// async fn run_simulation<F: SimulationEnvironmentFactory>(factory: &F) {
-///     let config = SimulationEnvironmentConfig::new(42, device_id);
+///     let config = SimulationEnvironmentConfig::new(42, device_id, authority_id);
 ///     let effects = factory.create_simulation_environment(config).await?;
 ///     // Use effects...
 /// }
@@ -104,25 +102,15 @@ impl SimulationEnvironmentFactory for EffectSystemFactory {
     ) -> Result<Arc<Self::EffectSystem>, SimulationEnvironmentError> {
         let agent_config = self.to_agent_config(&config);
 
-        // Determine authority ID (use provided or derive from device ID)
-        let authority_id = match config.authority_id {
-            Some(authority_id) => authority_id,
-            None => {
-                let device_bytes = config.device_id.to_bytes().map_err(|e| {
-                    SimulationEnvironmentError::CreationFailed(format!(
-                        "DeviceId::to_bytes failed: {e}"
-                    ))
-                })?;
-                AuthorityId::new_from_entropy(hash(&device_bytes))
-            }
-        };
-
         // Simulation factory is runtime infrastructure and intentionally uses
         // explicit simulation constructors with externally provided seeds.
         #[allow(clippy::disallowed_methods)]
-        let effect_system =
-            AuraEffectSystem::simulation_for_authority(&agent_config, config.seed, authority_id)
-                .map_err(|e| SimulationEnvironmentError::CreationFailed(e.to_string()))?;
+        let effect_system = AuraEffectSystem::simulation_for_authority(
+            &agent_config,
+            config.seed,
+            config.authority_id,
+        )
+        .map_err(|e| SimulationEnvironmentError::CreationFailed(e.to_string()))?;
 
         Ok(Arc::new(effect_system))
     }
@@ -134,23 +122,10 @@ impl SimulationEnvironmentFactory for EffectSystemFactory {
     ) -> Result<Arc<Self::EffectSystem>, SimulationEnvironmentError> {
         let agent_config = self.to_agent_config(&config);
 
-        // Determine authority ID (use provided or derive from device ID)
-        let authority_id = match config.authority_id {
-            Some(authority_id) => authority_id,
-            None => {
-                let device_bytes = config.device_id.to_bytes().map_err(|e| {
-                    SimulationEnvironmentError::CreationFailed(format!(
-                        "DeviceId::to_bytes failed: {e}"
-                    ))
-                })?;
-                AuthorityId::new_from_entropy(hash(&device_bytes))
-            }
-        };
-
         let effect_system = AuraEffectSystem::simulation_with_shared_inbox_for_authority(
             &agent_config,
             config.seed,
-            authority_id,
+            config.authority_id,
             shared_inbox,
         )
         .map_err(|e| SimulationEnvironmentError::CreationFailed(e.to_string()))?;
@@ -163,14 +138,15 @@ impl SimulationEnvironmentFactory for EffectSystemFactory {
 mod tests {
     use super::*;
     use aura_core::effects::RuntimeEffectsBundle;
-    use aura_core::DeviceId;
+    use aura_core::{AuthorityId, DeviceId};
     use parking_lot::RwLock;
 
     #[tokio::test]
     async fn test_factory_creates_effect_system() {
         let factory = EffectSystemFactory::new();
         let device_id = DeviceId::new_from_entropy([1u8; 32]);
-        let config = SimulationEnvironmentConfig::new(42, device_id);
+        let authority_id = AuthorityId::new_from_entropy([11u8; 32]);
+        let config = SimulationEnvironmentConfig::new(42, device_id, authority_id);
 
         let result = factory.create_simulation_environment(config).await;
         assert!(result.is_ok());
@@ -186,7 +162,8 @@ mod tests {
     async fn test_factory_with_shared_transport() {
         let factory = EffectSystemFactory::new();
         let device_id = DeviceId::new_from_entropy([2u8; 32]);
-        let config = SimulationEnvironmentConfig::new(42, device_id);
+        let authority_id = AuthorityId::new_from_entropy([12u8; 32]);
+        let config = SimulationEnvironmentConfig::new(42, device_id, authority_id);
         let shared_inbox = Arc::new(RwLock::new(Vec::new()));
 
         let result = factory
@@ -200,7 +177,7 @@ mod tests {
         let factory = EffectSystemFactory::new();
         let device_id = DeviceId::new_from_entropy([3u8; 32]);
         let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
-        let config = SimulationEnvironmentConfig::new(42, device_id).with_authority(authority_id);
+        let config = SimulationEnvironmentConfig::new(42, device_id, authority_id);
 
         let result = factory.create_simulation_environment(config).await;
         assert!(result.is_ok());

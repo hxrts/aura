@@ -380,6 +380,7 @@ impl SyncServiceManager {
         E: aura_core::effects::JournalEffects
             + aura_core::effects::NetworkEffects
             + aura_core::effects::PhysicalTimeEffects
+            + aura_guards::GuardContextProvider
             + Send
             + Sync,
     {
@@ -615,8 +616,8 @@ impl SyncServiceManager {
 
 impl SyncServiceManager {
     fn epoch_role(authority_id: AuthorityId, role_index: u16) -> ChoreographicRole {
-        ChoreographicRole::new(
-            DeviceId::from_uuid(Uuid::from_bytes(authority_id.to_bytes())),
+        ChoreographicRole::for_authority(
+            authority_id,
             RoleIndex::new(role_index.into()).expect("role index"),
         )
     }

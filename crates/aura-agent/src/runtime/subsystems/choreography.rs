@@ -119,6 +119,7 @@ impl Default for ChoreographySessionState {
             roles: Vec::new(),
             current_role: ChoreographicRole::new(
                 DeviceId::from_uuid(Uuid::from_bytes([0x5A; 16])),
+                AuthorityId::from_uuid(Uuid::from_bytes([0x5B; 16])),
                 RoleIndex::new(0).expect("role index"),
             ),
             timeout_ms: None,
@@ -370,7 +371,11 @@ mod tests {
     #[test]
     fn session_notifier_tracks_session_lifecycle() {
         let authority_id = DeviceId::from_uuid(Uuid::from_bytes([4; 16]));
-        let role = ChoreographicRole::new(authority_id, RoleIndex::new(0).expect("role index"));
+        let role = ChoreographicRole::new(
+            authority_id,
+            AuthorityId::new_from_entropy([0u8; 32]),
+            RoleIndex::new(0).expect("role index"),
+        );
         let session_id = RuntimeChoreographySessionId::from_uuid(Uuid::from_u128(44));
         let context_id = ContextId::new_from_entropy([7; 32]);
         let mut state = ChoreographyState::new();
@@ -393,7 +398,11 @@ mod tests {
     #[test]
     fn cancel_session_releases_bindings_and_inbox_state() {
         let authority_id = DeviceId::from_uuid(Uuid::from_bytes([5; 16]));
-        let role = ChoreographicRole::new(authority_id, RoleIndex::new(0).expect("role index"));
+        let role = ChoreographicRole::new(
+            authority_id,
+            AuthorityId::new_from_entropy([0u8; 32]),
+            RoleIndex::new(0).expect("role index"),
+        );
         let session_id = RuntimeChoreographySessionId::from_uuid(Uuid::from_u128(45));
         let context_id = ContextId::new_from_entropy([8; 32]);
         let mut state = ChoreographyState::new();

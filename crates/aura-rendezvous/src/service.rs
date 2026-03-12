@@ -378,10 +378,8 @@ impl RendezvousService {
             return Ok(outcome);
         }
 
-        if peer_descriptor.context_id != context_id || peer_descriptor.authority_id != peer {
-            return Err(AuraError::invalid(
-                "Peer descriptor does not match context or peer",
-            ));
+        if peer_descriptor.authority_id != peer {
+            return Err(AuraError::invalid("Peer descriptor does not match peer"));
         }
         if !peer_descriptor.is_valid(now_ms) {
             return Err(AuraError::invalid(

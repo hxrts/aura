@@ -52,7 +52,7 @@ async fn create_simulation_agent(
     );
 
     let config = AgentConfig {
-        device_id: DeviceId::from_uuid(authority_id.uuid()),
+        device_id: DeviceId::for_authority(authority_id),
         ..AgentConfig::default()
     };
 

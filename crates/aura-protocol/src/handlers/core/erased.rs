@@ -10,7 +10,7 @@ use aura_composition::registry::Handler;
 use aura_core::context::ContextSnapshot;
 use aura_core::effects::ExecutionMode;
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::identifiers::ContextId;
 use aura_mpst::LocalSessionType;
 
 /// Primary interface for all Aura handlers
@@ -72,9 +72,8 @@ impl AuraHandler for CompositeHandlerAdapter {
         ctx: &AuraContext,
     ) -> Result<Vec<u8>, AuraHandlerError> {
         // Convert AuraContext to HandlerContext
-        let authority_id = AuthorityId::from_uuid(ctx.device_id.into());
-        let context_id = ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
-        let snapshot = ContextSnapshot::new(authority_id, context_id, ctx.execution_mode);
+        let context_id = ContextId::new_from_entropy(hash(&ctx.authority_id.to_bytes()));
+        let snapshot = ContextSnapshot::new(ctx.authority_id, context_id, ctx.execution_mode);
         let handler_ctx = aura_composition::HandlerContext::from_snapshot(snapshot);
 
         // Execute through composite handler
@@ -90,9 +89,8 @@ impl AuraHandler for CompositeHandlerAdapter {
         ctx: &AuraContext,
     ) -> Result<(), AuraHandlerError> {
         // Convert AuraContext to HandlerContext
-        let authority_id = AuthorityId::from_uuid(ctx.device_id.into());
-        let context_id = ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
-        let snapshot = ContextSnapshot::new(authority_id, context_id, ctx.execution_mode);
+        let context_id = ContextId::new_from_entropy(hash(&ctx.authority_id.to_bytes()));
+        let snapshot = ContextSnapshot::new(ctx.authority_id, context_id, ctx.execution_mode);
         let handler_ctx = aura_composition::HandlerContext::from_snapshot(snapshot);
 
         // Execute through composite handler
@@ -195,13 +193,14 @@ impl HandlerUtils {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use aura_core::identifiers::DeviceId;
+    use aura_core::identifiers::{AuthorityId, DeviceId};
 
     #[tokio::test]
     async fn test_handler_basic_functionality() {
         let device_id = DeviceId::new_from_entropy([3u8; 32]);
+        let authority_id = AuthorityId::new_from_entropy([4u8; 32]);
         let handler = AuraHandlerFactory::for_testing(device_id);
-        let ctx = AuraContext::for_testing(device_id);
+        let ctx = AuraContext::for_testing(authority_id, device_id);
 
         // Test supports_effect - basic test should work regardless of what effects are registered
         // Note: CompositeHandler::for_testing() creates an empty handler, so we just test the interface
@@ -224,8 +223,9 @@ mod tests {
     #[tokio::test]
     async fn test_typed_effect_execution() {
         let device_id = DeviceId::new_from_entropy([3u8; 32]);
+        let authority_id = AuthorityId::new_from_entropy([4u8; 32]);
         let mut handler = AuraHandlerFactory::for_testing(device_id);
-        let ctx = AuraContext::for_testing(device_id);
+        let ctx = AuraContext::for_testing(authority_id, device_id);
 
         // Test typed effect execution - only test if the effect is actually supported
         if handler.supports_effect(EffectType::Console) {
@@ -287,7 +287,8 @@ mod tests {
         }
 
         let device_id = DeviceId::new_from_entropy([3u8; 32]);
-        let ctx = AuraContext::for_testing(device_id);
+        let authority_id = AuthorityId::new_from_entropy([4u8; 32]);
+        let ctx = AuraContext::for_testing(authority_id, device_id);
         let mut handler = EchoHandler;
 
         let input = EchoParams { value: 42 };

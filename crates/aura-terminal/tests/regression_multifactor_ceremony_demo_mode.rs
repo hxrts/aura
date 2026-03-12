@@ -309,12 +309,8 @@ async fn control_multifactor_ceremony_works_with_shared_transport() {
     let mobile_device_id_str = "demo:bob-mobile";
     let mobile_device_id = ids::device_id(mobile_device_id_str);
 
-    // CRITICAL: The mobile device's authority MUST match what participant_identity_to_authority_id derives
-    // For Device participants, this is: AuthorityId::new_from_entropy(hash(device_id.to_bytes()))
-    let mobile_authority = {
-        let bytes = mobile_device_id.to_bytes().expect("valid device id");
-        AuthorityId::new_from_entropy(hash(&bytes))
-    };
+    // CRITICAL: The mobile device's authority MUST match what participant_identity_to_authority_id derives.
+    let mobile_authority = AuthorityId::for_device(mobile_device_id);
 
     let mobile_context_entropy = hash::hash(format!("context:{}", mobile_device_id_str).as_bytes());
     let mobile_context = ContextId::new_from_entropy(mobile_context_entropy);

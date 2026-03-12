@@ -1410,6 +1410,8 @@ impl SharedSemanticBackend for LocalPtyBackend {
 
         self.activate_control(ControlId::NavChat)?;
         wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
+        let previous_operation =
+            observe_operation(&self.ui_snapshot()?, &OperationId::send_message());
         let snapshot = self.ui_snapshot()?;
         if let Some(channels) = snapshot
             .lists
@@ -1437,11 +1439,26 @@ impl SharedSemanticBackend for LocalPtyBackend {
         }
 
         send_once(self, message)?;
+        let handle = wait_for_operation_submission(
+            self,
+            OperationId::send_message(),
+            previous_operation,
+            Duration::from_secs(5),
+        )?;
         let first_deadline = Instant::now() + Duration::from_millis(1500);
         loop {
             let snapshot = self.ui_snapshot()?;
-            if message_visible(&snapshot, message) {
-                return Ok(SubmittedAction::without_handle(()));
+            match snapshot.operation_state_for_instance(&handle.id, &handle.instance_id) {
+                Some(OperationState::Failed) => {
+                    anyhow::bail!("submit_send_chat_message: runtime send failed");
+                }
+                Some(OperationState::Succeeded) if message_visible(&snapshot, message) => {
+                    return Ok(SubmittedAction::with_ui_operation((), handle));
+                }
+                Some(OperationState::Submitting) | Some(OperationState::Succeeded) => {
+                    return Ok(SubmittedAction::with_ui_operation((), handle));
+                }
+                _ => {}
             }
             if Instant::now() >= first_deadline {
                 break;
@@ -1453,12 +1470,21 @@ impl SharedSemanticBackend for LocalPtyBackend {
         let retry_deadline = Instant::now() + Duration::from_secs(3);
         loop {
             let snapshot = self.ui_snapshot()?;
-            if message_visible(&snapshot, message) {
-                return Ok(SubmittedAction::without_handle(()));
+            match snapshot.operation_state_for_instance(&handle.id, &handle.instance_id) {
+                Some(OperationState::Failed) => {
+                    anyhow::bail!("submit_send_chat_message: runtime send failed");
+                }
+                Some(OperationState::Succeeded) if message_visible(&snapshot, message) => {
+                    return Ok(SubmittedAction::with_ui_operation((), handle));
+                }
+                Some(OperationState::Submitting) | Some(OperationState::Succeeded) => {
+                    return Ok(SubmittedAction::with_ui_operation((), handle));
+                }
+                _ => {}
             }
             if Instant::now() >= retry_deadline {
                 anyhow::bail!(
-                    "submit_send_chat_message: message did not appear locally after bounded retry"
+                    "submit_send_chat_message: send_message never reached a live submitted state"
                 );
             }
             thread::sleep(Duration::from_millis(80));

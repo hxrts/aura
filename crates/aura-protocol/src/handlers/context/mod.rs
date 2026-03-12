@@ -25,7 +25,7 @@ mod tests {
     use super::*;
     use crate::effects::choreographic::{ChoreographicRole, RoleIndex};
     use crate::handlers::ExecutionMode;
-    use aura_core::identifiers::DeviceId;
+    use aura_core::identifiers::{AuthorityId, DeviceId};
     use aura_core::SessionId;
     use std::time::Duration;
 
@@ -37,6 +37,7 @@ mod tests {
         let role_id = uuid::Uuid::from_bytes(uuid_bytes);
         let role = ChoreographicRole::new(
             DeviceId::from_uuid(role_id),
+            AuthorityId::new_from_entropy([0u8; 32]),
             RoleIndex::new(0).expect("role index"),
         );
         let participants = vec![role];
@@ -76,7 +77,7 @@ mod tests {
     #[test]
     fn test_immutable_agent_context() {
         let device_id = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
-        let ctx = AgentContext::new(device_id);
+        let ctx = AgentContext::new();
 
         // Test immutable configuration
         let ctx2 = ctx.with_config("key", "value");
@@ -124,9 +125,11 @@ mod tests {
 
     #[test]
     fn test_immutable_aura_context() {
+        let authority_id = AuthorityId::from(uuid::Uuid::from_bytes([2u8; 16]));
         let device_id = DeviceId::from(uuid::Uuid::from_bytes([1u8; 16]));
 
-        let ctx = AuraContext::for_testing(device_id);
+        let ctx = AuraContext::for_testing(authority_id, device_id);
+        assert_eq!(ctx.authority_id, authority_id);
         assert_eq!(ctx.execution_mode, ExecutionMode::Testing);
         assert!(ctx.is_deterministic());
 

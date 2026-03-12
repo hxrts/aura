@@ -6,6 +6,11 @@
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash::hash;
 use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
+#[cfg(test)]
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[cfg(test)]
+static NEXT_TEST_DEVICE_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Derive the default context ID for an authority.
 pub fn default_context_id_for_authority(authority_id: AuthorityId) -> ContextId {
@@ -56,10 +61,12 @@ pub struct ContextMetadata {
 }
 
 impl AuthorityContext {
-    /// Create a new authority context
+    /// Create a new authority context for tests with a unique synthetic device id.
+    #[cfg(test)]
     pub fn new(authority_id: AuthorityId) -> Self {
-        // Legacy default: derive device_id from authority (single-device mapping).
-        let device_id = DeviceId(authority_id.0);
+        let device_id = DeviceId::from_uuid(uuid::Uuid::from_u128(
+            NEXT_TEST_DEVICE_ID.fetch_add(1, Ordering::Relaxed) as u128,
+        ));
         Self::new_with_device(authority_id, device_id)
     }
 

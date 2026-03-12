@@ -494,7 +494,8 @@ where
                 .get(&role)
                 .ok_or_else(|| AuraChoreographyError::RoleNotFound {
                     role: ChoreographicRole::new(
-                        aura_core::DeviceId::from_uuid(self.authority_id.0),
+                        aura_core::DeviceId::new_from_entropy([0u8; 32]),
+                        self.authority_id,
                         RoleIndex::new(0).expect("role index"),
                     ),
                 })?
@@ -506,10 +507,7 @@ where
                 message: format!("invalid role index: {role_index}"),
             })?;
 
-        Ok(ChoreographicRole::new(
-            aura_core::DeviceId::from_uuid(authority_id.0),
-            role_index,
-        ))
+        Ok(ChoreographicRole::for_authority(authority_id, role_index))
     }
 }
 

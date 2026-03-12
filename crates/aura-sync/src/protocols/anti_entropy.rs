@@ -56,7 +56,7 @@ use aura_core::scope::ResourceScope;
 use aura_core::types::Epoch;
 use aura_core::{hash, AttestedOp, AuraError, AuraResult, DeviceId, FlowBudget, FlowCost, Journal};
 use aura_guards::types::CapabilityId;
-use aura_guards::{BiscuitGuardEvaluator, GuardError};
+use aura_guards::{BiscuitGuardEvaluator, GuardContextProvider, GuardError};
 
 // =============================================================================
 // Types
@@ -431,20 +431,16 @@ impl AntiEntropyProtocol {
     }
 
     /// Check if the current token authorizes sync operations with a peer
-    fn check_sync_authorization<E>(&self, _effects: &E, peer: DeviceId) -> SyncResult<()>
+    fn check_sync_authorization<E>(&self, effects: &E, peer: DeviceId) -> SyncResult<()>
     where
-        E: JournalEffects + NetworkEffects,
+        E: JournalEffects + NetworkEffects + GuardContextProvider,
     {
         if let (Some(ref token_manager), Some(ref evaluator)) =
             (&self.token_manager, &self.guard_evaluator)
         {
             let token = token_manager.current_token();
-            // Get actual authority ID from peer's device registration
-            // In Aura's architecture, each device belongs to an authority
-            // We can derive the authority ID from the device ID using the standard mapping
-            let authority_id = aura_core::AuthorityId::from_uuid(peer.0);
             let resource = ResourceScope::Authority {
-                authority_id,
+                authority_id: effects.authority_id(),
                 operation: aura_core::scope::AuthorityOp::UpdateTree, // Sync requires authority access
             };
 
@@ -501,7 +497,7 @@ impl AntiEntropyProtocol {
     /// - Uses `RetryPolicy` from infrastructure for resilience
     pub async fn execute<E>(&self, effects: &E, peer: DeviceId) -> SyncResult<AntiEntropyResult>
     where
-        E: JournalEffects + NetworkEffects + Send + Sync + PhysicalTimeEffects,
+        E: JournalEffects + NetworkEffects + Send + Sync + PhysicalTimeEffects + GuardContextProvider,
     {
         // Check authorization before starting sync
         self.check_sync_authorization(effects, peer)?;

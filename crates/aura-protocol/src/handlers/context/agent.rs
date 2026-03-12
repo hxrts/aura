@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use aura_core::identifiers::DeviceId;
 use aura_core::SessionId;
 
 /// Immutable context for agent operations
@@ -68,7 +67,7 @@ pub struct SessionMetadata {
 
 impl AgentContext {
     /// Create a new agent context
-    pub fn new(_device_id: DeviceId) -> Self {
+    pub fn new() -> Self {
         Self {
             platform: PlatformInfo::default(),
             auth_state: AuthenticationState::default(),

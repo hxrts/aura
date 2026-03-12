@@ -566,6 +566,30 @@ impl RendezvousManager {
             .cloned()
     }
 
+    /// Get any cached descriptor for a peer authority regardless of context.
+    ///
+    /// Transport address resolution is authority-scoped even when higher-level
+    /// protocols are operating inside a more specific relational context. When a
+    /// context-specific descriptor has not been cached yet, this provides a
+    /// bounded authority-level fallback instead of treating the peer as absent.
+    pub async fn get_any_descriptor_for_authority(
+        &self,
+        peer: AuthorityId,
+    ) -> Option<RendezvousDescriptor> {
+        let state = self.state.read().await;
+        state
+            .descriptor_cache
+            .values()
+            .find(|descriptor| descriptor.authority_id == peer)
+            .cloned()
+            .or_else(|| {
+                state
+                    .lan_discovered_peers
+                    .get(&peer)
+                    .map(|discovered| discovered.descriptor.clone())
+            })
+    }
+
     /// Check if our descriptor needs refresh in a context
     pub async fn needs_refresh(&self, context_id: ContextId, now_ms: u64) -> bool {
         self.state
@@ -629,8 +653,14 @@ impl RendezvousManager {
             .await
             .descriptor_cache
             .get(&(context_id, peer))
-            .cloned()
-            .ok_or("Peer descriptor not found in cache")?;
+            .cloned();
+        let descriptor = match descriptor {
+            Some(value) => value,
+            None => self
+                .get_any_descriptor_for_authority(peer)
+                .await
+                .ok_or("Peer descriptor not found in cache")?,
+        };
         let establish_descriptor = Self::relay_first_initial_descriptor(&descriptor);
 
         // Retrieve identity keys
@@ -961,6 +991,36 @@ impl RendezvousManager {
             })
             .chain(state.lan_discovered_peers.values().filter_map(|peer| {
                 (peer.authority_id != self.authority_id)
+                    .then_some(peer.descriptor.device_id)
+                    .flatten()
+            }))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        devices.sort();
+        devices
+    }
+
+    /// List reachable device ids for a specific peer authority.
+    ///
+    /// Social semantics remain authority-based, but transport routing must target
+    /// explicit devices. This returns the currently known reachable device set for
+    /// that authority from descriptor and LAN-discovery state.
+    pub async fn list_reachable_peer_devices_for_authority(
+        &self,
+        authority_id: AuthorityId,
+    ) -> Vec<DeviceId> {
+        let state = self.state.read().await;
+        let mut devices = state
+            .descriptor_cache
+            .values()
+            .filter_map(|descriptor| {
+                (descriptor.authority_id == authority_id)
+                    .then_some(descriptor.device_id)
+                    .flatten()
+            })
+            .chain(state.lan_discovered_peers.values().filter_map(|peer| {
+                (peer.authority_id == authority_id)
                     .then_some(peer.descriptor.device_id)
                     .flatten()
             }))
@@ -1447,6 +1507,7 @@ mod tests {
 
         let descriptor = RendezvousDescriptor {
             authority_id: test_peer(),
+            device_id: None,
             context_id: test_context(),
             transport_hints: vec![TransportHint::quic_direct("127.0.0.1:8443").unwrap()],
             handshake_psk_commitment: [0u8; 32],
@@ -1525,6 +1586,7 @@ mod tests {
 
         let descriptor = RendezvousDescriptor {
             authority_id: test_peer(),
+            device_id: None,
             context_id: test_context(),
             transport_hints: vec![
                 TransportHint::websocket_relay(test_authority()),

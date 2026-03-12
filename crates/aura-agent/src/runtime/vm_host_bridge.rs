@@ -613,7 +613,7 @@ pub fn collect_vm_session_artifacts(
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
-    use aura_core::{AuthorityId, DeviceId};
+    use aura_core::AuthorityId;
     use aura_mpst::telltale_types::Label;
     use aura_mpst::CompositionLinkSpec;
     use aura_protocol::effects::{ChoreographicEffects, RoleIndex};
@@ -623,8 +623,8 @@ mod tests {
     use uuid::Uuid;
 
     fn authority_device_role(authority_id: AuthorityId, role_index: u16) -> ChoreographicRole {
-        ChoreographicRole::new(
-            DeviceId::from_uuid(Uuid::from_bytes(authority_id.to_bytes())),
+        ChoreographicRole::for_authority(
+            authority_id,
             RoleIndex::new(role_index.into()).expect("role index"),
         )
     }

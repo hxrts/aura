@@ -260,6 +260,16 @@ bench-choreo-parity:
 check:
     cargo check --workspace -q
 
+# Detect legacy authority/device UUID coercions
+check-device-id-legacy:
+    bash scripts/check/device-id-legacy.sh
+
+audit-device-id-separation:
+    bash scripts/check/device-id-legacy.sh audit-live
+
+audit-runtime-device-id-separation:
+    bash scripts/check/device-id-legacy.sh audit-runtime
+
 # Run the exact same check that Zed editor runs (rust-analyzer checkOnSave)
 check-zed:
     cargo check --workspace --all-targets

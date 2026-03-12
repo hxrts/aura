@@ -485,25 +485,18 @@ pub struct SimulationEnvironmentConfig {
     pub seed: u64,
     /// Device ID for this simulated agent
     pub device_id: DeviceId,
-    /// Optional authority ID override (derived from device_id if not provided)
-    pub authority_id: Option<AuthorityId>,
+    /// Explicit authority ID for this simulated agent
+    pub authority_id: AuthorityId,
 }
 
 impl SimulationEnvironmentConfig {
-    /// Create a new configuration with the given seed and device ID
-    pub fn new(seed: u64, device_id: DeviceId) -> Self {
+    /// Create a new configuration with the given seed, device ID, and authority ID.
+    pub fn new(seed: u64, device_id: DeviceId, authority_id: AuthorityId) -> Self {
         Self {
             seed,
             device_id,
-            authority_id: None,
+            authority_id,
         }
-    }
-
-    /// Set an explicit authority ID
-    #[must_use]
-    pub fn with_authority(mut self, authority_id: AuthorityId) -> Self {
-        self.authority_id = Some(authority_id);
-        self
     }
 }
 

@@ -560,6 +560,19 @@ pub trait RuntimeBridge: Send + Sync {
     /// This is useful for requesting state updates from a known good peer.
     async fn sync_with_peer(&self, peer_id: &str) -> Result<(), IntentError>;
 
+    /// Ensure a transport/rendezvous channel exists for a specific authority
+    /// within the provided context before parity-critical flows rely on remote
+    /// delivery.
+    async fn ensure_peer_channel(
+        &self,
+        _context: ContextId,
+        _peer: AuthorityId,
+    ) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Peer channel establishment not available in offline mode",
+        ))
+    }
+
     // =========================================================================
     // Peer Availability
     // =========================================================================
@@ -1181,6 +1194,16 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn sync_with_peer(&self, _peer_id: &str) -> Result<(), IntentError> {
         Err(IntentError::no_agent(
             "Peer-targeted sync not available in offline mode",
+        ))
+    }
+
+    async fn ensure_peer_channel(
+        &self,
+        _context: ContextId,
+        _peer: AuthorityId,
+    ) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Peer channel establishment not available in offline mode",
         ))
     }
 

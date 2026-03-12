@@ -5,13 +5,17 @@
 #![allow(clippy::expect_used)]
 
 use aura_core::{
-    AccountId, DataId, DeviceId, EventId, EventNonce, GuardianId, IndividualId, MemberId,
-    OperationId, SessionId,
+    AccountId, AuthorityId, DataId, DeviceId, EventId, EventNonce, GuardianId, IndividualId,
+    MemberId, OperationId, SessionId,
 };
 use uuid::Uuid;
 
 fn account(seed: u8) -> AccountId {
     AccountId::new_from_entropy([seed; 32])
+}
+
+fn authority(seed: u8) -> AuthorityId {
+    AuthorityId::new_from_entropy([seed; 32])
 }
 
 fn device(seed: u8) -> DeviceId {
@@ -335,4 +339,20 @@ fn test_identifier_determinism() {
     let member1 = MemberId::new(String::from("same_id"));
     let member2 = MemberId::new(String::from("same_id"));
     assert_eq!(member1, member2, "Same string should produce same MemberId");
+}
+
+#[test]
+fn test_authority_device_derivations_are_domain_separated_and_deterministic() {
+    let authority = authority(31);
+    let device = device(32);
+
+    let derived_device_1 = DeviceId::for_authority(authority);
+    let derived_device_2 = DeviceId::for_authority(authority);
+    assert_eq!(derived_device_1, derived_device_2);
+    assert_ne!(derived_device_1.uuid(), authority.uuid());
+
+    let derived_authority_1 = AuthorityId::for_device(device);
+    let derived_authority_2 = AuthorityId::for_device(device);
+    assert_eq!(derived_authority_1, derived_authority_2);
+    assert_ne!(derived_authority_1.uuid(), device.uuid());
 }

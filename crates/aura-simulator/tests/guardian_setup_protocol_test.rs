@@ -41,10 +41,10 @@ async fn guardian_setup_adapter_setup() {
     let guardian2_device = DeviceId::from_uuid(Uuid::from_bytes([13; 16]));
     let guardian3_device = DeviceId::from_uuid(Uuid::from_bytes([14; 16]));
 
-    let initiator_auth = AuthorityId::from_uuid(initiator_device.uuid());
-    let guardian1_auth = AuthorityId::from_uuid(guardian1_device.uuid());
-    let guardian2_auth = AuthorityId::from_uuid(guardian2_device.uuid());
-    let guardian3_auth = AuthorityId::from_uuid(guardian3_device.uuid());
+    let initiator_auth = AuthorityId::for_device(initiator_device);
+    let guardian1_auth = AuthorityId::for_device(guardian1_device);
+    let guardian2_auth = AuthorityId::for_device(guardian2_device);
+    let guardian3_auth = AuthorityId::for_device(guardian3_device);
 
     let mut role_map = HashMap::new();
     role_map.insert(GuardianSetupRole::SetupInitiator, initiator_auth);

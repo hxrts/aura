@@ -3,7 +3,7 @@
 //! Pure trait definitions for choreographic protocol operations.
 
 use async_trait::async_trait;
-use aura_core::DeviceId;
+use aura_core::{AuthorityId, DeviceId};
 use std::num::NonZeroU32;
 use uuid::Uuid;
 
@@ -140,22 +140,44 @@ impl RoleIndex {
 pub struct ChoreographicRole {
     /// Device ID for this role
     pub device_id: DeviceId,
+    /// Authority identity used for transport routing and guard evaluation.
+    pub authority_id: AuthorityId,
     /// Role index in the protocol (0-based)
     pub role_index: RoleIndex,
 }
 
 impl ChoreographicRole {
     /// Create a new choreographic role
-    pub fn new(device_id: DeviceId, role_index: RoleIndex) -> Self {
+    pub fn new(device_id: DeviceId, authority_id: AuthorityId, role_index: RoleIndex) -> Self {
         Self {
             device_id,
+            authority_id,
             role_index,
         }
     }
 
+    /// Create a role with explicit device and authority identities.
+    pub fn with_authority(
+        device_id: DeviceId,
+        authority_id: AuthorityId,
+        role_index: RoleIndex,
+    ) -> Self {
+        Self::new(device_id, authority_id, role_index)
+    }
+
+    /// Create an authority-scoped role without reusing the authority UUID as a device id.
+    pub fn for_authority(authority_id: AuthorityId, role_index: RoleIndex) -> Self {
+        Self::new(DeviceId::new_from_entropy([0u8; 32]), authority_id, role_index)
+    }
+
     /// Create a new role from a 0-based index.
-    pub fn from_index(device_id: DeviceId, role_index: u32) -> Option<Self> {
-        RoleIndex::new(role_index).map(|idx| Self::new(device_id, idx))
+    pub fn from_index(device_id: DeviceId, authority_id: AuthorityId, role_index: u32) -> Option<Self> {
+        RoleIndex::new(role_index).map(|idx| Self::new(device_id, authority_id, idx))
+    }
+
+    /// Create an authority-scoped role from a 0-based index.
+    pub fn for_authority_index(authority_id: AuthorityId, role_index: u32) -> Option<Self> {
+        RoleIndex::new(role_index).map(|idx| Self::for_authority(authority_id, idx))
     }
 }
 

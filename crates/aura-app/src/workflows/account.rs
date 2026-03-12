@@ -330,54 +330,6 @@ pub async fn initialize_runtime_account(
 // ID Derivation Functions
 // =============================================================================
 
-/// Derive an authority ID deterministically from a device ID string
-///
-/// This ensures the same device_id always creates the same authority.
-/// The derivation uses a hash of `"authority:{device_id}"`.
-///
-/// # Arguments
-/// * `device_id` - The device identifier string
-///
-/// # Returns
-/// * A deterministically derived `AuthorityId`
-///
-/// # Example
-/// ```
-/// use aura_app::ui::workflows::account::derive_authority_id;
-///
-/// let id1 = derive_authority_id("my-device");
-/// let id2 = derive_authority_id("my-device");
-/// assert_eq!(id1, id2); // Same input -> same output
-/// ```
-pub fn derive_authority_id(device_id: &str) -> AuthorityId {
-    let entropy = aura_core::hash::hash(format!("authority:{device_id}").as_bytes());
-    AuthorityId::new_from_entropy(entropy)
-}
-
-/// Derive a context ID deterministically from a device ID string
-///
-/// This ensures the same device_id always creates the same context.
-/// The derivation uses a hash of `"context:{device_id}"`.
-///
-/// # Arguments
-/// * `device_id` - The device identifier string
-///
-/// # Returns
-/// * A deterministically derived `ContextId`
-///
-/// # Example
-/// ```
-/// use aura_app::ui::workflows::account::derive_context_id;
-///
-/// let id1 = derive_context_id("my-device");
-/// let id2 = derive_context_id("my-device");
-/// assert_eq!(id1, id2); // Same input -> same output
-/// ```
-pub fn derive_context_id(device_id: &str) -> ContextId {
-    let entropy = aura_core::hash::hash(format!("context:{device_id}").as_bytes());
-    ContextId::new_from_entropy(entropy)
-}
-
 /// Derive a context ID for a recovered authority
 ///
 /// Used during guardian-based recovery when the original context_id
@@ -483,37 +435,8 @@ mod tests {
     }
 
     #[test]
-    fn test_derive_authority_id_deterministic() {
-        let id1 = derive_authority_id("test-device");
-        let id2 = derive_authority_id("test-device");
-        assert_eq!(id1, id2);
-    }
-
-    #[test]
-    fn test_derive_authority_id_different_inputs() {
-        let id1 = derive_authority_id("device-1");
-        let id2 = derive_authority_id("device-2");
-        assert_ne!(id1, id2);
-    }
-
-    #[test]
-    fn test_derive_context_id_deterministic() {
-        let id1 = derive_context_id("test-device");
-        let id2 = derive_context_id("test-device");
-        assert_eq!(id1, id2);
-    }
-
-    #[test]
-    fn test_derive_context_id_different_from_authority() {
-        let authority = derive_authority_id("test-device");
-        let context = derive_context_id("test-device");
-        // They should be different IDs (different prefixes in derivation)
-        assert_ne!(authority.to_bytes(), context.to_bytes());
-    }
-
-    #[test]
     fn test_derive_recovered_context_id() {
-        let authority = derive_authority_id("test-device");
+        let authority = AuthorityId::new_from_entropy([7u8; 32]);
         let context1 = derive_recovered_context_id(&authority);
         let context2 = derive_recovered_context_id(&authority);
         assert_eq!(context1, context2);

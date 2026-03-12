@@ -23,7 +23,7 @@ use aura_app::ui::types::{format_timestamp, ChatState};
 use crate::tui::callbacks::{
     CreateChannelCallback, RetryMessageCallback, SendCallback, SetTopicCallback,
 };
-use crate::tui::chat_scope::{active_home_scope_id, scoped_channels};
+use crate::tui::chat_scope::{active_home_scope_id, effective_home_scope_id, scoped_channels};
 use crate::tui::components::{ListPanel, MessageInput, MessagePanel};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
@@ -221,10 +221,15 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 // Selection is managed by TUI state, not app state
                 if let Some(ref tx) = update_tx {
                     let scope = active_scope.read().ok().and_then(|g| g.clone());
-                    let scoped = scoped_channels(&chat_state, scope.as_deref());
                     let selected_channel_id = shared_selected
                         .as_ref()
                         .and_then(|selected| selected.read().ok().and_then(|guard| guard.clone()));
+                    let effective_scope = effective_home_scope_id(
+                        &chat_state,
+                        scope.as_deref(),
+                        selected_channel_id.as_deref(),
+                    );
+                    let scoped = scoped_channels(&chat_state, effective_scope.as_deref());
                     let selected_channel_message_count = selected_channel_id
                         .as_ref()
                         .and_then(|channel_id| {
@@ -303,13 +308,22 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let chat_state = reactive_chat_state.read().clone();
     let contacts = reactive_contacts.read().clone();
     let active_scope = reactive_active_scope.read().clone();
+    let committed_selected_channel_id = props
+        .selected_channel
+        .as_ref()
+        .and_then(|selected| selected.read().ok().and_then(|guard| guard.clone()));
+    let effective_scope = effective_home_scope_id(
+        &chat_state,
+        active_scope.as_deref(),
+        committed_selected_channel_id.as_deref(),
+    );
     let channels: Vec<Channel> = props
         .shared_channels
         .as_ref()
         .and_then(|channels_ref| channels_ref.read().ok().map(|guard| guard.clone()))
         .filter(|channels| !channels.is_empty())
         .unwrap_or_else(|| {
-            scoped_channels(&chat_state, active_scope.as_deref())
+            scoped_channels(&chat_state, effective_scope.as_deref())
                 .into_iter()
                 .map(Channel::from)
                 .collect()

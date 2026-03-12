@@ -40,7 +40,6 @@ use aura_core::Prestate;
 use aura_journal::fact::{
     ChannelBootstrap, ChannelBumpReason, FactOptions, ProposedChannelEpochBump, RelationalFact,
 };
-#[cfg(target_arch = "wasm32")]
 use aura_journal::fact::{Fact as TypedFact, FactContent};
 use aura_journal::DomainFact;
 use aura_journal::ProtocolRelationalFact;
@@ -52,12 +51,16 @@ use aura_social::moderation::{
 };
 #[cfg(target_arch = "wasm32")]
 use futures::channel::oneshot;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", not(target_arch = "wasm32")))]
 use futures::{SinkExt, StreamExt};
 #[cfg(target_arch = "wasm32")]
 use gloo_net::websocket::{futures::WebSocket, Message};
 use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio_tungstenite::connect_async;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio_tungstenite::tungstenite::Message;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local;
 
@@ -79,9 +82,7 @@ use consensus::{map_consensus_error, persist_consensus_dkg_transcript};
 use invitation::convert_invitation_to_bridge_info;
 
 const CHAT_FACT_CONTENT_TYPE: &str = "application/aura-chat-fact";
-#[cfg(target_arch = "wasm32")]
 const FACT_SYNC_REQUEST_CONTENT_TYPE: &str = "application/aura-fact-sync-request";
-#[cfg(target_arch = "wasm32")]
 const FACT_SYNC_RESPONSE_CONTENT_TYPE: &str = "application/aura-fact-sync-response";
 const DEFAULT_HARNESS_SYNC_ROUNDS: usize = 3;
 const DEFAULT_HARNESS_SYNC_BACKOFF_MS: u64 = 75;
@@ -135,7 +136,60 @@ impl AgentRuntimeBridge {
         Self { agent }
     }
 
-    #[cfg(target_arch = "wasm32")]
+    async fn seed_sync_peers_from_rendezvous(&self) {
+        if let (Some(sync), Some(rendezvous)) = (
+            self.agent.runtime().sync(),
+            self.agent.runtime().rendezvous(),
+        ) {
+            for peer_device in rendezvous.list_reachable_peer_devices().await {
+                sync.add_peer(peer_device).await;
+            }
+        }
+    }
+
+    async fn sync_seeded_peers(&self) -> Result<(), IntentError> {
+        let Some(sync) = self.agent.runtime().sync() else {
+            return Ok(());
+        };
+        let peers = sync.peers().await;
+        if peers.is_empty() {
+            return Ok(());
+        }
+        let effects = self.agent.runtime().effects();
+        sync.sync_with_peers(&effects, peers)
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Sync failed: {e}")))
+    }
+
+    async fn refresh_reachability_after_ceremony_processing(&self) -> Result<(), IntentError> {
+        let rounds = if harness_mode_enabled() {
+            harness_sync_rounds()
+        } else {
+            1
+        };
+        let backoff_ms = harness_sync_backoff_ms();
+        let mut last_error = None;
+
+        for round in 0..rounds {
+            if harness_mode_enabled() {
+                let _ = rendezvous::trigger_discovery(self).await;
+            }
+            self.seed_sync_peers_from_rendezvous().await;
+            match self.sync_seeded_peers().await {
+                Ok(()) => return Ok(()),
+                Err(error) => last_error = Some(error),
+            }
+            if round + 1 < rounds && harness_mode_enabled() && backoff_ms > 0 {
+                self.sleep_ms(backoff_ms).await;
+            }
+        }
+
+        match last_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
     async fn pull_remote_relational_facts(&self, peer: AuthorityId) -> Result<usize, IntentError> {
         tracing::info!(peer = %peer, "pull_remote_relational_facts start");
         let Some(rendezvous) = self.agent.runtime().rendezvous() else {
@@ -202,6 +256,7 @@ impl AgentRuntimeBridge {
             IntentError::internal_error(format!("Failed to encode fact sync request: {e}"))
         })?;
 
+        #[cfg(target_arch = "wasm32")]
         let remote_facts: Vec<RelationalFact> = run_local_ws(move || async move {
             let mut socket = WebSocket::open(&url).map_err(|e| {
                 IntentError::network_error(format!("Failed to open fact sync websocket {url}: {e}"))
@@ -244,6 +299,49 @@ impl AgentRuntimeBridge {
             })
         })
         .await?;
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let remote_facts: Vec<RelationalFact> = {
+            let (mut socket, _) = connect_async(&url).await.map_err(|e| {
+                IntentError::network_error(format!("Failed to open fact sync websocket {url}: {e}"))
+            })?;
+            socket
+                .send(Message::Binary(bytes))
+                .await
+                .map_err(|e| IntentError::network_error(format!("Failed to send fact sync request: {e}")))?;
+
+            let response = socket.next().await.ok_or_else(|| {
+                IntentError::network_error("Fact sync websocket closed before response".to_string())
+            })?;
+            let payload = match response
+                .map_err(|e| IntentError::network_error(format!("Fact sync websocket read failed: {e}")))? {
+                Message::Binary(payload) => payload,
+                _ => {
+                    return Err(IntentError::network_error(
+                        "Fact sync websocket returned non-binary payload".to_string(),
+                    ));
+                }
+            };
+
+            let envelope: TransportEnvelope = aura_core::util::serialization::from_slice(&payload)
+                .map_err(|e| {
+                    IntentError::internal_error(format!("Failed to decode fact sync response: {e}"))
+                })?;
+
+            if envelope
+                .metadata
+                .get("content-type")
+                .is_none_or(|value| value != FACT_SYNC_RESPONSE_CONTENT_TYPE)
+            {
+                return Err(IntentError::network_error(
+                    "Fact sync response had unexpected content type".to_string(),
+                ));
+            }
+
+            aura_core::util::serialization::from_slice(&envelope.payload).map_err(|e| {
+                IntentError::internal_error(format!("Failed to decode fact sync payload: {e}"))
+            })?
+        };
 
         tracing::info!(
             peer = %peer,
@@ -390,29 +488,84 @@ impl RuntimeBridge for AgentRuntimeBridge {
             "content-type".to_string(),
             CHAT_FACT_CONTENT_TYPE.to_string(),
         );
+        metadata.insert("target-authority-id".to_string(), peer.to_string());
 
-        let envelope = TransportEnvelope {
-            destination: peer,
-            source: self.agent.authority_id(),
-            context,
-            payload,
-            metadata,
-            receipt: None,
+        let effects = self.agent.runtime().effects();
+        let reachable_devices = if let Some(rendezvous) = self.agent.runtime().rendezvous() {
+            rendezvous
+                .list_reachable_peer_devices_for_authority(peer)
+                .await
+        } else {
+            Vec::new()
         };
 
-        eprintln!(
-            "[send-chat-fact] source={};destination={};context={}",
-            self.agent.authority_id(),
-            peer,
-            context
-        );
+        if reachable_devices.is_empty() {
+            let envelope = TransportEnvelope {
+                destination: peer,
+                source: self.agent.authority_id(),
+                context,
+                payload,
+                metadata,
+                receipt: None,
+            };
 
-        self.agent
-            .runtime()
-            .effects()
-            .send_envelope(envelope)
-            .await
-            .map_err(|e| IntentError::network_error(format!("Failed to send chat fact: {e}")))
+            eprintln!(
+                "[send-chat-fact] source={};destination={};context={};mode=authority_fallback",
+                self.agent.authority_id(),
+                peer,
+                context
+            );
+
+            return effects
+                .send_envelope(envelope)
+                .await
+                .map_err(|e| IntentError::network_error(format!("Failed to send chat fact: {e}")));
+        }
+
+        let mut last_error = None;
+        let mut sent = 0usize;
+        for device_id in reachable_devices {
+            let mut device_metadata = metadata.clone();
+            device_metadata.insert(
+                "aura-destination-device-id".to_string(),
+                device_id.to_string(),
+            );
+            let envelope = TransportEnvelope {
+                destination: peer,
+                source: self.agent.authority_id(),
+                context,
+                payload: payload.clone(),
+                metadata: device_metadata,
+                receipt: None,
+            };
+
+            eprintln!(
+                "[send-chat-fact] source={};destination={};context={};target_authority={};device_id={};mode=device_route",
+                self.agent.authority_id(),
+                envelope.destination,
+                context,
+                peer,
+                device_id
+            );
+
+            match effects.send_envelope(envelope).await {
+                Ok(()) => {
+                    sent = sent.saturating_add(1);
+                }
+                Err(error) => {
+                    last_error = Some(error.to_string());
+                }
+            }
+        }
+
+        if sent > 0 {
+            Ok(())
+        } else {
+            Err(IntentError::network_error(format!(
+                "Failed to send chat fact to any reachable device for {peer}: {}",
+                last_error.unwrap_or_else(|| "no reachable device route succeeded".to_string())
+            )))
+        }
     }
 
     // AMP Channel Operations
@@ -985,7 +1138,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
             }
 
             let fallback_context = default_context_id_for_authority(peer);
-            if fallback_context != context && rendezvous.get_descriptor(fallback_context, peer).await.is_some() {
+            if fallback_context != context
+                && rendezvous
+                    .get_descriptor(fallback_context, peer)
+                    .await
+                    .is_some()
+            {
                 return true;
             }
 
@@ -1022,14 +1180,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     let _ = rendezvous::trigger_discovery(self).await;
                 }
 
-                if let Some(rendezvous) = self.agent.runtime().rendezvous() {
-                    let peer_devices = rendezvous.list_reachable_peer_devices().await;
-                    for peer_device in peer_devices {
-                        sync.add_peer(peer_device).await;
-                    }
-                }
+                self.seed_sync_peers_from_rendezvous().await;
 
-                #[cfg(target_arch = "wasm32")]
                 let authority_peers: Vec<AuthorityId> =
                     if let Some(rendezvous) = self.agent.runtime().rendezvous() {
                         let mut peers = rendezvous.list_cached_peers().await;
@@ -1057,21 +1209,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
                         .map_err(|e| IntentError::internal_error(format!("Sync failed: {e}")))
                 };
 
-                #[cfg(target_arch = "wasm32")]
-                {
-                    let mut pull_error: Option<IntentError> = None;
-                    for peer in authority_peers {
-                        if let Err(error) = self.pull_remote_relational_facts(peer).await {
-                            tracing::warn!(peer = %peer, error = %error, "web fact sync pull failed");
-                            if pull_error.is_none() {
-                                pull_error = Some(error);
-                            }
+                let mut pull_error: Option<IntentError> = None;
+                for peer in authority_peers {
+                    if let Err(error) = self.pull_remote_relational_facts(peer).await {
+                        tracing::warn!(peer = %peer, error = %error, "fact sync pull failed");
+                        if pull_error.is_none() {
+                            pull_error = Some(error);
                         }
                     }
+                }
 
-                    if let Some(error) = pull_error {
-                        last_sync_error = Some(error);
-                    }
+                if let Some(error) = pull_error {
+                    last_sync_error = Some(error);
                 }
 
                 match sync_result {
@@ -1098,13 +1247,72 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn process_ceremony_messages(&self) -> Result<(), IntentError> {
-        self.agent
+        let (processed_acceptances, processed_completions) = self
+            .agent
             .process_ceremony_acceptances()
             .await
-            .map(|_| ())
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to process ceremony messages: {e}"))
-            })
+            })?;
+        let invitation_handler = crate::handlers::invitation::InvitationHandler::new(
+            crate::core::AuthorityContext::new_with_device(
+                self.agent.authority_id(),
+                self.agent.runtime().device_id(),
+            ),
+        )
+        .map_err(|e| {
+            IntentError::internal_error(format!(
+                "Failed to create invitation handler for inbox processing: {e}"
+            ))
+        })?;
+        let processed_contact_messages = invitation_handler
+            .process_contact_invitation_acceptances(self.agent.runtime().effects())
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!(
+                    "Failed to process contact/chat envelopes: {e}"
+                ))
+            })?;
+        let processed_handshakes = if let Some(rendezvous_manager) = self.agent.runtime().rendezvous()
+        {
+            let authority = self.agent.context().clone();
+            let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)
+                .map_err(|e| {
+                    IntentError::internal_error(format!(
+                        "Failed to create rendezvous handler for handshake processing: {e}"
+                    ))
+                })?
+                .with_rendezvous_manager((*rendezvous_manager).clone());
+            handler
+                .process_handshake_envelopes(self.agent.runtime().effects())
+                .await
+                .map_err(|e| {
+                    IntentError::internal_error(format!(
+                        "Failed to process rendezvous handshakes: {e}"
+                    ))
+                })?
+        } else {
+            0
+        };
+
+        if processed_acceptances > 0
+            || processed_completions > 0
+            || processed_contact_messages > 0
+            || processed_handshakes > 0
+        {
+            if let Err(error) = self.refresh_reachability_after_ceremony_processing().await {
+                tracing::debug!(
+                    acceptances = processed_acceptances,
+                    completions = processed_completions,
+                    contact_messages = processed_contact_messages,
+                    handshakes = processed_handshakes,
+                    error = %error,
+                    "post-processing reachability refresh did not converge"
+                );
+            }
+        }
+
+        Ok(())
     }
 
     async fn sync_with_peer(&self, peer_id: &str) -> Result<(), IntentError> {
@@ -1127,6 +1335,110 @@ impl RuntimeBridge for AgentRuntimeBridge {
         } else {
             Err(service_unavailable("sync_service"))
         }
+    }
+
+    async fn ensure_peer_channel(
+        &self,
+        context: ContextId,
+        peer: AuthorityId,
+    ) -> Result<(), IntentError> {
+        let effects = self.agent.runtime().effects();
+        let Some(rendezvous_manager) = self.agent.runtime().rendezvous() else {
+            return Err(service_unavailable("rendezvous_manager"));
+        };
+
+        let authority = self.agent.context().clone();
+        let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)
+            .map_err(|e| {
+                IntentError::internal_error(format!(
+                    "Failed to create rendezvous handler for peer channel setup: {e}"
+                ))
+            })?
+            .with_rendezvous_manager((*rendezvous_manager).clone());
+
+        let fallback_context = default_context_id_for_authority(peer);
+        let mut contexts = vec![context];
+        if fallback_context != context {
+            contexts.push(fallback_context);
+        }
+
+        let rounds = if harness_mode_enabled() {
+            harness_sync_rounds()
+        } else {
+            1
+        };
+        let backoff_ms = if harness_mode_enabled() {
+            harness_sync_backoff_ms()
+        } else {
+            0
+        };
+
+        let mut last_error: Option<String> = None;
+        for channel_context in contexts {
+            if effects.is_channel_established(channel_context, peer).await {
+                self.seed_sync_peers_from_rendezvous().await;
+                let _ = self.sync_seeded_peers().await;
+                return Ok(());
+            }
+
+            let result = handler
+                .initiate_channel(&effects, channel_context, peer)
+                .await
+                .map_err(|e| {
+                    IntentError::network_error(format!(
+                        "Failed to initiate peer channel for {peer} in {channel_context}: {e}"
+                    ))
+                });
+
+            let result = match result {
+                Ok(value) => value,
+                Err(error) => {
+                    last_error = Some(error.to_string());
+                    continue;
+                }
+            };
+
+            if !result.success {
+                last_error = Some(
+                    result
+                        .error
+                        .unwrap_or_else(|| "peer channel initiation was denied".to_string()),
+                );
+                continue;
+            }
+
+            for round in 0..rounds {
+                if effects.is_channel_established(channel_context, peer).await {
+                    self.seed_sync_peers_from_rendezvous().await;
+                    let _ = self.sync_seeded_peers().await;
+                    return Ok(());
+                }
+
+                if harness_mode_enabled() {
+                    let _ = rendezvous::trigger_discovery(self).await;
+                }
+                self.seed_sync_peers_from_rendezvous().await;
+                let _ = self.sync_seeded_peers().await;
+                let _ = self.process_ceremony_messages().await;
+
+                if round + 1 < rounds && backoff_ms > 0 {
+                    self.sleep_ms(backoff_ms).await;
+                }
+            }
+
+            last_error = Some(format!(
+                "peer channel for {peer} in {channel_context} did not establish after bounded convergence"
+            ));
+        }
+
+        Err(IntentError::network_error(format!(
+            "{}",
+            last_error.unwrap_or_else(|| {
+                format!(
+                    "peer channel for {peer} in {context} did not establish after bounded convergence"
+                )
+            })
+        )))
     }
 
     // =========================================================================
@@ -1572,9 +1884,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
     ///
     /// # Cross-Authority Envelope Routing
     ///
-    /// Each participating device has its own authority derived from its device_id:
+    /// Each participating device has its own authority derived from its device id:
     /// ```text
-    /// device_authority = AuthorityId::new_from_entropy(hash(device_id.to_bytes()))
+    /// device_authority = AuthorityId::for_device(device_id)
     /// ```
     ///
     /// Key package envelopes are routed as follows:
@@ -1845,18 +2157,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 )));
             };
 
-            // Each device has its own authority derived from its device_id
-            // We need to send the envelope to that device's authority, not the initiator's authority
-            let device_authority = {
-                let bytes = device_id.to_bytes().map_err(|_| {
-                    IntentError::internal_error(format!(
-                        "Failed to convert device id {} to bytes",
-                        device_id
-                    ))
-                })?;
-                AuthorityId::new_from_entropy(hash(&bytes))
-            };
-
             let mut metadata = std::collections::HashMap::new();
             metadata.insert(
                 "content-type".to_string(),
@@ -1886,8 +2186,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
             }
 
             let envelope = aura_core::effects::TransportEnvelope {
-                destination: device_authority, // Send to the device's own authority
-                source: authority_id,          // From the ceremony initiator's authority
+                // Device-specific routing happens via aura-destination-device-id under the
+                // shared target authority for the ceremony.
+                destination: authority_id,
+                source: authority_id,
                 context: ceremony_context,
                 payload: key_package,
                 metadata,

@@ -90,7 +90,7 @@
 //! use std::time::Duration;
 //!
 //! // Create simulation environment using EffectRegistry + composer pattern
-//! let environment = SimulationEffectComposer::for_testing(device_id)?;
+//! let environment = SimulationEffectComposer::for_testing(device_id, authority_id)?;
 //!
 //! // Or customize simulation effects
 //! let effects = EffectRegistry::simulation(42)

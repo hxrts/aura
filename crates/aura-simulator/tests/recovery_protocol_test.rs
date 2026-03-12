@@ -38,9 +38,9 @@ async fn recovery_protocol_adapter_setup() {
     let guardian_device = DeviceId::from_uuid(Uuid::from_bytes([12; 16]));
     let coordinator_device = DeviceId::from_uuid(Uuid::from_bytes([13; 16]));
 
-    let account_auth = AuthorityId::from_uuid(account_device.uuid());
-    let guardian_auth = AuthorityId::from_uuid(guardian_device.uuid());
-    let coordinator_auth = AuthorityId::from_uuid(coordinator_device.uuid());
+    let account_auth = AuthorityId::for_device(account_device);
+    let guardian_auth = AuthorityId::for_device(guardian_device);
+    let coordinator_auth = AuthorityId::for_device(coordinator_device);
 
     let mut role_map = HashMap::new();
     role_map.insert(RecoveryProtocolRole::Account, account_auth);

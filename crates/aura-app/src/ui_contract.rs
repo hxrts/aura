@@ -644,6 +644,11 @@ impl OperationId {
     pub fn device_enrollment() -> Self {
         Self("device_enrollment".to_string())
     }
+
+    #[must_use]
+    pub fn send_message() -> Self {
+        Self("send_message".to_string())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

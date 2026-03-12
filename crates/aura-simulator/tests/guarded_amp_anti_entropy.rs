@@ -16,7 +16,8 @@ use uuid::Uuid;
 #[tokio::test]
 async fn simulator_amp_guard_chain_is_deterministic() {
     let fixture = DeviceTestFixture::new(42);
-    let env = create_deterministic_environment(fixture.device_id(), 123)
+    let authority_id = AuthorityId::new_from_entropy([42u8; 32]);
+    let env = create_deterministic_environment(fixture.device_id(), authority_id, 123)
         .await
         .unwrap_or_else(|err| panic!("deterministic environment: {err}"));
     let effects = env.effect_system();
@@ -47,7 +48,8 @@ async fn simulator_amp_guard_chain_is_deterministic() {
 #[tokio::test]
 async fn simulator_anti_entropy_guard_chain_path() {
     let fixture = DeviceTestFixture::new(7);
-    let env = create_deterministic_environment(fixture.device_id(), 99)
+    let authority_id = AuthorityId::new_from_entropy([7u8; 32]);
+    let env = create_deterministic_environment(fixture.device_id(), authority_id, 99)
         .await
         .unwrap_or_else(|err| panic!("deterministic environment: {err}"));
     let effects = env.effect_system();

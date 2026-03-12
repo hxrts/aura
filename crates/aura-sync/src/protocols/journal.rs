@@ -45,7 +45,7 @@ use aura_authorization::BiscuitTokenManager;
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::time::PhysicalTime;
 use aura_core::{AccountId, AttestedOp, DeviceId};
-use aura_guards::BiscuitGuardEvaluator;
+use aura_guards::{BiscuitGuardEvaluator, GuardContextProvider};
 use futures;
 
 #[cfg(target_arch = "wasm32")]
@@ -276,7 +276,12 @@ impl JournalSyncProtocol {
         start: MonotonicInstant,
     ) -> SyncResult<JournalSyncResult>
     where
-        E: JournalEffects + NetworkEffects + Send + Sync + PhysicalTimeEffects,
+        E: JournalEffects
+            + NetworkEffects
+            + Send
+            + Sync
+            + PhysicalTimeEffects
+            + GuardContextProvider,
     {
         let mut operations_synced = 0u64;
         let mut peers_synced = Vec::new();
@@ -379,7 +384,12 @@ impl JournalSyncProtocol {
     /// Synchronize with a single peer
     pub async fn sync_with_peer<E>(&mut self, effects: &E, peer: DeviceId) -> SyncResult<u64>
     where
-        E: JournalEffects + NetworkEffects + Send + Sync + PhysicalTimeEffects,
+        E: JournalEffects
+            + NetworkEffects
+            + Send
+            + Sync
+            + PhysicalTimeEffects
+            + GuardContextProvider,
     {
         self.peer_states.insert(peer, SyncState::Syncing);
         self.sync_with_peer_impl(effects, peer).await
@@ -388,7 +398,12 @@ impl JournalSyncProtocol {
     /// Internal implementation of peer synchronization
     async fn sync_with_peer_impl<E>(&self, effects: &E, peer: DeviceId) -> SyncResult<u64>
     where
-        E: JournalEffects + NetworkEffects + Send + Sync + PhysicalTimeEffects,
+        E: JournalEffects
+            + NetworkEffects
+            + Send
+            + Sync
+            + PhysicalTimeEffects
+            + GuardContextProvider,
     {
         tracing::debug!("Starting synchronization with peer {}", peer);
 

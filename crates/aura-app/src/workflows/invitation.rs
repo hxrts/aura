@@ -392,17 +392,7 @@ pub async fn accept_invitation(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {e}")))?;
 
-    for _ in 0..4 {
-        converge_runtime(&runtime).await;
-        if ensure_runtime_peer_connectivity(&runtime, "invitation_accept")
-            .await
-            .is_ok()
-        {
-            break;
-        }
-    }
-
-    let _ = crate::workflows::system::refresh_account(app_core).await;
+    converge_runtime(&runtime).await;
 
     Ok(())
 }

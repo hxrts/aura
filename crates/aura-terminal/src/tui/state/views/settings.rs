@@ -224,7 +224,7 @@ impl ConfirmRemoveModalState {
 
     /// Reset state (called when dismissed)
     pub fn reset(&mut self) {
-        self.device_id = DeviceId::default();
+        self.device_id = DeviceId::from_bytes([0; 32]);
         self.display_name.clear();
         self.confirm_focused = false;
     }

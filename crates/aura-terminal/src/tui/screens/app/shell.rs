@@ -40,6 +40,7 @@ use aura_app::ui::workflows::ceremonies::{
 };
 use aura_app::ui::workflows::network as network_workflows;
 use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
+use aura_app::ui::workflows::system as system_workflows;
 use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::CeremonyId;
@@ -309,6 +310,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let shared_authority_id = use_authority_id_subscription(&mut hooks, &app_ctx);
 
     // =========================================================================
+    // Shared selected channel identity for subscriptions and dispatch
+    // =========================================================================
+    let tui_selected_ref =
+        hooks.use_ref(|| std::sync::Arc::new(std::sync::RwLock::new(None::<String>)));
+    let tui_selected: std::sync::Arc<std::sync::RwLock<Option<String>>> =
+        tui_selected_ref.read().clone();
+
+    // =========================================================================
     // Channels subscription: SharedChannels for dispatch handlers to read
     // =========================================================================
     // Must be created before messages subscription since messages depend on channels
@@ -316,16 +325,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         &mut hooks,
         &app_ctx,
         shared_authority_id.clone(),
+        tui_selected.clone(),
         update_tx_holder.clone(),
     );
-
-    // =========================================================================
-    // Shared selected channel identity for subscriptions and dispatch
-    // =========================================================================
-    let tui_selected_ref =
-        hooks.use_ref(|| std::sync::Arc::new(std::sync::RwLock::new(None::<String>)));
-    let tui_selected: std::sync::Arc<std::sync::RwLock<Option<String>>> =
-        tui_selected_ref.read().clone();
 
     // =========================================================================
     // Messages subscription: SharedMessages for dispatch handlers to read
@@ -513,6 +515,35 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             }
         }
     });
+
+    // =========================================================================
+    // Harness Runtime Maintenance
+    //
+    // In harness mode, keep ceremony ingestion, sync, and discovery moving while
+    // the UI is idle on a screen. Shared-flow receive steps otherwise depend too
+    // heavily on incidental user actions to drive runtime convergence.
+    // =========================================================================
+    if std::env::var_os("AURA_HARNESS_MODE").is_some() {
+        hooks.use_future({
+            let app_core = app_ctx.app_core.raw().clone();
+            async move {
+                loop {
+                    let runtime = {
+                        let core = app_core.read().await;
+                        core.runtime().cloned()
+                    };
+
+                    if let Some(runtime) = runtime {
+                        let _ = runtime.process_ceremony_messages().await;
+                    }
+
+                    let _ = system_workflows::refresh_account(&app_core).await;
+
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                }
+            }
+        });
+    }
 
     // =========================================================================
     // UI Update Processor - Central handler for all async callback results
@@ -911,6 +942,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // =========================================================================
                         // Chat / messaging
                         // =========================================================================
+                        UiUpdate::MessageSendSubmitting => {
+                            tui.with_mut(|state| {
+                                state.set_operation_state(
+                                    OperationId::send_message(),
+                                    OperationState::Submitting,
+                                );
+                            });
+                        }
+                        UiUpdate::MessageSendCompleted => {
+                            tui.with_mut(|state| {
+                                state.set_operation_state(
+                                    OperationId::send_message(),
+                                    OperationState::Succeeded,
+                                );
+                            });
+                        }
                         UiUpdate::MessageSent { channel, content } => {
                             let mut appended = false;
                             let selected_channel = tui_selected_for_updates
@@ -969,21 +1016,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             );
                         }
                         UiUpdate::ChannelSelected(channel_id) => {
-                            let selected_idx = shared_channels_for_updates
+                            let selected_channel = shared_channels_for_updates
                                 .read()
                                 .ok()
                                 .and_then(|channels| {
-                                    channels
-                                        .iter()
-                                        .position(|channel| channel.id == channel_id)
+                                    channels.iter().enumerate().find_map(|(idx, channel)| {
+                                        (channel.id == channel_id).then_some((idx, channel.clone()))
+                                    })
                                 });
                             if let Ok(mut guard) = tui_selected_for_updates.write() {
                                 *guard = Some(channel_id.clone());
                             }
-                            if let Some(idx) = selected_idx {
+                            if let Some((idx, channel)) = selected_channel {
                                 tui.with_mut(|state| {
                                     state.chat.selected_channel = idx;
                                     state.chat.message_scroll = 0;
+                                    let _ = &channel;
                                 });
                             }
                         }
@@ -1483,6 +1531,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 tui.with_mut(|state| {
                                     state.set_operation_state(
                                         OperationId::invitation_accept(),
+                                        OperationState::Failed,
+                                    );
+                                });
+                            }
+                            if operation == "SendMessage" {
+                                tui.with_mut(|state| {
+                                    state.set_operation_state(
+                                        OperationId::send_message(),
                                         OperationState::Failed,
                                     );
                                 });

@@ -18,11 +18,9 @@ use std::time::Duration;
 
 // Import app types from aura-app (pure layer)
 use aura_app::ui::prelude::*;
-// Import portable account types and ID derivation functions
+// Import portable account types and parsing helpers
 use aura_app::ui::types::{AccountBackup, AccountConfig};
-use aura_app::ui::workflows::account::{
-    derive_authority_id, derive_context_id, derive_recovered_context_id, parse_backup_code,
-};
+use aura_app::ui::workflows::account::{derive_recovered_context_id, parse_backup_code};
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
 use aura_agent::core::config::{NetworkConfig, StorageConfig};
@@ -36,6 +34,7 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
 use aura_effects::time::PhysicalTimeHandler;
 use aura_effects::{
+    identifiers::{new_authority_id, new_context_id},
     EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
     RealSecureStorageHandler,
 };
@@ -274,16 +273,18 @@ async fn persist_selected_authority(
 /// Uses portable ID derivation from aura_app::workflows::account.
 pub async fn create_account(
     base_path: &Path,
-    device_id_str: &str,
+    _device_id_str: &str,
     nickname_suggestion: &str,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
     tracing::info!(path = %base_path.display(), nickname = nickname_suggestion, "tui create_account begin");
     let storage = open_bootstrap_storage(base_path);
     let time = PhysicalTimeHandler::new();
+    let crypto = RealCryptoHandler::new();
 
-    // Use portable ID derivation functions from aura-app
-    let authority_id = derive_authority_id(device_id_str);
-    let context_id = derive_context_id(device_id_str);
+    // First-run bootstrap must generate fresh authority/context identities rather than
+    // deriving authority from a device-local string.
+    let authority_id = new_authority_id(&crypto).await;
+    let context_id = new_context_id(&crypto).await;
 
     // Persist to storage using effect-backed handlers.
     tracing::info!("tui create_account persisting account config");
@@ -304,7 +305,7 @@ pub async fn create_account(
 ///
 /// This is used after catastrophic device loss where guardians have
 /// reconstructed the ORIGINAL authority_id via FROST threshold signatures.
-/// Unlike `create_account()` which derives from device_id, this preserves
+/// Unlike `create_account()` which generates a fresh local authority, this preserves
 /// the cryptographically identical authority from before the loss.
 ///
 /// Uses portable ID derivation from aura_app::workflows::account.

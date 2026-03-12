@@ -283,8 +283,7 @@ impl SimulatedAgent {
         // IMPORTANT: the simulator transport inbox is addressed by AuthorityId (not DeviceId).
         // Wire the effect system to the simulated agent's AuthorityId so transport routing works.
         let environment = if let Some(inbox) = shared_inbox {
-            SimulationEffectComposer::new(device_id)
-                .with_authority(authority_id)
+            SimulationEffectComposer::new(device_id, authority_id)
                 .with_seed(config.seed)
                 .with_shared_transport_inbox(inbox)
                 .with_effect_system_async()
@@ -294,8 +293,7 @@ impl SimulatedAgent {
                 .with_scenario_management()
                 .build()?
         } else {
-            SimulationEffectComposer::new(device_id)
-                .with_authority(authority_id)
+            SimulationEffectComposer::new(device_id, authority_id)
                 .with_seed(config.seed)
                 .with_effect_system_async()
                 .await?

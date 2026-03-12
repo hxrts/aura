@@ -37,7 +37,7 @@ async fn consensus_adapter_setup() {
     let witness_a = DeviceId::from_uuid(Uuid::from_bytes([12; 16]));
     let witness_b = DeviceId::from_uuid(Uuid::from_bytes([13; 16]));
 
-    let coordinator_auth = AuthorityId::from_uuid(coordinator_device.uuid());
+    let coordinator_auth = AuthorityId::for_device(coordinator_device);
     let witness_auths = vec![
         AuthorityId::from_uuid(witness_a.uuid()),
         AuthorityId::from_uuid(witness_b.uuid()),

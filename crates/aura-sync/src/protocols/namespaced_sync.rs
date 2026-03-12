@@ -501,12 +501,13 @@ impl NamespacedAntiEntropy {
                     return Ok(AuthorityId::from_uuid(parsed));
                 }
             }
+            return Err(AuraError::invalid(
+                "Stored local_authority_id is not a valid UUID".to_string(),
+            ));
         }
-        // Fallback to effect_api device mapping
-        match effects.effect_api_device_id().await {
-            Ok(device_id) => Ok(AuthorityId::from_uuid(device_id.into())),
-            Err(_) => Ok(AuthorityId::new_from_entropy([1u8; 32])),
-        }
+        Err(AuraError::invalid(
+            "Missing explicit local_authority_id for namespaced sync".to_string(),
+        ))
     }
 
     /// Exchange sync data with peer

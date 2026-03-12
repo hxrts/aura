@@ -230,7 +230,11 @@ impl SimulatedTransport {
 
     /// Get the current role for this transport
     pub fn current_role(&self) -> ChoreographicRole {
-        ChoreographicRole::new(self.device_id, self.role_index)
+        ChoreographicRole::new(
+            self.device_id,
+            aura_core::AuthorityId::new_from_entropy([0u8; 32]),
+            self.role_index,
+        )
     }
 
     /// Create a transport network for multiple roles
@@ -298,7 +302,11 @@ impl ChoreographicEffects for SimulatedTransport {
     }
 
     fn current_role(&self) -> ChoreographicRole {
-        ChoreographicRole::new(self.device_id, self.role_index)
+        ChoreographicRole::new(
+            self.device_id,
+            aura_core::AuthorityId::new_from_entropy([0u8; 32]),
+            self.role_index,
+        )
     }
 
     fn all_roles(&self) -> Vec<ChoreographicRole> {
@@ -421,7 +429,7 @@ impl TestEffectSystem {
         let transport = SimulatedTransport::new(bus, device_id, role_index)?;
         Some(Self {
             transport,
-            authority_id: AuthorityId::from_uuid(device_id.uuid()),
+            authority_id: AuthorityId::for_device(device_id),
             storage: std::sync::Mutex::new(HashMap::new()),
             physical_time_ms: std::sync::Mutex::new(1640995200000), // 2022-01-01
             logical_clock: std::sync::Mutex::new(LogicalTime {

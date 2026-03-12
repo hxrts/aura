@@ -541,7 +541,8 @@ impl SessionOperations {
         let device_id = self.device_id();
         let timestamp_millis = self.effects.current_timestamp().await.unwrap_or(0);
         let role_index = RoleIndex::new(0).expect("role index");
-        let my_role = ChoreographicRole::new(device_id, role_index);
+        let my_role =
+            ChoreographicRole::new(device_id, self.authority_context.authority_id(), role_index);
 
         let session_handle = SessionHandle {
             session_id: request.session_id,
@@ -890,8 +891,8 @@ fn session_coordination_runtime_session_id(
 }
 
 fn coordination_role(authority_id: AuthorityId, role_index: u16) -> ChoreographicRole {
-    ChoreographicRole::new(
-        DeviceId::from_uuid(authority_id.0),
+    ChoreographicRole::for_authority(
+        authority_id,
         RoleIndex::new(role_index.into()).expect("role index"),
     )
 }
@@ -1007,7 +1008,11 @@ impl SessionOperations {
             session_id: parse_session_id(session_id)?,
             session_type: SessionType::Coordination,
             participants: vec![device_id],
-            my_role: ChoreographicRole::new(device_id, RoleIndex::new(0).expect("role index")),
+            my_role: ChoreographicRole::new(
+                device_id,
+                self.authority_context.authority_id(),
+                RoleIndex::new(0).expect("role index"),
+            ),
             epoch: 0,
             start_time: current_time,
             metadata: {
@@ -1121,7 +1126,7 @@ mod tests {
             .unwrap();
 
         // Verify that an invitation was sent to the transport layer
-        let destination = AuthorityId::from_uuid(other_device.0);
+        let destination = AuthorityId::for_device(other_device);
         let inbox = shared_transport.inbox_for(destination);
         let inbox = inbox.read();
         assert_eq!(inbox.len(), 1, "Expected exactly one transport envelope");

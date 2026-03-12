@@ -41,12 +41,8 @@ impl TestkitSimulatorBridge {
         for fixture in fixtures {
             let device_id = fixture.device_id();
 
-            // Create simulation config with authority derived from device ID
-            let authority_id = AuthorityId::new_from_entropy(hash(&device_id.to_bytes().expect(
-                "device ids from fixtures should always convert to bytes deterministically",
-            )));
-            let sim_config =
-                SimulationEnvironmentConfig::new(seed, device_id).with_authority(authority_id);
+            let authority_id = AuthorityId::for_device(device_id);
+            let sim_config = SimulationEnvironmentConfig::new(seed, device_id, authority_id);
 
             // Use factory to create effect system
             let effect_system = factory
@@ -120,8 +116,7 @@ impl TestkitSimulatorBridge {
 
         // Create simulation config with authority derived from seed
         let authority_id = AuthorityId::new_from_entropy(hash(&seed.to_le_bytes()));
-        let sim_config =
-            SimulationEnvironmentConfig::new(seed, device_id).with_authority(authority_id);
+        let sim_config = SimulationEnvironmentConfig::new(seed, device_id, authority_id);
 
         // Use factory to create effect system
         factory

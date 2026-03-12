@@ -19,7 +19,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use aura_composition::{CompositeHandler, Handler, HandlerContext};
-use aura_core::identifiers::DeviceId;
+use aura_core::identifiers::{AuthorityId, DeviceId};
 use aura_protocol::handlers::AuraContext;
 use aura_protocol::handlers::{
     core::erased::AuraHandlerFactory, AuraHandler, AuraHandlerError, EffectRegistry, EffectType,
@@ -34,6 +34,15 @@ fn test_device_id(seed: &[u8]) -> DeviceId {
     let hash_bytes = hash(seed);
     let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
     DeviceId(Uuid::from_bytes(uuid_bytes))
+}
+
+/// Helper to create deterministic authority IDs for tests
+fn test_authority_id(seed: &[u8]) -> AuthorityId {
+    use aura_core::hash::hash;
+    use uuid::Uuid;
+    let hash_bytes = hash(seed);
+    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    AuthorityId(Uuid::from_bytes(uuid_bytes))
 }
 
 /// Test that all effect types have corresponding implementations
@@ -291,12 +300,13 @@ fn test_comprehensive_effect_type_validation() {
 #[tokio::test]
 async fn test_handler_determinism() {
     let device_id = test_device_id(b"test_handler_determinism");
+    let authority_id = test_authority_id(b"test_handler_determinism/authority");
 
     // Create two handlers with the same device ID for deterministic testing
     let handler1 = AuraHandlerFactory::for_testing(device_id);
     let handler2 = AuraHandlerFactory::for_testing(device_id);
-    let ctx1 = AuraContext::for_testing(device_id);
-    let ctx2 = AuraContext::for_testing(device_id);
+    let ctx1 = AuraContext::for_testing(authority_id, device_id);
+    let ctx2 = AuraContext::for_testing(authority_id, device_id);
 
     // Both should be in simulation mode (deterministic)
     assert!(handler1.execution_mode().is_deterministic());

@@ -296,11 +296,11 @@ impl AuraEffectSystem {
         crypto_seed: Option<[u8; 32]>,
         shared_transport: Option<SharedTransport>,
         shared_inbox: Option<Arc<RwLock<Vec<TransportEnvelope>>>>,
-        authority_override: Option<AuthorityId>,
+        authority_id: AuthorityId,
     ) -> Self {
         Self::maybe_start_deadlock_detector();
+        let authority = authority_id;
         let device_id = config.device_id();
-        let authority = authority_override.unwrap_or_else(|| AuthorityId::from_uuid(device_id.0));
         let (journal_policy, journal_verifying_key) = Self::init_journal_policy(authority);
         let test_mode = execution_mode.is_deterministic();
 
@@ -1013,7 +1013,10 @@ impl AuraEffectSystem {
     const TEST_CRYPTO_SEED: [u8; 32] = [42u8; 32];
 
     /// Create new effect system with configuration (testing mode).
-    pub fn new(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
+    pub fn new(
+        config: AgentConfig,
+        authority_id: AuthorityId,
+    ) -> Result<Self, crate::core::AgentError> {
         let config = Self::normalize_test_config(config);
         let composite = CompositeHandlerAdapter::for_testing(config.device_id());
         Ok(Self::build_internal(
@@ -1023,12 +1026,15 @@ impl AuraEffectSystem {
             Some(Self::TEST_CRYPTO_SEED),
             None, // No shared transport
             None, // No shared inbox
-            None, // Derive authority from device_id
+            authority_id,
         ))
     }
 
     /// Create effect system for production.
-    pub fn production(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
+    pub fn production(
+        config: AgentConfig,
+        authority_id: AuthorityId,
+    ) -> Result<Self, crate::core::AgentError> {
         let mut composite = CompositeHandlerAdapter::for_production(config.device_id());
         composite
             .composite_mut()
@@ -1042,7 +1048,7 @@ impl AuraEffectSystem {
             None,
             None,
             None,
-            None,
+            authority_id,
         ))
     }
 
@@ -1118,7 +1124,7 @@ impl AuraEffectSystem {
     #[allow(clippy::disallowed_methods)]
     pub fn simulation_for_test(config: &AgentConfig) -> Result<Self, crate::core::AgentError> {
         let seed = Self::allocate_test_seed(0)?;
-        Self::simulation(config, seed)
+        Self::simulation(config, seed, AuthorityId::for_device(config.device_id()))
     }
 
     /// Deterministic test constructor with extra salt for multi-instance setups
@@ -1130,7 +1136,7 @@ impl AuraEffectSystem {
         extra_salt: u64,
     ) -> Result<Self, crate::core::AgentError> {
         let seed = Self::allocate_test_seed(extra_salt)?;
-        Self::simulation(config, seed)
+        Self::simulation(config, seed, AuthorityId::for_device(config.device_id()))
     }
 
     /// Deterministic test constructor using explicit test identity plus callsite.
@@ -1141,7 +1147,7 @@ impl AuraEffectSystem {
         test_identity: &str,
     ) -> Result<Self, crate::core::AgentError> {
         let seed = Self::allocate_test_seed_with_identity(test_identity, 0)?;
-        Self::simulation(config, seed)
+        Self::simulation(config, seed, AuthorityId::for_device(config.device_id()))
     }
 
     /// Deterministic test constructor with explicit test identity and salt.
@@ -1153,7 +1159,7 @@ impl AuraEffectSystem {
         extra_salt: u64,
     ) -> Result<Self, crate::core::AgentError> {
         let seed = Self::allocate_test_seed_with_identity(test_identity, extra_salt)?;
-        Self::simulation(config, seed)
+        Self::simulation(config, seed, AuthorityId::for_device(config.device_id()))
     }
 
     /// Deterministic authority-aware constructor for tests.
@@ -1187,7 +1193,12 @@ impl AuraEffectSystem {
         shared_transport: SharedTransport,
     ) -> Result<Self, crate::core::AgentError> {
         let seed = Self::allocate_test_seed(0)?;
-        Self::simulation_with_shared_transport(config, seed, shared_transport)
+        Self::simulation_with_shared_transport(
+            config,
+            seed,
+            AuthorityId::for_device(config.device_id()),
+            shared_transport,
+        )
     }
 
     /// Deterministic shared-transport constructor for tests with explicit authority.
@@ -1210,7 +1221,10 @@ impl AuraEffectSystem {
     /// Create effect system for testing with default configuration.
     ///
     /// Prefer `simulation_for_test(...)` for deterministic per-test seeding.
-    pub fn testing(config: &AgentConfig) -> Result<Self, crate::core::AgentError> {
+    pub fn testing(
+        config: &AgentConfig,
+        authority_id: AuthorityId,
+    ) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_testing(config.device_id());
         Ok(Self::build_internal(
             Self::normalize_test_config(config.clone()),
@@ -1219,7 +1233,7 @@ impl AuraEffectSystem {
             Some(Self::TEST_CRYPTO_SEED),
             None, // No shared transport
             None, // No shared inbox
-            None, // Derive authority from device_id
+            authority_id,
         ))
     }
 
@@ -1229,6 +1243,7 @@ impl AuraEffectSystem {
     /// enabling loopback testing where an agent can send and receive messages from itself.
     pub fn testing_with_shared_transport(
         config: &AgentConfig,
+        authority_id: AuthorityId,
         shared_transport: SharedTransport,
     ) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_testing(config.device_id());
@@ -1239,12 +1254,16 @@ impl AuraEffectSystem {
             Some(Self::TEST_CRYPTO_SEED),
             Some(shared_transport),
             None, // No shared inbox
-            None, // Derive authority from device_id
+            authority_id,
         ))
     }
 
     /// Create effect system for simulation with controlled seed.
-    pub fn simulation(config: &AgentConfig, seed: u64) -> Result<Self, crate::core::AgentError> {
+    pub fn simulation(
+        config: &AgentConfig,
+        seed: u64,
+        authority_id: AuthorityId,
+    ) -> Result<Self, crate::core::AgentError> {
         let config = Self::normalize_test_config(config.clone());
         let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
         // Convert u64 seed to [u8; 32] for crypto handler
@@ -1257,7 +1276,7 @@ impl AuraEffectSystem {
             Some(crypto_seed),
             None, // No shared transport
             None, // No shared inbox
-            None, // Derive authority from device_id
+            authority_id,
         ))
     }
 
@@ -1269,6 +1288,7 @@ impl AuraEffectSystem {
     pub fn simulation_with_shared_transport(
         config: &AgentConfig,
         seed: u64,
+        authority_id: AuthorityId,
         shared_transport: SharedTransport,
     ) -> Result<Self, crate::core::AgentError> {
         let config = Self::normalize_test_config(config.clone());
@@ -1283,7 +1303,7 @@ impl AuraEffectSystem {
             Some(crypto_seed),
             Some(shared_transport),
             None, // No shared inbox
-            None, // Derive authority from device_id
+            authority_id,
         ))
     }
 
@@ -1294,6 +1314,7 @@ impl AuraEffectSystem {
     pub fn simulation_with_shared_inbox(
         config: &AgentConfig,
         seed: u64,
+        authority_id: AuthorityId,
         shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
     ) -> Result<Self, crate::core::AgentError> {
         let config = Self::normalize_test_config(config.clone());
@@ -1307,7 +1328,7 @@ impl AuraEffectSystem {
             Some(crypto_seed),
             None, // No shared transport
             Some(shared_inbox),
-            None, // Derive authority from device_id
+            authority_id,
         ))
     }
 
@@ -1316,20 +1337,7 @@ impl AuraEffectSystem {
         config: AgentConfig,
         authority_id: AuthorityId,
     ) -> Result<Self, crate::core::AgentError> {
-        let mut composite = CompositeHandlerAdapter::for_production(config.device_id());
-        composite
-            .composite_mut()
-            .register_all(RegisterAllOptions::allow_impure())
-            .map_err(|e| crate::core::AgentError::effects(e.to_string()))?;
-        Ok(Self::build_internal(
-            config,
-            composite,
-            ExecutionMode::Production,
-            None,
-            None,
-            None,
-            Some(authority_id),
-        ))
+        Self::production(config, authority_id)
     }
 
     /// Create effect system for testing, overriding the authority identity.
@@ -1339,16 +1347,7 @@ impl AuraEffectSystem {
         config: &AgentConfig,
         authority_id: AuthorityId,
     ) -> Result<Self, crate::core::AgentError> {
-        let composite = CompositeHandlerAdapter::for_testing(config.device_id());
-        Ok(Self::build_internal(
-            Self::normalize_test_config(config.clone()),
-            composite,
-            ExecutionMode::Testing,
-            Some(Self::TEST_CRYPTO_SEED),
-            None,
-            None,
-            Some(authority_id),
-        ))
+        Self::testing(config, authority_id)
     }
 
     /// Create effect system for simulation, overriding the authority identity.
@@ -1357,19 +1356,7 @@ impl AuraEffectSystem {
         seed: u64,
         authority_id: AuthorityId,
     ) -> Result<Self, crate::core::AgentError> {
-        let config = Self::normalize_test_config(config.clone());
-        let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
-        let mut crypto_seed = [0u8; 32];
-        crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
-        Ok(Self::build_internal(
-            config,
-            composite,
-            ExecutionMode::Simulation { seed },
-            Some(crypto_seed),
-            None,
-            None,
-            Some(authority_id),
-        ))
+        Self::simulation(config, seed, authority_id)
     }
 
     /// Create effect system for simulation with shared transport, overriding authority.
@@ -1379,19 +1366,7 @@ impl AuraEffectSystem {
         authority_id: AuthorityId,
         shared_transport: SharedTransport,
     ) -> Result<Self, crate::core::AgentError> {
-        let config = Self::normalize_test_config(config.clone());
-        let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
-        let mut crypto_seed = [0u8; 32];
-        crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
-        Ok(Self::build_internal(
-            config,
-            composite,
-            ExecutionMode::Simulation { seed },
-            Some(crypto_seed),
-            Some(shared_transport),
-            None,
-            Some(authority_id),
-        ))
+        Self::simulation_with_shared_transport(config, seed, authority_id, shared_transport)
     }
 
     /// Create effect system for simulation with a shared inbox, overriding authority.
@@ -1401,19 +1376,7 @@ impl AuraEffectSystem {
         authority_id: AuthorityId,
         shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
     ) -> Result<Self, crate::core::AgentError> {
-        let config = Self::normalize_test_config(config.clone());
-        let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
-        let mut crypto_seed = [0u8; 32];
-        crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
-        Ok(Self::build_internal(
-            config,
-            composite,
-            ExecutionMode::Simulation { seed },
-            Some(crypto_seed),
-            None,
-            Some(shared_inbox),
-            Some(authority_id),
-        ))
+        Self::simulation_with_shared_inbox(config, seed, authority_id, shared_inbox)
     }
 
     /// Get configuration

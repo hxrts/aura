@@ -349,48 +349,52 @@ impl RuntimeSystem {
             sync_manager.start_maintenance_task(tasks.clone(), time_effects.clone());
         }
 
-        if let Ok(invitation_handler) = InvitationHandler::new(AuthorityContext::new_with_device(
-            self.authority_id,
-            self.device_id(),
-        )) {
-            let effects = self.effect_system.clone();
-            let handler = invitation_handler.clone();
-            let interval = Duration::from_secs(2);
-            tasks.spawn_interval_until(time_effects.clone(), interval, move || {
-                let effects = effects.clone();
-                let handler = handler.clone();
-                async move {
-                    if let Err(e) = handler
-                        .process_contact_invitation_acceptances(effects.clone())
-                        .await
-                    {
-                        tracing::debug!(
-                            error = %e,
-                            "Failed to process contact invitation acceptances"
-                        );
-                    }
-                    true
-                }
-            });
-        }
+        let harness_mode = std::env::var_os("AURA_HARNESS_MODE").is_some();
 
-        if let Some(rendezvous_handler) = rendezvous_handler {
-            let effects = self.effect_system.clone();
-            let handler = rendezvous_handler.clone();
-            let interval = Duration::from_secs(2);
-            tasks.spawn_interval_until(time_effects.clone(), interval, move || {
-                let effects = effects.clone();
-                let handler = handler.clone();
-                async move {
-                    if let Err(e) = handler.process_handshake_envelopes(effects.clone()).await {
-                        tracing::debug!(
-                            error = %e,
-                            "Failed to process rendezvous handshake envelopes"
-                        );
+        if !harness_mode {
+            if let Ok(invitation_handler) = InvitationHandler::new(AuthorityContext::new_with_device(
+                self.authority_id,
+                self.device_id(),
+            )) {
+                let effects = self.effect_system.clone();
+                let handler = invitation_handler.clone();
+                let interval = Duration::from_secs(2);
+                tasks.spawn_interval_until(time_effects.clone(), interval, move || {
+                    let effects = effects.clone();
+                    let handler = handler.clone();
+                    async move {
+                        if let Err(e) = handler
+                            .process_contact_invitation_acceptances(effects.clone())
+                            .await
+                        {
+                            tracing::debug!(
+                                error = %e,
+                                "Failed to process contact invitation acceptances"
+                            );
+                        }
+                        true
                     }
-                    true
-                }
-            });
+                });
+            }
+
+            if let Some(rendezvous_handler) = rendezvous_handler {
+                let effects = self.effect_system.clone();
+                let handler = rendezvous_handler.clone();
+                let interval = Duration::from_secs(2);
+                tasks.spawn_interval_until(time_effects.clone(), interval, move || {
+                    let effects = effects.clone();
+                    let handler = handler.clone();
+                    async move {
+                        if let Err(e) = handler.process_handshake_envelopes(effects.clone()).await {
+                            tracing::debug!(
+                                error = %e,
+                                "Failed to process rendezvous handshake envelopes"
+                            );
+                        }
+                        true
+                    }
+                });
+            }
         }
 
         if let (Some(sync_manager), Some(rendezvous_manager)) =
@@ -1030,9 +1034,7 @@ async fn handle_inbound_transport_envelope(
     {
         eprintln!(
             "[recv-chat-fact] source={};destination={};context={}",
-            envelope.source,
-            envelope.destination,
-            envelope.context
+            envelope.source, envelope.destination, envelope.context
         );
         match from_slice::<RelationalFact>(&envelope.payload) {
             Ok(fact) => {

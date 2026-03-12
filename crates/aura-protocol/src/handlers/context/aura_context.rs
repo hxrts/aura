@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use aura_core::identifiers::DeviceId;
+use aura_core::identifiers::{AuthorityId, DeviceId};
 use aura_core::{AccountId, SessionId};
 
 use super::{AgentContext, ChoreographicContext, MiddlewareContext, SimulationContext};
@@ -21,6 +21,8 @@ use crate::handlers::ExecutionMode;
 /// instances rather than mutating in place.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuraContext {
+    /// Core authority identifier
+    pub authority_id: AuthorityId,
     /// Core device identifier
     pub device_id: DeviceId,
     /// Execution mode (testing, production, simulation)
@@ -53,9 +55,10 @@ pub struct AuraContext {
 
 impl AuraContext {
     /// Create a new context for testing mode
-    pub fn for_testing(device_id: DeviceId) -> Self {
+    pub fn for_testing(authority_id: AuthorityId, device_id: DeviceId) -> Self {
         let created_at = 0u64; // Fixed timestamp for deterministic testing
-        let mut seed = Vec::with_capacity(24);
+        let mut seed = Vec::with_capacity(40);
+        seed.extend_from_slice(authority_id.0.as_bytes());
         seed.extend_from_slice(device_id.0.as_bytes());
         seed.extend_from_slice(&created_at.to_le_bytes());
         let digest = aura_core::hash::hash(&seed);
@@ -63,6 +66,7 @@ impl AuraContext {
         op_bytes.copy_from_slice(&digest[..16]);
         let operation_id = uuid::Uuid::from_bytes(op_bytes);
         Self {
+            authority_id,
             device_id,
             execution_mode: ExecutionMode::Testing,
             session_id: None,
@@ -73,14 +77,20 @@ impl AuraContext {
             epoch: created_at,
             choreographic: None,
             simulation: None,
-            agent: Some(AgentContext::new(device_id)),
+            agent: Some(AgentContext::new()),
             middleware: MiddlewareContext::new(),
         }
     }
 
     /// Create a new context for production mode
-    pub fn for_production(device_id: DeviceId, created_at: u64, operation_id: Uuid) -> Self {
+    pub fn for_production(
+        authority_id: AuthorityId,
+        device_id: DeviceId,
+        created_at: u64,
+        operation_id: Uuid,
+    ) -> Self {
         Self {
+            authority_id,
             device_id,
             execution_mode: ExecutionMode::Production,
             session_id: None,
@@ -91,15 +101,16 @@ impl AuraContext {
             epoch: created_at,
             choreographic: None,
             simulation: None,
-            agent: Some(AgentContext::new(device_id)),
+            agent: Some(AgentContext::new()),
             middleware: MiddlewareContext::new(),
         }
     }
 
     /// Create a new context for simulation mode
-    pub fn for_simulation(device_id: DeviceId, seed: u64) -> Self {
+    pub fn for_simulation(authority_id: AuthorityId, device_id: DeviceId, seed: u64) -> Self {
         let created_at = seed; // Use seed as deterministic timestamp
         Self {
+            authority_id,
             device_id,
             execution_mode: ExecutionMode::Simulation { seed },
             session_id: None,
@@ -110,7 +121,7 @@ impl AuraContext {
             epoch: created_at,
             choreographic: None,
             simulation: Some(SimulationContext::new(seed)),
-            agent: Some(AgentContext::new(device_id)),
+            agent: Some(AgentContext::new()),
             middleware: MiddlewareContext::new(),
         }
     }
@@ -118,6 +129,7 @@ impl AuraContext {
     /// Create new context with choreographic context
     pub fn with_choreographic(&self, context: ChoreographicContext) -> Self {
         Self {
+            authority_id: self.authority_id,
             device_id: self.device_id,
             execution_mode: self.execution_mode,
             session_id: self.session_id,
@@ -136,6 +148,7 @@ impl AuraContext {
     /// Create new context with session ID
     pub fn with_session(&self, session_id: SessionId) -> Self {
         Self {
+            authority_id: self.authority_id,
             device_id: self.device_id,
             execution_mode: self.execution_mode,
             session_id: Some(session_id),
@@ -154,6 +167,7 @@ impl AuraContext {
     /// Create new context with account identifier
     pub fn with_account(&self, account_id: AccountId) -> Self {
         Self {
+            authority_id: self.authority_id,
             device_id: self.device_id,
             execution_mode: self.execution_mode,
             session_id: self.session_id,
@@ -175,6 +189,7 @@ impl AuraContext {
         new_metadata.insert(key.into(), value.into());
 
         Self {
+            authority_id: self.authority_id,
             device_id: self.device_id,
             execution_mode: self.execution_mode,
             session_id: self.session_id,
@@ -193,6 +208,7 @@ impl AuraContext {
     /// Create new context with tracing
     pub fn with_tracing(&self, trace_id: String, span_id: String) -> Self {
         Self {
+            authority_id: self.authority_id,
             device_id: self.device_id,
             execution_mode: self.execution_mode,
             session_id: self.session_id,
@@ -211,6 +227,7 @@ impl AuraContext {
     /// Create new context with metrics enabled
     pub fn with_metrics(&self) -> Self {
         Self {
+            authority_id: self.authority_id,
             device_id: self.device_id,
             execution_mode: self.execution_mode,
             session_id: self.session_id,
@@ -229,6 +246,7 @@ impl AuraContext {
     /// Create a derived context for a new operation
     pub fn child_operation(&self, operation_id: Uuid) -> Self {
         Self {
+            authority_id: self.authority_id,
             device_id: self.device_id,
             execution_mode: self.execution_mode,
             session_id: self.session_id,
@@ -262,6 +280,9 @@ impl AuraContext {
 
 impl Default for AuraContext {
     fn default() -> Self {
-        Self::for_testing(DeviceId::new_from_entropy([3u8; 32]))
+        Self::for_testing(
+            AuthorityId::new_from_entropy([3u8; 32]),
+            DeviceId::new_from_entropy([4u8; 32]),
+        )
     }
 }

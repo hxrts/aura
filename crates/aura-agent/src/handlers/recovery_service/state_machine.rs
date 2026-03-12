@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 use telltale_vm::vm::StepResult;
 
 fn recovery_role(authority_id: AuthorityId, role_index: u16) -> ChoreographicRole {
-    ChoreographicRole::new(
-        aura_core::DeviceId::from_uuid(authority_id.0),
+    ChoreographicRole::for_authority(
+        authority_id,
         RoleIndex::new(role_index.into()).expect("role index"),
     )
 }

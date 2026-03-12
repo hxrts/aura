@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used)]
 #![allow(missing_docs)]
 
-use aura_core::identifiers::{ContextId, SessionId};
+use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
 use aura_simulator::{
     PropertyMonitoringConfig, PropertyRunReport, PropertyTrendTracker, ProtocolPropertyClass,
     ProtocolPropertySuiteIds, SimulationEffectComposer, SimulationScenarioConfig,
@@ -14,7 +14,8 @@ use uuid::Uuid;
 async fn property_monitor_ci_gate() {
     let fixture = DeviceTestFixture::new(99);
     let device_id = fixture.device_id();
-    let env = SimulationEffectComposer::for_testing(device_id)
+    let authority_id = AuthorityId::new_from_entropy([99u8; 32]);
+    let env = SimulationEffectComposer::for_testing(device_id, authority_id)
         .await
         .expect("create simulation environment");
 

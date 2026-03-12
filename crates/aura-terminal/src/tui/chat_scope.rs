@@ -1,7 +1,8 @@
 //! Chat scoping helpers tied to neighborhood traversal state.
 
 use aura_app::ui::types::{
-    chat::is_note_to_self_channel_name, Channel as AppChannel, ChatState, NeighborhoodState,
+    chat::is_note_to_self_channel_name, Channel as AppChannel, ChannelType, ChatState,
+    NeighborhoodState,
 };
 use aura_core::identifiers::ChannelId;
 
@@ -21,6 +22,47 @@ pub fn active_home_scope_id(neighborhood: &NeighborhoodState) -> String {
     } else {
         scope_id.to_string()
     }
+}
+
+/// Resolve the effective home scope for chat publication and rendering.
+///
+/// An explicit selected non-DM shared channel takes precedence over neighborhood
+/// traversal because the chat view may already have committed to a shared channel
+/// before the neighborhood projection catches up.
+#[must_use]
+pub fn effective_home_scope_id(
+    chat_state: &ChatState,
+    active_home_scope: Option<&str>,
+    selected_channel_id: Option<&str>,
+) -> Option<String> {
+    let selected_channel = selected_channel_id.and_then(|selected_id| {
+        chat_state
+            .all_channels()
+            .find(|channel| channel.id.to_string() == selected_id)
+    });
+
+    if let Some(channel) = selected_channel.filter(|channel| !is_pinned_channel(channel)) {
+        if channel.channel_type == ChannelType::Home {
+            return Some(channel.id.to_string());
+        }
+
+        if let Some(context_id) = channel.context_id {
+            if let Some(home_channel) = chat_state.all_channels().find(|candidate| {
+                candidate.channel_type == ChannelType::Home
+                    && !is_pinned_channel(candidate)
+                    && candidate.context_id == Some(context_id)
+            }) {
+                return Some(home_channel.id.to_string());
+            }
+        }
+
+        return Some(channel.id.to_string());
+    }
+
+    active_home_scope
+        .map(str::trim)
+        .filter(|scope| !scope.is_empty())
+        .map(str::to_owned)
 }
 
 /// Returns true when the channel is a DM-like stream that should stay visible.

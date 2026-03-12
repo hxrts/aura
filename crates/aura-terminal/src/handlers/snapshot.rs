@@ -3,10 +3,8 @@
 
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
-use aura_app::ui::workflows::snapshot;
-use aura_core::identifiers::AuthorityId;
-
 use crate::SnapshotAction;
+use aura_app::ui::workflows::snapshot;
 
 /// Dispatch snapshot-related CLI actions.
 ///
@@ -27,8 +25,7 @@ async fn propose_snapshot(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput>
 
     output.println("Starting snapshot proposal...");
 
-    // Convert DeviceId to AuthorityId (1:1 mapping for single-device authorities)
-    let authority_id = AuthorityId(ctx.device_id().0);
+    let authority_id = ctx.authority_id();
 
     // Use the aura-app workflow for snapshot proposal
     let fact_key = snapshot::propose_snapshot(ctx.effects(), authority_id)

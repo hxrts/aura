@@ -112,10 +112,7 @@ impl AuthServiceApi {
     }
 
     fn auth_role(authority_id: AuthorityId) -> ChoreographicRole {
-        ChoreographicRole::new(
-            DeviceId::from_uuid(authority_id.0),
-            RoleIndex::new(0).expect("role index"),
-        )
+        ChoreographicRole::for_authority(authority_id, RoleIndex::new(0).expect("role index"))
     }
 
     async fn run_vm_protocol(
@@ -212,21 +209,21 @@ impl AuthServiceApi {
                 session_id: session_id.clone(),
                 message_type: "initiate".to_string(),
                 payload: hash::hash(format!("init:{}", session_id.0).as_bytes()).to_vec(),
-                sender: DeviceId::from_uuid(authority_id.0),
+                sender: self.device_id(),
                 timestamp,
             },
             DkdMessage {
                 session_id: session_id.clone(),
                 message_type: "reveal_request".to_string(),
                 payload: hash::hash(format!("reveal:{}", session_id.0).as_bytes()).to_vec(),
-                sender: DeviceId::from_uuid(authority_id.0),
+                sender: self.device_id(),
                 timestamp,
             },
             DkdMessage {
                 session_id: session_id.clone(),
                 message_type: "key_derived".to_string(),
                 payload: hash::hash(format!("key:{}", session_id.0).as_bytes()).to_vec(),
-                sender: DeviceId::from_uuid(authority_id.0),
+                sender: self.device_id(),
                 timestamp,
             },
         ]
@@ -277,14 +274,14 @@ impl AuthServiceApi {
                 session_id: session_id.clone(),
                 message_type: "commitment".to_string(),
                 payload: hash::hash(format!("commit:{}", session_id.0).as_bytes()).to_vec(),
-                sender: DeviceId::from_uuid(authority_id.0),
+                sender: self.device_id(),
                 timestamp,
             },
             DkdMessage {
                 session_id: session_id.clone(),
                 message_type: "reveal".to_string(),
                 payload: hash::hash(format!("reveal:{}", session_id.0).as_bytes()).to_vec(),
-                sender: DeviceId::from_uuid(authority_id.0),
+                sender: self.device_id(),
                 timestamp,
             },
         ]

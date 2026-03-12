@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used)]
 #![allow(missing_docs)]
 
-use aura_core::identifiers::{ContextId, SessionId};
+use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
 use aura_simulator::{
     PropertyEvent, PropertyMonitoringConfig, PropertyStateSnapshot, ProtocolPropertyClass,
     ProtocolPropertySuiteIds, SimulationEffectComposer, SimulationScenarioConfig,
@@ -31,7 +31,8 @@ fn injected_fault_provider(
 #[tokio::test]
 async fn fault_injection_is_reported_by_property_monitor() {
     let fixture = DeviceTestFixture::new(55);
-    let env = SimulationEffectComposer::for_testing(fixture.device_id())
+    let authority_id = AuthorityId::new_from_entropy([55u8; 32]);
+    let env = SimulationEffectComposer::for_testing(fixture.device_id(), authority_id)
         .await
         .expect("create simulation environment");
 
@@ -73,7 +74,8 @@ async fn fault_injection_is_reported_by_property_monitor() {
 #[should_panic(expected = "property monitor gate expected clean run")]
 async fn monitor_gate_fails_when_fault_violation_exists() {
     let fixture = DeviceTestFixture::new(56);
-    let env = SimulationEffectComposer::for_testing(fixture.device_id())
+    let authority_id = AuthorityId::new_from_entropy([56u8; 32]);
+    let env = SimulationEffectComposer::for_testing(fixture.device_id(), authority_id)
         .await
         .expect("create simulation environment");
 

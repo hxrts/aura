@@ -16,10 +16,7 @@ impl<'a> InvitationGuardianHandler<'a> {
     }
 
     fn role(authority_id: AuthorityId) -> ChoreographicRole {
-        ChoreographicRole::new(
-            aura_core::DeviceId::from_uuid(authority_id.0),
-            RoleIndex::new(0).expect("role index"),
-        )
+        ChoreographicRole::for_authority(authority_id, RoleIndex::new(0).expect("role index"))
     }
 
     pub(super) async fn execute_guardian_invitation_principal(

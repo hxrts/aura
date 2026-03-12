@@ -475,6 +475,7 @@ impl ChatCallbacks {
                     content: content_clone.clone(),
                 };
 
+                send_ui_update_reliable(&tx, UiUpdate::MessageSendSubmitting).await;
                 send_ui_update_reliable(
                     &tx,
                     UiUpdate::MessageSent {
@@ -485,11 +486,16 @@ impl ChatCallbacks {
                 .await;
 
                 match ctx.dispatch(cmd).await {
-                    Ok(_) => {}
+                    Ok(_) => {
+                        send_ui_update_reliable(&tx, UiUpdate::MessageSendCompleted).await;
+                    }
                     Err(e) => {
                         send_ui_update_reliable(
                             &tx,
-                            UiUpdate::ToastAdded(ToastMessage::error("send", e.to_string())),
+                            UiUpdate::OperationFailed {
+                                operation: "SendMessage".to_string(),
+                                error: e.to_string(),
+                            },
                         )
                         .await;
                     }

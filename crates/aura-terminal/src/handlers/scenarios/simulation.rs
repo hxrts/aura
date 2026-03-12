@@ -226,6 +226,7 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
     let config = AgentConfig::default();
 
     let initiator_id = crate::ids::authority_id("scenario:guardian-setup:initiator");
+    let initiator_device = crate::ids::device_id("scenario:guardian-setup:initiator:device");
     let account_id = crate::ids::authority_id("scenario:guardian-setup:account");
     let guardians = vec![
         crate::ids::authority_id("guardian:alice"),
@@ -243,11 +244,16 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
             shared_transport.clone(),
         )?,
     );
-    let initiator_service =
-        RecoveryServiceApi::new(initiator_effects, AuthorityContext::new(initiator_id))?;
+    let initiator_service = RecoveryServiceApi::new(
+        initiator_effects,
+        AuthorityContext::new_with_device(initiator_id, initiator_device),
+    )?;
 
     let mut guardian_services = Vec::with_capacity(guardians.len());
     for (index, guardian_id) in guardians.iter().copied().enumerate() {
+        let guardian_device = crate::ids::device_id(&format!(
+            "scenario:guardian-setup:guardian:{index}:device"
+        ));
         #[allow(clippy::disallowed_methods)]
         let guardian_effects = Arc::new(
             AuraEffectSystem::simulation_with_shared_transport_for_authority(
@@ -257,8 +263,10 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
                 shared_transport.clone(),
             )?,
         );
-        let service =
-            RecoveryServiceApi::new(guardian_effects, AuthorityContext::new(guardian_id))?;
+        let service = RecoveryServiceApi::new(
+            guardian_effects,
+            AuthorityContext::new_with_device(guardian_id, guardian_device),
+        )?;
         guardian_services.push(service);
     }
 
