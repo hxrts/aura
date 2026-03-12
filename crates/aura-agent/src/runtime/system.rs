@@ -352,10 +352,9 @@ impl RuntimeSystem {
         let harness_mode = std::env::var_os("AURA_HARNESS_MODE").is_some();
 
         if !harness_mode {
-            if let Ok(invitation_handler) = InvitationHandler::new(AuthorityContext::new_with_device(
-                self.authority_id,
-                self.device_id(),
-            )) {
+            if let Ok(invitation_handler) = InvitationHandler::new(
+                AuthorityContext::new_with_device(self.authority_id, self.device_id()),
+            ) {
                 let effects = self.effect_system.clone();
                 let handler = invitation_handler.clone();
                 let interval = Duration::from_secs(2);

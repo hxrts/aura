@@ -217,7 +217,7 @@ pub struct IoAppProps {
 #[component]
 pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let screen = hooks.use_state(|| Screen::Neighborhood);
-    let should_exit = hooks.use_state(|| false);
+    let mut should_exit = hooks.use_state(|| false);
     let mut system = hooks.use_context_mut::<SystemContext>();
 
     // Pure TUI state machine - holds all UI state for deterministic transitions
@@ -1502,6 +1502,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 );
                                 state.account_created_queued();
                             });
+                            if show_setup {
+                                should_exit.set(true);
+                            }
                         }
 
                         // =========================================================================

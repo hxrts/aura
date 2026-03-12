@@ -178,7 +178,7 @@ async fn demo_accepting_contact_invites_updates_peer_count() {
     let test_dir = support::unique_test_dir("aura-demo-peer-count-invites");
 
     // Persist a demo-mode account config so invitation acceptance has bootstrap state.
-    let (authority_id, context_id) = create_account(&test_dir, bob_device_id_str, "Bob")
+    let (authority_id, context_id) = create_account(&test_dir, "Bob")
         .await
         .expect("create_account should succeed");
 

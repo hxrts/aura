@@ -67,10 +67,9 @@ async fn setup_demo_env(seed: u64) -> DemoTestEnv {
 
     let device_id_str = "demo:bob".to_string();
     let nickname_suggestion = "DemoUser".to_string();
-    let (authority_id, context_id) =
-        create_account(&test_dir, &device_id_str, &nickname_suggestion)
-            .await
-            .expect("Failed to create account");
+    let (authority_id, context_id) = create_account(&test_dir, &nickname_suggestion)
+        .await
+        .expect("Failed to create account");
 
     let shared_transport = SharedTransport::new();
     let effect_ctx =
@@ -253,10 +252,9 @@ async fn demo_mode_enrollment_immediately_after_account_creation() {
     // Create account (this is what happens in the account setup wizard)
     let device_id_str = "demo:bob".to_string();
     let nickname_suggestion = "NewUser".to_string();
-    let (authority_id, context_id) =
-        create_account(&test_dir, &device_id_str, &nickname_suggestion)
-            .await
-            .expect("Failed to create account");
+    let (authority_id, context_id) = create_account(&test_dir, &nickname_suggestion)
+        .await
+        .expect("Failed to create account");
 
     // Build agent immediately
     let shared_transport = SharedTransport::new();

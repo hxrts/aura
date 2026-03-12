@@ -184,11 +184,10 @@ impl AndroidPresetBuilder {
                 "application_id is required for Android preset. Call .application_id(\"com.example\") before building."
             ))?;
 
-            // Get or generate authority ID
-            let authority_id = self.authority_id.unwrap_or_else(|| {
-                let id_str = format!("android:{}", application_id);
-                AuthorityId::new_from_entropy(hash::hash(id_str.as_bytes()))
-            });
+            let authority_id = self.authority_id.ok_or(BuildError::BootstrapRequired {
+                preset: "android",
+                identity: "authority_id",
+            })?;
 
             // Derive context ID if not set
             let context_id = self.context_id.unwrap_or_else(|| {

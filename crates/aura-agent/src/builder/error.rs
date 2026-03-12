@@ -5,6 +5,14 @@ use std::fmt;
 /// Error type for runtime builder operations
 #[derive(Debug)]
 pub enum BuildError {
+    /// Runtime construction requires explicit bootstrap identity first
+    BootstrapRequired {
+        /// Preset/runtime surface requiring bootstrap
+        preset: &'static str,
+        /// Missing identity field
+        identity: &'static str,
+    },
+
     /// A required configuration value is missing
     MissingRequired(&'static str),
 
@@ -30,6 +38,12 @@ pub enum BuildError {
 impl fmt::Display for BuildError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::BootstrapRequired { preset, identity } => {
+                write!(
+                    f,
+                    "{preset} bootstrap required: missing explicit {identity}; create or load an account identity first"
+                )
+            }
             Self::MissingRequired(field) => {
                 write!(f, "missing required configuration: {}", field)
             }

@@ -65,7 +65,7 @@ impl CliPresetBuilder {
 
     /// Set the authority ID for this agent.
     ///
-    /// If not set, a default authority ID is generated.
+    /// This must be supplied explicitly from persisted bootstrap state.
     pub fn authority(mut self, id: AuthorityId) -> Self {
         self.authority_id = Some(id);
         self
@@ -128,12 +128,10 @@ impl CliPresetBuilder {
             })?;
         }
 
-        // Get or generate authority ID
-        let authority_id = self.authority_id.unwrap_or_else(|| {
-            // Generate a deterministic authority ID from data directory path
-            let id_str = format!("cli:{}", data_dir.display());
-            AuthorityId::new_from_entropy(hash::hash(id_str.as_bytes()))
-        });
+        let authority_id = self.authority_id.ok_or(BuildError::BootstrapRequired {
+            preset: "cli",
+            identity: "authority_id",
+        })?;
 
         // Derive context ID if not set
         let context_id = self.context_id.unwrap_or_else(|| {
@@ -186,12 +184,10 @@ impl CliPresetBuilder {
             })?;
         }
 
-        // Get or generate authority ID
-        let authority_id = self.authority_id.unwrap_or_else(|| {
-            // Generate a deterministic authority ID from data directory path
-            let id_str = format!("cli:{}", data_dir.display());
-            AuthorityId::new_from_entropy(hash::hash(id_str.as_bytes()))
-        });
+        let authority_id = self.authority_id.ok_or(BuildError::BootstrapRequired {
+            preset: "cli",
+            identity: "authority_id",
+        })?;
 
         // Build using existing infrastructure
         let runtime = match self.execution_mode {

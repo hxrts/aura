@@ -25,6 +25,10 @@ check_pattern() {
 case "$mode" in
   legacy)
     check_pattern \
+      "removed authority/device helper constructor detected" \
+      'AuthorityId::for_device\(|DeviceId::for_authority\('
+
+    check_pattern \
       "legacy authority-from-device UUID coercion detected" \
       'AuthorityId::from_uuid\(([^)]*device[^)]*)\)|AuthorityId\([^)]*device[^)]*\)'
 
@@ -36,9 +40,14 @@ case "$mode" in
       "legacy device-from-authority UUID coercion detected" \
       'DeviceId::from_uuid\(([^)]*authority[^)]*)\)|DeviceId\([^)]*authority[^)]*\)'
 
+    check_pattern \
+      "open-coded authority-from-device derivation detected outside canonical bridge" \
+      'derived_uuid_with_bytes\(\s*AUTHORITY_FOR_DEVICE_DOMAIN' \
+      --glob '!crates/aura-core/src/types/identifiers.rs'
+
     if [[ "$violations" -ne 0 ]]; then
       echo "device-id-legacy: found $violations legacy authority/device coercion pattern(s)"
-      echo "use AuthorityId::for_device(...), DeviceId::for_authority(...), or explicit authority-aware role constructors instead"
+      echo "use derive_legacy_authority_from_device(...) only, with explicit metadata"
       exit 1
     fi
 

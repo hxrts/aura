@@ -4,13 +4,14 @@
 use aura_core::{AuraConformanceArtifactV1, AuraError, ConformanceSurfaceName};
 // Import app types from aura-app (pure layer)
 use aura_app::ui::prelude::*;
+use aura_app::ui::types::{BootstrapEvent, BootstrapEventKind, BootstrapSurface};
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
-use aura_agent::core::AgentConfig;
-use aura_agent::{AgentBuilder, EffectContext};
+use aura_agent::core::{default_storage_path, AgentConfig};
+use aura_agent::{AgentBuilder, BuildError, EffectContext};
 use aura_core::effects::ExecutionMode;
 use aura_terminal::cli::commands::{cli_parser, Commands, GlobalArgs, ReplayArgs, ThresholdArgs};
-use aura_terminal::handlers::CliOutput;
+use aura_terminal::handlers::{tui::try_load_account_from_path, CliOutput};
 use aura_terminal::ids;
 use aura_terminal::{CliHandler, SyncAction};
 use bpaf::{Args, Parser};
@@ -79,17 +80,60 @@ async fn main() -> Result<(), AuraError> {
         return Ok(());
     }
 
-    // Create CLI device ID and identifiers
+    if let Commands::Version = &command {
+        CliOutput::new()
+            .println(format!("aura {}", env!("CARGO_PKG_VERSION")))
+            .println(format!("Package: {}", env!("CARGO_PKG_NAME")))
+            .println(format!("Description: {}", env!("CARGO_PKG_DESCRIPTION")))
+            .println(format!(
+                "Repository: {} {}",
+                env!("CARGO_PKG_REPOSITORY"),
+                env!("CARGO_PKG_VERSION")
+            ))
+            .render();
+        return Ok(());
+    }
+
+    if let Commands::Tui(tui_args) = &command {
+        aura_terminal::handlers::tui::handle_tui(tui_args)
+            .await
+            .map_err(|e| AuraError::agent(format!("{e}")))?;
+        return Ok(());
+    }
+
+    // Create CLI device ID. Authority/context must come from persisted bootstrap state.
     let device_id = ids::device_id("cli:main-device");
-    let authority_id = ids::authority_id("cli:main-authority");
-    let context_id = ids::context_id("cli:main-context");
+    let storage_base_path = derive_storage_base_path(&command, args.config.as_ref())
+        .unwrap_or_else(default_storage_path);
+    let loaded_account = try_load_account_from_path(&storage_base_path)
+        .await
+        .map_err(|e| AuraError::agent(format!("failed to load persisted account: {e}")))?;
+    let (authority_id, context_id) = match loaded_account {
+        aura_terminal::handlers::tui::AccountLoadResult::Loaded { authority, context } => {
+            (authority, context)
+        }
+        aura_terminal::handlers::tui::AccountLoadResult::NotFound => {
+            let bootstrap_event = BootstrapEvent::new(
+                BootstrapSurface::Terminal,
+                BootstrapEventKind::RuntimeBootstrapRequired,
+            );
+            CliOutput::new()
+                .eprintln(bootstrap_event.to_string())
+                .render();
+            return Err(AuraError::agent(
+                BuildError::BootstrapRequired {
+                    preset: "terminal",
+                    identity: "persisted_account_identity",
+                }
+                .to_string(),
+            ));
+        }
+    };
     let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
 
     // Initialize agent using CLI preset (unified backend)
     let mut agent_config = AgentConfig::default();
-    if let Some(base_path) = derive_storage_base_path(&command, args.config.as_ref()) {
-        agent_config.storage.base_path = base_path;
-    }
+    agent_config.storage.base_path = storage_base_path;
     let agent = AgentBuilder::cli()
         .with_config(agent_config)
         .authority(authority_id)
@@ -204,14 +248,8 @@ async fn main() -> Result<(), AuraError> {
                 .map_err(|e| AuraError::agent(format!("{e}")))?;
         }
         #[cfg(feature = "terminal")]
-        Commands::Tui(args) => cli_handler
-            .handle_tui(&args)
-            .await
-            .map_err(|e| AuraError::agent(format!("{e}")))?,
-        Commands::Version => cli_handler
-            .handle_version()
-            .await
-            .map_err(|e| AuraError::agent(format!("{e}")))?,
+        Commands::Tui(_) => unreachable!("tui command is handled before runtime boot"),
+        Commands::Version => unreachable!("version command is handled before runtime boot"),
     }
 
     Ok(())

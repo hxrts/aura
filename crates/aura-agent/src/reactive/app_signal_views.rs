@@ -959,7 +959,22 @@ impl ChatSignalView {
             .iter()
             .any(|home| home.member(&sender_id).is_some());
         if has_member_roster && !sender_is_member {
-            return false;
+            let chat_state = match self.reactive.read(&*CHAT_SIGNAL).await {
+                Ok(chat) => chat,
+                Err(_) => return true,
+            };
+            if let Some(channel) = chat_state.channel(&channel_id) {
+                if channel.member_ids.contains(&sender_id) || !channel.member_ids.is_empty() {
+                    return true;
+                }
+            }
+            tracing::debug!(
+                context_id = %context_id,
+                channel_id = %channel_id,
+                sender_id = %sender_id,
+                "Allowing inbound message despite stale membership roster"
+            );
+            return true;
         }
 
         true

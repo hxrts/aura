@@ -3,17 +3,13 @@
 //! This module contains account and threshold validation operations that are
 //! portable across all frontends. It follows the reactive signal pattern.
 //!
-//! ## ID Derivation
-//!
-//! Authority and Context IDs can be deterministically derived from a device ID
-//! string. This ensures the same device_id always produces the same account.
-//!
 //! ## Account Backup
 //!
 //! Account backup operations (encode/decode/validate) are portable business
 //! logic. The actual file I/O for export/import remains in aura-terminal.
 
-use crate::workflows::{context, runtime::require_runtime, settings, system, time};
+use crate::views::PendingAccountBootstrap;
+use crate::workflows::{context, runtime::require_runtime, settings, system};
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::identifiers::{AuthorityId, ContextId};
@@ -27,6 +23,26 @@ pub struct ThresholdConfig {
     pub threshold: u32,
     /// Total number of devices/shares (n in k-of-n)
     pub num_devices: u32,
+}
+
+/// Shared outcome of reconciling pending first-run runtime bootstrap state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingRuntimeBootstrapResolution {
+    /// Whether the runtime has a persisted account configuration after reconciliation.
+    pub account_ready: bool,
+    /// What the reconciliation step had to do.
+    pub action: PendingRuntimeBootstrapAction,
+}
+
+/// Action taken while reconciling pending first-run runtime bootstrap state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingRuntimeBootstrapAction {
+    /// Nothing was pending.
+    None,
+    /// Pending bootstrap metadata was consumed to initialize the runtime account.
+    InitializedFromPending,
+    /// Pending bootstrap metadata was stale because the runtime account already existed.
+    ClearedStalePending,
 }
 
 impl ThresholdConfig {
@@ -265,6 +281,15 @@ pub fn can_submit_account_setup(
     is_valid_nickname_suggestion(nickname_suggestion) && !is_creating && !is_success
 }
 
+/// Prepare typed first-run bootstrap metadata from nickname input.
+pub fn prepare_pending_account_bootstrap(
+    nickname_suggestion: &str,
+) -> Result<PendingAccountBootstrap, AuraError> {
+    let nickname_suggestion = validate_nickname_suggestion(nickname_suggestion)
+        .map_err(|error| AuraError::invalid(error.to_string()))?;
+    Ok(PendingAccountBootstrap::new(nickname_suggestion))
+}
+
 /// Returns true when a runtime-backed account configuration exists.
 pub async fn has_runtime_account_config(
     app_core: &Arc<RwLock<AppCore>>,
@@ -281,14 +306,52 @@ pub async fn initialize_runtime_account(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
 ) -> Result<(), AuraError> {
+    let pending_bootstrap = prepare_pending_account_bootstrap(&nickname_suggestion)?;
+    let runtime = require_runtime(app_core).await?;
+    runtime
+        .initialize_account(&pending_bootstrap.nickname_suggestion)
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to initialize account: {e}")))?;
+    finalize_runtime_account_bootstrap(app_core, pending_bootstrap.nickname_suggestion).await
+}
+
+/// Reconcile pending first-run runtime bootstrap metadata against the current runtime state.
+pub async fn reconcile_pending_runtime_account_bootstrap(
+    app_core: &Arc<RwLock<AppCore>>,
+    pending_bootstrap: Option<PendingAccountBootstrap>,
+) -> Result<PendingRuntimeBootstrapResolution, AuraError> {
+    let account_ready = has_runtime_account_config(app_core).await?;
+    match (account_ready, pending_bootstrap) {
+        (false, Some(pending_bootstrap)) => {
+            initialize_runtime_account(app_core, pending_bootstrap.nickname_suggestion).await?;
+            Ok(PendingRuntimeBootstrapResolution {
+                account_ready: true,
+                action: PendingRuntimeBootstrapAction::InitializedFromPending,
+            })
+        }
+        (true, Some(_)) => Ok(PendingRuntimeBootstrapResolution {
+            account_ready: true,
+            action: PendingRuntimeBootstrapAction::ClearedStalePending,
+        }),
+        (ready, None) => Ok(PendingRuntimeBootstrapResolution {
+            account_ready: ready,
+            action: PendingRuntimeBootstrapAction::None,
+        }),
+    }
+}
+
+/// Complete first-run runtime bootstrap after account metadata already exists.
+///
+/// This path is used when a frontend has already persisted explicit bootstrap
+/// identity state and then restarts into a real runtime that must finish
+/// provisioning local home state, signing keys, and reactive projections.
+pub async fn finalize_runtime_account_bootstrap(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname_suggestion: String,
+) -> Result<(), AuraError> {
     let nickname_suggestion = validate_nickname_suggestion(&nickname_suggestion)
         .map_err(|error| AuraError::invalid(error.to_string()))?;
     let home_name = format!("{nickname_suggestion}'s Home");
-    let runtime = require_runtime(app_core).await?;
-    runtime
-        .initialize_account(&nickname_suggestion)
-        .await
-        .map_err(|e| AuraError::agent(format!("Failed to initialize account: {e}")))?;
     context::create_home(app_core, Some(home_name), None).await?;
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -306,7 +369,7 @@ pub async fn initialize_runtime_account(
                 }
             }
             if attempt + 1 < SIGNING_KEY_ATTEMPTS {
-                let _ = time::sleep_ms(app_core, BOOTSTRAP_RETRY_MS).await;
+                let _ = crate::workflows::time::sleep_ms(app_core, BOOTSTRAP_RETRY_MS).await;
             }
         }
     }

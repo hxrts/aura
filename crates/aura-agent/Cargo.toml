@@ -74,6 +74,7 @@ cfg-if = "1"
 dirs = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["net", "rt-multi-thread"] }
 get_if_addrs = "0.5"
 tokio-tungstenite = { workspace = true }
 
@@ -123,6 +124,7 @@ proptest = { workspace = true }
 telltale-vm = { workspace = true, features = ["multi-thread"] }
 telltale-types = { workspace = true }
 telltale-theory = { workspace = true }
+tempfile = { workspace = true }
 wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

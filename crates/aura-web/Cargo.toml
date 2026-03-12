@@ -18,11 +18,13 @@ web = ["dioxus/web"]
 aura-app = { path = "../aura-app", features = ["web-js"] }
 aura-agent = { path = "../aura-agent", features = ["web"] }
 aura-core = { path = "../aura-core" }
+aura-effects = { path = "../aura-effects" }
 aura-ui = { path = "../aura-ui" }
 async-lock = { workspace = true }
 cfg-if = "1"
 dioxus = { version = "0.7", default-features = false, features = ["launch", "macro", "hooks", "signals", "html"] }
 futures = { workspace = true }
+serde_json = { workspace = true }
 tracing = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

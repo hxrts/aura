@@ -20,9 +20,11 @@ pub use authority::{Authority, AuthorityRef, AuthorityState, TreeStateSummary};
 pub use epochs::*;
 pub use flow::{FlowBudget, FlowCost, FlowNonce, Receipt, ReceiptSig};
 pub use identifiers::{
-    AccountId, AuthorityId, ChannelId, ContextId, DataId, DeviceId, DkdContextId, EventId,
-    EventNonce, GroupId, GuardianId, HomeId, IndividualId, IndividualIdExt, MemberId,
-    MessageContext, NeighborhoodId, OperationId, RelayId, SessionId,
+    derive_legacy_authority_from_device, AccountId, AuthorityId, ChannelId, ContextId, DataId,
+    DeviceId, DkdContextId, EventId, EventNonce, GroupId, GuardianId, HomeId, IndividualId,
+    IndividualIdExt, LegacyAuthorityFromDeviceDerivation, LegacyAuthorityFromDeviceError,
+    LegacyAuthorityFromDeviceReason, LegacyAuthorityFromDeviceRequest, MemberId, MessageContext,
+    NeighborhoodId, OperationId, RelayId, SessionId,
 };
 pub use participants::{
     FrostThreshold, InvalidThresholdError, NetworkAddress, NetworkAddressError,

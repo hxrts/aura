@@ -21,35 +21,53 @@ cfg_if! {
         use aura_app::ui::workflows::runtime as runtime_workflows;
         use aura_app::ui::workflows::settings as settings_workflows;
         use aura_app::ui::workflows::time as time_workflows;
-        use aura_app::ui::types::InvitationBridgeType;
-        use aura_app::ui_contract::{QuiescenceSnapshot, next_projection_revision};
+        use aura_app::ui::types::{
+            BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity, BootstrapSurface,
+            InvitationBridgeType, PendingAccountBootstrap,
+            WEB_PENDING_ACCOUNT_BOOTSTRAP_STORAGE_SUFFIX,
+            WEB_SELECTED_RUNTIME_IDENTITY_STORAGE_SUFFIX,
+        };
         use aura_core::{identifiers::AuthorityId, DeviceId};
         use aura_app::ui::contract::{
-            ControlId, FieldId, OperationId, OperationInstanceId, OperationSnapshot,
-            OperationState, ScreenId, UiReadiness, UiSnapshot,
+            ControlId, FieldId, OperationId, OperationState, ScreenId, UiReadiness,
         };
+        use aura_effects::{new_authority_id, new_device_id, RealRandomHandler};
         use aura_ui::{AuraUiRoot, UiController};
         use dioxus::dioxus_core::schedule_update;
         use dioxus::prelude::*;
         use std::sync::Arc;
-        use wasm_bindgen::closure::Closure;
-        use wasm_bindgen::JsCast;
         use wasm_bindgen_futures::spawn_local;
         use web_clipboard::WebClipboardAdapter;
 
         const WEB_STORAGE_PREFIX: &str = "aura_";
         const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
+        const LEGACY_SELECTED_AUTHORITY_STORAGE_SUFFIX: &str = "selected_authority";
+        const LEGACY_SELECTED_DEVICE_STORAGE_SUFFIX: &str = "selected_device";
 
-        fn selected_authority_key(storage_prefix: &str) -> String {
-            format!("{storage_prefix}selected_authority")
+        fn selected_runtime_identity_key(storage_prefix: &str) -> String {
+            format!(
+                "{storage_prefix}{}",
+                WEB_SELECTED_RUNTIME_IDENTITY_STORAGE_SUFFIX
+            )
         }
 
-        fn selected_device_key(storage_prefix: &str) -> String {
-            format!("{storage_prefix}selected_device")
+        fn legacy_selected_authority_key(storage_prefix: &str) -> String {
+            format!("{storage_prefix}{LEGACY_SELECTED_AUTHORITY_STORAGE_SUFFIX}")
+        }
+
+        fn legacy_selected_device_key(storage_prefix: &str) -> String {
+            format!("{storage_prefix}{LEGACY_SELECTED_DEVICE_STORAGE_SUFFIX}")
         }
 
         fn pending_device_enrollment_code_key(storage_prefix: &str) -> String {
             format!("{storage_prefix}pending_device_enrollment_code")
+        }
+
+        fn pending_account_bootstrap_key(storage_prefix: &str) -> String {
+            format!(
+                "{storage_prefix}{}",
+                WEB_PENDING_ACCOUNT_BOOTSTRAP_STORAGE_SUFFIX
+            )
         }
 
         fn sanitize_storage_segment(raw: &str) -> String {
@@ -122,32 +140,102 @@ cfg_if! {
             raw.parse::<DeviceId>().ok()
         }
 
-        fn persist_selected_authority(
+        fn load_selected_runtime_identity(
             storage_key: &str,
-            authority_id: &AuthorityId,
-        ) -> Result<(), String> {
-            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
-            let storage = window
-                .local_storage()
-                .map_err(|error| format!("localStorage unavailable: {:?}", error))?
-                .ok_or_else(|| "localStorage unavailable".to_string())?;
-            storage
-                .set_item(storage_key, &authority_id.to_string())
-                .map_err(|error| format!("failed to persist selected authority: {:?}", error))
+            legacy_authority_key: &str,
+            legacy_device_key: &str,
+        ) -> Option<BootstrapRuntimeIdentity> {
+            let window = web_sys::window()?;
+            let storage = window.local_storage().ok().flatten()?;
+
+            if let Some(raw) = storage.get_item(storage_key).ok().flatten() {
+                if let Ok(identity) = serde_json::from_str::<BootstrapRuntimeIdentity>(&raw) {
+                    return Some(identity);
+                }
+            }
+
+            let authority_id = load_selected_authority(legacy_authority_key)?;
+            let device_id = load_selected_device(legacy_device_key)?;
+            Some(BootstrapRuntimeIdentity::new(authority_id, device_id))
         }
 
-        fn persist_selected_device(
+        fn persist_selected_runtime_identity(
             storage_key: &str,
-            device_id: &DeviceId,
+            identity: &BootstrapRuntimeIdentity,
         ) -> Result<(), String> {
             let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
             let storage = window
                 .local_storage()
                 .map_err(|error| format!("localStorage unavailable: {:?}", error))?
                 .ok_or_else(|| "localStorage unavailable".to_string())?;
+            let raw = serde_json::to_string(identity)
+                .map_err(|error| format!("failed to serialize runtime identity: {error}"))?;
             storage
-                .set_item(storage_key, &device_id.to_string())
-                .map_err(|error| format!("failed to persist selected device: {:?}", error))
+                .set_item(storage_key, &raw)
+                .map_err(|error| format!("failed to persist selected runtime identity: {:?}", error))
+        }
+
+        fn clear_storage_key(storage_key: &str) -> Result<(), String> {
+            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
+            let storage = window
+                .local_storage()
+                .map_err(|error| format!("localStorage unavailable: {:?}", error))?
+                .ok_or_else(|| "localStorage unavailable".to_string())?;
+            storage
+                .remove_item(storage_key)
+                .map_err(|error| format!("failed to clear localStorage key {storage_key}: {:?}", error))
+        }
+
+        fn load_pending_account_bootstrap(storage_key: &str) -> Option<PendingAccountBootstrap> {
+            let window = web_sys::window()?;
+            let storage = window.local_storage().ok().flatten()?;
+            let raw = storage.get_item(storage_key).ok().flatten()?;
+            serde_json::from_str(&raw).ok()
+        }
+
+        fn persist_pending_account_bootstrap(
+            storage_key: &str,
+            pending_bootstrap: &PendingAccountBootstrap,
+        ) -> Result<(), String> {
+            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
+            let storage = window
+                .local_storage()
+                .map_err(|error| format!("localStorage unavailable: {:?}", error))?
+                .ok_or_else(|| "localStorage unavailable".to_string())?;
+            let raw = serde_json::to_string(pending_bootstrap)
+                .map_err(|error| format!("failed to serialize pending account bootstrap: {error}"))?;
+            storage
+                .set_item(storage_key, &raw)
+                .map_err(|error| format!("failed to persist pending account bootstrap: {:?}", error))
+        }
+
+        async fn stage_initial_web_account_bootstrap(nickname: &str) -> Result<(), String> {
+            let pending_bootstrap = account_workflows::prepare_pending_account_bootstrap(nickname)
+                .map_err(|error| error.to_string())?;
+            let storage_prefix = active_storage_prefix();
+            let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
+            let pending_account_key = pending_account_bootstrap_key(&storage_prefix);
+            let random = RealRandomHandler::new();
+            let authority_id = new_authority_id(&random).await;
+            let device_id = new_device_id(&random).await;
+            let runtime_identity = BootstrapRuntimeIdentity::new(authority_id, device_id);
+
+            persist_selected_runtime_identity(&runtime_identity_key, &runtime_identity)?;
+            persist_pending_account_bootstrap(&pending_account_key, &pending_bootstrap)?;
+
+            let staged_event = BootstrapEvent::new(
+                BootstrapSurface::Web,
+                BootstrapEventKind::PendingBootstrapStaged,
+            );
+            web_sys::console::log_1(&staged_event.to_string().into());
+            web_sys::console::log_1(
+                &format!(
+                    "[web-bootstrap] staged_initial_account authority={authority_id};device={device_id};nickname={}",
+                    pending_bootstrap.nickname_suggestion
+                )
+                .into(),
+            );
+            Ok(())
         }
 
         fn install_harness_instrumentation(controller: Arc<UiController>) {
@@ -213,170 +301,247 @@ cfg_if! {
 
         async fn bootstrap_controller() -> Result<BootstrapState, String> {
             let storage_prefix = active_storage_prefix();
-            let authority_storage_key = selected_authority_key(&storage_prefix);
-            let device_storage_key = selected_device_key(&storage_prefix);
-            let pending_device_code_key = pending_device_enrollment_code_key(&storage_prefix);
-            let selected_authority = load_selected_authority(&authority_storage_key);
-            let selected_device = load_selected_device(&device_storage_key);
+            let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
+            let legacy_authority_key = legacy_selected_authority_key(&storage_prefix);
+            let legacy_device_key = legacy_selected_device_key(&storage_prefix);
+            let pending_account_key = pending_account_bootstrap_key(&storage_prefix);
+            let selected_runtime_identity = load_selected_runtime_identity(
+                &runtime_identity_key,
+                &legacy_authority_key,
+                &legacy_device_key,
+            );
+            let pending_account_bootstrap = load_pending_account_bootstrap(&pending_account_key);
             web_sys::console::log_1(
                 &format!(
-                    "[web-bootstrap] storage_prefix={storage_prefix};selected_authority={:?};selected_device={:?}",
-                    selected_authority, selected_device
+                    "[web-bootstrap] storage_prefix={storage_prefix};selected_runtime_identity={:?};pending_account_bootstrap={:?}",
+                    selected_runtime_identity, pending_account_bootstrap
                 )
                 .into(),
             );
             let harness_instance = harness_instance_id();
-            let builder = AgentBuilder::web().storage_prefix(&storage_prefix);
-            let builder = if let Some(authority_id) = selected_authority {
-                builder.authority(authority_id)
-            } else {
-                builder
-            };
-            let builder = if let Some(device_id) = selected_device {
+            let clipboard = Arc::new(WebClipboardAdapter::default());
+            if let Some(runtime_identity) = selected_runtime_identity {
+                let authority_id = runtime_identity.authority_id;
+                let device_id = runtime_identity.device_id;
                 let config = aura_agent::core::AgentConfig {
                     device_id,
                     ..Default::default()
                 };
-                builder.with_config(config)
-            } else {
-                builder
-            };
-
-            let agent = Arc::new(
-                builder
-                    .build()
-                    .await
-                    .map_err(|error| format!("failed to build web runtime: {error}"))?,
-            );
-            web_sys::console::log_1(
-                &format!(
-                    "[web-bootstrap] runtime_authority={};runtime_device={}",
-                    agent.authority_id(),
-                    agent.runtime().device_id()
-                )
-                .into(),
-            );
-            let account_ready = agent
-                .clone()
-                .as_runtime_bridge()
-                .has_account_config()
-                .await
-                .map_err(|error| format!("failed to load account bootstrap state: {error}"))?;
-
-            let current_authority = agent.authority_id().clone();
-            if let Err(error) = persist_selected_authority(&authority_storage_key, &current_authority)
-            {
-                web_sys::console::warn_1(
-                    &format!("failed to persist selected authority: {error}").into(),
+                let agent = Arc::new(
+                    AgentBuilder::web()
+                        .storage_prefix(&storage_prefix)
+                        .authority(authority_id)
+                        .with_config(config)
+                        .build()
+                        .await
+                        .map_err(|error| format!("failed to build web runtime: {error}"))?,
                 );
-            }
+                web_sys::console::log_1(
+                    &format!(
+                        "[web-bootstrap] runtime_authority={};runtime_device={}",
+                        agent.authority_id(),
+                        agent.runtime().device_id()
+                    )
+                    .into(),
+                );
 
-            let app_core = Arc::new(RwLock::new(
-                AppCore::with_runtime(AppConfig::default(), agent.clone().as_runtime_bridge())
-                    .map_err(|error| format!("failed to initialize AppCore: {error}"))?,
-            ));
+                let app_core = Arc::new(RwLock::new(
+                    AppCore::with_runtime(AppConfig::default(), agent.clone().as_runtime_bridge())
+                        .map_err(|error| format!("failed to initialize AppCore: {error}"))?,
+                ));
 
-            let ceremony_agent = agent.clone();
-            let ceremony_app_core = app_core.clone();
-            spawn(async move {
-                loop {
-                    let _ = time_workflows::sleep_ms(&ceremony_app_core, 500).await;
-                    if let Err(error) = ceremony_agent.process_ceremony_acceptances().await {
-                        web_sys::console::debug_1(
-                            &format!("process_ceremony_acceptances error: {error}").into(),
-                        );
-                    }
-                }
-            });
-
-            AppCore::init_signals_with_hooks(&app_core)
-                .await
-                .map_err(|error| format!("failed to initialize app signals: {error}"))?;
-
-            let clipboard = Arc::new(WebClipboardAdapter::default());
-            let controller = Arc::new(UiController::with_authority_switcher(
-                app_core,
-                clipboard,
-                Some(Arc::new(|authority_id: AuthorityId| {
-                    let storage_prefix = active_storage_prefix();
-                    let authority_storage_key = selected_authority_key(&storage_prefix);
-                    if let Err(error) =
-                        persist_selected_authority(&authority_storage_key, &authority_id)
-                    {
-                        web_sys::console::error_1(
-                            &format!("failed to persist authority switch: {error}").into(),
-                        );
-                        return;
-                    }
-                    if let Err(error) = reload_page() {
-                        web_sys::console::error_1(
-                            &format!("failed to reload after authority switch: {error}").into(),
-                        );
-                    }
-                })),
-            ));
-            controller.set_account_setup_state(account_ready, "", None);
-            install_harness_instrumentation(controller.clone());
-
-            if account_ready {
-                if let Err(error) = settings_workflows::refresh_settings_from_runtime(
-                    controller.app_core(),
-                )
-                .await
-                {
-                    web_sys::console::warn_1(
-                        &format!("failed to seed settings signal during bootstrap: {error}")
-                            .into(),
-                        );
-                }
-                match runtime_workflows::require_runtime(controller.app_core()).await {
-                    Ok(runtime) => {
-                        let runtime_devices = runtime.list_devices().await;
-                        match settings_workflows::get_settings(controller.app_core()).await {
-                            Ok(settings) => web_sys::console::log_1(
-                                &format!(
-                                    "[web-bootstrap] settings_seeded runtime_devices={:?};settings_devices={:?}",
-                                    runtime_devices
-                                        .iter()
-                                        .map(|device| device.id.to_string())
-                                        .collect::<Vec<_>>(),
-                                    settings
-                                        .devices
-                                        .iter()
-                                        .map(|device| device.id.clone())
-                                        .collect::<Vec<_>>()
-                                )
-                                .into(),
-                            ),
-                            Err(error) => web_sys::console::warn_1(
-                                &format!(
-                                    "[web-bootstrap] settings_seeded runtime_devices={:?};settings_error={error}",
-                                    runtime_devices
-                                        .iter()
-                                        .map(|device| device.id.to_string())
-                                        .collect::<Vec<_>>()
-                                )
-                                .into(),
-                            ),
+                let ceremony_agent = agent.clone();
+                let ceremony_app_core = app_core.clone();
+                spawn(async move {
+                    loop {
+                        let _ = time_workflows::sleep_ms(&ceremony_app_core, 500).await;
+                        if let Err(error) = ceremony_agent.process_ceremony_acceptances().await {
+                            web_sys::console::debug_1(
+                                &format!("process_ceremony_acceptances error: {error}").into(),
+                            );
                         }
                     }
-                    Err(error) => web_sys::console::warn_1(
-                        &format!("[web-bootstrap] failed to inspect runtime devices: {error}")
-                            .into(),
-                    ),
-                }
-            }
+                });
 
-            controller.push_log("runtime bootstrap enabled in web shell");
-            if let Some(instance_id) = harness_instance {
-                controller.push_log(&format!(
-                    "web harness instance {instance_id} booted in testing mode"
+                AppCore::init_signals_with_hooks(&app_core)
+                    .await
+                    .map_err(|error| format!("failed to initialize app signals: {error}"))?;
+
+                    let bootstrap_resolution =
+                    account_workflows::reconcile_pending_runtime_account_bootstrap(
+                        &app_core,
+                        pending_account_bootstrap.clone(),
+                    )
+                    .await
+                    .map_err(|error| {
+                        format!("failed to reconcile pending web account bootstrap: {error}")
+                    })?;
+                let account_ready = bootstrap_resolution.account_ready;
+
+                if bootstrap_resolution.action
+                    != account_workflows::PendingRuntimeBootstrapAction::None
+                {
+                    let reconciled_event = BootstrapEvent::new(
+                        BootstrapSurface::Web,
+                        BootstrapEventKind::PendingBootstrapReconciled,
+                    );
+                    web_sys::console::log_1(&reconciled_event.to_string().into());
+                    clear_storage_key(&pending_account_key)?;
+                }
+
+                let current_runtime_identity = BootstrapRuntimeIdentity::new(
+                    agent.authority_id().clone(),
+                    agent.runtime().device_id(),
+                );
+                if let Err(error) = persist_selected_runtime_identity(
+                    &runtime_identity_key,
+                    &current_runtime_identity,
+                ) {
+                    web_sys::console::warn_1(
+                        &format!("failed to persist selected runtime identity: {error}").into(),
+                    );
+                }
+                let _ = clear_storage_key(&legacy_authority_key);
+                let _ = clear_storage_key(&legacy_device_key);
+
+                let current_device_id = current_runtime_identity.device_id;
+                let controller = Arc::new(UiController::with_authority_switcher(
+                    app_core,
+                    clipboard,
+                    Some(Arc::new(move |authority_id: AuthorityId| {
+                        let storage_prefix = active_storage_prefix();
+                        let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
+                        let legacy_authority_key = legacy_selected_authority_key(&storage_prefix);
+                        let legacy_device_key = legacy_selected_device_key(&storage_prefix);
+                        let runtime_identity = load_selected_runtime_identity(
+                            &runtime_identity_key,
+                            &legacy_authority_key,
+                            &legacy_device_key,
+                        )
+                        .unwrap_or_else(|| {
+                            BootstrapRuntimeIdentity::new(authority_id, current_device_id.clone())
+                        });
+                        let updated_identity = BootstrapRuntimeIdentity::new(
+                            authority_id,
+                            runtime_identity.device_id,
+                        );
+                        if let Err(error) = persist_selected_runtime_identity(
+                            &runtime_identity_key,
+                            &updated_identity,
+                        ) {
+                            web_sys::console::error_1(
+                                &format!("failed to persist runtime identity switch: {error}").into(),
+                            );
+                            return;
+                        }
+                        let _ = clear_storage_key(&legacy_authority_key);
+                        let _ = clear_storage_key(&legacy_device_key);
+                        if let Err(error) = reload_page() {
+                            web_sys::console::error_1(
+                                &format!("failed to reload after authority switch: {error}").into(),
+                            );
+                        }
+                    })),
                 ));
+                controller.set_account_setup_state(account_ready, "", None);
+                install_harness_instrumentation(controller.clone());
+
+                if account_ready {
+                    if let Err(error) = settings_workflows::refresh_settings_from_runtime(
+                        controller.app_core(),
+                    )
+                    .await
+                    {
+                        web_sys::console::warn_1(
+                            &format!("failed to seed settings signal during bootstrap: {error}")
+                                .into(),
+                        );
+                    }
+                    match runtime_workflows::require_runtime(controller.app_core()).await {
+                        Ok(runtime) => {
+                            let runtime_devices = runtime.list_devices().await;
+                            match settings_workflows::get_settings(controller.app_core()).await {
+                                Ok(settings) => web_sys::console::log_1(
+                                    &format!(
+                                        "[web-bootstrap] settings_seeded runtime_devices={:?};settings_devices={:?}",
+                                        runtime_devices
+                                            .iter()
+                                            .map(|device| device.id.to_string())
+                                            .collect::<Vec<_>>(),
+                                        settings
+                                            .devices
+                                            .iter()
+                                            .map(|device| device.id.clone())
+                                            .collect::<Vec<_>>()
+                                    )
+                                    .into(),
+                                ),
+                                Err(error) => web_sys::console::warn_1(
+                                    &format!(
+                                        "[web-bootstrap] settings_seeded runtime_devices={:?};settings_error={error}",
+                                        runtime_devices
+                                            .iter()
+                                            .map(|device| device.id.to_string())
+                                            .collect::<Vec<_>>()
+                                    )
+                                    .into(),
+                                ),
+                            }
+                        }
+                        Err(error) => web_sys::console::warn_1(
+                            &format!("[web-bootstrap] failed to inspect runtime devices: {error}")
+                                .into(),
+                        ),
+                    }
+                }
+
+                let finalized_event = BootstrapEvent::new(
+                    BootstrapSurface::Web,
+                    BootstrapEventKind::RuntimeBootstrapFinalized,
+                );
+                controller.push_log(&finalized_event.to_string());
+                if let Some(instance_id) = harness_instance {
+                    controller.push_log(&format!(
+                        "web harness instance {instance_id} booted in testing mode"
+                    ));
+                }
+                Ok(BootstrapState {
+                    controller,
+                    account_ready,
+                })
+            } else {
+                if load_selected_authority(&legacy_authority_key).is_some()
+                    || load_selected_device(&legacy_device_key).is_some()
+                {
+                    web_sys::console::warn_1(
+                        &"[web-bootstrap] incomplete persisted bootstrap identity; starting without runtime".into(),
+                    );
+                }
+                let app_core = Arc::new(RwLock::new(
+                    AppCore::new(AppConfig::default())
+                        .map_err(|error| format!("failed to initialize bootstrap AppCore: {error}"))?,
+                ));
+                AppCore::init_signals_with_hooks(&app_core)
+                    .await
+                    .map_err(|error| format!("failed to initialize bootstrap app signals: {error}"))?;
+                let controller = Arc::new(UiController::new(app_core, clipboard));
+                controller.set_account_setup_state(false, "", None);
+                install_harness_instrumentation(controller.clone());
+                let waiting_event = BootstrapEvent::new(
+                    BootstrapSurface::Web,
+                    BootstrapEventKind::ShellAwaitingAccount,
+                );
+                controller.push_log(&waiting_event.to_string());
+                if let Some(instance_id) = harness_instance {
+                    controller.push_log(&format!(
+                        "web harness instance {instance_id} booted without runtime"
+                    ));
+                }
+                Ok(BootstrapState {
+                    controller,
+                    account_ready: false,
+                })
             }
-            Ok(BootstrapState {
-                controller,
-                account_ready,
-            })
         }
 
         fn main() {
@@ -490,8 +655,9 @@ cfg_if! {
                     }
 
                     let storage_prefix = active_storage_prefix();
-                    let authority_storage_key = selected_authority_key(&storage_prefix);
-                    let device_storage_key = selected_device_key(&storage_prefix);
+                    let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
+                    let legacy_authority_key = legacy_selected_authority_key(&storage_prefix);
+                    let legacy_device_key = legacy_selected_device_key(&storage_prefix);
                     let pending_code_storage_key =
                         pending_device_enrollment_code_key(&storage_prefix);
                     importing_code.set(true);
@@ -519,16 +685,23 @@ cfg_if! {
 
                             let runtime = runtime_workflows::require_runtime(&app_core).await?;
                             let current_authority = runtime.authority_id();
-                            let selected_device = load_selected_device(&device_storage_key);
+                            let selected_runtime_identity = load_selected_runtime_identity(
+                                &runtime_identity_key,
+                                &legacy_authority_key,
+                                &legacy_device_key,
+                            );
                                 if current_authority != subject_authority
-                                    || selected_device.as_ref() != Some(&device_id)
+                                    || selected_runtime_identity
+                                        .as_ref()
+                                        .map(|identity| identity.device_id)
+                                        != Some(device_id)
                                 {
                                 web_sys::console::log_1(
                                     &format!(
-                                        "[web-import-device] staging_reload current_authority={};subject_authority={};selected_device={:?};invited_device={}",
+                                        "[web-import-device] staging_reload current_authority={};subject_authority={};selected_runtime_identity={:?};invited_device={}",
                                         current_authority,
                                         subject_authority,
-                                        selected_device,
+                                        selected_runtime_identity,
                                         device_id
                                     )
                                     .into(),
@@ -538,13 +711,13 @@ cfg_if! {
                                     &code,
                                 )
                                 .map_err(aura_core::AuraError::agent)?;
-                                persist_selected_authority(
-                                    &authority_storage_key,
-                                    &subject_authority,
+                                persist_selected_runtime_identity(
+                                    &runtime_identity_key,
+                                    &BootstrapRuntimeIdentity::new(subject_authority, device_id),
                                 )
                                 .map_err(aura_core::AuraError::agent)?;
-                                persist_selected_device(&device_storage_key, &device_id)
-                                    .map_err(aura_core::AuraError::agent)?;
+                                let _ = clear_storage_key(&legacy_authority_key);
+                                let _ = clear_storage_key(&legacy_device_key);
                                 web_sys::console::log_1(
                                     &format!(
                                         "[web-import-device] staged_reload subject_authority={};device_id={}",
@@ -560,9 +733,9 @@ cfg_if! {
                             let _ = clear_pending_device_enrollment_code(&pending_code_storage_key);
                             web_sys::console::log_1(
                                 &format!(
-                                    "[web-import-device] accepting_on_bound_runtime authority={};selected_device={:?};invited_device={}",
+                                    "[web-import-device] accepting_on_bound_runtime authority={};selected_runtime_identity={:?};invited_device={}",
                                     current_authority,
-                                    selected_device,
+                                    selected_runtime_identity,
                                     device_id
                                 )
                                 .into(),
@@ -710,18 +883,35 @@ cfg_if! {
 
                     let controller = controller.clone();
                     spawn(async move {
-                        match account_workflows::initialize_runtime_account(
-                            controller.app_core(),
-                            nickname.clone(),
-                        )
-                        .await
-                        {
+                        let has_runtime = {
+                            let core = controller.app_core().read().await;
+                            core.runtime().is_some()
+                        };
+                        let result = if has_runtime {
+                            account_workflows::initialize_runtime_account(
+                                controller.app_core(),
+                                nickname.clone(),
+                            )
+                            .await
+                            .map_err(|error| error.to_string())
+                        } else {
+                            match stage_initial_web_account_bootstrap(&nickname).await {
+                                Ok(()) => reload_page(),
+                                Err(error) => Err(error),
+                            }
+                        };
+
+                        match result {
                             Ok(()) => {
                                 web_sys::console::log_1(
                                     &"[web-onboarding] submit_account ok".into(),
                                 );
-                                bootstrap_account_ready.set(true);
-                                controller.set_account_setup_state(true, "", None);
+                                if has_runtime {
+                                    bootstrap_account_ready.set(true);
+                                    controller.set_account_setup_state(true, "", None);
+                                } else {
+                                    controller.info_toast("Reloading to finish account creation");
+                                }
                                 creating_account.set(false);
                             }
                             Err(error) => {

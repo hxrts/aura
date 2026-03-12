@@ -4183,6 +4183,9 @@ fn wait_for_semantic_state(
     if semantic_wait_matches(step, &last_snapshot) {
         return Ok(());
     }
+    if message_contains_authoritative_screen(step, tool_api, instance_id, backend_kind)? {
+        return Ok(());
+    }
     let mut browser_version = None;
     loop {
         if Instant::now() >= deadline {
@@ -4222,6 +4225,9 @@ fn wait_for_semantic_state(
         if semantic_wait_matches(step, &snapshot) {
             return Ok(());
         }
+        if message_contains_authoritative_screen(step, tool_api, instance_id, backend_kind)? {
+            return Ok(());
+        }
         last_snapshot = snapshot;
     }
     let diagnostic_screen = fetch_screen_text(tool_api, instance_id, ScreenSource::Default).ok();
@@ -4232,6 +4238,26 @@ fn wait_for_semantic_state(
         semantic_wait_description(step),
         Some(last_snapshot),
         diagnostic_screen
+    )
+}
+
+fn message_contains_authoritative_screen(
+    step: &ScenarioStep,
+    tool_api: &mut ToolApi,
+    instance_id: &str,
+    backend_kind: &str,
+) -> Result<bool> {
+    if backend_kind != "local_pty" || !matches!(step.action, ScenarioAction::MessageContains) {
+        return Ok(false);
+    }
+    let Some(expected_contains) = step.value.as_deref().or(step.expect.as_deref()) else {
+        return Ok(false);
+    };
+    diagnostic_screen_contains(
+        tool_api,
+        instance_id,
+        expected_contains,
+        FallbackObservationMode::DiagnosticOnly,
     )
 }
 

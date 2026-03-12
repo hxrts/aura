@@ -167,11 +167,19 @@ impl ChoreographicRole {
 
     /// Create an authority-scoped role without reusing the authority UUID as a device id.
     pub fn for_authority(authority_id: AuthorityId, role_index: RoleIndex) -> Self {
-        Self::new(DeviceId::new_from_entropy([0u8; 32]), authority_id, role_index)
+        Self::new(
+            DeviceId::new_from_entropy([0u8; 32]),
+            authority_id,
+            role_index,
+        )
     }
 
     /// Create a new role from a 0-based index.
-    pub fn from_index(device_id: DeviceId, authority_id: AuthorityId, role_index: u32) -> Option<Self> {
+    pub fn from_index(
+        device_id: DeviceId,
+        authority_id: AuthorityId,
+        role_index: u32,
+    ) -> Option<Self> {
         RoleIndex::new(role_index).map(|idx| Self::new(device_id, authority_id, idx))
     }
 

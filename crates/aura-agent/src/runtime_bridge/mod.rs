@@ -305,16 +305,16 @@ impl AgentRuntimeBridge {
             let (mut socket, _) = connect_async(&url).await.map_err(|e| {
                 IntentError::network_error(format!("Failed to open fact sync websocket {url}: {e}"))
             })?;
-            socket
-                .send(Message::Binary(bytes))
-                .await
-                .map_err(|e| IntentError::network_error(format!("Failed to send fact sync request: {e}")))?;
+            socket.send(Message::Binary(bytes)).await.map_err(|e| {
+                IntentError::network_error(format!("Failed to send fact sync request: {e}"))
+            })?;
 
             let response = socket.next().await.ok_or_else(|| {
                 IntentError::network_error("Fact sync websocket closed before response".to_string())
             })?;
-            let payload = match response
-                .map_err(|e| IntentError::network_error(format!("Fact sync websocket read failed: {e}")))? {
+            let payload = match response.map_err(|e| {
+                IntentError::network_error(format!("Fact sync websocket read failed: {e}"))
+            })? {
                 Message::Binary(payload) => payload,
                 _ => {
                     return Err(IntentError::network_error(
@@ -1111,7 +1111,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         SyncStatus {
             is_running,
-            connected_peers: transport_stats.active_channels as usize,
+            connected_peers: (transport_stats.active_channels as usize)
+                .max(active_sessions as usize),
             last_sync_ms,
             pending_facts: 0, // Would need to track this in SyncServiceManager
             active_sessions: active_sessions as usize,
@@ -1273,27 +1274,27 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     "Failed to process contact/chat envelopes: {e}"
                 ))
             })?;
-        let processed_handshakes = if let Some(rendezvous_manager) = self.agent.runtime().rendezvous()
-        {
-            let authority = self.agent.context().clone();
-            let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)
-                .map_err(|e| {
-                    IntentError::internal_error(format!(
-                        "Failed to create rendezvous handler for handshake processing: {e}"
-                    ))
-                })?
-                .with_rendezvous_manager((*rendezvous_manager).clone());
-            handler
-                .process_handshake_envelopes(self.agent.runtime().effects())
-                .await
-                .map_err(|e| {
-                    IntentError::internal_error(format!(
-                        "Failed to process rendezvous handshakes: {e}"
-                    ))
-                })?
-        } else {
-            0
-        };
+        let processed_handshakes =
+            if let Some(rendezvous_manager) = self.agent.runtime().rendezvous() {
+                let authority = self.agent.context().clone();
+                let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)
+                    .map_err(|e| {
+                        IntentError::internal_error(format!(
+                            "Failed to create rendezvous handler for handshake processing: {e}"
+                        ))
+                    })?
+                    .with_rendezvous_manager((*rendezvous_manager).clone());
+                handler
+                    .process_handshake_envelopes(self.agent.runtime().effects())
+                    .await
+                    .map_err(|e| {
+                        IntentError::internal_error(format!(
+                            "Failed to process rendezvous handshakes: {e}"
+                        ))
+                    })?
+            } else {
+                0
+            };
 
         if processed_acceptances > 0
             || processed_completions > 0

@@ -24,6 +24,7 @@
 //!     .with_time(Arc::new(MyTime::new()))
 //!     .with_random(Arc::new(MyRandom::new()))
 //!     .with_console(Arc::new(MyConsole::new()))
+//!     .authority(my_authority_id)
 //!     .build()
 //!     .await?;
 //!
@@ -238,6 +239,8 @@ impl<C, S, T, R, O> CustomPresetBuilder<C, S, T, R, O> {
     }
 
     /// Set the authority ID for this agent.
+    ///
+    /// This must be supplied explicitly from persisted or test bootstrap state.
     pub fn authority(mut self, id: AuthorityId) -> Self {
         self.authority_id = Some(id);
         self
@@ -292,11 +295,10 @@ impl
     ///
     /// Returns an error if runtime construction fails.
     pub async fn build(self) -> AgentResult<AuraAgent> {
-        // Get or generate authority ID
-        let authority_id = self.authority_id.unwrap_or_else(|| {
-            let id_str = "custom:default";
-            AuthorityId::new_from_entropy(hash::hash(id_str.as_bytes()))
-        });
+        let authority_id = self.authority_id.ok_or(BuildError::BootstrapRequired {
+            preset: "custom",
+            identity: "authority_id",
+        })?;
 
         // Derive context ID if not set
         let context_id = self.context_id.unwrap_or_else(|| {
@@ -346,11 +348,10 @@ impl
 
     /// Build the agent synchronously (for testing).
     pub fn build_sync(self) -> AgentResult<AuraAgent> {
-        // Get or generate authority ID
-        let authority_id = self.authority_id.unwrap_or_else(|| {
-            let id_str = "custom:default";
-            AuthorityId::new_from_entropy(hash::hash(id_str.as_bytes()))
-        });
+        let authority_id = self.authority_id.ok_or(BuildError::BootstrapRequired {
+            preset: "custom",
+            identity: "authority_id",
+        })?;
 
         // Build using existing infrastructure
         let runtime = match self.execution_mode {

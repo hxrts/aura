@@ -26,7 +26,10 @@ pub mod wizards;
 pub use state::ViewState;
 
 // Re-export state types for convenience
-pub use account::{AccountBackup, AccountConfig, BACKUP_PREFIX, BACKUP_VERSION};
+pub use account::{
+    AccountBackup, AccountConfig, BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity,
+    BootstrapSurface, PendingAccountBootstrap, BACKUP_PREFIX, BACKUP_VERSION,
+};
 pub use chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus};
 pub use collection::DomainCollection;
 pub use contacts::{Contact, ContactsState, MySuggestion, ReadReceiptPolicy, SuggestionPolicy};

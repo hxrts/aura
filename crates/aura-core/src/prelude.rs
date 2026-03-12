@@ -30,7 +30,9 @@ pub use crate::faults::{AuraFault, AuraFaultKind, CorruptionMode, FaultEdge};
 
 // === Core Identifiers ===
 pub use crate::types::identifiers::{
-    AccountId, AuthorityId, ChannelId, ContextId, DeviceId, GroupId, GuardianId, RelayId, SessionId,
+    derive_legacy_authority_from_device, AccountId, AuthorityId, ChannelId, ContextId, DeviceId,
+    GroupId, GuardianId, LegacyAuthorityFromDeviceReason, LegacyAuthorityFromDeviceRequest,
+    RelayId, SessionId,
 };
 
 // === Journal & CRDT Types ===

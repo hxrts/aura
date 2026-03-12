@@ -49,6 +49,9 @@ pub const ACCOUNT_FILENAME: &str = "account.json";
 /// - Demo: `$AURA_PATH/.aura-demo/journal.json` (default: `~/.aura-demo/journal.json`)
 pub const JOURNAL_FILENAME: &str = "journal.json";
 
+/// Pending first-run bootstrap metadata filename.
+pub const PENDING_ACCOUNT_BOOTSTRAP_FILENAME: &str = "pending-account-bootstrap.json";
+
 /// TUI log key prefix for storage.
 pub const TUI_LOG_KEY_PREFIX: &str = "logs";
 
@@ -57,6 +60,12 @@ pub const MAX_TUI_LOG_BYTES: usize = 1_000_000;
 
 /// TUI log queue capacity.
 pub const TUI_LOG_QUEUE_CAPACITY: usize = 256;
+
+/// Web storage key suffix for pending first-run bootstrap metadata.
+pub const WEB_PENDING_ACCOUNT_BOOTSTRAP_STORAGE_SUFFIX: &str = "pending_account_bootstrap";
+
+/// Web storage key suffix for the selected bootstrap runtime identity.
+pub const WEB_SELECTED_RUNTIME_IDENTITY_STORAGE_SUFFIX: &str = "selected_runtime_identity";
 
 // ============================================================================
 // Configuration Functions

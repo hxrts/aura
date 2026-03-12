@@ -52,4 +52,5 @@ patchbay = { git = "https://github.com/hxrts/patchbay", branch = "hxrts/aura", o
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio = { workspace = true, features = ["net"] }
 patchbay = { git = "https://github.com/hxrts/patchbay", branch = "hxrts/aura" }

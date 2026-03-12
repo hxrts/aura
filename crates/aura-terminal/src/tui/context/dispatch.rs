@@ -60,13 +60,7 @@ impl AccountFilesHelper {
         &self,
         nickname_suggestion: &str,
     ) -> TerminalResult<(AuthorityId, ContextId)> {
-        match crate::handlers::tui::create_account(
-            &self.base_path,
-            &self.device_id_str,
-            nickname_suggestion,
-        )
-        .await
-        {
+        match crate::handlers::tui::create_account(&self.base_path, nickname_suggestion).await {
             Ok((authority_id, context_id)) => {
                 self.set_account_created();
                 Ok((authority_id, context_id))

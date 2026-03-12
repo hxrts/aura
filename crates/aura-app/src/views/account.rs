@@ -4,6 +4,7 @@
 //! These types are FFI-safe and can be used across all frontends.
 
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -43,6 +44,123 @@ impl AccountConfig {
             context_id,
             nickname_suggestion,
             created_at,
+        }
+    }
+}
+
+/// Explicit runtime identity selected for a bootstrap/build surface.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BootstrapRuntimeIdentity {
+    /// The authority the runtime should boot as.
+    pub authority_id: AuthorityId,
+    /// The local device identity for the runtime.
+    pub device_id: DeviceId,
+}
+
+impl BootstrapRuntimeIdentity {
+    /// Create a new bootstrap runtime identity pair.
+    #[must_use]
+    pub fn new(authority_id: AuthorityId, device_id: DeviceId) -> Self {
+        Self {
+            authority_id,
+            device_id,
+        }
+    }
+}
+
+/// Frontend/runtime surface emitting bootstrap lifecycle events.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BootstrapSurface {
+    /// Web/WASM shell.
+    Web,
+    /// Terminal/TUI shell.
+    Tui,
+    /// Terminal CLI entrypoint.
+    Terminal,
+}
+
+impl BootstrapSurface {
+    /// Stable lowercase surface code for logs and harness output.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Web => "web",
+            Self::Tui => "tui",
+            Self::Terminal => "terminal",
+        }
+    }
+}
+
+/// Typed bootstrap lifecycle event kind.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BootstrapEventKind {
+    /// UI entered a no-runtime shell awaiting explicit account creation.
+    ShellAwaitingAccount,
+    /// First-run bootstrap metadata was staged explicitly.
+    PendingBootstrapStaged,
+    /// A runtime surface could not continue because no persisted bootstrap identity exists.
+    RuntimeBootstrapRequired,
+    /// Pending bootstrap metadata was reconciled against the runtime state.
+    PendingBootstrapReconciled,
+    /// Runtime bootstrap finished and the frontend is ready for normal operation.
+    RuntimeBootstrapFinalized,
+}
+
+impl BootstrapEventKind {
+    /// Stable lowercase event code for logs and harness output.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ShellAwaitingAccount => "shell_awaiting_account",
+            Self::PendingBootstrapStaged => "pending_bootstrap_staged",
+            Self::RuntimeBootstrapRequired => "runtime_bootstrap_required",
+            Self::PendingBootstrapReconciled => "pending_bootstrap_reconciled",
+            Self::RuntimeBootstrapFinalized => "runtime_bootstrap_finalized",
+        }
+    }
+}
+
+/// Structured bootstrap lifecycle event for logging and harness visibility.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BootstrapEvent {
+    /// Surface where the event occurred.
+    pub surface: BootstrapSurface,
+    /// Specific lifecycle transition.
+    pub kind: BootstrapEventKind,
+}
+
+impl BootstrapEvent {
+    /// Construct a new bootstrap lifecycle event.
+    #[must_use]
+    pub const fn new(surface: BootstrapSurface, kind: BootstrapEventKind) -> Self {
+        Self { surface, kind }
+    }
+}
+
+impl std::fmt::Display for BootstrapEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "bootstrap surface={} kind={}",
+            self.surface.as_str(),
+            self.kind.as_str()
+        )
+    }
+}
+
+/// Pending first-run account bootstrap metadata.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PendingAccountBootstrap {
+    /// Validated nickname suggestion chosen during onboarding.
+    pub nickname_suggestion: String,
+}
+
+impl PendingAccountBootstrap {
+    /// Create pending bootstrap metadata from a validated nickname suggestion.
+    #[must_use]
+    pub fn new(nickname_suggestion: String) -> Self {
+        Self {
+            nickname_suggestion,
         }
     }
 }

@@ -1076,20 +1076,21 @@ impl HarnessCoordinator {
             .get(instance_id)
             .ok_or_else(|| anyhow!("missing data_dir for instance_id: {instance_id}"))?;
         let epoch_dir = data_dir.join("secure_store").join("epoch_state");
-        let entries = fs::read_dir(&epoch_dir).map_err(|error| {
-            anyhow!(
-                "failed reading local authority state {}: {error}",
-                epoch_dir.display()
-            )
-        })?;
-
-        let mut authority_ids = entries
-            .filter_map(std::result::Result::ok)
-            .filter_map(|entry| entry.file_name().into_string().ok())
-            .filter(|name| name.starts_with("authority-"))
-            .collect::<Vec<_>>();
-        authority_ids.sort();
-        authority_ids.dedup();
+        let journal_facts_dir = data_dir.join("journal").join("facts");
+        let epoch_authorities = read_authority_ids_from_dir(&epoch_dir);
+        let (mut authority_ids, source_dir) = if epoch_authorities.is_empty() {
+            let journal_authorities = read_authority_ids_from_dir(&journal_facts_dir);
+            if journal_authorities.is_empty() {
+                bail!(
+                    "failed reading local authority state {} and {}: no authority directories found",
+                    epoch_dir.display(),
+                    journal_facts_dir.display()
+                );
+            }
+            (journal_authorities, journal_facts_dir)
+        } else {
+            (epoch_authorities, epoch_dir)
+        };
 
         match authority_ids.len() {
             1 => {
@@ -1099,7 +1100,7 @@ impl HarnessCoordinator {
                     "resolve_authority_id_local_state",
                     Some(instance_id.to_string()),
                     serde_json::json!({
-                        "source": epoch_dir.display().to_string(),
+                        "source": source_dir.display().to_string(),
                         "authority_id": authority_id
                     }),
                 );
@@ -1107,17 +1108,31 @@ impl HarnessCoordinator {
             }
             0 => bail!(
                 "no local authority ids found in {} for instance {}",
-                epoch_dir.display(),
+                source_dir.display(),
                 instance_id
             ),
             _ => bail!(
                 "multiple local authority ids found in {} for instance {}: {:?}",
-                epoch_dir.display(),
+                source_dir.display(),
                 instance_id,
                 authority_ids
             ),
         }
     }
+}
+
+fn read_authority_ids_from_dir(path: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(path) else {
+        return Vec::new();
+    };
+    let mut authority_ids = entries
+        .filter_map(std::result::Result::ok)
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.starts_with("authority-"))
+        .collect::<Vec<_>>();
+    authority_ids.sort();
+    authority_ids.dedup();
+    authority_ids
 }
 
 struct BrowserAppUrlProvision {

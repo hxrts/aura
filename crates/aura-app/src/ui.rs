@@ -145,7 +145,9 @@ pub mod types {
     pub use crate::workflows::config::{
         default_port, generate_device_config, DeviceConfigDefaults, ACCOUNT_FILENAME,
         DEFAULT_BASE_PORT, DEFAULT_LOG_LEVEL, DEFAULT_MAX_RETRIES, DEFAULT_NETWORK_TIMEOUT_SECS,
-        JOURNAL_FILENAME, MAX_TUI_LOG_BYTES, TUI_LOG_KEY_PREFIX, TUI_LOG_QUEUE_CAPACITY,
+        JOURNAL_FILENAME, MAX_TUI_LOG_BYTES, PENDING_ACCOUNT_BOOTSTRAP_FILENAME,
+        TUI_LOG_KEY_PREFIX, TUI_LOG_QUEUE_CAPACITY, WEB_PENDING_ACCOUNT_BOOTSTRAP_STORAGE_SUFFIX,
+        WEB_SELECTED_RUNTIME_IDENTITY_STORAGE_SUFFIX,
     };
     pub use crate::workflows::invitation::{
         format_invitation_type, format_invitation_type_detailed, format_ttl_display,
@@ -166,17 +168,19 @@ pub mod types {
     pub use crate::views::naming::EffectiveName;
     pub use crate::views::{
         classify_threshold_security, format_recovery_status, security_level_hint, AccountBackup,
-        AccountConfig, BanRecord, CeremonyProgress, Channel, ChannelType, ChatState, Contact,
+        AccountConfig, BanRecord, BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity,
+        BootstrapSurface, CeremonyProgress, Channel, ChannelType, ChatState, Contact,
         ContactsState, Guardian, GuardianBinding, GuardianStatus, HomeMember, HomeRole, HomeState,
         HomesState, Invitation, InvitationDirection, InvitationStatus, InvitationsState,
         KickRecord, Message, MessageDeliveryStatus, MuteRecord, MySuggestion, NeighborHome,
-        NeighborhoodState, OneHopLinkType, RecoveryApproval, RecoveryProcess,
-        RecoveryProcessStatus, RecoveryState, SecurityLevel, SuggestionPolicy, TraversalPosition,
-        BACKUP_PREFIX, BACKUP_VERSION,
+        NeighborhoodState, OneHopLinkType, PendingAccountBootstrap, RecoveryApproval,
+        RecoveryProcess, RecoveryProcessStatus, RecoveryState, SecurityLevel, SuggestionPolicy,
+        TraversalPosition, BACKUP_PREFIX, BACKUP_VERSION,
     };
     pub use crate::workflows::account::{
-        can_submit_account_setup, is_valid_nickname_suggestion, validate_nickname_suggestion,
-        NicknameSuggestionError, MAX_NICKNAME_SUGGESTION_LENGTH, MIN_NICKNAME_SUGGESTION_LENGTH,
+        can_submit_account_setup, is_valid_nickname_suggestion, prepare_pending_account_bootstrap,
+        validate_nickname_suggestion, NicknameSuggestionError, MAX_NICKNAME_SUGGESTION_LENGTH,
+        MIN_NICKNAME_SUGGESTION_LENGTH,
     };
     pub use aura_social::AccessLevel;
     // Toast and modal lifecycle types

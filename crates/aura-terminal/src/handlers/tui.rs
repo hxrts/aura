@@ -19,8 +19,14 @@ use std::time::Duration;
 // Import app types from aura-app (pure layer)
 use aura_app::ui::prelude::*;
 // Import portable account types and parsing helpers
-use aura_app::ui::types::{AccountBackup, AccountConfig};
-use aura_app::ui::workflows::account::{derive_recovered_context_id, parse_backup_code};
+use aura_app::ui::types::{
+    AccountBackup, AccountConfig, BootstrapEvent, BootstrapEventKind, BootstrapSurface,
+    PendingAccountBootstrap, PENDING_ACCOUNT_BOOTSTRAP_FILENAME,
+};
+use aura_app::ui::workflows::account::{
+    derive_recovered_context_id, parse_backup_code, prepare_pending_account_bootstrap,
+    reconcile_pending_runtime_account_bootstrap,
+};
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
 use aura_agent::core::config::{NetworkConfig, StorageConfig};
@@ -173,22 +179,10 @@ async fn try_load_account(
     })
 }
 
-/// Create placeholder authority/context IDs for pre-account-setup state
-///
-/// These use a deterministic sentinel value so the TUI can detect that
-/// the account hasn't been set up yet (via `has_account()` check).
-fn create_placeholder_ids(device_id_str: &str) -> (AuthorityId, ContextId) {
-    // Use the same deterministic derivation as `create_account`.
-    //
-    // The "placeholder" status is tracked separately via `has_existing_account`.
-    // Keeping the identity stable avoids needing to rebuild the runtime after account creation.
-    let authority_entropy = aura_core::hash::hash(format!("authority:{device_id_str}").as_bytes());
-    let context_entropy = aura_core::hash::hash(format!("context:{device_id_str}").as_bytes());
-
-    (
-        AuthorityId::new_from_entropy(authority_entropy),
-        ContextId::new_from_entropy(context_entropy),
-    )
+/// Load persisted account state for a terminal storage root.
+pub async fn try_load_account_from_path(base_path: &Path) -> Result<AccountLoadResult, AuraError> {
+    let storage = open_bootstrap_storage(base_path);
+    try_load_account(&storage).await
 }
 
 fn harness_lan_discovery_override(current: &mut aura_agent::core::config::AgentConfig) {
@@ -244,6 +238,51 @@ async fn persist_account_config(
     Ok(())
 }
 
+async fn load_pending_account_bootstrap(
+    storage: &impl StorageCoreEffects,
+) -> Result<Option<PendingAccountBootstrap>, AuraError> {
+    let Some(bytes) = storage
+        .retrieve(PENDING_ACCOUNT_BOOTSTRAP_FILENAME)
+        .await
+        .map_err(|e| {
+            AuraError::internal(format!("Failed to read pending account bootstrap: {e}"))
+        })?
+    else {
+        return Ok(None);
+    };
+
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|e| AuraError::internal(format!("Invalid pending account bootstrap data: {e}")))
+}
+
+async fn persist_pending_account_bootstrap(
+    storage: &impl StorageCoreEffects,
+    pending_bootstrap: &PendingAccountBootstrap,
+) -> Result<(), AuraError> {
+    let bytes = serde_json::to_vec(pending_bootstrap).map_err(|e| {
+        AuraError::internal(format!(
+            "Failed to serialize pending account bootstrap: {e}"
+        ))
+    })?;
+    storage
+        .store(PENDING_ACCOUNT_BOOTSTRAP_FILENAME, bytes)
+        .await
+        .map_err(|e| {
+            AuraError::internal(format!("Failed to persist pending account bootstrap: {e}"))
+        })
+}
+
+async fn clear_pending_account_bootstrap(
+    storage: &impl StorageExtendedEffects,
+) -> Result<(), AuraError> {
+    storage
+        .remove(PENDING_ACCOUNT_BOOTSTRAP_FILENAME)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to clear pending account bootstrap: {e}")))
+        .map(|_| ())
+}
+
 async fn persist_selected_authority(
     base_path: &Path,
     authority_id: AuthorityId,
@@ -273,9 +312,14 @@ async fn persist_selected_authority(
 /// Uses portable ID derivation from aura_app::workflows::account.
 pub async fn create_account(
     base_path: &Path,
-    _device_id_str: &str,
     nickname_suggestion: &str,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
+    let pending_bootstrap = prepare_pending_account_bootstrap(nickname_suggestion)?;
+    let staged_event = BootstrapEvent::new(
+        BootstrapSurface::Tui,
+        BootstrapEventKind::PendingBootstrapStaged,
+    );
+    tracing::info!(event = %staged_event, path = %base_path.display());
     tracing::info!(path = %base_path.display(), nickname = nickname_suggestion, "tui create_account begin");
     let storage = open_bootstrap_storage(base_path);
     let time = PhysicalTimeHandler::new();
@@ -288,12 +332,13 @@ pub async fn create_account(
 
     // Persist to storage using effect-backed handlers.
     tracing::info!("tui create_account persisting account config");
+    persist_pending_account_bootstrap(&storage, &pending_bootstrap).await?;
     persist_account_config(
         &storage,
         &time,
         authority_id,
         context_id,
-        Some(nickname_suggestion.to_string()),
+        Some(pending_bootstrap.nickname_suggestion),
     )
     .await?;
     tracing::info!("tui create_account persisted account config");
@@ -699,212 +744,270 @@ async fn handle_tui_launch(
         stdio.println(format_args!("Bind address: {addr}"));
     }
     std::env::set_var("AURA_DEMO_BOB_DEVICE_ID", device_id.to_string());
-
-    // Determine device ID string for account derivation
-    let device_id_for_account = device_id_str.unwrap_or("tui:production-device");
+    let device_label = device_id_str.unwrap_or("tui:production-device").to_string();
 
     loop {
-        // Try to load existing account, or use placeholders if no account exists
-        let (authority_id, context_id, has_existing_account) =
-            match try_load_account(storage.as_ref()).await? {
-                AccountLoadResult::Loaded { authority, context } => {
-                    stdio.println(format_args!("Authority: {authority}"));
-                    stdio.println(format_args!("Context: {context}"));
-                    (authority, context, true)
-                }
-                AccountLoadResult::NotFound => {
-                    let (authority, context) = create_placeholder_ids(device_id_for_account);
-                    stdio.println(format_args!("No existing account - will show setup modal"));
-                    stdio.println(format_args!("Placeholder Authority: {authority}"));
-                    stdio.println(format_args!("Placeholder Context: {context}"));
-                    (authority, context, false)
-                }
-            };
-
-        let mut agent_config = AgentConfig {
-            device_id: device_id.clone(),
-            storage: StorageConfig {
-                base_path: base_path.clone(),
-                ..StorageConfig::default()
-            },
-            network: NetworkConfig {
-                bind_address: bind_address.unwrap_or("0.0.0.0:0").to_string(),
-                ..NetworkConfig::default()
-            },
-            ..AgentConfig::default()
-        };
-        harness_lan_discovery_override(&mut agent_config);
-
-        let execution_mode = match mode {
-            TuiMode::Production => aura_core::effects::ExecutionMode::Production,
-            TuiMode::Demo { seed } => aura_core::effects::ExecutionMode::Simulation { seed },
-        };
-        let effect_ctx = EffectContext::new(authority_id, context_id, execution_mode);
-
-        #[cfg(feature = "development")]
-        let demo_simulator_for_bob = match mode {
-            TuiMode::Demo { seed } => {
-                stdio.println(format_args!(
-                    "Creating demo simulator for shared transport..."
-                ));
-                let sim = DemoSimulator::new(seed, base_path.clone(), authority_id, context_id)
-                    .await
-                    .map_err(|e| {
-                        AuraError::internal(format!("Failed to create simulator: {}", e))
-                    })?;
-                Some(sim)
-            }
-            TuiMode::Production => None,
-        };
-
-        #[cfg(not(feature = "development"))]
-        let _demo_simulator_for_bob: Option<()> = None;
-
-        let sync_config = SyncManagerConfig {
-            auto_sync_interval: Duration::from_secs(2),
-            ..SyncManagerConfig::default()
-        };
-        let agent = match mode {
-            TuiMode::Production => AgentBuilder::new()
-                .with_config(agent_config)
-                .with_authority(authority_id)
-                .with_sync_config(sync_config.clone())
-                .with_rendezvous()
-                .build_production(&effect_ctx)
-                .await
-                .map_err(|e| AuraError::internal(format!("Failed to create agent: {e}")))?,
-            TuiMode::Demo { seed } => {
-                stdio.println(format_args!("Using simulation agent with seed: {seed}"));
-
-                #[cfg(feature = "development")]
-                {
-                    let shared_transport = demo_simulator_for_bob
-                        .as_ref()
-                        .map(|sim| sim.shared_transport())
-                        .ok_or_else(|| {
-                            AuraError::internal("Simulator not available in demo mode")
-                        })?;
-
-                    stdio.println(format_args!(
-                        "Creating Bob's agent with shared transport..."
-                    ));
-                    AgentBuilder::new()
-                        .with_config(agent_config)
-                        .with_authority(authority_id)
-                        .with_sync_config(sync_config.clone())
-                        .build_simulation_async_with_shared_transport(
-                            seed,
-                            &effect_ctx,
-                            shared_transport,
-                        )
-                        .await
-                        .map_err(|e| {
-                            AuraError::internal(format!(
-                                "Failed to create simulation agent with shared transport: {}",
-                                e
-                            ))
-                        })?
-                }
-
-                #[cfg(not(feature = "development"))]
-                {
-                    AgentBuilder::new()
-                        .with_config(agent_config)
-                        .with_authority(authority_id)
-                        .with_sync_config(sync_config.clone())
-                        .build_simulation_async(seed, &effect_ctx)
-                        .await
-                        .map_err(|e| {
-                            AuraError::internal(format!("Failed to create simulation agent: {e}"))
-                        })?
-                }
-            }
-        };
-
         let app_config = AppConfig {
             data_dir: base_path.to_string_lossy().to_string(),
             debug: false,
             journal_path: None,
         };
-        let agent = Arc::new(agent);
-        let app_core = AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
-            .map_err(|e| AuraError::internal(format!("Failed to create AppCore: {e}")))?;
-        let app_core = Arc::new(RwLock::new(app_core));
-        let app_core = InitializedAppCore::new(app_core).await?;
-
-        if let Err(e) =
-            aura_app::ui::workflows::settings::refresh_settings_from_runtime(app_core.raw()).await
-        {
-            stdio.eprintln(format_args!("Warning: Failed to refresh settings: {e}"));
-        }
-
-        stdio.println(format_args!(
-            "AppCore initialized (with runtime bridge and reactive signals)"
-        ));
-
-        let ceremony_agent = agent.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
-            loop {
-                interval.tick().await;
-                if let Err(e) = ceremony_agent.process_ceremony_acceptances().await {
-                    tracing::debug!("Error processing ceremony acceptances: {}", e);
-                }
-            }
-        });
+        let loaded_account = try_load_account(storage.as_ref()).await?;
+        let has_existing_account = matches!(loaded_account, AccountLoadResult::Loaded { .. });
 
         #[cfg(feature = "development")]
-        let mut simulator: Option<DemoSimulator> = match mode {
-            TuiMode::Demo { .. } => {
-                stdio.println(format_args!("Starting demo simulator..."));
-                let mut sim = demo_simulator_for_bob
-                    .ok_or_else(|| AuraError::internal("Simulator not available in demo mode"))?;
-                sim.enable_realistic_world(base_path.clone())
-                    .await
-                    .map_err(|e| {
-                        AuraError::internal(format!("Failed to build realistic demo world: {e}"))
-                    })?;
-                sim.start().await.map_err(|e| {
-                    AuraError::internal(format!("Failed to start simulator: {}", e))
-                })?;
+        let mut simulator: Option<DemoSimulator> = None;
+        #[cfg(feature = "development")]
+        let mut runtime_agent: Option<Arc<aura_agent::AuraAgent>> = None;
 
-                stdio.println(format_args!("Alice online: {}", sim.alice_authority()));
-                stdio.println(format_args!("Carol online: {}", sim.carol_authority()));
-                stdio.println(format_args!("Mobile online: {}", sim.mobile_authority()));
-                std::env::set_var("AURA_DEMO_DEVICE_ID", sim.mobile_device_id().to_string());
+        let app_core = match loaded_account {
+            AccountLoadResult::Loaded { authority, context } => {
+                stdio.println(format_args!("Authority: {authority}"));
+                stdio.println(format_args!("Context: {context}"));
 
-                seed_realistic_demo_world(app_core.raw(), &agent, &sim)
-                    .await
-                    .map_err(|e| AuraError::internal(format!("Failed to seed demo world: {e}")))?;
+                let mut agent_config = AgentConfig {
+                    device_id: device_id.clone(),
+                    storage: StorageConfig {
+                        base_path: base_path.clone(),
+                        ..StorageConfig::default()
+                    },
+                    network: NetworkConfig {
+                        bind_address: bind_address.unwrap_or("0.0.0.0:0").to_string(),
+                        ..NetworkConfig::default()
+                    },
+                    ..AgentConfig::default()
+                };
+                harness_lan_discovery_override(&mut agent_config);
+
+                let execution_mode = match mode {
+                    TuiMode::Production => aura_core::effects::ExecutionMode::Production,
+                    TuiMode::Demo { seed } => {
+                        aura_core::effects::ExecutionMode::Simulation { seed }
+                    }
+                };
+                let effect_ctx = EffectContext::new(authority, context, execution_mode);
+
+                #[cfg(feature = "development")]
+                let demo_simulator_for_bob = match mode {
+                    TuiMode::Demo { seed } => {
+                        stdio.println(format_args!(
+                            "Creating demo simulator for shared transport..."
+                        ));
+                        let sim = DemoSimulator::new(seed, base_path.clone(), authority, context)
+                            .await
+                            .map_err(|e| {
+                                AuraError::internal(format!("Failed to create simulator: {}", e))
+                            })?;
+                        Some(sim)
+                    }
+                    TuiMode::Production => None,
+                };
+
+                let sync_config = SyncManagerConfig {
+                    auto_sync_interval: Duration::from_secs(2),
+                    ..SyncManagerConfig::default()
+                };
+                let agent = match mode {
+                    TuiMode::Production => AgentBuilder::new()
+                        .with_config(agent_config)
+                        .with_authority(authority)
+                        .with_sync_config(sync_config.clone())
+                        .with_rendezvous()
+                        .build_production(&effect_ctx)
+                        .await
+                        .map_err(|e| AuraError::internal(format!("Failed to create agent: {e}")))?,
+                    TuiMode::Demo { seed } => {
+                        stdio.println(format_args!("Using simulation agent with seed: {seed}"));
+
+                        #[cfg(feature = "development")]
+                        {
+                            let shared_transport = demo_simulator_for_bob
+                                .as_ref()
+                                .map(|sim| sim.shared_transport())
+                                .ok_or_else(|| {
+                                    AuraError::internal("Simulator not available in demo mode")
+                                })?;
+
+                            stdio.println(format_args!(
+                                "Creating Bob's agent with shared transport..."
+                            ));
+                            AgentBuilder::new()
+                                .with_config(agent_config)
+                                .with_authority(authority)
+                                .with_sync_config(sync_config.clone())
+                                .build_simulation_async_with_shared_transport(
+                                    seed,
+                                    &effect_ctx,
+                                    shared_transport,
+                                )
+                                .await
+                                .map_err(|e| {
+                                    AuraError::internal(format!(
+                                        "Failed to create simulation agent with shared transport: {}",
+                                        e
+                                    ))
+                                })?
+                        }
+
+                        #[cfg(not(feature = "development"))]
+                        {
+                            AgentBuilder::new()
+                                .with_config(agent_config)
+                                .with_authority(authority)
+                                .with_sync_config(sync_config.clone())
+                                .build_simulation_async(seed, &effect_ctx)
+                                .await
+                                .map_err(|e| {
+                                    AuraError::internal(format!(
+                                        "Failed to create simulation agent: {e}"
+                                    ))
+                                })?
+                        }
+                    }
+                };
+
+                let agent = Arc::new(agent);
+                let app_core = AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
+                    .map_err(|e| AuraError::internal(format!("Failed to create AppCore: {e}")))?;
+                let app_core = Arc::new(RwLock::new(app_core));
+                let app_core = InitializedAppCore::new(app_core).await?;
+
+                if let Some(pending_bootstrap) =
+                    load_pending_account_bootstrap(storage.as_ref()).await?
+                {
+                    let resolution = reconcile_pending_runtime_account_bootstrap(
+                        app_core.raw(),
+                        Some(pending_bootstrap),
+                    )
+                    .await?;
+                    if resolution.action
+                        != aura_app::ui::workflows::account::PendingRuntimeBootstrapAction::None
+                    {
+                        let reconciled_event = BootstrapEvent::new(
+                            BootstrapSurface::Tui,
+                            BootstrapEventKind::PendingBootstrapReconciled,
+                        );
+                        tracing::info!(event = %reconciled_event, path = %base_path.display());
+                        clear_pending_account_bootstrap(storage.as_ref()).await?;
+                    }
+                    if resolution.account_ready {
+                        let finalized_event = BootstrapEvent::new(
+                            BootstrapSurface::Tui,
+                            BootstrapEventKind::RuntimeBootstrapFinalized,
+                        );
+                        tracing::info!(event = %finalized_event, path = %base_path.display());
+                    }
+                }
 
                 if let Err(e) =
-                    aura_app::ui::workflows::system::refresh_account(app_core.raw()).await
+                    aura_app::ui::workflows::settings::refresh_settings_from_runtime(app_core.raw())
+                        .await
                 {
-                    tracing::warn!("Demo: Failed to refresh account state: {}", e);
+                    stdio.eprintln(format_args!("Warning: Failed to refresh settings: {e}"));
                 }
 
-                Some(sim)
-            }
-            TuiMode::Production => None,
-        };
+                stdio.println(format_args!(
+                    "AppCore initialized (with runtime bridge and reactive signals)"
+                ));
 
-        #[cfg(feature = "development")]
-        if let TuiMode::Demo { .. } = mode {
-            if let Some(sim) = &simulator {
-                let effects = agent.runtime().effects();
-                let peers = vec![
-                    EchoPeer {
-                        authority_id: sim.alice_authority(),
-                        name: "Alice".to_string(),
-                    },
-                    EchoPeer {
-                        authority_id: sim.carol_authority(),
-                        name: "Carol".to_string(),
-                    },
-                ];
-                let _amp_inbox_handle = spawn_amp_inbox_listener(effects, authority_id, peers);
+                let ceremony_agent = agent.clone();
+                tokio::spawn(async move {
+                    let mut interval =
+                        tokio::time::interval(tokio::time::Duration::from_millis(500));
+                    loop {
+                        interval.tick().await;
+                        if let Err(e) = ceremony_agent.process_ceremony_acceptances().await {
+                            tracing::debug!("Error processing ceremony acceptances: {}", e);
+                        }
+                    }
+                });
+
+                #[cfg(feature = "development")]
+                {
+                    runtime_agent = Some(agent.clone());
+                    simulator = match mode {
+                        TuiMode::Demo { .. } => {
+                            stdio.println(format_args!("Starting demo simulator..."));
+                            let mut sim = demo_simulator_for_bob.ok_or_else(|| {
+                                AuraError::internal("Simulator not available in demo mode")
+                            })?;
+                            sim.enable_realistic_world(base_path.clone())
+                                .await
+                                .map_err(|e| {
+                                    AuraError::internal(format!(
+                                        "Failed to build realistic demo world: {e}"
+                                    ))
+                                })?;
+                            sim.start().await.map_err(|e| {
+                                AuraError::internal(format!("Failed to start simulator: {}", e))
+                            })?;
+
+                            stdio.println(format_args!("Alice online: {}", sim.alice_authority()));
+                            stdio.println(format_args!("Carol online: {}", sim.carol_authority()));
+                            stdio
+                                .println(format_args!("Mobile online: {}", sim.mobile_authority()));
+                            std::env::set_var(
+                                "AURA_DEMO_DEVICE_ID",
+                                sim.mobile_device_id().to_string(),
+                            );
+
+                            seed_realistic_demo_world(app_core.raw(), &agent, &sim)
+                                .await
+                                .map_err(|e| {
+                                    AuraError::internal(format!("Failed to seed demo world: {e}"))
+                                })?;
+
+                            if let Err(e) =
+                                aura_app::ui::workflows::system::refresh_account(app_core.raw())
+                                    .await
+                            {
+                                tracing::warn!("Demo: Failed to refresh account state: {}", e);
+                            }
+
+                            Some(sim)
+                        }
+                        TuiMode::Production => None,
+                    };
+                }
+
+                #[cfg(feature = "development")]
+                if let TuiMode::Demo { .. } = mode {
+                    if let (Some(sim), Some(agent)) = (&simulator, &runtime_agent) {
+                        let effects = agent.runtime().effects();
+                        let peers = vec![
+                            EchoPeer {
+                                authority_id: sim.alice_authority(),
+                                name: "Alice".to_string(),
+                            },
+                            EchoPeer {
+                                authority_id: sim.carol_authority(),
+                                name: "Carol".to_string(),
+                            },
+                        ];
+                        let _amp_inbox_handle = spawn_amp_inbox_listener(effects, authority, peers);
+                    }
+                }
+
+                app_core
             }
-        }
+            AccountLoadResult::NotFound => {
+                let waiting_event = BootstrapEvent::new(
+                    BootstrapSurface::Tui,
+                    BootstrapEventKind::ShellAwaitingAccount,
+                );
+                tracing::info!(event = %waiting_event, path = %base_path.display());
+                stdio.println(format_args!("No existing account - will show setup modal"));
+                let app_core =
+                    Arc::new(RwLock::new(AppCore::new(app_config).map_err(|e| {
+                        AuraError::internal(format!("Failed to create AppCore: {e}"))
+                    })?));
+                let app_core = InitializedAppCore::new(app_core).await?;
+                stdio.println(format_args!(
+                    "AppCore initialized (bootstrap shell without runtime)"
+                ));
+                app_core
+            }
+        };
 
         #[cfg(feature = "development")]
         let ctx = match mode {
@@ -919,40 +1022,20 @@ async fn handle_tui_launch(
                     "  Carol invite code: {}",
                     hints.carol_invite_code
                 ));
-                let demo_mobile_agent = simulator
-                    .as_ref()
-                    .map(|sim| sim.mobile_agent())
-                    .ok_or_else(|| {
-                        crate::error::TerminalError::Operation(
-                            "Simulator not available in demo mode".into(),
-                        )
-                    })?;
-                let demo_mobile_device_id = simulator
-                    .as_ref()
-                    .map(|sim| sim.mobile_device_id().to_string())
-                    .ok_or_else(|| {
-                        crate::error::TerminalError::Operation(
-                            "Simulator not available in demo mode".into(),
-                        )
-                    })?;
-                let demo_mobile_authority_id = simulator
-                    .as_ref()
-                    .map(|sim| sim.mobile_authority().to_string())
-                    .ok_or_else(|| {
-                        crate::error::TerminalError::Operation(
-                            "Simulator not available in demo mode".into(),
-                        )
-                    })?;
-                let builder = IoContext::builder()
+                let mut builder = IoContext::builder()
                     .with_app_core(app_core)
                     .with_base_path(base_path.clone())
-                    .with_device_id(device_id_for_account.to_string())
+                    .with_device_id(device_label.clone())
                     .with_mode(mode)
                     .with_existing_account(has_existing_account)
-                    .with_demo_hints(hints)
-                    .with_demo_mobile_agent(demo_mobile_agent)
-                    .with_demo_mobile_device_id(demo_mobile_device_id)
-                    .with_demo_mobile_authority_id(demo_mobile_authority_id);
+                    .with_demo_hints(hints);
+
+                if let Some(sim) = simulator.as_ref() {
+                    builder = builder
+                        .with_demo_mobile_agent(sim.mobile_agent())
+                        .with_demo_mobile_device_id(sim.mobile_device_id().to_string())
+                        .with_demo_mobile_authority_id(sim.mobile_authority().to_string());
+                }
 
                 builder.build().map_err(|e| {
                     crate::error::TerminalError::Config(format!("IoContext build failed: {e}"))
@@ -961,7 +1044,7 @@ async fn handle_tui_launch(
             TuiMode::Production => IoContext::builder()
                 .with_app_core(app_core.clone())
                 .with_base_path(base_path.clone())
-                .with_device_id(device_id_for_account.to_string())
+                .with_device_id(device_label.clone())
                 .with_mode(mode)
                 .with_existing_account(has_existing_account)
                 .build()
@@ -974,7 +1057,7 @@ async fn handle_tui_launch(
         let ctx = IoContext::builder()
             .with_app_core(app_core.clone())
             .with_base_path(base_path.clone())
-            .with_device_id(device_id_for_account.to_string())
+            .with_device_id(device_label.clone())
             .with_mode(mode)
             .with_existing_account(has_existing_account)
             .build()
@@ -1029,6 +1112,18 @@ async fn handle_tui_launch(
                 request.authority_id
             ));
             continue;
+        }
+
+        if !has_existing_account {
+            if matches!(
+                try_load_account(storage.as_ref()).await?,
+                AccountLoadResult::Loaded { .. }
+            ) {
+                stdio.println(format_args!(
+                    "Reloading TUI with newly created bootstrap identity"
+                ));
+                continue;
+            }
         }
 
         break;
@@ -1119,4 +1214,66 @@ fn init_tui_tracing(storage: Arc<dyn StorageCoreEffects>, mode: TuiMode) {
         .with_target(false)
         .with_writer(make_writer)
         .try_init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn create_account_persists_pending_bootstrap_and_account() {
+        let temp_dir = tempdir().expect("create temp dir");
+
+        let (authority_id, context_id) = create_account(temp_dir.path(), "Alice")
+            .await
+            .expect("create account");
+
+        let storage = open_bootstrap_storage(temp_dir.path());
+        let pending = load_pending_account_bootstrap(&storage)
+            .await
+            .expect("read pending bootstrap")
+            .expect("pending bootstrap should exist");
+        assert_eq!(pending.nickname_suggestion, "Alice");
+
+        let loaded = try_load_account(&storage).await.expect("load account");
+        match loaded {
+            AccountLoadResult::Loaded { authority, context } => {
+                assert_eq!(authority, authority_id);
+                assert_eq!(context, context_id);
+            }
+            AccountLoadResult::NotFound => panic!("account should have been persisted"),
+        }
+    }
+
+    #[tokio::test]
+    async fn try_load_account_from_path_loads_persisted_identity() {
+        let temp_dir = tempdir().expect("create temp dir");
+
+        let (authority_id, context_id) = create_account(temp_dir.path(), "Alice")
+            .await
+            .expect("create account");
+
+        let loaded = try_load_account_from_path(temp_dir.path())
+            .await
+            .expect("load persisted account");
+
+        match loaded {
+            AccountLoadResult::Loaded { authority, context } => {
+                assert_eq!(authority, authority_id);
+                assert_eq!(context, context_id);
+            }
+            AccountLoadResult::NotFound => panic!("persisted account should be loaded"),
+        }
+    }
+
+    #[tokio::test]
+    async fn try_load_account_from_path_reports_missing_account() {
+        let temp_dir = tempdir().expect("create temp dir");
+
+        let loaded = try_load_account_from_path(temp_dir.path())
+            .await
+            .expect("load account");
+        assert!(matches!(loaded, AccountLoadResult::NotFound));
+    }
 }

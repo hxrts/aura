@@ -76,7 +76,7 @@ tempfile = { workspace = true }
 proptest = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["fs", "net"] }
 tokio-tungstenite = "0.23"
 socket2 = { workspace = true }
 

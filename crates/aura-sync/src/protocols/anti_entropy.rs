@@ -497,7 +497,12 @@ impl AntiEntropyProtocol {
     /// - Uses `RetryPolicy` from infrastructure for resilience
     pub async fn execute<E>(&self, effects: &E, peer: DeviceId) -> SyncResult<AntiEntropyResult>
     where
-        E: JournalEffects + NetworkEffects + Send + Sync + PhysicalTimeEffects + GuardContextProvider,
+        E: JournalEffects
+            + NetworkEffects
+            + Send
+            + Sync
+            + PhysicalTimeEffects
+            + GuardContextProvider,
     {
         // Check authorization before starting sync
         self.check_sync_authorization(effects, peer)?;

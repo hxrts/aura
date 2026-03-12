@@ -1766,19 +1766,6 @@ impl AppCallbacks {
                         .await;
 
                         send_ui_update_reliable(&tx, UiUpdate::AccountCreated).await;
-
-                        // Persist the nickname suggestion and create the journal fact in the
-                        // background. The local account already exists at this point, so
-                        // onboarding should not remain blocked on these best-effort follow-ups.
-                        let ctx_for_fact = ctx.clone();
-                        let nickname_for_fact = nickname_suggestion.clone();
-                        spawn_ctx(ctx_for_fact.clone(), async move {
-                            let _ = ctx_for_fact
-                                .dispatch(EffectCommand::UpdateNickname {
-                                    name: nickname_for_fact.clone(),
-                                })
-                                .await;
-                        });
                     }
                     Ok(Err(e)) => {
                         tracing::error!("tui create_account callback failed: {e}");

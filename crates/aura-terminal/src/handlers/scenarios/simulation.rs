@@ -251,9 +251,8 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
 
     let mut guardian_services = Vec::with_capacity(guardians.len());
     for (index, guardian_id) in guardians.iter().copied().enumerate() {
-        let guardian_device = crate::ids::device_id(&format!(
-            "scenario:guardian-setup:guardian:{index}:device"
-        ));
+        let guardian_device =
+            crate::ids::device_id(&format!("scenario:guardian-setup:guardian:{index}:device"));
         #[allow(clippy::disallowed_methods)]
         let guardian_effects = Arc::new(
             AuraEffectSystem::simulation_with_shared_transport_for_authority(

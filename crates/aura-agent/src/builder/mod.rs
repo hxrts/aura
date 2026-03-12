@@ -29,6 +29,7 @@
 //! // Platform preset - simplest path
 //! let agent = AgentBuilder::cli()
 //!     .data_dir(PathBuf::from("~/.aura"))
+//!     .authority(my_authority_id)
 //!     .build()
 //!     .await?;
 //!

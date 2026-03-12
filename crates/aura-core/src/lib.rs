@@ -163,9 +163,12 @@ pub use reconfiguration::{
 };
 #[doc = "stable: Core identifier types with semver guarantees"]
 pub use types::identifiers::{
-    AccountId, AuthorityId, CeremonyId, ChannelId, ContextId, DataId, DeviceId, DkdContextId,
-    EventId, EventNonce, GroupId, GuardianId, HomeId, IndividualId, IndividualIdExt, InvitationId,
-    MemberId, MessageContext, NeighborhoodId, OperationId, RecoveryId, RelayId, SessionId,
+    derive_legacy_authority_from_device, AccountId, AuthorityId, CeremonyId, ChannelId, ContextId,
+    DataId, DeviceId, DkdContextId, EventId, EventNonce, GroupId, GuardianId, HomeId, IndividualId,
+    IndividualIdExt, InvitationId, LegacyAuthorityFromDeviceDerivation,
+    LegacyAuthorityFromDeviceError, LegacyAuthorityFromDeviceReason,
+    LegacyAuthorityFromDeviceRequest, MemberId, MessageContext, NeighborhoodId, OperationId,
+    RecoveryId, RelayId, SessionId,
 };
 #[doc = "unstable: Context derivation system is under active development"]
 pub use util::context::{

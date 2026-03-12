@@ -270,6 +270,9 @@ audit-device-id-separation:
 audit-runtime-device-id-separation:
     bash scripts/check/device-id-legacy.sh audit-runtime
 
+check-bootstrap-guardrails:
+    bash scripts/check/bootstrap-guardrails.sh
+
 # Run the exact same check that Zed editor runs (rust-analyzer checkOnSave)
 check-zed:
     cargo check --workspace --all-targets

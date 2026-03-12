@@ -186,11 +186,10 @@ impl IosPresetBuilder {
                 "app_group is required for iOS preset. Call .app_group(\"group.com.example\") before building."
             ))?;
 
-            // Get or generate authority ID
-            let authority_id = self.authority_id.unwrap_or_else(|| {
-                let id_str = format!("ios:{}", app_group);
-                AuthorityId::new_from_entropy(hash::hash(id_str.as_bytes()))
-            });
+            let authority_id = self.authority_id.ok_or(BuildError::BootstrapRequired {
+                preset: "ios",
+                identity: "authority_id",
+            })?;
 
             // Derive context ID if not set
             let context_id = self.context_id.unwrap_or_else(|| {

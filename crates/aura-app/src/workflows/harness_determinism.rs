@@ -8,8 +8,11 @@ use cfg_if::cfg_if;
 use crate::workflows::time::current_time_ms;
 use crate::AppCore;
 
+#[cfg(not(target_arch = "wasm32"))]
 const HARNESS_MODE_KEY: &str = "AURA_HARNESS_MODE";
+#[cfg(not(target_arch = "wasm32"))]
 const HARNESS_SCENARIO_SEED_KEY: &str = "AURA_HARNESS_SCENARIO_SEED";
+#[cfg(not(target_arch = "wasm32"))]
 const HARNESS_INSTANCE_ID_KEY: &str = "AURA_HARNESS_INSTANCE_ID";
 const HARNESS_TIME_BASE_MS: u64 = 1_700_000_000_000;
 

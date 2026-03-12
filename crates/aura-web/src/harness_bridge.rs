@@ -3,7 +3,7 @@
 //! Exposes the UiController to JavaScript via window.harness, enabling the test
 //! harness to send keys, capture screenshots, and query UI state from Playwright.
 
-use aura_app::ui::contract::{ModalId, RenderHeartbeat, ScreenId, UiReadiness, UiSnapshot};
+use aura_app::ui::contract::{ModalId, RenderHeartbeat, ScreenId, UiSnapshot};
 use aura_app::ui::workflows::account as account_workflows;
 use aura_app::ui::workflows::context as context_workflows;
 use aura_app::ui::workflows::invitation as invitation_workflows;
@@ -95,28 +95,48 @@ fn install_pending_harness_command_loop(controller: Arc<UiController>) {
                 &format!("[web-harness] create_account start nickname={nickname}").into(),
             );
             controller.set_account_setup_state(false, nickname.clone(), None);
-            if let Err(error) = account_workflows::initialize_runtime_account(
-                controller.app_core(),
-                nickname.clone(),
-            )
-            .await
-            {
-                web_sys::console::error_1(
-                    &format!("[web-harness] create_account error {}", error).into(),
-                );
-                return;
-            }
-            if let Some(window) = web_sys::window() {
-                if let Ok(Some(storage)) = window.local_storage() {
-                    let storage_key =
-                        format!("{}selected_authority", harness_storage_prefix(&window));
-                    let _ = storage.set_item(&storage_key, &controller.authority_id());
+            let has_runtime = {
+                let core = controller.app_core().read().await;
+                core.runtime().is_some()
+            };
+            let result = if has_runtime {
+                account_workflows::initialize_runtime_account(
+                    controller.app_core(),
+                    nickname.clone(),
+                )
+                .await
+                .map_err(|error| error.to_string())
+            } else {
+                match super::stage_initial_web_account_bootstrap(&nickname).await {
+                    Ok(()) => super::reload_page(),
+                    Err(error) => Err(error),
+                }
+            };
+
+            match result {
+                Ok(()) => {
+                    if has_runtime {
+                        if let Some(window) = web_sys::window() {
+                            if let Ok(Some(storage)) = window.local_storage() {
+                                let storage_key = format!(
+                                    "{}selected_authority",
+                                    harness_storage_prefix(&window)
+                                );
+                                let _ = storage.set_item(&storage_key, &controller.authority_id());
+                            }
+                        }
+                        controller.set_account_setup_state(true, "", None);
+                    }
+                    web_sys::console::log_1(
+                        &format!("[web-harness] create_account ok nickname={nickname}").into(),
+                    );
+                }
+                Err(error) => {
+                    web_sys::console::error_1(
+                        &format!("[web-harness] create_account error {error}").into(),
+                    );
                 }
             }
-            controller.set_account_setup_state(true, "", None);
-            web_sys::console::log_1(
-                &format!("[web-harness] create_account ok nickname={nickname}").into(),
-            );
         });
     }) as Box<dyn FnMut()>);
     let _ = window.set_interval_with_callback_and_timeout_and_arguments_0(
@@ -350,7 +370,7 @@ fn serialized_published_ui_snapshot(
         return live_json;
     };
 
-    let Some(published_json) = published.as_string() else {
+    let Some(_published_json) = published.as_string() else {
         return live_json;
     };
 

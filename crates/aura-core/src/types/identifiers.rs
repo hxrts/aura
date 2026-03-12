@@ -14,7 +14,9 @@ use crate::{crypto::hash, AuraError, Hash32};
 use hex;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::panic::Location;
 use std::str::FromStr;
+use tracing::warn;
 use uuid::Uuid;
 
 fn derived_uuid(label: &[u8]) -> Uuid {
@@ -34,8 +36,131 @@ fn derived_uuid_with_bytes(domain: &[u8], bytes: &[u8]) -> Uuid {
     Uuid::from_bytes(uuid_bytes)
 }
 
-const DEVICE_FOR_AUTHORITY_DOMAIN: &[u8] = b"aura/device-for-authority/v1";
 const AUTHORITY_FOR_DEVICE_DOMAIN: &[u8] = b"aura/authority-for-device/v1";
+
+/// Intentional legacy compatibility reason for deriving an authority from a device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LegacyAuthorityFromDeviceReason {
+    /// A narrow compatibility boundary still requires a device-shaped input.
+    CompatibilityBoundary,
+}
+
+impl fmt::Display for LegacyAuthorityFromDeviceReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CompatibilityBoundary => write!(f, "compatibility-boundary"),
+        }
+    }
+}
+
+/// Validation error for the explicit legacy authority-from-device bridge.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
+pub enum LegacyAuthorityFromDeviceError {
+    /// The caller did not identify the component/site requesting the derivation.
+    #[error("legacy authority-from-device derivation requires a non-empty site")]
+    MissingSite,
+    /// The caller did not provide a human-readable justification.
+    #[error("legacy authority-from-device derivation requires a non-empty justification")]
+    MissingJustification,
+}
+
+/// Explicit request to cross the device/authority boundary for legacy compatibility.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LegacyAuthorityFromDeviceRequest {
+    /// Concrete device identifier being bridged.
+    pub device_id: DeviceId,
+    /// Explicit reason this legacy bridge is still needed.
+    pub reason: LegacyAuthorityFromDeviceReason,
+    /// Stable component or module name requesting the bridge.
+    pub site: String,
+    /// Human-readable justification for observability and audits.
+    pub justification: String,
+}
+
+impl LegacyAuthorityFromDeviceRequest {
+    /// Create a validated legacy bridge request.
+    pub fn new(
+        device_id: DeviceId,
+        reason: LegacyAuthorityFromDeviceReason,
+        site: impl Into<String>,
+        justification: impl Into<String>,
+    ) -> Result<Self, LegacyAuthorityFromDeviceError> {
+        let site = site.into();
+        if site.trim().is_empty() {
+            return Err(LegacyAuthorityFromDeviceError::MissingSite);
+        }
+
+        let justification = justification.into();
+        if justification.trim().is_empty() {
+            return Err(LegacyAuthorityFromDeviceError::MissingJustification);
+        }
+
+        Ok(Self {
+            device_id,
+            reason,
+            site,
+            justification,
+        })
+    }
+}
+
+/// Structured record emitted when the legacy authority-from-device bridge is used.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LegacyAuthorityFromDeviceDerivation {
+    /// Original device identifier.
+    pub device_id: DeviceId,
+    /// Derived compatibility authority.
+    pub authority_id: AuthorityId,
+    /// Explicit legacy reason.
+    pub reason: LegacyAuthorityFromDeviceReason,
+    /// Stable component or module name requesting the bridge.
+    pub site: String,
+    /// Human-readable justification for observability and audits.
+    pub justification: String,
+    /// File where the bridge was invoked.
+    pub caller_file: String,
+    /// Line where the bridge was invoked.
+    pub caller_line: u32,
+}
+
+/// The single explicit authority-from-device legacy bridge.
+///
+/// This is intentionally not modeled as a convenience constructor on `AuthorityId`.
+/// Callers must opt into the legacy boundary with a validated request so the use
+/// is visible in code review, logs, and audits.
+#[track_caller]
+pub fn derive_legacy_authority_from_device(
+    request: LegacyAuthorityFromDeviceRequest,
+) -> LegacyAuthorityFromDeviceDerivation {
+    let authority_id = AuthorityId(derived_uuid_with_bytes(
+        AUTHORITY_FOR_DEVICE_DOMAIN,
+        request.device_id.0.as_bytes(),
+    ));
+    let caller = Location::caller();
+    let derivation = LegacyAuthorityFromDeviceDerivation {
+        device_id: request.device_id,
+        authority_id,
+        reason: request.reason,
+        site: request.site,
+        justification: request.justification,
+        caller_file: caller.file().to_string(),
+        caller_line: caller.line(),
+    };
+
+    warn!(
+        target: "aura.identity.legacy_authority_from_device",
+        device_id = %derivation.device_id,
+        authority_id = %derivation.authority_id,
+        reason = %derivation.reason,
+        site = %derivation.site,
+        justification = %derivation.justification,
+        caller_file = %derivation.caller_file,
+        caller_line = derivation.caller_line,
+        "legacy authority-from-device derivation executed"
+    );
+
+    derivation
+}
 
 // ============================================================================
 // Identifier Generation Macros
@@ -419,17 +544,6 @@ impl DeviceId {
     pub fn uuid(&self) -> Uuid {
         self.0
     }
-
-    /// Derive a stable, domain-separated device identifier for an authority.
-    ///
-    /// This exists for legacy authority-scoped contexts that still need a
-    /// device-shaped identifier without reusing the authority UUID directly.
-    pub fn for_authority(authority_id: AuthorityId) -> Self {
-        Self(derived_uuid_with_bytes(
-            DEVICE_FOR_AUTHORITY_DOMAIN,
-            &authority_id.to_bytes(),
-        ))
-    }
 }
 
 impl fmt::Display for DeviceId {
@@ -509,14 +623,6 @@ impl AuthorityId {
     /// Convert to bytes
     pub fn to_bytes(&self) -> [u8; 16] {
         self.0.into_bytes()
-    }
-
-    /// Derive the device-owned authority for a concrete device identifier.
-    pub fn for_device(device_id: DeviceId) -> Self {
-        Self(derived_uuid_with_bytes(
-            AUTHORITY_FOR_DEVICE_DOMAIN,
-            device_id.0.as_bytes(),
-        ))
     }
 }
 

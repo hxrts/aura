@@ -22,12 +22,12 @@
 //!
 //! let agent = AgentBuilder::web()
 //!     .storage_prefix("aura_")
+//!     .authority(my_authority_id)
 //!     .build()
 //!     .await?;
 //! ```
 
 use aura_core::effects::ExecutionMode;
-#[cfg(feature = "web")]
 use aura_core::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
 #[cfg(feature = "web")]
@@ -45,7 +45,7 @@ use crate::{AgentResult, AuraAgent};
 ///
 /// - `storage_prefix`: Prefix for IndexedDB database names
 /// - `use_session_storage`: Use SessionStorage instead of IndexedDB for ephemeral data
-/// - `authority`: Custom authority ID (defaults to derived from origin)
+/// - `authority`: Authority ID for this runtime (required)
 /// - `context`: Custom context ID (defaults to derived from authority)
 ///
 /// # Platform Effects
@@ -176,11 +176,10 @@ impl WebPresetBuilder {
 
         #[cfg(feature = "web")]
         {
-            // Get or generate authority ID
-            let authority_id = self.authority_id.unwrap_or_else(|| {
-                let id_str = format!("web:{}", self.storage_prefix);
-                AuthorityId::new_from_entropy(hash::hash(id_str.as_bytes()))
-            });
+            let authority_id = self.authority_id.ok_or(BuildError::BootstrapRequired {
+                preset: "web",
+                identity: "authority_id",
+            })?;
 
             // Derive context ID if not set
             let context_id = self.context_id.unwrap_or_else(|| {

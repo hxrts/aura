@@ -613,62 +613,19 @@ impl IoContext {
             "io_context create_account begin"
         );
         let app_core = self.app_core_raw().clone();
-        let nickname_suggestion = nickname_suggestion.to_string();
-        let home_name = format!("{nickname_suggestion}'s Home");
         let (authority_id, _context_id) = self
             .account_files
-            .create_account(&nickname_suggestion)
+            .create_account(nickname_suggestion)
             .await?;
         tracing::info!(%authority_id, "io_context create_account persisted account");
-        let app_core_for_bootstrap = app_core.clone();
-        tokio::spawn(async move {
-            {
-                let mut core = app_core_for_bootstrap.write().await;
-                core.set_authority(authority_id);
-            }
-            tracing::info!("io_context create_account authority set");
-            const SIGNING_KEY_ATTEMPTS: usize = 40;
-            const BOOTSTRAP_RETRY_MS: u64 = 250;
-            for attempt in 0..SIGNING_KEY_ATTEMPTS {
-                let runtime = {
-                    let core = app_core_for_bootstrap.read().await;
-                    core.runtime().cloned()
-                };
-                let bootstrap_ready = if let Some(runtime) = runtime {
-                    runtime.bootstrap_signing_keys().await.is_ok()
-                } else {
-                    false
-                };
-                if bootstrap_ready {
-                    break;
-                }
-                if attempt + 1 < SIGNING_KEY_ATTEMPTS {
-                    tokio::time::sleep(std::time::Duration::from_millis(BOOTSTRAP_RETRY_MS)).await;
-                }
-            }
-
-            let created_home_id = context_workflows::create_home_for_authority(
-                &app_core_for_bootstrap,
-                authority_id,
-                Some(home_name.clone()),
-                None,
-            )
-            .await;
-            let _ =
-                settings_workflows::refresh_settings_from_runtime(&app_core_for_bootstrap).await;
-            let _ = system_workflows::refresh_account(&app_core_for_bootstrap).await;
-            if let Ok(home_id) = created_home_id {
-                let _ = context_workflows::ensure_local_home_projection(
-                    &app_core_for_bootstrap,
-                    home_id,
-                    home_name.clone(),
-                    authority_id,
-                )
-                .await;
-            }
-        });
-
-        tracing::info!("io_context create_account queued convergence and returning success");
+        {
+            let mut core = app_core.write().await;
+            core.set_authority(authority_id);
+        }
+        tracing::info!(
+            %authority_id,
+            "io_context create_account staged local authority; runtime bootstrap will occur after restart"
+        );
         Ok(())
     }
 

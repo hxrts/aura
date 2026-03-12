@@ -5,17 +5,17 @@
 #![allow(clippy::expect_used)]
 
 use aura_core::{
-    AccountId, AuthorityId, DataId, DeviceId, EventId, EventNonce, GuardianId, IndividualId,
+    derive_legacy_authority_from_device, AccountId, DataId, DeviceId, EventId, EventNonce,
+    GuardianId, IndividualId, LegacyAuthorityFromDeviceReason, LegacyAuthorityFromDeviceRequest,
     MemberId, OperationId, SessionId,
 };
+use std::io;
+use std::sync::{Arc, Mutex};
+use tracing_subscriber::fmt::MakeWriter;
 use uuid::Uuid;
 
 fn account(seed: u8) -> AccountId {
     AccountId::new_from_entropy([seed; 32])
-}
-
-fn authority(seed: u8) -> AuthorityId {
-    AuthorityId::new_from_entropy([seed; 32])
 }
 
 fn device(seed: u8) -> DeviceId {
@@ -342,17 +342,111 @@ fn test_identifier_determinism() {
 }
 
 #[test]
-fn test_authority_device_derivations_are_domain_separated_and_deterministic() {
-    let authority = authority(31);
+fn test_legacy_authority_from_device_request_requires_metadata() {
     let device = device(32);
 
-    let derived_device_1 = DeviceId::for_authority(authority);
-    let derived_device_2 = DeviceId::for_authority(authority);
-    assert_eq!(derived_device_1, derived_device_2);
-    assert_ne!(derived_device_1.uuid(), authority.uuid());
+    let missing_site = LegacyAuthorityFromDeviceRequest::new(
+        device,
+        LegacyAuthorityFromDeviceReason::CompatibilityBoundary,
+        "   ",
+        "compatibility bridge for deterministic test fixture",
+    )
+    .unwrap_err();
+    assert_eq!(
+        missing_site.to_string(),
+        "legacy authority-from-device derivation requires a non-empty site"
+    );
 
-    let derived_authority_1 = AuthorityId::for_device(device);
-    let derived_authority_2 = AuthorityId::for_device(device);
-    assert_eq!(derived_authority_1, derived_authority_2);
-    assert_ne!(derived_authority_1.uuid(), device.uuid());
+    let missing_justification = LegacyAuthorityFromDeviceRequest::new(
+        device,
+        LegacyAuthorityFromDeviceReason::CompatibilityBoundary,
+        "identifiers_test",
+        "",
+    )
+    .unwrap_err();
+    assert_eq!(
+        missing_justification.to_string(),
+        "legacy authority-from-device derivation requires a non-empty justification"
+    );
+}
+
+#[derive(Clone, Default)]
+struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
+
+impl SharedBuffer {
+    fn snapshot(&self) -> String {
+        String::from_utf8(self.0.lock().expect("lock log buffer").clone()).expect("utf8 log buffer")
+    }
+}
+
+struct SharedBufferWriter(SharedBuffer);
+
+impl io::Write for SharedBufferWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0
+             .0
+            .lock()
+            .expect("lock log buffer")
+            .extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> MakeWriter<'a> for SharedBuffer {
+    type Writer = SharedBufferWriter;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        SharedBufferWriter(self.clone())
+    }
+}
+
+#[test]
+fn test_legacy_authority_from_device_derivation_is_domain_separated_deterministic_and_logged() {
+    let device = device(33);
+    let request = LegacyAuthorityFromDeviceRequest::new(
+        device,
+        LegacyAuthorityFromDeviceReason::CompatibilityBoundary,
+        "identifiers_test",
+        "verify explicit legacy compatibility bridge behavior",
+    )
+    .expect("valid derivation request");
+
+    let logs = SharedBuffer::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(logs.clone())
+        .with_ansi(false)
+        .without_time()
+        .finish();
+
+    let first = tracing::subscriber::with_default(subscriber, || {
+        derive_legacy_authority_from_device(request.clone())
+    });
+    let second = derive_legacy_authority_from_device(request);
+
+    assert_eq!(first.authority_id, second.authority_id);
+    assert_eq!(first.device_id, device);
+    assert_ne!(first.authority_id.uuid(), device.uuid());
+    assert_eq!(first.site, "identifiers_test");
+    assert_eq!(
+        first.reason,
+        LegacyAuthorityFromDeviceReason::CompatibilityBoundary
+    );
+
+    let log_output = logs.snapshot();
+    assert!(
+        log_output.contains("legacy authority-from-device derivation executed"),
+        "expected structured warning in log output: {log_output}"
+    );
+    assert!(
+        log_output.contains("identifiers_test"),
+        "expected site metadata in log output: {log_output}"
+    );
+    assert!(
+        log_output.contains(&device.to_string()),
+        "expected device metadata in log output: {log_output}"
+    );
 }

@@ -494,7 +494,7 @@ fn publish_scoped_channels(
     last_message_count: &Arc<AtomicUsize>,
     last_channel_signature: &Arc<RwLock<Option<String>>>,
     transport_peer_count: usize,
-    discovered_peer_ids: &[AuthorityId],
+    _discovered_peer_ids: &[AuthorityId],
     self_authority: Option<AuthorityId>,
     homes_state: &HomesState,
     contacts_state: &ContactsState,
@@ -533,10 +533,6 @@ fn publish_scoped_channels(
                 })
                 .unwrap_or_default();
             let resolved_recipient_count = resolved_recipients.len();
-            let reachable_recipient_count = resolved_recipients
-                .iter()
-                .filter(|authority_id| discovered_peer_ids.contains(authority_id))
-                .count();
             let observed_remote_message = chat_state
                 .messages_for_channel(&channel.id)
                 .iter()
@@ -549,9 +545,7 @@ fn publish_scoped_channels(
                 member_count: Some(resolved_member_count),
             }];
             let remote_delivery_ready = resolved_recipient_count > 0
-                && (transport_peer_count > 0
-                    || reachable_recipient_count > 0
-                    || observed_remote_message)
+                && (transport_peer_count > 0 || observed_remote_message)
                 && !channel.name.eq_ignore_ascii_case("note to self")
                 && !is_dm_like_channel(channel);
             if remote_delivery_ready {
