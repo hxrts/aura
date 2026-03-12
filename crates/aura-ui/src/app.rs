@@ -1333,13 +1333,7 @@ fn submit_runtime_modal_action(
                         controller_for_import.push_log("accept_invitation runtime_accept start");
                         harness_log("accept_invitation runtime_accept start");
                         let accepted = match invitation.invitation_type {
-                            InvitationBridgeType::DeviceEnrollment { .. } => {
-                                invitation_workflows::accept_device_enrollment_invitation(
-                                    &app_core,
-                                    &invitation,
-                                )
-                                .await
-                            }
+                            InvitationBridgeType::DeviceEnrollment { .. } => invitation_workflows::issue_device_enrollment_invitation_accept(&app_core, &invitation).await,
                             _ => {
                                 invitation_workflows::accept_invitation(
                                     &app_core,
@@ -1513,13 +1507,22 @@ fn submit_runtime_modal_action(
                             }
                         }
 
-                        match invitation_workflows::accept_device_enrollment_invitation(
+                        match invitation_workflows::issue_device_enrollment_invitation_accept(
                             &app_core,
                             &invitation,
                         )
                         .await
                         {
                             Ok(()) => {
+                                let app_core_for_convergence = app_core.clone();
+                                let invitation_for_convergence = invitation.clone();
+                                spawn(async move {
+                                    let _ = invitation_workflows::converge_device_enrollment_invitation_accept(
+                                        &app_core_for_convergence,
+                                        &invitation_for_convergence,
+                                    )
+                                    .await;
+                                });
                                 let _ =
                                     settings_workflows::refresh_settings_from_runtime(&app_core)
                                         .await;
@@ -1602,6 +1605,7 @@ fn submit_runtime_modal_action(
                                 controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
                                     receiver_authority_id: Some(receiver_id.to_string()),
                                     source_operation: OperationId::invitation_create(),
+                                    code: Some(code.clone()),
                                 });
                                 controller.complete_runtime_modal_operation_success(
                                     OperationId::invitation_create(),
@@ -4372,9 +4376,9 @@ fn render_chat_message_bubble(message: ChatRuntimeMessage) -> Element {
                 }
                 div {
                     class: if message.is_own {
-                        "rounded-[1.75rem] bg-primary px-4 pt-px pb-0 text-sm text-primary-foreground shadow-sm"
+                        "rounded-[1.75rem] bg-primary px-4 py-1.5 text-sm text-primary-foreground shadow-sm"
                     } else {
-                        "rounded-[1.75rem] border border-border bg-muted px-4 pt-px pb-0 text-sm text-foreground shadow-sm"
+                        "rounded-[1.75rem] border border-border bg-muted px-4 py-1.5 text-sm text-foreground shadow-sm"
                     },
                     p {
                         class: "m-0 whitespace-pre-wrap break-words leading-relaxed",
@@ -4600,6 +4604,7 @@ fn ContactsScreen(
                                                                     RuntimeFact::InvitationCodeReady {
                                                                         receiver_authority_id: Some(authority_id.to_string()),
                                                                         source_operation: OperationId::invitation_create(),
+                                                                        code: Some(code.clone()),
                                                                     },
                                                                 );
                                                                 controller.info_toast(

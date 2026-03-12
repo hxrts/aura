@@ -34,6 +34,7 @@ cfg_if! {
         use std::sync::Arc;
         use wasm_bindgen::closure::Closure;
         use wasm_bindgen::JsCast;
+        use wasm_bindgen_futures::spawn_local;
         use web_clipboard::WebClipboardAdapter;
 
         const WEB_STORAGE_PREFIX: &str = "aura_";
@@ -581,11 +582,20 @@ cfg_if! {
                                 time_workflows::sleep_ms(&app_core, 250).await?;
                             }
 
-                            invitation_workflows::accept_device_enrollment_invitation(
+                            invitation_workflows::issue_device_enrollment_invitation_accept(
                                 &app_core,
                                 &invitation,
                             )
                             .await?;
+                            let app_core_for_convergence = app_core.clone();
+                            let invitation_for_convergence = invitation.clone();
+                            spawn_local(async move {
+                                let _ = invitation_workflows::converge_device_enrollment_invitation_accept(
+                                    &app_core_for_convergence,
+                                    &invitation_for_convergence,
+                                )
+                                .await;
+                            });
                             let runtime_devices_after_accept = runtime.list_devices().await;
                             web_sys::console::log_1(
                                 &format!(
@@ -746,9 +756,6 @@ cfg_if! {
 
             rsx! {
                 main {
-                    id: ControlId::AppRoot
-                        .web_dom_id()
-                        .expect("ControlId::AppRoot must define a web DOM id"),
                     class: "min-h-screen bg-background text-foreground grid place-items-center px-6",
                     div {
                         id: ControlId::OnboardingRoot
@@ -842,16 +849,6 @@ cfg_if! {
                                 }
                             }
                         }
-                    }
-                    div {
-                        id: ControlId::ToastRegion
-                            .web_dom_id()
-                            .expect("ControlId::ToastRegion must define a web DOM id"),
-                    }
-                    div {
-                        id: ControlId::ModalRegion
-                            .web_dom_id()
-                            .expect("ControlId::ModalRegion must define a web DOM id"),
                     }
                 }
             }

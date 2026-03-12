@@ -34,6 +34,7 @@ use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::{StorageCoreEffects, StorageExtendedEffects};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
+use aura_core::TimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
 use aura_effects::{
     EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
@@ -277,6 +278,7 @@ pub async fn create_account(
     device_id_str: &str,
     nickname_suggestion: &str,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
+    tracing::info!(path = %base_path.display(), nickname = nickname_suggestion, "tui create_account begin");
     let storage = open_bootstrap_storage(base_path);
     let time = PhysicalTimeHandler::new();
 
@@ -285,6 +287,7 @@ pub async fn create_account(
     let context_id = derive_context_id(device_id_str);
 
     // Persist to storage using effect-backed handlers.
+    tracing::info!("tui create_account persisting account config");
     persist_account_config(
         &storage,
         &time,
@@ -293,6 +296,7 @@ pub async fn create_account(
         Some(nickname_suggestion.to_string()),
     )
     .await?;
+    tracing::info!("tui create_account persisted account config");
 
     Ok((authority_id, context_id))
 }

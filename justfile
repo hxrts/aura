@@ -664,12 +664,21 @@ ci-dry-run profile="push":
     #!/usr/bin/env bash
     set -euo pipefail
     export CARGO_INCREMENTAL=0
+    export CARGO_TERM_COLOR=always
+    export RUST_BACKTRACE=1
+    export AURA_SUPPRESS_NIX_WELCOME=1
     mkdir -p "${PWD}/.tmp"
     export TMPDIR="${PWD}/.tmp"
     GREEN='\033[0;32m' RED='\033[0;31m' YELLOW='\033[0;33m' BLUE='\033[0;34m' NC='\033[0m'
     exit_code=0
     current=0
-    total=0
+    STEPS=()
+    profile="{{ profile }}"
+
+    add_step() {
+        local name="$1" cmd="$2"
+        STEPS+=("${name}:::${cmd}")
+    }
 
     run_step() {
         local name="$1" cmd="$2"
@@ -683,18 +692,84 @@ ci-dry-run profile="push":
         fi
     }
 
-    case "{{ profile }}" in
-        pr) total=14 ;;
-        push) total=27 ;;
-        all) total=35 ;;
+    case "$profile" in
+        pr|push|all)
+            ;;
         *)
-            echo "Unknown ci-dry-run profile: {{ profile }}"
+            echo "Unknown ci-dry-run profile: $profile"
             echo "Valid profiles: pr, push, all"
             exit 2
             ;;
     esac
 
-    echo "CI Dry Run (profile: {{ profile }})"
+    # CI / Fast (push + pull_request)
+    add_step "Format Check"               "nix develop --command just ci-format"
+    add_step "Clippy Check"               "nix develop --command just ci-clippy"
+    add_step "Build Check"                "nix develop --command just ci-build"
+    add_step "Architecture Check"         "nix develop --command scripts/check/arch.sh --quick"
+    add_step "UX Flow Coverage"           "nix develop --command just ci-ux-flow-coverage"
+    add_step "UX Policy"                  "nix develop --command just ci-ux-policy"
+    add_step "Shared Flow Policy"         "nix develop --command just ci-shared-flow-policy"
+    add_step "Tests + Protocol Compat"    "nix develop --command bash -lc 'just ci-test && just ci-protocol-compat'"
+
+    # Docs / Site (push + pull_request)
+    add_step "Docs Links"                 "nix develop --command just ci-docs-links"
+    add_step "Crate Doc Links"            "nix develop --command just ci-crates-doc-links"
+    add_step "Text Formatting Check"      "nix develop --command just ci-text-formatting"
+    add_step "Semantic Drift Check"       "nix develop --command just ci-docs-semantic-drift"
+    add_step "Docs Build"                 "nix develop --command just ci-book"
+
+    # CI / Deep Conformance (push + pull_request)
+    add_step "Conformance Suite"          "nix develop --command bash -lc 'just ci-conformance-policy && CARGO_BUILD_JOBS=4 AURA_CONFORMANCE_WRITE_ARTIFACTS=1 AURA_CONFORMANCE_ARTIFACT_DIR=artifacts/conformance AURA_CONFORMANCE_ROTATING_WINDOW=8 AURA_CONFORMANCE_ITF_SEED_WINDOW=8 just ci-conformance'"
+    add_step "Conformance ITF"            "nix develop --command just ci-conformance-itf"
+    add_step "Conformance Differential"   "nix develop --command bash -lc 'just lean-oracle-build && just ci-conformance-diff'"
+    add_step "Choreography Parity"        "nix develop .#ci --command bash -lc 'CARGO_BUILD_JOBS=4 just ci-choreo-parity'"
+    add_step "Property Monitor Suite"     "nix develop .#ci --command just ci-property-monitor"
+    add_step "Effects Gate"               "nix develop .#ci --command just ci-effects"
+    add_step "Agent WASM Gate"            "nix develop .#ci --command bash -lc 'CARGO_BUILD_JOBS=4 just ci-agent-wasm'"
+
+    if [[ "$profile" != "pr" ]]; then
+        # CI / Deep Harness (push)
+        add_step "Harness Build"             "nix develop --command just ci-harness-build"
+        add_step "Harness Contract"          "nix develop --command just ci-harness-contract"
+        add_step "Harness UI Evented"        "nix develop --command just ci-harness-ui-state-evented"
+        add_step "Harness Matrix Inventory"  "nix develop --command just ci-harness-matrix-inventory"
+        add_step "Harness Shared Intent"     "nix develop --command just ci-harness-shared-intent-contract"
+        add_step "Harness Browser"           "nix develop --command just ci-harness-browser"
+
+        # CI / Deep LAN (push)
+        add_step "LAN Smoke"                 "nix develop --command just ci-lan-smoke"
+
+        # CI / Deep Verify (push)
+        add_step "Lean Proofs"               "nix develop --command bash -lc 'just ci-lean-build && just ci-lean-check-sorry'"
+        add_step "Lean-Quint Bridge"         "nix develop --command just ci-lean-quint-bridge"
+        add_step "Kani Proofs"               "nix develop .#nightly --command just ci-kani"
+    fi
+
+    if [[ "$profile" == "all" ]]; then
+        # CI / Deep Harness (schedule + workflow_dispatch)
+        add_step "Harness Replay"                    "nix develop --command just ci-harness-replay"
+        add_step "Harness Matrix TUI"                "nix develop --command just ci-harness-matrix-tui"
+        add_step "Harness Matrix Web"                "nix develop --command just ci-harness-matrix-web"
+
+        # CI / Deep LAN (schedule + workflow_dispatch)
+        add_step "LAN Deep"                          "nix develop --command just ci-lan-deep"
+
+        # CI / Scheduled Quint
+        add_step "Quint Typecheck"                   "nix develop --command just ci-quint-typecheck"
+        add_step "Quint Verification"                "nix develop --command just ci-quint-verify"
+
+        # CI / Scheduled Holepunch
+        add_step "Holepunch Daily Smoke"             "nix develop --command just ci-holepunch-daily-smoke"
+        add_step "Holepunch Nightly Stress"          "nix develop --command just ci-holepunch-nightly-stress"
+        add_step "Holepunch Nightly Artifact Verification" "nix develop --command just ci-holepunch-verify-artifacts"
+        add_step "Holepunch Weekly Flaky Triage"     "nix develop --command just ci-holepunch-flaky-triage"
+        add_step "Holepunch Weekly Toolchain Audit"  "nix develop --command just ci-holepunch-toolchain-audit"
+    fi
+
+    total=${#STEPS[@]}
+
+    echo "CI Dry Run (profile: $profile)"
     echo "==============================="
     echo ""
 
@@ -710,59 +785,11 @@ ci-dry-run profile="push":
     fi
     echo ""
 
-    # Fast CI / PR lanes
-    run_step "Format Check"          "just ci-format"
-    run_step "Clippy Check"          "just ci-clippy"
-    run_step "Build Check"           "just ci-build"
-    run_step "Architecture Check"    "scripts/check/arch.sh --quick"
-    run_step "Shared Flow Policy"    "just ci-shared-flow-policy"
-    run_step "UX Flow Coverage"      "just ci-ux-flow-coverage"
-    run_step "UX Policy"             "just ci-ux-policy"
-    run_step "Tests"                 "just ci-test"
-    run_step "Protocol Compat"       "just ci-protocol-compat"
-
-    # Docs workflow lanes
-    run_step "Docs Links"            "just ci-docs-links"
-    run_step "Crate Doc Links"       "just ci-crates-doc-links"
-    run_step "Text Formatting"       "just ci-text-formatting"
-    run_step "Docs Semantic Drift"   "just ci-docs-semantic-drift"
-    run_step "Docs Build"            "just ci-book"
-
-    if [[ "{{ profile }}" != "pr" ]]; then
-        # Harness workflow lanes that run on push
-        run_step "Harness Build"         "just ci-harness-build"
-        run_step "Harness Contract"      "just ci-harness-contract"
-        run_step "Harness Shared Intent" "just ci-harness-shared-intent-contract"
-        run_step "Harness UI Evented"    "just ci-harness-ui-state-evented"
-        run_step "Harness Matrix Inventory" "just ci-harness-matrix-inventory"
-        run_step "Harness Browser"       "just ci-harness-browser"
-        run_step "LAN Smoke"             "just ci-lan-smoke"
-
-        # Deep conformance workflow lanes that run on push
-        run_step "Conformance Suite"     "just ci-conformance"
-        run_step "Choreo Parity"         "nix develop .#ci --command just ci-choreo-parity"
-        run_step "Property Monitor"      "nix develop .#ci --command just ci-property-monitor"
-        run_step "Effects Gate"          "nix develop .#ci --command just ci-effects"
-        run_step "Agent WASM Gate"       "nix develop .#ci --command just ci-agent-wasm"
-
-        # Deep verify workflow lanes that run on push
-        run_step "Lean Proofs"           "just ci-lean-build && just ci-lean-check-sorry"
-        run_step "Lean-Quint Bridge"     "just ci-lean-quint-bridge"
-        run_step "Kani Proofs"           "nix develop .#nightly --command just ci-kani"
-    fi
-
-    if [[ "{{ profile }}" == "all" ]]; then
-        # Scheduled/manual-only lanes
-        run_step "Harness Replay"                    "just ci-harness-replay"
-        run_step "LAN Deep"                          "just ci-lan-deep"
-        run_step "Quint Typecheck"                   "just ci-quint-typecheck"
-        run_step "Quint Verification"                "just ci-quint-verify"
-        run_step "Holepunch Daily Smoke"             "just ci-holepunch-daily-smoke"
-        run_step "Holepunch Nightly Stress"          "just ci-holepunch-nightly-stress"
-        run_step "Holepunch Verify Artifacts"        "just ci-holepunch-verify-artifacts"
-        run_step "Holepunch Flaky Triage"            "just ci-holepunch-flaky-triage"
-        run_step "Holepunch Toolchain Audit"         "just ci-holepunch-toolchain-audit"
-    fi
+    for step in "${STEPS[@]}"; do
+        name="${step%%:::*}"
+        cmd="${step#*:::}"
+        run_step "$name" "$cmd"
+    done
 
     # Summary
     echo ""
@@ -1292,20 +1319,47 @@ wasm-db action="build":
 # Utilities
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Build and run TUI in demo mode
-demo:
+# Launch the cross-frontend developer demo UX with isolated TUI + web instances.
+demo-dual *ARGS='':
+    just build-dev
+    ./scripts/dev/demo-dual.sh --mode dual {{ ARGS }}
+
+# Launch only the isolated TUI side of the developer demo UX.
+demo-tui *ARGS='':
+    just build-dev
+    ./scripts/dev/demo-dual.sh --mode tui {{ ARGS }}
+
+# Launch only the isolated web side of the developer demo UX with a dedicated browser profile.
+demo-web *ARGS='':
+    ./scripts/dev/demo-dual.sh --mode web {{ ARGS }}
+
+# Preserve the existing simulated TUI demo under an explicit name.
+demo-sim:
     just build-dev
     ./bin/aura tui --demo
 
-# Run TUI in demo mode with logging to file
-demo-log log="/tmp/aura-demo.log":
+# Run the simulated TUI demo with logging to file.
+demo-sim-log log="/tmp/aura-demo.log":
     #!/usr/bin/env bash
     set -euo pipefail
     just build-dev
     rm -f {{ log }}
-    echo "Starting TUI demo with logging to {{ log }}"
+    echo "Starting simulated TUI demo with logging to {{ log }}"
     echo "After exiting, view logs with: grep -i ContactsSignalView {{ log }}"
     RUST_LOG=aura_agent=info,aura_app=info,aura_terminal=info AURA_TUI_ALLOW_STDIO=1 ./bin/aura tui --demo 2>{{ log }}
+
+# Alias the old `just demo` surface to the cross-frontend developer demo UX.
+demo *ARGS='':
+    just build-dev
+    ./scripts/dev/demo-dual.sh --mode dual {{ ARGS }}
+
+# Backwards-compatible alias for the simulated TUI demo log helper.
+demo-log log="/tmp/aura-demo.log":
+    just demo-sim-log {{ log }}
+
+# Smoke-check the developer demo launcher startup, cleanup, and rerun behavior.
+demo-smoke:
+    bash scripts/check/demo-dual-smoke.sh
 
 # Execute any aura CLI command
 aura *ARGS='--help':

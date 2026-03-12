@@ -5,7 +5,7 @@ description: Essential Aura project overview including 8-layer architecture, aut
 
 # Aura Quick Reference
 
-## ⚠️ Critical First Steps
+## Critical First Steps
 1. **Enter the Nix environment if not already in the shell**: `nix develop`
 2. **Verify architecture**: `just check-arch`
 3. **Check available skills**: `ls .claude/skills/` for specific guidance

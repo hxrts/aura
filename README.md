@@ -26,8 +26,11 @@ For more details see [System Architecture](docs/001_system_architecture.md) and 
 # Enter dev shell
 nix develop
 
-# Build binary with development features and start TUI in demo mode
+# Launch the cross-frontend developer demo UX (TUI + web)
 just demo
+
+# Launch the older simulated TUI-only demo
+just demo-sim
 
 # Build production binary
 just build

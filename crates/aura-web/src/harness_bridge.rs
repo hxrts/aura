@@ -521,6 +521,7 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
                 controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
                     receiver_authority_id: Some(authority_id.to_string()),
                     source_operation: aura_app::ui::contract::OperationId::invitation_create(),
+                    code: Some(code.clone()),
                 });
                 Ok(JsValue::from_str(&code))
             })
@@ -626,6 +627,12 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
                 .web_dom_id()
                 .expect("ControlId::ModalRegion must define a web DOM id")
         );
+        let onboarding_root_selector = format!(
+            "#{}",
+            aura_app::ui::contract::ControlId::OnboardingRoot
+                .web_dom_id()
+                .expect("ControlId::OnboardingRoot must define a web DOM id")
+        );
         let toast_region_selector = format!(
             "#{}",
             aura_app::ui::contract::ControlId::ToastRegion
@@ -647,6 +654,12 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
             .unwrap_or(0);
         let modal_region_count = document
             .query_selector(&modal_region_selector)
+            .ok()
+            .flatten()
+            .map(|_| 1)
+            .unwrap_or(0);
+        let onboarding_root_count = document
+            .query_selector(&onboarding_root_selector)
             .ok()
             .flatten()
             .map(|_| 1)
@@ -678,6 +691,11 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
             &payload,
             &JsValue::from_str("modal_region_count"),
             &JsValue::from_f64(f64::from(modal_region_count)),
+        );
+        let _ = Reflect::set(
+            &payload,
+            &JsValue::from_str("onboarding_root_count"),
+            &JsValue::from_f64(f64::from(onboarding_root_count)),
         );
         let _ = Reflect::set(
             &payload,

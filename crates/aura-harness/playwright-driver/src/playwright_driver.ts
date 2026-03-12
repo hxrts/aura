@@ -785,14 +785,22 @@ async function assertRootStructure(session, reason) {
 
   const appRootCount = Number(structure.app_root_count ?? 0);
   const modalRegionCount = Number(structure.modal_region_count ?? 0);
+  const onboardingRootCount = Number(structure.onboarding_root_count ?? 0);
   const toastRegionCount = Number(structure.toast_region_count ?? 0);
   const activeScreenRootCount = Number(structure.active_screen_root_count ?? 0);
-  if (
-    appRootCount !== 1 ||
-    modalRegionCount !== 1 ||
-    toastRegionCount !== 1 ||
-    activeScreenRootCount !== 1
-  ) {
+  const onboardingShell =
+    onboardingRootCount === 1 &&
+    appRootCount === 0 &&
+    modalRegionCount === 0 &&
+    toastRegionCount === 0 &&
+    activeScreenRootCount === 0;
+  const appShell =
+    onboardingRootCount === 0 &&
+    appRootCount === 1 &&
+    modalRegionCount === 1 &&
+    toastRegionCount === 1 &&
+    activeScreenRootCount === 1;
+  if (!onboardingShell && !appShell) {
     throw new Error(
       `invalid root structure during ${reason}: ${JSON.stringify(structure)}`,
     );

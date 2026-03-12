@@ -48,10 +48,10 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const CHAT_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
-const CHAT_FACT_CONNECTIVITY_ATTEMPTS: usize = 6;
-const CHAT_FACT_CONNECTIVITY_BACKOFF_MS: u64 = 75;
 const AMP_SEND_RETRY_ATTEMPTS: usize = 6;
 const AMP_SEND_RETRY_BACKOFF_MS: u64 = 75;
+const REMOTE_DELIVERY_RETRY_ATTEMPTS: usize = 24;
+const REMOTE_DELIVERY_RETRY_BACKOFF_MS: u64 = 250;
 
 mod routing;
 mod validation;
@@ -322,7 +322,20 @@ async fn try_join_via_pending_channel_invitation(
         }
     }
 
-    converge_runtime(&runtime).await;
+    for attempt in 0..16 {
+        converge_runtime(&runtime).await;
+        if ensure_runtime_peer_connectivity(&runtime, "accept_pending_channel_invitation")
+            .await
+            .is_ok()
+        {
+            break;
+        }
+        if attempt + 1 < 16 {
+            runtime.sleep_ms(250).await;
+        }
+    }
+
+    let _ = crate::workflows::system::refresh_account(app_core).await;
 
     // Joining by invited channel id is best-effort; some runtimes auto-join on accept.
     let _ = join_channel(app_core, invited_channel_id).await;
@@ -1695,65 +1708,66 @@ pub async fn send_message_ref(
                     .await
                     .map_err(|e| AuraError::agent(format!("Failed to persist message: {e}")))?;
 
-                let mut recipients =
-                    recipient_peers_for_channel(app_core, channel_id, sender_id).await;
-                let mut attempted_fanout = 0usize;
-                let mut failed_fanout = Vec::new();
                 let channel_requires_remote_delivery = chat_snapshot(app_core)
                     .await
                     .channel(&channel_id)
                     .map(|channel| channel.is_dm || channel.member_count > 1)
                     .unwrap_or(false);
-                if recipients.is_empty() && channel_requires_remote_delivery {
-                    for attempt in 0..CHAT_FACT_CONNECTIVITY_ATTEMPTS {
-                        let _ =
-                            ensure_runtime_peer_connectivity(&runtime, "send_message_ref").await;
-                        converge_runtime(&runtime).await;
-                        runtime.sleep_ms(CHAT_FACT_CONNECTIVITY_BACKOFF_MS).await;
-                        recipients =
-                            recipient_peers_for_channel(app_core, channel_id, sender_id).await;
-                        if !recipients.is_empty() {
-                            break;
-                        }
-                        if attempt + 1 >= CHAT_FACT_CONNECTIVITY_ATTEMPTS {
-                            return Err(AuraError::agent(format!(
-                                "Missing sync prerequisite for channel {channel_id}: no recipient peers resolved"
-                            )));
-                        }
-                    }
-                }
-                if !recipients.is_empty() {
-                    for attempt in 0..CHAT_FACT_CONNECTIVITY_ATTEMPTS {
-                        if ensure_runtime_peer_connectivity(&runtime, "send_message_ref")
-                            .await
-                            .is_ok()
+                let mut delivered_remote = !channel_requires_remote_delivery;
+                let mut recipients =
+                    recipient_peers_for_channel(app_core, channel_id, sender_id).await;
+                let mut failed_fanout = Vec::new();
+                if channel_requires_remote_delivery {
+                    for attempt in 0..REMOTE_DELIVERY_RETRY_ATTEMPTS {
+                        if recipients.is_empty()
+                            || ensure_runtime_peer_connectivity(&runtime, "send_message_ref")
+                                .await
+                                .is_err()
                         {
+                            converge_runtime(&runtime).await;
+                            runtime.sleep_ms(REMOTE_DELIVERY_RETRY_BACKOFF_MS).await;
+                            recipients =
+                                recipient_peers_for_channel(app_core, channel_id, sender_id).await;
+                            continue;
+                        }
+
+                        failed_fanout.clear();
+                        let mut attempted_fanout = 0usize;
+                        for peer in recipients.iter().copied() {
+                            attempted_fanout = attempted_fanout.saturating_add(1);
+                            if let Err(error) =
+                                send_chat_fact_with_retry(&runtime, peer, context_id, &fact).await
+                            {
+                                failed_fanout.push(format!("{peer}: {error}"));
+                            }
+                        }
+
+                        if attempted_fanout > 0 && failed_fanout.is_empty() {
+                            delivered_remote = true;
                             break;
                         }
-                        if attempt + 1 < CHAT_FACT_CONNECTIVITY_ATTEMPTS {
+
+                        if attempt + 1 < REMOTE_DELIVERY_RETRY_ATTEMPTS {
                             converge_runtime(&runtime).await;
-                            runtime.sleep_ms(CHAT_FACT_CONNECTIVITY_BACKOFF_MS).await;
+                            runtime.sleep_ms(REMOTE_DELIVERY_RETRY_BACKOFF_MS).await;
+                            recipients =
+                                recipient_peers_for_channel(app_core, channel_id, sender_id).await;
                         }
                     }
-                }
-                for peer in recipients {
-                    attempted_fanout = attempted_fanout.saturating_add(1);
-                    if let Err(error) =
-                        send_chat_fact_with_retry(&runtime, peer, context_id, &fact).await
-                    {
-                        failed_fanout.push(format!("{peer}: {error}"));
+
+                    if !delivered_remote {
+                        if recipients.is_empty() {
+                            messaging_warn!(
+                                "No recipient peers resolved for channel {channel_id} after extended retries; treating send as locally persisted"
+                            );
+                        } else if !failed_fanout.is_empty() {
+                            messaging_warn!(
+                                "Message fanout unavailable for all recipients on {} after extended retries: {}; treating send as locally persisted",
+                                channel_id,
+                                failed_fanout.join("; ")
+                            );
+                        }
                     }
-                }
-                if attempted_fanout == 0 {
-                    messaging_warn!(
-                        "No recipient peers resolved for channel {channel_id}; treating send as locally persisted"
-                    );
-                }
-                if attempted_fanout > 0 && failed_fanout.len() == attempted_fanout {
-                    return Err(AuraError::agent(format!(
-                        "Message fanout unavailable for all recipients on {channel_id}: {}",
-                        failed_fanout.join("; ")
-                    )));
                 }
                 converge_runtime(&runtime).await;
                 if let Err(_error) =
@@ -2086,10 +2100,54 @@ pub async fn invite_authority_to_channel(
 
     // Channel invitations must carry bootstrap key material so recipients can
     // decrypt channel traffic immediately after acceptance.
-    let bootstrap = runtime
-        .amp_create_channel_bootstrap(context_id, channel_id, vec![receiver])
+    let invitees = vec![receiver];
+    let mut maybe_bootstrap = match runtime
+        .amp_create_channel_bootstrap(context_id, channel_id, invitees.clone())
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to bootstrap channel invitation: {e}")))?;
+    {
+        Ok(bootstrap) => Some(bootstrap),
+        Err(error) => {
+            let error_text = error.to_string();
+            if error_text.contains("channel state not found") {
+                None
+            } else {
+                return Err(AuraError::agent(format!(
+                    "Failed to bootstrap channel invitation: {error}"
+                )));
+            }
+        }
+    };
+    if maybe_bootstrap.is_none() {
+        for attempt in 1..=AMP_SEND_RETRY_ATTEMPTS {
+            runtime
+                .sleep_ms(AMP_SEND_RETRY_BACKOFF_MS * attempt as u64)
+                .await;
+            match runtime
+                .amp_create_channel_bootstrap(context_id, channel_id, invitees.clone())
+                .await
+            {
+                Ok(bootstrap) => {
+                    maybe_bootstrap = Some(bootstrap);
+                    break;
+                }
+                Err(error) => {
+                    let error_text = error.to_string();
+                    if error_text.contains("channel state not found") {
+                        continue;
+                    }
+                    return Err(AuraError::agent(format!(
+                        "Failed to bootstrap channel invitation: {error}"
+                    )));
+                }
+            }
+        }
+    }
+    let bootstrap = maybe_bootstrap.ok_or_else(|| {
+        AuraError::agent(format!(
+            "Failed to bootstrap channel invitation after {} retries: channel state not found",
+            AMP_SEND_RETRY_ATTEMPTS
+        ))
+    })?;
 
     // Delegate to invitation workflow.
     let invitation = crate::workflows::invitation::create_channel_invitation(

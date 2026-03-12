@@ -4,7 +4,8 @@ use crate::tui::screens::Screen;
 use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::state::toast::ToastLevel;
 use crate::tui::types::{
-    Channel as TuiChannel, Device as TuiDevice, SettingsSection,
+    Channel as TuiChannel, Contact as TuiContact, Device as TuiDevice, Message as TuiMessage,
+    SettingsSection,
 };
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
@@ -45,8 +46,10 @@ fn last_written_snapshot() -> &'static Mutex<Option<String>> {
 
 pub struct TuiSemanticInputs<'a> {
     pub app_snapshot: &'a StateSnapshot,
+    pub contacts: &'a [TuiContact],
     pub settings_devices: &'a [TuiDevice],
     pub chat_channels: &'a [TuiChannel],
+    pub chat_messages: &'a [TuiMessage],
 }
 
 fn map_screen(screen: Screen) -> ScreenId {
@@ -158,11 +161,6 @@ pub fn authoritative_ui_snapshot(
         map_screen(state.screen())
     };
     let open_modal = state.modal_queue.current().and_then(map_modal);
-    let readiness = if onboarding_active {
-        UiReadiness::Loading
-    } else {
-        UiReadiness::Ready
-    };
 
     let focused_control = if onboarding_active {
         Some(ControlId::OnboardingRoot)
@@ -195,7 +193,7 @@ pub fn authoritative_ui_snapshot(
             }
         })
         .collect::<Vec<_>>();
-    let selected_navigation_id = Some(screen_item_id(screen));
+    let selected_navigation_id = (!onboarding_active).then(|| screen_item_id(screen));
     push_list(
         &mut lists,
         &mut selections,
@@ -225,12 +223,12 @@ pub fn authoritative_ui_snapshot(
         selected_channel_id.clone(),
     );
 
-    let contact_items = app_snapshot
+    let contact_items = semantic_inputs
         .contacts
-        .all_contacts()
+        .iter()
         .enumerate()
         .map(|(idx, contact)| ListItemSnapshot {
-            id: contact.id.to_string(),
+            id: contact.id.clone(),
             selected: idx == state.contacts.selected_index,
             confirmation: ConfirmationState::Confirmed,
         })
@@ -455,29 +453,45 @@ pub fn authoritative_ui_snapshot(
         })
         .unwrap_or_default();
 
-    let messages = selected_channel_id
-        .as_ref()
-        .and_then(|channel_id| {
-            app_snapshot
-                .chat
-                .all_channels()
-                .find(|channel| channel.id.to_string() == *channel_id)
-                .map(|channel| {
-                    app_snapshot
-                        .chat
-                        .messages_for_channel(&channel.id)
-                        .iter()
-                        .map(|message| MessageSnapshot {
-                            id: message.id.clone(),
-                            content: message.content.clone(),
-                        })
-                        .collect::<Vec<_>>()
-                })
-        })
-        .unwrap_or_default();
+    let messages = if semantic_inputs.chat_messages.is_empty() {
+        selected_channel_id
+            .as_ref()
+            .and_then(|channel_id| {
+                app_snapshot
+                    .chat
+                    .all_channels()
+                    .find(|channel| channel.id.to_string() == *channel_id)
+                    .map(|channel| {
+                        app_snapshot
+                            .chat
+                            .messages_for_channel(&channel.id)
+                            .iter()
+                            .map(|message| MessageSnapshot {
+                                id: message.id.clone(),
+                                content: message.content.clone(),
+                            })
+                            .collect::<Vec<_>>()
+                    })
+            })
+            .unwrap_or_default()
+    } else {
+        semantic_inputs
+            .chat_messages
+            .iter()
+            .map(|message| MessageSnapshot {
+                id: message.id.clone(),
+                content: message.content.clone(),
+            })
+            .collect::<Vec<_>>()
+    };
 
     let operations = state.exported_operation_snapshots();
     let runtime_events = state.exported_runtime_events();
+    let readiness = if onboarding_active {
+        UiReadiness::Loading
+    } else {
+        UiReadiness::Ready
+    };
 
     let snapshot = UiSnapshot {
         screen,
@@ -553,8 +567,10 @@ mod tests {
             &state,
             TuiSemanticInputs {
                 app_snapshot: &app_snapshot,
+                contacts: &[],
                 settings_devices: &[],
                 chat_channels: &[],
+                chat_messages: &[],
             },
         );
         assert_eq!(snapshot.readiness, UiReadiness::Loading);
@@ -572,8 +588,10 @@ mod tests {
             &state,
             TuiSemanticInputs {
                 app_snapshot: &app_snapshot,
+                contacts: &[],
                 settings_devices: &[],
                 chat_channels: &[],
+                chat_messages: &[],
             },
         );
         let nav = snapshot
@@ -610,8 +628,10 @@ mod tests {
             &state,
             TuiSemanticInputs {
                 app_snapshot: &app_snapshot,
+                contacts: &[],
                 settings_devices: &[],
                 chat_channels: &[],
+                chat_messages: &[],
             },
         );
         let operation_state = snapshot
@@ -633,8 +653,10 @@ mod tests {
             &state,
             TuiSemanticInputs {
                 app_snapshot: &app_snapshot,
+                contacts: &[],
                 settings_devices: &[],
                 chat_channels: &[],
+                chat_messages: &[],
             },
         );
 
@@ -698,6 +720,7 @@ mod tests {
         state.upsert_runtime_fact(RuntimeFact::InvitationCodeReady {
             receiver_authority_id: None,
             source_operation: OperationId::invitation_create(),
+            code: Some("invite-code".to_string()),
         });
 
         let app_snapshot = StateSnapshot::default();
@@ -705,8 +728,10 @@ mod tests {
             &state,
             TuiSemanticInputs {
                 app_snapshot: &app_snapshot,
+                contacts: &[],
                 settings_devices: &[],
                 chat_channels: &[],
+                chat_messages: &[],
             },
         );
 
