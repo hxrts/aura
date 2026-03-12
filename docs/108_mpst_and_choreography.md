@@ -4,7 +4,7 @@ This document describes the architecture of choreographic protocols in Aura. It 
 
 ## 1. DSL and Projection
 
-Aura defines global protocols using the `choreography!` macro. The macro parses a global specification into an abstract syntax tree. The macro produces code that represents the protocol as a choreographic structure. The source of truth for protocols is a `.choreo` file stored **next to the Rust module** that loads it.
+Aura defines global protocols using the `choreography!` macro. The macro parses a global specification into an abstract syntax tree. The macro produces code that represents the protocol as a choreographic structure. The source of truth for protocols is a `.choreo` file stored next to the Rust module that loads it.
 
 Projection converts the global protocol into per-role local session types. Each local session type defines the exact sequence of sends and receives for a single role. Projection eliminates deadlocks and ensures that communication structure is correct.
 
@@ -55,11 +55,17 @@ These values are sourced from runtime state such as params, journal facts, UI in
 Aura has one production choreography backend:
 - VM backend (`AuraChoreoEngine`) for admitted Telltale VM execution, replay, and parity checks.
 
+The authoritative async ownership contract for how `aura-agent` hosts these
+sessions lives in `crates/aura-agent/ARCHITECTURE.md`.
+
 Direct generated-runner execution is test and migration support only.
 
 Production runtime ownership is fragment-scoped. The admitted unit is one VM fragment derived from the generated `CompositionManifest`. A manifest without `link` metadata yields one protocol fragment. A manifest with `link` metadata yields one fragment per linked bundle.
 
 `delegate` and `link` define how ownership moves. Local runtime services claim fragment ownership through `AuraEffectSystem`. Runtime transfer goes through `ReconfigurationManager`. The runtime rejects ambiguous local ownership before a transfer reaches the VM.
+
+Host-side async code must preserve that ownership model. External network,
+timer, and callback work enters through canonical ingress and is routed to the current local owner before any session mutation occurs.
 
 `VmBridgeEffects` is the synchronous host boundary for one fragment. VM callbacks use it for session-local payload queues, blocked receive snapshots, and scheduler signals. Async transport, journal, and storage work stay outside the callback path in the host bridge loop.
 
@@ -121,31 +127,32 @@ The runtime now treats linked composition metadata as an ownership boundary as w
 
 ### Protocol Evolution Compatibility Policy
 
-Aura classifies choreography evolution by comparing **baseline** and **candidate**
-projections with `async_subtype(new_local, old_local)` for every shared role.
+Aura classifies choreography evolution by comparing baseline and candidate projections with `async_subtype(new_local, old_local)` for every shared role.
 
 Compatibility rule:
 - Compatible if `async_subtype` succeeds for every shared role.
 - Breaking if `async_subtype` fails for any shared role.
 
 Version bump rules:
-- **Patch**: no projection-shape change (comments, docs, metadata-only updates).
-- **Minor**: projection changes are present, but compatibility check passes for all shared roles.
-- **Major**: any compatibility failure, role-set change, or protocol namespace replacement.
+
+- Patch: no projection-shape change (comments, docs, metadata-only updates).
+- Minor: projection changes are present, but compatibility check passes for all shared roles.
+- Major: any compatibility failure, role-set change, or protocol namespace replacement.
 
 Reviewer decision table:
 
 | Change type | Default classification | Required action |
 |---|---|---|
-| Additive branch (existing roles unchanged) | Minor if async-subtype passes | Run compatibility checker; bump minor on pass, major on fail |
-| Payload narrowing/widening | Minor or Major based on async-subtype result | Treat checker as source of truth; bump major on any role failure |
-| Role added/removed/renamed | Major | Bump major and treat as new protocol contract |
-| Namespace change with same semantics | Major (new contract surface) | Register as new protocol namespace and keep old baseline until migration completes |
+| Additive branch (existing roles unchanged) | Minor if async-subtype passes | Run compatibility checker. Bump minor on pass, major on fail. |
+| Payload narrowing/widening | Minor or Major based on async-subtype result | Treat checker as source of truth. Bump major on any role failure. |
+| Role added/removed/renamed | Major | Bump major and treat as new protocol contract. |
+| Namespace change with same semantics | Major (new contract surface) | Register as new protocol namespace. Keep old baseline until migration completes. |
 
 Operational notes:
-- Compatibility checks are tooling/CI gates, never runtime hot-path logic.
-- New protocol files without a baseline are not auto-classified; reviewers must explicitly approve initial versioning.
-- Baseline/current checks are implemented by `scripts/check/protocol-compat.sh` and `just ci-protocol-compat`.
+
+- Compatibility checks are tooling and CI gates, never runtime hot-path logic.
+- New protocol files without a baseline are not auto-classified. Reviewers must explicitly approve initial versioning.
+- Baseline and current checks are implemented by `scripts/check/protocol-compat.sh` and `just ci-protocol-compat`.
 
 ### Quantitative Termination Budgets
 
@@ -189,35 +196,37 @@ The `choreography!` macro emits a stable, minimal surface intended for runtime i
 Consumers should rely only on the contracts below. All other generated items are internal and
 may change without notice.
 
-**Stable contracts:**
+Stable contracts:
+
 - `effect_bridge::EffectBridgeContext` (context, authority, peer, timestamp)
 - `effect_bridge::annotation_to_commands(...)`
 - `effect_bridge::annotations_to_commands(...)`
 - `effect_bridge::create_context(...)`
 - `effect_bridge::execute_commands(...)`
 
-**Stability rules:**
-- The above names and signatures are **stable within a minor release series**.
-- Additional helper functions may be added, but existing signatures will not change without a
-  schema/version bump in the macro output.
-- Generated role enums and protocol-specific modules are **not** part of the stable API surface.
+Stability rules:
+
+- The above names and signatures are stable within a minor release series.
+- Additional helper functions may be added, but existing signatures will not change without a schema/version bump in the macro output.
+- Generated role enums and protocol-specific modules are not part of the stable API surface.
 
 ### Integration with Effect Interpreters
 
-Generated `EffectCommand` sequences execute through:
-- **Production**: `ProductionEffectInterpreter` (aura-effects)
-- **Simulation**: `SimulationEffectInterpreter` (aura-simulator)
-- **Testing**: `BorrowedEffectInterpreter` / mock interpreters
+Generated `EffectCommand` sequences execute through different interpreters:
+
+- Production: `ProductionEffectInterpreter` (aura-effects)
+- Simulation: `SimulationEffectInterpreter` (aura-simulator)
+- Testing: `BorrowedEffectInterpreter` and mock interpreters
 
 This unified approach ensures consistent guard behavior across all execution environments.
 
 ## 5. Guard Chain Integration
 
-Guard effects originate from two sources that share the same `EffectCommand` system:
+Guard effects originate from two sources that share the same `EffectCommand` system.
 
-1. **Choreographic Annotations** (compile-time): The `choreography!` macro generates `EffectCommand` sequences from annotations. These represent per-message guard requirements.
+Choreographic annotations (compile-time): The `choreography!` macro generates `EffectCommand` sequences from annotations. These represent per-message guard requirements.
 
-2. **Runtime Guard Chain** (send-site): The `GuardChain::standard()` evaluates pure guards against a `GuardSnapshot` at each protocol send site. This enforces invariants like charge-before-send.
+Runtime guard chain (send-site): The `GuardChain::standard()` evaluates pure guards against a `GuardSnapshot` at each protocol send site. This enforces invariants like charge-before-send.
 
 ### Guard Chain Sequence
 
@@ -290,20 +299,19 @@ Not all multi-party operations require full choreographic specification. Aura cl
 
 ### 8.1 When to Use Choreography
 
-**Category C (Consensus-Gated) Operations** - Full choreography required:
+Category C (Consensus-Gated) operations require full choreography:
+
 - Guardian rotation ceremonies
 - Recovery execution flows
 - OTA hard fork activation
 - Device revocation
-- Adding contacts / creating groups (establishing cryptographic context)
+- Adding contacts or creating groups (establishing cryptographic context)
 - Adding members to existing groups
 
-These operations require explicit session types because:
-- Partial execution is dangerous
-- All parties must agree before effects apply
-- Strong ordering guarantees are necessary
+These operations require explicit session types because partial execution is dangerous, all parties must agree before effects apply, and strong ordering guarantees are necessary.
 
-**Example - Invitation Ceremony:**
+Example invitation ceremony:
+
 ```rust
 choreography! {
     #[namespace = "invitation"]
@@ -318,19 +326,17 @@ choreography! {
 
 ### 8.2 When Choreography is NOT Required
 
-**Category A (Optimistic) Operations** - No choreography needed:
+Category A (Optimistic) operations do not need choreography:
+
 - Send message (within established context)
 - Create channel (within existing relational context)
 - Update channel topic
-- Block/unblock contact
+- Block or unblock contact
 
-These use simple CRDT fact emission because:
-- Cryptographic context already exists
-- Keys derive deterministically from shared state
-- Eventual consistency is sufficient
-- No coordination required
+These use simple CRDT fact emission because cryptographic context already exists, keys derive deterministically from shared state, eventual consistency is sufficient, and no coordination is required.
 
-**Example - No choreography:**
+Example without choreography:
+
 ```rust
 // Just emit a fact - no ceremony needed
 journal.append(ChannelCheckpoint {
@@ -343,12 +349,13 @@ journal.append(ChannelCheckpoint {
 });
 ```
 
-**Category B (Deferred) Operations** - May use lightweight choreography:
+Category B (Deferred) operations may use lightweight choreography:
+
 - Change channel permissions
 - Remove channel member (may be contested)
 - Transfer ownership
 
-These may use a proposal/approval pattern but don't require the full ceremony infrastructure.
+These may use a proposal and approval pattern but do not require the full ceremony infrastructure.
 
 ### 8.3 Decision Tree for Protocol Design
 
@@ -481,7 +488,7 @@ Practical integration points:
 3. Guard chain evaluates commands and budgets at send sites.
 4. VM output/flow policies gate observable commits and cross-role message flow before transport effects execute.
 
-This means choreography-level guard semantics and VM-level hardening are additive, not competing: annotations define required effects; policies constrain which effects are allowed to become observable.
+Choreography-level guard semantics and VM-level hardening are additive, not competing. Annotations define required effects. Policies constrain which effects are allowed to become observable.
 
 ## 11. Summary
 
