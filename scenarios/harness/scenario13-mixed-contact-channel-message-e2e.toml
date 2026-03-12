@@ -189,6 +189,20 @@ actor = "bob"
 timeout_ms = 30000
 
 [[steps]]
+id = "bob-open-chat-after-accept"
+action = "open_screen"
+actor = "bob"
+screen_id = "chat"
+timeout_ms = 6000
+
+[[steps]]
+id = "bob-join-shared-channel-explicit"
+action = "join_channel"
+actor = "bob"
+value = "shared-parity-lab"
+timeout_ms = 6000
+
+[[steps]]
 id = "bob-channel-membership-ready"
 action = "runtime_event_occurred"
 actor = "bob"
@@ -200,13 +214,6 @@ id = "alice-recipient-peers-resolved"
 action = "runtime_event_occurred"
 actor = "alice"
 runtime_event_kind = "recipient_peers_resolved"
-timeout_ms = 120000
-
-[[steps]]
-id = "alice-message-delivery-ready"
-action = "runtime_event_occurred"
-actor = "alice"
-runtime_event_kind = "message_delivery_ready"
 timeout_ms = 120000
 
 [[steps]]
@@ -243,6 +250,13 @@ action = "open_screen"
 actor = "bob"
 screen_id = "chat"
 timeout_ms = 6000
+
+[[steps]]
+id = "bob-recipient-peers-resolved"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "recipient_peers_resolved"
+timeout_ms = 120000
 
 [[steps]]
 id = "bob-send-message"

@@ -84,12 +84,83 @@ fn select_home_and_channel(backend: &mut LocalPtyBackend, channel_id: &str) -> R
     backend.activate_control(ControlId::NavChat)?;
     wait_for_screen_visible(backend, ScreenId::Chat, Duration::from_secs(5))?;
     backend.activate_list_item(ListId::Channels, channel_id)?;
+    backend.send_keys("\r")?;
+    thread::sleep(Duration::from_millis(150));
+    let committed = backend
+        .ui_snapshot()?
+        .selections
+        .iter()
+        .find(|selection| selection.list == ListId::Channels)
+        .is_some_and(|selection| selection.item_id == channel_id);
+    if !committed {
+        backend.activate_list_item(ListId::Channels, channel_id)?;
+        backend.send_keys("\r")?;
+        thread::sleep(Duration::from_millis(150));
+    }
     if !selected_home {
         tracing::debug!(
             "select_home_and_channel: home {channel_id} not visible, fell back to chat selection"
         );
     }
     Ok(())
+}
+
+fn unique_shared_channel_candidate(snapshot: &UiSnapshot) -> Option<String> {
+    let mut candidates = snapshot
+        .runtime_events
+        .iter()
+        .filter_map(|event| match &event.fact {
+            RuntimeFact::ChannelMembershipReady {
+                channel,
+                member_count: Some(member_count),
+            } if *member_count > 1
+                && channel
+                    .name
+                    .as_deref()
+                    .map(|name| !name.eq_ignore_ascii_case("note to self"))
+                    .unwrap_or(true) =>
+            {
+                channel.id.clone()
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    candidates.sort();
+    candidates.dedup();
+    if let [channel_id] = candidates.as_slice() {
+        return Some(channel_id.clone());
+    }
+
+    let note_to_self_id = snapshot.runtime_events.iter().find_map(|event| match &event.fact {
+        RuntimeFact::ChannelMembershipReady { channel, .. }
+            if channel
+                .name
+                .as_deref()
+                .map(|name| name.eq_ignore_ascii_case("note to self"))
+                .unwrap_or(false) =>
+        {
+            channel.id.clone()
+        }
+        _ => None,
+    });
+    let mut listed_candidates = snapshot
+        .lists
+        .iter()
+        .find(|list| list.id == ListId::Channels)
+        .map(|list| {
+            list.items
+                .iter()
+                .map(|item| item.id.clone())
+                .filter(|item_id| note_to_self_id.as_deref() != Some(item_id.as_str()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    listed_candidates.sort();
+    listed_candidates.dedup();
+    match listed_candidates.as_slice() {
+        [channel_id] => Some(channel_id.clone()),
+        _ => None,
+    }
 }
 
 struct RunningSession {
@@ -1241,6 +1312,18 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     } if *member_count > 1 => channel.id.clone(),
                     _ => None,
                 });
+        let joined_channel_name =
+            snapshot
+                .runtime_events
+                .iter()
+                .find_map(|event| match &event.fact {
+                    RuntimeFact::ChannelMembershipReady {
+                        channel,
+                        member_count: Some(member_count),
+                        ..
+                    } if *member_count > 1 => channel.name.clone(),
+                    _ => None,
+                });
         let already_joined = previous_channel_count > 1 || joined_channel_id.is_some();
         if already_joined {
             if let Some(channel_id) = joined_channel_id {
@@ -1252,6 +1335,11 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 if selected_channel_id.as_deref() != Some(channel_id.as_str()) {
                     select_home_and_channel(self, &channel_id)?;
                 }
+            }
+            if let Some(channel_name) =
+                joined_channel_name.filter(|name| !name.eq_ignore_ascii_case("note to self"))
+            {
+                let _ = self.submit_chat_command_via_ui(&format!("join {channel_name}"));
             }
             return Ok(SubmittedAction::without_handle(()));
         }
@@ -1277,6 +1365,18 @@ impl SharedSemanticBackend for LocalPtyBackend {
                         } if *member_count > 1 => channel.id.clone(),
                         _ => None,
                     });
+            let joined_channel_name =
+                snapshot
+                    .runtime_events
+                    .iter()
+                    .find_map(|event| match &event.fact {
+                        RuntimeFact::ChannelMembershipReady {
+                            channel,
+                            member_count: Some(member_count),
+                            ..
+                        } if *member_count > 1 => channel.name.clone(),
+                        _ => None,
+                    });
             let joined = channel_count > previous_channel_count || joined_channel_id.is_some();
             if joined {
                 if let Some(channel_id) = joined_channel_id {
@@ -1288,6 +1388,11 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     if selected_channel_id.as_deref() != Some(channel_id.as_str()) {
                         select_home_and_channel(self, &channel_id)?;
                     }
+                }
+                if let Some(channel_name) =
+                    joined_channel_name.filter(|name| !name.eq_ignore_ascii_case("note to self"))
+                {
+                    let _ = self.submit_chat_command_via_ui(&format!("join {channel_name}"));
                 }
                 return Ok(SubmittedAction::without_handle(()));
             }
@@ -1413,6 +1518,16 @@ impl SharedSemanticBackend for LocalPtyBackend {
         let previous_operation =
             observe_operation(&self.ui_snapshot()?, &OperationId::send_message());
         let snapshot = self.ui_snapshot()?;
+        if let Some(channel_id) = unique_shared_channel_candidate(&snapshot) {
+            let selected_channel_id = snapshot
+                .selections
+                .iter()
+                .find(|selection| selection.list == ListId::Channels)
+                .map(|selection| selection.item_id.clone());
+            if selected_channel_id.as_deref() != Some(channel_id.as_str()) {
+                let _ = select_home_and_channel(self, &channel_id);
+            }
+        }
         if let Some(channels) = snapshot
             .lists
             .iter()

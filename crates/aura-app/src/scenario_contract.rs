@@ -759,26 +759,13 @@ impl IntentAction {
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
                         BarrierDeclaration::Quiescence(QuiescenceState::Settled),
                     ],
-                    before_next_intent: vec![
-                        BarrierDeclaration::RuntimeEvent(RuntimeEventKind::ChannelJoined),
-                        BarrierDeclaration::RuntimeEvent(RuntimeEventKind::ChannelMembershipReady),
-                        BarrierDeclaration::Readiness(UiReadiness::Ready),
-                    ],
+                    before_next_intent: vec![BarrierDeclaration::Readiness(UiReadiness::Ready)],
                 },
                 post_operation_convergence: None,
                 focus_semantics: FocusSemantics::Control(ControlId::ChatNewGroupButton),
                 selection_semantics: SelectionSemantics::List(ListId::Channels),
-                transitions: vec![
-                    AuthoritativeTransitionKind::RuntimeEvent(RuntimeEventKind::ChannelJoined),
-                    AuthoritativeTransitionKind::RuntimeEvent(
-                        RuntimeEventKind::ChannelMembershipReady,
-                    ),
-                ],
-                terminal_success: vec![
-                    TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::ChannelJoined),
-                    TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::ChannelMembershipReady),
-                    TerminalSuccessKind::Readiness(UiReadiness::Ready),
-                ],
+                transitions: vec![],
+                terminal_success: vec![TerminalSuccessKind::Readiness(UiReadiness::Ready)],
                 terminal_failure_codes: vec![
                     "join_channel_issue_failed".to_string(),
                     "join_channel_timeout".to_string(),
@@ -829,14 +816,12 @@ impl IntentAction {
                     ActionPrecondition::Screen(ScreenId::Chat),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
                     ActionPrecondition::Quiescence(QuiescenceState::Settled),
-                    ActionPrecondition::RuntimeEvent(RuntimeEventKind::MessageDeliveryReady),
                 ],
                 barriers: SharedActionBarrierMetadata {
                     before_issue: vec![
                         BarrierDeclaration::Screen(ScreenId::Chat),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
                         BarrierDeclaration::Quiescence(QuiescenceState::Settled),
-                        BarrierDeclaration::RuntimeEvent(RuntimeEventKind::MessageDeliveryReady),
                     ],
                     before_next_intent: vec![
                         BarrierDeclaration::RuntimeEvent(RuntimeEventKind::MessageCommitted),

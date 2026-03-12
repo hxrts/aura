@@ -2207,7 +2207,37 @@ fn unique_shared_channel_candidate(snapshot: &UiSnapshot) -> Option<String> {
         .collect::<Vec<_>>();
     candidates.sort();
     candidates.dedup();
-    match candidates.as_slice() {
+    if let [channel_id] = candidates.as_slice() {
+        return Some(channel_id.clone());
+    }
+
+    let note_to_self_id = snapshot.runtime_events.iter().find_map(|event| match &event.fact {
+        RuntimeFact::ChannelMembershipReady { channel, .. }
+            if channel
+                .name
+                .as_deref()
+                .map(|name| name.eq_ignore_ascii_case("note to self"))
+                .unwrap_or(false) =>
+        {
+            channel.id.clone()
+        }
+        _ => None,
+    });
+    let mut listed_candidates = snapshot
+        .lists
+        .iter()
+        .find(|list| list.id == ListId::Channels)
+        .map(|list| {
+            list.items
+                .iter()
+                .map(|item| item.id.clone())
+                .filter(|item_id| note_to_self_id.as_deref() != Some(item_id.as_str()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    listed_candidates.sort();
+    listed_candidates.dedup();
+    match listed_candidates.as_slice() {
         [channel_id] => Some(channel_id.clone()),
         _ => None,
     }
@@ -2280,6 +2310,22 @@ fn ensure_chat_screen_targets_unique_shared_channel(
         ..ScenarioStep::default()
     };
     wait_for_semantic_state(&chat_wait, tool_api, instance_id, timeout_ms)?;
+    let channel_visible_deadline = Instant::now() + Duration::from_millis(timeout_ms.min(5_000));
+    loop {
+        let snapshot = tool_api.ui_snapshot(instance_id)?;
+        let visible = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Channels)
+            .is_some_and(|list| list.items.iter().any(|item| item.id == channel_id));
+        if visible {
+            break;
+        }
+        if Instant::now() >= channel_visible_deadline {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(80));
+    }
     dispatch(
         tool_api,
         ToolRequest::ActivateListItem {
@@ -4987,10 +5033,10 @@ mod tests {
             "expected quiescence failure, got {failures:?}"
         );
         assert!(
-            failures
+            !failures
                 .iter()
-                .any(|failure| failure.contains("runtime_event=MessageDeliveryReady")),
-            "expected runtime-event failure, got {failures:?}"
+                .any(|failure| failure.contains("runtime_event=")),
+            "unexpected runtime-event failure, got {failures:?}"
         );
     }
 

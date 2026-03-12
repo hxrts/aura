@@ -1093,7 +1093,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                 if let Some(idx) = committed_index {
                                     state.chat.selected_channel = idx;
-                                } else if state.chat.selected_channel >= channel_count {
+                                } else if committed_selection.is_none()
+                                    && state.chat.selected_channel >= channel_count
+                                {
                                     let idx =
                                         clamp_list_index(selected_index.unwrap_or(0), channel_count);
                                     state.chat.selected_channel = idx;
@@ -1101,13 +1103,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 }
 
                                 if let Ok(mut guard) = tui_selected_for_updates.write() {
-                                    *guard = shared_channels_for_updates.read().ok().and_then(
-                                        |channels| {
-                                            channels
-                                                .get(state.chat.selected_channel)
-                                                .map(|channel| channel.id.clone())
-                                        },
-                                    );
+                                    if committed_selection.is_none() || committed_index.is_some() {
+                                        *guard = shared_channels_for_updates.read().ok().and_then(
+                                            |channels| {
+                                                channels
+                                                    .get(state.chat.selected_channel)
+                                                    .map(|channel| channel.id.clone())
+                                            },
+                                        );
+                                    }
                                 }
 
                                 // Auto-scroll to bottom when new messages arrive, but only if

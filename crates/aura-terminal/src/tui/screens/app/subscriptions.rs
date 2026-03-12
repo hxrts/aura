@@ -445,7 +445,11 @@ pub fn use_messages_subscription(
 /// Used to map selected channel index -> channel ID for send operations.
 pub type SharedChannels = Arc<RwLock<Vec<Channel>>>;
 
-fn merge_dm_like_channels(incoming: &ChatState, previous: &ChatState) -> ChatState {
+fn merge_transient_channels(
+    incoming: &ChatState,
+    previous: &ChatState,
+    selected_channel_id: Option<&str>,
+) -> ChatState {
     if incoming.channel_count() == 0 && previous.channel_count() > 0 {
         let had_dm_like = previous.all_channels().any(is_dm_like_channel);
         if had_dm_like {
@@ -457,9 +461,13 @@ fn merge_dm_like_channels(incoming: &ChatState, previous: &ChatState) -> ChatSta
     }
 
     let mut merged = incoming.clone();
+    let selected_channel_id = selected_channel_id.map(str::to_owned);
 
     for channel in previous.all_channels() {
-        if !is_dm_like_channel(channel) || merged.has_channel(&channel.id) {
+        let preserve_selected = selected_channel_id
+            .as_deref()
+            .is_some_and(|selected_id| channel.id.to_string() == selected_id);
+        if (!is_dm_like_channel(channel) && !preserve_selected) || merged.has_channel(&channel.id) {
             continue;
         }
 
@@ -507,7 +515,27 @@ fn publish_scoped_channels(
         .iter()
         .map(|channel| chat_state.messages_for_channel(&channel.id).len())
         .sum();
-    let channel_list: Vec<Channel> = scoped.iter().copied().map(Channel::from).collect();
+    let mut channel_list: Vec<Channel> = scoped.iter().copied().map(Channel::from).collect();
+    if let Some(selected_channel_id) = selected_channel_id {
+        let already_present = channel_list
+            .iter()
+            .any(|channel| channel.id == selected_channel_id);
+        if !already_present {
+            let preserved = channels
+                .read()
+                .ok()
+                .and_then(|guard| {
+                    guard
+                        .iter()
+                        .find(|channel| channel.id == selected_channel_id)
+                        .cloned()
+                });
+            if let Some(channel) = preserved {
+                channel_list.push(channel);
+                channel_list.sort_by(|left, right| left.name.cmp(&right.name));
+            }
+        }
+    }
     let channel_count = channel_list.len();
     let channel_signature = channel_list
         .iter()
@@ -544,15 +572,18 @@ fn publish_scoped_channels(
                 channel: channel_fact.clone(),
                 member_count: Some(resolved_member_count),
             }];
-            let remote_delivery_ready = resolved_recipient_count > 0
-                && (transport_peer_count > 0 || observed_remote_message)
+            let recipients_resolved = resolved_recipient_count > 0
                 && !channel.name.eq_ignore_ascii_case("note to self")
                 && !is_dm_like_channel(channel);
-            if remote_delivery_ready {
+            let remote_delivery_ready = recipients_resolved
+                && (transport_peer_count > 0 || observed_remote_message);
+            if recipients_resolved {
                 facts.push(RuntimeFact::RecipientPeersResolved {
                     channel: channel_fact.clone(),
                     member_count: resolved_member_count,
                 });
+            }
+            if remote_delivery_ready {
                 facts.push(RuntimeFact::MessageDeliveryReady {
                     channel: channel_fact,
                     member_count: resolved_member_count,
@@ -649,7 +680,17 @@ pub fn use_channels_subscription(
                 let mut stabilized = latest_chat_state
                     .read()
                     .ok()
-                    .map(|previous| merge_dm_like_channels(&chat_state, &previous))
+                    .map(|previous| {
+                        let selected_channel = selected_channel_id
+                            .read()
+                            .ok()
+                            .and_then(|guard| guard.clone());
+                        merge_transient_channels(
+                            &chat_state,
+                            &previous,
+                            selected_channel.as_deref(),
+                        )
+                    })
                     .unwrap_or_else(|| chat_state.clone());
                 if let Some(authority_id) = shared_authority_id
                     .read()

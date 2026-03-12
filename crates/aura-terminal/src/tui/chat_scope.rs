@@ -35,6 +35,9 @@ pub fn effective_home_scope_id(
     active_home_scope: Option<&str>,
     selected_channel_id: Option<&str>,
 ) -> Option<String> {
+    let selected_channel_id = selected_channel_id
+        .map(str::trim)
+        .filter(|selected_id| !selected_id.is_empty());
     let selected_channel = selected_channel_id.and_then(|selected_id| {
         chat_state
             .all_channels()
@@ -57,6 +60,10 @@ pub fn effective_home_scope_id(
         }
 
         return Some(channel.id.to_string());
+    }
+
+    if let Some(selected_id) = selected_channel_id {
+        return Some(selected_id.to_owned());
     }
 
     active_home_scope

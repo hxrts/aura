@@ -336,6 +336,11 @@ async fn try_join_via_pending_channel_invitation(
 
     // Joining by invited channel id is best-effort; some runtimes auto-join on accept.
     let _ = join_channel(app_core, invited_channel_id).await;
+    if let Ok(context_id) =
+        context_id_for_channel(app_core, invited_channel_id, Some(runtime.authority_id())).await
+    {
+        warm_channel_connectivity(app_core, &runtime, invited_channel_id, context_id).await;
+    }
     Ok(true)
 }
 
@@ -892,6 +897,19 @@ async fn recipient_peers_for_channel(
     )
 }
 
+async fn warm_channel_connectivity(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn RuntimeBridge>,
+    channel_id: ChannelId,
+    context_id: ContextId,
+) {
+    let recipients = recipient_peers_for_channel(app_core, channel_id, runtime.authority_id()).await;
+    for peer in recipients {
+        let _ = runtime.ensure_peer_channel(context_id, peer).await;
+    }
+    converge_runtime(runtime).await;
+}
+
 /// Resolve recipient peers for a channel view from known channel, home, contact, and discovery state.
 pub fn resolved_recipient_peers_for_channel_view(
     channel: &Channel,
@@ -1288,6 +1306,7 @@ pub async fn join_channel(
     )
     .await?;
     apply_authoritative_membership_projection(app_core, channel_id, context_id, true, None).await?;
+    warm_channel_connectivity(app_core, &runtime, channel_id, context_id).await;
 
     Ok(())
 }
