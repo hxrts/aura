@@ -25,6 +25,15 @@ use std::sync::Arc;
 pub struct TestkitSimulatorBridge;
 
 impl TestkitSimulatorBridge {
+    fn fixture_authority_id(fixture: &DeviceTestFixture, seed: u64) -> AuthorityId {
+        let material = format!(
+            "testkit-simulator-authority:{}:{}:{seed}",
+            fixture.index(),
+            fixture.label()
+        );
+        AuthorityId::new_from_entropy(hash(material.as_bytes()))
+    }
+
     /// Create effect systems for simulation from testkit fixtures
     ///
     /// This method creates multiple effect systems configured for simulation,
@@ -41,7 +50,7 @@ impl TestkitSimulatorBridge {
         for fixture in fixtures {
             let device_id = fixture.device_id();
 
-            let authority_id = AuthorityId::for_device(device_id);
+            let authority_id = Self::fixture_authority_id(fixture, seed);
             let sim_config = SimulationEnvironmentConfig::new(seed, device_id, authority_id);
 
             // Use factory to create effect system

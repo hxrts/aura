@@ -36,7 +36,7 @@ hex = { workspace = true }
 tracing = { workspace = true }
 
 # Async runtime
-tokio = { workspace = true, features = ["process", "rt-multi-thread"] }
+tokio = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 

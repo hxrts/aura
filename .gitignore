@@ -67,3 +67,4 @@ outcomes/
 target-codex
 node_modules/
 /bin/
+.sweep.timestamp

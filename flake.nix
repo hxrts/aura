@@ -202,6 +202,7 @@
             cargo-watch
             cargo-edit
             cargo-audit
+            cargo-sweep
 
             # WASM tools
             wasm-pack

@@ -477,7 +477,7 @@ impl SessionOperations {
             };
 
             let envelope = TransportEnvelope {
-                destination: AuthorityId::from_uuid(participant_id.0),
+                destination: self.authority_context.authority_id(),
                 source: self.authority_context.authority_id(),
                 context: self.guard_context(),
                 payload: serde_json::to_vec(&invitation)
@@ -486,6 +486,10 @@ impl SessionOperations {
                     let mut metadata = HashMap::new();
                     metadata.insert("type".to_string(), "session_invitation".to_string());
                     metadata.insert("session_id".to_string(), request.session_id.to_string());
+                    metadata.insert(
+                        "aura-destination-device-id".to_string(),
+                        participant_id.to_string(),
+                    );
                     metadata
                 },
                 receipt: None,
@@ -1102,6 +1106,7 @@ mod tests {
     #[tokio::test]
     async fn invitations_use_transport_envelopes() {
         let authority_context = AuthorityContext::new(AuthorityId::new_from_entropy([70u8; 32]));
+        let local_authority = authority_context.authority_id();
         let account_id = AccountId::new_from_entropy([12u8; 32]);
         let config = AgentConfig::default();
 
@@ -1126,7 +1131,7 @@ mod tests {
             .unwrap();
 
         // Verify that an invitation was sent to the transport layer
-        let destination = AuthorityId::for_device(other_device);
+        let destination = local_authority;
         let inbox = shared_transport.inbox_for(destination);
         let inbox = inbox.read();
         assert_eq!(inbox.len(), 1, "Expected exactly one transport envelope");
@@ -1135,6 +1140,10 @@ mod tests {
         assert_eq!(
             envelope.metadata.get("type"),
             Some(&"session_invitation".to_string())
+        );
+        assert_eq!(
+            envelope.metadata.get("aura-destination-device-id"),
+            Some(&other_device.to_string())
         );
     }
 

@@ -93,7 +93,7 @@ cfg-if = "1"
 bpaf = "0.9"
 
 # Async
-tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
+tokio = { workspace = true }
 async-lock = "3"
 futures = { workspace = true }
 

@@ -1069,6 +1069,11 @@ impl AuraEffectSystem {
         u64::from_le_bytes(seed_bytes)
     }
 
+    fn derive_test_authority(seed: u64) -> AuthorityId {
+        let authority_material = format!("{TEST_SEED_DERIVATION_DOMAIN}:authority:{seed}");
+        AuthorityId::new_from_entropy(aura_hash(authority_material.as_bytes()))
+    }
+
     fn register_test_seed(
         seed: u64,
         identity: &str,
@@ -1124,7 +1129,7 @@ impl AuraEffectSystem {
     #[allow(clippy::disallowed_methods)]
     pub fn simulation_for_test(config: &AgentConfig) -> Result<Self, crate::core::AgentError> {
         let seed = Self::allocate_test_seed(0)?;
-        Self::simulation(config, seed, AuthorityId::for_device(config.device_id()))
+        Self::simulation(config, seed, Self::derive_test_authority(seed))
     }
 
     /// Deterministic test constructor with extra salt for multi-instance setups
@@ -1136,7 +1141,7 @@ impl AuraEffectSystem {
         extra_salt: u64,
     ) -> Result<Self, crate::core::AgentError> {
         let seed = Self::allocate_test_seed(extra_salt)?;
-        Self::simulation(config, seed, AuthorityId::for_device(config.device_id()))
+        Self::simulation(config, seed, Self::derive_test_authority(seed))
     }
 
     /// Deterministic test constructor using explicit test identity plus callsite.
@@ -1147,7 +1152,7 @@ impl AuraEffectSystem {
         test_identity: &str,
     ) -> Result<Self, crate::core::AgentError> {
         let seed = Self::allocate_test_seed_with_identity(test_identity, 0)?;
-        Self::simulation(config, seed, AuthorityId::for_device(config.device_id()))
+        Self::simulation(config, seed, Self::derive_test_authority(seed))
     }
 
     /// Deterministic test constructor with explicit test identity and salt.
@@ -1159,7 +1164,7 @@ impl AuraEffectSystem {
         extra_salt: u64,
     ) -> Result<Self, crate::core::AgentError> {
         let seed = Self::allocate_test_seed_with_identity(test_identity, extra_salt)?;
-        Self::simulation(config, seed, AuthorityId::for_device(config.device_id()))
+        Self::simulation(config, seed, Self::derive_test_authority(seed))
     }
 
     /// Deterministic authority-aware constructor for tests.
@@ -1196,7 +1201,7 @@ impl AuraEffectSystem {
         Self::simulation_with_shared_transport(
             config,
             seed,
-            AuthorityId::for_device(config.device_id()),
+            Self::derive_test_authority(seed),
             shared_transport,
         )
     }

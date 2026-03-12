@@ -849,6 +849,18 @@ clean-all: clean
         echo "Aborted."
     fi
 
+# Clean old compilation artifacts (keeps builds from last 7 days)
+sweep:
+    cargo sweep --time 7
+
+# Clean all build artifacts except those for installed toolchains
+sweep-installed:
+    cargo sweep --installed
+
+# Show what would be cleaned without removing anything
+sweep-dry-run:
+    cargo sweep --time 7 --dry-run
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Watch
 # ═══════════════════════════════════════════════════════════════════════════════

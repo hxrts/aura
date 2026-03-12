@@ -43,6 +43,11 @@ type MessageQueueKey = (ChoreographicRole, ChoreographicRole);
 /// Message queue storage type
 type MessageQueues = HashMap<MessageQueueKey, VecDeque<Vec<u8>>>;
 
+fn derived_test_authority(device_id: DeviceId, role_index: u32) -> AuthorityId {
+    let material = format!("simulated-transport-authority:{device_id}:{role_index}");
+    AuthorityId::new_from_entropy(aura_core::hash::hash(material.as_bytes()))
+}
+
 /// Shared message bus for simulation
 ///
 /// This structure holds the message queues for all roles in a simulation.
@@ -429,7 +434,7 @@ impl TestEffectSystem {
         let transport = SimulatedTransport::new(bus, device_id, role_index)?;
         Some(Self {
             transport,
-            authority_id: AuthorityId::for_device(device_id),
+            authority_id: derived_test_authority(device_id, role_index),
             storage: std::sync::Mutex::new(HashMap::new()),
             physical_time_ms: std::sync::Mutex::new(1640995200000), // 2022-01-01
             logical_clock: std::sync::Mutex::new(LogicalTime {

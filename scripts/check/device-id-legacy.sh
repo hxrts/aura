@@ -29,6 +29,10 @@ case "$mode" in
       'AuthorityId::from_uuid\(([^)]*device[^)]*)\)|AuthorityId\([^)]*device[^)]*\)'
 
     check_pattern \
+      "legacy authority-from-device field coercion detected" \
+      'AuthorityId::from_uuid\(([^)]*(device|participant)[^)]*\.0[^)]*)\)'
+
+    check_pattern \
       "legacy device-from-authority UUID coercion detected" \
       'DeviceId::from_uuid\(([^)]*authority[^)]*)\)|DeviceId\([^)]*authority[^)]*\)'
 

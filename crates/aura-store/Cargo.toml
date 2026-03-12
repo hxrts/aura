@@ -26,7 +26,7 @@ serde_json = { workspace = true }
 hex = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt", "macros"] }
+tokio = { workspace = true }
 async-trait = { workspace = true }
 uuid = { workspace = true }
 aura-testkit = { path = "../aura-testkit" }
