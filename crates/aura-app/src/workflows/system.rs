@@ -193,10 +193,11 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
         core.runtime().cloned()
     };
 
-    // Refresh chat state (signals feature only)
+    // Refresh chat state and republish CHAT_SIGNAL so UI subscriptions pick up
+    // runtime-side convergence that did not originate from a direct UI action.
     #[cfg(feature = "signals")]
     {
-        let _ = super::messaging::get_chat_state(app_core).await;
+        let _ = emit_chat_snapshot_signal(app_core).await;
     }
 
     // Refresh contacts state
@@ -217,6 +218,11 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
     if let Some(runtime) = runtime {
         let _ = runtime.trigger_discovery().await;
         let _ = runtime.trigger_sync().await;
+    }
+
+    #[cfg(feature = "signals")]
+    {
+        let _ = emit_chat_snapshot_signal(app_core).await;
     }
 
     // Refresh discovered peers (re-query runtime, not just read stale signal)

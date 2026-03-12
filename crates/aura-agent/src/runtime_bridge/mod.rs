@@ -1882,20 +1882,19 @@ impl RuntimeBridge for AgentRuntimeBridge {
     /// This implementation handles the technical details of distributing FROST key packages
     /// to devices that may have different authorities than the target authority being configured.
     ///
-    /// # Cross-Authority Envelope Routing
+    /// # Device-Targeted Envelope Routing
     ///
-    /// Each participating device has its own authority derived from its device id:
-    /// ```text
-    /// device_authority = AuthorityId::for_device(device_id)
-    /// ```
+    /// Enrollment stays within the existing authority. Device-specific routing is expressed with
+    /// `metadata["aura-destination-device-id"]`, while the envelope destination remains the
+    /// authority being configured.
     ///
     /// Key package envelopes are routed as follows:
-    /// - **destination**: Device's own authority (computed from device_id)
+    /// - **destination**: Authority being configured for threshold signing
     /// - **source**: Initiator's authority (current authority_id)
-    /// - **metadata["target-authority-id"]**: Authority being configured for threshold signing
+    /// - **metadata["aura-destination-device-id"]**: Specific destination device within that authority
     ///
-    /// This allows devices to receive and process envelopes addressed to their own authority
-    /// while knowing which authority's threshold they are joining.
+    /// This keeps authority identity explicit and avoids modeling device enrollment as a
+    /// cross-authority handoff.
     ///
     /// # Fresh DKG vs Existing State
     ///

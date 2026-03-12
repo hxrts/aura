@@ -534,6 +534,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     };
 
                     if let Some(runtime) = runtime {
+                        let _ = runtime.trigger_discovery().await;
+                        let _ = runtime.process_ceremony_messages().await;
+                        let _ = runtime.trigger_sync().await;
                         let _ = runtime.process_ceremony_messages().await;
                     }
 
