@@ -298,10 +298,15 @@
 
             # Custom PS1 prompt matching user's style: user@host path (branch) [nix] >
             # Colors: darkgrey=user@host, purple=path, greenish-yellow=branch, orange=[nix] >
+            # Note: \001 and \002 mark non-printing chars in command substitutions (like \[ \] in literal PS1)
             __git_branch() {
-              git branch 2>/dev/null | grep '^*' | colrm 1 2
+              local branch
+              branch=$(git branch 2>/dev/null | grep '^*' | colrm 1 2)
+              if [ -n "$branch" ]; then
+                printf ' \001\033[38;5;148m\002(%s)\001\033[0m\002' "$branch"
+              fi
             }
-            PS1='\[\033[90m\]\u@\h\[\033[0m\] \[\033[35m\]\w\[\033[0m\]$(__git_branch | sed -e "s/\(.*\)/ \x1b[38;5;148m(\1)\x1b[0m/") \[\033[38;5;208m\][nix] >\[\033[0m\] '
+            PS1='\[\033[90m\]\u@\h\[\033[0m\] \[\033[35m\]\w\[\033[0m\]$(__git_branch)\[\033[38;5;208m\][nix] >\[\033[0m\] '
 
             # Set AURA_PATH to the project directory for development.
             # This ensures TUI data files (.aura/, .aura-demo/) are created in the
@@ -409,10 +414,15 @@
 
             # Custom PS1 prompt (nightly variant)
             # Colors: darkgrey=user@host, purple=path, greenish-yellow=branch, orange=[nix-nightly] >
+            # Note: \001 and \002 mark non-printing chars in command substitutions (like \[ \] in literal PS1)
             __git_branch() {
-              git branch 2>/dev/null | grep '^*' | colrm 1 2
+              local branch
+              branch=$(git branch 2>/dev/null | grep '^*' | colrm 1 2)
+              if [ -n "$branch" ]; then
+                printf ' \001\033[38;5;148m\002(%s)\001\033[0m\002' "$branch"
+              fi
             }
-            PS1='\[\033[90m\]\u@\h\[\033[0m\] \[\033[35m\]\w\[\033[0m\]$(__git_branch | sed -e "s/\(.*\)/ \x1b[38;5;148m(\1)\x1b[0m/") \[\033[38;5;208m\][nix-nightly] >\[\033[0m\] '
+            PS1='\[\033[90m\]\u@\h\[\033[0m\] \[\033[35m\]\w\[\033[0m\]$(__git_branch)\[\033[38;5;208m\][nix-nightly] >\[\033[0m\] '
 
             # Set AURA_PATH to the project directory for development.
             # See default devShell for full explanation.
