@@ -6,6 +6,11 @@ Aura uses algebraic effects to abstract system capabilities. Effect traits defin
 
 This document covers effect trait design, handler patterns, and the context model. See [Runtime](120_runtime.md) for lifecycle management, service composition, and guard chain execution.
 
+The `aura-agent` runtime uses structured concurrency with explicit session ownership.
+Session-bound effects execute only under the current owner via canonical ingress.
+For complete details on async ownership, session ownership, typed runtime errors,
+and instrumentation policy, see `crates/aura-agent/ARCHITECTURE.md`.
+
 ## Effect Traits
 
 Aura defines effect traits as abstract interfaces for system capabilities. Core traits expose essential functionality. Extended traits expose optional operations and coordinated behaviors. Each trait is independent and does not assume global state.
@@ -188,6 +193,10 @@ Production choreography execution uses a narrow synchronous bridge trait at the 
 This split exists because Telltale host callbacks are synchronous. The callback path may enqueue outbound payloads, record blocked receive edges, consume branch choices, and snapshot scheduler signals. It must not perform network I/O or journal work directly.
 
 Async host work resumes outside the VM step boundary in Layer 6 runtime services. `vm_host_bridge` observes `VmBridgeEffects` state, performs transport and guard-chain work, and injects completed results back into the VM. This preserves deterministic VM progression while keeping Aura's runtime async.
+
+`aura-agent` runtime code preserves this boundary through canonical ingress and explicit session ownership. Network callbacks, timers, and background tasks route typed `SessionIngress` to the current local owner. Each active session has exactly one owner at any time.
+
+See `crates/aura-agent/ARCHITECTURE.md` for the complete ownership model.
 
 ## Layer Placement
 

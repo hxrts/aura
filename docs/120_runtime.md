@@ -5,20 +5,107 @@
 The Aura runtime assembles effect handlers into working systems. It manages lifecycle, executes the guard chain, schedules reactive updates, and exposes services through `AuraAgent`. The `AppCore` provides a unified interface for all frontends.
 
 This document covers runtime composition and execution. See [Effect System](105_effect_system.md) for trait definitions and handler design.
+The `aura-agent` crate-level runtime contract, including structured concurrency,
+canonical ingress, ownership, typed errors, and CI policy gates, lives in
+`crates/aura-agent/ARCHITECTURE.md`.
+
+## Structured Concurrency
+
+`aura-agent` uses structured concurrency as the only production async model.
+
+Rules:
+
+- Every long-lived async subsystem has one named owner.
+- Every owner has one rooted task group.
+- Child tasks belong to exactly one task group.
+- Detached fire-and-forget tasks are forbidden in production runtime code.
+- Shutdown is hierarchical and parent-driven.
+
+### Service Actor Pattern
+
+Long-lived runtime services use actor ownership:
+
+```rust
+struct ServiceHandle {
+    cmd_tx: mpsc::Sender<ServiceCommand>,
+}
+
+struct ServiceActor {
+    state: ServiceState,
+    cmd_rx: mpsc::Receiver<ServiceCommand>,
+    tasks: TaskGroup,
+}
+```
+
+Each actor maintains:
+
+- Typed command channel for external requests.
+- Single event loop driving all state transitions.
+- Explicit lifecycle state machine.
+- Owned child task group for internal loops.
+- Authoritative health derived from actor state.
+
+### Async Primitives
+
+Preferred primitives:
+
+- `tokio::sync::mpsc` and `tokio::sync::oneshot` for channels.
+- `tokio::sync::watch` for snapshots rather than command routing.
+- `tokio::sync::Notify` for ownership-local wakeups.
+- Supervised task groups and actor loops.
+
+Forbidden in production:
+
+- Raw `tokio::spawn` and `spawn_local`.
+- Ad hoc background loops without a task owner.
+- Direct session mutation from non-owner tasks.
+- Multi-writer service state as the default pattern.
 
 ## Lifecycle Management
 
-Aura defines a lightweight `LifecycleManager` for initialization and shutdown. It coordinates session cleanup timeouts and shutdown behavior. If richer lifecycle orchestration becomes necessary, it should be introduced via a dedicated design pass.
+`aura-agent` uses an explicit service lifecycle contract with authoritative
+service states, structured task ownership, and deterministic teardown. The
+crate-level runtime contract in `crates/aura-agent/ARCHITECTURE.md` is the
+source of truth.
 
-Long-lived runtimes must periodically prune caches and stale in-memory state. Aura handles this in Layer 6 via background maintenance tasks scheduled by the `RuntimeTaskRegistry`. Domain crates expose cleanup APIs but do not self-schedule. The agent runtime wires these up during startup.
+All long-lived services implement a shared lifecycle state machine:
+
+- `New`: Initial state before startup.
+- `Starting`: Initialization in progress.
+- `Running`: Actor alive and command path available.
+- `Stopping`: Graceful shutdown in progress.
+- `Stopped`: No live owned tasks and no live command handling.
+- `Failed`: Observable failure state.
+
+Long-lived runtimes periodically prune caches and stale in-memory state through
+owned service actors and supervised task groups. Domain crates expose cleanup
+APIs but do not self-schedule. The agent runtime owns the scheduling model.
 
 ```rust
-// In aura-agent runtime builder
-system.start_maintenance_tasks();
+struct ServiceActor {
+    state: ServiceState,
+    cmd_rx: mpsc::Receiver<ServiceCommand>,
+    tasks: TaskGroup,
+}
 
-// Internally, maintenance tasks call:
-// - sync_service.maintenance_cleanup(...)
-// - ceremony_tracker.cleanup_timed_out()
+impl ServiceActor {
+    async fn run(&mut self) {
+        while let Some(cmd) = self.cmd_rx.recv().await {
+            match cmd {
+                ServiceCommand::Start { reply } => {
+                    self.state = ServiceState::Running;
+                    let _ = reply.send(Ok(()));
+                }
+                ServiceCommand::Stop { reply } => {
+                    self.state = ServiceState::Stopping;
+                    self.tasks.shutdown().await;
+                    self.state = ServiceState::Stopped;
+                    let _ = reply.send(Ok(()));
+                }
+            }
+        }
+    }
+}
 ```
 
 This approach keeps time-based policy in the runtime layer and preserves deterministic testing. The simulator controls time directly. Layer 4 and 5 crates remain decoupled from runtime concerns.
@@ -227,7 +314,40 @@ This pattern provides clean service access. Services are created on demand with 
 
 ## Session Management
 
-The runtime manages the lifecycle of distributed protocols. Choreographies define protocol logic. Sessions represent single stateful executions of choreographies. The runtime uses the effect system to create, manage, and execute sessions.
+The runtime manages the lifecycle of distributed protocols. Choreographies define protocol logic. Sessions represent single stateful executions of choreographies. The runtime uses structured concurrency with explicit session ownership.
+
+### Session Ownership
+
+Each active session or fragment has exactly one current local owner. The owner is either a per-session actor or an authoritative choreography runtime loop. This invariant is enforced through the canonical ingress pattern.
+
+```rust
+enum SessionIngress {
+    NetworkEnvelope(TransportEnvelope),
+    Timer(SessionTimerEvent),
+    Command(SessionCommand),
+    DelegatedEndpoint(DelegationBundle),
+}
+
+struct SessionHandle {
+    ingress_tx: mpsc::Sender<SessionIngress>,
+}
+```
+
+Network, timer, and external events are queued before touching session state. Session ownership and task ownership move together. Session-bound effects execute only under the current owner.
+
+### Ownership Transitions
+
+Owner-visible state transitions:
+
+- `Unowned -> Claimed`
+- `Claimed -> Running`
+- `Running -> DelegatingOut`
+- `DelegatingOut -> Released`
+- `Running -> Stopping`
+- `Stopping -> Stopped`
+- `Any -> Failed`
+
+No transition may create overlapping owners.
 
 ### Session Interface
 
@@ -253,9 +373,14 @@ This trait abstracts session management into an effect. Application logic remain
 
 ### Session State
 
-Concrete implementations act as the engine for the session system. Each session has a `SessionId` for unique identification, a `SessionStatus` indicating the current phase, a `SessionEpoch` for coordinating state changes, and a list of participants.
+Concrete implementations act as the engine for the session system. Each session maintains:
 
-The creation and lifecycle of sessions are themselves managed as choreographic protocols. The `SessionLifecycleChoreography` in `aura-protocol` ensures consistency across all participants.
+- `SessionId` for unique identification.
+- `SessionStatus` indicating the current phase.
+- `SessionEpoch` for coordinating state changes.
+- Participant list.
+
+Session creation and lifecycle are managed as choreographic protocols. The `SessionLifecycleChoreography` in `aura-protocol` ensures consistency across all participants.
 
 ### Telltale Integration
 
