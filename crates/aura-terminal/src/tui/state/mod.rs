@@ -134,6 +134,9 @@ pub struct TuiState {
     /// Last exported invite code for harness-visible semantic readiness.
     pub last_exported_invitation_code: Option<String>,
 
+    /// True while the shell is waiting for a startup runtime bootstrap to converge.
+    pub pending_runtime_bootstrap: bool,
+
     /// Runtime facts exported from owned TUI transitions.
     pub runtime_facts: Vec<RuntimeFact>,
 }

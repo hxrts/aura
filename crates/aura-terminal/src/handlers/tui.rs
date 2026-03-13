@@ -20,7 +20,8 @@ use std::time::Duration;
 use aura_app::ui::prelude::*;
 // Import portable account types and parsing helpers
 use aura_app::ui::types::{
-    AccountBackup, AccountConfig, BootstrapEvent, BootstrapEventKind, BootstrapSurface,
+    AccountBackup, AccountConfig, BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity,
+    BootstrapSurface,
     PendingAccountBootstrap, PENDING_ACCOUNT_BOOTSTRAP_FILENAME,
 };
 use aura_app::ui::workflows::account::{
@@ -86,6 +87,7 @@ pub use aura_app::ui::types::{
 
 type BootstrapStorage =
     EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>;
+const SELECTED_RUNTIME_IDENTITY_FILENAME: &str = "selected-runtime-identity.json";
 
 fn open_bootstrap_storage(base_path: &Path) -> BootstrapStorage {
     let crypto = Arc::new(RealCryptoHandler::new());
@@ -283,6 +285,41 @@ async fn clear_pending_account_bootstrap(
         .map(|_| ())
 }
 
+async fn load_selected_runtime_identity(
+    storage: &impl StorageCoreEffects,
+) -> Result<Option<BootstrapRuntimeIdentity>, AuraError> {
+    let Some(bytes) = storage
+        .retrieve(SELECTED_RUNTIME_IDENTITY_FILENAME)
+        .await
+        .map_err(|e| {
+            AuraError::internal(format!("Failed to read selected runtime identity: {e}"))
+        })?
+    else {
+        return Ok(None);
+    };
+
+    serde_json::from_slice(&bytes).map(Some).map_err(|e| {
+        AuraError::internal(format!("Invalid selected runtime identity data: {e}"))
+    })
+}
+
+async fn persist_selected_runtime_identity(
+    storage: &impl StorageCoreEffects,
+    runtime_identity: &BootstrapRuntimeIdentity,
+) -> Result<(), AuraError> {
+    let bytes = serde_json::to_vec(runtime_identity).map_err(|e| {
+        AuraError::internal(format!(
+            "Failed to serialize selected runtime identity: {e}"
+        ))
+    })?;
+    storage
+        .store(SELECTED_RUNTIME_IDENTITY_FILENAME, bytes)
+        .await
+        .map_err(|e| {
+            AuraError::internal(format!("Failed to persist selected runtime identity: {e}"))
+        })
+}
+
 async fn persist_selected_authority(
     base_path: &Path,
     authority_id: AuthorityId,
@@ -315,7 +352,7 @@ pub async fn create_account(
     nickname_suggestion: &str,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
     let pending_bootstrap = prepare_pending_account_bootstrap(nickname_suggestion)?;
-    create_account_with_pending_bootstrap(base_path, pending_bootstrap).await
+    create_account_with_pending_bootstrap(base_path, pending_bootstrap, None).await
 }
 
 /// Create a new account and stage a device-enrollment import for the first runtime start.
@@ -326,12 +363,25 @@ pub async fn create_account_with_device_enrollment(
 ) -> Result<(AuthorityId, ContextId), AuraError> {
     let pending_bootstrap = prepare_pending_account_bootstrap(nickname_suggestion)?
         .with_device_enrollment_code(device_enrollment_code.to_string());
-    create_account_with_pending_bootstrap(base_path, pending_bootstrap).await
+    create_account_with_pending_bootstrap(base_path, pending_bootstrap, None).await
+}
+
+pub async fn create_account_with_device_enrollment_runtime_identity(
+    base_path: &Path,
+    runtime_identity: BootstrapRuntimeIdentity,
+    nickname_suggestion: &str,
+    device_enrollment_code: &str,
+) -> Result<(AuthorityId, ContextId), AuraError> {
+    let pending_bootstrap = prepare_pending_account_bootstrap(nickname_suggestion)?
+        .with_device_enrollment_code(device_enrollment_code.to_string());
+    create_account_with_pending_bootstrap(base_path, pending_bootstrap, Some(runtime_identity))
+        .await
 }
 
 async fn create_account_with_pending_bootstrap(
     base_path: &Path,
     pending_bootstrap: PendingAccountBootstrap,
+    runtime_identity: Option<BootstrapRuntimeIdentity>,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
     let staged_event = BootstrapEvent::new(
         BootstrapSurface::Tui,
@@ -348,14 +398,25 @@ async fn create_account_with_pending_bootstrap(
     let time = PhysicalTimeHandler::new();
     let crypto = RealCryptoHandler::new();
 
-    // First-run bootstrap must generate fresh authority/context identities rather than
-    // deriving authority from a device-local string.
-    let authority_id = new_authority_id(&crypto).await;
-    let context_id = new_context_id(&crypto).await;
+    let (authority_id, context_id) = if let Some(identity) = runtime_identity.clone() {
+        (
+            identity.authority_id,
+            default_context_id_for_authority(identity.authority_id),
+        )
+    } else {
+        // First-run bootstrap must generate fresh authority/context identities rather than
+        // deriving authority from a device-local string.
+        let authority_id = new_authority_id(&crypto).await;
+        let context_id = new_context_id(&crypto).await;
+        (authority_id, context_id)
+    };
 
     // Persist to storage using effect-backed handlers.
     tracing::info!("tui create_account persisting account config");
     persist_pending_account_bootstrap(&storage, &pending_bootstrap).await?;
+    if let Some(identity) = runtime_identity.as_ref() {
+        persist_selected_runtime_identity(&storage, identity).await?;
+    }
     persist_account_config(
         &storage,
         &time,
@@ -756,18 +817,17 @@ async fn handle_tui_launch(
     // Safe to call multiple times; only the first init wins.
     init_tui_tracing(storage.clone(), mode);
 
-    // Determine device ID
-    let device_id = device_id_str
+    // Determine configured device ID fallback.
+    let configured_device_id = device_id_str
         .map(|id| crate::ids::device_id(id))
         .unwrap_or_else(|| crate::ids::device_id("tui:production-device"));
 
     stdio.println(format_args!("Data directory: {}", base_path.display()));
-    stdio.println(format_args!("Device ID: {device_id}"));
+    stdio.println(format_args!("Device ID: {configured_device_id}"));
     if let Some(addr) = bind_address {
         stdio.println(format_args!("Bind address: {addr}"));
     }
-    std::env::set_var("AURA_DEMO_BOB_DEVICE_ID", device_id.to_string());
-    let device_label = device_id_str.unwrap_or("tui:production-device").to_string();
+    std::env::set_var("AURA_DEMO_BOB_DEVICE_ID", configured_device_id.to_string());
 
     loop {
         let app_config = AppConfig {
@@ -775,6 +835,12 @@ async fn handle_tui_launch(
             debug: false,
             journal_path: None,
         };
+        let selected_runtime_identity = load_selected_runtime_identity(storage.as_ref()).await?;
+        let device_id = selected_runtime_identity
+            .as_ref()
+            .map(|identity| identity.device_id)
+            .unwrap_or(configured_device_id);
+        let device_label = device_id.to_string();
         let loaded_account = try_load_account(storage.as_ref()).await?;
         let has_existing_account = matches!(loaded_account, AccountLoadResult::Loaded { .. });
 
@@ -782,6 +848,7 @@ async fn handle_tui_launch(
         let mut simulator: Option<DemoSimulator> = None;
         #[cfg(feature = "development")]
         let mut runtime_agent: Option<Arc<aura_agent::AuraAgent>> = None;
+        let mut pending_runtime_bootstrap = false;
 
         let app_core = match loaded_account {
             AccountLoadResult::Loaded { authority, context } => {
@@ -901,6 +968,7 @@ async fn handle_tui_launch(
                 {
                     pending_device_enrollment_code =
                         pending_bootstrap.device_enrollment_code.clone();
+                    pending_runtime_bootstrap = pending_device_enrollment_code.is_some();
                     let resolution = reconcile_pending_runtime_account_bootstrap(
                         app_core.raw(),
                         Some(pending_bootstrap),
@@ -1128,6 +1196,7 @@ async fn handle_tui_launch(
                     .with_device_id(device_label.clone())
                     .with_mode(mode)
                     .with_existing_account(has_existing_account)
+                    .with_pending_runtime_bootstrap(pending_runtime_bootstrap)
                     .with_demo_hints(hints);
 
                 if let Some(sim) = simulator.as_ref() {
@@ -1147,6 +1216,7 @@ async fn handle_tui_launch(
                 .with_device_id(device_label.clone())
                 .with_mode(mode)
                 .with_existing_account(has_existing_account)
+                .with_pending_runtime_bootstrap(pending_runtime_bootstrap)
                 .build()
                 .map_err(|e| {
                     crate::error::TerminalError::Config(format!("IoContext build failed: {e}"))
@@ -1160,6 +1230,7 @@ async fn handle_tui_launch(
             .with_device_id(device_label.clone())
             .with_mode(mode)
             .with_existing_account(has_existing_account)
+            .with_pending_runtime_bootstrap(pending_runtime_bootstrap)
             .build()
             .map_err(|e| {
                 crate::error::TerminalError::Config(format!("IoContext build failed: {e}"))

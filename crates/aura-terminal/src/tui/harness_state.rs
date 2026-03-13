@@ -8,7 +8,9 @@ use crate::tui::types::{
     Channel as TuiChannel, Contact as TuiContact, Device as TuiDevice, Message as TuiMessage,
     SettingsSection,
 };
-use crate::tui::updates::{HarnessCommandReceiptHandle, UiUpdate, UiUpdateSender};
+use crate::tui::updates::{
+    HarnessCommandReceiptHandle, HarnessCommandSender, HarnessCommandSubmission,
+};
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
     ConfirmationState, ControlId, HarnessUiCommand, HarnessUiCommandReceipt, ListId,
@@ -34,6 +36,9 @@ static UI_STATE_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
 static UI_STATE_SOCKET: OnceLock<Option<PathBuf>> = OnceLock::new();
 static COMMAND_SOCKET: OnceLock<Option<PathBuf>> = OnceLock::new();
 static LAST_WRITTEN_SNAPSHOT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static ACTIVE_HARNESS_COMMAND_SENDER: OnceLock<Mutex<Option<HarnessCommandSender>>> =
+    OnceLock::new();
+static HARNESS_COMMAND_LISTENER_STARTED: OnceLock<()> = OnceLock::new();
 
 struct HarnessSocketGuard {
     path: PathBuf,
@@ -85,6 +90,10 @@ fn bind_harness_command_listener() -> io::Result<Option<(UnixListener, HarnessSo
 
 fn last_written_snapshot() -> &'static Mutex<Option<String>> {
     LAST_WRITTEN_SNAPSHOT.get_or_init(|| Mutex::new(None))
+}
+
+fn active_harness_command_sender() -> &'static Mutex<Option<HarnessCommandSender>> {
+    ACTIVE_HARNESS_COMMAND_SENDER.get_or_init(|| Mutex::new(None))
 }
 
 pub struct TuiSemanticInputs<'a> {
@@ -209,28 +218,45 @@ fn selected_by_index(items: &[String], index: usize) -> Option<String> {
     items.get(index).cloned()
 }
 
-pub(crate) async fn forward_harness_commands(update_tx: UiUpdateSender) {
-    let Ok(Some((listener, _guard))) = bind_harness_command_listener() else {
-        return;
+pub(crate) fn ensure_harness_command_listener() -> io::Result<()> {
+    if HARNESS_COMMAND_LISTENER_STARTED.get().is_some() {
+        return Ok(());
+    }
+    let Some((listener, guard)) = bind_harness_command_listener()? else {
+        return Ok(());
     };
-    forward_harness_commands_from_listener(listener, update_tx).await;
+    tokio::spawn(async move {
+        let _guard = guard;
+        forward_harness_commands_from_listener(listener).await;
+    });
+    let _ = HARNESS_COMMAND_LISTENER_STARTED.set(());
+    Ok(())
 }
 
-async fn forward_harness_commands_from_listener(listener: UnixListener, update_tx: UiUpdateSender) {
+pub(crate) fn register_harness_command_sender(sender: HarnessCommandSender) {
+    if let Ok(mut guard) = active_harness_command_sender().lock() {
+        *guard = Some(sender);
+    }
+}
+
+pub(crate) fn clear_harness_command_sender() {
+    if let Ok(mut guard) = active_harness_command_sender().lock() {
+        *guard = None;
+    }
+}
+
+async fn forward_harness_commands_from_listener(listener: UnixListener) {
     loop {
         let Ok((stream, _addr)) = listener.accept().await else {
             break;
         };
-        if !process_harness_command_stream(stream, &update_tx).await {
+        if !process_harness_command_stream(stream).await {
             break;
         }
     }
 }
 
-async fn process_harness_command_stream(
-    mut stream: UnixStream,
-    update_tx: &UiUpdateSender,
-) -> bool {
+async fn process_harness_command_stream(mut stream: UnixStream) -> bool {
     let mut payload = Vec::new();
     if let Err(error) = stream.read_to_end(&mut payload).await {
         let _ = write_harness_command_receipt(
@@ -255,29 +281,55 @@ async fn process_harness_command_stream(
             return true;
         }
     };
-    let (receipt_tx, receipt_rx) = tokio::sync::oneshot::channel();
-    if let Err(error) = update_tx
-        .send(UiUpdate::HarnessCommand {
-            command,
-            receipt: HarnessCommandReceiptHandle::new(receipt_tx),
-        })
-        .await
-    {
-        let _ = write_harness_command_receipt(
-            &mut stream,
-            &HarnessUiCommandReceipt::Rejected {
-                reason: format!("failed to submit harness command into update loop: {error}"),
-            },
-        )
-        .await;
-        return false;
-    }
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(10);
+    let receipt = loop {
+        let command_tx = active_harness_command_sender()
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone());
+        let Some(command_tx) = command_tx else {
+            if tokio::time::Instant::now() >= deadline {
+                break HarnessUiCommandReceipt::Rejected {
+                    reason: "TUI harness command plane is temporarily unavailable".to_string(),
+                };
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            continue;
+        };
 
-    let receipt = match receipt_rx.await {
-        Ok(receipt) => receipt,
-        Err(error) => HarnessUiCommandReceipt::Rejected {
-            reason: format!("harness command dropped before application: {error}"),
-        },
+        let (receipt_tx, receipt_rx) = tokio::sync::oneshot::channel();
+        match command_tx
+            .send(HarnessCommandSubmission {
+                command: command.clone(),
+                receipt: HarnessCommandReceiptHandle::new(receipt_tx),
+            })
+            .await
+        {
+            Ok(()) => {}
+            Err(error) => {
+                if tokio::time::Instant::now() >= deadline {
+                    break HarnessUiCommandReceipt::Rejected {
+                        reason: format!(
+                            "failed to submit harness command into shell ingress: {error}"
+                        ),
+                    };
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                continue;
+            }
+        }
+
+        match receipt_rx.await {
+            Ok(receipt) => break receipt,
+            Err(error) => {
+                if tokio::time::Instant::now() >= deadline {
+                    break HarnessUiCommandReceipt::Rejected {
+                        reason: format!("harness command dropped before application: {error}"),
+                    };
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            }
+        }
     };
     let _ = write_harness_command_receipt(&mut stream, &receipt).await;
     true
@@ -397,10 +449,10 @@ fn write_snapshot_file(path: &Path, snapshot_json: &str) -> io::Result<()> {
     Ok(())
 }
 
-pub fn authoritative_ui_snapshot(
+pub fn try_authoritative_ui_snapshot(
     state: &TuiState,
     semantic_inputs: TuiSemanticInputs<'_>,
-) -> UiSnapshot {
+) -> Result<UiSnapshot, String> {
     let app_snapshot = semantic_inputs.app_snapshot;
     let onboarding_active = matches!(
         state.modal_queue.current(),
@@ -713,7 +765,7 @@ pub fn authoritative_ui_snapshot(
 
     let operations = state.exported_operation_snapshots();
     let runtime_events = state.exported_runtime_events();
-    let readiness = if onboarding_active {
+    let readiness = if onboarding_active || state.pending_runtime_bootstrap {
         UiReadiness::Loading
     } else {
         UiReadiness::Ready
@@ -733,29 +785,38 @@ pub fn authoritative_ui_snapshot(
         toasts,
         runtime_events,
     };
-    snapshot
-        .validate_invariants()
-        .unwrap_or_else(|error| panic!("invalid TUI semantic snapshot export: {error}"));
-    snapshot
+    snapshot.validate_invariants()?;
+    Ok(snapshot)
 }
 
-pub fn maybe_export_ui_snapshot(state: &TuiState, semantic_inputs: TuiSemanticInputs<'_>) {
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn authoritative_ui_snapshot(
+    state: &TuiState,
+    semantic_inputs: TuiSemanticInputs<'_>,
+) -> UiSnapshot {
+    try_authoritative_ui_snapshot(state, semantic_inputs)
+        .unwrap_or_else(|error| panic!("invalid TUI semantic snapshot export: {error}"))
+}
+
+pub fn maybe_export_ui_snapshot(
+    state: &TuiState,
+    semantic_inputs: TuiSemanticInputs<'_>,
+) -> Result<(), String> {
     let socket_path = configured_ui_state_socket();
     let file_path = configured_ui_state_file();
     if socket_path.is_none() && file_path.is_none() {
-        return;
+        return Ok(());
     }
 
-    let snapshot = authoritative_ui_snapshot(state, semantic_inputs);
-    let Ok(snapshot_json) = serde_json::to_string_pretty(&snapshot) else {
-        return;
-    };
+    let snapshot = try_authoritative_ui_snapshot(state, semantic_inputs)?;
+    let snapshot_json = serde_json::to_string_pretty(&snapshot)
+        .map_err(|error| format!("failed to encode TUI semantic snapshot: {error}"))?;
 
     let mut last_written = last_written_snapshot()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if last_written.as_deref() == Some(snapshot_json.as_str()) {
-        return;
+        return Ok(());
     }
 
     let write_result = socket_path
@@ -766,21 +827,26 @@ pub fn maybe_export_ui_snapshot(state: &TuiState, semantic_inputs: TuiSemanticIn
         .or_else(|| file_path.map(|path| write_snapshot_file(path, &snapshot_json)));
     if matches!(write_result, Some(Ok(()))) {
         *last_written = Some(snapshot_json);
+        return Ok(());
     }
+    if let Some(Err(error)) = write_result {
+        return Err(format!("failed to publish TUI semantic snapshot: {error}"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_harness_command, authoritative_ui_snapshot, forward_harness_commands_from_listener,
-        TuiSemanticInputs,
+        apply_harness_command, authoritative_ui_snapshot, clear_harness_command_sender,
+        forward_harness_commands_from_listener, register_harness_command_sender, TuiSemanticInputs,
     };
     use crate::tui::screens::Screen;
     use crate::tui::state::modal_queue::QueuedModal;
     use crate::tui::state::views::{AccountSetupModalState, DeviceEnrollmentCeremonyModalState};
     use crate::tui::state::DispatchCommand;
     use crate::tui::types::SettingsSection;
-    use crate::tui::updates::{ui_update_channel, UiUpdate};
+    use crate::tui::updates::{harness_command_channel, HarnessCommandSubmission};
     use crate::tui::{TuiCommand, TuiState};
     use aura_app::ui::contract::{
         ControlId, HarnessUiCommand, HarnessUiCommandReceipt, ListId, OperationId, OperationState,
@@ -1007,18 +1073,20 @@ mod tests {
         let listener = UnixListener::from_std(listener)
             .unwrap_or_else(|error| panic!("failed to convert listener: {error}"));
 
-        let (update_tx, mut update_rx) = ui_update_channel();
+        let (command_tx, mut command_rx) = harness_command_channel();
+        register_harness_command_sender(command_tx);
         let bridge_task = tokio::spawn(async move {
-            forward_harness_commands_from_listener(listener, update_tx).await;
+            forward_harness_commands_from_listener(listener).await;
         });
 
         let apply_task = tokio::spawn(async move {
-            let observed_update = tokio::time::timeout(Duration::from_secs(1), update_rx.recv())
+            let observed_submission =
+                tokio::time::timeout(Duration::from_secs(1), command_rx.recv())
                 .await
-                .unwrap_or_else(|_| panic!("timed out waiting for harness command update"))
-                .unwrap_or_else(|| panic!("harness command update channel closed unexpectedly"));
-            match observed_update {
-                UiUpdate::HarnessCommand {
+                .unwrap_or_else(|_| panic!("timed out waiting for harness command submission"))
+                .unwrap_or_else(|| panic!("harness command channel closed unexpectedly"));
+            match observed_submission {
+                HarnessCommandSubmission {
                     command:
                         HarnessUiCommand::NavigateScreen {
                             screen: ScreenId::Settings,
@@ -1027,7 +1095,7 @@ mod tests {
                 } => {
                     receipt.complete(HarnessUiCommandReceipt::Accepted);
                 }
-                other => panic!("unexpected harness command update: {other:?}"),
+                other => panic!("unexpected harness command submission: {other:?}"),
             }
         });
 
@@ -1060,6 +1128,7 @@ mod tests {
             .await
             .unwrap_or_else(|error| panic!("apply task failed: {error}"));
 
+        clear_harness_command_sender();
         bridge_task.abort();
         let _ = std::fs::remove_file(&socket_path);
     }

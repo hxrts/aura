@@ -4,9 +4,12 @@
 //!
 //! ## Architecture
 //!
-//! All async callbacks send their results through a single `UiUpdate` channel.
+//! Async callback results send their UI state changes through `UiUpdate`.
 //! The IoApp component awaits on this channel and updates `State<T>` values,
 //! which automatically trigger re-renders via iocraft's waker mechanism.
+//!
+//! Typed harness semantic commands use a separate command channel so their
+//! application/ack path stays independent from the broader async UI update stream.
 //!
 //! This replaces the previous polling-based approach with true reactive updates.
 //!
@@ -55,10 +58,22 @@ pub type UiUpdateSender = tokio::sync::mpsc::Sender<UiUpdate>;
 /// Channel receiver type for UI updates
 pub type UiUpdateReceiver = tokio::sync::mpsc::Receiver<UiUpdate>;
 
+/// Channel sender type for typed harness UI commands.
+pub type HarnessCommandSender = tokio::sync::mpsc::Sender<HarnessCommandSubmission>;
+
+/// Channel receiver type for typed harness UI commands.
+pub type HarnessCommandReceiver = tokio::sync::mpsc::Receiver<HarnessCommandSubmission>;
+
 /// Create a new UI update channel pair
 #[must_use]
 pub fn ui_update_channel() -> (UiUpdateSender, UiUpdateReceiver) {
     tokio::sync::mpsc::channel(1024)
+}
+
+/// Create a new harness command channel pair.
+#[must_use]
+pub fn harness_command_channel() -> (HarnessCommandSender, HarnessCommandReceiver) {
+    tokio::sync::mpsc::channel(128)
 }
 
 #[derive(Clone)]
@@ -89,6 +104,12 @@ impl HarnessCommandReceiptHandle {
             }
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct HarnessCommandSubmission {
+    pub command: HarnessUiCommand,
+    pub receipt: HarnessCommandReceiptHandle,
 }
 
 /// All UI updates flow through this enum.
@@ -124,6 +145,9 @@ pub enum UiUpdate {
         device_id: String,
     },
 
+    /// Pending startup runtime bootstrap finished converging.
+    RuntimeBootstrapFinalized,
+
     /// Device enrollment ("add device") ceremony started.
     DeviceEnrollmentStarted {
         ceremony_id: String,
@@ -147,12 +171,6 @@ pub enum UiUpdate {
         pending_epoch: Option<Epoch>,
         agreement_mode: aura_core::threshold::AgreementMode,
         reversion_risk: bool,
-    },
-
-    /// A typed harness command entered through the frontend command bridge.
-    HarnessCommand {
-        command: HarnessUiCommand,
-        receipt: HarnessCommandReceiptHandle,
     },
 
     // =========================================================================
@@ -469,6 +487,28 @@ mod tests {
         assert!(matches!(
             update2,
             UiUpdate::MfaPolicyChanged(MfaPolicy::AlwaysRequired)
+        ));
+    }
+
+    #[test]
+    fn test_harness_command_channel() {
+        let (tx, mut rx) = harness_command_channel();
+        let (receipt_tx, _receipt_rx) = oneshot::channel();
+
+        tx.try_send(HarnessCommandSubmission {
+            command: HarnessUiCommand::NavigateScreen {
+                screen: aura_app::ui::contract::ScreenId::Settings,
+            },
+            receipt: HarnessCommandReceiptHandle::new(receipt_tx),
+        })
+        .unwrap();
+
+        let submission = rx.try_recv().unwrap();
+        assert!(matches!(
+            submission.command,
+            HarnessUiCommand::NavigateScreen {
+                screen: aura_app::ui::contract::ScreenId::Settings,
+            }
         ));
     }
 

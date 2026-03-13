@@ -52,7 +52,8 @@ use crate::tui::components::{
 };
 use crate::tui::context::IoContext;
 use crate::tui::harness_state::{
-    apply_harness_command, forward_harness_commands, maybe_export_ui_snapshot, TuiSemanticInputs,
+    apply_harness_command, clear_harness_command_sender, ensure_harness_command_listener,
+    maybe_export_ui_snapshot, register_harness_command_sender, TuiSemanticInputs,
 };
 use crate::tui::hooks::{AppCoreContext, CallbackContext};
 use crate::tui::keymap::{global_footer_hints, screen_footer_hints};
@@ -81,7 +82,10 @@ use crate::tui::props::{
     extract_notifications_view_props, extract_settings_view_props,
 };
 use crate::tui::state_machine::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
-use crate::tui::updates::{ui_update_channel, UiUpdate, UiUpdateReceiver, UiUpdateSender};
+use crate::tui::updates::{
+    harness_command_channel, ui_update_channel, HarnessCommandReceiver, UiUpdate,
+    UiUpdateReceiver, UiUpdateSender,
+};
 use std::sync::Mutex;
 
 mod events;
@@ -231,6 +235,8 @@ pub struct IoAppProps {
     // Account setup
     /// Whether to show account setup modal on start
     pub show_account_setup: bool,
+    /// Whether startup runtime bootstrap is still converging.
+    pub pending_runtime_bootstrap: bool,
     // Network status
     /// Unified network status (disconnected, no peers, syncing, synced)
     pub network_status: NetworkStatus,
@@ -257,6 +263,8 @@ pub struct IoAppProps {
     // Reactive update channel - receiver wrapped in Arc<Mutex<Option>> for take-once semantics
     /// UI update receiver for reactive updates from callbacks
     pub update_rx: Option<Arc<Mutex<Option<UiUpdateReceiver>>>>,
+    /// Dedicated harness command receiver for semantic command ingress.
+    pub harness_command_rx: Option<Arc<Mutex<Option<HarnessCommandReceiver>>>>,
     /// UI update sender for sending updates from event handlers
     pub update_tx: Option<UiUpdateSender>,
     /// Callback registry for all domain actions
@@ -274,6 +282,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Pure TUI state machine - holds all UI state for deterministic transitions
     // This is the source of truth; iocraft hooks sync FROM this state
     let show_setup = props.show_account_setup;
+    let pending_runtime_bootstrap = props.pending_runtime_bootstrap;
     #[cfg(feature = "development")]
     let demo_alice = props.demo_alice_code.clone();
     #[cfg(feature = "development")]
@@ -290,6 +299,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             } else {
                 TuiState::new()
             };
+            state.pending_runtime_bootstrap = pending_runtime_bootstrap;
             // Set demo mode codes for import modal shortcuts (on contacts screen)
             state.contacts.demo_alice_code = demo_alice.clone();
             state.contacts.demo_carol_code = demo_carol.clone();
@@ -301,9 +311,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         #[cfg(not(feature = "development"))]
         {
             if show_setup {
-                TuiState::with_account_setup()
+                let mut state = TuiState::with_account_setup();
+                state.pending_runtime_bootstrap = pending_runtime_bootstrap;
+                state
             } else {
-                TuiState::new()
+                let mut state = TuiState::new();
+                state.pending_runtime_bootstrap = pending_runtime_bootstrap;
+                state
             }
         }
     });
@@ -311,16 +325,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let tui = TuiStateHandle::new(tui_state.clone(), tui_state_version.clone());
 
     // =========================================================================
-    // UI Update Channel - Single reactive channel for all async callback results
+    // UI Update Channel - Reactive channel for async callback results
     //
     // Callbacks in run_app_with_context send their results through this channel.
     // The update processor (use_future below) awaits on this channel and updates
     // State<T> values, which automatically trigger re-renders via iocraft's waker.
     //
     // The receiver is passed via props.update_rx from run_app_with_context.
-    // This replaces polling loops and detached tokio::spawn patterns.
+    // Typed harness semantic commands use a separate ingress channel so command
+    // application/ack is not multiplexed through the broader async update stream.
     // =========================================================================
     let update_rx_holder = props.update_rx.clone();
+    let harness_command_rx_holder = props.harness_command_rx.clone();
     let update_tx_holder = props.update_tx.clone();
 
     // Nickname suggestion state - State<T> automatically triggers re-renders on .set()
@@ -393,7 +409,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Devices subscription: SharedDevices for dispatch handlers to read
     // =========================================================================
-    let shared_devices = use_devices_subscription(&mut hooks, &app_ctx);
+    let shared_devices = use_devices_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
 
     // =========================================================================
     // Invitations subscription: SharedInvitations for notification action dispatch
@@ -608,16 +624,103 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Only runs if update_rx was provided via props.
     // =========================================================================
     let tasks_for_updates = tasks.clone();
+    if let Some(command_rx_holder) = harness_command_rx_holder {
+        hooks.use_future({
+            let mut screen = screen.clone();
+            let mut should_exit = should_exit.clone();
+            let app_ctx_for_commands = app_ctx.clone();
+            let mut tui = tui.clone();
+            let shared_contacts_for_commands = shared_contacts.clone();
+            let shared_channels_for_commands = shared_channels.clone();
+            let shared_devices_for_commands = shared_devices.clone();
+            let shared_messages_for_commands = shared_messages.clone();
+            async move {
+                #[allow(clippy::expect_used)]
+                let mut rx = {
+                    let mut guard = command_rx_holder
+                        .lock()
+                        .expect("Failed to lock harness_command_rx");
+                    guard
+                        .take()
+                        .expect("Harness command receiver already taken")
+                };
+
+                while let Some(submission) = rx.recv().await {
+                    let next_screen = tui.with_mut(|state| {
+                        let followup = apply_harness_command(state, submission.command);
+                        for command in followup {
+                            execute_harness_followup_command(
+                                state,
+                                command,
+                                &shared_devices_for_commands,
+                            );
+                        }
+                        state.screen()
+                    });
+                    if next_screen != screen.get() {
+                        screen.set(next_screen);
+                    }
+
+                    let updated_state = tui.read_clone();
+                    if updated_state.should_exit && !should_exit.get() {
+                        should_exit.set(true);
+                    }
+
+                    let app_snapshot = app_ctx_for_commands.snapshot();
+                    let harness_contacts = shared_contacts_for_commands
+                        .read()
+                        .ok()
+                        .map(|contacts| contacts.clone())
+                        .unwrap_or_default();
+                    let harness_devices = shared_devices_for_commands
+                        .read()
+                        .ok()
+                        .map(|devices| devices.clone())
+                        .unwrap_or_default();
+                    let harness_channels = shared_channels_for_commands
+                        .read()
+                        .ok()
+                        .map(|channels| channels.clone())
+                        .unwrap_or_default();
+                    let harness_messages = shared_messages_for_commands
+                        .read()
+                        .ok()
+                        .map(|messages| messages.clone())
+                        .unwrap_or_default();
+                    let export_result = maybe_export_ui_snapshot(
+                        &updated_state,
+                        TuiSemanticInputs {
+                            app_snapshot: &app_snapshot,
+                            contacts: &harness_contacts,
+                            settings_devices: &harness_devices,
+                            chat_channels: &harness_channels,
+                            chat_messages: &harness_messages,
+                        },
+                    );
+                    match export_result {
+                        Ok(()) => submission
+                            .receipt
+                            .complete(aura_app::ui::contract::HarnessUiCommandReceipt::Accepted),
+                        Err(error) => submission.receipt.complete(
+                            aura_app::ui::contract::HarnessUiCommandReceipt::Rejected {
+                                reason: format!(
+                                    "failed to export authoritative TUI projection after applying harness command: {error}"
+                                ),
+                            },
+                        ),
+                    }
+                }
+            }
+        });
+    }
     if let Some(rx_holder) = update_rx_holder {
         hooks.use_future({
             let mut nickname_suggestion_state = nickname_suggestion_state.clone();
             let app_core = app_ctx.app_core.clone();
-            let app_ctx_for_updates = app_ctx.clone();
             // Toast queue migration: mutate TuiState via TuiStateHandle (always bumps render version)
             let mut tui = tui.clone();
             let shared_contacts_for_updates = shared_contacts.clone();
             let shared_channels_for_updates = shared_channels.clone();
-            let shared_devices_for_updates = shared_devices.clone();
             let shared_messages_for_updates = shared_messages.clone();
             // Shared selection state for messages subscription synchronization
             let tui_selected_for_updates = tui_selected;
@@ -670,6 +773,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
                         UiUpdate::DeviceRemoved { device_id: _ } => {
                             // Settings screen renders from SETTINGS_SIGNAL; no local state update.
+                        }
+                        UiUpdate::RuntimeBootstrapFinalized => {
+                            let should_clear = tui.read_clone().pending_runtime_bootstrap;
+                            if should_clear {
+                                tui.with_mut(|state| {
+                                    state.pending_runtime_bootstrap = false;
+                                });
+                            }
                         }
                         UiUpdate::DeviceEnrollmentStarted {
                             ceremony_id,
@@ -1627,51 +1738,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             }
                         }
 
-                        UiUpdate::HarnessCommand { command, receipt } => {
-                            tui.with_mut(|state| {
-                                let followup = apply_harness_command(state, command);
-                                for command in followup {
-                                    execute_harness_followup_command(
-                                        state,
-                                        command,
-                                        &shared_devices_for_updates,
-                                    );
-                                }
-                            });
-                            let updated_state = tui.read_clone();
-                            let app_snapshot = app_ctx_for_updates.snapshot();
-                            let harness_contacts = shared_contacts_for_updates
-                                .read()
-                                .ok()
-                                .map(|contacts| contacts.clone())
-                                .unwrap_or_default();
-                            let harness_devices = shared_devices_for_updates
-                                .read()
-                                .ok()
-                                .map(|devices| devices.clone())
-                                .unwrap_or_default();
-                            let harness_channels = shared_channels_for_updates
-                                .read()
-                                .ok()
-                                .map(|channels| channels.clone())
-                                .unwrap_or_default();
-                            let harness_messages = shared_messages_for_updates
-                                .read()
-                                .ok()
-                                .map(|messages| messages.clone())
-                                .unwrap_or_default();
-                            maybe_export_ui_snapshot(
-                                &updated_state,
-                                TuiSemanticInputs {
-                                    app_snapshot: &app_snapshot,
-                                    contacts: &harness_contacts,
-                                    settings_devices: &harness_devices,
-                                    chat_channels: &harness_channels,
-                                    chat_messages: &harness_messages,
-                                },
-                            );
-                            receipt.complete(aura_app::ui::contract::HarnessUiCommandReceipt::Accepted);
-                        }
                     }
                 }
             }
@@ -1713,7 +1779,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         .ok()
         .map(|messages| messages.clone())
         .unwrap_or_default();
-    maybe_export_ui_snapshot(
+    if let Err(error) = maybe_export_ui_snapshot(
         &tui_snapshot,
         TuiSemanticInputs {
             app_snapshot: &app_snapshot,
@@ -1722,7 +1788,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             chat_channels: &harness_channels,
             chat_messages: &harness_messages,
         },
-    );
+    ) {
+        tracing::warn!(error = %error, "failed to publish TUI harness snapshot");
+    }
 
     // Callbacks registry and individual callback extraction for screen props
     let callbacks = props.callbacks.clone();
@@ -3432,7 +3500,10 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     // Create the UI update channel for reactive updates
     let (update_tx, update_rx) = ui_update_channel();
     let update_rx_holder = Arc::new(Mutex::new(Some(update_rx)));
-    let harness_command_task = tokio::spawn(forward_harness_commands(update_tx.clone()));
+    let (harness_command_tx, harness_command_rx) = harness_command_channel();
+    let harness_command_rx_holder = Arc::new(Mutex::new(Some(harness_command_rx)));
+    ensure_harness_command_listener()?;
+    register_harness_command_sender(harness_command_tx);
 
     // Create effect dispatch callbacks using CallbackRegistry
     let ctx_arc = Arc::new(ctx);
@@ -3528,6 +3599,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         access_level: AccessLevel::Limited,
                         // Account setup
                         show_account_setup: show_account_setup,
+                        pending_runtime_bootstrap: ctx_arc.pending_runtime_bootstrap(),
                         // Network status
                         network_status: network_status.clone(),
                         transport_peers: transport_peers,
@@ -3540,6 +3612,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         demo_mobile_authority_id: ctx_arc.demo_mobile_authority_id(),
                         // Reactive update channel
                         update_rx: Some(update_rx_holder),
+                        harness_command_rx: Some(harness_command_rx_holder),
                         update_tx: Some(update_tx.clone()),
                         // Callbacks registry
                         callbacks: Some(callbacks),
@@ -3574,12 +3647,14 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         access_level: AccessLevel::Limited,
                         // Account setup
                         show_account_setup: show_account_setup,
+                        pending_runtime_bootstrap: ctx_arc.pending_runtime_bootstrap(),
                         // Network status
                         network_status: network_status,
                         transport_peers: transport_peers,
                         known_online: known_online,
                         // Reactive update channel
                         update_rx: Some(update_rx_holder),
+                        harness_command_rx: Some(harness_command_rx_holder),
                         update_tx: Some(update_tx.clone()),
                         // Callbacks registry
                         callbacks: Some(callbacks),
@@ -3589,8 +3664,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         };
 
         let result = app.fullscreen().await;
-        harness_command_task.abort();
-        let _ = harness_command_task.await;
+        clear_harness_command_sender();
         result
     }
 }

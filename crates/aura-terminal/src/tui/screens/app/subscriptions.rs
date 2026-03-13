@@ -345,13 +345,18 @@ impl SharedDevices {
 }
 
 /// Create a shared devices holder and subscribe it to SETTINGS_SIGNAL.
-pub fn use_devices_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -> SharedDevices {
+pub fn use_devices_subscription(
+    hooks: &mut Hooks,
+    app_ctx: &AppCoreContext,
+    update_tx: Option<UiUpdateSender>,
+) -> SharedDevices {
     let shared_devices_ref = hooks.use_ref(SharedDevices::new);
     let shared_devices: SharedDevices = shared_devices_ref.read().clone();
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let devices = shared_devices.clone();
+        let update_tx = update_tx.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
                 let list: Vec<Device> = settings_state
@@ -366,6 +371,11 @@ pub fn use_devices_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -> 
                     .collect();
                 if let Ok(mut guard) = devices.write() {
                     *guard = list;
+                }
+                if settings_state.devices.len() >= 2 {
+                    if let Some(tx) = update_tx.as_ref() {
+                        let _ = tx.try_send(UiUpdate::RuntimeBootstrapFinalized);
+                    }
                 }
             })
             .await;

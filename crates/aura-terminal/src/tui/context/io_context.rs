@@ -35,7 +35,7 @@ use aura_app::ui::signals::{
     ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, DISCOVERED_PEERS_SIGNAL, ERROR_SIGNAL,
     SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
 };
-use aura_app::ui::types::InvitationBridgeType;
+use aura_app::ui::types::{BootstrapRuntimeIdentity, InvitationBridgeType};
 use aura_app::ui::workflows::invitation::import_invitation_details;
 use aura_app::ui::workflows::{
     context as context_workflows, settings as settings_workflows, system as system_workflows,
@@ -106,6 +106,7 @@ pub struct IoContextBuilder {
     device_id: Option<String>,
     mode: Option<TuiMode>,
     has_existing_account: bool,
+    pending_runtime_bootstrap: bool,
     #[cfg_attr(feature = "development", doc = "Demo configuration fields")]
     #[cfg(feature = "development")]
     demo_hints: Option<crate::demo::DemoHints>,
@@ -158,6 +159,12 @@ impl IoContextBuilder {
     #[must_use]
     pub fn with_existing_account(mut self, exists: bool) -> Self {
         self.has_existing_account = exists;
+        self
+    }
+
+    #[must_use]
+    pub fn with_pending_runtime_bootstrap(mut self, pending: bool) -> Self {
+        self.pending_runtime_bootstrap = pending;
         self
     }
 
@@ -256,6 +263,7 @@ impl IoContextBuilder {
             current_context,
             channel_modes,
             tasks,
+            pending_runtime_bootstrap: self.pending_runtime_bootstrap,
             requested_authority_switch,
         })
     }
@@ -292,6 +300,7 @@ pub struct IoContext {
     current_context: Arc<RwLock<Option<String>>>,
     channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
     tasks: Arc<UiTaskRegistry>,
+    pending_runtime_bootstrap: bool,
     requested_authority_switch: Arc<std::sync::Mutex<Option<AuthoritySwitchRequest>>>,
 }
 
@@ -708,6 +717,11 @@ impl IoContext {
         self.snapshots.snapshot_guardians()
     }
 
+    #[must_use]
+    pub fn pending_runtime_bootstrap(&self) -> bool {
+        self.pending_runtime_bootstrap
+    }
+
     // =========================================================================
     // Command dispatch
     // =========================================================================
@@ -874,6 +888,8 @@ impl IoContext {
                 TerminalError::Operation(format!("Failed to parse device enrollment code: {e}"))
             })?;
             let AgentInvitationType::DeviceEnrollment {
+                subject_authority,
+                device_id,
                 nickname_suggestion,
                 ..
             } = shareable.invitation_type
@@ -884,9 +900,15 @@ impl IoContext {
             };
             let nickname_suggestion =
                 nickname_suggestion.unwrap_or_else(|| "Imported Device".to_string());
+            let runtime_identity =
+                BootstrapRuntimeIdentity::new(subject_authority, device_id);
             let (authority_id, _context_id) = self
                 .account_files
-                .create_account_with_device_enrollment(&nickname_suggestion, code)
+                .create_account_with_device_enrollment_runtime_identity(
+                    runtime_identity,
+                    &nickname_suggestion,
+                    code,
+                )
                 .await?;
             {
                 let mut core = app_core.write().await;

@@ -17,6 +17,7 @@ use super::{SnapshotHelper, ToastHelper};
 use crate::error::{TerminalError, TerminalResult};
 use crate::tui::effects::{EffectCommand, OpResponse, OperationalHandler};
 use crate::tui::types::ChannelMode;
+use aura_app::ui::types::BootstrapRuntimeIdentity;
 
 /// File-based account operations used by the TUI.
 ///
@@ -94,6 +95,36 @@ impl AccountFilesHelper {
                 tracing::error!("Failed to create account with device enrollment: {}", e);
                 Err(TerminalError::Operation(format!(
                     "Failed to create account with device enrollment: {e}"
+                )))
+            }
+        }
+    }
+
+    pub async fn create_account_with_device_enrollment_runtime_identity(
+        &self,
+        runtime_identity: BootstrapRuntimeIdentity,
+        nickname_suggestion: &str,
+        device_enrollment_code: &str,
+    ) -> TerminalResult<(AuthorityId, ContextId)> {
+        match crate::handlers::tui::create_account_with_device_enrollment_runtime_identity(
+            &self.base_path,
+            runtime_identity,
+            nickname_suggestion,
+            device_enrollment_code,
+        )
+        .await
+        {
+            Ok((authority_id, context_id)) => {
+                self.set_account_created();
+                Ok((authority_id, context_id))
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Failed to create account with device enrollment runtime identity: {}",
+                    e
+                );
+                Err(TerminalError::Operation(format!(
+                    "Failed to create account with device enrollment runtime identity: {e}"
                 )))
             }
         }
