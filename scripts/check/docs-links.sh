@@ -12,10 +12,32 @@
 #    (except itself and SUMMARY.md)
 # 3. No links in checked directories reference work/ (scratch directory)
 #
+# Flags:
+#   --fix      Fix broken links by finding matching files and replacing in-place
+#   --dry-run  Show what --fix would change without modifying files
+#
 # Note: .claude/skills/ is skipped in CI (detected via CI or GITHUB_ACTIONS env vars)
 # because .claude/ is gitignored.
 
 set -euo pipefail
+
+# Parse flags
+FIX_MODE=false
+DRY_RUN=false
+for arg in "$@"; do
+  case "$arg" in
+    --fix) FIX_MODE=true ;;
+    --dry-run) DRY_RUN=true ;;
+    --help|-h)
+      echo "Usage: $0 [--fix] [--dry-run]"
+      echo ""
+      echo "Flags:"
+      echo "  --fix      Fix broken links by finding matching files and replacing in-place"
+      echo "  --dry-run  Show what --fix would change without modifying files"
+      exit 0
+      ;;
+  esac
+done
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$ROOT"
@@ -66,6 +88,7 @@ normalize_path() {
 
 checked=0
 missing=0
+declare -a broken_links=()
 
 while IFS= read -r record; do
   [[ -z "$record" ]] && continue
@@ -120,6 +143,9 @@ while IFS= read -r record; do
   if [[ ! -f "$resolved" ]]; then
     missing=$((missing + 1))
     echo "missing docs link: $src_file:$src_line -> $target (resolved: ${resolved#$ROOT/})"
+    # Store for potential fixing: src_file|target|resolved_basename
+    resolved_basename="$(basename "$resolved")"
+    broken_links+=("$src_file|$target|$resolved_basename")
   fi
 done < <(
   # Check markdown files in crates/
@@ -172,13 +198,108 @@ done < <(
   fi
 )
 
-if [[ "$missing" -gt 0 ]]; then
+# Fix mode: attempt to repair broken links
+if [[ "$FIX_MODE" == true || "$DRY_RUN" == true ]] && [[ "${#broken_links[@]}" -gt 0 ]]; then
+  echo ""
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "=== DRY RUN: showing proposed fixes ==="
+  else
+    echo "=== Fixing broken links ==="
+  fi
+
+  # Build a map of doc basenames (without number prefix) to actual filenames
+  declare -A doc_map=()
+  while IFS= read -r -d '' doc_file; do
+    doc_name="$(basename "$doc_file")"
+    # Extract the name part after the number prefix (e.g., "103_journal.md" -> "journal")
+    if [[ "$doc_name" =~ ^[0-9]+_(.+)\.md$ ]]; then
+      name_part="${BASH_REMATCH[1]}"
+      doc_map["$name_part"]="$doc_name"
+    fi
+  done < <(find "$docs_root" -maxdepth 1 -name '*.md' -print0 2>/dev/null)
+
+  fixed_count=0
+  declare -A file_replacements
+  declare -A affected_files
+
+  for entry in "${broken_links[@]}"; do
+    src_file="${entry%%|*}"
+    rest="${entry#*|}"
+    old_target="${rest%%|*}"
+    old_basename="${rest##*|}"
+
+    # Extract the name part from the old basename
+    if [[ "$old_basename" =~ ^[0-9]+_(.+)\.md$ ]]; then
+      name_part="${BASH_REMATCH[1]}"
+      if [[ -n "${doc_map[$name_part]:-}" ]]; then
+        new_basename="${doc_map[$name_part]}"
+        if [[ "$old_basename" != "$new_basename" ]]; then
+          # Compute the new target by replacing the basename
+          new_target="${old_target/$old_basename/$new_basename}"
+
+          if [[ "$DRY_RUN" == true ]]; then
+            echo "  $src_file: $old_target -> $new_target"
+            affected_files[$src_file]=1
+          else
+            # Accumulate replacements per file
+            if [[ -z "${file_replacements[$src_file]:-}" ]]; then
+              file_replacements[$src_file]="s|$old_basename|$new_basename|g"
+            else
+              file_replacements[$src_file]="${file_replacements[$src_file]}; s|$old_basename|$new_basename|g"
+            fi
+          fi
+          fixed_count=$((fixed_count + 1))
+        fi
+      else
+        echo "  warning: no match found for $old_basename in $src_file"
+      fi
+    fi
+  done
+
+  # Apply replacements
+  if [[ "$DRY_RUN" != true ]]; then
+    num_files="${#file_replacements[@]}"
+    if [[ "$num_files" -gt 0 ]]; then
+      for src_file in "${!file_replacements[@]}"; do
+        [[ -z "$src_file" ]] && continue
+        sed_expr="${file_replacements[$src_file]}"
+        if [[ -f "$src_file" ]]; then
+          # Use temp file approach for reliable in-place editing
+          tmp_file="$(mktemp)"
+          sed -e "$sed_expr" "$src_file" > "$tmp_file" && mv "$tmp_file" "$src_file"
+          echo "  fixed: $src_file"
+        else
+          echo "  warning: file not found: $src_file"
+        fi
+      done
+    fi
+  fi
+
+  echo ""
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "would fix $fixed_count link(s) in ${#affected_files[@]} file(s)"
+    echo ""
+    echo "Run with --fix to apply changes"
+  else
+    echo "fixed $fixed_count link(s) in ${#file_replacements[@]} file(s)"
+  fi
+fi
+
+if [[ "$missing" -gt 0 ]] && [[ "$FIX_MODE" != true ]]; then
   echo ""
   echo "checked $checked docs link(s); found $missing missing target(s)"
+  if [[ "$DRY_RUN" != true ]]; then
+    echo "hint: run with --dry-run to see proposed fixes, or --fix to apply them"
+  fi
   exit 1
 fi
 
-echo "checked $checked docs link(s); all targets exist"
+if [[ "$FIX_MODE" == true ]]; then
+  echo ""
+  echo "checked $checked docs link(s); fixed $missing broken link(s)"
+else
+  echo "checked $checked docs link(s); all targets exist"
+fi
 
 # Check that docs/000_project_overview.md links to all docs files
 overview="$docs_root/000_project_overview.md"
