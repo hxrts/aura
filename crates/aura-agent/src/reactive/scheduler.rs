@@ -473,7 +473,7 @@ impl ReactiveScheduler {
                 0.0
             };
 
-            let _ = self.update_tx.send(ViewUpdate::Stats {
+            self.emit_view_update(ViewUpdate::Stats {
                 batch_count: stats.batch_count,
                 facts_processed: stats.facts_processed,
                 avg_batch_latency_ms: avg_latency,
@@ -512,7 +512,7 @@ impl ReactiveScheduler {
         }
 
         // Emit update event
-        let _ = self.update_tx.send(ViewUpdate::Batch { count: fact_count });
+        self.emit_view_update(ViewUpdate::Batch { count: fact_count });
 
         // Update statistics using effect-based time for determinism
         if self.config.collect_stats {
@@ -556,6 +556,23 @@ impl ReactiveScheduler {
             FactSource::Journal(facts) => facts,
             FactSource::Network(facts) => facts,
             FactSource::Timer(facts) => facts,
+        }
+    }
+
+    fn emit_view_update(&self, update: ViewUpdate) {
+        let update_kind = match &update {
+            ViewUpdate::Batch { .. } => "batch",
+            ViewUpdate::ViewChanged { .. } => "view_changed",
+            ViewUpdate::Stats { .. } => "stats",
+        };
+
+        if self.update_tx.send(update).is_err() {
+            tracing::debug!(
+                event = "runtime.reactive.view_update_dropped",
+                reason = "no_subscribers",
+                update_kind,
+                "Reactive scheduler dropped a non-fatal view update because no subscribers were attached"
+            );
         }
     }
 }

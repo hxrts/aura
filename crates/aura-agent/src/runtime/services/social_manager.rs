@@ -3,6 +3,8 @@
 //! Wraps `aura_social` types for integration with the agent runtime.
 //! Provides social topology, relay selection, and data availability.
 
+use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
+use async_trait::async_trait;
 use aura_core::effects::relay::{RelayCandidate, RelayContext, RelaySelector};
 use aura_core::identifiers::AuthorityId;
 use aura_social::{DiscoveryLayer, Home, Neighborhood, SocialTopology};
@@ -244,17 +246,13 @@ impl SocialManager {
 // RuntimeService Implementation
 // =============================================================================
 
-use super::traits::{RuntimeService, ServiceError, ServiceHealth};
-use super::RuntimeTaskRegistry;
-use async_trait::async_trait;
-
 #[async_trait]
 impl RuntimeService for SocialManager {
     fn name(&self) -> &'static str {
         "social_manager"
     }
 
-    async fn start(&self, _tasks: Arc<RuntimeTaskRegistry>) -> Result<(), ServiceError> {
+    async fn start(&self, _context: &RuntimeServiceContext) -> Result<(), ServiceError> {
         // Mark as ready - topology will be populated by journal sync
         *self.state.write().await = SocialManagerState::Ready;
         Ok(())
@@ -265,9 +263,8 @@ impl RuntimeService for SocialManager {
         Ok(())
     }
 
-    fn health(&self) -> ServiceHealth {
-        // Synchronous approximation
-        ServiceHealth::Healthy
+    async fn health(&self) -> ServiceHealth {
+        self.health_async().await
     }
 }
 

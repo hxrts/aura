@@ -8,14 +8,12 @@ use super::recovery::{
     RecoveryState,
 };
 use crate::core::{AgentError, AgentResult, AuthorityContext};
+use crate::runtime::open_owned_manifest_vm_session_admitted;
 use crate::runtime::services::ceremony_runner::{
     CeremonyCommitMetadata, CeremonyInitRequest, CeremonyRunner,
 };
-use crate::runtime::services::{CeremonyTracker, ReconfigurationManager};
-use crate::runtime::vm_host_bridge::{
-    advance_host_bridged_vm_round, close_and_reap_vm_session, inject_vm_receive,
-    open_manifest_vm_session_admitted, AuraVmHostWaitStatus,
-};
+use crate::runtime::services::{CeremonyTracker, ReconfigurationManager, RuntimeTaskRegistry};
+use crate::runtime::vm_host_bridge::AuraVmHostWaitStatus;
 use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId};
 use aura_core::crypto::Ed25519Signature;
 use aura_core::effects::{CryptoCoreEffects, PhysicalTimeEffects, RandomCoreEffects};
@@ -26,9 +24,7 @@ use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_core::TimeEffects;
 use aura_journal::fact::{ProtocolRelationalFact, RelationalFact};
-use aura_protocol::effects::{
-    ChoreographicEffects, ChoreographicRole, ChoreographyError, RoleIndex, TreeEffects,
-};
+use aura_protocol::effects::{ChoreographicRole, RoleIndex, TreeEffects};
 use aura_recovery::ceremony_runners::{
     AbortCeremony, CommitCeremony, GuardianCeremonyRole, ProposeRotation,
 };
@@ -70,6 +66,7 @@ pub struct RecoveryServiceApi {
     effects: Arc<AuraEffectSystem>,
     ceremony_runner: CeremonyRunner,
     reconfiguration: ReconfigurationManager,
+    tasks: Arc<RuntimeTaskRegistry>,
 }
 
 impl std::fmt::Debug for RecoveryServiceApi {
@@ -99,6 +96,7 @@ impl RecoveryServiceApi {
             effects,
             ceremony_runner,
             reconfiguration: ReconfigurationManager::new(),
+            tasks: Arc::new(RuntimeTaskRegistry::new()),
         })
     }
 
@@ -108,6 +106,7 @@ impl RecoveryServiceApi {
         authority_context: AuthorityContext,
         ceremony_runner: CeremonyRunner,
         reconfiguration: ReconfigurationManager,
+        tasks: Arc<RuntimeTaskRegistry>,
     ) -> AgentResult<Self> {
         let handler = RecoveryHandler::new(authority_context)?;
         Ok(Self {
@@ -115,6 +114,7 @@ impl RecoveryServiceApi {
             effects,
             ceremony_runner,
             reconfiguration,
+            tasks,
         })
     }
 
@@ -445,11 +445,14 @@ impl RecoveryServiceApi {
         let guardians = request.guardians.clone();
         let effects = self.effects.clone();
         let authority_id = self.handler.authority_context().authority_id();
+        let tasks = self
+            .tasks
+            .group(format!("recovery_service.protocol.{}", request.recovery_id));
 
         for guardian_id in guardians {
             let protocol_request = protocol_request.clone();
             let effects = effects.clone();
-            tokio::spawn(async move {
+            tasks.spawn_named(format!("guardian.{guardian_id}"), async move {
                 let account_fut = execute_recovery_protocol_account(
                     effects.clone(),
                     authority_id,
@@ -555,16 +558,11 @@ impl RecoveryServiceApi {
         let global_type = aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::global_type();
         let local_types = aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::local_types();
 
-        self.effects
-            .start_session(session_id, roles)
-            .await
-            .map_err(|error| {
-                AgentError::internal(format!("recovery guardian VM start failed: {error}"))
-            })?;
-
         let result = async {
-            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-                self.effects.as_ref(),
+            let mut session = open_owned_manifest_vm_session_admitted(
+                self.effects.clone(),
+                session_id,
+                roles,
                 &manifest,
                 "Guardian",
                 &global_type,
@@ -572,26 +570,21 @@ impl RecoveryServiceApi {
                 crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
-            .map_err(AgentError::internal)?;
-            handler.push_send_bytes(to_vec(&protocol_approval).map_err(|error| {
+            .map_err(|error| AgentError::internal(error.to_string()))?;
+            session.queue_send_bytes(to_vec(&protocol_approval).map_err(|error| {
                 AgentError::internal(format!("guardian approval encode failed: {error}"))
             })?);
 
             let loop_result = loop {
-                let round = advance_host_bridged_vm_round(
-                    self.effects.as_ref(),
-                    &mut engine,
-                    handler.as_ref(),
-                    vm_sid,
-                    "Guardian",
-                    &peer_roles,
-                )
-                .await
-                .map_err(AgentError::internal)?;
+                let round = session
+                    .advance_round("Guardian", &peer_roles)
+                    .await
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
 
                 if let Some(blocked) = round.blocked_receive {
-                    inject_vm_receive(&mut engine, vm_sid, &blocked)
-                        .map_err(AgentError::internal)?;
+                    session
+                        .inject_blocked_receive(&blocked)
+                        .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
 
@@ -622,12 +615,10 @@ impl RecoveryServiceApi {
                 }
             };
 
-            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            let _ = session.close().await;
             loop_result
         }
         .await;
-
-        let _ = self.effects.end_session().await;
         result
     }
 
@@ -934,54 +925,61 @@ impl RecoveryServiceApi {
         let (sorted_guardians, sorted_key_packages): (Vec<_>, Vec<_>) =
             guardian_packages.into_iter().unzip();
         let session_id = Self::ceremony_session_id(ceremony_id);
-        let mut attempt = 0usize;
         let roles = vec![
             Self::role(authority_id, 0),
             Self::role(sorted_guardians[0], 0),
             Self::role(sorted_guardians[1], 0),
         ];
-        loop {
-            match self.effects.start_session(session_id, roles.clone()).await {
-                Ok(()) => break,
-                Err(ChoreographyError::SessionAlreadyExists { .. }) => {
-                    if attempt >= CHOREO_START_RETRY_LIMIT {
-                        return Err(AgentError::internal(
-                            "guardian ceremony start failed: another session is still active"
-                                .to_string(),
-                        ));
-                    }
-                    attempt += 1;
-                    sleep(Duration::from_millis(CHOREO_START_RETRY_DELAY_MS)).await;
-                }
-                Err(e) => {
-                    return Err(AgentError::internal(format!(
-                        "guardian ceremony start failed: {e}"
-                    )))
-                }
-            }
-        }
+        let manifest = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::composition_manifest();
+        let global_type = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::global_type();
+        let local_types = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::local_types();
+        let mut attempt = 0usize;
 
-        let result = async {
-            let manifest = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::composition_manifest();
-            let global_type = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::global_type();
-            let local_types = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::local_types();
-            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-                self.effects.as_ref(),
+        let result = loop {
+            let open_result = open_owned_manifest_vm_session_admitted(
+                self.effects.clone(),
+                session_id,
+                roles.clone(),
                 &manifest,
                 "Initiator",
                 &global_type,
                 &local_types,
                 crate::runtime::AuraVmSchedulerSignals::default(),
             )
-            .await
-            .map_err(AgentError::internal)?;
+            .await;
+
+            let mut session = match open_result {
+                Ok(session) => session,
+                Err(error)
+                    if matches!(
+                        &error,
+                        crate::runtime::SessionIngressError::SessionStart { message, .. }
+                            if message.contains("already exists")
+                    ) =>
+                {
+                    if attempt >= CHOREO_START_RETRY_LIMIT {
+                        break Err(AgentError::internal(
+                            "guardian ceremony start failed: another session is still active"
+                                .to_string(),
+                        ));
+                    }
+                    attempt += 1;
+                    sleep(Duration::from_millis(CHOREO_START_RETRY_DELAY_MS)).await;
+                    continue;
+                }
+                Err(error) => {
+                    break Err(AgentError::internal(format!(
+                        "guardian ceremony start failed: {error}"
+                    )))
+                }
+            };
 
             for key_package in &sorted_key_packages {
                 let nonce_bytes = self.effects.random_bytes(12).await;
                 let mut encryption_nonce = [0u8; 12];
                 encryption_nonce.copy_from_slice(&nonce_bytes[..12]);
                 let ephemeral_public_key = self.effects.random_bytes(32).await;
-                handler.push_send_bytes(
+                session.queue_send_bytes(
                     to_vec(&ProposeRotation(CeremonyProposal {
                         ceremony_id,
                         initiator_id: authority_id,
@@ -1005,16 +1003,10 @@ impl RecoveryServiceApi {
             let mut branch_queued = false;
 
             let loop_result = loop {
-                let round = advance_host_bridged_vm_round(
-                    self.effects.as_ref(),
-                    &mut engine,
-                    handler.as_ref(),
-                    vm_sid,
-                    "Initiator",
-                    &peer_roles,
-                )
-                .await
-                .map_err(AgentError::internal)?;
+                let round = session
+                    .advance_round("Initiator", &peer_roles)
+                    .await
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
 
                 if let Some(blocked) = round.blocked_receive {
                     let response: CeremonyResponseMsg =
@@ -1034,8 +1026,9 @@ impl RecoveryServiceApi {
                         let declined = responses
                             .iter()
                             .any(|response| response.response == CeremonyResponse::Decline);
-                        let finalize = !declined && accepted.len() >= operation.threshold_k as usize;
-                        handler.push_choice_label(if finalize { "finalize" } else { "cancel" });
+                        let finalize =
+                            !declined && accepted.len() >= operation.threshold_k as usize;
+                        session.queue_choice_label(if finalize { "finalize" } else { "cancel" });
                         if finalize {
                             let commit = CommitCeremony(CeremonyCommit {
                                 ceremony_id,
@@ -1048,8 +1041,8 @@ impl RecoveryServiceApi {
                                     "guardian ceremony commit encode failed: {error}"
                                 ))
                             })?;
-                            handler.push_send_bytes(payload.clone());
-                            handler.push_send_bytes(payload);
+                            session.queue_send_bytes(payload.clone());
+                            session.queue_send_bytes(payload);
                         } else {
                             let reason = if declined {
                                 "guardian_declined"
@@ -1065,14 +1058,15 @@ impl RecoveryServiceApi {
                                     "guardian ceremony abort encode failed: {error}"
                                 ))
                             })?;
-                            handler.push_send_bytes(payload.clone());
-                            handler.push_send_bytes(payload);
+                            session.queue_send_bytes(payload.clone());
+                            session.queue_send_bytes(payload);
                         }
                         branch_queued = true;
                     }
 
-                    inject_vm_receive(&mut engine, vm_sid, &blocked)
-                        .map_err(AgentError::internal)?;
+                    session
+                        .inject_blocked_receive(&blocked)
+                        .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
 
@@ -1112,12 +1106,9 @@ impl RecoveryServiceApi {
                 }
             };
 
-            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
-            loop_result
-        }
-        .await;
-
-        let _ = self.effects.end_session().await;
+            let _ = session.close().await;
+            break loop_result;
+        };
         result
     }
 
@@ -1154,71 +1145,71 @@ impl RecoveryServiceApi {
             signature: Vec::new(),
         };
         let session_id = Self::ceremony_session_id(ceremony_id);
-        let mut attempt = 0usize;
         let active_role_name = match guardian_role {
             GuardianCeremonyRole::Guardian1 => "Guardian1",
             GuardianCeremonyRole::Guardian2 => "Guardian2",
             GuardianCeremonyRole::Initiator => unreachable!(),
         };
         let roles = vec![Self::role(initiator_id, 0), Self::role(authority_id, 0)];
-        loop {
-            match self.effects.start_session(session_id, roles.clone()).await {
-                Ok(()) => break,
-                Err(ChoreographyError::SessionAlreadyExists { .. }) => {
-                    if attempt >= CHOREO_START_RETRY_LIMIT {
-                        return Err(AgentError::internal(
-                            "guardian ceremony start failed: another session is still active"
-                                .to_string(),
-                        ));
-                    }
-                    attempt += 1;
-                    sleep(Duration::from_millis(CHOREO_START_RETRY_DELAY_MS)).await;
-                }
-                Err(e) => {
-                    return Err(AgentError::internal(format!(
-                        "guardian ceremony start failed: {e}"
-                    )))
-                }
-            }
-        }
+        let manifest = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::composition_manifest();
+        let global_type = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::global_type();
+        let local_types = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::local_types();
+        let mut attempt = 0usize;
 
-        let result = async {
-            let manifest = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::composition_manifest();
-            let global_type = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::global_type();
-            let local_types = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::local_types();
-            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-                self.effects.as_ref(),
+        let result = loop {
+            let open_result = open_owned_manifest_vm_session_admitted(
+                self.effects.clone(),
+                session_id,
+                roles.clone(),
                 &manifest,
                 active_role_name,
                 &global_type,
                 &local_types,
                 crate::runtime::AuraVmSchedulerSignals::default(),
             )
-            .await
-            .map_err(AgentError::internal)?;
-            handler.push_send_bytes(
-                to_vec(&response_msg).map_err(|error| {
-                    AgentError::internal(format!("guardian ceremony response encode failed: {error}"))
-                })?,
-            );
+            .await;
+
+            let mut session = match open_result {
+                Ok(session) => session,
+                Err(error)
+                    if matches!(
+                        &error,
+                        crate::runtime::SessionIngressError::SessionStart { message, .. }
+                            if message.contains("already exists")
+                    ) =>
+                {
+                    if attempt >= CHOREO_START_RETRY_LIMIT {
+                        break Err(AgentError::internal(
+                            "guardian ceremony start failed: another session is still active"
+                                .to_string(),
+                        ));
+                    }
+                    attempt += 1;
+                    sleep(Duration::from_millis(CHOREO_START_RETRY_DELAY_MS)).await;
+                    continue;
+                }
+                Err(error) => {
+                    break Err(AgentError::internal(format!(
+                        "guardian ceremony start failed: {error}"
+                    )))
+                }
+            };
+            session.queue_send_bytes(to_vec(&response_msg).map_err(|error| {
+                AgentError::internal(format!("guardian ceremony response encode failed: {error}"))
+            })?);
             let peer_roles =
                 BTreeMap::from([("Initiator".to_string(), Self::role(initiator_id, 0))]);
 
             let loop_result = loop {
-                let round = advance_host_bridged_vm_round(
-                    self.effects.as_ref(),
-                    &mut engine,
-                    handler.as_ref(),
-                    vm_sid,
-                    active_role_name,
-                    &peer_roles,
-                )
-                .await
-                .map_err(AgentError::internal)?;
+                let round = session
+                    .advance_round(active_role_name, &peer_roles)
+                    .await
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
 
                 if let Some(blocked) = round.blocked_receive {
-                    inject_vm_receive(&mut engine, vm_sid, &blocked)
-                        .map_err(AgentError::internal)?;
+                    session
+                        .inject_blocked_receive(&blocked)
+                        .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
 
@@ -1226,14 +1217,12 @@ impl RecoveryServiceApi {
                     AuraVmHostWaitStatus::Idle => {}
                     AuraVmHostWaitStatus::TimedOut => {
                         break Err(AgentError::internal(
-                            "guardian ceremony VM timed out while waiting for receive"
-                                .to_string(),
+                            "guardian ceremony VM timed out while waiting for receive".to_string(),
                         ));
                     }
                     AuraVmHostWaitStatus::Cancelled => {
                         break Err(AgentError::internal(
-                            "guardian ceremony VM cancelled while waiting for receive"
-                                .to_string(),
+                            "guardian ceremony VM cancelled while waiting for receive".to_string(),
                         ));
                     }
                     AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
@@ -1251,12 +1240,9 @@ impl RecoveryServiceApi {
                 }
             };
 
-            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
-            loop_result
-        }
-        .await;
-
-        let _ = self.effects.end_session().await;
+            let _ = session.close().await;
+            break loop_result;
+        };
         result
     }
 
@@ -1305,16 +1291,11 @@ impl RecoveryServiceApi {
         let local_types =
             aura_recovery::guardian_setup::telltale_session_types_guardian_setup::vm_artifacts::local_types();
 
-        self.effects
-            .start_session(session_id, roles)
-            .await
-            .map_err(|error| {
-                AgentError::internal(format!("guardian setup VM start failed: {error}"))
-            })?;
-
         let result = async {
-            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-                self.effects.as_ref(),
+            let mut session = open_owned_manifest_vm_session_admitted(
+                self.effects.clone(),
+                session_id,
+                roles,
                 &manifest,
                 "SetupInitiator",
                 &global_type,
@@ -1322,10 +1303,10 @@ impl RecoveryServiceApi {
                 crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
-            .map_err(AgentError::internal)?;
+            .map_err(|error| AgentError::internal(error.to_string()))?;
 
             for _ in 0..guardians.len() {
-                handler.push_send_bytes(
+                session.queue_send_bytes(
                     to_vec(&GuardianInvitation {
                         setup_id: setup_id.to_string(),
                         account_id,
@@ -1343,16 +1324,10 @@ impl RecoveryServiceApi {
             let mut completion_queued = false;
 
             let loop_result = loop {
-                let round = advance_host_bridged_vm_round(
-                    self.effects.as_ref(),
-                    &mut engine,
-                    handler.as_ref(),
-                    vm_sid,
-                    "SetupInitiator",
-                    &peer_roles,
-                )
-                .await
-                .map_err(AgentError::internal)?;
+                let round = session
+                    .advance_round("SetupInitiator", &peer_roles)
+                    .await
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
 
                 if let Some(blocked) = round.blocked_receive {
                     let acceptance: GuardianAcceptance =
@@ -1374,12 +1349,13 @@ impl RecoveryServiceApi {
                             ))
                         })?;
                         for _ in 0..guardians.len() {
-                            handler.push_send_bytes(payload.clone());
+                            session.queue_send_bytes(payload.clone());
                         }
                         completion_queued = true;
                     }
-                    inject_vm_receive(&mut engine, vm_sid, &blocked)
-                        .map_err(AgentError::internal)?;
+                    session
+                        .inject_blocked_receive(&blocked)
+                        .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
 
@@ -1418,12 +1394,10 @@ impl RecoveryServiceApi {
                 }
             };
 
-            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            let _ = session.close().await;
             loop_result
         }
         .await;
-
-        let _ = self.effects.end_session().await;
         result
     }
 
@@ -1491,16 +1465,11 @@ impl RecoveryServiceApi {
         let local_types =
             aura_recovery::guardian_setup::telltale_session_types_guardian_setup::vm_artifacts::local_types();
 
-        self.effects
-            .start_session(session_id, roles)
-            .await
-            .map_err(|error| {
-                AgentError::internal(format!("guardian setup VM start failed: {error}"))
-            })?;
-
         let result = async {
-            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-                self.effects.as_ref(),
+            let mut session = open_owned_manifest_vm_session_admitted(
+                self.effects.clone(),
+                session_id,
+                roles,
                 &manifest,
                 active_role_name,
                 &global_type,
@@ -1508,26 +1477,21 @@ impl RecoveryServiceApi {
                 crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
-            .map_err(AgentError::internal)?;
-            handler.push_send_bytes(to_vec(&acceptance).map_err(|error| {
+            .map_err(|error| AgentError::internal(error.to_string()))?;
+            session.queue_send_bytes(to_vec(&acceptance).map_err(|error| {
                 AgentError::internal(format!("guardian acceptance encode failed: {error}"))
             })?);
 
             let loop_result = loop {
-                let round = advance_host_bridged_vm_round(
-                    self.effects.as_ref(),
-                    &mut engine,
-                    handler.as_ref(),
-                    vm_sid,
-                    active_role_name,
-                    &peer_roles,
-                )
-                .await
-                .map_err(AgentError::internal)?;
+                let round = session
+                    .advance_round(active_role_name, &peer_roles)
+                    .await
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
 
                 if let Some(blocked) = round.blocked_receive {
-                    inject_vm_receive(&mut engine, vm_sid, &blocked)
-                        .map_err(AgentError::internal)?;
+                    session
+                        .inject_blocked_receive(&blocked)
+                        .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
 
@@ -1557,12 +1521,10 @@ impl RecoveryServiceApi {
                 }
             };
 
-            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            let _ = session.close().await;
             loop_result
         }
         .await;
-
-        let _ = self.effects.end_session().await;
         result
     }
 
@@ -1656,16 +1618,11 @@ impl RecoveryServiceApi {
         let global_type = aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::global_type();
         let local_types = aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::local_types();
 
-        self.effects
-            .start_session(session_id, roles)
-            .await
-            .map_err(|error| {
-                AgentError::internal(format!("membership change VM start failed: {error}"))
-            })?;
-
         let completion = async {
-            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-                self.effects.as_ref(),
+            let mut session = open_owned_manifest_vm_session_admitted(
+                self.effects.clone(),
+                session_id,
+                roles,
                 &manifest,
                 "ChangeInitiator",
                 &global_type,
@@ -1673,10 +1630,10 @@ impl RecoveryServiceApi {
                 crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
-            .map_err(AgentError::internal)?;
+            .map_err(|error| AgentError::internal(error.to_string()))?;
 
             for _ in 0..3 {
-                handler.push_send_bytes(
+                session.queue_send_bytes(
                     to_vec(&MembershipProposal {
                         change_id: change_id.clone(),
                         account_id: authority_id,
@@ -1698,16 +1655,10 @@ impl RecoveryServiceApi {
             let mut completion_queued = false;
 
             let loop_result = loop {
-                let round = advance_host_bridged_vm_round(
-                    self.effects.as_ref(),
-                    &mut engine,
-                    handler.as_ref(),
-                    vm_sid,
-                    "ChangeInitiator",
-                    &peer_roles,
-                )
-                .await
-                .map_err(AgentError::internal)?;
+                let round = session
+                    .advance_round("ChangeInitiator", &peer_roles)
+                    .await
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
 
                 if let Some(blocked) = round.blocked_receive {
                     let vote: GuardianVote = from_slice(&blocked.payload).map_err(|error| {
@@ -1740,13 +1691,14 @@ impl RecoveryServiceApi {
                             ))
                         })?;
                         for _ in 0..3 {
-                            handler.push_send_bytes(payload.clone());
+                            session.queue_send_bytes(payload.clone());
                         }
                         completion_queued = true;
                     }
 
-                    inject_vm_receive(&mut engine, vm_sid, &blocked)
-                        .map_err(AgentError::internal)?;
+                    session
+                        .inject_blocked_receive(&blocked)
+                        .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
 
@@ -1797,12 +1749,10 @@ impl RecoveryServiceApi {
                 }
             };
 
-            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            let _ = session.close().await;
             loop_result
         }
         .await?;
-
-        let _ = self.effects.end_session().await;
 
         if completion.success {
             self.apply_guardian_handoff_reconfiguration(&completion, &change)
@@ -1886,16 +1836,11 @@ impl RecoveryServiceApi {
         let global_type = aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::global_type();
         let local_types = aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::local_types();
 
-        self.effects
-            .start_session(session_id, roles)
-            .await
-            .map_err(|error| {
-                AgentError::internal(format!("membership vote VM start failed: {error}"))
-            })?;
-
         let result = async {
-            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-                self.effects.as_ref(),
+            let mut session = open_owned_manifest_vm_session_admitted(
+                self.effects.clone(),
+                session_id,
+                roles,
                 &manifest,
                 active_role_name,
                 &global_type,
@@ -1903,26 +1848,21 @@ impl RecoveryServiceApi {
                 crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
-            .map_err(AgentError::internal)?;
-            handler.push_send_bytes(to_vec(&vote).map_err(|error| {
+            .map_err(|error| AgentError::internal(error.to_string()))?;
+            session.queue_send_bytes(to_vec(&vote).map_err(|error| {
                 AgentError::internal(format!("guardian vote encode failed: {error}"))
             })?);
 
             let loop_result = loop {
-                let round = advance_host_bridged_vm_round(
-                    self.effects.as_ref(),
-                    &mut engine,
-                    handler.as_ref(),
-                    vm_sid,
-                    active_role_name,
-                    &peer_roles,
-                )
-                .await
-                .map_err(AgentError::internal)?;
+                let round = session
+                    .advance_round(active_role_name, &peer_roles)
+                    .await
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
 
                 if let Some(blocked) = round.blocked_receive {
-                    inject_vm_receive(&mut engine, vm_sid, &blocked)
-                        .map_err(AgentError::internal)?;
+                    session
+                        .inject_blocked_receive(&blocked)
+                        .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
 
@@ -1952,12 +1892,10 @@ impl RecoveryServiceApi {
                 }
             };
 
-            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            let _ = session.close().await;
             loop_result
         }
         .await;
-
-        let _ = self.effects.end_session().await;
         result.map(|_| vote)
     }
 

@@ -903,7 +903,8 @@ async fn warm_channel_connectivity(
     channel_id: ChannelId,
     context_id: ContextId,
 ) {
-    let recipients = recipient_peers_for_channel(app_core, channel_id, runtime.authority_id()).await;
+    let recipients =
+        recipient_peers_for_channel(app_core, channel_id, runtime.authority_id()).await;
     for peer in recipients {
         let _ = runtime.ensure_peer_channel(context_id, peer).await;
     }

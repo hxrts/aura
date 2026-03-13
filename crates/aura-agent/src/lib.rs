@@ -169,6 +169,8 @@ pub use handlers::{ChannelResult, RendezvousHandler, RendezvousResult, Rendezvou
 
 // Runtime types for advanced usage
 #[cfg(feature = "choreo-backend-telltale-vm")]
+pub use runtime::system::RuntimeShutdownError;
+#[cfg(feature = "choreo-backend-telltale-vm")]
 pub use runtime::{
     AuraHandlerAdapter as ChoreographyAdapter, EffectContext, EffectExecutor, EffectOperation,
     EffectRegistry, EffectRegistryError, EffectRegistryExt, EffectSystemBuilder, EffectType,

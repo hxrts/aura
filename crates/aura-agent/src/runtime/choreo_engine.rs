@@ -263,7 +263,8 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
             .expect("default VM config should admit without runtime contracts")
     }
 
-    /// Create an engine with admission checks and capability snapshot capture.
+    /// Create an engine with admission checks, capability snapshot capture, and
+    /// canonical cooperative execution selected by default.
     pub fn new_with_contracts(
         config: VMConfig,
         handler: Arc<H>,
@@ -977,19 +978,13 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
 }
 
 impl<H: VmEffectHandler + AuraVmSchedulerSignalsProvider> AuraChoreoEngine<H> {
-    /// Admit required runtime capabilities, then open the choreography session.
-    pub async fn open_session_admitted(
+    /// Admit one explicitly selected runtime policy, then open the choreography session.
+    pub async fn open_session_for_policy_admitted(
         &mut self,
         image: &CodeImage,
-        protocol_id: &str,
-        determinism_policy_ref: Option<&str>,
+        policy: AuraVmProtocolExecutionPolicy,
         required_capabilities: &[&str],
     ) -> Result<SessionId, AuraChoreoEngineError> {
-        let policy = policy_for_protocol(protocol_id, determinism_policy_ref).map_err(|error| {
-            AuraChoreoEngineError::Interpreter {
-                message: format!("invalid VM protocol policy: {error}"),
-            }
-        })?;
         let mut admission_capabilities = required_capabilities.to_vec();
         for capability in required_runtime_capabilities_for_policy(policy) {
             if !admission_capabilities
@@ -1023,6 +1018,23 @@ impl<H: VmEffectHandler + AuraVmSchedulerSignalsProvider> AuraChoreoEngine<H> {
             .insert(sid, policy.protocol_class);
         self.session_determinism_profiles.insert(sid, policy);
         Ok(sid)
+    }
+
+    /// Admit required runtime capabilities, then open the choreography session.
+    pub async fn open_session_admitted(
+        &mut self,
+        image: &CodeImage,
+        protocol_id: &str,
+        determinism_policy_ref: Option<&str>,
+        required_capabilities: &[&str],
+    ) -> Result<SessionId, AuraChoreoEngineError> {
+        let policy = policy_for_protocol(protocol_id, determinism_policy_ref).map_err(|error| {
+            AuraChoreoEngineError::Interpreter {
+                message: format!("invalid VM protocol policy: {error}"),
+            }
+        })?;
+        self.open_session_for_policy_admitted(image, policy, required_capabilities)
+            .await
     }
 }
 

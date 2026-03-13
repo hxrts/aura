@@ -309,12 +309,6 @@ impl EffectSystemBuilder {
         // Start reactive pipeline (facts → scheduler).
         system.start_reactive_pipeline().await?;
 
-        // Start receipt cleanup background task
-        system.receipts().start_cleanup_task(
-            system.tasks(),
-            Arc::new(effect_system.time_effects().clone()),
-        );
-
         // Start runtime maintenance tasks (cleanup/pruning).
         system.start_maintenance_tasks();
 
@@ -358,6 +352,7 @@ impl EffectSystemBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::EffectContext;
 
     #[test]
     fn test_execution_modes() {
@@ -378,5 +373,61 @@ mod tests {
             .build_sync()
             .expect("build_sync should succeed in testing mode");
         assert!(runtime.reactive_pipeline().is_some());
+    }
+
+    #[test]
+    fn build_shutdown_typed_succeeds() {
+        let authority_id = AuthorityId::new_from_entropy([7u8; 32]);
+        let ctx = EffectContext::new(
+            authority_id,
+            aura_core::identifiers::ContextId::new_from_entropy([9u8; 32]),
+            ExecutionMode::Testing,
+        );
+
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        rt.block_on(async move {
+            let runtime = EffectSystemBuilder::testing()
+                .with_authority(authority_id)
+                .build(&ctx)
+                .await
+                .expect("build should succeed in testing mode");
+            runtime
+                .shutdown_typed(&ctx)
+                .await
+                .expect("shutdown_typed should succeed");
+        });
+    }
+
+    #[test]
+    fn build_shutdown_typed_cancels_runtime_load() {
+        let authority_id = AuthorityId::new_from_entropy([8u8; 32]);
+        let ctx = EffectContext::new(
+            authority_id,
+            aura_core::identifiers::ContextId::new_from_entropy([10u8; 32]),
+            ExecutionMode::Testing,
+        );
+
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        rt.block_on(async move {
+            let runtime = EffectSystemBuilder::testing()
+                .with_authority(authority_id)
+                .build(&ctx)
+                .await
+                .expect("build should succeed in testing mode");
+            let tasks = runtime.tasks();
+            let activity_gate = runtime.activity_gate();
+
+            tasks.spawn_named("test.shutdown.load", async move {
+                std::future::pending::<()>().await;
+            });
+
+            runtime
+                .shutdown_typed(&ctx)
+                .await
+                .expect("shutdown_typed should cancel runtime-owned load");
+
+            assert!(tasks.active_tasks().is_empty());
+            assert_eq!(activity_gate.state(), crate::runtime::RuntimeActivityState::Stopped);
+        });
     }
 }

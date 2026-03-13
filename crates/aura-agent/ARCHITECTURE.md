@@ -194,6 +194,39 @@ No transition may create overlapping owners.
 Correctness never depends on uncontrolled host scheduling. If the runtime cannot
 show that a path is envelope-safe, it serializes execution.
 
+### Current Path Classification
+
+Canonical-only paths:
+
+- Session ownership claim, assertion, and release.
+- Canonical ingress routing for network, timer, and command events.
+- Link-boundary routing and delegation ownership transfer.
+- Service lifecycle, shutdown, and runtime supervision logic.
+- VM policies with cooperative runtime mode:
+  - `aura.vm.prod.default`
+  - `aura.vm.recovery_grant.prod`
+  - `aura.vm.consensus_fast_path.prod`
+
+Envelope-admitted paths:
+
+- VM policies that declare bounded concurrency beyond canonical execution:
+  - `aura.vm.consensus_fallback.prod`
+  - `aura.vm.dkg_ceremony.prod`
+  - `aura.vm.sync_anti_entropy.prod`
+
+### Current Host Bridge Rule
+
+The owned-session host bridge remains canonical-only until threaded execution is
+explicitly admitted end-to-end.
+
+Rules:
+
+- Policy classification is resolved from `AuraVmProtocolExecutionPolicy`.
+- Non-canonical protocol policies are recorded as envelope-admitted intent.
+- The host bridge currently activates explicit canonical fallback for those paths.
+- Fallback is visible in runtime instrumentation and in the effective session metadata.
+- No session may silently widen from canonical to threaded execution.
+
 ## Link and Delegate Boundaries
 
 ### Link Boundary

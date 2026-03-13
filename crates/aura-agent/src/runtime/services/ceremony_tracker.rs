@@ -23,7 +23,10 @@
 //! can be converted to `CeremonyStatus` (from `aura-core::domain::status`) for
 //! UI display and consistency tracking.
 
+use super::runtime_tasks::TaskGroup;
 use super::state::with_state_mut_validated;
+use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
+use async_trait::async_trait;
 use aura_app::core::IntentError;
 use aura_app::runtime_bridge::CeremonyKind;
 use aura_core::ceremony::{SupersessionReason, SupersessionRecord};
@@ -48,6 +51,10 @@ pub struct CeremonyTracker {
     state: Arc<RwLock<CeremonyTrackerState>>,
     /// Time effects for deterministic simulation support
     time: Arc<dyn PhysicalTimeEffects>,
+    /// Authoritative lifecycle state for runtime health.
+    lifecycle: Arc<RwLock<ServiceHealth>>,
+    /// Owned cleanup tasks for ceremony timeout maintenance.
+    cleanup_tasks: Arc<RwLock<Option<TaskGroup>>>,
 }
 
 #[derive(Debug, Default)]
@@ -296,7 +303,38 @@ impl CeremonyTracker {
         Self {
             state: Arc::new(RwLock::new(CeremonyTrackerState::default())),
             time,
+            lifecycle: Arc::new(RwLock::new(ServiceHealth::NotStarted)),
+            cleanup_tasks: Arc::new(RwLock::new(None)),
         }
+    }
+
+    fn spawn_timeout_cleanup_task(
+        &self,
+        tasks: TaskGroup,
+        time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
+    ) {
+        const CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
+
+        let tracker = self.clone();
+        tasks.spawn_interval_until_named(
+            "ceremony.timeout_cleanup",
+            time_effects,
+            CLEANUP_INTERVAL,
+            move || {
+                let tracker = tracker.clone();
+                async move {
+                    let cleaned = tracker.cleanup_timed_out().await;
+                    if cleaned > 0 {
+                        tracing::debug!(
+                            event = "runtime.service.ceremony.cleanup",
+                            cleaned,
+                            "Cleaned timed-out ceremonies"
+                        );
+                    }
+                    true
+                }
+            },
+        );
     }
 
     /// Register a new ceremony
@@ -918,29 +956,41 @@ impl CeremonyTracker {
 // RuntimeService Implementation
 // =============================================================================
 
-use super::traits::{RuntimeService, ServiceError, ServiceHealth};
-use super::RuntimeTaskRegistry;
-use async_trait::async_trait;
-
 #[async_trait]
 impl RuntimeService for CeremonyTracker {
     fn name(&self) -> &'static str {
         "ceremony_tracker"
     }
 
-    async fn start(&self, _tasks: Arc<RuntimeTaskRegistry>) -> Result<(), ServiceError> {
-        // CeremonyTracker is in-memory and always ready
+    async fn start(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
+        *self.lifecycle.write().await = ServiceHealth::Healthy;
+        let cleanup_group = context.tasks().group(self.name());
+        self.spawn_timeout_cleanup_task(cleanup_group.clone(), context.time_effects());
+        *self.cleanup_tasks.write().await = Some(cleanup_group);
         Ok(())
     }
 
     async fn stop(&self) -> Result<(), ServiceError> {
+        *self.lifecycle.write().await = ServiceHealth::Stopping;
+        if let Some(task_group) = self.cleanup_tasks.write().await.take() {
+            task_group
+                .shutdown_with_timeout(Duration::from_secs(2))
+                .await
+                .map_err(|error| {
+                    ServiceError::shutdown_failed(
+                        self.name(),
+                        format!("failed to stop ceremony cleanup task group: {error}"),
+                    )
+                })?;
+        }
         // Clean up any tracked ceremonies
         self.cleanup_timed_out().await;
+        *self.lifecycle.write().await = ServiceHealth::Stopped;
         Ok(())
     }
 
-    fn health(&self) -> ServiceHealth {
-        ServiceHealth::Healthy
+    async fn health(&self) -> ServiceHealth {
+        self.lifecycle.read().await.clone()
     }
 }
 

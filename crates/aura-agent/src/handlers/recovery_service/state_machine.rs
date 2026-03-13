@@ -1,11 +1,8 @@
 use super::*;
-use crate::runtime::vm_host_bridge::{
-    advance_host_bridged_vm_round, close_and_reap_vm_session, handle_standard_vm_round,
-    inject_vm_receive, open_manifest_vm_session_admitted, AuraVmHostWaitStatus,
-    AuraVmRoundDisposition,
-};
+use crate::runtime::open_owned_manifest_vm_session_admitted;
+use crate::runtime::vm_host_bridge::{AuraVmHostWaitStatus, AuraVmRoundDisposition};
 use aura_core::util::serialization::to_vec;
-use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, RoleIndex};
+use aura_protocol::effects::{ChoreographicRole, RoleIndex};
 use std::collections::BTreeMap;
 use telltale_vm::vm::StepResult;
 
@@ -36,16 +33,11 @@ pub(super) async fn execute_recovery_protocol_account(
     let local_types =
         aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::local_types();
 
-    effects
-        .start_session(session_id, roles)
-        .await
-        .map_err(|error| {
-            AgentError::internal(format!("recovery account VM start failed: {error}"))
-        })?;
-
     let result = async {
-        let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-            effects.as_ref(),
+        let mut session = open_owned_manifest_vm_session_admitted(
+            effects.clone(),
+            session_id,
+            roles,
             &manifest,
             "Account",
             &global_type,
@@ -53,37 +45,29 @@ pub(super) async fn execute_recovery_protocol_account(
             crate::runtime::AuraVmSchedulerSignals::default(),
         )
         .await
-        .map_err(AgentError::internal)?;
-        handler.push_send_bytes(to_vec(&request).map_err(|error| {
+        .map_err(|error| AgentError::internal(error.to_string()))?;
+        session.queue_send_bytes(to_vec(&request).map_err(|error| {
             AgentError::internal(format!("recovery request encode failed: {error}"))
         })?);
 
         let loop_result = loop {
-            let round = advance_host_bridged_vm_round(
-                effects.as_ref(),
-                &mut engine,
-                handler.as_ref(),
-                vm_sid,
-                "Account",
-                &peer_roles,
-            )
-            .await
-            .map_err(AgentError::internal)?;
+            let round = session
+                .advance_round("Account", &peer_roles)
+                .await
+                .map_err(|error| AgentError::internal(error.to_string()))?;
 
-            match handle_standard_vm_round(&mut engine, vm_sid, round, "recovery account VM")
-                .map_err(AgentError::internal)?
+            match crate::runtime::handle_owned_vm_round(&mut session, round, "recovery account VM")
+                .map_err(|error| AgentError::internal(error.to_string()))?
             {
                 AuraVmRoundDisposition::Continue => {}
                 AuraVmRoundDisposition::Complete => break Ok(()),
             }
         };
 
-        let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+        let _ = session.close().await;
         loop_result
     }
     .await;
-
-    let _ = effects.end_session().await;
     result
 }
 
@@ -110,16 +94,11 @@ pub(super) async fn execute_recovery_protocol_coordinator(
     let local_types =
         aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::local_types();
 
-    effects
-        .start_session(session_id, roles)
-        .await
-        .map_err(|error| {
-            AgentError::internal(format!("recovery coordinator VM start failed: {error}"))
-        })?;
-
     let result = async {
-        let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-            effects.as_ref(),
+        let mut session = open_owned_manifest_vm_session_admitted(
+            effects.clone(),
+            session_id,
+            roles,
             &manifest,
             "Coordinator",
             &global_type,
@@ -127,23 +106,17 @@ pub(super) async fn execute_recovery_protocol_coordinator(
             crate::runtime::AuraVmSchedulerSignals::default(),
         )
         .await
-        .map_err(AgentError::internal)?;
-        handler.push_send_bytes(to_vec(&request).map_err(|error| {
+        .map_err(|error| AgentError::internal(error.to_string()))?;
+        session.queue_send_bytes(to_vec(&request).map_err(|error| {
             AgentError::internal(format!("recovery request encode failed: {error}"))
         })?);
         let mut approvals = Vec::new();
 
         let loop_result = loop {
-            let round = advance_host_bridged_vm_round(
-                effects.as_ref(),
-                &mut engine,
-                handler.as_ref(),
-                vm_sid,
-                "Coordinator",
-                &peer_roles,
-            )
-            .await
-            .map_err(AgentError::internal)?;
+            let round = session
+                .advance_round("Coordinator", &peer_roles)
+                .await
+                .map_err(|error| AgentError::internal(error.to_string()))?;
 
             if let Some(blocked) = round.blocked_receive {
                 let approval: ProtocolGuardianApproval =
@@ -151,7 +124,7 @@ pub(super) async fn execute_recovery_protocol_coordinator(
                         AgentError::internal(format!("guardian approval decode failed: {error}"))
                     })?;
                 approvals.push(approval.clone());
-                handler.push_send_bytes(
+                session.queue_send_bytes(
                     to_vec(&RecoveryOutcome {
                         success: true,
                         recovery_grant: None,
@@ -162,7 +135,9 @@ pub(super) async fn execute_recovery_protocol_coordinator(
                         AgentError::internal(format!("recovery outcome encode failed: {error}"))
                     })?,
                 );
-                inject_vm_receive(&mut engine, vm_sid, &blocked).map_err(AgentError::internal)?;
+                session
+                    .inject_blocked_receive(&blocked)
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
                 continue;
             }
 
@@ -193,12 +168,10 @@ pub(super) async fn execute_recovery_protocol_coordinator(
             }
         };
 
-        let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+        let _ = session.close().await;
         loop_result
     }
     .await;
-
-    let _ = effects.end_session().await;
     result
 }
 

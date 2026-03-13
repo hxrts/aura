@@ -7,12 +7,10 @@ use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::fact_types::{SESSION_CREATED_FACT_TYPE_ID, SESSION_INVITATION_SENT_FACT_TYPE_ID};
 use crate::handlers::shared::HandlerUtilities;
 use crate::runtime::services::SessionManager;
-use crate::runtime::vm_host_bridge::{
-    advance_host_bridged_vm_round, close_and_reap_vm_session, handle_standard_vm_round,
-    inject_vm_receive, open_manifest_vm_session_admitted, AuraVmHostWaitStatus,
-    AuraVmRoundDisposition,
+use crate::runtime::vm_host_bridge::{AuraVmHostWaitStatus, AuraVmRoundDisposition};
+use crate::runtime::{
+    open_owned_manifest_vm_session_admitted, AuraEffectSystem, RuntimeChoreographySessionId,
 };
-use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId};
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{
     RandomExtendedEffects, SessionType, StorageCoreEffects, TransportEffects, TransportError,
@@ -22,9 +20,7 @@ use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId, Sessio
 use aura_core::util::serialization::to_vec;
 use aura_core::FlowCost;
 use aura_macros::choreography;
-use aura_protocol::effects::{
-    ChoreographicEffects, ChoreographicRole, EffectApiEffects, RoleIndex,
-};
+use aura_protocol::effects::{ChoreographicRole, EffectApiEffects, RoleIndex};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -597,14 +593,11 @@ impl SessionOperations {
         let local_types =
             self::telltale_session_types_session_coordination::vm_artifacts::local_types();
 
-        self.effects
-            .start_session(session_uuid, roles)
-            .await
-            .map_err(|e| AgentError::internal(format!("session coordination start failed: {e}")))?;
-
         let result = async {
-            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-                self.effects.as_ref(),
+            let mut session = open_owned_manifest_vm_session_admitted(
+                self.effects.clone(),
+                session_uuid,
+                roles,
                 &manifest,
                 "Initiator",
                 &global_type,
@@ -612,42 +605,32 @@ impl SessionOperations {
                 crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
-            .map_err(AgentError::internal)?;
-            handler.push_send_bytes(to_vec(&session_request).map_err(|error| {
+            .map_err(|error| AgentError::internal(error.to_string()))?;
+            session.queue_send_bytes(to_vec(&session_request).map_err(|error| {
                 AgentError::internal(format!("session request encode failed: {error}"))
             })?);
 
-            loop {
-                let round = advance_host_bridged_vm_round(
-                    self.effects.as_ref(),
-                    &mut engine,
-                    handler.as_ref(),
-                    vm_sid,
-                    "Initiator",
-                    &peer_roles,
-                )
-                .await
-                .map_err(AgentError::internal)?;
+            let loop_result = loop {
+                let round = session
+                    .advance_round("Initiator", &peer_roles)
+                    .await
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
 
-                match handle_standard_vm_round(
-                    &mut engine,
-                    vm_sid,
+                match crate::runtime::handle_owned_vm_round(
+                    &mut session,
                     round,
                     "session coordination initiator VM",
                 )
-                .map_err(AgentError::internal)?
+                .map_err(|error| AgentError::internal(error.to_string()))?
                 {
                     AuraVmRoundDisposition::Continue => {}
                     AuraVmRoundDisposition::Complete => break Ok(()),
                 }
-            }
-            .map(|_| {
-                let _ = close_and_reap_vm_session(&mut engine, vm_sid);
-            })
+            };
+            let _ = session.close().await;
+            loop_result
         }
         .await;
-
-        let _ = self.effects.end_session().await;
         result
     }
 
@@ -684,14 +667,11 @@ impl SessionOperations {
         let local_types =
             self::telltale_session_types_session_coordination::vm_artifacts::local_types();
 
-        self.effects
-            .start_session(session_uuid, roles)
-            .await
-            .map_err(|e| AgentError::internal(format!("session coordination start failed: {e}")))?;
-
         let result = async {
-            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-                self.effects.as_ref(),
+            let mut session = open_owned_manifest_vm_session_admitted(
+                self.effects.clone(),
+                session_uuid,
+                roles,
                 &manifest,
                 "Coordinator",
                 &global_type,
@@ -699,9 +679,9 @@ impl SessionOperations {
                 crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
-            .map_err(AgentError::internal)?;
+            .map_err(|error| AgentError::internal(error.to_string()))?;
             for _ in &participants {
-                handler.push_send_bytes(
+                session.queue_send_bytes(
                     to_vec(&invitation).map_err(|error| {
                         AgentError::internal(format!("participant invitation encode failed: {error}"))
                     })?,
@@ -710,17 +690,11 @@ impl SessionOperations {
             let mut decisions = Vec::new();
             let mut branch_queued = false;
 
-            loop {
-                let round = advance_host_bridged_vm_round(
-                    self.effects.as_ref(),
-                    &mut engine,
-                    handler.as_ref(),
-                    vm_sid,
-                    "Coordinator",
-                    &peer_roles,
-                )
+            let loop_result = loop {
+                let round = session
+                    .advance_round("Coordinator", &peer_roles)
                     .await
-                    .map_err(AgentError::internal)?;
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
 
                 if let Some(blocked) = round.blocked_receive {
                     let decision: SessionDecision = serde_json::from_slice(&blocked.payload)
@@ -731,27 +705,29 @@ impl SessionOperations {
                     if !branch_queued && decisions.len() == participants.len() {
                         let accepted = decisions.iter().filter(|decision| decision.accepted).count();
                         let success = accepted >= accept_threshold;
-                        handler.push_choice_label(if success { "Success" } else { "Failure" });
+                        session.queue_choice_label(if success { "Success" } else { "Failure" });
                         if success {
                             let initiator_payload = to_vec(&created).map_err(|error| {
                                 AgentError::internal(format!("session created encode failed: {error}"))
                             })?;
-                            handler.push_send_bytes(initiator_payload.clone());
+                            session.queue_send_bytes(initiator_payload.clone());
                             for _ in &participants {
-                                handler.push_send_bytes(initiator_payload.clone());
+                                session.queue_send_bytes(initiator_payload.clone());
                             }
                         } else {
                             let initiator_payload = to_vec(&failed).map_err(|error| {
                                 AgentError::internal(format!("session failure encode failed: {error}"))
                             })?;
-                            handler.push_send_bytes(initiator_payload.clone());
+                            session.queue_send_bytes(initiator_payload.clone());
                             for _ in &participants {
-                                handler.push_send_bytes(initiator_payload.clone());
+                                session.queue_send_bytes(initiator_payload.clone());
                             }
                         }
                         branch_queued = true;
                     }
-                    inject_vm_receive(&mut engine, vm_sid, &blocked).map_err(AgentError::internal)?;
+                    session
+                        .inject_blocked_receive(&blocked)
+                        .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
 
@@ -782,14 +758,11 @@ impl SessionOperations {
                         ));
                     }
                 }
-            }
-            .map(|_| {
-                let _ = close_and_reap_vm_session(&mut engine, vm_sid);
-            })
+            };
+            let _ = session.close().await;
+            loop_result
         }
         .await;
-
-        let _ = self.effects.end_session().await;
         result
     }
 
@@ -823,14 +796,11 @@ impl SessionOperations {
         let local_types =
             self::telltale_session_types_session_coordination::vm_artifacts::local_types();
 
-        self.effects
-            .start_session(session_uuid, roles)
-            .await
-            .map_err(|e| AgentError::internal(format!("session coordination start failed: {e}")))?;
-
         let result = async {
-            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-                self.effects.as_ref(),
+            let mut session = open_owned_manifest_vm_session_admitted(
+                self.effects.clone(),
+                session_uuid,
+                roles,
                 &manifest,
                 &active_role_name,
                 &global_type,
@@ -838,42 +808,32 @@ impl SessionOperations {
                 crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
-            .map_err(AgentError::internal)?;
-            handler.push_send_bytes(to_vec(&decision).map_err(|error| {
+            .map_err(|error| AgentError::internal(error.to_string()))?;
+            session.queue_send_bytes(to_vec(&decision).map_err(|error| {
                 AgentError::internal(format!("session decision encode failed: {error}"))
             })?);
 
-            loop {
-                let round = advance_host_bridged_vm_round(
-                    self.effects.as_ref(),
-                    &mut engine,
-                    handler.as_ref(),
-                    vm_sid,
-                    &active_role_name,
-                    &peer_roles,
-                )
-                .await
-                .map_err(AgentError::internal)?;
+            let loop_result = loop {
+                let round = session
+                    .advance_round(&active_role_name, &peer_roles)
+                    .await
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
 
-                match handle_standard_vm_round(
-                    &mut engine,
-                    vm_sid,
+                match crate::runtime::handle_owned_vm_round(
+                    &mut session,
                     round,
                     "session coordination participant VM",
                 )
-                .map_err(AgentError::internal)?
+                .map_err(|error| AgentError::internal(error.to_string()))?
                 {
                     AuraVmRoundDisposition::Continue => {}
                     AuraVmRoundDisposition::Complete => break Ok(()),
                 }
-            }
-            .map(|_| {
-                let _ = close_and_reap_vm_session(&mut engine, vm_sid);
-            })
+            };
+            let _ = session.close().await;
+            loop_result
         }
         .await;
-
-        let _ = self.effects.end_session().await;
         result
     }
 }

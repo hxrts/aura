@@ -274,6 +274,49 @@ pub struct AuraVmProtocolExecutionPolicy {
     pub communication_replay_mode: CommunicationReplayMode,
 }
 
+impl AuraVmProtocolExecutionPolicy {
+    /// Concurrency profile admitted by this policy.
+    #[must_use]
+    pub const fn concurrency_profile(self) -> AuraVmConcurrencyProfile {
+        match self.runtime_mode {
+            AuraVmRuntimeMode::Cooperative => AuraVmConcurrencyProfile::Canonical,
+            AuraVmRuntimeMode::ThreadedReplayDeterministic
+            | AuraVmRuntimeMode::ThreadedEnvelopeBounded => {
+                AuraVmConcurrencyProfile::EnvelopeAdmitted
+            }
+        }
+    }
+
+    /// Whether this policy is canonical-only in the runtime.
+    #[must_use]
+    pub const fn is_canonical_only(self) -> bool {
+        matches!(
+            self.concurrency_profile(),
+            AuraVmConcurrencyProfile::Canonical
+        )
+    }
+
+    /// Whether this policy admits bounded concurrency beyond canonical execution.
+    #[must_use]
+    pub const fn is_envelope_admitted(self) -> bool {
+        matches!(
+            self.concurrency_profile(),
+            AuraVmConcurrencyProfile::EnvelopeAdmitted
+        )
+    }
+
+    /// Conservative cooperative fallback preserving the protocol's other determinism dimensions.
+    #[must_use]
+    pub const fn canonical_fallback_policy(self) -> Self {
+        Self {
+            runtime_mode: AuraVmRuntimeMode::Cooperative,
+            scheduler_envelope_class: AuraVmSchedulerEnvelopeClass::Exact,
+            declared_wave_width_bound: Some(1),
+            ..self
+        }
+    }
+}
+
 /// Concrete runtime-selection input for one admitted VM fragment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AuraVmRuntimeSelector {
@@ -301,7 +344,7 @@ impl AuraVmRuntimeSelector {
         }
     }
 
-    /// Cooperative default used by the legacy runtime startup path.
+    /// Canonical cooperative selector used when runtime work stays on the reference path.
     #[must_use]
     pub const fn cooperative() -> Self {
         Self {
@@ -513,6 +556,26 @@ impl AuraVmRuntimeMode {
             Self::ThreadedReplayDeterministic | Self::ThreadedEnvelopeBounded => {
                 ThreadedRoundSemantics::WaveParallelExtension
             }
+        }
+    }
+}
+
+/// Runtime concurrency profile admitted by Aura for one protocol path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuraVmConcurrencyProfile {
+    /// Exact single-owner reference execution.
+    Canonical,
+    /// Bounded runtime concurrency admitted by policy.
+    EnvelopeAdmitted,
+}
+
+impl AuraVmConcurrencyProfile {
+    /// Stable concurrency-profile identifier.
+    #[must_use]
+    pub const fn as_ref(self) -> &'static str {
+        match self {
+            Self::Canonical => "canonical",
+            Self::EnvelopeAdmitted => "envelope_admitted",
         }
     }
 }
@@ -1404,6 +1467,12 @@ mod tests {
             AuraVmRuntimeMode::ThreadedReplayDeterministic
         );
         assert_eq!(
+            dkg.concurrency_profile(),
+            AuraVmConcurrencyProfile::EnvelopeAdmitted
+        );
+        assert!(dkg.is_envelope_admitted());
+        assert!(!dkg.is_canonical_only());
+        assert_eq!(
             dkg.scheduler_envelope_class,
             AuraVmSchedulerEnvelopeClass::SessionNormalizedPermutation
         );
@@ -1436,6 +1505,12 @@ mod tests {
             TerminationProtocolClass::RecoveryGrant
         );
         assert_eq!(invitation.runtime_mode, AuraVmRuntimeMode::Cooperative);
+        assert_eq!(
+            invitation.concurrency_profile(),
+            AuraVmConcurrencyProfile::Canonical
+        );
+        assert!(invitation.is_canonical_only());
+        assert!(!invitation.is_envelope_admitted());
         assert_eq!(invitation.determinism_mode, DeterminismMode::Full);
         assert_eq!(
             AuraVmRuntimeSelector::for_policy(invitation),
@@ -1454,6 +1529,11 @@ mod tests {
             AuraVmRuntimeMode::ThreadedEnvelopeBounded
         );
         assert_eq!(
+            sync.concurrency_profile(),
+            AuraVmConcurrencyProfile::EnvelopeAdmitted
+        );
+        assert!(sync.is_envelope_admitted());
+        assert_eq!(
             sync.scheduler_envelope_class,
             AuraVmSchedulerEnvelopeClass::EnvelopeBounded
         );
@@ -1471,6 +1551,15 @@ mod tests {
             &["mixed_determinism", "vmEnvelopeAdherence"]
         );
         assert!(policy_requires_envelope_artifact(sync));
+        assert_eq!(
+            sync.canonical_fallback_policy(),
+            AuraVmProtocolExecutionPolicy {
+                runtime_mode: AuraVmRuntimeMode::Cooperative,
+                scheduler_envelope_class: AuraVmSchedulerEnvelopeClass::Exact,
+                declared_wave_width_bound: Some(1),
+                ..sync
+            }
+        );
     }
 
     #[test]

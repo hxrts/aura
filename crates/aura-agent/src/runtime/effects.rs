@@ -534,6 +534,30 @@ impl AuraEffectSystem {
         self.choreography_state.read().current_session_id()
     }
 
+    /// Claim authoritative ownership for one active runtime choreography session.
+    pub fn claim_runtime_choreography_session_owner(
+        &self,
+        session_id: crate::runtime::RuntimeChoreographySessionId,
+        owner_label: impl Into<String>,
+    ) -> Result<(), String> {
+        self.choreography_state
+            .write()
+            .claim_session_owner(session_id, owner_label)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Ensure the current owner record still matches the expected local owner.
+    pub fn ensure_runtime_choreography_session_owner(
+        &self,
+        session_id: crate::runtime::RuntimeChoreographySessionId,
+        expected_owner: &str,
+    ) -> Result<(), String> {
+        self.choreography_state
+            .read()
+            .ensure_session_owner(session_id, expected_owner)
+            .map_err(|error| error.to_string())
+    }
+
     /// Claim local ownership for every fragment described by one manifest in the current session.
     pub fn claim_vm_fragments_for_manifest(
         &self,
@@ -787,14 +811,14 @@ impl AuraEffectSystem {
     }
 
     async fn publish_typed_facts(&self, facts: Vec<TypedFact>) -> Result<(), AuraError> {
-        let tx = self.journal.fact_publisher();
-        let Some(tx) = tx else {
+        if !self.journal.has_fact_sink() {
             return Ok(());
-        };
+        }
 
-        tx.send(crate::reactive::FactSource::Journal(facts))
+        self.journal
+            .publish_facts(crate::reactive::FactSource::Journal(facts))
             .await
-            .map_err(|_| AuraError::internal("Reactive fact sink dropped"))?;
+            .map_err(|error| AuraError::internal(error.to_string()))?;
 
         Ok(())
     }

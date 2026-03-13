@@ -5,20 +5,21 @@
 //!
 //! ## Lifecycle Integration
 //!
-//! The receipt manager integrates with the runtime lifecycle via `start_cleanup_task()`.
-//! When enabled, it periodically prunes expired receipts based on the configured
-//! retention period.
+//! The receipt manager integrates with the runtime lifecycle through
+//! `RuntimeService::start()`. When enabled, it periodically prunes expired
+//! receipts based on the configured retention period.
 
+use super::runtime_tasks::TaskGroup;
 use super::state::with_state_mut_validated;
+use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use crate::core::AgentConfig;
+use async_trait::async_trait;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-
-use super::RuntimeTaskRegistry;
 
 /// Configuration for the receipt manager
 #[derive(Debug, Clone)]
@@ -108,7 +109,7 @@ pub enum ReceiptError {
     VerificationFailed,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct ReceiptState {
     receipts: HashMap<ReceiptId, Receipt>,
     chains: HashMap<(ContextId, AuthorityId), Vec<ReceiptId>>,
@@ -141,6 +142,10 @@ pub struct ReceiptManager {
     config: ReceiptManagerConfig,
     /// Owned receipt state (receipts + chains)
     state: Arc<RwLock<ReceiptState>>,
+    /// Authoritative lifecycle state for runtime health and shutdown.
+    lifecycle: Arc<RwLock<ServiceHealth>>,
+    /// Owned cleanup task group for receipt-local maintenance.
+    cleanup_tasks: Arc<RwLock<Option<TaskGroup>>>,
 }
 
 impl ReceiptManager {
@@ -155,21 +160,13 @@ impl ReceiptManager {
             agent_config: agent_config.clone(),
             config,
             state: Arc::new(RwLock::new(ReceiptState::default())),
+            lifecycle: Arc::new(RwLock::new(ServiceHealth::NotStarted)),
+            cleanup_tasks: Arc::new(RwLock::new(None)),
         }
     }
 
-    /// Start the background cleanup task
-    ///
-    /// This integrates the receipt manager with the runtime lifecycle. The cleanup
-    /// task will periodically prune expired receipts based on the retention period.
-    ///
-    /// The task is registered with the `RuntimeTaskRegistry` and will be automatically
-    /// stopped when the runtime shuts down.
-    pub fn start_cleanup_task(
-        &self,
-        tasks: Arc<RuntimeTaskRegistry>,
-        time: Arc<dyn PhysicalTimeEffects>,
-    ) {
+    /// Start the background cleanup task.
+    fn spawn_cleanup_task(&self, tasks: TaskGroup, time: Arc<dyn PhysicalTimeEffects>) {
         if !self.config.auto_cleanup_enabled {
             tracing::debug!("Receipt cleanup task disabled by configuration");
             return;
@@ -179,7 +176,7 @@ impl ReceiptManager {
         let retention_ms = self.config.retention_period.as_millis() as u64;
         let interval = self.config.cleanup_interval;
 
-        tasks.spawn_interval_until(time.clone(), interval, move || {
+        tasks.spawn_interval_until_named("receipt.cleanup", time.clone(), interval, move || {
             let state = state.clone();
             let time = time.clone();
 
@@ -245,6 +242,10 @@ impl ReceiptManager {
             retention_days = self.config.retention_period.as_secs() / 86400,
             "Receipt cleanup task started"
         );
+    }
+
+    async fn set_lifecycle(&self, health: ServiceHealth) {
+        *self.lifecycle.write().await = health;
     }
 
     /// Get the configuration
@@ -406,9 +407,6 @@ impl ReceiptManager {
 // RuntimeService Implementation
 // =============================================================================
 
-use super::traits::{RuntimeService, ServiceError, ServiceHealth};
-use async_trait::async_trait;
-
 #[async_trait]
 impl RuntimeService for ReceiptManager {
     fn name(&self) -> &'static str {
@@ -419,20 +417,28 @@ impl RuntimeService for ReceiptManager {
         &["flow_budget_manager"]
     }
 
-    async fn start(&self, tasks: Arc<RuntimeTaskRegistry>) -> Result<(), ServiceError> {
-        // Start cleanup task if auto-cleanup is enabled
-        // Note: This requires time effects which should be configured externally
-        // The cleanup task is typically started via start_cleanup_task()
-        if self.config.auto_cleanup_enabled {
-            tracing::debug!(
-                "ReceiptManager: auto-cleanup enabled, call start_cleanup_task() with time effects"
-            );
-        }
-        let _ = tasks; // Acknowledge tasks param
+    async fn start(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
+        self.set_lifecycle(ServiceHealth::Starting).await;
+        let cleanup_group = context.tasks().group(self.name());
+        self.spawn_cleanup_task(cleanup_group.clone(), context.time_effects());
+        *self.cleanup_tasks.write().await = Some(cleanup_group);
+        self.set_lifecycle(ServiceHealth::Healthy).await;
         Ok(())
     }
 
     async fn stop(&self) -> Result<(), ServiceError> {
+        self.set_lifecycle(ServiceHealth::Stopping).await;
+        if let Some(task_group) = self.cleanup_tasks.write().await.take() {
+            task_group
+                .shutdown_with_timeout(Duration::from_secs(2))
+                .await
+                .map_err(|error| {
+                    ServiceError::shutdown_failed(
+                        "receipt_manager",
+                        format!("failed to stop cleanup task group: {error}"),
+                    )
+                })?;
+        }
         // Clear all receipts on shutdown
         with_state_mut_validated(
             &self.state,
@@ -443,10 +449,11 @@ impl RuntimeService for ReceiptManager {
             |state| state.validate(),
         )
         .await;
+        self.set_lifecycle(ServiceHealth::Stopped).await;
         Ok(())
     }
 
-    fn health(&self) -> ServiceHealth {
-        ServiceHealth::Healthy
+    async fn health(&self) -> ServiceHealth {
+        self.lifecycle.read().await.clone()
     }
 }

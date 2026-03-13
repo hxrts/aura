@@ -6,17 +6,8 @@
 //! This module provides UI-agnostic reactive programming infrastructure
 //! that can be used by CLI, webapp, or other UI layers.
 //!
-//! # Blocking Lock Usage
-//!
-//! Uses `parking_lot::Mutex` for TaskRegistry JoinHandle storage because:
-//! 1. Operations are O(1) push or O(n) drain (shutdown only)
-//! 2. Lock is never held across `.await` points
-//! 3. No I/O or async work inside lock scope
-
-#![allow(clippy::disallowed_types)]
-
 use super::state::DynamicState;
-use crate::task_registry::TaskRegistry;
+use crate::task_registry::TaskSupervisor;
 use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, RwLock};
@@ -45,7 +36,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
             state: Arc::new(RwLock::new(DynamicState {
                 value: initial,
                 updates: tx,
-                tasks: Arc::new(TaskRegistry::new()),
+                tasks: Arc::new(TaskSupervisor::new()),
             })),
         }
     }
@@ -128,7 +119,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
             let state = mapped.state.read().await;
             state.tasks.clone()
         };
-        tasks.spawn_cancellable(async move {
+        tasks.spawn_cancellable_named("reactive.dynamic.map", async move {
             // Signal that we're ready to receive
             let _ = ready_tx.send(());
 
@@ -190,7 +181,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
             let state = combined.state.read().await;
             state.tasks.clone()
         };
-        tasks.spawn_cancellable(async move {
+        tasks.spawn_cancellable_named("reactive.dynamic.combine", async move {
             loop {
                 tokio::select! {
                     res = rx_self.recv() => {
@@ -260,7 +251,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
             let state = filtered.state.read().await;
             state.tasks.clone()
         };
-        tasks.spawn_cancellable(async move {
+        tasks.spawn_cancellable_named("reactive.dynamic.filter", async move {
             loop {
                 match rx.recv().await {
                     Ok(value) => {
@@ -310,7 +301,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
             let state = folded.state.read().await;
             state.tasks.clone()
         };
-        tasks.spawn_cancellable(async move {
+        tasks.spawn_cancellable_named("reactive.dynamic.fold", async move {
             loop {
                 match rx.recv().await {
                     Ok(value) => {

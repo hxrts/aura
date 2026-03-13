@@ -2211,18 +2211,21 @@ fn unique_shared_channel_candidate(snapshot: &UiSnapshot) -> Option<String> {
         return Some(channel_id.clone());
     }
 
-    let note_to_self_id = snapshot.runtime_events.iter().find_map(|event| match &event.fact {
-        RuntimeFact::ChannelMembershipReady { channel, .. }
-            if channel
-                .name
-                .as_deref()
-                .map(|name| name.eq_ignore_ascii_case("note to self"))
-                .unwrap_or(false) =>
-        {
-            channel.id.clone()
-        }
-        _ => None,
-    });
+    let note_to_self_id = snapshot
+        .runtime_events
+        .iter()
+        .find_map(|event| match &event.fact {
+            RuntimeFact::ChannelMembershipReady { channel, .. }
+                if channel
+                    .name
+                    .as_deref()
+                    .map(|name| name.eq_ignore_ascii_case("note to self"))
+                    .unwrap_or(false) =>
+            {
+                channel.id.clone()
+            }
+            _ => None,
+        });
     let mut listed_candidates = snapshot
         .lists
         .iter()

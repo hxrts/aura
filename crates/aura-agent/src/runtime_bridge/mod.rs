@@ -568,6 +568,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
     }
 
+    // =========================================================================
     // AMP Channel Operations
     // =========================================================================
 
@@ -798,7 +799,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             Arc::new(effects.time_effects().clone());
         let remaining = Arc::new(std::sync::atomic::AtomicUsize::new(120));
 
-        tasks.spawn_interval_until(
+        tasks.spawn_interval_until_named(
+            "runtime_bridge.channel_invitation_monitor",
             time_effects,
             std::time::Duration::from_millis(1000),
             move || {
@@ -1087,7 +1089,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         let (is_running, active_sessions, last_sync_ms) =
             if let Some(sync) = self.agent.runtime().sync() {
-                let health = sync.health().await;
+                let health = sync.sync_service_health().await;
                 (
                     sync.is_running().await,
                     health.as_ref().map(|h| h.active_sessions).unwrap_or(0),

@@ -6,7 +6,9 @@
 //! enforcement in the guard chain.
 
 use super::state::with_state_mut_validated;
+use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use crate::core::AgentConfig;
+use async_trait::async_trait;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -66,6 +68,8 @@ pub struct FlowBudgetManager {
     state: Arc<RwLock<FlowBudgetState>>,
     /// Default budget limit for new pairs
     default_limit: u32,
+    /// Authoritative lifecycle state for runtime health.
+    lifecycle: Arc<RwLock<ServiceHealth>>,
 }
 
 #[derive(Debug, Default)]
@@ -94,6 +98,7 @@ impl FlowBudgetManager {
             config: config.clone(),
             state: Arc::new(RwLock::new(FlowBudgetState::default())),
             default_limit: 1000, // Default limit per epoch
+            lifecycle: Arc::new(RwLock::new(ServiceHealth::NotStarted)),
         }
     }
 
@@ -270,22 +275,19 @@ impl FlowBudgetManager {
 // RuntimeService Implementation
 // =============================================================================
 
-use super::traits::{RuntimeService, ServiceError, ServiceHealth};
-use super::RuntimeTaskRegistry;
-use async_trait::async_trait;
-
 #[async_trait]
 impl RuntimeService for FlowBudgetManager {
     fn name(&self) -> &'static str {
         "flow_budget_manager"
     }
 
-    async fn start(&self, _tasks: Arc<RuntimeTaskRegistry>) -> Result<(), ServiceError> {
-        // FlowBudgetManager is stateless and always ready
+    async fn start(&self, _context: &RuntimeServiceContext) -> Result<(), ServiceError> {
+        *self.lifecycle.write().await = ServiceHealth::Healthy;
         Ok(())
     }
 
     async fn stop(&self) -> Result<(), ServiceError> {
+        *self.lifecycle.write().await = ServiceHealth::Stopping;
         // Clear all budgets on shutdown
         with_state_mut_validated(
             &self.state,
@@ -295,10 +297,11 @@ impl RuntimeService for FlowBudgetManager {
             |state| state.validate(),
         )
         .await;
+        *self.lifecycle.write().await = ServiceHealth::Stopped;
         Ok(())
     }
 
-    fn health(&self) -> ServiceHealth {
-        ServiceHealth::Healthy
+    async fn health(&self) -> ServiceHealth {
+        self.lifecycle.read().await.clone()
     }
 }

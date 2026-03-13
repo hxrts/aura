@@ -20,6 +20,7 @@
 //! For multi-device (threshold>1), coordination happens via choreography.
 
 use super::state::with_state_mut_validated;
+use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use crate::runtime::AuraEffectSystem;
 use async_trait::async_trait;
 use aura_consensus::dkg::recovery::recover_share_from_transcript;
@@ -184,6 +185,8 @@ pub struct ThresholdSigningService {
 
     /// Runtime capability admission snapshot for threshold-signing gates.
     runtime_capabilities: RuntimeCapabilityHandler,
+    /// Authoritative lifecycle state for runtime health.
+    lifecycle: Arc<RwLock<ServiceHealth>>,
 }
 
 impl std::fmt::Debug for ThresholdSigningService {
@@ -200,6 +203,7 @@ impl Clone for ThresholdSigningService {
             effects: self.effects.clone(),
             state: self.state.clone(),
             runtime_capabilities: self.runtime_capabilities.clone(),
+            lifecycle: self.lifecycle.clone(),
         }
     }
 }
@@ -213,6 +217,7 @@ impl ThresholdSigningService {
             effects,
             state: Arc::new(RwLock::new(ThresholdSigningState::default())),
             runtime_capabilities,
+            lifecycle: Arc::new(RwLock::new(ServiceHealth::NotStarted)),
         }
     }
 
@@ -225,6 +230,7 @@ impl ThresholdSigningService {
             effects,
             state: Arc::new(RwLock::new(ThresholdSigningState::default())),
             runtime_capabilities,
+            lifecycle: Arc::new(RwLock::new(ServiceHealth::NotStarted)),
         }
     }
 
@@ -1428,9 +1434,6 @@ impl ThresholdSigningEffects for ThresholdSigningService {
 // RuntimeService Implementation
 // =============================================================================
 
-use super::traits::{RuntimeService, ServiceError, ServiceHealth};
-use super::RuntimeTaskRegistry;
-
 #[async_trait]
 impl RuntimeService for ThresholdSigningService {
     fn name(&self) -> &'static str {
@@ -1441,12 +1444,13 @@ impl RuntimeService for ThresholdSigningService {
         &["ceremony_tracker"]
     }
 
-    async fn start(&self, _tasks: Arc<RuntimeTaskRegistry>) -> Result<(), ServiceError> {
-        // ThresholdSigningService is in-memory and always ready
+    async fn start(&self, _context: &RuntimeServiceContext) -> Result<(), ServiceError> {
+        *self.lifecycle.write().await = ServiceHealth::Healthy;
         Ok(())
     }
 
     async fn stop(&self) -> Result<(), ServiceError> {
+        *self.lifecycle.write().await = ServiceHealth::Stopping;
         // Clear signing contexts + leases on shutdown
         with_state_mut_validated(
             &self.state,
@@ -1457,11 +1461,12 @@ impl RuntimeService for ThresholdSigningService {
             |state| state.validate(),
         )
         .await;
+        *self.lifecycle.write().await = ServiceHealth::Stopped;
         Ok(())
     }
 
-    fn health(&self) -> ServiceHealth {
-        ServiceHealth::Healthy
+    async fn health(&self) -> ServiceHealth {
+        self.lifecycle.read().await.clone()
     }
 }
 

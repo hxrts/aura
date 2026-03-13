@@ -5,11 +5,10 @@
 
 use super::auth::{AuthChallenge, AuthHandler, AuthMethod, AuthResponse, AuthResult};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
-use crate::runtime::vm_host_bridge::{
-    advance_host_bridged_vm_round, close_and_reap_vm_session, handle_standard_vm_round,
-    open_manifest_vm_session_admitted, AuraVmRoundDisposition,
+use crate::runtime::vm_host_bridge::AuraVmRoundDisposition;
+use crate::runtime::{
+    handle_owned_vm_round, open_owned_manifest_vm_session_admitted, AuraEffectSystem,
 };
-use crate::runtime::AuraEffectSystem;
 use aura_authentication::dkd::{DkdMessage, DkdSessionId};
 use aura_authentication::guardian_auth_relational::{
     GuardianAuthProof, GuardianAuthRequest, GuardianAuthResponse,
@@ -20,7 +19,7 @@ use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
 use aura_core::util::serialization::to_vec;
 use aura_mpst::telltale_types::{GlobalType, LocalTypeR};
 use aura_mpst::CompositionManifest;
-use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, RoleIndex};
+use aura_protocol::effects::{ChoreographicRole, RoleIndex};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -126,16 +125,11 @@ impl AuthServiceApi {
         local_types: &BTreeMap<String, LocalTypeR>,
         initial_payloads: Vec<Vec<u8>>,
     ) -> AgentResult<()> {
-        self.effects
-            .start_session(session_uuid, roles)
-            .await
-            .map_err(|error| {
-                AgentError::internal(format!("auth VM session start failed: {error}"))
-            })?;
-
         let result = async {
-            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-                self.effects.as_ref(),
+            let mut session = open_owned_manifest_vm_session_admitted(
+                self.effects.clone(),
+                session_uuid,
+                roles,
                 manifest,
                 active_role,
                 global_type,
@@ -143,43 +137,30 @@ impl AuthServiceApi {
                 crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
-            .map_err(AgentError::internal)?;
+            .map_err(|error| AgentError::internal(error.to_string()))?;
 
             for payload in initial_payloads {
-                handler.push_send_bytes(payload);
+                session.queue_send_bytes(payload);
             }
 
             let loop_result = loop {
-                let round = advance_host_bridged_vm_round(
-                    self.effects.as_ref(),
-                    &mut engine,
-                    handler.as_ref(),
-                    vm_sid,
-                    active_role,
-                    &peer_roles,
-                )
-                .await
-                .map_err(AgentError::internal)?;
+                let round = session
+                    .advance_round(active_role, &peer_roles)
+                    .await
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
 
-                match handle_standard_vm_round(
-                    &mut engine,
-                    vm_sid,
-                    round,
-                    &format!("auth {active_role} VM"),
-                )
-                .map_err(AgentError::internal)?
+                match handle_owned_vm_round(&mut session, round, &format!("auth {active_role} VM"))
+                    .map_err(|error| AgentError::internal(error.to_string()))?
                 {
                     AuraVmRoundDisposition::Continue => {}
                     AuraVmRoundDisposition::Complete => break Ok(()),
                 }
             };
 
-            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            let _ = session.close().await;
             loop_result
         }
         .await;
-
-        let _ = self.effects.end_session().await;
         result
     }
 

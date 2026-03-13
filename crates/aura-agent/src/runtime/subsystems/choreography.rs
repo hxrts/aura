@@ -51,6 +51,38 @@ impl fmt::Display for RuntimeChoreographySessionId {
     }
 }
 
+/// Authoritative local owner record for one active runtime session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionOwnerRecord {
+    /// Stable local owner label.
+    pub owner_label: String,
+}
+
+/// Errors raised while managing runtime session ownership.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum SessionOwnershipError {
+    /// Another local owner already claimed the active session.
+    #[error(
+        "runtime session {session_id} is already owned by {existing_owner}; requested owner {requested_owner}"
+    )]
+    OwnerConflict {
+        session_id: RuntimeChoreographySessionId,
+        existing_owner: String,
+        requested_owner: String,
+    },
+    /// No authoritative owner exists for the requested session.
+    #[error("runtime session {session_id} has no owner record")]
+    MissingOwner {
+        session_id: RuntimeChoreographySessionId,
+    },
+    /// The caller does not match the authoritative owner for the requested session.
+    #[error("runtime session {session_id} is not owned by expected owner {expected_owner}")]
+    OwnerMismatch {
+        session_id: RuntimeChoreographySessionId,
+        expected_owner: String,
+    },
+}
+
 /// In-memory choreography session state for one runtime session.
 #[derive(Debug, Clone)]
 pub struct ChoreographySessionState {
@@ -95,6 +127,7 @@ impl ChoreographySessionState {
 #[derive(Debug, Clone, Default)]
 pub struct ChoreographyState {
     sessions: HashMap<RuntimeChoreographySessionId, ChoreographySessionState>,
+    session_owners: HashMap<RuntimeChoreographySessionId, SessionOwnerRecord>,
     task_bindings: HashMap<ExecutionBindingKey, RuntimeChoreographySessionId>,
     session_inbox_notifiers: HashMap<RuntimeChoreographySessionId, Arc<Notify>>,
     session_inboxes: HashMap<RuntimeChoreographySessionId, Vec<TransportEnvelope>>,
@@ -222,6 +255,7 @@ impl ChoreographyState {
         if let Some(notify) = self.session_inbox_notifiers.remove(&session_id) {
             notify.notify_waiters();
         }
+        self.session_owners.remove(&session_id);
         self.session_inboxes.remove(&session_id);
         self.task_bindings.retain(|_, sid| *sid != session_id);
         Ok(session_id)
@@ -233,6 +267,7 @@ impl ChoreographyState {
         if let Some(notify) = self.session_inbox_notifiers.remove(&session_id) {
             notify.notify_waiters();
         }
+        self.session_owners.remove(&session_id);
         self.session_inboxes.remove(&session_id);
         self.task_bindings.retain(|_, sid| *sid != session_id);
         removed
@@ -353,6 +388,72 @@ impl ChoreographyState {
             .cloned()
             .unwrap_or_default()
     }
+
+    /// Claim authoritative ownership for one active session.
+    pub fn claim_session_owner(
+        &mut self,
+        session_id: RuntimeChoreographySessionId,
+        owner_label: impl Into<String>,
+    ) -> Result<(), SessionOwnershipError> {
+        let owner_label = owner_label.into();
+        if !self.sessions.contains_key(&session_id) {
+            return Err(SessionOwnershipError::MissingOwner { session_id });
+        }
+
+        if let Some(existing) = self.session_owners.get(&session_id) {
+            if existing.owner_label != owner_label {
+                return Err(SessionOwnershipError::OwnerConflict {
+                    session_id,
+                    existing_owner: existing.owner_label.clone(),
+                    requested_owner: owner_label,
+                });
+            }
+            return Ok(());
+        }
+
+        self.session_owners
+            .insert(session_id, SessionOwnerRecord { owner_label });
+        Ok(())
+    }
+
+    /// Ensure the requested owner still holds the active session.
+    pub fn ensure_session_owner(
+        &self,
+        session_id: RuntimeChoreographySessionId,
+        expected_owner: &str,
+    ) -> Result<(), SessionOwnershipError> {
+        let Some(owner) = self.session_owners.get(&session_id) else {
+            return Err(SessionOwnershipError::MissingOwner { session_id });
+        };
+
+        if owner.owner_label != expected_owner {
+            return Err(SessionOwnershipError::OwnerMismatch {
+                session_id,
+                expected_owner: expected_owner.to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Release authoritative ownership for one active session.
+    pub fn release_session_owner(
+        &mut self,
+        session_id: RuntimeChoreographySessionId,
+        expected_owner: &str,
+    ) -> Result<(), SessionOwnershipError> {
+        self.ensure_session_owner(session_id, expected_owner)?;
+        self.session_owners.remove(&session_id);
+        Ok(())
+    }
+
+    /// Snapshot the current owner for one active session.
+    pub fn session_owner(
+        &self,
+        session_id: RuntimeChoreographySessionId,
+    ) -> Option<&SessionOwnerRecord> {
+        self.session_owners.get(&session_id)
+    }
 }
 
 #[cfg(test)]
@@ -426,5 +527,56 @@ mod tests {
         assert!(state.current_session_id().is_none());
         assert!(state.session_inbox_notify(session_id).is_none());
         assert_eq!(state.session_inbox_len(session_id), 0);
+    }
+
+    #[test]
+    fn session_owner_conflict_is_rejected() {
+        let authority_id = DeviceId::from_uuid(Uuid::from_bytes([7; 16]));
+        let role = ChoreographicRole::new(
+            authority_id,
+            AuthorityId::new_from_entropy([1u8; 32]),
+            RoleIndex::new(0).expect("role index"),
+        );
+        let session_id = RuntimeChoreographySessionId::from_uuid(Uuid::from_u128(46));
+        let context_id = ContextId::new_from_entropy([9; 32]);
+        let mut state = ChoreographyState::new();
+
+        state
+            .start_session(session_id, context_id, vec![role], role, Some(1000), 0)
+            .expect("session starts");
+        state
+            .claim_session_owner(session_id, "owner-a")
+            .expect("owner a claims session");
+
+        assert!(matches!(
+            state.claim_session_owner(session_id, "owner-b"),
+            Err(SessionOwnershipError::OwnerConflict { .. })
+        ));
+    }
+
+    #[test]
+    fn ending_session_releases_owner_record() {
+        let authority_id = DeviceId::from_uuid(Uuid::from_bytes([8; 16]));
+        let role = ChoreographicRole::new(
+            authority_id,
+            AuthorityId::new_from_entropy([2u8; 32]),
+            RoleIndex::new(0).expect("role index"),
+        );
+        let session_id = RuntimeChoreographySessionId::from_uuid(Uuid::from_u128(47));
+        let context_id = ContextId::new_from_entropy([10; 32]);
+        let mut state = ChoreographyState::new();
+
+        state
+            .start_session(session_id, context_id, vec![role], role, Some(1000), 0)
+            .expect("session starts");
+        state
+            .claim_session_owner(session_id, "owner-a")
+            .expect("owner claims session");
+        state.end_session(10).expect("session ends");
+
+        assert!(matches!(
+            state.ensure_session_owner(session_id, "owner-a"),
+            Err(SessionOwnershipError::MissingOwner { .. })
+        ));
     }
 }

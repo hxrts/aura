@@ -1,9 +1,6 @@
 use super::*;
-use crate::runtime::vm_host_bridge::{
-    advance_host_bridged_vm_round, advance_host_bridged_vm_round_until_receive,
-    close_and_reap_vm_session, inject_vm_receive, open_manifest_vm_session_admitted,
-    AuraVmHostWaitStatus,
-};
+use crate::runtime::open_owned_manifest_vm_session_admitted;
+use crate::runtime::vm_host_bridge::AuraVmHostWaitStatus;
 use std::collections::BTreeMap;
 
 pub(super) struct InvitationGuardianHandler<'a> {
@@ -50,16 +47,11 @@ impl<'a> InvitationGuardianHandler<'a> {
             relationship_id: None,
         });
 
-        effects
-            .start_session(session_id, roles)
-            .await
-            .map_err(|error| {
-                AgentError::internal(format!("guardian invite VM start failed: {error}"))
-            })?;
-
         let result = async {
-            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-                effects.as_ref(),
+            let mut session = open_owned_manifest_vm_session_admitted(
+                effects.clone(),
+                session_id,
+                roles,
                 &manifest,
                 "Principal",
                 &global_type,
@@ -67,30 +59,28 @@ impl<'a> InvitationGuardianHandler<'a> {
                 crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
-            .map_err(AgentError::internal)?;
-            handler.push_send_bytes(to_vec(&request).map_err(|error| {
+            .map_err(|error| AgentError::internal(error.to_string()))?;
+            session.queue_send_bytes(to_vec(&request).map_err(|error| {
                 AgentError::internal(format!("guardian request encode failed: {error}"))
             })?);
-            handler.push_send_bytes(to_vec(&confirm).map_err(|error| {
+            session.queue_send_bytes(to_vec(&confirm).map_err(|error| {
                 AgentError::internal(format!("guardian confirm encode failed: {error}"))
             })?);
 
             let loop_result = loop {
-                let round = advance_host_bridged_vm_round_until_receive(
-                    effects.as_ref(),
-                    &mut engine,
-                    handler.as_ref(),
-                    vm_sid,
-                    "Principal",
-                    &peer_roles,
-                    InvitationHandler::is_transport_no_message,
-                )
-                .await
-                .map_err(AgentError::internal)?;
+                let round = session
+                    .advance_round_until_receive(
+                        "Principal",
+                        &peer_roles,
+                        InvitationHandler::is_transport_no_message,
+                    )
+                    .await
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
 
                 if let Some(blocked) = round.blocked_receive {
-                    inject_vm_receive(&mut engine, vm_sid, &blocked)
-                        .map_err(AgentError::internal)?;
+                    session
+                        .inject_blocked_receive(&blocked)
+                        .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
 
@@ -122,12 +112,10 @@ impl<'a> InvitationGuardianHandler<'a> {
                 }
             };
 
-            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            let _ = session.close().await;
             loop_result
         }
         .await;
-
-        let _ = effects.end_session().await;
         result
     }
 
@@ -150,16 +138,11 @@ impl<'a> InvitationGuardianHandler<'a> {
         let global_type = aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::vm_artifacts::global_type();
         let local_types = aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::vm_artifacts::local_types();
 
-        effects
-            .start_session(session_id, roles)
-            .await
-            .map_err(|error| {
-                AgentError::internal(format!("guardian invite VM start failed: {error}"))
-            })?;
-
         let result = async {
-            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-                effects.as_ref(),
+            let mut session = open_owned_manifest_vm_session_admitted(
+                effects.clone(),
+                session_id,
+                roles,
                 &manifest,
                 "Guardian",
                 &global_type,
@@ -167,26 +150,21 @@ impl<'a> InvitationGuardianHandler<'a> {
                 crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
-            .map_err(AgentError::internal)?;
-            handler.push_send_bytes(to_vec(&accept).map_err(|error| {
+            .map_err(|error| AgentError::internal(error.to_string()))?;
+            session.queue_send_bytes(to_vec(&accept).map_err(|error| {
                 AgentError::internal(format!("guardian accept encode failed: {error}"))
             })?);
 
             let loop_result = loop {
-                let round = advance_host_bridged_vm_round(
-                    effects.as_ref(),
-                    &mut engine,
-                    handler.as_ref(),
-                    vm_sid,
-                    "Guardian",
-                    &peer_roles,
-                )
-                .await
-                .map_err(AgentError::internal)?;
+                let round = session
+                    .advance_round("Guardian", &peer_roles)
+                    .await
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
 
                 if let Some(blocked) = round.blocked_receive {
-                    inject_vm_receive(&mut engine, vm_sid, &blocked)
-                        .map_err(AgentError::internal)?;
+                    session
+                        .inject_blocked_receive(&blocked)
+                        .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
 
@@ -216,12 +194,10 @@ impl<'a> InvitationGuardianHandler<'a> {
                 }
             };
 
-            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            let _ = session.close().await;
             loop_result
         }
         .await;
-
-        let _ = effects.end_session().await;
         result
     }
 }

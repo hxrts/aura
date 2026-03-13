@@ -9,11 +9,10 @@
 use crate::core::{AgentError, AgentResult};
 use crate::handlers::shared::context_commitment_from_journal;
 use crate::runtime::consensus::build_consensus_params;
-use crate::runtime::vm_host_bridge::{
-    advance_host_bridged_vm_round, close_and_reap_vm_session, handle_standard_vm_round,
-    open_manifest_vm_session_admitted, AuraVmRoundDisposition,
+use crate::runtime::vm_host_bridge::AuraVmRoundDisposition;
+use crate::runtime::{
+    handle_owned_vm_round, open_owned_manifest_vm_session_admitted, AuraEffectSystem,
 };
-use crate::runtime::AuraEffectSystem;
 use aura_chat::guards::{EffectCommand, GuardOutcome, GuardSnapshot};
 use aura_chat::types::{ChatMember, ChatRole};
 use aura_chat::{
@@ -39,7 +38,7 @@ use aura_protocol::amp::{
 };
 use aura_protocol::amp::{AmpMessage, AmpReceipt};
 use aura_protocol::effects::TreeEffects;
-use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, RoleIndex};
+use aura_protocol::effects::{ChoreographicRole, RoleIndex};
 use uuid::Uuid;
 
 /// Chat service API for the agent layer.
@@ -100,13 +99,6 @@ impl ChatServiceApi {
         active_role: &str,
         initial_payloads: Vec<Vec<u8>>,
     ) -> AgentResult<()> {
-        self.effects
-            .start_session(session_uuid, roles)
-            .await
-            .map_err(|error| {
-                AgentError::internal(format!("AMP VM session start failed: {error}"))
-            })?;
-
         let result = async {
             let manifest =
                 aura_protocol::amp::choreography::telltale_session_types_amp_transport::vm_artifacts::composition_manifest();
@@ -114,8 +106,10 @@ impl ChatServiceApi {
                 aura_protocol::amp::choreography::telltale_session_types_amp_transport::vm_artifacts::global_type();
             let local_types =
                 aura_protocol::amp::choreography::telltale_session_types_amp_transport::vm_artifacts::local_types();
-            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-                self.effects.as_ref(),
+            let mut session = open_owned_manifest_vm_session_admitted(
+                self.effects.clone(),
+                session_uuid,
+                roles,
                 &manifest,
                 active_role,
                 &global_type,
@@ -123,43 +117,30 @@ impl ChatServiceApi {
                 crate::runtime::AuraVmSchedulerSignals::default(),
             )
             .await
-            .map_err(AgentError::internal)?;
+            .map_err(|error| AgentError::internal(error.to_string()))?;
 
             for payload in initial_payloads {
-                handler.push_send_bytes(payload);
+                session.queue_send_bytes(payload);
             }
 
             let loop_result = loop {
-                let round = advance_host_bridged_vm_round(
-                    self.effects.as_ref(),
-                    &mut engine,
-                    handler.as_ref(),
-                    vm_sid,
-                    active_role,
-                    &peer_roles,
-                )
+                let round = session
+                    .advance_round(active_role, &peer_roles)
                     .await
-                    .map_err(AgentError::internal)?;
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
 
-                match handle_standard_vm_round(
-                    &mut engine,
-                    vm_sid,
-                    round,
-                    &format!("AMP {active_role} VM"),
-                )
-                .map_err(AgentError::internal)?
+                match handle_owned_vm_round(&mut session, round, &format!("AMP {active_role} VM"))
+                    .map_err(|error| AgentError::internal(error.to_string()))?
                 {
                     AuraVmRoundDisposition::Continue => {}
                     AuraVmRoundDisposition::Complete => break Ok(()),
                 }
             };
 
-            let _ = close_and_reap_vm_session(&mut engine, vm_sid);
+            let _ = session.close().await;
             loop_result
         }
         .await;
-
-        let _ = self.effects.end_session().await;
         result
     }
 

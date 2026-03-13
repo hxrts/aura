@@ -12,6 +12,7 @@
 //! 4. **Graceful Shutdown**: Services can clean up resources properly
 
 use async_trait::async_trait;
+use aura_core::effects::PhysicalTimeEffects;
 use std::fmt;
 use std::sync::Arc;
 
@@ -159,15 +160,39 @@ impl std::error::Error for ServiceError {
     }
 }
 
+/// Shared runtime context provided to services during lifecycle operations.
+#[derive(Clone)]
+pub struct RuntimeServiceContext {
+    tasks: Arc<RuntimeTaskRegistry>,
+    time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
+}
+
+impl RuntimeServiceContext {
+    /// Create one runtime service context from shared runtime dependencies.
+    pub fn new(
+        tasks: Arc<RuntimeTaskRegistry>,
+        time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
+    ) -> Self {
+        Self {
+            tasks,
+            time_effects,
+        }
+    }
+
+    /// Borrow the shared supervised task root for service-owned child groups.
+    pub fn tasks(&self) -> Arc<RuntimeTaskRegistry> {
+        self.tasks.clone()
+    }
+
+    /// Borrow physical time effects for service startup and maintenance work.
+    pub fn time_effects(&self) -> Arc<dyn PhysicalTimeEffects + Send + Sync> {
+        self.time_effects.clone()
+    }
+}
+
 /// Trait for runtime services with unified lifecycle management
 ///
-/// Note: This trait is infrastructure for future lifecycle management integration.
-/// Services will implement this trait incrementally to enable unified startup/shutdown.
-///
-/// All service managers in the runtime should implement this trait to enable:
-/// - Consistent startup/shutdown ordering
-/// - Health monitoring and reporting
-/// - Dependency management
+/// This is the only supported lifecycle API for runtime-managed services.
 ///
 /// ## Example
 ///
@@ -186,8 +211,9 @@ impl std::error::Error for ServiceError {
 ///         &["indexed_journal", "transport"]
 ///     }
 ///
-///     async fn start(&self, tasks: Arc<RuntimeTaskRegistry>) -> Result<(), ServiceError> {
+///     async fn start(&self, ctx: &RuntimeServiceContext) -> Result<(), ServiceError> {
 ///         // Initialize and start background tasks
+///         let _tasks = ctx.tasks();
 ///         Ok(())
 ///     }
 ///
@@ -196,12 +222,11 @@ impl std::error::Error for ServiceError {
 ///         Ok(())
 ///     }
 ///
-///     fn health(&self) -> ServiceHealth {
+///     async fn health(&self) -> ServiceHealth {
 ///         ServiceHealth::Healthy
 ///     }
 /// }
 /// ```
-#[allow(dead_code)] // Lifecycle API surface; methods are consumed incrementally by runtime wiring.
 #[async_trait]
 pub trait RuntimeService: Send + Sync {
     /// Returns the unique name of this service
@@ -221,14 +246,14 @@ pub trait RuntimeService: Send + Sync {
     ///
     /// Called during runtime startup. The service should initialize any
     /// required state and spawn background tasks using the provided
-    /// task registry.
+    /// runtime service context.
     ///
     /// # Arguments
-    /// * `tasks` - Task registry for spawning background tasks
+    /// * `context` - Runtime service context for spawning tasks and accessing time effects
     ///
     /// # Errors
     /// Returns `ServiceError` if startup fails
-    async fn start(&self, tasks: Arc<RuntimeTaskRegistry>) -> Result<(), ServiceError>;
+    async fn start(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError>;
 
     /// Stop the service gracefully
     ///
@@ -246,9 +271,9 @@ pub trait RuntimeService: Send + Sync {
 
     /// Returns the current health status of the service
     ///
-    /// Called periodically for health monitoring. Should be fast and
-    /// non-blocking.
-    fn health(&self) -> ServiceHealth;
+    /// Called after startup and during health monitoring. Should reflect the
+    /// current lifecycle/actor state rather than a placeholder approximation.
+    async fn health(&self) -> ServiceHealth;
 }
 
 /// Extension trait for collections of runtime services
@@ -306,5 +331,16 @@ mod tests {
         assert!(err.to_string().contains("test_service"));
         assert!(err.to_string().contains("StartupFailed"));
         assert!(err.to_string().contains("failed to connect"));
+    }
+
+    #[test]
+    fn runtime_service_context_exposes_shared_dependencies() {
+        let tasks = Arc::new(RuntimeTaskRegistry::new());
+        let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
+            Arc::new(aura_effects::time::PhysicalTimeHandler::new());
+        let context = RuntimeServiceContext::new(tasks.clone(), time_effects.clone());
+
+        assert!(Arc::ptr_eq(&context.tasks(), &tasks));
+        assert!(Arc::ptr_eq(&context.time_effects(), &time_effects));
     }
 }

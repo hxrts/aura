@@ -7,9 +7,9 @@ use crate::handlers::{
     AuthServiceApi, ChatServiceApi, InvitationServiceApi, OtaActivationServiceApi,
     RecoveryServiceApi, SessionServiceApi,
 };
-use crate::runtime::services::ReconfigurationManager;
 use crate::runtime::services::ThresholdSigningService;
-use crate::runtime::system::RuntimeSystem;
+use crate::runtime::services::{ReconfigurationManager, RuntimeTaskRegistry};
+use crate::runtime::system::{RuntimeActivityGate, RuntimePublicOperationError, RuntimeSystem};
 use crate::runtime::{AuraEffectSystem, EffectContext};
 use aura_core::identifiers::{AccountId, AuthorityId};
 use once_cell::sync::OnceCell;
@@ -37,6 +37,8 @@ impl AuraAgent {
             runtime.effects(),
             runtime.ceremony_runner().clone(),
             runtime.reconfiguration().clone(),
+            runtime.tasks(),
+            runtime.activity_gate(),
             context.clone(),
         );
         Self {
@@ -127,9 +129,9 @@ impl AuraAgent {
     /// Shutdown the agent
     pub async fn shutdown(self, ctx: &EffectContext) -> AgentResult<()> {
         self.runtime
-            .shutdown(ctx)
+            .shutdown_typed(ctx)
             .await
-            .map_err(AgentError::runtime)
+            .map_err(|error| AgentError::runtime(error.to_string()))
     }
 }
 
@@ -137,6 +139,8 @@ struct ServiceRegistry {
     effects: Arc<AuraEffectSystem>,
     ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
     reconfiguration_manager: ReconfigurationManager,
+    runtime_tasks: Arc<RuntimeTaskRegistry>,
+    runtime_activity: Arc<RuntimeActivityGate>,
     authority_context: AuthorityContext,
     account_id: AccountId,
     sessions: OnceCell<SessionServiceApi>,
@@ -152,6 +156,8 @@ impl ServiceRegistry {
         effects: Arc<AuraEffectSystem>,
         ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
         reconfiguration_manager: ReconfigurationManager,
+        runtime_tasks: Arc<RuntimeTaskRegistry>,
+        runtime_activity: Arc<RuntimeActivityGate>,
         authority_context: AuthorityContext,
     ) -> Self {
         let account_id = authority_context.account_id();
@@ -159,6 +165,8 @@ impl ServiceRegistry {
             effects,
             ceremony_runner,
             reconfiguration_manager,
+            runtime_tasks,
+            runtime_activity,
             authority_context,
             account_id,
             sessions: OnceCell::new(),
@@ -170,7 +178,14 @@ impl ServiceRegistry {
         }
     }
 
+    fn ensure_accepting_public_operations(&self) -> AgentResult<()> {
+        self.runtime_activity
+            .ensure_accepting_public_operations()
+            .map_err(|error: RuntimePublicOperationError| AgentError::runtime(error.to_string()))
+    }
+
     fn sessions(&self) -> AgentResult<SessionServiceApi> {
+        self.ensure_accepting_public_operations()?;
         self.sessions
             .get_or_try_init(|| {
                 SessionServiceApi::new(
@@ -183,6 +198,7 @@ impl ServiceRegistry {
     }
 
     fn auth(&self) -> AgentResult<AuthServiceApi> {
+        self.ensure_accepting_public_operations()?;
         self.auth
             .get_or_try_init(|| {
                 AuthServiceApi::new(
@@ -195,12 +211,14 @@ impl ServiceRegistry {
     }
 
     fn chat(&self) -> AgentResult<ChatServiceApi> {
+        self.ensure_accepting_public_operations()?;
         self.chat
             .get_or_try_init(|| ChatServiceApi::new(self.effects.clone()))
             .cloned()
     }
 
     fn invitations(&self) -> AgentResult<InvitationServiceApi> {
+        self.ensure_accepting_public_operations()?;
         self.invitations
             .get_or_try_init(|| {
                 InvitationServiceApi::new_with_runner(
@@ -213,6 +231,7 @@ impl ServiceRegistry {
     }
 
     fn recovery(&self) -> AgentResult<RecoveryServiceApi> {
+        self.ensure_accepting_public_operations()?;
         self.recovery
             .get_or_try_init(|| {
                 RecoveryServiceApi::new_with_runner(
@@ -220,12 +239,14 @@ impl ServiceRegistry {
                     self.authority_context.clone(),
                     self.ceremony_runner.clone(),
                     self.reconfiguration_manager.clone(),
+                    self.runtime_tasks.clone(),
                 )
             })
             .cloned()
     }
 
     fn ota_activation(&self) -> AgentResult<OtaActivationServiceApi> {
+        self.ensure_accepting_public_operations()?;
         self.ota_activation
             .get_or_try_init(|| {
                 OtaActivationServiceApi::new_with_runner(

@@ -6,12 +6,16 @@ use super::services::ceremony_runner::CeremonyRunner;
 use super::services::{
     AuthorityManager, AuthorityStatus, CeremonyTracker, ContextManager, FlowBudgetManager,
     LanTransportService, ReceiptManager, ReconfigurationManager, RendezvousManager, RuntimeService,
-    RuntimeTaskRegistry, ServiceError, SocialManager, SyncServiceManager, ThresholdSigningService,
+    RuntimeServiceContext, RuntimeTaskRegistry, ServiceError, ServiceErrorKind, ServiceHealth,
+    SocialManager, SyncServiceManager, ThresholdSigningService,
 };
-use super::{AuraEffectSystem, EffectContext, EffectExecutor, LifecycleManager};
+use super::{
+    AuraEffectSystem, EffectContext, EffectExecutor, LifecycleManager, RuntimeDiagnosticSink,
+};
 use crate::core::{AgentConfig, AuthorityContext};
 use crate::handlers::{InvitationHandler, RendezvousHandler};
-use crate::reactive::{FactSource, ReactivePipeline, SchedulerConfig};
+use crate::reactive::{ReactivePipeline, SchedulerConfig};
+use crate::task_registry::TaskSupervisionError;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
 use aura_core::effects::task::TaskSpawner;
@@ -36,7 +40,9 @@ use aura_protocol::amp::get_channel_state;
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 #[cfg(not(target_arch = "wasm32"))]
 use futures::{SinkExt, StreamExt};
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncReadExt;
@@ -57,6 +63,91 @@ fn sync_peer_reconcile_interval(sync_manager: &SyncServiceManager) -> Duration {
         MIN_SYNC_PEER_RECONCILE_INTERVAL,
         MAX_SYNC_PEER_RECONCILE_INTERVAL,
     )
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RuntimeShutdownError {
+    #[error("runtime task tree shutdown failed: {0}")]
+    TaskTree(#[from] TaskSupervisionError),
+    #[error("runtime service teardown failed: {0}")]
+    Service(#[from] ServiceError),
+    #[error("lifecycle shutdown failed: {0}")]
+    Lifecycle(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeActivityState {
+    Running,
+    Stopping,
+    Stopped,
+}
+
+impl RuntimeActivityState {
+    fn as_u8(self) -> u8 {
+        match self {
+            Self::Running => 0,
+            Self::Stopping => 1,
+            Self::Stopped => 2,
+        }
+    }
+
+    fn from_u8(value: u8) -> Self {
+        match value {
+            0 => Self::Running,
+            1 => Self::Stopping,
+            2 => Self::Stopped,
+            _ => Self::Stopped,
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RuntimePublicOperationError {
+    #[error("runtime is {state:?} and no longer accepts new public operations")]
+    NotAccepting { state: RuntimeActivityState },
+}
+
+#[derive(Debug, Default)]
+pub struct RuntimeActivityGate {
+    state: AtomicU8,
+}
+
+impl RuntimeActivityGate {
+    pub fn new() -> Self {
+        Self {
+            state: AtomicU8::new(RuntimeActivityState::Running.as_u8()),
+        }
+    }
+
+    pub fn state(&self) -> RuntimeActivityState {
+        RuntimeActivityState::from_u8(self.state.load(Ordering::SeqCst))
+    }
+
+    pub fn begin_shutdown(&self) -> RuntimeActivityState {
+        match self.state.compare_exchange(
+            RuntimeActivityState::Running.as_u8(),
+            RuntimeActivityState::Stopping.as_u8(),
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(_) => RuntimeActivityState::Running,
+            Err(previous) => RuntimeActivityState::from_u8(previous),
+        }
+    }
+
+    pub fn mark_stopped(&self) {
+        self.state
+            .store(RuntimeActivityState::Stopped.as_u8(), Ordering::SeqCst);
+    }
+
+    pub fn ensure_accepting_public_operations(
+        &self,
+    ) -> Result<(), RuntimePublicOperationError> {
+        match self.state() {
+            RuntimeActivityState::Running => Ok(()),
+            state => Err(RuntimePublicOperationError::NotAccepting { state }),
+        }
+    }
 }
 
 /// Main runtime system for the agent
@@ -113,6 +204,12 @@ pub struct RuntimeSystem {
     /// Runtime task registry for background work
     runtime_tasks: Arc<RuntimeTaskRegistry>,
 
+    /// Shared runtime activity gate used to reject new public work during shutdown.
+    activity_gate: Arc<RuntimeActivityGate>,
+
+    /// Shared diagnostics sink for surfaced async/runtime failures.
+    diagnostics: Arc<RuntimeDiagnosticSink>,
+
     /// Configuration
     #[allow(dead_code)] // Will be used for runtime configuration
     config: AgentConfig,
@@ -146,6 +243,8 @@ impl RuntimeSystem {
             Arc::new(effect_system.time_effects().clone());
         let ceremony_tracker = CeremonyTracker::new(time_effects);
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
+        let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
+        let runtime_tasks = Arc::new(RuntimeTaskRegistry::with_diagnostics(diagnostics.clone()));
         Self {
             effect_executor,
             effect_system,
@@ -163,7 +262,9 @@ impl RuntimeSystem {
             ceremony_runner,
             threshold_signing,
             reconfiguration_manager: ReconfigurationManager::new(),
-            runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
+            runtime_tasks,
+            activity_gate: Arc::new(RuntimeActivityGate::new()),
+            diagnostics,
             config,
             authority_id,
             reactive_pipeline: None,
@@ -190,6 +291,8 @@ impl RuntimeSystem {
             Arc::new(effect_system.time_effects().clone());
         let ceremony_tracker = CeremonyTracker::new(time_effects);
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
+        let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
+        let runtime_tasks = Arc::new(RuntimeTaskRegistry::with_diagnostics(diagnostics.clone()));
         Self {
             effect_executor,
             effect_system,
@@ -207,7 +310,9 @@ impl RuntimeSystem {
             ceremony_runner,
             threshold_signing,
             reconfiguration_manager: ReconfigurationManager::new(),
-            runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
+            runtime_tasks,
+            activity_gate: Arc::new(RuntimeActivityGate::new()),
+            diagnostics,
             config,
             authority_id,
             reactive_pipeline: None,
@@ -234,6 +339,8 @@ impl RuntimeSystem {
             Arc::new(effect_system.time_effects().clone());
         let ceremony_tracker = CeremonyTracker::new(time_effects);
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
+        let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
+        let runtime_tasks = Arc::new(RuntimeTaskRegistry::with_diagnostics(diagnostics.clone()));
         Self {
             effect_executor,
             effect_system,
@@ -251,7 +358,9 @@ impl RuntimeSystem {
             ceremony_runner,
             threshold_signing,
             reconfiguration_manager: ReconfigurationManager::new(),
-            runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
+            runtime_tasks,
+            activity_gate: Arc::new(RuntimeActivityGate::new()),
+            diagnostics,
             config,
             authority_id,
             reactive_pipeline: None,
@@ -281,6 +390,8 @@ impl RuntimeSystem {
             Arc::new(effect_system.time_effects().clone());
         let ceremony_tracker = CeremonyTracker::new(time_effects);
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
+        let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
+        let runtime_tasks = Arc::new(RuntimeTaskRegistry::with_diagnostics(diagnostics.clone()));
         Self {
             effect_executor,
             effect_system,
@@ -298,7 +409,9 @@ impl RuntimeSystem {
             ceremony_runner,
             threshold_signing,
             reconfiguration_manager: ReconfigurationManager::new(),
-            runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
+            runtime_tasks,
+            activity_gate: Arc::new(RuntimeActivityGate::new()),
+            diagnostics,
             config,
             authority_id,
             reactive_pipeline: None,
@@ -330,12 +443,23 @@ impl RuntimeSystem {
         self.runtime_tasks.clone()
     }
 
+    pub fn activity_gate(&self) -> Arc<RuntimeActivityGate> {
+        self.activity_gate.clone()
+    }
+
+    pub fn runtime_activity_state(&self) -> RuntimeActivityState {
+        self.activity_gate.state()
+    }
+
+    pub fn diagnostics(&self) -> Arc<RuntimeDiagnosticSink> {
+        self.diagnostics.clone()
+    }
+
     /// Start background maintenance tasks (cleanup, pruning).
     pub fn start_maintenance_tasks(&self) {
         let tasks = self.runtime_tasks.clone();
         let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
             Arc::new(self.effect_system.time_effects().clone());
-        let ceremony_tracker = self.ceremony_tracker.clone();
         let sync_manager = self.sync_manager.clone();
         let rendezvous_manager = self.rendezvous_manager.clone();
         let rendezvous_handler = self.rendezvous_handler.clone();
@@ -343,11 +467,6 @@ impl RuntimeSystem {
         let effects = self.effect_system.clone();
         let authority_id = self.authority_id;
         let device_id = self.device_id();
-
-        // Sync service maintains its own cleanup schedule.
-        if let Some(sync_manager) = sync_manager.as_ref() {
-            sync_manager.start_maintenance_task(tasks.clone(), time_effects.clone());
-        }
 
         let harness_mode = std::env::var_os("AURA_HARNESS_MODE").is_some();
 
@@ -358,41 +477,53 @@ impl RuntimeSystem {
                 let effects = self.effect_system.clone();
                 let handler = invitation_handler.clone();
                 let interval = Duration::from_secs(2);
-                tasks.spawn_interval_until(time_effects.clone(), interval, move || {
-                    let effects = effects.clone();
-                    let handler = handler.clone();
-                    async move {
-                        if let Err(e) = handler
-                            .process_contact_invitation_acceptances(effects.clone())
-                            .await
-                        {
-                            tracing::debug!(
-                                error = %e,
-                                "Failed to process contact invitation acceptances"
-                            );
+                tasks.spawn_interval_until_named(
+                    "maintenance.invitation_acceptance",
+                    time_effects.clone(),
+                    interval,
+                    move || {
+                        let effects = effects.clone();
+                        let handler = handler.clone();
+                        async move {
+                            if let Err(e) = handler
+                                .process_contact_invitation_acceptances(effects.clone())
+                                .await
+                            {
+                                tracing::debug!(
+                                    error = %e,
+                                    "Failed to process contact invitation acceptances"
+                                );
+                            }
+                            true
                         }
-                        true
-                    }
-                });
+                    },
+                );
             }
 
             if let Some(rendezvous_handler) = rendezvous_handler {
                 let effects = self.effect_system.clone();
                 let handler = rendezvous_handler.clone();
                 let interval = Duration::from_secs(2);
-                tasks.spawn_interval_until(time_effects.clone(), interval, move || {
-                    let effects = effects.clone();
-                    let handler = handler.clone();
-                    async move {
-                        if let Err(e) = handler.process_handshake_envelopes(effects.clone()).await {
-                            tracing::debug!(
-                                error = %e,
-                                "Failed to process rendezvous handshake envelopes"
-                            );
+                tasks.spawn_interval_until_named(
+                    "maintenance.rendezvous_handshakes",
+                    time_effects.clone(),
+                    interval,
+                    move || {
+                        let effects = effects.clone();
+                        let handler = handler.clone();
+                        async move {
+                            if let Err(e) =
+                                handler.process_handshake_envelopes(effects.clone()).await
+                            {
+                                tracing::debug!(
+                                    error = %e,
+                                    "Failed to process rendezvous handshake envelopes"
+                                );
+                            }
+                            true
                         }
-                        true
-                    }
-                });
+                    },
+                );
             }
         }
 
@@ -400,71 +531,72 @@ impl RuntimeSystem {
             (sync_manager.clone(), rendezvous_manager.clone())
         {
             let interval = sync_peer_reconcile_interval(&sync_manager);
-            tasks.spawn_interval_until(time_effects.clone(), interval, move || {
-                let sync_manager = sync_manager.clone();
-                let rendezvous_manager = rendezvous_manager.clone();
-                async move {
-                    let desired_peers: std::collections::HashSet<DeviceId> = rendezvous_manager
-                        .list_reachable_peer_devices()
-                        .await
-                        .into_iter()
-                        .collect();
+            tasks.spawn_interval_until_named(
+                "maintenance.sync_peer_reconcile",
+                time_effects.clone(),
+                interval,
+                move || {
+                    let sync_manager = sync_manager.clone();
+                    let rendezvous_manager = rendezvous_manager.clone();
+                    async move {
+                        let desired_peers: std::collections::HashSet<DeviceId> = rendezvous_manager
+                            .list_reachable_peer_devices()
+                            .await
+                            .into_iter()
+                            .collect();
 
-                    let current_peers = sync_manager.peers().await;
-                    for peer in current_peers.iter() {
-                        if !desired_peers.contains(peer) {
-                            sync_manager.remove_peer(peer).await;
+                        let current_peers = sync_manager.peers().await;
+                        for peer in current_peers.iter() {
+                            if !desired_peers.contains(peer) {
+                                sync_manager.remove_peer(peer).await;
+                            }
                         }
-                    }
 
-                    for peer in desired_peers {
-                        sync_manager.add_peer(peer).await;
-                    }
+                        for peer in desired_peers {
+                            sync_manager.add_peer(peer).await;
+                        }
 
-                    true
-                }
-            });
+                        true
+                    }
+                },
+            );
         }
-
-        // General runtime maintenance loop (ceremony timeouts, etc.).
-        let interval = Duration::from_secs(60);
-        tasks.spawn_interval_until(time_effects.clone(), interval, move || {
-            let ceremony_tracker = ceremony_tracker.clone();
-            async move {
-                let _ = ceremony_tracker.cleanup_timed_out().await;
-                true
-            }
-        });
 
         if let (Some(rendezvous_manager), Some(lan_transport)) = (rendezvous_manager, lan_transport)
         {
             let interval = Duration::from_secs(60);
-            tasks.spawn_interval_until(time_effects.clone(), interval, move || {
-                let rendezvous_manager = rendezvous_manager.clone();
-                let lan_transport = lan_transport.clone();
-                let effects = effects.clone();
-                async move {
-                    let now_ms = match effects.time_effects().physical_time().await {
-                        Ok(t) => t.ts_ms,
-                        Err(_) => return true,
-                    };
-                    let context_id = ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
-                    if rendezvous_manager.needs_refresh(context_id, now_ms).await {
-                        if let Err(e) = publish_lan_descriptor_with(
-                            effects.clone(),
-                            authority_id,
-                            device_id,
-                            &rendezvous_manager,
-                            lan_transport.as_ref(),
-                        )
-                        .await
-                        {
-                            tracing::debug!(error = %e, "Failed to refresh LAN descriptor");
+            tasks.spawn_interval_until_named(
+                "maintenance.lan_descriptor_refresh",
+                time_effects.clone(),
+                interval,
+                move || {
+                    let rendezvous_manager = rendezvous_manager.clone();
+                    let lan_transport = lan_transport.clone();
+                    let effects = effects.clone();
+                    async move {
+                        let now_ms = match effects.time_effects().physical_time().await {
+                            Ok(t) => t.ts_ms,
+                            Err(_) => return true,
+                        };
+                        let context_id =
+                            ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
+                        if rendezvous_manager.needs_refresh(context_id, now_ms).await {
+                            if let Err(e) = publish_lan_descriptor_with(
+                                effects.clone(),
+                                authority_id,
+                                device_id,
+                                &rendezvous_manager,
+                                lan_transport.as_ref(),
+                            )
+                            .await
+                            {
+                                tracing::debug!(error = %e, "Failed to refresh LAN descriptor");
+                            }
                         }
+                        true
                     }
-                    true
-                }
-            });
+                },
+            );
         }
     }
 
@@ -503,14 +635,17 @@ impl RuntimeSystem {
 
         let time_effects: Arc<dyn PhysicalTimeEffects> =
             Arc::new(self.effect_system.time_effects().clone());
+        let pipeline_tasks = self.runtime_tasks.group("reactive_pipeline");
 
         let pipeline = ReactivePipeline::start(
+            pipeline_tasks,
             SchedulerConfig::default(),
             self.effect_system.fact_registry(),
             time_effects,
             self.effect_system.clone(),
             self.authority_id,
             self.effect_system.reactive_handler(),
+            self.diagnostics.clone(),
         );
 
         // Attach the scheduler ingestion channel to the effect system so all journal commits
@@ -528,10 +663,10 @@ impl RuntimeSystem {
             .await
             .map_err(|e| e.to_string())?;
         if !existing.is_empty() {
-            let _ = pipeline
-                .fact_sender()
-                .send(FactSource::Journal(existing))
-                .await;
+            pipeline
+                .publish_journal_facts(existing)
+                .await
+                .map_err(|error| error.to_string())?;
         }
 
         self.reactive_pipeline = Some(pipeline);
@@ -561,47 +696,28 @@ impl RuntimeSystem {
             .await
             .map_err(|e| ServiceError::startup_failed("authority_manager", e.to_string()))?;
 
-        self.flow_budget_manager
-            .start(self.runtime_tasks.clone())
-            .await?;
-        tracing::info!("Flow budget manager started");
-        self.receipt_manager
-            .start(self.runtime_tasks.clone())
-            .await?;
-        tracing::info!("Receipt manager started");
-        self.ceremony_tracker
-            .start(self.runtime_tasks.clone())
-            .await?;
-        tracing::info!("Ceremony tracker started");
-        self.threshold_signing
-            .start(self.runtime_tasks.clone())
-            .await?;
-        tracing::info!("Threshold signing started");
+        let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
+            Arc::new(self.effect_system.time_effects().clone());
+        let service_context = RuntimeServiceContext::new(self.runtime_tasks.clone(), time_effects);
 
-        if let Some(social_manager) = &self.social_manager {
-            social_manager.start(self.runtime_tasks.clone()).await?;
-            tracing::info!("Social manager started");
-        }
-        if let Some(rendezvous_manager) = &self.rendezvous_manager {
-            RuntimeService::start(rendezvous_manager, self.runtime_tasks.clone()).await?;
-            tracing::info!("Rendezvous manager service start completed");
-            if let Err(e) = self.publish_lan_descriptor().await {
-                tracing::warn!(error = %e, "Failed to publish LAN descriptor");
+        for service in self.runtime_services_in_start_order()? {
+            self.start_runtime_service(service, &service_context)
+                .await?;
+            if service.name() == "rendezvous_manager" {
+                if let Err(error) = self.publish_lan_descriptor().await {
+                    tracing::warn!(
+                        event = "runtime.service.lifecycle.post_start_failed",
+                        service = service.name(),
+                        error = %error,
+                        "Service-specific post-start action failed"
+                    );
+                }
             }
         }
+
         #[cfg(not(target_arch = "wasm32"))]
         if self.lan_transport.is_some() {
             self.start_lan_transport_listener();
-        }
-        if let Some(sync_manager) = &self.sync_manager {
-            tracing::info!("Starting sync manager");
-            let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
-                Arc::new(self.effect_system.time_effects().clone());
-            sync_manager
-                .start(time_effects)
-                .await
-                .map_err(|e| ServiceError::startup_failed("sync_service", e))?;
-            tracing::info!("Sync manager started");
         }
 
         Ok(())
@@ -630,13 +746,15 @@ impl RuntimeSystem {
             return;
         };
 
+        let tcp_accept_group = self.runtime_tasks.group("lan_transport.tcp");
+        let tcp_connection_group = tcp_accept_group.group("connections");
         let listener = lan_transport.listener();
         let websocket_listener = lan_transport.websocket_listener();
         let effects = self.effect_system.clone();
         let metrics = lan_transport.metrics_handle();
         let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
             Arc::new(effects.time_effects().clone());
-        self.runtime_tasks.spawn_cancellable(async move {
+        tcp_accept_group.spawn_cancellable_named("accept_loop", async move {
             loop {
                 let (mut stream, addr) = match listener.accept().await {
                     Ok((stream, addr)) => (stream, addr),
@@ -660,6 +778,7 @@ impl RuntimeSystem {
                 let effects = effects.clone();
                 let metrics = metrics.clone();
                 let time_effects = time_effects.clone();
+                let connection_group = tcp_connection_group.clone();
                 let now_ms = time_effects
                     .physical_time()
                     .await
@@ -673,7 +792,7 @@ impl RuntimeSystem {
                         metrics.last_accept_ms = now_ms;
                     }
                 }
-                tokio::spawn(async move {
+                connection_group.spawn_named(format!("connection.{addr}"), async move {
                     let mut len_buf = [0u8; 4];
                     if let Err(err) = stream.read_exact(&mut len_buf).await {
                         tracing::debug!(error = %err, addr = %addr, "LAN transport read len failed");
@@ -761,11 +880,13 @@ impl RuntimeSystem {
             }
         });
 
+        let websocket_accept_group = self.runtime_tasks.group("lan_transport.websocket");
+        let websocket_connection_group = websocket_accept_group.group("connections");
         let effects = self.effect_system.clone();
         let metrics = lan_transport.metrics_handle();
         let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
             Arc::new(self.effect_system.time_effects().clone());
-        self.runtime_tasks.spawn_cancellable(async move {
+        websocket_accept_group.spawn_cancellable_named("accept_loop", async move {
             loop {
                 let (stream, addr) = match websocket_listener.accept().await {
                     Ok((stream, addr)) => (stream, addr),
@@ -778,7 +899,8 @@ impl RuntimeSystem {
                 let effects = effects.clone();
                 let metrics = metrics.clone();
                 let time_effects = time_effects.clone();
-                tokio::spawn(async move {
+                let connection_group = websocket_connection_group.clone();
+                connection_group.spawn_named(format!("connection.{addr}"), async move {
                     let websocket = match accept_async(stream).await {
                         Ok(websocket) => websocket,
                         Err(err) => {
@@ -871,21 +993,117 @@ impl RuntimeSystem {
             .await
             .map_err(|e| ServiceError::shutdown_failed("authority_manager", e.to_string()))?;
 
-        if let Some(sync_manager) = &self.sync_manager {
-            RuntimeService::stop(sync_manager).await?;
+        for service in self.runtime_services_in_stop_order()? {
+            self.stop_runtime_service(service).await?;
         }
-        if let Some(rendezvous_manager) = &self.rendezvous_manager {
-            RuntimeService::stop(rendezvous_manager).await?;
-        }
-        if let Some(social_manager) = &self.social_manager {
-            RuntimeService::stop(social_manager).await?;
-        }
-        self.threshold_signing.stop().await?;
-        self.ceremony_tracker.stop().await?;
-        self.receipt_manager.stop().await?;
-        self.flow_budget_manager.stop().await?;
 
         Ok(())
+    }
+
+    fn runtime_services(&self) -> Vec<&dyn RuntimeService> {
+        let mut services: Vec<&dyn RuntimeService> = vec![
+            &self.flow_budget_manager,
+            &self.receipt_manager,
+            &self.ceremony_tracker,
+            &self.threshold_signing,
+        ];
+        if let Some(social_manager) = &self.social_manager {
+            services.push(social_manager);
+        }
+        if let Some(rendezvous_manager) = &self.rendezvous_manager {
+            services.push(rendezvous_manager);
+        }
+        if let Some(sync_manager) = &self.sync_manager {
+            services.push(sync_manager);
+        }
+        services
+    }
+
+    fn runtime_services_in_start_order(&self) -> Result<Vec<&dyn RuntimeService>, ServiceError> {
+        sort_runtime_services_by_dependencies(self.runtime_services())
+    }
+
+    fn runtime_services_in_stop_order(&self) -> Result<Vec<&dyn RuntimeService>, ServiceError> {
+        let mut services = self.runtime_services_in_start_order()?;
+        services.reverse();
+        Ok(services)
+    }
+
+    async fn start_runtime_service(
+        &self,
+        service: &dyn RuntimeService,
+        context: &RuntimeServiceContext,
+    ) -> Result<(), ServiceError> {
+        tracing::info!(
+            event = "runtime.service.lifecycle.transition",
+            service = service.name(),
+            phase = "start_requested",
+            "Starting runtime service"
+        );
+        service.start(context).await?;
+        let health = service.health().await;
+        match health {
+            ServiceHealth::Healthy | ServiceHealth::Degraded { .. } => {
+                tracing::info!(
+                    event = "runtime.service.lifecycle.transition",
+                    service = service.name(),
+                    phase = "running",
+                    health = %health,
+                    "Runtime service started"
+                );
+                Ok(())
+            }
+            other => Err(ServiceError::startup_failed(
+                service.name(),
+                format!("service entered non-operational state after start: {other}"),
+            )),
+        }
+    }
+
+    async fn stop_runtime_service(&self, service: &dyn RuntimeService) -> Result<(), ServiceError> {
+        const SERVICE_STOP_TIMEOUT: Duration = Duration::from_secs(5);
+
+        tracing::info!(
+            event = "runtime.service.lifecycle.transition",
+            service = service.name(),
+            phase = "stop_requested",
+            "Stopping runtime service"
+        );
+        tokio::time::timeout(SERVICE_STOP_TIMEOUT, service.stop())
+            .await
+            .map_err(|_| {
+                tracing::warn!(
+                    event = "runtime.shutdown.service_timeout",
+                    service = service.name(),
+                    timeout_ms = SERVICE_STOP_TIMEOUT.as_millis() as u64,
+                    "Runtime service stop timed out"
+                );
+                ServiceError::new(
+                    service.name(),
+                    ServiceErrorKind::Timeout,
+                    format!(
+                        "service stop timed out after {}ms",
+                        SERVICE_STOP_TIMEOUT.as_millis()
+                    ),
+                )
+            })??;
+        let health = service.health().await;
+        match health {
+            ServiceHealth::Stopped | ServiceHealth::NotStarted => {
+                tracing::info!(
+                    event = "runtime.service.lifecycle.transition",
+                    service = service.name(),
+                    phase = "stopped",
+                    health = %health,
+                    "Runtime service stopped"
+                );
+                Ok(())
+            }
+            other => Err(ServiceError::shutdown_failed(
+                service.name(),
+                format!("service remained active after stop: {other}"),
+            )),
+        }
     }
 
     /// Get the context manager
@@ -943,32 +1161,165 @@ impl RuntimeSystem {
         self.social_manager.is_some()
     }
 
-    /// Shutdown the runtime system
-    pub async fn shutdown(self, ctx: &EffectContext) -> Result<(), String> {
-        // Stop services (best-effort) before tearing down the runtime.
+    pub async fn shutdown_typed(mut self, ctx: &EffectContext) -> Result<(), RuntimeShutdownError> {
+        let prior_state = self.activity_gate.begin_shutdown();
+        if prior_state != RuntimeActivityState::Running {
+            tracing::info!(
+                event = "runtime.shutdown.already_in_progress",
+                previous_state = ?prior_state,
+                "Runtime shutdown requested after shutdown had already started"
+            );
+            self.activity_gate.mark_stopped();
+            return Ok(());
+        }
+
+        let runtime_tasks = self.runtime_tasks.clone();
+        let mut shutdown_error: Option<RuntimeShutdownError> = None;
+
+        // Drain the reactive scheduler before cancelling the broader runtime task tree.
+        tracing::info!(
+            event = "runtime.shutdown.stage",
+            stage = "reactive_pipeline",
+            "Starting runtime shutdown"
+        );
+        let reactive_pipeline = self.reactive_pipeline.take();
+        if let Some(pipeline) = reactive_pipeline {
+            if let Err(error) = pipeline.shutdown().await {
+                tracing::warn!(
+                    event = "runtime.shutdown.reactive_pipeline_signal_failed",
+                    error = %error,
+                    "Reactive pipeline shutdown signal was unavailable during runtime shutdown"
+                );
+            }
+        }
+
+        tracing::info!(
+            event = "runtime.shutdown.stage",
+            stage = "task_tree",
+            "Cancelling runtime task tree"
+        );
+        if let Err(error) = runtime_tasks
+            .shutdown_with_timeout(Duration::from_secs(5))
+            .await
+        {
+            tracing::warn!(
+                event = "runtime.shutdown.task_tree_escalated",
+                error = %error,
+                "Runtime task tree required forced shutdown"
+            );
+            shutdown_error.get_or_insert(RuntimeShutdownError::TaskTree(error));
+        }
+
+        // Stop services after background runtime work has been cancelled.
+        tracing::info!(
+            event = "runtime.shutdown.stage",
+            stage = "services",
+            "Stopping runtime services"
+        );
         if let Err(e) = self.stop_services().await {
-            tracing::warn!("Failed to stop runtime services during shutdown: {}", e);
+            tracing::warn!(
+                event = "runtime.shutdown.services_failed",
+                error = %e,
+                "Failed to stop runtime services during shutdown"
+            );
+            shutdown_error.get_or_insert(RuntimeShutdownError::Service(e));
         }
 
         let RuntimeSystem {
             lifecycle_manager,
             sync_manager: _sync_manager,
             rendezvous_manager: _rendezvous_manager,
-            reactive_pipeline,
-            runtime_tasks,
             ..
         } = self;
 
-        // Stop reactive pipeline (scheduler task) if running.
-        if let Some(pipeline) = reactive_pipeline {
-            pipeline.shutdown().await;
+        tracing::info!(
+            event = "runtime.shutdown.stage",
+            stage = "lifecycle_manager",
+            "Shutting down lifecycle manager"
+        );
+        if let Err(error) = lifecycle_manager.shutdown(ctx).await {
+            tracing::warn!(
+                event = "runtime.shutdown.lifecycle_failed",
+                error = %error,
+                "Lifecycle manager shutdown failed"
+            );
+            shutdown_error.get_or_insert(RuntimeShutdownError::Lifecycle(error));
         }
 
-        // Stop background runtime tasks (invitation monitors, subscriptions).
-        runtime_tasks.shutdown();
+        self.activity_gate.mark_stopped();
 
-        lifecycle_manager.shutdown(ctx).await
+        match shutdown_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
+}
+
+fn sort_runtime_services_by_dependencies(
+    services: Vec<&dyn RuntimeService>,
+) -> Result<Vec<&dyn RuntimeService>, ServiceError> {
+    let mut service_by_name = BTreeMap::new();
+    for service in &services {
+        service_by_name.insert(service.name(), *service);
+    }
+
+    let mut indegree = BTreeMap::<&'static str, usize>::new();
+    let mut dependents = BTreeMap::<&'static str, Vec<&'static str>>::new();
+    for service in &services {
+        indegree.entry(service.name()).or_insert(0);
+        for dependency in service.dependencies() {
+            if !service_by_name.contains_key(dependency) {
+                continue;
+            }
+            *indegree.entry(service.name()).or_insert(0) += 1;
+            dependents
+                .entry(*dependency)
+                .or_default()
+                .push(service.name());
+        }
+    }
+
+    let mut ready = VecDeque::new();
+    for service in &services {
+        if indegree.get(service.name()).copied().unwrap_or_default() == 0 {
+            ready.push_back(service.name());
+        }
+    }
+
+    let mut ordered = Vec::with_capacity(services.len());
+    while let Some(name) = ready.pop_front() {
+        let Some(service) = service_by_name.get(name).copied() else {
+            continue;
+        };
+        ordered.push(service);
+        if let Some(children) = dependents.get(name) {
+            for child in children {
+                if let Some(entry) = indegree.get_mut(child) {
+                    *entry = entry.saturating_sub(1);
+                    if *entry == 0 {
+                        ready.push_back(child);
+                    }
+                }
+            }
+        }
+    }
+
+    if ordered.len() != services.len() {
+        let blocked = indegree
+            .into_iter()
+            .filter_map(|(name, count)| (count > 0).then_some(name))
+            .collect::<Vec<_>>();
+        return Err(ServiceError::new(
+            "runtime_services",
+            ServiceErrorKind::DependencyUnavailable,
+            format!(
+                "runtime service dependency graph contains a cycle or unsatisfied internal dependencies: {}",
+                blocked.join(", ")
+            ),
+        ));
+    }
+
+    Ok(ordered)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1205,6 +1556,26 @@ async fn publish_lan_descriptor_with(
 mod tests {
     use super::*;
     use crate::runtime::services::SyncManagerConfig;
+
+    #[test]
+    fn runtime_activity_gate_transitions_and_rejects_new_public_work() {
+        let gate = RuntimeActivityGate::new();
+        assert_eq!(gate.state(), RuntimeActivityState::Running);
+        assert!(gate.ensure_accepting_public_operations().is_ok());
+
+        assert_eq!(gate.begin_shutdown(), RuntimeActivityState::Running);
+        assert_eq!(gate.state(), RuntimeActivityState::Stopping);
+        assert!(matches!(
+            gate.ensure_accepting_public_operations(),
+            Err(RuntimePublicOperationError::NotAccepting {
+                state: RuntimeActivityState::Stopping
+            })
+        ));
+
+        assert_eq!(gate.begin_shutdown(), RuntimeActivityState::Stopping);
+        gate.mark_stopped();
+        assert_eq!(gate.state(), RuntimeActivityState::Stopped);
+    }
 
     #[test]
     fn sync_peer_reconcile_interval_follows_fast_sync_config() {

@@ -131,18 +131,21 @@ fn unique_shared_channel_candidate(snapshot: &UiSnapshot) -> Option<String> {
         return Some(channel_id.clone());
     }
 
-    let note_to_self_id = snapshot.runtime_events.iter().find_map(|event| match &event.fact {
-        RuntimeFact::ChannelMembershipReady { channel, .. }
-            if channel
-                .name
-                .as_deref()
-                .map(|name| name.eq_ignore_ascii_case("note to self"))
-                .unwrap_or(false) =>
-        {
-            channel.id.clone()
-        }
-        _ => None,
-    });
+    let note_to_self_id = snapshot
+        .runtime_events
+        .iter()
+        .find_map(|event| match &event.fact {
+            RuntimeFact::ChannelMembershipReady { channel, .. }
+                if channel
+                    .name
+                    .as_deref()
+                    .map(|name| name.eq_ignore_ascii_case("note to self"))
+                    .unwrap_or(false) =>
+            {
+                channel.id.clone()
+            }
+            _ => None,
+        });
     let mut listed_candidates = snapshot
         .lists
         .iter()
@@ -1365,18 +1368,16 @@ impl SharedSemanticBackend for LocalPtyBackend {
                         } if *member_count > 1 => channel.id.clone(),
                         _ => None,
                     });
-            let joined_channel_name =
-                snapshot
-                    .runtime_events
-                    .iter()
-                    .find_map(|event| match &event.fact {
-                        RuntimeFact::ChannelMembershipReady {
-                            channel,
-                            member_count: Some(member_count),
-                            ..
-                        } if *member_count > 1 => channel.name.clone(),
-                        _ => None,
-                    });
+            let joined_channel_name = snapshot.runtime_events.iter().find_map(|event| match &event
+                .fact
+            {
+                RuntimeFact::ChannelMembershipReady {
+                    channel,
+                    member_count: Some(member_count),
+                    ..
+                } if *member_count > 1 => channel.name.clone(),
+                _ => None,
+            });
             let joined = channel_count > previous_channel_count || joined_channel_id.is_some();
             if joined {
                 if let Some(channel_id) = joined_channel_id {

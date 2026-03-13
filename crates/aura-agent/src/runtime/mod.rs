@@ -49,7 +49,9 @@ pub mod shared_transport;
 pub mod simulation_factory;
 
 // Cross-cutting concerns
+pub mod diagnostics;
 pub mod reliability;
+pub mod session_ingress;
 
 // Choreography integration
 pub mod choreography_adapter;
@@ -81,6 +83,9 @@ pub use choreography_adapter::{
     MessageGuardRequirements,
 };
 pub use context::EffectContext;
+pub use diagnostics::{
+    RuntimeDiagnostic, RuntimeDiagnosticKind, RuntimeDiagnosticSeverity, RuntimeDiagnosticSink,
+};
 #[allow(unused_imports)] // Re-exported for public API
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use effect_trace_capture::{
@@ -91,7 +96,14 @@ pub use effects::AuraEffectSystem;
 #[allow(unused_imports)] // Re-exported for public API
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use parity_policy::{AuraEnvelopeParityError, AuraEnvelopeParityPolicy};
+#[allow(unused_imports)] // Re-exported for public API
+pub use session_ingress::{
+    caller_session_owner_label, handle_owned_vm_round, open_owned_manifest_vm_session_admitted,
+    OwnedVmSession, RuntimeSessionOwner, SessionIngressError,
+};
 pub use shared_transport::SharedTransport;
+#[allow(unused_imports)] // Re-exported for public API
+pub use system::{RuntimeActivityGate, RuntimeActivityState, RuntimePublicOperationError};
 #[allow(unused_imports)] // Re-exported for public API
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use vm_effect_handler::{AuraVmEffectEvent, AuraVmEffectHandler};
@@ -106,18 +118,22 @@ pub use vm_hardening::{
     scheduler_control_input_for_image, scheduler_policy_for_input, scheduler_policy_ref,
     validate_determinism_profile, validate_envelope_artifact_for_policy,
     validate_protocol_execution_policy, validate_scheduler_execution_policy, vm_config_for_profile,
-    AuraVmDeterminismProfileError, AuraVmGuardLayer, AuraVmHardeningProfile, AuraVmParityProfile,
-    AuraVmProtocolExecutionPolicy, AuraVmRuntimeMode, AuraVmRuntimeSelector,
-    AuraVmSchedulerControlInput, AuraVmSchedulerEnvelopeClass, AuraVmSchedulerExecutionPolicy,
-    AuraVmSchedulerSignals, AuraVmSchedulerSignalsProvider, AURA_OUTPUT_PREDICATE_CHOICE,
-    AURA_OUTPUT_PREDICATE_GUARD_ACQUIRE, AURA_OUTPUT_PREDICATE_GUARD_RELEASE,
-    AURA_OUTPUT_PREDICATE_OBSERVABLE, AURA_OUTPUT_PREDICATE_STEP,
-    AURA_OUTPUT_PREDICATE_TRANSPORT_RECV, AURA_OUTPUT_PREDICATE_TRANSPORT_SEND,
-    AURA_OUTPUT_PREDICATE_VM_OBSERVABLE, AURA_VM_POLICY_CONSENSUS_FALLBACK,
-    AURA_VM_POLICY_CONSENSUS_FAST_PATH, AURA_VM_POLICY_DKG_CEREMONY, AURA_VM_POLICY_PROD_DEFAULT,
-    AURA_VM_POLICY_RECOVERY_GRANT, AURA_VM_POLICY_SYNC_ANTI_ENTROPY, AURA_VM_SCHED_PRIORITY_AGING,
-    AURA_VM_SCHED_PROGRESS_AWARE, AURA_VM_SCHED_ROUND_ROBIN,
+    AuraVmConcurrencyProfile, AuraVmDeterminismProfileError, AuraVmGuardLayer,
+    AuraVmHardeningProfile, AuraVmParityProfile, AuraVmProtocolExecutionPolicy, AuraVmRuntimeMode,
+    AuraVmRuntimeSelector, AuraVmSchedulerControlInput, AuraVmSchedulerEnvelopeClass,
+    AuraVmSchedulerExecutionPolicy, AuraVmSchedulerSignals, AuraVmSchedulerSignalsProvider,
+    AURA_OUTPUT_PREDICATE_CHOICE, AURA_OUTPUT_PREDICATE_GUARD_ACQUIRE,
+    AURA_OUTPUT_PREDICATE_GUARD_RELEASE, AURA_OUTPUT_PREDICATE_OBSERVABLE,
+    AURA_OUTPUT_PREDICATE_STEP, AURA_OUTPUT_PREDICATE_TRANSPORT_RECV,
+    AURA_OUTPUT_PREDICATE_TRANSPORT_SEND, AURA_OUTPUT_PREDICATE_VM_OBSERVABLE,
+    AURA_VM_POLICY_CONSENSUS_FALLBACK, AURA_VM_POLICY_CONSENSUS_FAST_PATH,
+    AURA_VM_POLICY_DKG_CEREMONY, AURA_VM_POLICY_PROD_DEFAULT, AURA_VM_POLICY_RECOVERY_GRANT,
+    AURA_VM_POLICY_SYNC_ANTI_ENTROPY, AURA_VM_SCHED_PRIORITY_AGING, AURA_VM_SCHED_PROGRESS_AWARE,
+    AURA_VM_SCHED_ROUND_ROBIN,
 };
+#[allow(unused_imports)] // Re-exported for public API
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub use vm_host_bridge::{AuraVmConcurrencyEnvelopeError, AuraVmSessionOpenError};
 
 // Re-export JournalCoupler for choreography journal coupling
 #[allow(unused_imports)] // Re-exported for public API

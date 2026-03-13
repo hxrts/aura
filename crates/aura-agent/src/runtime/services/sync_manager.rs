@@ -3,23 +3,23 @@
 //! Wraps `aura_sync::SyncService` for integration with the agent runtime.
 //! Provides lifecycle management and configuration for automatic background sync.
 
+use super::runtime_tasks::TaskGroup;
+use super::service_actor::{validate_actor_transition, ActorLifecyclePhase};
 use super::state::{with_state_mut, with_state_mut_validated};
-use super::traits::{RuntimeService, ServiceError, ServiceHealth};
-use super::{ReconfigurationManager, RuntimeTaskRegistry};
+use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
+use super::ReconfigurationManager;
 use crate::core::default_context_id_for_authority;
-use crate::runtime::vm_host_bridge::{
-    advance_host_bridged_vm_round, close_and_reap_vm_session, handle_standard_vm_round,
-    inject_vm_receive, open_manifest_vm_session_admitted, AuraVmHostWaitStatus,
-    AuraVmRoundDisposition,
+use crate::runtime::vm_host_bridge::{AuraVmHostWaitStatus, AuraVmRoundDisposition};
+use crate::runtime::{
+    open_owned_manifest_vm_session_admitted, AuraEffectSystem, RuntimeChoreographySessionId,
 };
-use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId};
 use async_trait::async_trait;
 use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash::hash;
 use aura_core::util::serialization::to_vec;
 use aura_core::{AuthorityId, DelegationReceipt, DeviceId};
-use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, RoleIndex};
+use aura_protocol::effects::{ChoreographicRole, RoleIndex};
 use aura_sync::protocols::epoch_runners::EpochRotationProtocolRole;
 use aura_sync::protocols::{EpochCommit, EpochConfirmation, EpochRotationProposal};
 use aura_sync::services::{Service, SyncService, SyncServiceConfig};
@@ -28,7 +28,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 use telltale_vm::vm::StepResult;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
 /// Configuration for the sync service manager
@@ -115,13 +115,14 @@ pub enum SyncManagerState {
     Running,
     /// Service shutting down
     Stopping,
+    /// Service hit an observable lifecycle failure.
+    Failed,
 }
 
 struct SyncState {
     service: Option<Arc<SyncService>>,
     status: SyncManagerState,
     peers: Vec<DeviceId>,
-    background_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl SyncState {
@@ -130,7 +131,6 @@ impl SyncState {
             service: None,
             status: SyncManagerState::Stopped,
             peers: initial_peers,
-            background_task: None,
         }
     }
 
@@ -143,16 +143,19 @@ impl SyncState {
         if self.status == SyncManagerState::Stopped && self.service.is_some() {
             return Err("sync state stopped with active service".to_string());
         }
-        // background_task can exist during Running (active) and Stopping (being shut down)
-        if self.background_task.is_some()
-            && !matches!(
-                self.status,
-                SyncManagerState::Running | SyncManagerState::Stopping
-            )
-        {
-            return Err("background task active while not running or stopping".to_string());
-        }
         Ok(())
+    }
+}
+
+impl SyncManagerState {
+    fn phase(self) -> ActorLifecyclePhase {
+        match self {
+            Self::Stopped => ActorLifecyclePhase::Stopped,
+            Self::Starting => ActorLifecyclePhase::Starting,
+            Self::Running => ActorLifecyclePhase::Running,
+            Self::Stopping => ActorLifecyclePhase::Stopping,
+            Self::Failed => ActorLifecyclePhase::Failed,
+        }
     }
 }
 
@@ -170,6 +173,10 @@ pub struct SyncServiceManager {
 
     /// Optional Merkle verifier for fact sync (requires indexed journal)
     merkle_verifier: Option<Arc<MerkleVerifier>>,
+    /// Owned maintenance task group for service-local loops.
+    maintenance_tasks: Arc<RwLock<Option<TaskGroup>>>,
+    /// Serializes lifecycle transitions.
+    lifecycle: Arc<Mutex<()>>,
     /// Reconfiguration/session-footprint state for sync choreography delegation.
     reconfiguration: ReconfigurationManager,
 }
@@ -181,6 +188,8 @@ impl SyncServiceManager {
             config: config.clone(),
             state: Arc::new(RwLock::new(SyncState::new(config.initial_peers))),
             merkle_verifier: None,
+            maintenance_tasks: Arc::new(RwLock::new(None)),
+            lifecycle: Arc::new(Mutex::new(())),
             reconfiguration: ReconfigurationManager::new(),
         }
     }
@@ -198,6 +207,8 @@ impl SyncServiceManager {
             config: config.clone(),
             state: Arc::new(RwLock::new(SyncState::new(config.initial_peers))),
             merkle_verifier: Some(Arc::new(MerkleVerifier::new(indexed_journal, time))),
+            maintenance_tasks: Arc::new(RwLock::new(None)),
+            lifecycle: Arc::new(Mutex::new(())),
             reconfiguration: ReconfigurationManager::new(),
         }
     }
@@ -217,18 +228,17 @@ impl SyncServiceManager {
         self.state.read().await.status == SyncManagerState::Running
     }
 
-    /// Start the sync service
-    ///
-    /// # Arguments
-    /// - `time_effects`: Time effects for service initialization
-    pub async fn start(
-        &self,
-        time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
-    ) -> Result<(), String> {
+    async fn start_managed(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
+        let _lifecycle_guard = self.lifecycle.lock().await;
         let current_state = self.state.read().await.status;
         if current_state == SyncManagerState::Running {
-            return Ok(()); // Already running
+            return Ok(());
         }
+        validate_actor_transition(
+            self.name(),
+            current_state.phase(),
+            ActorLifecyclePhase::Starting,
+        )?;
 
         with_state_mut_validated(
             &self.state,
@@ -247,15 +257,42 @@ impl SyncServiceManager {
 
         // Create the underlying sync service
         let now_instant = SyncService::monotonic_now();
-        let service = SyncService::new(sync_config, time_effects, now_instant)
-            .await
-            .map_err(|e| format!("Failed to create sync service: {}", e))?;
+        let service = match SyncService::new(sync_config, context.time_effects(), now_instant).await
+        {
+            Ok(service) => service,
+            Err(error) => {
+                with_state_mut_validated(
+                    &self.state,
+                    |state| {
+                        state.service = None;
+                        state.status = SyncManagerState::Failed;
+                    },
+                    |state| state.validate(),
+                )
+                .await;
+                return Err(ServiceError::startup_failed(
+                    "sync_service",
+                    error.to_string(),
+                ));
+            }
+        };
 
         // Start the service
-        service
-            .start(now_instant)
-            .await
-            .map_err(|e| format!("Failed to start sync service: {}", e))?;
+        if let Err(error) = service.start(now_instant).await {
+            with_state_mut_validated(
+                &self.state,
+                |state| {
+                    state.service = None;
+                    state.status = SyncManagerState::Failed;
+                },
+                |state| state.validate(),
+            )
+            .await;
+            return Err(ServiceError::startup_failed("sync_service", error.to_string()));
+        }
+
+        let maintenance_group = context.tasks().group(self.name());
+        self.spawn_maintenance_task(maintenance_group.clone(), context.time_effects());
 
         with_state_mut_validated(
             &self.state,
@@ -266,17 +303,27 @@ impl SyncServiceManager {
             |state| state.validate(),
         )
         .await;
+        *self.maintenance_tasks.write().await = Some(maintenance_group);
 
-        tracing::info!("Sync service manager started");
+        tracing::info!(
+            event = "runtime.service.sync.started",
+            service = self.name(),
+            "Sync service manager started"
+        );
         Ok(())
     }
 
-    /// Stop the sync service
-    pub async fn stop(&self) -> Result<(), String> {
+    async fn stop_managed(&self) -> Result<(), ServiceError> {
+        let _lifecycle_guard = self.lifecycle.lock().await;
         let current_state = self.state.read().await.status;
         if current_state == SyncManagerState::Stopped {
-            return Ok(()); // Already stopped
+            return Ok(());
         }
+        validate_actor_transition(
+            self.name(),
+            current_state.phase(),
+            ActorLifecyclePhase::Stopping,
+        )?;
 
         with_state_mut_validated(
             &self.state,
@@ -285,21 +332,37 @@ impl SyncServiceManager {
         )
         .await;
 
-        // Cancel background task if running
-        let background_task =
-            with_state_mut(&self.state, |state| state.background_task.take()).await;
-        if let Some(handle) = background_task {
-            handle.abort();
-        }
+        let maintenance_shutdown_error =
+            if let Some(task_group) = self.maintenance_tasks.write().await.take() {
+                task_group
+                    .shutdown_with_timeout(Duration::from_secs(2))
+                    .await
+                    .err()
+                    .map(|error| {
+                        ServiceError::shutdown_failed(
+                            self.name(),
+                            format!("failed to stop maintenance task group: {error}"),
+                        )
+                    })
+            } else {
+                None
+            };
 
         // Stop the underlying service
         let service = self.state.read().await.service.clone();
         if let Some(service) = service.as_ref() {
             let now_instant = SyncService::monotonic_now();
-            service
-                .stop(now_instant)
-                .await
-                .map_err(|e| format!("Failed to stop sync service: {}", e))?;
+            if let Err(error) = service.stop(now_instant).await {
+                with_state_mut_validated(
+                    &self.state,
+                    |state| {
+                        state.status = SyncManagerState::Failed;
+                    },
+                    |state| state.validate(),
+                )
+                .await;
+                return Err(ServiceError::shutdown_failed(self.name(), error.to_string()));
+            }
         }
 
         with_state_mut_validated(
@@ -312,14 +375,29 @@ impl SyncServiceManager {
         )
         .await;
 
-        tracing::info!("Sync service manager stopped");
-        Ok(())
+        tracing::info!(
+            event = "runtime.service.sync.stopped",
+            service = self.name(),
+            "Sync service manager stopped"
+        );
+        match maintenance_shutdown_error {
+            Some(error) => {
+                with_state_mut_validated(
+                    &self.state,
+                    |state| state.status = SyncManagerState::Failed,
+                    |state| state.validate(),
+                )
+                .await;
+                Err(error)
+            }
+            None => Ok(()),
+        }
     }
 
     /// Start background maintenance task for pruning long-lived state.
-    pub fn start_maintenance_task(
+    fn spawn_maintenance_task(
         &self,
-        tasks: Arc<crate::runtime::services::RuntimeTaskRegistry>,
+        tasks: TaskGroup,
         time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
     ) {
         if !self.config.maintenance_enabled {
@@ -332,42 +410,49 @@ impl SyncServiceManager {
         let max_peer_states = self.config.max_peer_states;
         let manager = self.clone();
 
-        tasks.spawn_interval_until(time_effects.clone(), interval, move || {
-            let manager = manager.clone();
-            let time_effects = time_effects.clone();
-            async move {
-                let status = manager.state.read().await.status;
-                if matches!(
-                    status,
-                    SyncManagerState::Stopped | SyncManagerState::Stopping
-                ) {
-                    return true;
-                }
-
-                let now_ms = match time_effects.physical_time().await {
-                    Ok(t) => t.ts_ms,
-                    Err(e) => {
-                        tracing::warn!("Sync maintenance: failed to get time: {}", e);
+        tasks.spawn_interval_until_named(
+            "sync.maintenance",
+            time_effects.clone(),
+            interval,
+            move || {
+                let manager = manager.clone();
+                let time_effects = time_effects.clone();
+                async move {
+                    let status = manager.state.read().await.status;
+                    if matches!(
+                        status,
+                        SyncManagerState::Stopped
+                            | SyncManagerState::Stopping
+                            | SyncManagerState::Failed
+                    ) {
                         return true;
                     }
-                };
 
-                if let Some(service) = manager.state.read().await.service.clone() {
-                    if let Err(e) = service
-                        .maintenance_cleanup(
-                            now_ms,
-                            peer_state_ttl.as_millis() as u64,
-                            max_peer_states,
-                        )
-                        .await
-                    {
-                        tracing::warn!("Sync maintenance failed: {}", e);
+                    let now_ms = match time_effects.physical_time().await {
+                        Ok(t) => t.ts_ms,
+                        Err(e) => {
+                            tracing::warn!("Sync maintenance: failed to get time: {}", e);
+                            return true;
+                        }
+                    };
+
+                    if let Some(service) = manager.state.read().await.service.clone() {
+                        if let Err(e) = service
+                            .maintenance_cleanup(
+                                now_ms,
+                                peer_state_ttl.as_millis() as u64,
+                                max_peer_states,
+                            )
+                            .await
+                        {
+                            tracing::warn!("Sync maintenance failed: {}", e);
+                        }
                     }
-                }
 
-                true
-            }
-        });
+                    true
+                }
+            },
+        );
     }
 
     /// Perform a manual sync with specific peers
@@ -425,7 +510,7 @@ impl SyncServiceManager {
     }
 
     /// Get service health information
-    pub async fn health(&self) -> Option<aura_sync::services::SyncServiceHealth> {
+    pub async fn sync_service_health(&self) -> Option<aura_sync::services::SyncServiceHealth> {
         self.state
             .read()
             .await
@@ -526,45 +611,16 @@ impl RuntimeService for SyncServiceManager {
         &["indexed_journal", "transport"]
     }
 
-    async fn start(&self, _tasks: Arc<RuntimeTaskRegistry>) -> Result<(), ServiceError> {
-        // Note: The actual start() requires time_effects, which should be
-        // provided via with_indexed_journal() constructor. This implementation
-        // checks if the service is already running from previous initialization.
-        //
-        // For full startup with background tasks, use:
-        //   1. Create manager with with_indexed_journal()
-        //   2. Call start(time_effects).await
-        //   3. Call start_maintenance_task(tasks, time_effects)
-        //
-        // The RuntimeService::start is primarily for lifecycle tracking.
-        let current_state = self.state().await;
-        if current_state == SyncManagerState::Running {
-            return Ok(());
-        }
-
-        // If not running, we can't start without time_effects
-        // This is expected - caller should have called start(time_effects) first
-        if current_state == SyncManagerState::Stopped {
-            tracing::debug!(
-                "SyncServiceManager: RuntimeService::start called but service needs \
-                 explicit start(time_effects) for initialization"
-            );
-        }
-
-        Ok(())
+    async fn start(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
+        self.start_managed(context).await
     }
 
     async fn stop(&self) -> Result<(), ServiceError> {
-        self.stop()
-            .await
-            .map_err(|e| ServiceError::shutdown_failed("sync_service", e))
+        self.stop_managed().await
     }
 
-    fn health(&self) -> ServiceHealth {
-        // Since we need async for full health check, return based on cached state
-        // For actual health metrics, use async health() method directly
-        // This is a synchronous approximation for the trait
-        ServiceHealth::Healthy // Placeholder - actual state requires async
+    async fn health(&self) -> ServiceHealth {
+        self.health_async().await
     }
 }
 
@@ -580,9 +636,12 @@ impl SyncServiceManager {
             SyncManagerState::Stopped => ServiceHealth::Stopped,
             SyncManagerState::Starting => ServiceHealth::Starting,
             SyncManagerState::Stopping => ServiceHealth::Stopping,
+            SyncManagerState::Failed => ServiceHealth::Unhealthy {
+                reason: "service entered failed lifecycle state".to_string(),
+            },
             SyncManagerState::Running => {
                 // Check underlying service health
-                if let Some(svc_health) = self.health().await {
+                if let Some(svc_health) = self.sync_service_health().await {
                     use aura_sync::services::HealthStatus;
                     match svc_health.status {
                         HealthStatus::Healthy => ServiceHealth::Healthy,
@@ -657,38 +716,31 @@ impl SyncServiceManager {
         let local_types =
             aura_sync::protocols::epochs::telltale_session_types_epoch_rotation::vm_artifacts::local_types();
 
-        effects
-            .start_session(session_id, roles)
-            .await
-            .map_err(|e| format!("epoch rotation start failed: {e}"))?;
-
         let result = async {
-            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-                effects.as_ref(),
+            let mut session = open_owned_manifest_vm_session_admitted(
+                effects.clone(),
+                session_id,
+                roles,
                 &manifest,
                 "Coordinator",
                 &global_type,
                 &local_types,
                 crate::runtime::AuraVmSchedulerSignals::default(),
             )
-            .await?;
-            handler.push_send_bytes(
+            .await
+            .map_err(|error| error.to_string())?;
+            session.queue_send_bytes(
                 to_vec(&proposal)
                     .map_err(|error| format!("epoch proposal encode failed: {error}"))?,
             );
             let mut confirmations = Vec::new();
             let mut commit_queued = false;
 
-            loop {
-                let round = advance_host_bridged_vm_round(
-                    effects.as_ref(),
-                    &mut engine,
-                    handler.as_ref(),
-                    vm_sid,
-                    "Coordinator",
-                    &peer_roles,
-                )
-                .await?;
+            let loop_result = loop {
+                let round = session
+                    .advance_round("Coordinator", &peer_roles)
+                    .await
+                    .map_err(|error| error.to_string())?;
 
                 if let Some(blocked) = round.blocked_receive {
                     let confirmation: EpochConfirmation =
@@ -699,11 +751,13 @@ impl SyncServiceManager {
                     if !commit_queued && confirmations.len() == 2 {
                         let payload = to_vec(&commit)
                             .map_err(|error| format!("epoch commit encode failed: {error}"))?;
-                        handler.push_send_bytes(payload.clone());
-                        handler.push_send_bytes(payload);
+                        session.queue_send_bytes(payload.clone());
+                        session.queue_send_bytes(payload);
                         commit_queued = true;
                     }
-                    inject_vm_receive(&mut engine, vm_sid, &blocked)?;
+                    session
+                        .inject_blocked_receive(&blocked)
+                        .map_err(|error| error.to_string())?;
                     continue;
                 }
 
@@ -734,14 +788,11 @@ impl SyncServiceManager {
                         );
                     }
                 }
-            }
-            .map(|_| {
-                let _ = close_and_reap_vm_session(&mut engine, vm_sid);
-            })
+            };
+            let _ = session.close().await;
+            loop_result
         }
         .await;
-
-        let _ = effects.end_session().await;
         result
     }
 
@@ -785,54 +836,45 @@ impl SyncServiceManager {
         let local_types =
             aura_sync::protocols::epochs::telltale_session_types_epoch_rotation::vm_artifacts::local_types();
 
-        effects
-            .start_session(session_id, roles)
-            .await
-            .map_err(|e| format!("epoch rotation start failed: {e}"))?;
-
         let result = async {
-            let (mut engine, handler, vm_sid) = open_manifest_vm_session_admitted(
-                effects.as_ref(),
+            let mut session = open_owned_manifest_vm_session_admitted(
+                effects.clone(),
+                session_id,
+                roles,
                 &manifest,
                 active_role_name,
                 &global_type,
                 &local_types,
                 crate::runtime::AuraVmSchedulerSignals::default(),
             )
-            .await?;
-            handler.push_send_bytes(
+            .await
+            .map_err(|error| error.to_string())?;
+            session.queue_send_bytes(
                 to_vec(&confirmation)
                     .map_err(|error| format!("epoch confirmation encode failed: {error}"))?,
             );
 
-            loop {
-                let round = advance_host_bridged_vm_round(
-                    effects.as_ref(),
-                    &mut engine,
-                    handler.as_ref(),
-                    vm_sid,
-                    active_role_name,
-                    &peer_roles,
-                )
-                .await?;
+            let loop_result = loop {
+                let round = session
+                    .advance_round(active_role_name, &peer_roles)
+                    .await
+                    .map_err(|error| error.to_string())?;
 
-                match handle_standard_vm_round(
-                    &mut engine,
-                    vm_sid,
+                match crate::runtime::handle_owned_vm_round(
+                    &mut session,
                     round,
                     "epoch rotation participant VM",
-                )? {
+                )
+                .map_err(|error| error.to_string())?
+                {
                     AuraVmRoundDisposition::Continue => {}
                     AuraVmRoundDisposition::Complete => break Ok(()),
                 }
-            }
-            .map(|_| {
-                let _ = close_and_reap_vm_session(&mut engine, vm_sid);
-            })
+            };
+            let _ = session.close().await;
+            loop_result
         }
         .await;
-
-        let _ = effects.end_session().await;
         result
     }
 
@@ -893,6 +935,13 @@ mod tests {
     use aura_core::AuthorityId;
     use aura_effects::time::PhysicalTimeHandler;
     use std::sync::Mutex;
+
+    fn test_service_context() -> RuntimeServiceContext {
+        RuntimeServiceContext::new(
+            Arc::new(crate::runtime::services::RuntimeTaskRegistry::new()),
+            Arc::new(PhysicalTimeHandler::new()),
+        )
+    }
 
     /// Mock indexed journal for testing
     struct MockIndexedJournal {
@@ -986,14 +1035,14 @@ mod tests {
     async fn test_sync_manager_lifecycle() {
         let config = SyncManagerConfig::for_testing();
         let manager = SyncServiceManager::new(config);
-        let time_effects = Arc::new(PhysicalTimeHandler::new());
+        let context = test_service_context();
 
         // Start
-        manager.start(time_effects).await.unwrap();
+        RuntimeService::start(&manager, &context).await.unwrap();
         assert!(manager.is_running().await);
 
         // Stop
-        manager.stop().await.unwrap();
+        RuntimeService::stop(&manager).await.unwrap();
         assert!(!manager.is_running().await);
     }
 
@@ -1026,21 +1075,21 @@ mod tests {
         let manager = SyncServiceManager::with_defaults();
 
         // Health should be None when not running
-        assert!(manager.health().await.is_none());
+        assert!(manager.sync_service_health().await.is_none());
     }
 
     #[tokio::test]
     async fn test_sync_manager_health_when_running() {
         let manager = SyncServiceManager::new(SyncManagerConfig::for_testing());
-        let time_effects = Arc::new(PhysicalTimeHandler::new());
+        let context = test_service_context();
 
-        manager.start(time_effects).await.unwrap();
+        RuntimeService::start(&manager, &context).await.unwrap();
 
         // Health should be available when running
-        let health = manager.health().await;
+        let health = manager.sync_service_health().await;
         assert!(health.is_some());
 
-        manager.stop().await.unwrap();
+        RuntimeService::stop(&manager).await.unwrap();
     }
 
     #[tokio::test]

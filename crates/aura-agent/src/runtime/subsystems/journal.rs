@@ -141,11 +141,6 @@ impl JournalSubsystem {
         *self.fact_publish_tx.lock() = None;
     }
 
-    /// Get a clone of the fact publication sender (if attached)
-    pub fn fact_publisher(&self) -> Option<mpsc::Sender<FactSource>> {
-        self.fact_publish_tx.lock().clone()
-    }
-
     /// Check if a fact sink is attached
     pub fn has_fact_sink(&self) -> bool {
         self.fact_publish_tx.lock().is_some()
@@ -245,5 +240,17 @@ mod tests {
 
         subsystem.detach_fact_sink();
         assert!(!subsystem.has_fact_sink());
+    }
+
+    #[tokio::test]
+    async fn test_publish_facts_reports_closed_sink() {
+        let registry = Arc::new(build_fact_registry());
+        let subsystem = JournalSubsystem::new(1000u64, registry);
+        let (tx, rx) = mpsc::channel(1);
+        subsystem.attach_fact_sink(tx);
+        drop(rx);
+
+        let result = subsystem.publish_facts(FactSource::Journal(Vec::new())).await;
+        assert!(matches!(result, Err(JournalSubsystemError::SinkClosed)));
     }
 }

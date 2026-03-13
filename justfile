@@ -561,6 +561,24 @@ ci-ux-policy:
 ci-choreo:
     scripts/check/choreo-wiring.sh
 
+ci-async-task-ownership:
+    bash scripts/check/async-task-ownership.sh
+
+ci-async-session-ownership:
+    bash scripts/check/async-session-ownership.sh
+
+ci-async-concurrency-envelope:
+    bash scripts/check/async-concurrency-envelope.sh
+
+ci-runtime-service-lifecycle:
+    bash scripts/check/runtime-service-lifecycle.sh
+
+ci-runtime-shutdown-order:
+    bash scripts/check/runtime-shutdown-order.sh
+
+ci-async-service-actor-ownership:
+    bash scripts/check/async-service-actor-ownership.sh
+
 # Quint typecheck
 ci-quint-typecheck:
     just quint check

@@ -521,15 +521,12 @@ fn publish_scoped_channels(
             .iter()
             .any(|channel| channel.id == selected_channel_id);
         if !already_present {
-            let preserved = channels
-                .read()
-                .ok()
-                .and_then(|guard| {
-                    guard
-                        .iter()
-                        .find(|channel| channel.id == selected_channel_id)
-                        .cloned()
-                });
+            let preserved = channels.read().ok().and_then(|guard| {
+                guard
+                    .iter()
+                    .find(|channel| channel.id == selected_channel_id)
+                    .cloned()
+            });
             if let Some(channel) = preserved {
                 channel_list.push(channel);
                 channel_list.sort_by(|left, right| left.name.cmp(&right.name));
@@ -575,8 +572,8 @@ fn publish_scoped_channels(
             let recipients_resolved = resolved_recipient_count > 0
                 && !channel.name.eq_ignore_ascii_case("note to self")
                 && !is_dm_like_channel(channel);
-            let remote_delivery_ready = recipients_resolved
-                && (transport_peer_count > 0 || observed_remote_message);
+            let remote_delivery_ready =
+                recipients_resolved && (transport_peer_count > 0 || observed_remote_message);
             if recipients_resolved {
                 facts.push(RuntimeFact::RecipientPeersResolved {
                     channel: channel_fact.clone(),

@@ -1137,11 +1137,11 @@ async fn test_lan_sync_roundtrip() -> TestResult {
     res_b.map_err(anyhow::Error::msg)?;
 
     let health_a = sync_a
-        .health()
+        .sync_service_health()
         .await
         .ok_or_else(|| anyhow!("missing sync health"))?;
     let health_b = sync_b
-        .health()
+        .sync_service_health()
         .await
         .ok_or_else(|| anyhow!("missing sync health"))?;
     assert!(health_a.last_sync.is_some());

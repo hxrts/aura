@@ -3,7 +3,8 @@
 use crate::runtime::vm_hardening::{
     apply_protocol_execution_policy, apply_scheduler_execution_policy, configured_guard_capacity,
     policy_for_protocol, scheduler_control_input_for_image, scheduler_policy_for_input,
-    AuraVmSchedulerSignals, AuraVmSchedulerSignalsProvider,
+    AuraVmProtocolExecutionPolicy, AuraVmRuntimeSelector, AuraVmSchedulerSignals,
+    AuraVmSchedulerSignalsProvider,
 };
 use crate::runtime::{
     build_vm_config, AuraChoreoEngine, AuraEffectSystem, AuraVmHardeningProfile,
@@ -27,6 +28,75 @@ use telltale_vm::SessionId;
 use super::subsystems::VmBridgeState;
 
 pub type PendingVmSend = VmBridgePendingSend;
+
+#[derive(Debug, thiserror::Error)]
+pub enum AuraVmConcurrencyEnvelopeError {
+    #[error(
+        "protocol {protocol_id} denied requested concurrency profile {requested_profile} for policy {requested_policy_ref}: {reason}"
+    )]
+    AdmissionDenied {
+        protocol_id: String,
+        requested_policy_ref: String,
+        requested_profile: String,
+        reason: &'static str,
+    },
+    #[error(
+        "protocol {protocol_id} activated canonical fallback from policy {requested_policy_ref} to {effective_policy_ref}: {reason}"
+    )]
+    CanonicalFallbackActivated {
+        protocol_id: String,
+        requested_policy_ref: String,
+        effective_policy_ref: String,
+        reason: &'static str,
+    },
+}
+
+impl AuraVmConcurrencyEnvelopeError {
+    fn error_kind(&self) -> &'static str {
+        match self {
+            Self::AdmissionDenied { .. } => "admission_denied",
+            Self::CanonicalFallbackActivated { .. } => "canonical_fallback_activated",
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AuraVmSessionOpenError {
+    #[error("failed to build role-scoped VM image for protocol {protocol_id}: {message}")]
+    RoleScopedImage {
+        protocol_id: String,
+        message: String,
+    },
+    #[error("failed to resolve VM protocol policy for protocol {protocol_id}: {source}")]
+    PolicyResolution {
+        protocol_id: String,
+        #[source]
+        source: crate::runtime::AuraVmDeterminismProfileError,
+    },
+    #[error("failed to claim VM fragments for protocol {protocol_id}: {message}")]
+    FragmentClaim {
+        protocol_id: String,
+        message: String,
+    },
+    #[error(
+        "failed to create VM engine for protocol {protocol_id} under policy {policy_ref}: {source}"
+    )]
+    EngineCreation {
+        protocol_id: String,
+        policy_ref: String,
+        #[source]
+        source: crate::runtime::AuraChoreoEngineError,
+    },
+    #[error(
+        "failed to open VM session for protocol {protocol_id} under policy {policy_ref}: {source}"
+    )]
+    SessionOpen {
+        protocol_id: String,
+        policy_ref: String,
+        #[source]
+        source: crate::runtime::AuraChoreoEngineError,
+    },
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockedVmReceive {
@@ -193,6 +263,84 @@ impl EffectHandler for AuraQueuedVmBridgeHandler {
     }
 }
 
+fn effective_host_bridge_policy(
+    protocol_id: &str,
+    policy: AuraVmProtocolExecutionPolicy,
+) -> (
+    AuraVmProtocolExecutionPolicy,
+    Option<AuraVmConcurrencyEnvelopeError>,
+    Option<AuraVmConcurrencyEnvelopeError>,
+) {
+    if policy.is_canonical_only() {
+        (policy, None, None)
+    } else {
+        let effective_policy = policy.canonical_fallback_policy();
+        (
+            effective_policy,
+            Some(AuraVmConcurrencyEnvelopeError::AdmissionDenied {
+                protocol_id: protocol_id.to_string(),
+                requested_policy_ref: policy.policy_ref.to_string(),
+                requested_profile: policy.concurrency_profile().as_ref().to_string(),
+                reason: "host_bridge_canonical_only",
+            }),
+            Some(AuraVmConcurrencyEnvelopeError::CanonicalFallbackActivated {
+                protocol_id: protocol_id.to_string(),
+                requested_policy_ref: policy.policy_ref.to_string(),
+                effective_policy_ref: effective_policy.policy_ref.to_string(),
+                reason: "host_bridge_canonical_only",
+            }),
+        )
+    }
+}
+
+fn log_concurrency_profile_selection(
+    protocol_id: &str,
+    requested_policy: AuraVmProtocolExecutionPolicy,
+    effective_policy: AuraVmProtocolExecutionPolicy,
+) {
+    tracing::debug!(
+        event = "runtime.vm.concurrency_profile.selected",
+        protocol_id,
+        requested_policy_ref = requested_policy.policy_ref,
+        requested_profile = requested_policy.concurrency_profile().as_ref(),
+        requested_runtime_mode = requested_policy.runtime_mode.as_ref(),
+        effective_policy_ref = effective_policy.policy_ref,
+        effective_profile = effective_policy.concurrency_profile().as_ref(),
+        effective_runtime_mode = effective_policy.runtime_mode.as_ref(),
+        "Selected runtime concurrency profile for VM session"
+    );
+}
+
+fn log_concurrency_profile_fallback(
+    protocol_id: &str,
+    requested_policy: AuraVmProtocolExecutionPolicy,
+    effective_policy: AuraVmProtocolExecutionPolicy,
+    error: &AuraVmConcurrencyEnvelopeError,
+) {
+    tracing::warn!(
+        event = "runtime.vm.concurrency_profile.fallback",
+        protocol_id,
+        requested_policy_ref = requested_policy.policy_ref,
+        requested_profile = requested_policy.concurrency_profile().as_ref(),
+        requested_runtime_mode = requested_policy.runtime_mode.as_ref(),
+        effective_policy_ref = effective_policy.policy_ref,
+        effective_profile = effective_policy.concurrency_profile().as_ref(),
+        effective_runtime_mode = effective_policy.runtime_mode.as_ref(),
+        error_kind = error.error_kind(),
+        error = %error,
+        "Fell back to canonical VM runtime profile"
+    );
+}
+
+fn log_concurrency_profile_admission_failed(error: &AuraVmConcurrencyEnvelopeError) {
+    tracing::warn!(
+        event = "runtime.vm.concurrency_profile.admission_failed",
+        error_kind = error.error_kind(),
+        error = %error,
+        "Denied requested VM concurrency profile"
+    );
+}
+
 pub fn build_role_scoped_code_image(
     roles: &[&str],
     active_role: &str,
@@ -261,41 +409,63 @@ pub async fn open_role_scoped_vm_session_admitted(
         Arc<AuraQueuedVmBridgeHandler>,
         SessionId,
     ),
-    String,
+    AuraVmSessionOpenError,
 > {
-    let image = build_role_scoped_code_image(role_names, active_role, global_type, local_types)?;
+    let image = build_role_scoped_code_image(role_names, active_role, global_type, local_types)
+        .map_err(|message| AuraVmSessionOpenError::RoleScopedImage {
+            protocol_id: protocol_id.to_string(),
+            message,
+        })?;
     let handler = Arc::new(AuraQueuedVmBridgeHandler::default());
     handler.set_scheduler_signals(scheduler_signals);
     let mut config = build_vm_config(
         AuraVmHardeningProfile::Prod,
         AuraVmParityProfile::RuntimeDefault,
     );
-    let policy = policy_for_protocol(protocol_id, determinism_policy_ref)
-        .map_err(|error| format!("failed to resolve VM protocol policy: {error}"))?;
-    apply_protocol_execution_policy(&mut config, policy);
+    let requested_policy =
+        policy_for_protocol(protocol_id, determinism_policy_ref).map_err(|source| {
+            AuraVmSessionOpenError::PolicyResolution {
+                protocol_id: protocol_id.to_string(),
+                source,
+            }
+        })?;
+    let (effective_policy, admission_denied, fallback_activated) =
+        effective_host_bridge_policy(protocol_id, requested_policy);
+    if let Some(error) = admission_denied.as_ref() {
+        log_concurrency_profile_admission_failed(error);
+    }
+    if let Some(error) = fallback_activated.as_ref() {
+        log_concurrency_profile_fallback(protocol_id, requested_policy, effective_policy, error);
+    }
+    log_concurrency_profile_selection(protocol_id, requested_policy, effective_policy);
+    apply_protocol_execution_policy(&mut config, effective_policy);
     let scheduler_input = scheduler_control_input_for_image(
         &image,
-        policy.protocol_class,
+        effective_policy.protocol_class,
         configured_guard_capacity(&config),
         handler.scheduler_signals(),
     );
     let scheduler_policy = scheduler_policy_for_input(scheduler_input);
     apply_scheduler_execution_policy(&mut config, &scheduler_policy);
-    let mut engine = AuraChoreoEngine::new_with_contracts(
+    let mut engine = AuraChoreoEngine::new_with_contracts_and_selector(
         config,
         Arc::clone(&handler),
         Some(RuntimeContracts::full()),
+        AuraVmRuntimeSelector::for_policy(effective_policy),
     )
-    .map_err(|error| format!("failed to create VM engine: {error}"))?;
+    .map_err(|source| AuraVmSessionOpenError::EngineCreation {
+        protocol_id: protocol_id.to_string(),
+        policy_ref: effective_policy.policy_ref.to_string(),
+        source,
+    })?;
     let sid = engine
-        .open_session_admitted(
-            &image,
-            protocol_id,
-            determinism_policy_ref,
-            required_capabilities,
-        )
+        .open_session_for_policy_admitted(&image, effective_policy, required_capabilities)
         .await
-        .map_err(|error| format!("failed to open VM session: {error}"))?;
+        .map_err(|source| AuraVmSessionOpenError::SessionOpen {
+            protocol_id: protocol_id.to_string(),
+            policy_ref: effective_policy.policy_ref.to_string(),
+            source,
+        })?;
     Ok((engine, handler, sid))
 }
 
@@ -312,7 +482,7 @@ pub async fn open_manifest_vm_session_admitted(
         Arc<AuraQueuedVmBridgeHandler>,
         SessionId,
     ),
-    String,
+    AuraVmSessionOpenError,
 > {
     #[allow(clippy::disallowed_methods)] // Caller locations provide a stable local-owner label for runtime arbitration.
     #[track_caller]
@@ -332,8 +502,12 @@ pub async fn open_manifest_vm_session_admitted(
         .map(String::as_str)
         .collect::<Vec<_>>();
     let claimed_session_id = effects.current_runtime_choreography_session_id();
-    let _claimed_fragments =
-        effects.claim_vm_fragments_for_manifest(caller_owner_label(), manifest)?;
+    let _claimed_fragments = effects
+        .claim_vm_fragments_for_manifest(caller_owner_label(), manifest)
+        .map_err(|message| AuraVmSessionOpenError::FragmentClaim {
+            protocol_id: manifest.protocol_id.clone(),
+            message,
+        })?;
     let open_result = open_role_scoped_vm_session_admitted(
         role_names.as_slice(),
         active_role,
@@ -835,6 +1009,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn envelope_admitted_host_bridge_path_matches_canonical_cooperative_trace() {
+        let global = GlobalType::send("Sender", "Receiver", Label::new("msg"), GlobalType::End);
+        let locals = BTreeMap::from([
+            (
+                "Sender".to_string(),
+                LocalTypeR::send("Receiver", Label::new("msg"), LocalTypeR::End),
+            ),
+            (
+                "Receiver".to_string(),
+                LocalTypeR::recv("Sender", Label::new("msg"), LocalTypeR::End),
+            ),
+        ]);
+
+        let (mut admitted_engine, admitted_handler, admitted_sid) =
+            open_role_scoped_vm_session_admitted(
+                &["Sender", "Receiver"],
+                "Sender",
+                &global,
+                &locals,
+                "aura.sync.epoch_rotation",
+                None,
+                AuraVmSchedulerSignals::default(),
+                &[],
+            )
+            .await
+            .expect("envelope-admitted host bridge session opens");
+        admitted_handler.push_send_bytes(vec![0xAB]);
+        admitted_engine.step().expect("admitted step succeeds");
+        let admitted_snapshot = collect_vm_session_artifacts(&admitted_engine, admitted_sid)
+            .expect("admitted snapshot");
+
+        let (mut canonical_engine, canonical_handler, canonical_sid) =
+            open_role_scoped_vm_session(&["Sender", "Receiver"], "Sender", &global, &locals)
+                .expect("canonical session opens");
+        canonical_handler.push_send_bytes(vec![0xAB]);
+        canonical_engine.step().expect("canonical step succeeds");
+        let canonical_snapshot = collect_vm_session_artifacts(&canonical_engine, canonical_sid)
+            .expect("canonical snapshot");
+
+        assert_eq!(
+            admitted_snapshot.effect_trace,
+            canonical_snapshot.effect_trace
+        );
+        assert_eq!(
+            admitted_snapshot.canonical_effect_trace,
+            canonical_snapshot.canonical_effect_trace
+        );
+    }
+
+    #[tokio::test]
     async fn linked_manifest_claims_fragment_ownership_and_releases_on_session_end() {
         let authority_id = AuthorityId::from_uuid(Uuid::from_bytes([0x41; 16]));
         let effects = test_effects(authority_id);
@@ -875,7 +1099,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn close_and_reap_vm_session_clears_envelope_policy_tracking() {
+    async fn host_bridge_falls_back_to_canonical_runtime_for_envelope_admitted_policy() {
         let authority_id = AuthorityId::from_uuid(Uuid::from_bytes([0x51; 16]));
         let effects = test_effects(authority_id);
         let session_id = Uuid::from_u128(0xBCDE);
@@ -912,9 +1136,16 @@ mod tests {
         .await
         .expect("vm session opens");
 
-        assert!(engine.session_determinism_profile_metadata(sid).is_some());
-        assert!(engine.session_requires_envelope_artifact(sid));
-        assert!(engine.session_runtime_selector(sid).is_some());
+        let metadata = engine
+            .session_determinism_profile_metadata(sid)
+            .expect("determinism metadata recorded");
+        assert_eq!(metadata.runtime_mode, "cooperative");
+        assert_eq!(metadata.scheduler_envelope_class, "exact");
+        assert!(!engine.session_requires_envelope_artifact(sid));
+        assert_eq!(
+            engine.session_runtime_selector(sid),
+            Some(AuraVmRuntimeSelector::cooperative())
+        );
 
         close_and_reap_vm_session(&mut engine, sid).expect("session closes");
         assert!(engine.session_determinism_profile_metadata(sid).is_none());

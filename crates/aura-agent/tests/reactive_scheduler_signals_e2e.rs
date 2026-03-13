@@ -46,7 +46,7 @@ async fn contacts_signal_updates_from_contact_facts_as_snapshots() {
         AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap(),
     );
 
-    let pipeline = ReactivePipeline::start(
+    let pipeline = ReactivePipeline::start_for_test(
         SchedulerConfig::default(),
         Arc::new(build_fact_registry()),
         time_effects,
@@ -79,7 +79,8 @@ async fn contacts_signal_updates_from_contact_facts_as_snapshots() {
             fact(1, FactContent::Relational(added.to_generic())),
             fact(2, FactContent::Relational(renamed.to_generic())),
         ])
-        .await;
+        .await
+        .expect("reactive facts published");
 
     let update = match tokio::time::timeout(Duration::from_secs(1), updates.recv()).await {
         Ok(Ok(update)) => update,
@@ -109,7 +110,7 @@ async fn contacts_signal_updates_existing_contact_nickname_suggestion_on_added_f
         AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap(),
     );
 
-    let pipeline = ReactivePipeline::start(
+    let pipeline = ReactivePipeline::start_for_test(
         SchedulerConfig::default(),
         Arc::new(build_fact_registry()),
         time_effects,
@@ -142,7 +143,8 @@ async fn contacts_signal_updates_existing_contact_nickname_suggestion_on_added_f
             fact(1, FactContent::Relational(initial_added.to_generic())),
             fact(2, FactContent::Relational(updated_added.to_generic())),
         ])
-        .await;
+        .await
+        .expect("reactive facts published");
 
     let update = match tokio::time::timeout(Duration::from_secs(1), updates.recv()).await {
         Ok(Ok(update)) => update,
@@ -175,7 +177,7 @@ async fn contacts_signal_does_not_overwrite_human_suggestion_with_fallback_ident
         AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap(),
     );
 
-    let pipeline = ReactivePipeline::start(
+    let pipeline = ReactivePipeline::start_for_test(
         SchedulerConfig::default(),
         Arc::new(build_fact_registry()),
         time_effects,
@@ -208,7 +210,8 @@ async fn contacts_signal_does_not_overwrite_human_suggestion_with_fallback_ident
             fact(1, FactContent::Relational(human_named.to_generic())),
             fact(2, FactContent::Relational(fallback_named.to_generic())),
         ])
-        .await;
+        .await
+        .expect("reactive facts published");
 
     let update = match tokio::time::timeout(Duration::from_secs(1), updates.recv()).await {
         Ok(Ok(update)) => update,
@@ -241,7 +244,7 @@ async fn contacts_signal_reflects_guardian_binding_protocol_fact() {
         AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap(),
     );
 
-    let pipeline = ReactivePipeline::start(
+    let pipeline = ReactivePipeline::start_for_test(
         SchedulerConfig::default(),
         Arc::new(build_fact_registry()),
         time_effects,
@@ -273,7 +276,8 @@ async fn contacts_signal_reflects_guardian_binding_protocol_fact() {
             fact(1, FactContent::Relational(added.to_generic())),
             fact(2, FactContent::Relational(binding)),
         ])
-        .await;
+        .await
+        .expect("reactive facts published");
 
     let update = match tokio::time::timeout(Duration::from_secs(1), updates.recv()).await {
         Ok(Ok(update)) => update,
@@ -306,7 +310,7 @@ async fn malformed_domain_fact_bytes_emit_error_signal() {
         AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap(),
     );
 
-    let pipeline = ReactivePipeline::start(
+    let pipeline = ReactivePipeline::start_for_test(
         SchedulerConfig::default(),
         Arc::new(build_fact_registry()),
         time_effects,
@@ -329,7 +333,8 @@ async fn malformed_domain_fact_bytes_emit_error_signal() {
     let mut updates = pipeline.subscribe();
     pipeline
         .publish_journal_facts(vec![fact(1, FactContent::Relational(bad))])
-        .await;
+        .await
+        .expect("reactive facts published");
 
     let update = match tokio::time::timeout(Duration::from_secs(1), updates.recv()).await {
         Ok(Ok(update)) => update,
