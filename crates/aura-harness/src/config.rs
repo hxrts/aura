@@ -43,9 +43,21 @@ pub struct ScenarioInventoryEntry {
 #[serde(rename_all = "snake_case")]
 pub enum ScenarioClassification {
     Shared,
-    TuiOnly,
-    WebOnly,
+    TuiConformance,
+    WebConformance,
     ToBeRemoved,
+}
+
+impl ScenarioClassification {
+    #[must_use]
+    pub const fn is_shared_semantic(self) -> bool {
+        matches!(self, Self::Shared)
+    }
+
+    #[must_use]
+    pub const fn is_frontend_conformance(self) -> bool {
+        matches!(self, Self::TuiConformance | Self::WebConformance)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -298,7 +310,9 @@ pub fn load_semantic_scenario_definition(path: &Path) -> Result<ScenarioDefiniti
             path.display()
         )
     })?;
-    if scenario_classification_for_path(path)? == Some(ScenarioClassification::Shared) {
+    if scenario_classification_for_path(path)?
+        .is_some_and(ScenarioClassification::is_shared_semantic)
+    {
         definition
             .validate_shared_intent_contract()
             .map_err(|error| {
@@ -1330,5 +1344,25 @@ mod tests {
             assert!(field.allowed_until.starts_with("202"));
             assert!(!field.reason.trim().is_empty());
         }
+    }
+
+    #[test]
+    fn scenario_classification_parses_frontend_conformance_variants() {
+        let tui: ScenarioClassification = serde_json::from_str("\"tui_conformance\"")
+            .unwrap_or_else(|error| panic!("tui_conformance should parse: {error}"));
+        let web: ScenarioClassification = serde_json::from_str("\"web_conformance\"")
+            .unwrap_or_else(|error| panic!("web_conformance should parse: {error}"));
+
+        assert_eq!(tui, ScenarioClassification::TuiConformance);
+        assert_eq!(web, ScenarioClassification::WebConformance);
+    }
+
+    #[test]
+    fn scenario_classification_helpers_separate_shared_and_frontend_conformance() {
+        assert!(ScenarioClassification::Shared.is_shared_semantic());
+        assert!(!ScenarioClassification::Shared.is_frontend_conformance());
+        assert!(ScenarioClassification::TuiConformance.is_frontend_conformance());
+        assert!(ScenarioClassification::WebConformance.is_frontend_conformance());
+        assert!(!ScenarioClassification::ToBeRemoved.is_frontend_conformance());
     }
 }

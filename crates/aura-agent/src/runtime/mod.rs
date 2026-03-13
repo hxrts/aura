@@ -177,8 +177,8 @@ pub use lifecycle::LifecycleManager;
 #[allow(unused_imports)] // Re-exported for public API
 pub use services::{
     AuthorityManager, AuthorityStatus, FlowBudgetManager, ReceiptManager, RuntimeService,
-    ServiceError, ServiceErrorKind, ServiceHealth, SyncManagerConfig, SyncManagerState,
-    SyncServiceManager,
+    RuntimeServiceContext, RuntimeTaskRegistry, ServiceError, ServiceErrorKind, ServiceHealth,
+    SyncManagerConfig, SyncManagerState, SyncServiceManager,
 };
 
 // Simulation factory re-export

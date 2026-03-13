@@ -10,6 +10,7 @@ fail() {
 }
 
 lane=""
+suite="all"
 dry_run=0
 scenario_ids=()
 
@@ -17,6 +18,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --lane)
       lane="${2:-}"
+      shift 2
+      ;;
+    --suite)
+      suite="${2:-}"
       shift 2
       ;;
     --dry-run)
@@ -35,17 +40,36 @@ done
 
 [[ -n "$lane" ]] || fail "--lane is required"
 [[ "$lane" == "tui" || "$lane" == "web" || "$lane" == "all" ]] || fail "invalid lane: $lane"
+[[ "$suite" == "shared" || "$suite" == "conformance" || "$suite" == "all" ]] || fail "invalid suite: $suite"
 [[ -f "$inventory" ]] || fail "missing inventory: $inventory"
+
+suite_match() {
+  local scenario_class="$1"
+  case "$suite" in
+    shared)
+      [[ "$scenario_class" == "shared" ]]
+      ;;
+    conformance)
+      [[ "$scenario_class" == "tui_conformance" || "$scenario_class" == "web_conformance" ]]
+      ;;
+    all)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
 
 lane_match() {
   local scenario_class="$1"
   local selected_lane="$2"
   case "$selected_lane" in
     tui)
-      [[ "$scenario_class" == "shared" || "$scenario_class" == "tui_only" ]]
+      [[ "$scenario_class" == "shared" || "$scenario_class" == "tui_conformance" ]]
       ;;
     web)
-      [[ "$scenario_class" == "shared" || "$scenario_class" == "web_only" ]]
+      [[ "$scenario_class" == "shared" || "$scenario_class" == "web_conformance" ]]
       ;;
     *)
       return 1
@@ -57,8 +81,8 @@ config_for_run() {
   local scenario_class="$1"
   local selected_lane="$2"
   case "$selected_lane:$scenario_class" in
-    tui:shared|tui:tui_only) echo "configs/harness/local-loopback.toml" ;;
-    web:shared|web:web_only) echo "configs/harness/browser-loopback.toml" ;;
+    tui:shared|tui:tui_conformance) echo "configs/harness/local-loopback.toml" ;;
+    web:shared|web:web_conformance) echo "configs/harness/browser-loopback.toml" ;;
     *) return 1 ;;
   esac
 }
@@ -92,10 +116,11 @@ run_lane() {
   local config=""
   local count=0
 
-  echo "[harness-matrix] lane=$selected_lane begin"
+  echo "[harness-matrix] lane=$selected_lane suite=$suite begin"
 
   while IFS='|' read -r scenario_id scenario_path scenario_class migration_status; do
     [[ -n "$scenario_id" ]] || continue
+    suite_match "$scenario_class" || continue
     lane_match "$scenario_class" "$selected_lane" || continue
     [[ "$migration_status" == "converted" ]] || continue
     scenario_id_requested "$scenario_id" || continue
@@ -103,7 +128,7 @@ run_lane() {
     config="$(config_for_run "$scenario_class" "$selected_lane")" || fail "no config for classification $scenario_class on lane $selected_lane"
     count=$((count + 1))
 
-    echo "[harness-matrix] lane=$selected_lane scenario=$scenario_id class=$scenario_class config=$config"
+    echo "[harness-matrix] lane=$selected_lane suite=$suite scenario=$scenario_id class=$scenario_class config=$config"
     if [[ $dry_run -eq 0 ]]; then
       (
         cd "$repo_root"
@@ -139,7 +164,7 @@ run_lane() {
     ' "$inventory"
   )
 
-  echo "[harness-matrix] lane=$selected_lane scenarios=$count done"
+  echo "[harness-matrix] lane=$selected_lane suite=$suite scenarios=$count done"
 }
 
 if [[ "$lane" == "all" ]]; then

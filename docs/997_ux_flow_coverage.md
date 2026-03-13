@@ -8,6 +8,16 @@ UX flow coverage validates user-visible behavior and interaction wiring through 
 It does not replace protocol conformance, theorem proofs, or differential parity lanes.
 Use this report for UI/product flow traceability and regression targeting.
 
+The harness coverage model has two explicit lanes:
+
+- shared semantic lane:
+  - parity-critical shared flows execute through the shared semantic command plane
+  - this is the primary lane for debugging production workflows
+- frontend-conformance lane:
+  - renderer-specific control wiring, DOM/PTy mechanics, and shell integration
+    are validated separately
+  - these scenarios are intentionally not the primary shared-flow substrate
+
 ## Summary Metrics
 
 | Metric | Count |
@@ -24,9 +34,9 @@ Aura tracks three different coverage classes in this document:
 
 | Class | Meaning | Main Artifact |
 |-------|---------|---------------|
-| Parity-critical shared flow | One semantic flow that must remain portable across TUI and web | `aura-app::ui_contract` + canonical harness scenarios |
+| Parity-critical shared flow | One semantic flow that must remain portable across TUI and web and execute through the shared semantic command plane | `aura-app::ui_contract` + canonical harness scenarios |
 | Mixed-runtime interoperability | User-visible flow that intentionally spans different frontend/runtime combinations | Canonical mixed-runtime scenarios |
-| Frontend-specific or auxiliary coverage | Focused smoke, modal, or renderer-specific coverage that is useful but not the parity contract | Supplementary scenarios |
+| Frontend-specific or auxiliary coverage | Focused smoke, modal, renderer-specific, or conformance-only coverage that is useful but not the parity contract | Supplementary scenarios |
 
 This report is a traceability document for those classes. It is not a proof of
 protocol correctness, and it does not replace conformance or verification lanes.
@@ -38,16 +48,19 @@ protocol correctness, and it does not replace conformance or verification lanes.
 | Scenario 1 | `scenarios/harness/scenario1-invitation-chat-e2e.toml` | Invitation acceptance + shared channel + bidirectional chat |
 | Scenario 2 | `scenarios/harness/scenario2-social-topology-e2e.toml` | Social topology and neighborhood operations |
 | Scenario 3 | `scenarios/harness/scenario3-irc-slash-commands-e2e.toml` | Slash command lifecycle and moderation commands |
-| Scenario 4 | `scenarios/harness/scenario4-global-nav-and-help-e2e.toml` | Global navigation and help modal behavior |
+| Scenario 4 | `scenarios/harness/scenario4-global-nav-and-help-e2e.toml` | TUI frontend-conformance: global navigation and help modal behavior |
 | Scenario 5 | `scenarios/harness/scenario5-chat-modal-and-retry-e2e.toml` | Chat wizard/modals and retry actions |
 | Scenario 6 | `scenarios/harness/scenario6-contacts-lan-and-contact-lifecycle-e2e.toml` | Contacts, LAN scan, contact removal |
-| Scenario 7 | `scenarios/harness/scenario7-neighborhood-keypath-parity-e2e.toml` | Neighborhood keypath parity and detail navigation |
+| Scenario 7 | `scenarios/harness/scenario7-neighborhood-keypath-parity-e2e.toml` | TUI frontend-conformance: neighborhood keypath parity and detail navigation |
 | Scenario 8 | `scenarios/harness/scenario8-settings-devices-authority-e2e.toml` | Settings: profile, devices, authority panels |
 | Scenario 9 | `scenarios/harness/scenario9-guardian-and-mfa-ceremonies-e2e.toml` | Guardian and MFA ceremony flows |
 | Scenario 10 | `scenarios/harness/scenario10-recovery-and-notifications-e2e.toml` | Recovery request and notifications surfaces |
 | Scenario 11 | `scenarios/harness/scenario11-demo-full-tui-flow-e2e.toml` | Full end-to-end demo-grade TUI flow |
 | Scenario 12 | `scenarios/harness/scenario12-mixed-device-enrollment-removal-e2e.toml` | Mixed TUI/Web device enrollment + removal |
 | Scenario 13 | `scenarios/harness/scenario13-mixed-contact-channel-message-e2e.toml` | Mixed TUI/Web contact invite + channel messaging |
+
+Scenarios 4 and 7 are retained as TUI frontend-conformance coverage. They are
+not part of the shared semantic product-flow suite.
 
 ## UX Flow Matrix
 
@@ -57,8 +70,8 @@ protocol correctness, and it does not replace conformance or verification lanes.
 | Contact lifecycle | Scenario 6 | Scenarios 1, 2, 5, 9, 13 | TUI + Web |
 | Chat channel + messaging | Scenario 1 | Scenarios 3, 5, 11, 13 | TUI + Web |
 | Slash commands and moderation | Scenario 3 | `moderation-and-modal-coverage.toml`, `moderator-assign.toml` | TUI-heavy |
-| Global navigation/help | Scenario 4 | Scenario 11 | TUI + Web |
-| Neighborhood/home operations | `scenarios/harness/real-runtime-mixed-startup-smoke.toml` | Scenarios 2, 7, 11, `home-roles.toml` | TUI + Web |
+| Global navigation/help | Scenario 4 | Scenario 11 | TUI frontend-conformance |
+| Neighborhood/home operations | `scenarios/harness/real-runtime-mixed-startup-smoke.toml` | Scenarios 2, 7, 11, `home-roles.toml` | Shared semantic + TUI conformance |
 | Settings panels | `scenarios/harness/shared-settings-parity.toml` | Scenarios 8, 9, 10, 12 | TUI + Web |
 | Device add/remove | Scenario 12 | Scenario 8 | Mixed runtime |
 | Guardian/MFA ceremonies | Scenario 9 | Scenario 10 | TUI + Web |
@@ -87,10 +100,15 @@ These scenarios are maintained as focused supplements and smoke checks:
 Every parity-critical shared flow should have, in code and metadata:
 
 - a canonical shared flow identifier in `aura-app::ui_contract`
+- a typed semantic command path on both TUI and web
 - semantic action contracts with preconditions and terminal success/failure conditions
 - an authoritative readiness, event, or quiescence owner for waits
 - any parity exception recorded as typed metadata in `aura-app::ui_contract`
 - at least one canonical scenario reference in this report
+
+Shared-flow scenarios must not rely on raw PTY keys, raw selector clicks, raw
+label matching, or incidental focus-stepping as their primary mechanics.
+Those behaviors belong in frontend-conformance coverage instead.
 
 Frontend-specific flows may still have scenario coverage, but they are not part
 of the portability contract unless explicitly promoted into the shared contract.
@@ -98,12 +116,14 @@ of the portability contract unless explicitly promoted into the shared contract.
 ### PR Gate Expectations
 
 1. Changes to global navigation, settings, chat, contacts, neighborhood, or ceremonies should have at least one impacted canonical scenario updated or re-validated.
-2. Changes that affect both TUI and web behavior should be validated against parity-critical scenarios (1-11) in both runtimes.
+2. Changes that affect both TUI and web behavior should be validated against parity-critical scenarios in the shared semantic lane on both runtimes.
 3. Changes to mixed-instance behavior should include scenario 12 and/or 13 coverage.
 4. Mixed-runtime code exchange and chat routing changes should preserve the
    event-driven contract used by scenarios 12 and 13: invitation/device codes
    come from typed runtime-event payloads, and chat assertions bind to the
    selected shared channel rather than frontend-specific ordering.
+5. Changes to renderer-specific control wiring should add or update
+   frontend-conformance coverage rather than weakening the shared semantic lane.
 
 ### CI Enforcement
 
@@ -113,6 +133,9 @@ Fast CI currently uses two separate gates:
 - `AURA_ALLOW_FLOW_COVERAGE_SKIP=1` is a local-only escape hatch; CI rejects it
 - `just ci-ux-policy` enforces documentation and contributor-guidance updates for shared UX contract and determinism surfaces via `scripts/check/ux-guidance-sync.sh`
 - `just ci-harness-matrix-inventory` enforces that converted scenario classification drives the TUI/web matrix lanes
+- shared semantic scenarios and frontend-conformance scenarios are expected to
+  remain distinct classifications; CI policy should reject shared-flow drift
+  back to renderer-driven mechanics
 
 Current limitation:
 

@@ -60,6 +60,21 @@ pub enum ModalId {
     CapabilityConfig,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HarnessUiCommand {
+    NavigateScreen { screen: ScreenId },
+    ActivateControl { control_id: ControlId },
+    ActivateListItem { list_id: ListId, item_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "submission", rename_all = "snake_case")]
+pub enum HarnessUiCommandReceipt {
+    Accepted,
+    Rejected { reason: String },
+}
+
 impl ModalId {
     #[must_use]
     pub const fn web_dom_id(self) -> &'static str {
@@ -1237,7 +1252,7 @@ pub struct BrowserHarnessBridgeMethod {
     pub returns_render_signal: bool,
 }
 
-pub const BROWSER_HARNESS_BRIDGE_API_VERSION: u32 = 1;
+pub const BROWSER_HARNESS_BRIDGE_API_VERSION: u32 = 3;
 
 pub const BROWSER_HARNESS_BRIDGE_METHODS: &[BrowserHarnessBridgeMethod] = &[
     BrowserHarnessBridgeMethod {
@@ -1283,21 +1298,7 @@ pub const BROWSER_HARNESS_BRIDGE_METHODS: &[BrowserHarnessBridgeMethod] = &[
         returns_render_signal: false,
     },
     BrowserHarnessBridgeMethod {
-        name: "create_contact_invitation",
-        kind: BrowserHarnessBridgeMethodKind::Action,
-        deterministic: false,
-        returns_semantic_state: false,
-        returns_render_signal: false,
-    },
-    BrowserHarnessBridgeMethod {
-        name: "create_account",
-        kind: BrowserHarnessBridgeMethodKind::Action,
-        deterministic: false,
-        returns_semantic_state: false,
-        returns_render_signal: false,
-    },
-    BrowserHarnessBridgeMethod {
-        name: "create_home",
+        name: "submit_semantic_command",
         kind: BrowserHarnessBridgeMethodKind::Action,
         deterministic: false,
         returns_semantic_state: false,
@@ -3064,9 +3065,7 @@ mod tests {
             "snapshot",
             "ui_state",
             "read_clipboard",
-            "create_contact_invitation",
-            "create_account",
-            "create_home",
+            "submit_semantic_command",
             "get_authority_id",
             "tail_log",
             "root_structure",

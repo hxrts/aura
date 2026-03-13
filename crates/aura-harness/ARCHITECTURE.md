@@ -2,13 +2,13 @@
 
 ## Purpose
 Provide a multi-instance orchestration harness for Aura runtime testing and operator workflows.
-The crate coordinates local PTY and SSH-backed instances, exposes a structured tool API, executes semantic scenarios against real frontends, and produces replay and artifact bundles.
+The crate coordinates local PTY and SSH-backed instances, exposes a structured tool API, executes semantic scenarios against real frontends through a typed semantic command plane, and produces replay and artifact bundles.
 By default it is intended to validate the real Aura runtime and real user interfaces, not to act as a simulator-specific runner.
 
 ## Inputs
 - Run configuration files and semantic scenario files from the shared `aura-app` scenario contract.
 - Instance backend configuration for local PTY and SSH tunnel modes.
-- Tool API requests for screen capture, input injection, waits, lifecycle actions, and logs.
+- Tool API requests for semantic command submission, projection reads, readiness waits, lifecycle actions, and logs.
 - Optional replay bundle payloads for deterministic re-execution.
 
 ## Outputs
@@ -19,6 +19,7 @@ By default it is intended to validate the real Aura runtime and real user interf
 - Replay bundles and replay outcomes.
 - Preflight capability and environment reports.
 - Artifact bundles for CI and debugging.
+- Explicit separation between shared semantic-lane execution and frontend-conformance coverage.
 
 ## Key Modules
 - `config.rs`: Schema parsing and translation from the shared semantic scenario contract into executor steps.
@@ -42,6 +43,12 @@ By default it is intended to validate the real Aura runtime and real user interf
 - Semantic-first execution: core shared scenarios are expressed in semantic
   actions and typed ids rather than raw selectors, raw keypresses, or label
   matching.
+- Semantic-command-plane execution: shared scenarios submit typed semantic
+  commands to frontend bridges and await typed readiness, handle, quiescence,
+  runtime-event, or projection contracts rather than driving renderer I/O.
+- Frontend-conformance isolation: PTY keys, selector clicks, focus-stepping,
+  and other renderer-specific mechanics are conformance-only and must not be
+  the primary execution substrate for shared flows.
 - Semantic-first observation: structured `UiSnapshot` and render-heartbeat data
   are authoritative; DOM/text fallbacks are diagnostics only and must not
   resolve parity-critical success-path observation.
@@ -74,21 +81,44 @@ Contract alignment:
 
 ### InvariantSharedFlowExecutionIsSemantic
 Shared harness scenarios remain portable across TUI and web because they target
-the shared semantic contract rather than frontend mechanics.
+the shared semantic contract and shared command plane rather than frontend
+mechanics.
 
 Enforcement locus:
 - `config.rs` parses the shared scenario contract from `aura-app`.
-- `executor.rs` translates semantic steps into backend-specific actions.
+- `executor.rs` submits typed semantic commands, tracks handles/readiness, and
+  waits on authoritative projection changes.
+- `backend/` implements the shared semantic command-plane bridge per frontend.
 - policy checks reject raw mechanics in the core shared scenario set.
 
 Failure mode:
 - Scenarios become backend-specific and require per-frontend special-casing.
 - Browser/TUI parity regresses and core scenarios stop being reusable.
+- Product debugging gets coupled to renderer I/O timing and harness-specific
+  choreography bugs.
 
 Verification hooks:
 - `bash scripts/check/shared-flow-policy.sh`
 - `cargo test -p aura-harness --lib tui_semantic_actions_emit_expected_tool_requests`
 - `cargo test -p aura-harness --lib browser_driver_maps_shared_controls_to_selectors`
+
+### InvariantSharedSemanticLaneIsNotRendererDriven
+The main shared-flow lane debugs production workflows through semantic command
+submission and authoritative projections rather than incidental frontend I/O.
+
+Enforcement locus:
+- shared semantic backend traits expose submit/observe/projection surfaces.
+- frontend-conformance-only helpers are isolated from shared semantic execution.
+- CI policy checks reject raw PTY/selector/text mechanics in shared-flow paths.
+
+Failure mode:
+- harness failures become ambiguous mixes of product bugs and renderer I/O
+  races.
+- shared matrix stability depends on focus, timing, or DOM/PTY structure.
+
+Verification hooks:
+- `bash scripts/check/shared-flow-policy.sh`
+- `just ci-harness-matrix`
 
 ### InvariantObservationUsesAuthoritativeSemanticState
 The harness observes semantic state first and uses DOM/text fallbacks only for
@@ -111,7 +141,10 @@ Verification hooks:
 ## Boundaries
 - This crate is tooling and test infrastructure. It is not part of the runtime layer stack.
 - It does not define Aura effect traits, domain semantics, or protocol safety rules.
-- It drives instances through process, PTY, and tool API surfaces rather than direct protocol mutation.
+- It drives instances through process boundaries and typed semantic/tool API
+  surfaces rather than direct protocol mutation.
+- Frontend-conformance coverage may still use renderer-specific I/O, but that
+  coverage is explicitly separate from the shared semantic lane.
 - It may use direct OS operations for orchestration, capture, and preflight checks by design.
 
 ## Migration State

@@ -18,10 +18,7 @@ export const ACTION_METHODS: ReadonlySet<DriverMethod> = new Set([
   'navigate_screen',
   'click_button',
   'fill_input',
-  'create_contact_invitation',
-  'create_account',
-  'create_home',
-  'join_channel',
+  'submit_semantic_command',
   'reload_page',
   'inject_message'
 ]);

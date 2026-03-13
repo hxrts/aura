@@ -51,7 +51,9 @@ use crate::tui::components::{
     DiscoveredPeerInfo, Footer, NavBar, ToastContainer, ToastLevel, ToastMessage,
 };
 use crate::tui::context::IoContext;
-use crate::tui::harness_state::{maybe_export_ui_snapshot, TuiSemanticInputs};
+use crate::tui::harness_state::{
+    apply_harness_command, forward_harness_commands, maybe_export_ui_snapshot, TuiSemanticInputs,
+};
 use crate::tui::hooks::{AppCoreContext, CallbackContext};
 use crate::tui::keymap::{global_footer_hints, screen_footer_hints};
 use crate::tui::layout::dim;
@@ -61,7 +63,8 @@ use crate::tui::screens::app::subscriptions::{
     use_devices_subscription, use_discovered_peers_subscription, use_invitations_subscription,
     use_messages_subscription, use_nav_status_signals, use_neighborhood_home_meta_subscription,
     use_neighborhood_homes_subscription, use_notifications_subscription,
-    use_pending_requests_subscription, use_threshold_subscription, SharedNeighborhoodHomeMeta,
+    use_pending_requests_subscription, use_threshold_subscription, SharedDevices,
+    SharedNeighborhoodHomeMeta,
 };
 use crate::tui::screens::router::Screen;
 use crate::tui::screens::{
@@ -151,6 +154,54 @@ fn read_selected_notification(
     notifications
         .get(selected_index)
         .map(|(_, selection)| selection.clone())
+}
+
+fn execute_harness_followup_command(
+    state: &mut TuiState,
+    command: TuiCommand,
+    shared_devices: &SharedDevices,
+) {
+    match command {
+        TuiCommand::Dispatch(DispatchCommand::OpenDeviceSelectModal) => {
+            let current_devices = shared_devices
+                .read()
+                .map(|guard| guard.clone())
+                .unwrap_or_default();
+
+            if current_devices.is_empty() {
+                state.toast_info("No devices to remove");
+                return;
+            }
+
+            let has_removable = current_devices.iter().any(|device| !device.is_current);
+            if !has_removable {
+                state.toast_info("Cannot remove the current device");
+                return;
+            }
+
+            let devices = current_devices
+                .iter()
+                .map(|device| Device {
+                    id: device.id.clone(),
+                    name: if device.name.is_empty() {
+                        let short = device.id.chars().take(8).collect::<String>();
+                        format!("Device {short}")
+                    } else {
+                        device.name.clone()
+                    },
+                    is_current: device.is_current,
+                    last_seen: device.last_seen,
+                })
+                .collect::<Vec<_>>();
+
+            let modal_state =
+                crate::tui::state_machine::DeviceSelectModalState::with_devices(devices);
+            state
+                .modal_queue
+                .enqueue(crate::tui::state_machine::QueuedModal::SettingsDeviceSelect(modal_state));
+        }
+        _ => {}
+    }
 }
 
 /// Props for IoApp
@@ -561,10 +612,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         hooks.use_future({
             let mut nickname_suggestion_state = nickname_suggestion_state.clone();
             let app_core = app_ctx.app_core.clone();
+            let app_ctx_for_updates = app_ctx.clone();
             // Toast queue migration: mutate TuiState via TuiStateHandle (always bumps render version)
             let mut tui = tui.clone();
             let shared_contacts_for_updates = shared_contacts.clone();
             let shared_channels_for_updates = shared_channels.clone();
+            let shared_devices_for_updates = shared_devices.clone();
             let shared_messages_for_updates = shared_messages.clone();
             // Shared selection state for messages subscription synchronization
             let tui_selected_for_updates = tui_selected;
@@ -1572,6 +1625,52 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     crate::tui::state_machine::ToastLevel::Error
                                 );
                             }
+                        }
+
+                        UiUpdate::HarnessCommand { command, receipt } => {
+                            tui.with_mut(|state| {
+                                let followup = apply_harness_command(state, command);
+                                for command in followup {
+                                    execute_harness_followup_command(
+                                        state,
+                                        command,
+                                        &shared_devices_for_updates,
+                                    );
+                                }
+                            });
+                            let updated_state = tui.read_clone();
+                            let app_snapshot = app_ctx_for_updates.snapshot();
+                            let harness_contacts = shared_contacts_for_updates
+                                .read()
+                                .ok()
+                                .map(|contacts| contacts.clone())
+                                .unwrap_or_default();
+                            let harness_devices = shared_devices_for_updates
+                                .read()
+                                .ok()
+                                .map(|devices| devices.clone())
+                                .unwrap_or_default();
+                            let harness_channels = shared_channels_for_updates
+                                .read()
+                                .ok()
+                                .map(|channels| channels.clone())
+                                .unwrap_or_default();
+                            let harness_messages = shared_messages_for_updates
+                                .read()
+                                .ok()
+                                .map(|messages| messages.clone())
+                                .unwrap_or_default();
+                            maybe_export_ui_snapshot(
+                                &updated_state,
+                                TuiSemanticInputs {
+                                    app_snapshot: &app_snapshot,
+                                    contacts: &harness_contacts,
+                                    settings_devices: &harness_devices,
+                                    chat_channels: &harness_channels,
+                                    chat_messages: &harness_messages,
+                                },
+                            );
+                            receipt.complete(aura_app::ui::contract::HarnessUiCommandReceipt::Accepted);
                         }
                     }
                 }
@@ -3333,6 +3432,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     // Create the UI update channel for reactive updates
     let (update_tx, update_rx) = ui_update_channel();
     let update_rx_holder = Arc::new(Mutex::new(Some(update_rx)));
+    let harness_command_task = tokio::spawn(forward_harness_commands(update_tx.clone()));
 
     // Create effect dispatch callbacks using CallbackRegistry
     let ctx_arc = Arc::new(ctx);
@@ -3488,6 +3588,9 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
             }
         };
 
-        app.fullscreen().await
+        let result = app.fullscreen().await;
+        harness_command_task.abort();
+        let _ = harness_command_task.await;
+        result
     }
 }

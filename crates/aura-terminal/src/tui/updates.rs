@@ -43,8 +43,11 @@
 
 use crate::tui::components::ToastMessage;
 use crate::tui::types::{Device, MfaPolicy};
+use aura_app::ui::contract::HarnessUiCommand;
 use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact};
 use aura_core::types::Epoch;
+use std::sync::{Arc, Mutex};
+use tokio::sync::oneshot;
 
 /// Channel sender type for UI updates
 pub type UiUpdateSender = tokio::sync::mpsc::Sender<UiUpdate>;
@@ -56,6 +59,36 @@ pub type UiUpdateReceiver = tokio::sync::mpsc::Receiver<UiUpdate>;
 #[must_use]
 pub fn ui_update_channel() -> (UiUpdateSender, UiUpdateReceiver) {
     tokio::sync::mpsc::channel(1024)
+}
+
+#[derive(Clone)]
+pub struct HarnessCommandReceiptHandle {
+    sender: Arc<Mutex<Option<oneshot::Sender<aura_app::ui::contract::HarnessUiCommandReceipt>>>>,
+}
+
+impl std::fmt::Debug for HarnessCommandReceiptHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HarnessCommandReceiptHandle").finish()
+    }
+}
+
+impl HarnessCommandReceiptHandle {
+    #[must_use]
+    pub fn new(
+        sender: oneshot::Sender<aura_app::ui::contract::HarnessUiCommandReceipt>,
+    ) -> Self {
+        Self {
+            sender: Arc::new(Mutex::new(Some(sender))),
+        }
+    }
+
+    pub fn complete(&self, receipt: aura_app::ui::contract::HarnessUiCommandReceipt) {
+        if let Ok(mut sender) = self.sender.lock() {
+            if let Some(sender) = sender.take() {
+                let _ = sender.send(receipt);
+            }
+        }
+    }
 }
 
 /// All UI updates flow through this enum.
@@ -114,6 +147,12 @@ pub enum UiUpdate {
         pending_epoch: Option<Epoch>,
         agreement_mode: aura_core::threshold::AgreementMode,
         reversion_risk: bool,
+    },
+
+    /// A typed harness command entered through the frontend command bridge.
+    HarnessCommand {
+        command: HarnessUiCommand,
+        receipt: HarnessCommandReceiptHandle,
     },
 
     // =========================================================================

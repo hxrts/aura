@@ -27,7 +27,8 @@ use tokio::time::timeout;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
 // Implementation of TransportEffects
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl TransportEffects for AuraEffectSystem {
     async fn send_envelope(&self, envelope: TransportEnvelope) -> Result<(), TransportError> {
         let payload_len = envelope.payload.len();

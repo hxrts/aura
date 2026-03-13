@@ -19,23 +19,34 @@ Aura's runtime harness is the primary end-to-end validation lane.
 Default harness runs exercise the real Aura runtime with real TUI and webfront ends.
 The goal is to catch integration failures in the actual product, not just prove a model.
 
+The harness now has two distinct responsibilities:
+
+- shared semantic lane:
+  - executes parity-critical shared flows through the shared semantic command plane
+  - waits on typed handles, readiness facts, runtime events, quiescence, and authoritative projections
+  - is the primary lane for debugging production code paths
+- frontend-conformance lane:
+  - validates renderer-specific control wiring, DOM structure, PTY key mappings, and shell-level integration
+  - may use renderer-specific mechanics intentionally
+  - must not be the primary execution substrate for shared scenarios
+
 Quint and other verification tools generate models, traces, and invariants.
 They are not a replacement for real frontends.
 
-`aura-app` owns the shared semantic scenario and UI contracts.
-`aura-harness` consumes those contracts and drives real frontends.
+`aura-app` owns the shared semantic scenario, command-plane, and UI contracts.
+`aura-harness` consumes those contracts and submits shared semantic commands to real frontends.
 `aura-simulator` is the separate alternate runtime substrate.
 
 Use this lane matrix when selecting harness mode.
 
 | Lane | Backend | Command |
 |------|---------|---------|
-| Local deterministic | `mock` | `just harness-run -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/local-discovery-smoke.toml` |
-| Patchbay relay realism | `patchbay` | `just harness-run -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/scenario2-social-topology-e2e.toml --network-backend patchbay` |
-| Patchbay-vm relay realism | `patchbay-vm` | `just harness-run -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/scenario2-social-topology-e2e.toml --network-backend patchbay-vm` |
-| Browser | Playwright | `just harness-run-browser scenarios/harness/local-discovery-smoke.toml` |
+| Local deterministic | `mock` | `just harness-run -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/real-runtime-mixed-startup-smoke.toml` |
+| Patchbay relay realism | `patchbay` | `just harness-run -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/real-runtime-mixed-startup-smoke.toml --network-backend patchbay` |
+| Patchbay-vm relay realism | `patchbay-vm` | `just harness-run -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/real-runtime-mixed-startup-smoke.toml --network-backend patchbay-vm` |
+| Browser | Playwright | `just harness-run-browser scenarios/harness/semantic-observation-browser-smoke.toml` |
 
-All shared flows should use typed scenario primitives and structured snapshot waits.
+All shared flows should use typed scenario primitives, typed semantic command submission, and structured snapshot/readiness waits.
 
 `aura-app::ui_contract` is the canonical module for shared flow support.
 It defines `SharedFlowId`, `SHARED_FLOW_SUPPORT`, `SHARED_FLOW_SCENARIO_COVERAGE`,
@@ -58,6 +69,14 @@ contract surface. It owns:
 The web shell and the TUI must consume that contract rather than deriving local
 IDs, local focus semantics, or ad hoc flow metadata.
 
+For parity-critical shared-flow execution:
+
+- shared scenarios must submit typed semantic commands through the frontend bridge
+- shared scenarios must not use raw PTY keys, raw selector clicks, raw label matching, or incidental focus stepping as primary mechanics
+- frontend-specific UI I/O remains valuable, but it belongs in frontend-conformance coverage rather than the main shared semantic lane
+- unsupported semantic commands must fail closed and diagnostically
+- command submission must enter the frontend through its real update/event path, not render-coupled polling or ad hoc harness shims
+
 For parity-critical observation:
 
 - `UiSnapshot` and render-convergence data are authoritative
@@ -70,6 +89,7 @@ For parity-critical observation:
 For parity-critical waits and assertions:
 
 - waits must bind to declared readiness, event, or quiescence conditions
+- waits may also bind to typed operation handles or strictly newer authoritative projections when the shared contract defines them
 - raw sleeps, redraw polling, DOM scraping, and fallback text matching are diagnostics only
 - harness mode may change instrumentation and render stability, but it must not change business-flow semantics
 

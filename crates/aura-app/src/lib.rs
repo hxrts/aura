@@ -162,9 +162,12 @@ pub use crate::runtime_bridge::{
 pub use crate::scenario_contract::{
     ActorId as ScenarioActorId, EnvironmentAction as SemanticEnvironmentAction,
     Expectation as ScenarioExpectation, InputKey as ScenarioInputKey,
-    ScenarioAction as SemanticScenarioAction, ScenarioDefinition,
-    ScenarioStep as SemanticScenarioStep, UiAction as SemanticUiAction,
-    VariableAction as SemanticVariableAction,
+    IntentAction as SemanticIntentAction, ScenarioAction as SemanticScenarioAction,
+    ScenarioDefinition, ScenarioStep as SemanticScenarioStep, SemanticBarrierRef,
+    SemanticCommandRequest, SemanticCommandResponse, SemanticCommandSupport, SemanticCommandValue,
+    SemanticSubmissionHandle, SettingsSection as SemanticSettingsSection, SubmissionState,
+    SubmittedAction as SubmittedSemanticAction, UiAction as SemanticUiAction, UiOperationHandle,
+    VariableAction as SemanticVariableAction, SEMANTIC_COMMAND_SUPPORT,
 };
 pub use crate::ui_contract::{
     ConfirmationState, ControlId, FieldId, ListId, MessageSnapshot, ModalId, OperationId,

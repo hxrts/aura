@@ -7,7 +7,7 @@ use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
 use serde::{Deserialize, Serialize};
 
 use crate::api_version::{negotiate, TOOL_API_DEFAULT_VERSION, TOOL_API_VERSIONS};
-use crate::backend::{ContactInvitationCode, SubmittedAction};
+use crate::backend::{SemanticCommandRequest, SemanticCommandResponse};
 use crate::config::{RunConfig, RuntimeSubstrate, ScreenSource};
 use crate::coordinator::HarnessCoordinator;
 use crate::introspection::{
@@ -231,74 +231,13 @@ impl ToolApi {
         self.coordinator.ui_snapshot(instance_id)
     }
 
-    pub fn submit_create_account(
+    pub fn submit_semantic_command(
         &mut self,
         instance_id: &str,
-        account_name: &str,
-    ) -> anyhow::Result<SubmittedAction<()>> {
+        request: SemanticCommandRequest,
+    ) -> anyhow::Result<SemanticCommandResponse> {
         self.coordinator
-            .create_account_via_ui(instance_id, account_name)
-    }
-
-    pub fn submit_create_home(
-        &mut self,
-        instance_id: &str,
-        home_name: &str,
-    ) -> anyhow::Result<SubmittedAction<()>> {
-        self.coordinator.create_home_via_ui(instance_id, home_name)
-    }
-
-    pub fn submit_create_contact_invitation(
-        &mut self,
-        instance_id: &str,
-        receiver_authority_id: &str,
-    ) -> anyhow::Result<SubmittedAction<ContactInvitationCode>> {
-        self.coordinator
-            .create_contact_invitation_via_ui(instance_id, receiver_authority_id)
-    }
-
-    pub fn submit_accept_contact_invitation(
-        &mut self,
-        instance_id: &str,
-        code: &str,
-    ) -> anyhow::Result<SubmittedAction<()>> {
-        self.coordinator
-            .accept_contact_invitation_via_ui(instance_id, code)
-    }
-
-    pub fn submit_invite_actor_to_channel(
-        &mut self,
-        instance_id: &str,
-        authority_id: &str,
-    ) -> anyhow::Result<SubmittedAction<()>> {
-        self.coordinator
-            .invite_actor_to_channel_via_ui(instance_id, authority_id)
-    }
-
-    pub fn submit_accept_pending_channel_invitation(
-        &mut self,
-        instance_id: &str,
-    ) -> anyhow::Result<SubmittedAction<()>> {
-        self.coordinator
-            .accept_pending_channel_invitation_via_ui(instance_id)
-    }
-
-    pub fn submit_join_channel(
-        &mut self,
-        instance_id: &str,
-        channel_name: &str,
-    ) -> anyhow::Result<SubmittedAction<()>> {
-        self.coordinator
-            .join_channel_via_ui(instance_id, channel_name)
-    }
-
-    pub fn submit_send_chat_message(
-        &mut self,
-        instance_id: &str,
-        message: &str,
-    ) -> anyhow::Result<SubmittedAction<()>> {
-        self.coordinator
-            .send_chat_message_via_ui(instance_id, message)
+            .submit_semantic_command_via_ui(instance_id, request)
     }
 
     pub fn wait_for_ui_snapshot_event(

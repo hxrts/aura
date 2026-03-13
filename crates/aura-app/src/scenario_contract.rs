@@ -6,8 +6,9 @@
 #![allow(missing_docs)] // Shared semantic contract - expanded incrementally during migration.
 
 use crate::ui_contract::{
-    ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState,
-    ProjectionRevision, QuiescenceState, RuntimeEventKind, ScreenId, ToastKind, UiReadiness,
+    ConfirmationState, ControlId, FieldId, FlowAvailability, FrontendId, ListId, ModalId,
+    OperationId, OperationInstanceId, OperationState, ProjectionRevision, QuiescenceState,
+    RuntimeEventKind, ScreenId, ToastKind, UiReadiness,
 };
 use serde::{Deserialize, Serialize};
 
@@ -103,6 +104,106 @@ pub struct SharedActionHandle {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticCommandRequest {
+    pub intent: IntentAction,
+    pub contract: SharedActionContract,
+}
+
+impl SemanticCommandRequest {
+    #[must_use]
+    pub fn new(intent: IntentAction) -> Self {
+        let contract = intent.contract();
+        Self { intent, contract }
+    }
+
+    #[must_use]
+    pub fn kind(&self) -> IntentKind {
+        self.intent.kind()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiOperationHandle {
+    pub id: OperationId,
+    pub instance_id: OperationInstanceId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct SemanticSubmissionHandle {
+    pub ui_operation: Option<UiOperationHandle>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubmissionState {
+    Accepted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubmittedAction<T> {
+    pub value: T,
+    pub submission: SubmissionState,
+    pub handle: SemanticSubmissionHandle,
+}
+
+impl<T> SubmittedAction<T> {
+    #[must_use]
+    pub fn without_handle(value: T) -> Self {
+        Self {
+            value,
+            submission: SubmissionState::Accepted,
+            handle: SemanticSubmissionHandle::default(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_ui_operation(value: T, handle: UiOperationHandle) -> Self {
+        Self {
+            value,
+            submission: SubmissionState::Accepted,
+            handle: SemanticSubmissionHandle {
+                ui_operation: Some(handle),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SemanticCommandValue {
+    None,
+    ContactInvitationCode { code: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticCommandResponse {
+    pub submission: SubmissionState,
+    pub handle: SemanticSubmissionHandle,
+    pub value: SemanticCommandValue,
+}
+
+impl SemanticCommandResponse {
+    #[must_use]
+    pub fn accepted(value: SemanticCommandValue) -> Self {
+        Self {
+            submission: SubmissionState::Accepted,
+            handle: SemanticSubmissionHandle::default(),
+            value,
+        }
+    }
+
+    #[must_use]
+    pub fn accepted_without_value() -> Self {
+        Self::accepted(SemanticCommandValue::None)
+    }
+
+    #[must_use]
+    pub fn accepted_contact_invitation_code(code: String) -> Self {
+        Self::accepted(SemanticCommandValue::ContactInvitationCode { code })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ActionPrecondition {
     Readiness(UiReadiness),
@@ -160,6 +261,156 @@ pub enum BarrierDeclaration {
         operation_id: OperationId,
         state: OperationState,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SemanticBarrierRef {
+    Readiness {
+        readiness: UiReadiness,
+    },
+    Quiescence {
+        state: QuiescenceState,
+    },
+    Screen {
+        screen: ScreenId,
+    },
+    Modal {
+        modal: ModalId,
+    },
+    RuntimeEvent {
+        event: RuntimeEventKind,
+    },
+    OperationState {
+        operation_id: OperationId,
+        state: OperationState,
+    },
+}
+
+impl SemanticBarrierRef {
+    #[must_use]
+    pub fn matches_declaration(&self, barrier: &BarrierDeclaration) -> bool {
+        match (self, barrier) {
+            (Self::Readiness { readiness: actual }, BarrierDeclaration::Readiness(expected)) => {
+                actual == expected
+            }
+            (Self::Quiescence { state: actual }, BarrierDeclaration::Quiescence(expected)) => {
+                actual == expected
+            }
+            (Self::Screen { screen: actual }, BarrierDeclaration::Screen(expected)) => {
+                actual == expected
+            }
+            (Self::Modal { modal: actual }, BarrierDeclaration::Modal(expected)) => {
+                actual == expected
+            }
+            (Self::RuntimeEvent { event: actual }, BarrierDeclaration::RuntimeEvent(expected)) => {
+                actual == expected
+            }
+            (
+                Self::OperationState {
+                    operation_id: actual_operation_id,
+                    state: actual_state,
+                },
+                BarrierDeclaration::OperationState {
+                    operation_id: expected_operation_id,
+                    state: expected_state,
+                },
+            ) => actual_operation_id == expected_operation_id && actual_state == expected_state,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticCommandSupport {
+    pub intent: IntentKind,
+    pub web: FlowAvailability,
+    pub tui: FlowAvailability,
+}
+
+pub const SEMANTIC_COMMAND_SUPPORT: &[SemanticCommandSupport] = &[
+    SemanticCommandSupport {
+        intent: IntentKind::OpenScreen,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SemanticCommandSupport {
+        intent: IntentKind::CreateAccount,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SemanticCommandSupport {
+        intent: IntentKind::CreateHome,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SemanticCommandSupport {
+        intent: IntentKind::StartDeviceEnrollment,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SemanticCommandSupport {
+        intent: IntentKind::ImportDeviceEnrollmentCode,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SemanticCommandSupport {
+        intent: IntentKind::OpenSettingsSection,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SemanticCommandSupport {
+        intent: IntentKind::RemoveSelectedDevice,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SemanticCommandSupport {
+        intent: IntentKind::CreateContactInvitation,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SemanticCommandSupport {
+        intent: IntentKind::AcceptContactInvitation,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SemanticCommandSupport {
+        intent: IntentKind::AcceptPendingChannelInvitation,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SemanticCommandSupport {
+        intent: IntentKind::JoinChannel,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SemanticCommandSupport {
+        intent: IntentKind::InviteActorToChannel,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SemanticCommandSupport {
+        intent: IntentKind::SendChatMessage,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+];
+
+#[must_use]
+pub fn semantic_command_support(intent: IntentKind) -> &'static SemanticCommandSupport {
+    SEMANTIC_COMMAND_SUPPORT
+        .iter()
+        .find(|support| support.intent == intent)
+        .unwrap_or_else(|| panic!("missing semantic command support for {intent:?}"))
+}
+
+#[must_use]
+pub fn frontend_supports_semantic_command(frontend: FrontendId, intent: IntentKind) -> bool {
+    let support = semantic_command_support(intent);
+    match frontend {
+        FrontendId::Web => support.web == FlowAvailability::Supported,
+        FrontendId::Tui => support.tui == FlowAvailability::Supported,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -727,7 +978,7 @@ impl IntentAction {
                     )],
                     violation_code: "channel_membership_convergence_required".to_string(),
                 }),
-                focus_semantics: FocusSemantics::None,
+                focus_semantics: FocusSemantics::Control(ControlId::ModalConfirmButton),
                 selection_semantics: SelectionSemantics::PreservesCurrent,
                 transitions: vec![AuthoritativeTransitionKind::Operation(
                     OperationId::invitation_accept(),
@@ -764,8 +1015,13 @@ impl IntentAction {
                 post_operation_convergence: None,
                 focus_semantics: FocusSemantics::Control(ControlId::ChatNewGroupButton),
                 selection_semantics: SelectionSemantics::List(ListId::Channels),
-                transitions: vec![],
-                terminal_success: vec![TerminalSuccessKind::Readiness(UiReadiness::Ready)],
+                transitions: vec![AuthoritativeTransitionKind::RuntimeEvent(
+                    RuntimeEventKind::ChannelJoined,
+                )],
+                terminal_success: vec![
+                    TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::ChannelJoined),
+                    TerminalSuccessKind::Readiness(UiReadiness::Ready),
+                ],
                 terminal_failure_codes: vec![
                     "join_channel_issue_failed".to_string(),
                     "join_channel_timeout".to_string(),
@@ -789,10 +1045,18 @@ impl IntentAction {
                             operation_id: OperationId::invitation_create(),
                             state: OperationState::Succeeded,
                         },
+                        BarrierDeclaration::RuntimeEvent(
+                            RuntimeEventKind::PendingHomeInvitationReady,
+                        ),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
                     ],
                 },
-                post_operation_convergence: None,
+                post_operation_convergence: Some(PostOperationConvergenceContract {
+                    required_before_next_intent: vec![BarrierDeclaration::RuntimeEvent(
+                        RuntimeEventKind::PendingHomeInvitationReady,
+                    )],
+                    violation_code: "pending_home_invitation_convergence_required".to_string(),
+                }),
                 focus_semantics: FocusSemantics::Control(ControlId::ContactsInviteToChannelButton),
                 selection_semantics: SelectionSemantics::List(ListId::Contacts),
                 transitions: vec![AuthoritativeTransitionKind::Operation(
@@ -803,6 +1067,7 @@ impl IntentAction {
                         operation_id: OperationId::invitation_create(),
                         state: OperationState::Succeeded,
                     },
+                    TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::PendingHomeInvitationReady),
                     TerminalSuccessKind::Readiness(UiReadiness::Ready),
                 ],
                 terminal_failure_codes: vec![
@@ -1326,12 +1591,17 @@ fn required<T>(value: Option<T>, field: &str, action: SemanticActionKind) -> Res
 #[cfg(test)]
 mod tests {
     use super::{
-        BarrierDeclaration, Expectation, FieldId, FocusSemantics, IntentAction, IntentKind,
-        ScenarioAction, ScenarioDefinition, ScenarioStep, ScreenId, SelectionSemantics,
-        SemanticActionKind, SemanticScenarioFile, SemanticScenarioFileStep, SettingsSection,
-        UiAction,
+        frontend_supports_semantic_command, semantic_command_support, BarrierDeclaration,
+        Expectation, FieldId, FocusSemantics, IntentAction, IntentKind, ScenarioAction,
+        ScenarioDefinition, ScenarioStep, ScreenId, SelectionSemantics, SemanticActionKind,
+        SemanticBarrierRef, SemanticCommandRequest, SemanticScenarioFile, SemanticScenarioFileStep,
+        SettingsSection, SubmissionState, SubmittedAction, UiAction, UiOperationHandle,
+        SEMANTIC_COMMAND_SUPPORT,
     };
-    use crate::ui_contract::RuntimeEventKind;
+    use crate::ui_contract::{
+        FlowAvailability, FrontendId, ModalId, OperationId, OperationInstanceId, OperationState,
+        RuntimeEventKind, UiReadiness,
+    };
 
     #[test]
     fn semantic_file_converts_to_definition() {
@@ -1802,5 +2072,81 @@ mod tests {
         }
         .contract();
         assert!(send_message_contract.post_operation_convergence.is_none());
+    }
+
+    #[test]
+    fn semantic_command_request_uses_intent_contract() {
+        let request = SemanticCommandRequest::new(IntentAction::CreateAccount {
+            account_name: "alice".to_string(),
+        });
+
+        assert_eq!(request.kind(), IntentKind::CreateAccount);
+        assert_eq!(request.contract.intent, IntentKind::CreateAccount);
+        assert_eq!(
+            request.contract.barriers.before_next_intent,
+            vec![
+                BarrierDeclaration::OperationState {
+                    operation_id: OperationId::account_create(),
+                    state: OperationState::Succeeded,
+                },
+                BarrierDeclaration::Screen(ScreenId::Neighborhood),
+                BarrierDeclaration::Readiness(UiReadiness::Ready),
+            ]
+        );
+    }
+
+    #[test]
+    fn submitted_action_without_handle_is_accepted() {
+        let submitted = SubmittedAction::without_handle("ok".to_string());
+        assert_eq!(submitted.value, "ok");
+        assert_eq!(submitted.submission, SubmissionState::Accepted);
+        assert!(submitted.handle.ui_operation.is_none());
+    }
+
+    #[test]
+    fn submitted_action_with_ui_operation_preserves_handle() {
+        let handle = UiOperationHandle {
+            id: OperationId::create_home(),
+            instance_id: OperationInstanceId("op-1".to_string()),
+        };
+        let submitted = SubmittedAction::with_ui_operation((), handle.clone());
+
+        assert_eq!(submitted.submission, SubmissionState::Accepted);
+        assert_eq!(submitted.handle.ui_operation, Some(handle));
+    }
+
+    #[test]
+    fn semantic_barrier_ref_matches_typed_declarations() {
+        assert!(SemanticBarrierRef::Screen {
+            screen: ScreenId::Chat
+        }
+        .matches_declaration(&BarrierDeclaration::Screen(ScreenId::Chat)));
+        assert!(SemanticBarrierRef::Readiness {
+            readiness: UiReadiness::Ready
+        }
+        .matches_declaration(&BarrierDeclaration::Readiness(UiReadiness::Ready)));
+        assert!(SemanticBarrierRef::RuntimeEvent {
+            event: RuntimeEventKind::MessageCommitted
+        }
+        .matches_declaration(&BarrierDeclaration::RuntimeEvent(
+            RuntimeEventKind::MessageCommitted,
+        )));
+        assert!(!SemanticBarrierRef::Modal {
+            modal: ModalId::AddDevice
+        }
+        .matches_declaration(&BarrierDeclaration::Screen(ScreenId::Settings)));
+    }
+
+    #[test]
+    fn semantic_command_support_covers_every_intent_kind() {
+        assert_eq!(SEMANTIC_COMMAND_SUPPORT.len(), IntentKind::ALL.len());
+        for intent in IntentKind::ALL {
+            let support = semantic_command_support(intent);
+            assert_eq!(support.intent, intent);
+            assert_eq!(support.web, FlowAvailability::Supported);
+            assert_eq!(support.tui, FlowAvailability::Supported);
+            assert!(frontend_supports_semantic_command(FrontendId::Web, intent));
+            assert!(frontend_supports_semantic_command(FrontendId::Tui, intent));
+        }
     }
 }

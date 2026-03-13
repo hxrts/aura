@@ -175,7 +175,8 @@ pub use runtime::{
     AuraHandlerAdapter as ChoreographyAdapter, EffectContext, EffectExecutor, EffectOperation,
     EffectRegistry, EffectRegistryError, EffectRegistryExt, EffectSystemBuilder, EffectType,
     FlowBudgetManager, LifecycleManager, OperationSessionId, ReceiptManager, RuntimeBuilder,
-    RuntimeChoreographySessionId, RuntimeSystem, SharedTransport,
+    RuntimeChoreographySessionId, RuntimeService, RuntimeServiceContext, RuntimeSystem,
+    RuntimeTaskRegistry, ServiceError, ServiceErrorKind, ServiceHealth, SharedTransport,
 };
 
 // Protocol adapter for choreography execution (used by tests)

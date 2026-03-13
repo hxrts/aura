@@ -43,10 +43,10 @@ for path in "${inventory_paths[@]}"; do
   [[ -f "$path" ]] || fail "inventory references missing scenario: $path"
 done
 
-for class in shared web_only tui_only to_be_removed; do
+for class in shared web_conformance tui_conformance to_be_removed; do
   printf '%s\n' "${inventory_classes[@]}" | rg -qx "$class" >/dev/null || true
 done
-if printf '%s\n' "${inventory_classes[@]}" | rg -vx '(shared|web_only|tui_only|to_be_removed)' >/tmp/harness-inventory-bad-class.$$ 2>/dev/null; then
+if printf '%s\n' "${inventory_classes[@]}" | rg -vx '(shared|web_conformance|tui_conformance|to_be_removed)' >/tmp/harness-inventory-bad-class.$$ 2>/dev/null; then
   cat /tmp/harness-inventory-bad-class.$$ >&2
   rm -f /tmp/harness-inventory-bad-class.$$
   fail "inventory contains invalid classification"

@@ -19,7 +19,10 @@ use anyhow::{anyhow, bail, Result};
 use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
 use tokio::time::Instant;
 
-use crate::backend::{BackendHandle, ContactInvitationCode, SubmittedAction};
+use crate::backend::{
+    BackendHandle, SemanticCommandRequest as BackendSemanticCommandRequest,
+    SemanticCommandResponse as BackendSemanticCommandResponse,
+};
 use crate::config::{InstanceMode, RunConfig, RuntimeSubstrate, ScreenSource};
 use crate::events::EventStream;
 use crate::runtime_substrate::RuntimeSubstrateController;
@@ -694,165 +697,26 @@ impl HarnessCoordinator {
             .map(|submitted| submitted.value.code)
     }
 
-    pub fn create_account_via_ui(
+    pub fn submit_semantic_command_via_ui(
         &mut self,
         instance_id: &str,
-        account_name: &str,
-    ) -> Result<SubmittedAction<()>> {
+        request: BackendSemanticCommandRequest,
+    ) -> Result<BackendSemanticCommandResponse> {
         let backend = self
             .backends
             .get_mut(instance_id)
             .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
         self.events.push(
             "action",
-            "create_account_via_ui",
-            Some(instance_id.to_string()),
-            serde_json::json!({ "account_name": account_name }),
-        );
-        backend
-            .as_shared_semantic_mut()?
-            .submit_create_account(account_name)
-    }
-
-    pub fn create_home_via_ui(
-        &mut self,
-        instance_id: &str,
-        home_name: &str,
-    ) -> Result<SubmittedAction<()>> {
-        let backend = self
-            .backends
-            .get_mut(instance_id)
-            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        self.events.push(
-            "action",
-            "create_home_via_ui",
-            Some(instance_id.to_string()),
-            serde_json::json!({ "home_name": home_name }),
-        );
-        backend
-            .as_shared_semantic_mut()?
-            .submit_create_home(home_name)
-    }
-
-    pub fn create_contact_invitation_via_ui(
-        &mut self,
-        instance_id: &str,
-        receiver_authority_id: &str,
-    ) -> Result<SubmittedAction<ContactInvitationCode>> {
-        let backend = self
-            .backends
-            .get_mut(instance_id)
-            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        self.events.push(
-            "action",
-            "create_contact_invitation_via_ui",
+            "submit_semantic_command_via_ui",
             Some(instance_id.to_string()),
             serde_json::json!({
-                "receiver_authority_id": receiver_authority_id,
+                "intent": format!("{:?}", request.kind()).to_ascii_lowercase(),
             }),
         );
         backend
             .as_shared_semantic_mut()?
-            .submit_create_contact_invitation(receiver_authority_id)
-    }
-
-    pub fn accept_contact_invitation_via_ui(
-        &mut self,
-        instance_id: &str,
-        code: &str,
-    ) -> Result<SubmittedAction<()>> {
-        let backend = self
-            .backends
-            .get_mut(instance_id)
-            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        self.events.push(
-            "action",
-            "accept_contact_invitation_via_ui",
-            Some(instance_id.to_string()),
-            serde_json::json!({ "bytes": code.len() }),
-        );
-        backend
-            .as_shared_semantic_mut()?
-            .submit_accept_contact_invitation(code)
-    }
-
-    pub fn invite_actor_to_channel_via_ui(
-        &mut self,
-        instance_id: &str,
-        authority_id: &str,
-    ) -> Result<SubmittedAction<()>> {
-        let backend = self
-            .backends
-            .get_mut(instance_id)
-            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        self.events.push(
-            "action",
-            "invite_actor_to_channel_via_ui",
-            Some(instance_id.to_string()),
-            serde_json::json!({ "authority_id": authority_id }),
-        );
-        backend
-            .as_shared_semantic_mut()?
-            .submit_invite_actor_to_channel(authority_id)
-    }
-
-    pub fn accept_pending_channel_invitation_via_ui(
-        &mut self,
-        instance_id: &str,
-    ) -> Result<SubmittedAction<()>> {
-        let backend = self
-            .backends
-            .get_mut(instance_id)
-            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        self.events.push(
-            "action",
-            "accept_pending_channel_invitation_via_ui",
-            Some(instance_id.to_string()),
-            serde_json::json!({}),
-        );
-        backend
-            .as_shared_semantic_mut()?
-            .submit_accept_pending_channel_invitation()
-    }
-
-    pub fn join_channel_via_ui(
-        &mut self,
-        instance_id: &str,
-        channel_name: &str,
-    ) -> Result<SubmittedAction<()>> {
-        let backend = self
-            .backends
-            .get_mut(instance_id)
-            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        self.events.push(
-            "action",
-            "join_channel_via_ui",
-            Some(instance_id.to_string()),
-            serde_json::json!({ "channel_name": channel_name }),
-        );
-        backend
-            .as_shared_semantic_mut()?
-            .submit_join_channel(channel_name)
-    }
-
-    pub fn send_chat_message_via_ui(
-        &mut self,
-        instance_id: &str,
-        message: &str,
-    ) -> Result<SubmittedAction<()>> {
-        let backend = self
-            .backends
-            .get_mut(instance_id)
-            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        self.events.push(
-            "action",
-            "send_chat_message_via_ui",
-            Some(instance_id.to_string()),
-            serde_json::json!({ "bytes": message.len() }),
-        );
-        backend
-            .as_shared_semantic_mut()?
-            .submit_send_chat_message(message)
+            .submit_semantic_command(request)
     }
 
     pub fn wait_for(

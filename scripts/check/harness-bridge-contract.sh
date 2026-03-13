@@ -57,7 +57,7 @@ mapfile -t exported_observation_methods < <(extract_bridge_methods observe)
 mapfile -t exported_methods < <(
   printf '%s\n' "${exported_action_methods[@]}" "${exported_observation_methods[@]}" \
     | awk 'NF { print }' \
-    | rg '^(send_keys|send_key|navigate_screen|snapshot|ui_state|read_clipboard|create_contact_invitation|create_account|create_home|get_authority_id|tail_log|root_structure|inject_message)$' \
+    | rg '^(send_keys|send_key|navigate_screen|snapshot|ui_state|read_clipboard|submit_semantic_command|get_authority_id|tail_log|root_structure|inject_message)$' \
     | sort -u
 )
 
@@ -89,7 +89,7 @@ fi
 rg -q '__AURA_HARNESS_OBSERVE__' "$bridge_impl" \
   || fail "browser observation surface global is not exported"
 if printf '%s\n' "${exported_observation_methods[@]}" \
-  | rg -q '^(send_keys|send_key|navigate_screen|create_contact_invitation|create_account|create_home|inject_message)$'; then
+  | rg -q '^(send_keys|send_key|navigate_screen|submit_semantic_command|inject_message)$'; then
   fail "browser observation surface exports action methods"
 fi
 
@@ -100,5 +100,6 @@ cargo test -p aura-app tui_observation_surface_contract_is_versioned_and_read_on
 cargo test -p aura-app harness_shell_structure_accepts_exactly_one_app_shell --quiet
 cargo test -p aura-app harness_shell_structure_accepts_single_onboarding_shell --quiet
 cargo test -p aura-app harness_shell_structure_rejects_duplicate_or_ambiguous_roots --quiet
+cargo test -p aura-harness playwright_semantic_bridge_failure_and_projection_contracts_are_explicit --quiet
 
 echo "harness bridge contract: clean"

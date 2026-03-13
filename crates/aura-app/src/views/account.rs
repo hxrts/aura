@@ -153,6 +153,9 @@ impl std::fmt::Display for BootstrapEvent {
 pub struct PendingAccountBootstrap {
     /// Validated nickname suggestion chosen during onboarding.
     pub nickname_suggestion: String,
+    /// Pending device-enrollment code to consume once a runtime is available.
+    #[serde(default)]
+    pub device_enrollment_code: Option<String>,
 }
 
 impl PendingAccountBootstrap {
@@ -161,7 +164,21 @@ impl PendingAccountBootstrap {
     pub fn new(nickname_suggestion: String) -> Self {
         Self {
             nickname_suggestion,
+            device_enrollment_code: None,
         }
+    }
+
+    /// Attach a pending device-enrollment code to the bootstrap record.
+    #[must_use]
+    pub fn with_device_enrollment_code(mut self, device_enrollment_code: String) -> Self {
+        self.device_enrollment_code = Some(device_enrollment_code);
+        self
+    }
+
+    /// Returns true when the bootstrap record still has a staged enrollment import.
+    #[must_use]
+    pub fn has_pending_device_enrollment(&self) -> bool {
+        self.device_enrollment_code.is_some()
     }
 }
 

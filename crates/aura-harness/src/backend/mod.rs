@@ -2,13 +2,17 @@ pub mod local_pty;
 pub mod playwright_browser;
 pub mod ssh_tunnel;
 
-use anyhow::{bail, Result};
-use aura_app::scenario_contract::IntentKind;
+use anyhow::{anyhow, bail, Result};
+use aura_app::scenario_contract::IntentAction;
+pub use aura_app::scenario_contract::{
+    SemanticCommandRequest, SemanticCommandResponse, SemanticCommandValue, SubmissionState,
+    SubmittedAction, UiOperationHandle,
+};
 use aura_app::ui::contract::{
     ControlId, FieldId, ListId, ModalId, OperationId, OperationInstanceId, OperationState,
     ScreenId, UiSnapshot,
 };
-use serde::{Deserialize, Serialize};
+use aura_app::ui_contract::ProjectionRevision;
 use std::time::Duration;
 use tokio::time::Instant;
 
@@ -27,102 +31,10 @@ pub struct ContactInvitationCode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UiOperationHandle {
-    pub id: OperationId,
-    pub instance_id: OperationInstanceId,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SemanticSubmissionHandle {
-    pub ui_operation: Option<UiOperationHandle>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SubmissionState {
-    Accepted,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SubmittedAction<T> {
-    pub value: T,
-    pub submission: SubmissionState,
-    pub handle: SemanticSubmissionHandle,
-}
-
-impl<T> SubmittedAction<T> {
-    #[must_use]
-    pub fn without_handle(value: T) -> Self {
-        Self {
-            value,
-            submission: SubmissionState::Accepted,
-            handle: SemanticSubmissionHandle::default(),
-        }
-    }
-
-    #[must_use]
-    pub fn with_ui_operation(value: T, handle: UiOperationHandle) -> Self {
-        Self {
-            value,
-            submission: SubmissionState::Accepted,
-            handle: SemanticSubmissionHandle {
-                ui_operation: Some(handle),
-            },
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObservedOperation {
     pub instance_id: OperationInstanceId,
     pub state: OperationState,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SharedIntentUiBypassKind {
-    TemporaryHarnessBridgeShortcut,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SharedIntentUiBypassException {
-    pub backend_kind: &'static str,
-    pub method_name: &'static str,
-    pub intent: IntentKind,
-    pub kind: SharedIntentUiBypassKind,
-    pub justification: &'static str,
-    pub design_ref: &'static str,
-}
-
-pub const SHARED_INTENT_UI_BYPASS_ALLOWLIST: &[SharedIntentUiBypassException] = &[
-    SharedIntentUiBypassException {
-        backend_kind: "playwright_browser",
-        method_name: "submit_create_account",
-        intent: IntentKind::CreateAccount,
-        kind: SharedIntentUiBypassKind::TemporaryHarnessBridgeShortcut,
-        justification:
-            "browser harness still relies on the onboarding bootstrap helper instead of the full visible form flow",
-        design_ref: "work/ux.md",
-    },
-    SharedIntentUiBypassException {
-        backend_kind: "playwright_browser",
-        method_name: "submit_create_home",
-        intent: IntentKind::CreateHome,
-        kind: SharedIntentUiBypassKind::TemporaryHarnessBridgeShortcut,
-        justification:
-            "browser harness still relies on the page-side create_home helper instead of the full visible modal flow",
-        design_ref: "work/ux.md",
-    },
-    SharedIntentUiBypassException {
-        backend_kind: "playwright_browser",
-        method_name: "submit_create_contact_invitation",
-        intent: IntentKind::CreateContactInvitation,
-        kind: SharedIntentUiBypassKind::TemporaryHarnessBridgeShortcut,
-        justification:
-            "browser harness still relies on the page-side invitation workflow helper instead of the full visible modal flow",
-        design_ref: "work/ux.md",
-    },
-];
 
 pub trait ObservationBackend {
     fn snapshot(&self) -> Result<String>;
@@ -268,18 +180,142 @@ pub trait SharedSemanticBackend {
         timeout: Duration,
         after_version: Option<u64>,
     ) -> Option<Result<UiSnapshotEvent>>;
-    fn submit_create_account(&mut self, account_name: &str) -> Result<SubmittedAction<()>>;
-    fn submit_create_home(&mut self, home_name: &str) -> Result<SubmittedAction<()>>;
+    fn submit_semantic_command(
+        &mut self,
+        request: SemanticCommandRequest,
+    ) -> Result<SemanticCommandResponse>;
+
+    fn wait_for_newer_shared_projection(
+        &self,
+        timeout: Duration,
+        after_version: Option<u64>,
+        baseline: ProjectionRevision,
+    ) -> Result<Option<UiSnapshotEvent>> {
+        let Some(event) = self.wait_for_shared_projection_event(timeout, after_version) else {
+            return Ok(None);
+        };
+        let event = event?;
+        if event.snapshot.revision.is_newer_than(baseline) {
+            return Ok(Some(event));
+        }
+        bail!(
+            "shared projection freshness violation: revision {:?} is not newer than baseline {:?}",
+            event.snapshot.revision,
+            baseline
+        );
+    }
+
+    fn submit_create_account(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
+        expect_semantic_command_unit(
+            self.submit_semantic_command(SemanticCommandRequest::new(
+                IntentAction::CreateAccount {
+                    account_name: account_name.to_string(),
+                },
+            ))?,
+            "submit_create_account",
+        )
+    }
+
+    fn submit_create_home(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
+        expect_semantic_command_unit(
+            self.submit_semantic_command(SemanticCommandRequest::new(IntentAction::CreateHome {
+                home_name: home_name.to_string(),
+            }))?,
+            "submit_create_home",
+        )
+    }
+
     fn submit_create_contact_invitation(
         &mut self,
         receiver_authority_id: &str,
-    ) -> Result<SubmittedAction<ContactInvitationCode>>;
-    fn submit_accept_contact_invitation(&mut self, code: &str) -> Result<SubmittedAction<()>>;
-    fn submit_invite_actor_to_channel(&mut self, authority_id: &str)
-        -> Result<SubmittedAction<()>>;
-    fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>>;
-    fn submit_join_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>>;
-    fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>>;
+    ) -> Result<SubmittedAction<ContactInvitationCode>> {
+        let response = self.submit_semantic_command(SemanticCommandRequest::new(
+            IntentAction::CreateContactInvitation {
+                receiver_authority_id: receiver_authority_id.to_string(),
+                code_name: None,
+            },
+        ))?;
+        match response.value {
+            SemanticCommandValue::ContactInvitationCode { code } => Ok(SubmittedAction {
+                value: ContactInvitationCode { code },
+                submission: response.submission,
+                handle: response.handle,
+            }),
+            SemanticCommandValue::None => Err(anyhow!(
+                "submit_create_contact_invitation did not produce a contact invitation code"
+            )),
+        }
+    }
+
+    fn submit_accept_contact_invitation(&mut self, code: &str) -> Result<SubmittedAction<()>> {
+        expect_semantic_command_unit(
+            self.submit_semantic_command(SemanticCommandRequest::new(
+                IntentAction::AcceptContactInvitation {
+                    code: code.to_string(),
+                },
+            ))?,
+            "submit_accept_contact_invitation",
+        )
+    }
+
+    fn submit_invite_actor_to_channel(
+        &mut self,
+        authority_id: &str,
+    ) -> Result<SubmittedAction<()>> {
+        expect_semantic_command_unit(
+            self.submit_semantic_command(SemanticCommandRequest::new(
+                IntentAction::InviteActorToChannel {
+                    authority_id: authority_id.to_string(),
+                },
+            ))?,
+            "submit_invite_actor_to_channel",
+        )
+    }
+
+    fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>> {
+        expect_semantic_command_unit(
+            self.submit_semantic_command(SemanticCommandRequest::new(
+                IntentAction::AcceptPendingChannelInvitation,
+            ))?,
+            "submit_accept_pending_channel_invitation",
+        )
+    }
+
+    fn submit_join_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
+        expect_semantic_command_unit(
+            self.submit_semantic_command(SemanticCommandRequest::new(IntentAction::JoinChannel {
+                channel_name: channel_name.to_string(),
+            }))?,
+            "submit_join_channel",
+        )
+    }
+
+    fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>> {
+        expect_semantic_command_unit(
+            self.submit_semantic_command(SemanticCommandRequest::new(
+                IntentAction::SendChatMessage {
+                    message: message.to_string(),
+                },
+            ))?,
+            "submit_send_chat_message",
+        )
+    }
+}
+
+fn expect_semantic_command_unit(
+    response: SemanticCommandResponse,
+    operation: &str,
+) -> Result<SubmittedAction<()>> {
+    match response.value {
+        SemanticCommandValue::None => Ok(SubmittedAction {
+            value: (),
+            submission: response.submission,
+            handle: response.handle,
+        }),
+        SemanticCommandValue::ContactInvitationCode { .. } => Err(anyhow!(
+            "{operation} produced an unexpected contact invitation code payload"
+        )),
+    }
 }
 
 pub(crate) fn wait_for_modal_visible(
@@ -522,15 +558,19 @@ impl BackendHandle {
 #[cfg(test)]
 mod tests {
     use super::{
-        BackendHandle, InstanceBackend, ObservationBackend, SharedIntentUiBypassKind,
-        UiSnapshotEvent, SHARED_INTENT_UI_BYPASS_ALLOWLIST,
+        BackendHandle, InstanceBackend, ObservationBackend, SemanticCommandRequest,
+        SemanticCommandResponse, SemanticCommandValue, SharedSemanticBackend, SubmissionState,
+        UiOperationHandle, UiSnapshotEvent,
     };
     use crate::config::{InstanceConfig, InstanceMode};
-    use anyhow::Result;
-    use aura_app::ui::contract::{ScreenId, UiReadiness, UiSnapshot};
+    use anyhow::{anyhow, Result};
+    use aura_app::scenario_contract::{IntentAction, SemanticSubmissionHandle};
+    use aura_app::ui::contract::{
+        OperationId, OperationInstanceId, ScreenId, UiReadiness, UiSnapshot,
+    };
     use aura_app::ui_contract::{ProjectionRevision, QuiescenceSnapshot};
     use std::cell::Cell;
-    use std::collections::HashSet;
+    use std::cell::RefCell;
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -566,28 +606,6 @@ mod tests {
             _ => panic!("expected browser backend"),
         }
         Ok(())
-    }
-
-    #[test]
-    fn shared_intent_ui_bypass_allowlist_is_explicit_and_unique() {
-        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(std::path::Path::parent)
-            .unwrap_or_else(|| panic!("workspace root"));
-        let unique: HashSet<_> = SHARED_INTENT_UI_BYPASS_ALLOWLIST
-            .iter()
-            .map(|entry| (entry.backend_kind, entry.method_name, entry.intent))
-            .collect();
-        assert_eq!(unique.len(), SHARED_INTENT_UI_BYPASS_ALLOWLIST.len());
-        for entry in SHARED_INTENT_UI_BYPASS_ALLOWLIST {
-            assert_eq!(
-                entry.kind,
-                SharedIntentUiBypassKind::TemporaryHarnessBridgeShortcut
-            );
-            assert!(!entry.justification.is_empty());
-            assert!(!entry.design_ref.is_empty());
-            assert!(workspace_root.join(entry.design_ref).exists());
-        }
     }
 
     struct ReadOnlyBackend {
@@ -729,5 +747,186 @@ mod tests {
         assert_eq!(observer.read_clipboard()?, "clipboard");
         assert_eq!(backend.mutation_calls.get(), 0);
         Ok(())
+    }
+
+    struct RecordingSemanticBackend {
+        submit_requests: RefCell<Vec<SemanticCommandRequest>>,
+        next_response: RefCell<Option<Result<SemanticCommandResponse>>>,
+        projection_event: RefCell<Option<Result<UiSnapshotEvent>>>,
+    }
+
+    impl RecordingSemanticBackend {
+        fn new() -> Self {
+            Self {
+                submit_requests: RefCell::new(Vec::new()),
+                next_response: RefCell::new(None),
+                projection_event: RefCell::new(None),
+            }
+        }
+
+        fn with_response(self, response: Result<SemanticCommandResponse>) -> Self {
+            self.next_response.replace(Some(response));
+            self
+        }
+
+        fn with_projection_event(self, event: Result<UiSnapshotEvent>) -> Self {
+            self.projection_event.replace(Some(event));
+            self
+        }
+    }
+
+    impl SharedSemanticBackend for RecordingSemanticBackend {
+        fn shared_projection(&self) -> Result<UiSnapshot> {
+            Ok(ReadOnlyBackend::snapshot_value())
+        }
+
+        fn wait_for_shared_projection_event(
+            &self,
+            _timeout: Duration,
+            _after_version: Option<u64>,
+        ) -> Option<Result<UiSnapshotEvent>> {
+            self.projection_event.borrow_mut().take()
+        }
+
+        fn submit_semantic_command(
+            &mut self,
+            request: SemanticCommandRequest,
+        ) -> Result<SemanticCommandResponse> {
+            self.submit_requests.borrow_mut().push(request);
+            self.next_response
+                .borrow_mut()
+                .take()
+                .unwrap_or_else(|| Ok(SemanticCommandResponse::accepted_without_value()))
+        }
+    }
+
+    fn operation_handle() -> UiOperationHandle {
+        UiOperationHandle {
+            id: OperationId::invitation_accept(),
+            instance_id: OperationInstanceId("test-op-1".to_string()),
+        }
+    }
+
+    #[test]
+    fn shared_semantic_submit_convenience_methods_forward_requests_and_preserve_handles() {
+        let handle = operation_handle();
+        let response = SemanticCommandResponse {
+            submission: SubmissionState::Accepted,
+            handle: SemanticSubmissionHandle {
+                ui_operation: Some(handle.clone()),
+            },
+            value: SemanticCommandValue::None,
+        };
+        let mut backend = RecordingSemanticBackend::new().with_response(Ok(response));
+
+        let submitted = backend
+            .submit_create_account("alice")
+            .unwrap_or_else(|error| panic!("semantic submit should succeed: {error:#}"));
+
+        assert_eq!(submitted.submission, SubmissionState::Accepted);
+        assert_eq!(submitted.handle.ui_operation, Some(handle));
+        assert_eq!(
+            backend.submit_requests.borrow().as_slice(),
+            &[SemanticCommandRequest::new(IntentAction::CreateAccount {
+                account_name: "alice".to_string(),
+            })]
+        );
+    }
+
+    #[test]
+    fn shared_semantic_submit_failures_remain_diagnostic() {
+        let mut backend = RecordingSemanticBackend::new().with_response(Err(anyhow!(
+            "unsupported semantic browser command: open_screen"
+        )));
+
+        let error = backend
+            .submit_create_home("alice-home")
+            .err()
+            .unwrap_or_else(|| panic!("unsupported semantic command should fail"));
+
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported semantic browser command"),
+            "expected unsupported-command context, got {error:#}"
+        );
+        assert_eq!(
+            backend.submit_requests.borrow().as_slice(),
+            &[SemanticCommandRequest::new(IntentAction::CreateHome {
+                home_name: "alice-home".to_string(),
+            })]
+        );
+    }
+
+    #[test]
+    fn shared_semantic_submit_rejects_unexpected_payload_shapes() {
+        let mut backend = RecordingSemanticBackend::new().with_response(Ok(
+            SemanticCommandResponse::accepted_contact_invitation_code("invite-code".to_string()),
+        ));
+
+        let error = backend
+            .submit_create_account("alice")
+            .err()
+            .unwrap_or_else(|| panic!("unexpected payload shape should fail"));
+
+        assert!(
+            error
+                .to_string()
+                .contains("unexpected contact invitation code payload"),
+            "expected payload-shape rejection, got {error:#}"
+        );
+    }
+
+    #[test]
+    fn shared_projection_wait_requires_strictly_newer_revision() {
+        let baseline = ProjectionRevision {
+            semantic_seq: 7,
+            render_seq: Some(7),
+        };
+        let stale_event = UiSnapshotEvent {
+            snapshot: UiSnapshot {
+                revision: baseline,
+                ..ReadOnlyBackend::snapshot_value()
+            },
+            version: 8,
+        };
+        let backend = RecordingSemanticBackend::new().with_projection_event(Ok(stale_event));
+
+        let error = backend
+            .wait_for_newer_shared_projection(Duration::from_millis(1), Some(7), baseline)
+            .err()
+            .unwrap_or_else(|| panic!("stale projections must fail"));
+        assert!(
+            error
+                .to_string()
+                .contains("shared projection freshness violation"),
+            "expected explicit freshness violation, got {error:#}"
+        );
+    }
+
+    #[test]
+    fn shared_projection_wait_accepts_strictly_newer_revision() {
+        let baseline = ProjectionRevision {
+            semantic_seq: 7,
+            render_seq: Some(7),
+        };
+        let newer = ProjectionRevision {
+            semantic_seq: 7,
+            render_seq: Some(8),
+        };
+        let backend = RecordingSemanticBackend::new().with_projection_event(Ok(UiSnapshotEvent {
+            snapshot: UiSnapshot {
+                revision: newer,
+                ..ReadOnlyBackend::snapshot_value()
+            },
+            version: 8,
+        }));
+
+        let event = backend
+            .wait_for_newer_shared_projection(Duration::from_millis(1), Some(7), baseline)
+            .unwrap_or_else(|error| panic!("newer projections should pass: {error:#}"))
+            .unwrap_or_else(|| panic!("projection event should be present"));
+        assert_eq!(event.snapshot.revision, newer);
+        assert_eq!(event.version, 8);
     }
 }

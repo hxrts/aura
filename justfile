@@ -174,6 +174,9 @@ harness-migration-audit:
 harness-boundary-check:
     bash scripts/check/harness-boundary-policy.sh
 
+harness-command-plane-boundary-check:
+    bash scripts/check/harness-command-plane-boundary.sh
+
 harness-scenario-inventory-check:
     bash scripts/check/harness-scenario-inventory.sh
 
@@ -201,8 +204,35 @@ harness-matrix-web *ARGS:
 harness-matrix-all *ARGS:
     just harness-matrix all {{ ARGS }}
 
+harness-shared-semantic-lane lane="all" *ARGS:
+    bash scripts/harness/run-matrix.sh --lane {{ lane }} --suite shared {{ ARGS }}
+
+harness-shared-semantic-tui *ARGS:
+    just harness-shared-semantic-lane tui {{ ARGS }}
+
+harness-shared-semantic-web *ARGS:
+    just harness-shared-semantic-lane web {{ ARGS }}
+
+harness-shared-semantic-matrix *ARGS:
+    just harness-shared-semantic-lane all {{ ARGS }}
+
+harness-frontend-conformance-lane lane="all" *ARGS:
+    bash scripts/harness/run-matrix.sh --lane {{ lane }} --suite conformance {{ ARGS }}
+
+harness-frontend-conformance-tui *ARGS:
+    just harness-frontend-conformance-lane tui {{ ARGS }}
+
+harness-frontend-conformance-web *ARGS:
+    just harness-frontend-conformance-lane web {{ ARGS }}
+
+harness-frontend-conformance-matrix *ARGS:
+    just harness-frontend-conformance-lane all {{ ARGS }}
+
 ci-shared-flow-policy:
     bash scripts/check/shared-flow-policy.sh
+
+ci-harness-command-plane-boundary:
+    bash scripts/check/harness-command-plane-boundary.sh
 
 ci-harness-scenario-canonical-model:
     bash scripts/check/harness-scenario-canonical-model.sh
@@ -402,6 +432,26 @@ ci-harness-matrix-web:
 ci-harness-matrix:
     just ci-harness-matrix-tui
     just ci-harness-matrix-web
+
+ci-harness-shared-semantic-tui:
+    ./scripts/ci/harness-shared-semantic-tui.sh
+
+ci-harness-shared-semantic-web:
+    ./scripts/ci/harness-shared-semantic-web.sh
+
+ci-harness-shared-semantic-matrix:
+    just ci-harness-shared-semantic-tui
+    just ci-harness-shared-semantic-web
+
+ci-harness-frontend-conformance-tui:
+    ./scripts/ci/harness-frontend-conformance-tui.sh
+
+ci-harness-frontend-conformance-web:
+    ./scripts/ci/harness-frontend-conformance-web.sh
+
+ci-harness-frontend-conformance-matrix:
+    just ci-harness-frontend-conformance-tui
+    just ci-harness-frontend-conformance-web
 
 # LAN smoke lane for workspace-fast coverage
 ci-lan-smoke:

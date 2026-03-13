@@ -41,8 +41,8 @@ collect_expected_ids() {
     }
     function emit() {
       if (status != "converted") return
-      if (lane == "tui" && (class == "shared" || class == "tui_only")) print id
-      if (lane == "web" && (class == "shared" || class == "web_only")) print id
+      if (lane == "tui" && (class == "shared" || class == "tui_conformance")) print id
+      if (lane == "web" && (class == "shared" || class == "web_conformance")) print id
     }
     END {
       if (id != "") emit()

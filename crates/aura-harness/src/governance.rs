@@ -15,7 +15,8 @@ use aura_app::ui_contract::{
 
 use crate::config::{
     load_scenario_inventory, load_semantic_scenario_definition, NonCanonicalScenarioField,
-    ScenarioCanonicalModel, ScenarioClassification, ScenarioConfig, NON_CANONICAL_SCENARIO_FIELDS,
+    ScenarioCanonicalModel, ScenarioClassification, ScenarioConfig, ScenarioInventoryEntry,
+    NON_CANONICAL_SCENARIO_FIELDS,
 };
 
 const COVERAGE_DOC: &str = "docs/997_ux_flow_coverage.md";
@@ -122,6 +123,7 @@ pub fn validate_scenario_legality() -> Result<()> {
 
         if entry.migration_status == "converted" {
             let definition = load_semantic_scenario_definition(&entry.path)?;
+            ensure_converted_frontend_mechanics_are_classified(entry, &definition)?;
             if entry.classification == ScenarioClassification::Shared {
                 definition
                     .validate_shared_intent_contract()
@@ -597,8 +599,8 @@ pub fn validate_legacy_shared_quarantine() -> Result<()> {
                         )
                     })?;
             }
-            ScenarioClassification::TuiOnly
-            | ScenarioClassification::WebOnly
+            ScenarioClassification::TuiConformance
+            | ScenarioClassification::WebConformance
             | ScenarioClassification::ToBeRemoved => {
                 if entry.migration_status == "legacy_pending_conversion" {
                     continue;
@@ -616,6 +618,29 @@ pub fn validate_legacy_shared_quarantine() -> Result<()> {
 
     println!("harness legacy shared quarantine: clean");
     Ok(())
+}
+
+fn ensure_converted_frontend_mechanics_are_classified(
+    entry: &ScenarioInventoryEntry,
+    definition: &ScenarioDefinition,
+) -> Result<()> {
+    if !uses_frontend_ui_mechanics(definition) {
+        return Ok(());
+    }
+    if entry.classification.is_frontend_conformance() {
+        return Ok(());
+    }
+    bail!(
+        "converted scenario {} uses frontend-local ui mechanics and must be classified as tui_conformance or web_conformance",
+        entry.path.display()
+    );
+}
+
+fn uses_frontend_ui_mechanics(definition: &ScenarioDefinition) -> bool {
+    definition
+        .steps
+        .iter()
+        .any(|step| matches!(step.action, SemanticAction::Ui(_)))
 }
 
 fn ensure_shared_execution_is_strict(scenario: &ScenarioConfig, path: &Path) -> Result<()> {
@@ -788,9 +813,10 @@ mod tests {
     use super::*;
     use aura_app::scenario_contract::{ActorId, ScenarioStep};
     use aura_app::ui::contract::{
-        OperationId, OperationState, RuntimeEventKind, ScreenId, UiReadiness,
+        FieldId, OperationId, OperationState, RuntimeEventKind, ScreenId, UiReadiness,
     };
     use aura_app::ui_contract::QuiescenceState;
+    use std::path::PathBuf;
 
     #[test]
     fn barrier_validator_requires_declared_convergence_before_next_intent() {
@@ -903,5 +929,68 @@ mod tests {
             &SemanticAction::Expect(Expectation::ReadinessIs(UiReadiness::Ready)),
             &BarrierDeclaration::Quiescence(QuiescenceState::Settled)
         ));
+    }
+
+    #[test]
+    fn converted_frontend_ui_mechanics_require_conformance_classification() {
+        let entry = ScenarioInventoryEntry {
+            id: "ui-conformance".to_string(),
+            path: PathBuf::from("tests/fixtures/ui-conformance.toml"),
+            classification: ScenarioClassification::Shared,
+            migration_status: "converted".to_string(),
+            runtime_substrate: "real_runtime".to_string(),
+            notes: "test".to_string(),
+        };
+        let definition = ScenarioDefinition {
+            id: "ui-conformance".to_string(),
+            goal: "frontend-local ui action".to_string(),
+            steps: vec![ScenarioStep {
+                id: "fill".to_string(),
+                actor: Some(ActorId("alice".to_string())),
+                timeout_ms: Some(1000),
+                action: SemanticAction::Ui(aura_app::scenario_contract::UiAction::Fill(
+                    FieldId::Nickname,
+                    "ops".to_string(),
+                )),
+            }],
+        };
+
+        let error = ensure_converted_frontend_mechanics_are_classified(&entry, &definition)
+            .err()
+            .unwrap_or_else(|| panic!("shared classification must reject frontend-local ui"));
+        assert!(
+            error
+                .to_string()
+                .contains("tui_conformance or web_conformance"),
+            "expected conformance classification requirement, got {error:#}"
+        );
+    }
+
+    #[test]
+    fn converted_frontend_ui_mechanics_allow_conformance_classification() {
+        let entry = ScenarioInventoryEntry {
+            id: "ui-conformance".to_string(),
+            path: PathBuf::from("tests/fixtures/ui-conformance.toml"),
+            classification: ScenarioClassification::TuiConformance,
+            migration_status: "converted".to_string(),
+            runtime_substrate: "real_runtime".to_string(),
+            notes: "test".to_string(),
+        };
+        let definition = ScenarioDefinition {
+            id: "ui-conformance".to_string(),
+            goal: "frontend-local ui action".to_string(),
+            steps: vec![ScenarioStep {
+                id: "fill".to_string(),
+                actor: Some(ActorId("alice".to_string())),
+                timeout_ms: Some(1000),
+                action: SemanticAction::Ui(aura_app::scenario_contract::UiAction::Fill(
+                    FieldId::Nickname,
+                    "ops".to_string(),
+                )),
+            }],
+        };
+
+        assert!(ensure_converted_frontend_mechanics_are_classified(&entry, &definition).is_ok());
+        assert!(uses_frontend_ui_mechanics(&definition));
     }
 }

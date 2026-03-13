@@ -3,16 +3,20 @@
 //! Exposes the UiController to JavaScript via window.harness, enabling the test
 //! harness to send keys, capture screenshots, and query UI state from Playwright.
 
-use aura_app::ui::contract::{ModalId, RenderHeartbeat, ScreenId, UiSnapshot};
+use aura_app::ui::contract::{ListId, ModalId, RenderHeartbeat, ScreenId, UiSnapshot};
+use aura_app::ui::scenarios::{
+    IntentAction, SemanticCommandRequest, SemanticCommandResponse, SettingsSection,
+};
 use aura_app::ui::workflows::account as account_workflows;
+use aura_app::ui::workflows::ceremonies as ceremony_workflows;
 use aura_app::ui::workflows::context as context_workflows;
 use aura_app::ui::workflows::invitation as invitation_workflows;
+use aura_app::ui::workflows::messaging as messaging_workflows;
 use aura_app::ui_contract::RuntimeFact;
-use aura_core::AuthorityId;
-use aura_ui::UiController;
-use aura_ui::UiScreen;
+use aura_core::{identifiers::ChannelId, AuthorityId};
+use aura_ui::{UiController, UiScreen};
 use js_sys::{Array, Function, Object, Reflect, JSON};
-use serde_wasm_bindgen::to_value;
+use serde_wasm_bindgen::{from_value, to_value};
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use wasm_bindgen::closure::Closure;
@@ -144,6 +148,242 @@ fn install_pending_harness_command_loop(controller: Arc<UiController>) {
         25,
     );
     callback.forget();
+}
+
+fn queue_pending_create_account(nickname: &str) -> Result<SemanticCommandResponse, JsValue> {
+    let window = web_sys::window().ok_or_else(|| JsValue::from_str("window is not available"))?;
+    Reflect::set(
+        window.as_ref(),
+        &JsValue::from_str(HARNESS_PENDING_CREATE_ACCOUNT_KEY),
+        &JsValue::from_str(nickname),
+    )?;
+    Ok(SemanticCommandResponse::accepted_without_value())
+}
+
+fn browser_screen(screen: ScreenId) -> Option<UiScreen> {
+    match screen {
+        ScreenId::Onboarding => Some(UiScreen::Onboarding),
+        ScreenId::Neighborhood => Some(UiScreen::Neighborhood),
+        ScreenId::Chat => Some(UiScreen::Chat),
+        ScreenId::Contacts => Some(UiScreen::Contacts),
+        ScreenId::Notifications => Some(UiScreen::Notifications),
+        ScreenId::Settings => Some(UiScreen::Settings),
+    }
+}
+
+fn browser_settings_section(section: SettingsSection) -> aura_ui::model::SettingsSection {
+    match section {
+        SettingsSection::Devices => aura_ui::model::SettingsSection::Devices,
+    }
+}
+
+fn selected_channel_id(controller: &UiController) -> Result<ChannelId, JsValue> {
+    let snapshot = controller.ui_snapshot();
+    let selected = snapshot
+        .selections
+        .iter()
+        .find(|selection| selection.list == ListId::Channels)
+        .map(|selection| selection.item_id.clone())
+        .or_else(|| {
+            snapshot
+                .lists
+                .iter()
+                .find(|list| list.id == ListId::Channels)
+                .and_then(|list| {
+                    if list.items.len() == 1 {
+                        list.items.first().map(|item| item.id.clone())
+                    } else {
+                        None
+                    }
+                })
+        })
+        .ok_or_else(|| JsValue::from_str("no channel is selected"))?;
+    selected
+        .parse::<ChannelId>()
+        .map_err(|error| JsValue::from_str(&format!("invalid selected channel id: {error}")))
+}
+
+fn selected_device_id(controller: &UiController) -> Result<String, JsValue> {
+    let snapshot = controller.ui_snapshot();
+    snapshot
+        .selections
+        .iter()
+        .find(|selection| selection.list == ListId::Devices)
+        .map(|selection| selection.item_id.clone())
+        .or_else(|| {
+            snapshot
+                .lists
+                .iter()
+                .find(|list| list.id == ListId::Devices)
+                .and_then(|list| {
+                    if list.items.len() == 1 {
+                        list.items.first().map(|item| item.id.clone())
+                    } else {
+                        None
+                    }
+                })
+        })
+        .ok_or_else(|| JsValue::from_str("no device is selected"))
+}
+
+async fn submit_semantic_command(
+    controller: Arc<UiController>,
+    request: SemanticCommandRequest,
+) -> Result<SemanticCommandResponse, JsValue> {
+    match request.intent {
+        IntentAction::OpenScreen(screen) => {
+            let target =
+                browser_screen(screen).ok_or_else(|| JsValue::from_str("unsupported screen"))?;
+            controller.set_screen(target);
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        IntentAction::CreateAccount { account_name } => queue_pending_create_account(&account_name),
+        IntentAction::CreateHome { home_name } => {
+            context_workflows::create_home(controller.app_core(), Some(home_name), None)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        IntentAction::StartDeviceEnrollment { device_name, .. } => {
+            controller.set_screen(UiScreen::Settings);
+            controller.set_settings_section(browser_settings_section(SettingsSection::Devices));
+            let start = ceremony_workflows::start_device_enrollment_ceremony(
+                &controller.app_core(),
+                device_name.clone(),
+                None,
+            )
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            controller.write_clipboard(&start.enrollment_code);
+            controller.push_runtime_fact(RuntimeFact::DeviceEnrollmentCodeReady {
+                device_name: Some(device_name),
+                code_len: Some(start.enrollment_code.len()),
+                code: Some(start.enrollment_code),
+            });
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        IntentAction::ImportDeviceEnrollmentCode { code } => {
+            let app_core = controller.app_core().clone();
+            let invitation = invitation_workflows::import_invitation_details(&app_core, &code)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            invitation_workflows::issue_device_enrollment_invitation_accept(&app_core, &invitation)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            let app_core_for_convergence = app_core.clone();
+            let invitation_for_convergence = invitation.clone();
+            spawn_local(async move {
+                let _ = invitation_workflows::converge_device_enrollment_invitation_accept(
+                    &app_core_for_convergence,
+                    &invitation_for_convergence,
+                )
+                .await;
+            });
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        IntentAction::OpenSettingsSection(section) => {
+            controller.set_screen(UiScreen::Settings);
+            controller.set_settings_section(browser_settings_section(section));
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        IntentAction::RemoveSelectedDevice => {
+            controller.set_screen(UiScreen::Settings);
+            controller.set_settings_section(browser_settings_section(SettingsSection::Devices));
+            let device_id = selected_device_id(&controller)?;
+            ceremony_workflows::start_device_removal_ceremony(&controller.app_core(), device_id)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        IntentAction::CreateContactInvitation {
+            receiver_authority_id,
+            ..
+        } => {
+            let authority_id = receiver_authority_id
+                .parse::<AuthorityId>()
+                .map_err(|error| JsValue::from_str(&format!("invalid authority id: {error}")))?;
+            let app_core = controller.app_core().clone();
+            let invitation = invitation_workflows::create_contact_invitation(
+                &app_core,
+                authority_id.clone(),
+                None,
+                None,
+                None,
+            )
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            let code =
+                invitation_workflows::export_invitation(&app_core, &invitation.invitation_id)
+                    .await
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            controller.write_clipboard(&code);
+            controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
+                receiver_authority_id: Some(authority_id.to_string()),
+                source_operation: aura_app::ui::contract::OperationId::invitation_create(),
+                code: Some(code.clone()),
+            });
+            Ok(SemanticCommandResponse::accepted_contact_invitation_code(
+                code,
+            ))
+        }
+        IntentAction::AcceptContactInvitation { code } => {
+            let app_core = controller.app_core().clone();
+            let invitation = invitation_workflows::import_invitation_details(&app_core, &code)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            invitation_workflows::accept_invitation(&app_core, &invitation.invitation_id)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        IntentAction::AcceptPendingChannelInvitation => {
+            invitation_workflows::accept_pending_home_invitation(controller.app_core())
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        IntentAction::JoinChannel { channel_name } => {
+            messaging_workflows::join_channel_by_name(controller.app_core(), &channel_name)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        IntentAction::InviteActorToChannel { authority_id } => {
+            let authority_id = authority_id
+                .parse::<AuthorityId>()
+                .map_err(|error| JsValue::from_str(&format!("invalid authority id: {error}")))?;
+            let channel_id = selected_channel_id(&controller)?;
+            messaging_workflows::invite_authority_to_channel(
+                controller.app_core(),
+                authority_id,
+                channel_id,
+                None,
+                None,
+            )
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        IntentAction::SendChatMessage { message } => {
+            let timestamp_ms = context_workflows::current_time_ms(controller.app_core())
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            let channel_id = selected_channel_id(&controller)?;
+            messaging_workflows::send_message(
+                controller.app_core(),
+                channel_id,
+                &message,
+                timestamp_ms,
+            )
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        other => Err(JsValue::from_str(&format!(
+            "unsupported semantic browser command: {:?}",
+            other.kind()
+        ))),
+    }
 }
 
 fn publish_ui_snapshot_now(
@@ -512,87 +752,28 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
     )?;
     read_clipboard.forget();
 
-    let create_contact_invitation_controller = controller.clone();
-    let create_contact_invitation =
-        Closure::wrap(Box::new(move |receiver: JsValue| -> js_sys::Promise {
-            let controller = create_contact_invitation_controller.clone();
+    let submit_semantic_command_controller = controller.clone();
+    let submit_semantic_command_fn =
+        Closure::wrap(Box::new(move |request: JsValue| -> js_sys::Promise {
+            let controller = submit_semantic_command_controller.clone();
             future_to_promise(async move {
-                let receiver = receiver
-                    .as_string()
-                    .ok_or_else(|| JsValue::from_str("receiver_authority_id must be a string"))?;
-                let authority_id = receiver.parse::<AuthorityId>().map_err(|error| {
-                    JsValue::from_str(&format!("invalid authority id: {error}"))
+                let request = from_value::<SemanticCommandRequest>(request).map_err(|error| {
+                    JsValue::from_str(&format!("invalid semantic command request: {error}"))
                 })?;
-                let app_core = controller.app_core().clone();
-                let invitation = invitation_workflows::create_contact_invitation(
-                    &app_core,
-                    authority_id,
-                    None,
-                    None,
-                    None,
-                )
-                .await
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-                let code =
-                    invitation_workflows::export_invitation(&app_core, &invitation.invitation_id)
-                        .await
-                        .map_err(|error| JsValue::from_str(&error.to_string()))?;
-                controller.write_clipboard(&code);
-                controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
-                    receiver_authority_id: Some(authority_id.to_string()),
-                    source_operation: aura_app::ui::contract::OperationId::invitation_create(),
-                    code: Some(code.clone()),
-                });
-                Ok(JsValue::from_str(&code))
+                let response = submit_semantic_command(controller, request).await?;
+                to_value(&response).map_err(|error| {
+                    JsValue::from_str(&format!(
+                        "failed to encode semantic command response: {error}"
+                    ))
+                })
             })
         }) as Box<dyn FnMut(JsValue) -> js_sys::Promise>);
     Reflect::set(
         &harness,
-        &JsValue::from_str("create_contact_invitation"),
-        create_contact_invitation.as_ref().unchecked_ref(),
+        &JsValue::from_str("submit_semantic_command"),
+        submit_semantic_command_fn.as_ref().unchecked_ref(),
     )?;
-    create_contact_invitation.forget();
-
-    let create_account = Closure::wrap(Box::new(move |account_name: JsValue| -> JsValue {
-        let Some(nickname) = account_name.as_string() else {
-            return JsValue::FALSE;
-        };
-        if let Some(window) = web_sys::window() {
-            let _ = Reflect::set(
-                window.as_ref(),
-                &JsValue::from_str(HARNESS_PENDING_CREATE_ACCOUNT_KEY),
-                &JsValue::from_str(&nickname),
-            );
-            return JsValue::TRUE;
-        }
-        JsValue::FALSE
-    }) as Box<dyn FnMut(JsValue) -> JsValue>);
-    Reflect::set(
-        &harness,
-        &JsValue::from_str("create_account"),
-        create_account.as_ref().unchecked_ref(),
-    )?;
-    create_account.forget();
-
-    let create_home_controller = controller.clone();
-    let create_home = Closure::wrap(Box::new(move |home_name: JsValue| -> js_sys::Promise {
-        let controller = create_home_controller.clone();
-        future_to_promise(async move {
-            let home_name = home_name
-                .as_string()
-                .ok_or_else(|| JsValue::from_str("home_name must be a string"))?;
-            context_workflows::create_home(controller.app_core(), Some(home_name), None)
-                .await
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            Ok(JsValue::TRUE)
-        })
-    }) as Box<dyn FnMut(JsValue) -> js_sys::Promise>);
-    Reflect::set(
-        &harness,
-        &JsValue::from_str("create_home"),
-        create_home.as_ref().unchecked_ref(),
-    )?;
-    create_home.forget();
+    submit_semantic_command_fn.forget();
 
     let authority_id_controller = controller.clone();
     let get_authority_id = Closure::wrap(Box::new(move || -> JsValue {

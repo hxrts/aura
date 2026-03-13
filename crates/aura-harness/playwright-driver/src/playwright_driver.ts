@@ -1554,11 +1554,8 @@ function requestTimeoutMs(method, params) {
     }
     case "click_button":
     case "fill_input":
-    case "create_contact_invitation":
+    case "submit_semantic_command":
       return 30000;
-    case "create_account":
-    case "create_home":
-    case "join_channel":
     case "reload_page":
     case "recover_ui_state":
     case "restart_page_session":
@@ -2518,182 +2515,25 @@ async function readClipboard(params) {
   return { text: lastText };
 }
 
-async function createContactInvitation(params) {
+async function submitSemanticCommand(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
-  const receiverAuthorityId = String(
-    params?.receiver_authority_id ?? "",
-  ).trim();
-  if (receiverAuthorityId.length === 0) {
-    throw new Error("receiver_authority_id is required");
+  const request = params?.request;
+  if (!request || typeof request !== "object") {
+    throw new Error("semantic command request is required");
   }
-  const code = await session.page.evaluate(async (receiver) => {
+  const response = await session.page.evaluate(async (semanticRequest) => {
     if (
-      typeof window.__AURA_HARNESS__?.create_contact_invitation !== "function"
+      typeof window.__AURA_HARNESS__?.submit_semantic_command !== "function"
     ) {
       throw new Error(
-        "window.__AURA_HARNESS__.create_contact_invitation is unavailable",
+        "window.__AURA_HARNESS__.submit_semantic_command is unavailable",
       );
     }
-    return await window.__AURA_HARNESS__.create_contact_invitation(receiver);
-  }, receiverAuthorityId);
-  const normalized = String(code ?? "").trim();
-  session.clipboardCache = normalized;
-  return { code: normalized };
-}
-
-async function createAccount(params) {
-  const instanceId = normalizeInstanceId(params);
-  const session = getSession(instanceId);
-  const accountName = String(params?.account_name ?? "").trim();
-  if (accountName.length === 0) {
-    throw new Error("account_name is required");
-  }
-  await session.page.evaluate((nickname) => {
-    if (typeof window.__AURA_HARNESS__?.create_account !== "function") {
-      throw new Error("window.__AURA_HARNESS__.create_account is unavailable");
-    }
-    window.setTimeout(() => {
-      window.__AURA_HARNESS__.create_account(nickname);
-    }, 0);
-    return true;
-  }, accountName);
-  resetObservationState(session, "create_account");
-  return { status: "submitted" };
-}
-
-async function createHome(params) {
-  const instanceId = normalizeInstanceId(params);
-  const session = getSession(instanceId);
-  const homeName = String(params?.home_name ?? "").trim();
-  if (homeName.length === 0) {
-    throw new Error("home_name is required");
-  }
-  await session.page.evaluate((name) => {
-    if (typeof window.__AURA_HARNESS__?.create_home !== "function") {
-      throw new Error("window.__AURA_HARNESS__.create_home is unavailable");
-    }
-    window.setTimeout(() => {
-      window.__AURA_HARNESS__.create_home(name);
-    }, 0);
-    return true;
-  }, homeName);
-  resetObservationState(session, "create_home");
-  return { status: "submitted" };
-}
-
-async function joinChannel(params) {
-  const instanceId = normalizeInstanceId(params);
-  const session = getSession(instanceId);
-  const channelName = String(params?.channel_name ?? "").trim();
-  if (channelName.length === 0) {
-    throw new Error("channel_name is required");
-  }
-
-  await session.page.evaluate(async (name) => {
-    const sleep = (ms) =>
-      new Promise((resolve) => window.setTimeout(resolve, ms));
-    const nextFrame = () =>
-      new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
-    const waitFor = async (predicate, timeoutMs, label) => {
-      const started = Date.now();
-      while (Date.now() - started < timeoutMs) {
-        const value = predicate();
-        if (value) {
-          return value;
-        }
-        await nextFrame();
-        await sleep(25);
-      }
-      throw new Error(`join_channel:${label}: timed out after ${timeoutMs}ms`);
-    };
-    const ensureElement = (selector, label) => {
-      const element = document.querySelector(selector);
-      if (!(element instanceof HTMLElement)) {
-        throw new Error(`join_channel:${label}: missing ${selector}`);
-      }
-      return element;
-    };
-    const clickElement = (selector, label) => {
-      const element = ensureElement(selector, label);
-      element.scrollIntoView({ block: "center", inline: "center" });
-      element.focus();
-      element.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
-      element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-      element.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-      element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-      element.click();
-    };
-    const fillText = (selector, value, label) => {
-      const element = ensureElement(selector, label);
-      if (
-        !(
-          element instanceof HTMLInputElement ||
-          element instanceof HTMLTextAreaElement
-        )
-      ) {
-        throw new Error(
-          `join_channel:${label}: ${selector} is not a text input`,
-        );
-      }
-      element.focus();
-      element.value = value;
-      element.dispatchEvent(
-        new InputEvent("input", { bubbles: true, data: value }),
-      );
-      element.dispatchEvent(new Event("change", { bubbles: true }));
-      element.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
-    };
-
-    await waitFor(
-      () => document.querySelector("#aura-nav-chat"),
-      10000,
-      "nav_chat_present",
-    );
-    clickElement("#aura-nav-chat", "nav_chat_click");
-    await waitFor(
-      () => document.querySelector("#aura-screen-chat"),
-      10000,
-      "chat_screen_visible",
-    );
-    clickElement("#aura-chat-new-group", "open_create_channel");
-    await waitFor(
-      () => document.querySelector("#aura-modal-create-channel"),
-      10000,
-      "create_channel_modal_visible",
-    );
-    await waitFor(
-      () => document.querySelector("#aura-field-create-channel-name"),
-      5000,
-      "details_step_visible",
-    );
-    fillText("#aura-field-create-channel-name", name, "fill_channel_name");
-    clickElement("#aura-modal-confirm-button", "advance_details");
-    await waitFor(
-      () =>
-        document.querySelector("#aura-modal-create-channel") &&
-        !document.querySelector("#aura-field-create-channel-name"),
-      5000,
-      "members_step_visible",
-    );
-    clickElement("#aura-modal-confirm-button", "advance_members");
-    await waitFor(
-      () =>
-        document.querySelector("#aura-modal-create-channel") &&
-        document.querySelector("#aura-field-threshold-input"),
-      5000,
-      "threshold_step_visible",
-    );
-    clickElement("#aura-modal-confirm-button", "submit_threshold");
-    await waitFor(
-      () => !document.querySelector("#aura-modal-create-channel"),
-      15000,
-      "create_channel_modal_closed",
-    );
-    return true;
-  }, channelName);
-
-  return { status: "submitted" };
+    return await window.__AURA_HARNESS__.submit_semantic_command(semanticRequest);
+  }, request);
+  resetObservationState(session, "submit_semantic_command");
+  return response;
 }
 
 async function getAuthorityId(params) {
@@ -2895,17 +2735,8 @@ async function dispatch(method: DriverMethod, params: DriverRequest["params"]) {
     case "read_clipboard":
       result = await readClipboard(params);
       break;
-    case "create_contact_invitation":
-      result = await createContactInvitation(params);
-      break;
-    case "create_account":
-      result = await createAccount(params);
-      break;
-    case "create_home":
-      result = await createHome(params);
-      break;
-    case "join_channel":
-      result = await joinChannel(params);
+    case "submit_semantic_command":
+      result = await submitSemanticCommand(params);
       break;
     case "get_authority_id":
       result = await getAuthorityId(params);

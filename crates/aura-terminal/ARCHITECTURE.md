@@ -28,6 +28,11 @@ platform-agnostic.
   `aura-app::ui_contract`, not frontend-local derivation.
 - Harness mode may add instrumentation or render-stability hooks, but it must
   not bypass normal user-visible execution semantics for parity-critical flows.
+- The TUI must expose shared semantic command ingress through its real
+  update/event loop for shared-flow execution; command handling may not depend
+  on render-time polling or PTY timing.
+- Renderer-specific key driving is frontend-conformance-only and must not be
+  the primary shared-flow execution path.
 - Parity-critical semantic export must not depend on placeholder IDs,
   override-backed lists, or heuristic runtime-event inference.
 
@@ -43,6 +48,8 @@ Enforcement locus:
 Failure mode:
 - Behavior diverges from the crate contract and produces non-reproducible outcomes.
 - Cross-layer assumptions drift and break composition safety.
+- Shared harness execution depends on TUI render timing or PTY choreography
+  instead of the normal command/update path.
 
 Verification hooks:
 - just check-arch and just test-crate aura-terminal
@@ -54,3 +61,5 @@ Contract alignment:
 - Business logic lives in aura-app.
 - Effect implementations live in aura-effects.
 - Runtime composition lives in aura-agent.
+- Shared-flow command ingress and projection export belong here; shared command
+  contract ownership does not.

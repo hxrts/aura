@@ -351,7 +351,8 @@ pub struct BridgeAuthorityInfo {
 ///
 /// The primary implementation is in `aura-agent`, where `AuraAgent` implements
 /// this trait. For testing, mock implementations can be provided.
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[allow(missing_docs)] // Trait method docs evolving with API
 pub trait RuntimeBridge: Send + Sync {
     // =========================================================================
@@ -1006,7 +1007,8 @@ impl OfflineRuntimeBridge {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl RuntimeBridge for OfflineRuntimeBridge {
     fn authority_id(&self) -> AuthorityId {
         self.authority_id

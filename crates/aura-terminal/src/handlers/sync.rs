@@ -9,14 +9,19 @@ use crate::cli::sync::SyncAction;
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use crate::ids;
-// Import sync types from aura-agent (runtime layer)
-use aura_agent::handlers::HealthStatus;
-use aura_agent::{SyncManagerConfig, SyncServiceManager};
+use aura_agent::{
+    RuntimeService, RuntimeServiceContext, RuntimeTaskRegistry, ServiceHealth, SyncManagerConfig,
+    SyncServiceManager,
+};
 use aura_core::identifiers::DeviceId;
 use aura_effects::time::PhysicalTimeHandler;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
+
+fn sync_service_context(time_handler: Arc<PhysicalTimeHandler>) -> RuntimeServiceContext {
+    RuntimeServiceContext::new(Arc::new(RuntimeTaskRegistry::new()), time_handler)
+}
 
 /// Handle sync operations through effects
 ///
@@ -92,8 +97,9 @@ async fn handle_daemon_mode(
 
     // Start the sync service
     let time_handler = Arc::new(PhysicalTimeHandler::new());
+    let service_context = sync_service_context(time_handler.clone());
     manager
-        .start(time_handler.clone())
+        .start(&service_context)
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to start sync service: {e}")))?;
 
@@ -115,24 +121,13 @@ async fn handle_daemon_mode(
                 let uptime_secs = (time_handler.physical_time_now_ms() - start_time) / 1000;
 
                 // Get health info
-                if let Some(health) = manager.health().await {
-                    let status = match health.status {
-                        HealthStatus::Healthy => "healthy",
-                        HealthStatus::Degraded => "degraded",
-                        HealthStatus::Unhealthy => "unhealthy",
-                        HealthStatus::Starting => "starting",
-                        HealthStatus::Stopping => "stopping",
-                    };
-                    println!(
-                        "[tick {}] Sync daemon {} (uptime: {}s, active sessions: {})",
-                        tick_count,
-                        status,
-                        uptime_secs,
-                        health.active_sessions
-                    );
-                } else {
-                    println!("[tick {tick_count}] Sync daemon running (uptime: {uptime_secs}s)");
-                }
+                let health = manager.health().await;
+                println!(
+                    "[tick {}] Sync daemon {} (uptime: {}s)",
+                    tick_count,
+                    health,
+                    uptime_secs,
+                );
 
                 // Get metrics periodically
                 if tick_count % 5 == 0 {
@@ -190,8 +185,9 @@ async fn handle_once_mode(ctx: &HandlerContext<'_>, peers_str: &str) -> Terminal
 
     // Start the sync service
     let time_handler = Arc::new(PhysicalTimeHandler::new());
+    let service_context = sync_service_context(time_handler.clone());
     manager
-        .start(time_handler.clone())
+        .start(&service_context)
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to start sync service: {e}")))?;
 
@@ -207,22 +203,26 @@ async fn handle_once_mode(ctx: &HandlerContext<'_>, peers_str: &str) -> Terminal
     // manager.sync_with_peers(effects, peers).await?;
 
     // Show completion
-    if let Some(health) = manager.health().await {
-        let status = match health.status {
-            HealthStatus::Healthy => "healthy",
-            HealthStatus::Degraded => "degraded",
-            HealthStatus::Unhealthy => "unhealthy",
-            HealthStatus::Starting => "starting",
-            HealthStatus::Stopping => "stopping",
-        };
-        output.kv("Sync service health", status);
-    }
+    let health = manager.health().await;
+    output.kv("Sync service health", format_service_health(&health));
 
     manager.stop().await.ok();
     let _ = ctx; // Acknowledge context for future use
 
     output.println("One-shot sync complete.");
     Ok(output)
+}
+
+fn format_service_health(health: &ServiceHealth) -> &'static str {
+    match health {
+        ServiceHealth::Healthy => "healthy",
+        ServiceHealth::Degraded { .. } => "degraded",
+        ServiceHealth::Unhealthy { .. } => "unhealthy",
+        ServiceHealth::NotStarted => "not started",
+        ServiceHealth::Starting => "starting",
+        ServiceHealth::Stopping => "stopping",
+        ServiceHealth::Stopped => "stopped",
+    }
 }
 
 /// Show sync status and metrics

@@ -14,6 +14,8 @@ It remains thin and delegates shared UI state, routing, and snapshot rendering t
 - Expose `window.__AURA_HARNESS__` for Playwright-driven automation.
 - Publish semantic `UiSnapshot` and `RenderHeartbeat` data in harness mode for
   browser-side observation.
+- Expose a typed semantic command bridge for shared-flow execution in harness
+  mode.
 
 ## Non-Goals
 
@@ -37,6 +39,10 @@ It remains thin and delegates shared UI state, routing, and snapshot rendering t
   explicit behaviors, not part of reading state.
 - Harness mode may change instrumentation and render stability, but not
   business-flow semantics.
+- Shared browser-flow execution must go through the semantic command bridge and
+  real app workflows rather than selector-driving as the primary substrate.
+- DOM clicks and selector helpers are frontend-conformance-only and must not be
+  the shared semantic execution path.
 - Published semantic state must support stale-state detection through shared
   revision/sequence and render-convergence semantics.
 - Onboarding uses the same semantic snapshot/publication path as every other
@@ -55,6 +61,25 @@ Failure mode:
 - Post-action hangs cannot be attributed to semantic state vs render
   convergence.
 - State reads silently repair stale state or hide observation side effects.
+
+### InvariantBrowserSharedFlowExecutionUsesSemanticBridge
+The browser shell accepts shared semantic commands through an explicit bridge and
+executes them through real app workflows.
+
+Enforcement locus:
+- `src/harness_bridge.rs` owns typed command submission and unsupported-command
+  failures.
+- selector-click helpers remain outside the shared semantic path.
+
+Failure mode:
+- shared browser scenarios debug DOM/selector timing instead of production
+  workflows.
+- browser and TUI shared lanes drift because they do not share one execution
+  contract.
+
+Verification hooks:
+- browser harness contract tests
+- Playwright semantic bridge tests
 
 Verification hooks:
 - Playwright driver self-test

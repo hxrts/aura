@@ -29,6 +29,7 @@ cfg_if! {
         use aura_agent::AuraAgent;
     }
 }
+use aura_agent::handlers::{InvitationType as AgentInvitationType, ShareableInvitation};
 use aura_app::ui::prelude::*;
 use aura_app::ui::signals::{
     ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, DISCOVERED_PEERS_SIGNAL, ERROR_SIGNAL,
@@ -864,6 +865,36 @@ impl IoContext {
         }
 
         let app_core = self.app_core_raw();
+        let runtime_available = {
+            let core = app_core.read().await;
+            core.runtime().is_some()
+        };
+        if !runtime_available {
+            let shareable = ShareableInvitation::from_code(code).map_err(|e| {
+                TerminalError::Operation(format!("Failed to parse device enrollment code: {e}"))
+            })?;
+            let AgentInvitationType::DeviceEnrollment {
+                nickname_suggestion,
+                ..
+            } = shareable.invitation_type
+            else {
+                return Err(TerminalError::Input(
+                    "Code is not a device enrollment invitation".to_string(),
+                ));
+            };
+            let nickname_suggestion =
+                nickname_suggestion.unwrap_or_else(|| "Imported Device".to_string());
+            let (authority_id, _context_id) = self
+                .account_files
+                .create_account_with_device_enrollment(&nickname_suggestion, code)
+                .await?;
+            {
+                let mut core = app_core.write().await;
+                core.set_authority(authority_id);
+            }
+            return Ok(());
+        }
+
         let invitation = import_invitation_details(app_core, code)
             .await
             .map_err(|e| TerminalError::Operation(format!("Failed to import invitation: {e}")))?;

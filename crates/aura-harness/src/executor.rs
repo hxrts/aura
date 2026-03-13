@@ -11,14 +11,15 @@ use aura_app::scenario_contract::{
     ActionPrecondition, ActorId, AuthoritativeTransitionFact, AuthoritativeTransitionKind,
     BarrierDeclaration, CanonicalTraceEvent, EnvironmentAction, Expectation, ExtractSource,
     InputKey, IntentAction, ScenarioAction as SemanticAction, ScenarioStep as SemanticStep,
-    SharedActionContract, SharedActionHandle, SharedActionId, SharedActionRequest,
-    TerminalFailureFact, TerminalSuccessFact, TerminalSuccessKind, UiAction, VariableAction,
+    SemanticCommandRequest, SemanticCommandResponse, SemanticCommandValue, SharedActionContract,
+    SharedActionHandle, SharedActionId, SharedActionRequest, TerminalFailureFact,
+    TerminalSuccessFact, TerminalSuccessKind, UiAction, VariableAction,
 };
 use aura_app::ui::contract::{
     ControlId, FieldId, ListId, ModalId, OperationId, OperationState, RuntimeEventKind, ScreenId,
     ToastKind, UiSnapshot,
 };
-use aura_app::ui_contract::{uncovered_ui_parity_mismatches, RuntimeFact};
+use aura_app::ui_contract::{uncovered_ui_parity_mismatches, ProjectionRevision, RuntimeFact};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
@@ -101,6 +102,12 @@ enum ExpectedConsistency {
     Replicated,
     Enforced,
     PartialTimeout,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExecutionLane {
+    FrontendConformance,
+    SharedSemantic,
 }
 
 impl ExpectedConsistency {
@@ -195,6 +202,7 @@ struct ScenarioContext {
     last_request_id: Option<u64>,
     last_chat_command: BTreeMap<String, String>,
     last_operation_handle: BTreeMap<String, UiOperationHandle>,
+    pending_projection_baseline: BTreeMap<String, ProjectionRevision>,
     canonical_trace: Vec<CanonicalTraceEvent>,
     shared_flow_state: BTreeMap<String, SharedFlowState>,
     pending_convergence: BTreeMap<String, Vec<BarrierDeclaration>>,
@@ -275,18 +283,6 @@ enum FallbackObservationMode {
 impl<'a> WaitCoordinator<'a> {
     fn new(tool_api: &'a mut ToolApi) -> Self {
         Self { tool_api }
-    }
-
-    fn modal(
-        &mut self,
-        contract: WaitContractRef<'_>,
-        step: &ScenarioStep,
-        instance_id: &str,
-        timeout_ms: u64,
-        modal_id: ModalId,
-    ) -> Result<()> {
-        debug_assert!(matches!(contract, WaitContractRef::Modal(expected) if expected == modal_id));
-        wait_for_modal(step, self.tool_api, instance_id, timeout_ms, modal_id)
     }
 }
 
@@ -963,11 +959,18 @@ fn execute_step(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let submission = issue_stage(
+            let response = submit_shared_intent(
                 step,
-                tool_api.submit_create_account(&instance_id, &account_name),
+                tool_api,
+                context,
+                &instance_id,
+                IntentAction::CreateAccount { account_name },
             )?;
-            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(step, "create_account", response)?,
+            );
             record_shared_flow_progress(step, context, &instance_id);
             Ok(())
         }
@@ -983,28 +986,25 @@ fn execute_step(
                 .var
                 .as_deref()
                 .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
-            dispatch(
-                tool_api,
-                plan_activate_control_request(&instance_id, ControlId::SettingsAddDeviceButton),
-            )?;
-            wait_for_modal(
+            let response = submit_shared_intent(
                 step,
                 tool_api,
+                context,
                 &instance_id,
-                step.timeout_ms.unwrap_or(step_budget_ms),
-                ModalId::AddDevice,
+                IntentAction::StartDeviceEnrollment {
+                    device_name,
+                    code_name: code_name.to_string(),
+                },
             )?;
-            dispatch(
-                tool_api,
-                plan_fill_field_request(&instance_id, FieldId::DeviceName, device_name),
-            )?;
-            dispatch(
-                tool_api,
-                plan_activate_control_request(&instance_id, ControlId::ModalConfirmButton),
-            )?;
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(step, "start_device_enrollment", response)?,
+            );
             wait_for_runtime_event(
                 step,
                 tool_api,
+                context,
                 &instance_id,
                 step.timeout_ms.unwrap_or(step_budget_ms),
                 RuntimeEventKind::DeviceEnrollmentCodeReady,
@@ -1030,17 +1030,18 @@ fn execute_step(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            dispatch(
+            let response = submit_shared_intent(
+                step,
                 tool_api,
-                plan_fill_field_request(&instance_id, FieldId::DeviceImportCode, code),
+                context,
+                &instance_id,
+                IntentAction::ImportDeviceEnrollmentCode { code },
             )?;
-            dispatch(
-                tool_api,
-                plan_activate_control_request(
-                    &instance_id,
-                    ControlId::OnboardingImportDeviceButton,
-                ),
-            )?;
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(step, "import_device_enrollment_code", response)?,
+            );
             let deadline =
                 Instant::now() + Duration::from_millis(step.timeout_ms.unwrap_or(step_budget_ms));
             let mut neighborhood_step = semantic_wait_step(step);
@@ -1048,6 +1049,7 @@ fn execute_step(
             wait_for_semantic_state(
                 &neighborhood_step,
                 tool_api,
+                context,
                 &instance_id,
                 step.timeout_ms.unwrap_or(step_budget_ms),
             )?;
@@ -1057,38 +1059,29 @@ fn execute_step(
                 .max(1) as u64;
             let mut readiness_step = semantic_wait_step(step);
             readiness_step.readiness = Some(aura_app::ui::contract::UiReadiness::Ready);
-            wait_for_semantic_state(&readiness_step, tool_api, &instance_id, remaining_ms)?;
+            wait_for_semantic_state(
+                &readiness_step,
+                tool_api,
+                context,
+                &instance_id,
+                remaining_ms,
+            )?;
             Ok(())
         }
         ScenarioAction::RemoveSelectedDevice => {
             let instance_id = resolve_required_instance(step, context)?;
-            let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
-            dispatch(
-                tool_api,
-                plan_activate_control_request(&instance_id, ControlId::SettingsRemoveDeviceButton),
-            )?;
-            wait_for_modal(
+            let response = submit_shared_intent(
                 step,
                 tool_api,
+                context,
                 &instance_id,
-                timeout_ms,
-                ModalId::SelectDeviceToRemove,
+                IntentAction::RemoveSelectedDevice,
             )?;
-            dispatch(
-                tool_api,
-                plan_activate_control_request(&instance_id, ControlId::ModalConfirmButton),
-            )?;
-            wait_for_modal(
-                step,
-                tool_api,
+            record_submission_handle(
+                context,
                 &instance_id,
-                timeout_ms,
-                ModalId::ConfirmRemoveDevice,
-            )?;
-            dispatch(
-                tool_api,
-                plan_activate_control_request(&instance_id, ControlId::ModalConfirmButton),
-            )?;
+                require_semantic_unit_submission(step, "remove_selected_device", response)?,
+            );
             Ok(())
         }
         ScenarioAction::CreateContactInvitation => {
@@ -1099,15 +1092,20 @@ fn execute_step(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let submission = issue_stage(
+            let response = submit_shared_intent(
                 step,
-                tool_api.submit_create_contact_invitation(&instance_id, &receiver_authority_id),
+                tool_api,
+                context,
+                &instance_id,
+                IntentAction::CreateContactInvitation {
+                    receiver_authority_id,
+                    code_name: step.var.clone(),
+                },
             )?;
-            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            let (code, handle) = require_contact_invitation_submission(step, response)?;
+            record_submission_handle(context, &instance_id, handle);
             if let Some(code_name) = step.var.as_deref() {
-                context
-                    .vars
-                    .insert(code_name.to_string(), submission.value.code);
+                context.vars.insert(code_name.to_string(), code);
             }
             record_shared_flow_progress(step, context, &instance_id);
             Ok(())
@@ -1122,12 +1120,16 @@ fn execute_step(
             )?;
             let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
             let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-            let submission = issue_stage(
+            let response = submit_shared_intent(
                 step,
-                tool_api.submit_accept_contact_invitation(&instance_id, &code),
+                tool_api,
+                context,
+                &instance_id,
+                IntentAction::AcceptContactInvitation { code },
             )?;
-            let operation_handle = submission.handle.ui_operation.clone();
-            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            let operation_handle =
+                require_semantic_unit_submission(step, "accept_contact_invitation", response)?;
+            record_submission_handle(context, &instance_id, operation_handle.clone());
             let mut contact_link_step = semantic_wait_step(step);
             contact_link_step.runtime_event_kind = Some(RuntimeEventKind::ContactLinkReady);
             if let Some(handle) = operation_handle {
@@ -1155,7 +1157,13 @@ fn execute_step(
             if convergence_stage(
                 step,
                 "contact_link",
-                wait_for_semantic_state(&contact_link_step, tool_api, &instance_id, remaining_ms),
+                wait_for_semantic_state(
+                    &contact_link_step,
+                    tool_api,
+                    context,
+                    &instance_id,
+                    remaining_ms,
+                ),
             )
             .is_err()
             {
@@ -1175,6 +1183,7 @@ fn execute_step(
                             wait_for_semantic_state(
                                 &contacts_step,
                                 tool_api,
+                                context,
                                 &instance_id,
                                 remaining_ms,
                             ),
@@ -1193,20 +1202,38 @@ fn execute_step(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let submission = issue_stage(
+            let response = submit_shared_intent(
                 step,
-                tool_api.submit_invite_actor_to_channel(&instance_id, &authority_id),
+                tool_api,
+                context,
+                &instance_id,
+                IntentAction::InviteActorToChannel { authority_id },
             )?;
-            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(step, "invite_actor_to_channel", response)?,
+            );
             Ok(())
         }
         ScenarioAction::AcceptPendingChannelInvitation => {
             let instance_id = resolve_required_instance(step, context)?;
-            let submission = issue_stage(
+            let response = submit_shared_intent(
                 step,
-                tool_api.submit_accept_pending_channel_invitation(&instance_id),
+                tool_api,
+                context,
+                &instance_id,
+                IntentAction::AcceptPendingChannelInvitation,
             )?;
-            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(
+                    step,
+                    "accept_pending_channel_invitation",
+                    response,
+                )?,
+            );
             record_shared_flow_progress(step, context, &instance_id);
             Ok(())
         }
@@ -1218,11 +1245,18 @@ fn execute_step(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let submission = issue_stage(
+            let response = submit_shared_intent(
                 step,
-                tool_api.submit_join_channel(&instance_id, &channel_name),
+                tool_api,
+                context,
+                &instance_id,
+                IntentAction::JoinChannel { channel_name },
             )?;
-            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(step, "join_channel", response)?,
+            );
             Ok(())
         }
         ScenarioAction::SendKeys => {
@@ -1283,7 +1317,14 @@ fn execute_step(
                     },
                 );
             }
-            ensure_chat_screen(step, tool_api, &instance_id, backend_kind, step_budget_ms)?;
+            ensure_chat_screen(
+                step,
+                tool_api,
+                context,
+                &instance_id,
+                backend_kind,
+                step_budget_ms,
+            )?;
             if backend_kind == "playwright_browser" {
                 dispatch(
                     tool_api,
@@ -1380,11 +1421,18 @@ fn execute_step(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let submission = issue_stage(
+            let response = submit_shared_intent(
                 step,
-                tool_api.submit_send_chat_message(&instance_id, &message),
+                tool_api,
+                context,
+                &instance_id,
+                IntentAction::SendChatMessage { message },
             )?;
-            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(step, "send_chat_message", response)?,
+            );
             Ok(())
         }
         ScenarioAction::SendClipboard => {
@@ -1614,6 +1662,7 @@ fn execute_step(
                     wait_for_semantic_state(
                         step,
                         tool_api,
+                        context,
                         &instance_id,
                         step.timeout_ms.unwrap_or(step_budget_ms),
                     ),
@@ -2021,41 +2070,58 @@ fn execute_semantic_shared_step(
             enforce_request_order(&compat_step, context)?;
             let instance_id = resolve_required_instance(&compat_step, context)?;
             ensure_shared_flow_prerequisites(&compat_step, context, &instance_id)?;
-            dispatch(
+            let response = submit_shared_intent(
+                &compat_step,
                 tool_api,
-                plan_activate_control_request(&instance_id, nav_control_id_for_screen(*screen_id)),
+                context,
+                &instance_id,
+                IntentAction::OpenScreen(*screen_id),
             )?;
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(&compat_step, "open_screen", response)?,
+            );
             let timeout_ms = compat_step.timeout_ms.unwrap_or(step_budget_ms);
             let mut wait_step = semantic_wait_step(&compat_step);
             wait_step.screen_id = Some(*screen_id);
-            wait_for_semantic_state(&wait_step, tool_api, &instance_id, timeout_ms)?;
-            if *screen_id == ScreenId::Chat {
-                ensure_chat_screen_targets_unique_shared_channel(
-                    tool_api,
-                    &instance_id,
-                    timeout_ms,
-                )?;
-            }
+            clear_projection_baseline_if_semantic_state_already_visible(
+                tool_api,
+                context,
+                &instance_id,
+                &wait_step,
+            );
+            wait_for_semantic_state(&wait_step, tool_api, context, &instance_id, timeout_ms)?;
             Ok(())
         }
         SemanticAction::Intent(IntentAction::OpenSettingsSection(section)) => {
             enforce_request_order(&compat_step, context)?;
             let instance_id = resolve_required_instance(&compat_step, context)?;
             ensure_shared_flow_prerequisites(&compat_step, context, &instance_id)?;
-            dispatch(
+            let response = submit_shared_intent(
+                &compat_step,
                 tool_api,
-                ToolRequest::ActivateListItem {
-                    instance_id: instance_id.clone(),
-                    list_id: ListId::SettingsSections,
-                    item_id: settings_section_item_id(*section).to_string(),
-                },
+                context,
+                &instance_id,
+                IntentAction::OpenSettingsSection(*section),
             )?;
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(&compat_step, "open_settings_section", response)?,
+            );
             let timeout_ms = compat_step.timeout_ms.unwrap_or(step_budget_ms);
             let mut wait_step = semantic_wait_step(&compat_step);
             wait_step.screen_id = Some(ScreenId::Settings);
             wait_step.list_id = Some(ListId::SettingsSections);
             wait_step.item_id = Some(settings_section_item_id(*section).to_string());
-            wait_for_semantic_state(&wait_step, tool_api, &instance_id, timeout_ms)
+            clear_projection_baseline_if_semantic_state_already_visible(
+                tool_api,
+                context,
+                &instance_id,
+                &wait_step,
+            );
+            wait_for_semantic_state(&wait_step, tool_api, context, &instance_id, timeout_ms)
         }
         SemanticAction::Variables(variable) => match variable {
             aura_app::scenario_contract::VariableAction::Set { name, value } => {
@@ -2065,8 +2131,11 @@ fn execute_semantic_shared_step(
             }
             aura_app::scenario_contract::VariableAction::CaptureCurrentAuthorityId { name } => {
                 let instance_id = resolve_required_instance(&compat_step, context)?;
-                let payload =
-                    dispatch_payload(tool_api, ToolRequest::GetAuthorityId { instance_id })?;
+                let payload = dispatch_payload_in_lane(
+                    tool_api,
+                    ExecutionLane::SharedSemantic,
+                    ToolRequest::GetAuthorityId { instance_id },
+                )?;
                 let authority_id = payload
                     .get("authority_id")
                     .and_then(serde_json::Value::as_str)
@@ -2094,6 +2163,7 @@ fn execute_semantic_shared_step(
                 aura_app::scenario_contract::Expectation::ModalOpen(modal_id) => wait_for_modal(
                     &compat_step,
                     tool_api,
+                    context,
                     &instance_id,
                     step_budget_ms,
                     *modal_id,
@@ -2102,6 +2172,7 @@ fn execute_semantic_shared_step(
                     wait_for_runtime_event(
                         &compat_step,
                         tool_api,
+                        context,
                         &instance_id,
                         step_budget_ms,
                         *kind,
@@ -2167,7 +2238,13 @@ fn execute_semantic_shared_step(
                         step_budget_ms,
                     )
                 }
-                _ => wait_for_semantic_state(&compat_step, tool_api, &instance_id, step_budget_ms),
+                _ => wait_for_semantic_state(
+                    &compat_step,
+                    tool_api,
+                    context,
+                    &instance_id,
+                    step_budget_ms,
+                ),
             };
             if result.is_ok() {
                 record_shared_flow_progress(&compat_step, context, &instance_id);
@@ -2183,171 +2260,6 @@ fn execute_semantic_shared_step(
             context,
         ),
     }
-}
-
-fn unique_shared_channel_candidate(snapshot: &UiSnapshot) -> Option<String> {
-    let mut candidates = snapshot
-        .runtime_events
-        .iter()
-        .filter_map(|event| match &event.fact {
-            RuntimeFact::ChannelMembershipReady {
-                channel,
-                member_count: Some(member_count),
-            } if *member_count > 1
-                && channel
-                    .name
-                    .as_deref()
-                    .map(|name| !name.eq_ignore_ascii_case("note to self"))
-                    .unwrap_or(true) =>
-            {
-                channel.id.clone()
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    candidates.sort();
-    candidates.dedup();
-    if let [channel_id] = candidates.as_slice() {
-        return Some(channel_id.clone());
-    }
-
-    let note_to_self_id = snapshot
-        .runtime_events
-        .iter()
-        .find_map(|event| match &event.fact {
-            RuntimeFact::ChannelMembershipReady { channel, .. }
-                if channel
-                    .name
-                    .as_deref()
-                    .map(|name| name.eq_ignore_ascii_case("note to self"))
-                    .unwrap_or(false) =>
-            {
-                channel.id.clone()
-            }
-            _ => None,
-        });
-    let mut listed_candidates = snapshot
-        .lists
-        .iter()
-        .find(|list| list.id == ListId::Channels)
-        .map(|list| {
-            list.items
-                .iter()
-                .map(|item| item.id.clone())
-                .filter(|item_id| note_to_self_id.as_deref() != Some(item_id.as_str()))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    listed_candidates.sort();
-    listed_candidates.dedup();
-    match listed_candidates.as_slice() {
-        [channel_id] => Some(channel_id.clone()),
-        _ => None,
-    }
-}
-
-fn ensure_chat_screen_targets_unique_shared_channel(
-    tool_api: &mut ToolApi,
-    instance_id: &str,
-    timeout_ms: u64,
-) -> Result<()> {
-    let snapshot = tool_api.ui_snapshot(instance_id)?;
-    let Some(channel_id) = unique_shared_channel_candidate(&snapshot) else {
-        return Ok(());
-    };
-    dispatch(
-        tool_api,
-        plan_activate_control_request(instance_id, ControlId::NavNeighborhood),
-    )?;
-    let neighborhood_wait = ScenarioStep {
-        id: format!("{instance_id}-neighborhood-home-restore"),
-        action: ScenarioAction::WaitFor,
-        instance: Some(instance_id.to_string()),
-        screen_id: Some(ScreenId::Neighborhood),
-        timeout_ms: Some(timeout_ms),
-        ..ScenarioStep::default()
-    };
-    wait_for_semantic_state(&neighborhood_wait, tool_api, instance_id, timeout_ms)?;
-    dispatch(
-        tool_api,
-        ToolRequest::SendKey {
-            instance_id: instance_id.to_string(),
-            key: ToolKey::Esc,
-            repeat: 1,
-        },
-    )?;
-    let neighborhood_snapshot = tool_api.ui_snapshot(instance_id)?;
-    let home_visible = neighborhood_snapshot
-        .lists
-        .iter()
-        .find(|list| list.id == ListId::Homes)
-        .is_some_and(|list| list.items.iter().any(|item| item.id == channel_id));
-    if home_visible {
-        dispatch(
-            tool_api,
-            ToolRequest::ActivateListItem {
-                instance_id: instance_id.to_string(),
-                list_id: ListId::Homes,
-                item_id: channel_id.clone(),
-            },
-        )?;
-        dispatch(
-            tool_api,
-            ToolRequest::SendKey {
-                instance_id: instance_id.to_string(),
-                key: ToolKey::Enter,
-                repeat: 1,
-            },
-        )?;
-    }
-    dispatch(
-        tool_api,
-        plan_activate_control_request(instance_id, ControlId::NavChat),
-    )?;
-    let chat_wait = ScenarioStep {
-        id: format!("{instance_id}-chat-screen-restore"),
-        action: ScenarioAction::WaitFor,
-        instance: Some(instance_id.to_string()),
-        screen_id: Some(ScreenId::Chat),
-        timeout_ms: Some(timeout_ms),
-        ..ScenarioStep::default()
-    };
-    wait_for_semantic_state(&chat_wait, tool_api, instance_id, timeout_ms)?;
-    let channel_visible_deadline = Instant::now() + Duration::from_millis(timeout_ms.min(5_000));
-    loop {
-        let snapshot = tool_api.ui_snapshot(instance_id)?;
-        let visible = snapshot
-            .lists
-            .iter()
-            .find(|list| list.id == ListId::Channels)
-            .is_some_and(|list| list.items.iter().any(|item| item.id == channel_id));
-        if visible {
-            break;
-        }
-        if Instant::now() >= channel_visible_deadline {
-            return Ok(());
-        }
-        std::thread::sleep(Duration::from_millis(80));
-    }
-    dispatch(
-        tool_api,
-        ToolRequest::ActivateListItem {
-            instance_id: instance_id.to_string(),
-            list_id: ListId::Channels,
-            item_id: channel_id.clone(),
-        },
-    )?;
-    let wait_step = ScenarioStep {
-        id: format!("{instance_id}-chat-channel-restore"),
-        action: ScenarioAction::WaitFor,
-        instance: Some(instance_id.to_string()),
-        screen_id: Some(ScreenId::Chat),
-        list_id: Some(ListId::Channels),
-        item_id: Some(channel_id),
-        timeout_ms: Some(timeout_ms),
-        ..ScenarioStep::default()
-    };
-    wait_for_semantic_state(&wait_step, tool_api, instance_id, timeout_ms)
 }
 
 fn semantic_execution_adapter_step(step: &SemanticStep) -> Result<ScenarioStep> {
@@ -2651,7 +2563,7 @@ fn execute_shared_semantic_action(
     step_budget_ms: u64,
     context: &mut ScenarioContext,
 ) -> Result<()> {
-    let mut waits = WaitCoordinator::new(tool_api);
+    let waits = WaitCoordinator::new(tool_api);
     match binding {
         SharedSemanticBinding::CreateAccount => {
             let instance_id = resolve_required_instance(step, context)?;
@@ -2661,11 +2573,18 @@ fn execute_shared_semantic_action(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let submission = issue_stage(
+            let response = submit_shared_intent(
                 step,
-                tool_api.submit_create_account(&instance_id, &account_name),
+                tool_api,
+                context,
+                &instance_id,
+                IntentAction::CreateAccount { account_name },
             )?;
-            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(step, "create_account", response)?,
+            );
             record_shared_flow_progress(step, context, &instance_id);
             Ok(())
         }
@@ -2677,9 +2596,18 @@ fn execute_shared_semantic_action(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let submission =
-                issue_stage(step, tool_api.submit_create_home(&instance_id, &home_name))?;
-            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            let response = submit_shared_intent(
+                step,
+                tool_api,
+                context,
+                &instance_id,
+                IntentAction::CreateHome { home_name },
+            )?;
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(step, "create_home", response)?,
+            );
             record_shared_flow_progress(step, context, &instance_id);
             Ok(())
         }
@@ -2695,35 +2623,21 @@ fn execute_shared_semantic_action(
                 .var
                 .as_deref()
                 .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
-            let contract = IntentAction::StartDeviceEnrollment {
-                device_name: device_name.clone(),
-                code_name: code_name.to_string(),
-            }
-            .contract();
-            dispatch(
+            let response = submit_shared_intent(
+                step,
                 waits.tool_api,
-                plan_activate_control_request(&instance_id, ControlId::SettingsAddDeviceButton),
-            )?;
-            ensure_wait_contract_declared(
-                step,
-                &contract,
-                WaitContractRef::Modal(ModalId::AddDevice),
-            )?;
-            waits.modal(
-                WaitContractRef::Modal(ModalId::AddDevice),
-                step,
+                context,
                 &instance_id,
-                step.timeout_ms.unwrap_or(step_budget_ms),
-                ModalId::AddDevice,
+                IntentAction::StartDeviceEnrollment {
+                    device_name,
+                    code_name: code_name.to_string(),
+                },
             )?;
-            dispatch(
-                waits.tool_api,
-                plan_fill_field_request(&instance_id, FieldId::DeviceName, device_name),
-            )?;
-            dispatch(
-                waits.tool_api,
-                plan_activate_control_request(&instance_id, ControlId::ModalConfirmButton),
-            )?;
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(step, "start_device_enrollment", response)?,
+            );
             let _ = code_name;
             Ok(())
         }
@@ -2735,62 +2649,35 @@ fn execute_shared_semantic_action(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let _contract =
-                IntentAction::ImportDeviceEnrollmentCode { code: code.clone() }.contract();
-            dispatch(
+            let response = submit_shared_intent(
+                step,
                 waits.tool_api,
-                plan_fill_field_request(&instance_id, FieldId::DeviceImportCode, code),
+                context,
+                &instance_id,
+                IntentAction::ImportDeviceEnrollmentCode { code },
             )?;
-            dispatch(
-                waits.tool_api,
-                plan_activate_control_request(
-                    &instance_id,
-                    ControlId::OnboardingImportDeviceButton,
-                ),
-            )?;
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(step, "import_device_enrollment_code", response)?,
+            );
             record_shared_flow_progress(step, context, &instance_id);
             Ok(())
         }
         SharedSemanticBinding::RemoveSelectedDevice => {
             let instance_id = resolve_required_instance(step, context)?;
-            let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
-            let contract = IntentAction::RemoveSelectedDevice.contract();
-            dispatch(
+            let response = submit_shared_intent(
+                step,
                 waits.tool_api,
-                plan_activate_control_request(&instance_id, ControlId::SettingsRemoveDeviceButton),
-            )?;
-            ensure_wait_contract_declared(
-                step,
-                &contract,
-                WaitContractRef::Modal(ModalId::SelectDeviceToRemove),
-            )?;
-            waits.modal(
-                WaitContractRef::Modal(ModalId::SelectDeviceToRemove),
-                step,
+                context,
                 &instance_id,
-                timeout_ms,
-                ModalId::SelectDeviceToRemove,
+                IntentAction::RemoveSelectedDevice,
             )?;
-            dispatch(
-                waits.tool_api,
-                plan_activate_control_request(&instance_id, ControlId::ModalConfirmButton),
-            )?;
-            ensure_wait_contract_declared(
-                step,
-                &contract,
-                WaitContractRef::Modal(ModalId::ConfirmRemoveDevice),
-            )?;
-            waits.modal(
-                WaitContractRef::Modal(ModalId::ConfirmRemoveDevice),
-                step,
+            record_submission_handle(
+                context,
                 &instance_id,
-                timeout_ms,
-                ModalId::ConfirmRemoveDevice,
-            )?;
-            dispatch(
-                tool_api,
-                plan_activate_control_request(&instance_id, ControlId::ModalConfirmButton),
-            )?;
+                require_semantic_unit_submission(step, "remove_selected_device", response)?,
+            );
             Ok(())
         }
         SharedSemanticBinding::CreateContactInvitation => {
@@ -2801,15 +2688,20 @@ fn execute_shared_semantic_action(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let submission = issue_stage(
+            let response = submit_shared_intent(
                 step,
-                tool_api.submit_create_contact_invitation(&instance_id, &receiver_authority_id),
+                tool_api,
+                context,
+                &instance_id,
+                IntentAction::CreateContactInvitation {
+                    receiver_authority_id,
+                    code_name: step.var.clone(),
+                },
             )?;
-            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            let (code, handle) = require_contact_invitation_submission(step, response)?;
+            record_submission_handle(context, &instance_id, handle);
             if let Some(code_name) = step.var.as_deref() {
-                context
-                    .vars
-                    .insert(code_name.to_string(), submission.value.code);
+                context.vars.insert(code_name.to_string(), code);
             }
             record_shared_flow_progress(step, context, &instance_id);
             Ok(())
@@ -2824,12 +2716,16 @@ fn execute_shared_semantic_action(
             )?;
             let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
             let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-            let submission = issue_stage(
+            let response = submit_shared_intent(
                 step,
-                tool_api.submit_accept_contact_invitation(&instance_id, &code),
+                tool_api,
+                context,
+                &instance_id,
+                IntentAction::AcceptContactInvitation { code },
             )?;
-            let operation_handle = submission.handle.ui_operation.clone();
-            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            let operation_handle =
+                require_semantic_unit_submission(step, "accept_contact_invitation", response)?;
+            record_submission_handle(context, &instance_id, operation_handle.clone());
             let mut contact_link_step = semantic_wait_step(step);
             contact_link_step.runtime_event_kind = Some(RuntimeEventKind::ContactLinkReady);
             if let Some(handle) = operation_handle {
@@ -2857,7 +2753,13 @@ fn execute_shared_semantic_action(
             if convergence_stage(
                 step,
                 "contact_link",
-                wait_for_semantic_state(&contact_link_step, tool_api, &instance_id, remaining_ms),
+                wait_for_semantic_state(
+                    &contact_link_step,
+                    tool_api,
+                    context,
+                    &instance_id,
+                    remaining_ms,
+                ),
             )
             .is_err()
             {
@@ -2871,7 +2773,13 @@ fn execute_shared_semantic_action(
                 convergence_stage(
                     step,
                     "contacts_list",
-                    wait_for_semantic_state(&contacts_step, tool_api, &instance_id, remaining_ms),
+                    wait_for_semantic_state(
+                        &contacts_step,
+                        tool_api,
+                        context,
+                        &instance_id,
+                        remaining_ms,
+                    ),
                 )?;
             }
             record_shared_flow_progress(step, context, &instance_id);
@@ -2885,11 +2793,18 @@ fn execute_shared_semantic_action(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let submission = issue_stage(
+            let response = submit_shared_intent(
                 step,
-                tool_api.submit_join_channel(&instance_id, &channel_name),
+                tool_api,
+                context,
+                &instance_id,
+                IntentAction::JoinChannel { channel_name },
             )?;
-            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(step, "join_channel", response)?,
+            );
             Ok(())
         }
         SharedSemanticBinding::InviteActorToChannel => {
@@ -2904,22 +2819,40 @@ fn execute_shared_semantic_action(
                 authority_id: authority_id.clone(),
             }
             .contract();
-            let submission = issue_stage(
+            let response = submit_shared_intent(
                 step,
-                tool_api.submit_invite_actor_to_channel(&instance_id, &authority_id),
+                tool_api,
+                context,
+                &instance_id,
+                IntentAction::InviteActorToChannel { authority_id },
             )?;
-            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(step, "invite_actor_to_channel", response)?,
+            );
             declare_post_operation_convergence(context, &instance_id, &contract);
             Ok(())
         }
         SharedSemanticBinding::AcceptPendingChannelInvitation => {
             let instance_id = resolve_required_instance(step, context)?;
             let contract = IntentAction::AcceptPendingChannelInvitation.contract();
-            let submission = issue_stage(
+            let response = submit_shared_intent(
                 step,
-                tool_api.submit_accept_pending_channel_invitation(&instance_id),
+                tool_api,
+                context,
+                &instance_id,
+                IntentAction::AcceptPendingChannelInvitation,
             )?;
-            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(
+                    step,
+                    "accept_pending_channel_invitation",
+                    response,
+                )?,
+            );
             declare_post_operation_convergence(context, &instance_id, &contract);
             Ok(())
         }
@@ -2931,11 +2864,18 @@ fn execute_shared_semantic_action(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let submission = issue_stage(
+            let response = submit_shared_intent(
                 step,
-                tool_api.submit_send_chat_message(&instance_id, &message),
+                tool_api,
+                context,
+                &instance_id,
+                IntentAction::SendChatMessage { message },
             )?;
-            record_submission_handle(context, &instance_id, submission.handle.ui_operation);
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(step, "send_chat_message", response)?,
+            );
             Ok(())
         }
     }
@@ -2994,6 +2934,7 @@ fn enforce_action_preconditions(
     );
 }
 
+#[cfg(test)]
 fn wait_contract_matches_barrier(
     contract: &WaitContractRef<'_>,
     barrier: &BarrierDeclaration,
@@ -3029,6 +2970,7 @@ fn wait_contract_matches_barrier(
     }
 }
 
+#[cfg(test)]
 fn ensure_wait_contract_declared(
     step: &ScenarioStep,
     contract: &SharedActionContract,
@@ -3429,6 +3371,7 @@ fn normalize_trace_event(event: &CanonicalTraceEvent) -> String {
 fn ensure_chat_screen(
     step: &ScenarioStep,
     tool_api: &mut ToolApi,
+    context: &mut ScenarioContext,
     instance_id: &str,
     backend_kind: &str,
     step_budget_ms: u64,
@@ -3464,7 +3407,7 @@ fn ensure_chat_screen(
             wait_step.item_id = None;
             wait_step.operation_id = None;
             wait_step.operation_state = None;
-            wait_for_semantic_state(&wait_step, tool_api, instance_id, chat_enter_timeout)
+            wait_for_semantic_state(&wait_step, tool_api, context, instance_id, chat_enter_timeout)
         }
         Err(error) if backend_kind == "local_pty" => {
             let _ = error;
@@ -3585,25 +3528,27 @@ fn semantic_wait_step(step: &ScenarioStep) -> ScenarioStep {
 fn wait_for_modal(
     step: &ScenarioStep,
     tool_api: &mut ToolApi,
+    context: &mut ScenarioContext,
     instance_id: &str,
     timeout_ms: u64,
     modal_id: ModalId,
 ) -> Result<()> {
     let mut wait_step = semantic_wait_step(step);
     wait_step.modal_id = Some(modal_id);
-    wait_for_semantic_state(&wait_step, tool_api, instance_id, timeout_ms)
+    wait_for_semantic_state(&wait_step, tool_api, context, instance_id, timeout_ms)
 }
 
 fn wait_for_runtime_event(
     step: &ScenarioStep,
     tool_api: &mut ToolApi,
+    context: &mut ScenarioContext,
     instance_id: &str,
     timeout_ms: u64,
     runtime_event_kind: RuntimeEventKind,
 ) -> Result<()> {
     let mut wait_step = semantic_wait_step(step);
     wait_step.runtime_event_kind = Some(runtime_event_kind);
-    wait_for_semantic_state(&wait_step, tool_api, instance_id, timeout_ms)
+    wait_for_semantic_state(&wait_step, tool_api, context, instance_id, timeout_ms)
 }
 
 fn wait_for_operation_handle_state(
@@ -4042,6 +3987,68 @@ fn record_submission_handle(
     }
 }
 
+fn submit_shared_intent(
+    step: &ScenarioStep,
+    tool_api: &mut ToolApi,
+    context: &mut ScenarioContext,
+    instance_id: &str,
+    intent: IntentAction,
+) -> Result<SemanticCommandResponse> {
+    if let Ok(snapshot) = fetch_ui_snapshot(tool_api, instance_id) {
+        context
+            .pending_projection_baseline
+            .insert(instance_id.to_string(), snapshot.revision);
+    }
+    issue_stage(
+        step,
+        tool_api.submit_semantic_command(instance_id, SemanticCommandRequest::new(intent)),
+    )
+}
+
+fn clear_projection_baseline_if_semantic_state_already_visible(
+    tool_api: &mut ToolApi,
+    context: &mut ScenarioContext,
+    instance_id: &str,
+    wait_step: &ScenarioStep,
+) {
+    let Ok(snapshot) = fetch_ui_snapshot(tool_api, instance_id) else {
+        return;
+    };
+    if semantic_wait_matches(wait_step, &snapshot) {
+        context.pending_projection_baseline.remove(instance_id);
+    }
+}
+
+fn require_semantic_unit_submission(
+    step: &ScenarioStep,
+    operation: &str,
+    response: SemanticCommandResponse,
+) -> Result<Option<UiOperationHandle>> {
+    match response.value {
+        SemanticCommandValue::None => Ok(response.handle.ui_operation),
+        SemanticCommandValue::ContactInvitationCode { .. } => bail!(
+            "step {} issue stage failed for {}: unexpected contact invitation code payload",
+            step.id,
+            operation
+        ),
+    }
+}
+
+fn require_contact_invitation_submission(
+    step: &ScenarioStep,
+    response: SemanticCommandResponse,
+) -> Result<(String, Option<UiOperationHandle>)> {
+    match response.value {
+        SemanticCommandValue::ContactInvitationCode { code } => {
+            Ok((code, response.handle.ui_operation))
+        }
+        SemanticCommandValue::None => bail!(
+            "step {} issue stage failed for create_contact_invitation: missing contact invitation code payload",
+            step.id
+        ),
+    }
+}
+
 fn issue_stage<T>(step: &ScenarioStep, result: Result<T>) -> Result<T> {
     result.map_err(|error| {
         anyhow::anyhow!(
@@ -4223,28 +4230,34 @@ fn semantic_modal_name(modal: ModalId) -> &'static str {
 fn wait_for_semantic_state(
     step: &ScenarioStep,
     tool_api: &mut ToolApi,
+    context: &mut ScenarioContext,
     instance_id: &str,
     timeout_ms: u64,
 ) -> Result<()> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let backend_kind = tool_api.backend_kind(instance_id).unwrap_or("unknown");
+    let supports_ui_snapshot = tool_api.supports_ui_snapshot(instance_id).unwrap_or(false);
+    let required_newer_than = context.pending_projection_baseline.get(instance_id).copied();
     let mut last_snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
-    if semantic_wait_matches(step, &last_snapshot) {
+    let mut snapshot_version = Some(last_snapshot.revision.semantic_seq);
+    if baseline_satisfied(required_newer_than, &last_snapshot)
+        && semantic_wait_matches(step, &last_snapshot)
+    {
+        context.pending_projection_baseline.remove(instance_id);
         return Ok(());
     }
     if message_contains_authoritative_screen(step, tool_api, instance_id, backend_kind)? {
         return Ok(());
     }
-    let mut browser_version = None;
     loop {
         if Instant::now() >= deadline {
             break;
         }
-        let snapshot = if backend_kind == "playwright_browser" {
+        let snapshot = if supports_ui_snapshot {
             let remaining = deadline.saturating_duration_since(Instant::now());
-            match tool_api.wait_for_ui_snapshot_event(instance_id, remaining, browser_version) {
+            match tool_api.wait_for_ui_snapshot_event(instance_id, remaining, snapshot_version) {
                 Ok(Some((snapshot, version))) => {
-                    browser_version = Some(version);
+                    snapshot_version = Some(version);
                     snapshot
                 }
                 Ok(None) => match fetch_ui_snapshot(tool_api, instance_id) {
@@ -4265,18 +4278,27 @@ fn wait_for_semantic_state(
                         Err(fetch_error) => return Err(fetch_error),
                     }
                 }
-                Err(error) => return Err(error),
+                Err(error) => match fetch_ui_snapshot(tool_api, instance_id) {
+                    Ok(snapshot) => snapshot,
+                    Err(_) => return Err(error),
+                },
             }
         } else {
             std::thread::sleep(Duration::from_millis(40));
             fetch_ui_snapshot(tool_api, instance_id)?
         };
-        if semantic_wait_matches(step, &snapshot) {
+        if baseline_satisfied(required_newer_than, &snapshot) && semantic_wait_matches(step, &snapshot)
+        {
+            context.pending_projection_baseline.remove(instance_id);
             return Ok(());
         }
-        if message_contains_authoritative_screen(step, tool_api, instance_id, backend_kind)? {
+        if baseline_satisfied(required_newer_than, &snapshot)
+            && message_contains_authoritative_screen(step, tool_api, instance_id, backend_kind)?
+        {
+            context.pending_projection_baseline.remove(instance_id);
             return Ok(());
         }
+        consume_projection_baseline(context, instance_id, &snapshot);
         last_snapshot = snapshot;
     }
     let diagnostic_screen = fetch_screen_text(tool_api, instance_id, ScreenSource::Default).ok();
@@ -4288,6 +4310,35 @@ fn wait_for_semantic_state(
         Some(last_snapshot),
         diagnostic_screen
     )
+}
+
+fn baseline_satisfied(
+    required_newer_than: Option<ProjectionRevision>,
+    snapshot: &UiSnapshot,
+) -> bool {
+    required_newer_than
+        .map(|baseline| {
+            snapshot.revision.is_newer_than(baseline)
+                || snapshot.revision.semantic_seq < baseline.semantic_seq
+        })
+        .unwrap_or(true)
+}
+
+fn consume_projection_baseline(
+    context: &mut ScenarioContext,
+    instance_id: &str,
+    snapshot: &UiSnapshot,
+) {
+    if context
+        .pending_projection_baseline
+        .get(instance_id)
+        .is_some_and(|baseline| {
+            snapshot.revision.is_newer_than(*baseline)
+                || snapshot.revision.semantic_seq < baseline.semantic_seq
+        })
+    {
+        context.pending_projection_baseline.remove(instance_id);
+    }
 }
 
 fn message_contains_authoritative_screen(
@@ -4777,15 +4828,51 @@ fn parse_tool_key(name: &str) -> Result<ToolKey> {
     }
 }
 
-fn dispatch(tool_api: &mut ToolApi, request: ToolRequest) -> Result<()> {
-    dispatch_payload(tool_api, request).map(|_| ())
+fn shared_semantic_raw_ui_request(request: &ToolRequest) -> bool {
+    matches!(
+        request,
+        ToolRequest::SendKeys { .. }
+            | ToolRequest::SendKey { .. }
+            | ToolRequest::ActivateControl { .. }
+            | ToolRequest::ActivateListItem { .. }
+            | ToolRequest::CreateContactInvitation { .. }
+            | ToolRequest::ClickButton { .. }
+            | ToolRequest::FillInput { .. }
+            | ToolRequest::FillField { .. }
+    )
 }
 
-fn dispatch_payload(tool_api: &mut ToolApi, request: ToolRequest) -> Result<serde_json::Value> {
+fn dispatch_in_lane(
+    tool_api: &mut ToolApi,
+    lane: ExecutionLane,
+    request: ToolRequest,
+) -> Result<()> {
+    dispatch_payload_in_lane(tool_api, lane, request).map(|_| ())
+}
+
+fn dispatch(tool_api: &mut ToolApi, request: ToolRequest) -> Result<()> {
+    dispatch_in_lane(tool_api, ExecutionLane::FrontendConformance, request)
+}
+
+fn dispatch_payload_in_lane(
+    tool_api: &mut ToolApi,
+    lane: ExecutionLane,
+    request: ToolRequest,
+) -> Result<serde_json::Value> {
+    if matches!(lane, ExecutionLane::SharedSemantic) && shared_semantic_raw_ui_request(&request) {
+        bail!(
+            "shared semantic lane may not issue raw UI request {:?}; move this flow to the semantic command plane or frontend-conformance coverage",
+            request
+        );
+    }
     match tool_api.handle_request(request) {
         ToolResponse::Ok { payload } => Ok(payload),
         ToolResponse::Error { message } => Err(anyhow!(message)),
     }
+}
+
+fn dispatch_payload(tool_api: &mut ToolApi, request: ToolRequest) -> Result<serde_json::Value> {
+    dispatch_payload_in_lane(tool_api, ExecutionLane::FrontendConformance, request)
 }
 
 fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str) -> Result<()> {
@@ -4834,11 +4921,12 @@ fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str
 mod tests {
     use super::*;
     use crate::config::{
-        InstanceConfig, InstanceMode, RunConfig, RunSection, ScenarioAction, ScenarioCanonicalModel,
+        InstanceConfig, InstanceMode, RunConfig, RunSection, ScenarioAction,
+        ScenarioCanonicalModel, ScreenSource,
     };
     use crate::coordinator::HarnessCoordinator;
     use aura_app::ui::contract::{
-        ConfirmationState, ListId, ListItemSnapshot, ListSnapshot, OperationId,
+        ConfirmationState, FieldId, ListId, ListItemSnapshot, ListSnapshot, OperationId,
         OperationInstanceId, OperationSnapshot, OperationState, ScreenId, SelectionSnapshot,
         UiReadiness, UiSnapshot,
     };
@@ -4889,6 +4977,111 @@ mod tests {
         assert!(!ExpectedConsistency::Enforced.is_satisfied_by(ExpectedConsistency::Accepted));
         assert!(!ExpectedConsistency::Enforced.is_satisfied_by(ExpectedConsistency::Replicated));
         assert!(!ExpectedConsistency::Accepted.is_satisfied_by(ExpectedConsistency::PartialTimeout));
+    }
+
+    #[test]
+    fn shared_semantic_lane_rejects_raw_ui_requests() {
+        for request in [
+            ToolRequest::SendKeys {
+                instance_id: "alice".to_string(),
+                keys: "hello".to_string(),
+            },
+            ToolRequest::SendKey {
+                instance_id: "alice".to_string(),
+                key: ToolKey::Enter,
+                repeat: 1,
+            },
+            ToolRequest::ActivateControl {
+                instance_id: "alice".to_string(),
+                control_id: ControlId::NavChat,
+            },
+            ToolRequest::ActivateListItem {
+                instance_id: "alice".to_string(),
+                list_id: ListId::Channels,
+                item_id: "channel-1".to_string(),
+            },
+            ToolRequest::ClickButton {
+                instance_id: "alice".to_string(),
+                label: "submit".to_string(),
+                selector: None,
+            },
+            ToolRequest::FillInput {
+                instance_id: "alice".to_string(),
+                selector: "#aura-input".to_string(),
+                value: "value".to_string(),
+            },
+            ToolRequest::FillField {
+                instance_id: "alice".to_string(),
+                field_id: FieldId::ChatInput,
+                value: "value".to_string(),
+            },
+        ] {
+            assert!(
+                shared_semantic_raw_ui_request(&request),
+                "shared semantic lane must reject raw request {request:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn shared_semantic_lane_allows_observation_and_semantic_adjacent_requests() {
+        for request in [
+            ToolRequest::UiState {
+                instance_id: "alice".to_string(),
+            },
+            ToolRequest::Screen {
+                instance_id: "alice".to_string(),
+                screen_source: ScreenSource::Default,
+            },
+            ToolRequest::GetAuthorityId {
+                instance_id: "alice".to_string(),
+            },
+            ToolRequest::ListChannels {
+                instance_id: "alice".to_string(),
+            },
+            ToolRequest::CurrentSelection {
+                instance_id: "alice".to_string(),
+            },
+            ToolRequest::ReadClipboard {
+                instance_id: "alice".to_string(),
+            },
+            ToolRequest::Restart {
+                instance_id: "alice".to_string(),
+            },
+        ] {
+            assert!(
+                !shared_semantic_raw_ui_request(&request),
+                "shared semantic lane should allow non-raw request {request:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn shared_open_screen_and_settings_use_semantic_submission_not_raw_ui() {
+        let source = include_str!("executor.rs");
+        let (_, semantic_body) = source
+            .split_once("fn execute_semantic_shared_step(")
+            .unwrap_or_else(|| panic!("missing execute_semantic_shared_step"));
+        let semantic_body = semantic_body
+            .split_once("fn semantic_execution_adapter_step(")
+            .map(|(body, _)| body)
+            .unwrap_or_else(|| panic!("missing semantic step end"));
+        assert!(
+            semantic_body.contains("IntentAction::OpenScreen(*screen_id)"),
+            "shared OpenScreen branch must submit the semantic intent"
+        );
+        assert!(
+            semantic_body.contains("IntentAction::OpenSettingsSection(*section)"),
+            "shared OpenSettingsSection branch must submit the semantic intent"
+        );
+        assert!(
+            !semantic_body.contains("plan_activate_control_request(&instance_id, nav_control_id_for_screen(*screen_id))"),
+            "shared OpenScreen branch must not fall back to raw control activation"
+        );
+        assert!(
+            !semantic_body.contains("ToolRequest::ActivateListItem {\n                    instance_id: instance_id.clone(),\n                    list_id: ListId::SettingsSections,"),
+            "shared OpenSettingsSection branch must not fall back to raw list activation"
+        );
     }
 
     #[test]
@@ -5231,6 +5424,64 @@ mod tests {
         };
 
         assert!(semantic_wait_matches(&step, &snapshot));
+    }
+
+    #[test]
+    fn operation_handle_match_requires_matching_instance_and_state() {
+        let handle = UiOperationHandle {
+            id: OperationId::invitation_accept(),
+            instance_id: OperationInstanceId("handle-instance".to_string()),
+        };
+        let matching_snapshot = UiSnapshot {
+            screen: ScreenId::Contacts,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: next_projection_revision(None),
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: Vec::new(),
+            lists: Vec::new(),
+            messages: Vec::new(),
+            operations: vec![OperationSnapshot {
+                id: OperationId::invitation_accept(),
+                instance_id: OperationInstanceId("handle-instance".to_string()),
+                state: OperationState::Succeeded,
+            }],
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+        let wrong_instance_snapshot = UiSnapshot {
+            operations: vec![OperationSnapshot {
+                id: OperationId::invitation_accept(),
+                instance_id: OperationInstanceId("other-instance".to_string()),
+                state: OperationState::Succeeded,
+            }],
+            ..matching_snapshot.clone()
+        };
+        let wrong_state_snapshot = UiSnapshot {
+            operations: vec![OperationSnapshot {
+                id: OperationId::invitation_accept(),
+                instance_id: OperationInstanceId("handle-instance".to_string()),
+                state: OperationState::Failed,
+            }],
+            ..matching_snapshot.clone()
+        };
+
+        assert!(operation_handle_matches(
+            &matching_snapshot,
+            &handle,
+            OperationState::Succeeded
+        ));
+        assert!(!operation_handle_matches(
+            &wrong_instance_snapshot,
+            &handle,
+            OperationState::Succeeded
+        ));
+        assert!(!operation_handle_matches(
+            &wrong_state_snapshot,
+            &handle,
+            OperationState::Succeeded
+        ));
     }
 
     #[test]

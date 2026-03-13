@@ -8,37 +8,19 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
-use aura_app::ui::contract::{
-    list_item_selector, ControlId, FieldId, ListId, OperationId, OperationState, ScreenId,
-    UiSnapshot,
-};
-use aura_app::ui_contract::RuntimeFact;
+use aura_app::ui::contract::{list_item_selector, ControlId, FieldId, ListId, UiSnapshot};
+use aura_app::ui::scenarios::{SemanticCommandRequest, SemanticCommandResponse};
 use nix::poll::{poll, PollFd, PollFlags};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
-use crate::backend::{
-    submit_accept_contact_invitation_via_shared_ui, submit_invite_actor_to_channel_via_shared_ui,
-    wait_for_screen_visible, ContactInvitationCode, InstanceBackend, RawUiBackend,
-    SharedSemanticBackend, SubmittedAction, UiSnapshotEvent,
-};
+use crate::backend::{InstanceBackend, RawUiBackend, SharedSemanticBackend, UiSnapshotEvent};
 use crate::config::InstanceConfig;
 use crate::tool_api::ToolKey;
 
 const DEFAULT_PAGE_GOTO_TIMEOUT_MS: u64 = 90_000;
 const DEFAULT_HARNESS_READY_TIMEOUT_MS: u64 = 90_000;
-const PLACEHOLDER_HOME_ID: &str =
-    "channel:0000000000000000000000000000000000000000000000000000000000000000";
-
-fn snapshot_has_real_home(snapshot: &UiSnapshot) -> bool {
-    snapshot
-        .lists
-        .iter()
-        .find(|list| list.id == ListId::Homes)
-        .map(|list| list.items.iter().any(|item| item.id != PLACEHOLDER_HOME_ID))
-        .unwrap_or(false)
-}
 const DEFAULT_RPC_TIMEOUT_MS: u64 = 15_000;
 const WAIT_RPC_TIMEOUT_MARGIN_MS: u64 = 5_000;
 const DEFAULT_START_MAX_ATTEMPTS: u32 = 3;
@@ -338,12 +320,23 @@ impl PlaywrightBrowserBackend {
         self.state = BackendState::Stopped;
         Ok(())
     }
-
-    fn submit_chat_command_via_ui(&mut self, command: &str) -> Result<()> {
-        self.activate_control(ControlId::NavChat)?;
-        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
-        self.fill_field(FieldId::ChatInput, &format!("/{command}"))?;
-        self.send_key(ToolKey::Enter, 1)
+    fn submit_semantic_command(
+        &mut self,
+        request: SemanticCommandRequest,
+    ) -> Result<SemanticCommandResponse> {
+        let payload = serde_json::to_value(&request)
+            .context("failed to encode browser semantic command request")?;
+        let response = self.with_session(|session| {
+            session.rpc_call(
+                "submit_semantic_command",
+                json!({
+                    "instance_id": self.config.id,
+                    "request": payload,
+                }),
+            )
+        })?;
+        serde_json::from_value(response)
+            .context("failed to decode browser semantic command response")
     }
 }
 
@@ -950,170 +943,11 @@ impl SharedSemanticBackend for PlaywrightBrowserBackend {
         self.wait_for_ui_snapshot_event(timeout, after_version)
     }
 
-    fn submit_create_account(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
-        self.with_session(|session| {
-            session.rpc_call(
-                "create_account",
-                json!({
-                    "instance_id": self.config.id,
-                    "account_name": account_name,
-                }),
-            )?;
-            Ok(())
-        })?;
-        let issue_deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            if snapshot.operations.iter().any(|operation| {
-                operation.id == OperationId::account_create()
-                    && operation.state == aura_app::ui::contract::OperationState::Failed
-            }) {
-                anyhow::bail!("submit_create_account: account creation failed");
-            }
-            if snapshot.operations.iter().any(|operation| {
-                operation.id == OperationId::account_create()
-                    && matches!(
-                        operation.state,
-                        aura_app::ui::contract::OperationState::Submitting
-                            | aura_app::ui::contract::OperationState::Succeeded
-                    )
-            }) {
-                return Ok(SubmittedAction::without_handle(()));
-            }
-            if snapshot.screen != ScreenId::Onboarding || snapshot_has_real_home(&snapshot) {
-                return Ok(SubmittedAction::without_handle(()));
-            }
-            if Instant::now() >= issue_deadline {
-                anyhow::bail!("submit_create_account: account creation did not issue");
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-    }
-
-    fn submit_create_home(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
-        self.with_session(|session| {
-            session.rpc_call(
-                "create_home",
-                json!({
-                    "instance_id": self.config.id,
-                    "home_name": home_name,
-                }),
-            )?;
-            Ok(())
-        })?;
-        Ok(SubmittedAction::without_handle(()))
-    }
-
-    fn submit_create_contact_invitation(
+    fn submit_semantic_command(
         &mut self,
-        receiver_authority_id: &str,
-    ) -> Result<SubmittedAction<ContactInvitationCode>> {
-        let payload = self.with_session(|session| {
-            session.rpc_call(
-                "create_contact_invitation",
-                json!({
-                    "instance_id": self.config.id,
-                    "receiver_authority_id": receiver_authority_id,
-                }),
-            )
-        })?;
-        let code = payload
-            .get("code")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                anyhow::anyhow!("submit_create_contact_invitation: missing code in response")
-            })?;
-        Ok(SubmittedAction::without_handle(ContactInvitationCode {
-            code: code.to_string(),
-        }))
-    }
-
-    fn submit_accept_contact_invitation(&mut self, code: &str) -> Result<SubmittedAction<()>> {
-        submit_accept_contact_invitation_via_shared_ui(self, code)
-    }
-
-    fn submit_invite_actor_to_channel(
-        &mut self,
-        authority_id: &str,
-    ) -> Result<SubmittedAction<()>> {
-        submit_invite_actor_to_channel_via_shared_ui(self, authority_id)
-    }
-
-    fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>> {
-        let previous_channel_count = self
-            .ui_snapshot()?
-            .lists
-            .iter()
-            .find(|list| list.id == ListId::Channels)
-            .map(|list| list.items.len())
-            .unwrap_or(0);
-        self.submit_chat_command_via_ui("homeaccept")?;
-        let deadline = Instant::now() + Duration::from_secs(20);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            let channel_count = snapshot
-                .lists
-                .iter()
-                .find(|list| list.id == ListId::Channels)
-                .map(|list| list.items.len())
-                .unwrap_or(0);
-            let joined = channel_count > previous_channel_count
-                || snapshot
-                    .runtime_events
-                    .iter()
-                    .any(|event| matches!(&event.fact, RuntimeFact::ChannelMembershipReady { .. }));
-            if joined {
-                return Ok(SubmittedAction::without_handle(()));
-            }
-            if snapshot.operation_state(&OperationId::invitation_accept())
-                == Some(OperationState::Failed)
-            {
-                anyhow::bail!("submit_accept_pending_channel_invitation: invitation_accept failed");
-            }
-            if Instant::now() >= deadline {
-                anyhow::bail!(
-                    "submit_accept_pending_channel_invitation: timed out waiting for channel join"
-                );
-            }
-            thread::sleep(Duration::from_millis(80));
-        }
-    }
-
-    fn submit_join_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
-        self.with_session(|session| {
-            session.rpc_call(
-                "join_channel",
-                json!({
-                    "instance_id": self.config.id,
-                    "channel_name": channel_name,
-                }),
-            )?;
-            Ok(())
-        })
-        .context("submit_join_channel: browser_dom_flow")?;
-        Ok(SubmittedAction::without_handle(()))
-    }
-
-    fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>> {
-        self.activate_control(ControlId::NavChat)?;
-        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
-        let snapshot = self.ui_snapshot()?;
-        if let Some(channels) = snapshot
-            .lists
-            .iter()
-            .find(|list| list.id == ListId::Channels)
-        {
-            let selected = channels.items.iter().any(|item| item.selected);
-            if !selected && channels.items.len() == 1 {
-                self.activate_list_item(ListId::Channels, &channels.items[0].id)?;
-                thread::sleep(Duration::from_millis(120));
-            }
-        }
-        self.fill_field(FieldId::ChatInput, message)?;
-        self.send_key(ToolKey::Enter, 1)?;
-        Ok(SubmittedAction::without_handle(()))
+        request: SemanticCommandRequest,
+    ) -> Result<SemanticCommandResponse> {
+        PlaywrightBrowserBackend::submit_semantic_command(self, request)
     }
 }
 
@@ -1293,7 +1127,6 @@ mod tests {
         browser_app_url, control_selector, field_selector, navigation_control_id,
         parse_bool_setting, parse_u64_setting, tool_key_name, DEFAULT_PAGE_GOTO_TIMEOUT_MS,
     };
-    use crate::backend::SHARED_INTENT_UI_BYPASS_ALLOWLIST;
     use crate::tool_api::ToolKey;
     use aura_app::ui::contract::{ControlId, FieldId};
 
@@ -1368,6 +1201,10 @@ mod tests {
             navigation_control_id("chat").unwrap_or_else(|error| panic!("{error}")),
             ControlId::NavChat
         );
+        assert_eq!(
+            navigation_control_id("settings").unwrap_or_else(|error| panic!("{error}")),
+            ControlId::NavSettings
+        );
         assert!(navigation_control_id("unknown").is_err());
     }
 
@@ -1377,43 +1214,122 @@ mod tests {
     }
 
     #[test]
-    fn playwright_shared_intent_methods_use_visible_ui_controls() {
+    fn playwright_shared_intent_methods_use_semantic_bridge() {
         let source = include_str!("playwright_browser.rs");
-        let contract_source = include_str!("mod.rs");
-        assert!(source.contains("submit_accept_contact_invitation_via_shared_ui(self, code)"));
-        assert!(contract_source
-            .contains("self.activate_control(ControlId::ContactsAcceptInvitationButton)?;"));
-        assert!(contract_source.contains(
-            "wait_for_modal_visible(self, ModalId::AcceptInvitation, Duration::from_secs(5))?;"
-        ));
-        assert!(contract_source.contains("backend.fill_field(FieldId::InvitationCode, code)?;"));
-        assert!(source.contains("submit_invite_actor_to_channel_via_shared_ui(self, authority_id)"));
-        assert!(contract_source.contains("backend.activate_control(ControlId::NavContacts)?;"));
-        assert!(contract_source
-            .contains("backend.activate_list_item(ListId::Contacts, authority_id)?;"));
-        assert!(contract_source
-            .contains("backend.activate_control(ControlId::ContactsInviteToChannelButton)?;"));
-        assert!(source.contains("fn submit_send_chat_message"));
-        assert!(source.contains("self.activate_control(ControlId::NavChat)?;"));
-        assert!(source.contains("self.fill_field(FieldId::ChatInput, message)?;"));
-        assert!(source.contains("self.send_key(ToolKey::Enter, 1)?;"));
+        assert!(source.contains("fn submit_semantic_command("));
+        for intent in [
+            "IntentAction::CreateAccount",
+            "IntentAction::CreateHome",
+            "IntentAction::CreateContactInvitation",
+            "IntentAction::AcceptContactInvitation",
+            "IntentAction::InviteActorToChannel",
+            "IntentAction::AcceptPendingChannelInvitation",
+            "IntentAction::JoinChannel",
+            "IntentAction::SendChatMessage",
+        ] {
+            assert!(
+                source.contains(intent),
+                "browser shared semantic backend should route {intent} through the semantic bridge"
+            );
+        }
     }
 
     #[test]
-    fn playwright_shortcut_bypasses_are_allowlisted() {
-        let unique: std::collections::HashSet<_> = SHARED_INTENT_UI_BYPASS_ALLOWLIST
-            .iter()
-            .map(|entry| (entry.backend_kind, entry.method_name))
-            .collect();
-        assert!(unique.contains(&("playwright_browser", "submit_create_account")));
-        assert!(unique.contains(&("playwright_browser", "submit_create_home")));
-        assert!(unique.contains(&("playwright_browser", "submit_create_contact_invitation")));
+    fn browser_frontend_conformance_keeps_settings_control_selector_aligned() {
+        assert_eq!(
+            control_selector(ControlId::NavSettings).unwrap_or_else(|error| panic!("{error}")),
+            "#aura-nav-settings"
+        );
+        assert_eq!(
+            control_selector(
+                navigation_control_id("settings").unwrap_or_else(|error| panic!("{error}"))
+            )
+            .unwrap_or_else(|error| panic!("{error}")),
+            "#aura-nav-settings"
+        );
+    }
+
+    #[test]
+    fn playwright_shared_semantic_methods_do_not_regress_to_raw_ui_driving() {
+        fn method_block<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
+            let (_, tail) = source
+                .split_once(start)
+                .unwrap_or_else(|| panic!("missing method start {start}"));
+            tail.split_once(end)
+                .map(|(body, _)| body)
+                .unwrap_or_else(|| panic!("missing method end {end}"))
+        }
 
         let source = include_str!("playwright_browser.rs");
-        assert!(source.contains("session.rpc_call(\n                \"create_account\","));
-        assert!(source.contains("session.rpc_call(\n                \"create_home\","));
+        let raw_ui_calls = [
+            "activate_control(",
+            "click_button(",
+            "click_target(",
+            "fill_input(",
+            "fill_field(",
+            "activate_list_item(",
+            "send_key(",
+            "send_keys(",
+        ];
+        let body = method_block(
+            source,
+            "impl SharedSemanticBackend for PlaywrightBrowserBackend {",
+            "impl Drop for PlaywrightBrowserBackend {",
+        );
         assert!(
-            source.contains("session.rpc_call(\n                \"create_contact_invitation\",")
+            body.contains("fn submit_semantic_command("),
+            "shared semantic backend should expose one generic semantic submit path"
+        );
+        for raw_call in raw_ui_calls {
+            assert!(
+                !body.contains(raw_call),
+                "shared semantic backend should not call raw UI helper {raw_call}"
+            );
+        }
+    }
+
+    #[test]
+    fn playwright_shared_semantic_bridge_replaces_shortcut_bypasses() {
+        let source = include_str!("playwright_browser.rs");
+        assert!(source.contains("fn submit_semantic_command("));
+        assert!(source.contains("session.rpc_call(\n                \"submit_semantic_command\","));
+        assert!(!source.contains("session.rpc_call(\n                \"create_account\","));
+        assert!(!source.contains("session.rpc_call(\n                \"create_home\","));
+        assert!(
+            !source.contains("session.rpc_call(\n                \"create_contact_invitation\",")
+        );
+    }
+
+    #[test]
+    fn playwright_semantic_bridge_failure_and_projection_contracts_are_explicit() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .unwrap_or_else(|| panic!("workspace root"));
+        let bridge_source =
+            std::fs::read_to_string(workspace_root.join("crates/aura-web/src/harness_bridge.rs"))
+                .unwrap_or_else(|error| panic!("failed to read browser harness bridge: {error}"));
+        let driver_source = std::fs::read_to_string(
+            workspace_root.join("crates/aura-harness/playwright-driver/src/playwright_driver.ts"),
+        )
+        .unwrap_or_else(|error| panic!("failed to read Playwright driver: {error}"));
+        let backend_source = include_str!("playwright_browser.rs");
+
+        assert!(
+            bridge_source.contains("invalid semantic command request"),
+            "browser bridge should reject malformed semantic requests with typed context"
+        );
+        assert!(
+            bridge_source.contains("unsupported semantic browser command"),
+            "browser bridge should fail closed on unsupported semantic commands"
+        );
+        assert!(
+            driver_source.contains("resetObservationState(session, \"submit_semantic_command\")"),
+            "browser driver should invalidate stale observation state after semantic submission"
+        );
+        assert!(
+            backend_source.contains("failed to decode browser semantic command response"),
+            "browser backend should preserve semantic bridge decode failures diagnostically"
         );
     }
 }

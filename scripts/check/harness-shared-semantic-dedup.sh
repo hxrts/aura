@@ -19,17 +19,17 @@ done
 
 rg -q 'submit_accept_contact_invitation_via_shared_ui\(self, code\)' "$local_backend" \
   || fail "local backend must route contact invitation acceptance through shared helper"
-rg -q 'submit_accept_contact_invitation_via_shared_ui\(self, code\)' "$browser_backend" \
-  || fail "browser backend must route contact invitation acceptance through shared helper"
 rg -q 'submit_invite_actor_to_channel_via_shared_ui\(self, authority_id\)' "$local_backend" \
   || fail "local backend must route channel invitation through shared helper"
-rg -q 'submit_invite_actor_to_channel_via_shared_ui\(self, authority_id\)' "$browser_backend" \
-  || fail "browser backend must route channel invitation through shared helper"
 
-if rg -q 'method_name: "submit_create_account"|method_name: "submit_create_home"|method_name: "submit_create_contact_invitation"' "$contract"; then
-  :
-else
-  fail "remaining backend-specific semantic divergences must stay typed and allowlisted"
+if rg -n 'SHARED_INTENT_UI_BYPASS_ALLOWLIST|TemporaryHarnessBridgeShortcut' "$contract" >/dev/null; then
+  fail "shared semantic browser bridge migration should remove the old bypass allowlist machinery"
+fi
+
+rg -q 'fn submit_semantic_command\(' "$browser_backend" \
+  || fail "browser backend must route supported semantic submissions through the typed bridge"
+if rg -n 'submit_accept_contact_invitation_via_shared_ui|submit_invite_actor_to_channel_via_shared_ui' "$browser_backend" >/dev/null; then
+  fail "browser backend should not keep local-only shared UI helper shortcuts"
 fi
 
 echo "harness shared semantic dedup: clean"

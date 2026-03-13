@@ -74,6 +74,31 @@ impl AccountFilesHelper {
         }
     }
 
+    pub async fn create_account_with_device_enrollment(
+        &self,
+        nickname_suggestion: &str,
+        device_enrollment_code: &str,
+    ) -> TerminalResult<(AuthorityId, ContextId)> {
+        match crate::handlers::tui::create_account_with_device_enrollment(
+            &self.base_path,
+            nickname_suggestion,
+            device_enrollment_code,
+        )
+        .await
+        {
+            Ok((authority_id, context_id)) => {
+                self.set_account_created();
+                Ok((authority_id, context_id))
+            }
+            Err(e) => {
+                tracing::error!("Failed to create account with device enrollment: {}", e);
+                Err(TerminalError::Operation(format!(
+                    "Failed to create account with device enrollment: {e}"
+                )))
+            }
+        }
+    }
+
     pub async fn restore_recovered_account(
         &self,
         recovered_authority_id: aura_core::identifiers::AuthorityId,

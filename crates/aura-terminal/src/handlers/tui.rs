@@ -315,12 +315,35 @@ pub async fn create_account(
     nickname_suggestion: &str,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
     let pending_bootstrap = prepare_pending_account_bootstrap(nickname_suggestion)?;
+    create_account_with_pending_bootstrap(base_path, pending_bootstrap).await
+}
+
+/// Create a new account and stage a device-enrollment import for the first runtime start.
+pub async fn create_account_with_device_enrollment(
+    base_path: &Path,
+    nickname_suggestion: &str,
+    device_enrollment_code: &str,
+) -> Result<(AuthorityId, ContextId), AuraError> {
+    let pending_bootstrap = prepare_pending_account_bootstrap(nickname_suggestion)?
+        .with_device_enrollment_code(device_enrollment_code.to_string());
+    create_account_with_pending_bootstrap(base_path, pending_bootstrap).await
+}
+
+async fn create_account_with_pending_bootstrap(
+    base_path: &Path,
+    pending_bootstrap: PendingAccountBootstrap,
+) -> Result<(AuthorityId, ContextId), AuraError> {
     let staged_event = BootstrapEvent::new(
         BootstrapSurface::Tui,
         BootstrapEventKind::PendingBootstrapStaged,
     );
     tracing::info!(event = %staged_event, path = %base_path.display());
-    tracing::info!(path = %base_path.display(), nickname = nickname_suggestion, "tui create_account begin");
+    tracing::info!(
+        path = %base_path.display(),
+        nickname = pending_bootstrap.nickname_suggestion,
+        pending_device_enrollment = pending_bootstrap.has_pending_device_enrollment(),
+        "tui create_account begin"
+    );
     let storage = open_bootstrap_storage(base_path);
     let time = PhysicalTimeHandler::new();
     let crypto = RealCryptoHandler::new();
@@ -338,7 +361,7 @@ pub async fn create_account(
         &time,
         authority_id,
         context_id,
-        Some(pending_bootstrap.nickname_suggestion),
+        Some(pending_bootstrap.nickname_suggestion.clone()),
     )
     .await?;
     tracing::info!("tui create_account persisted account config");
@@ -871,18 +894,27 @@ async fn handle_tui_launch(
                     .map_err(|e| AuraError::internal(format!("Failed to create AppCore: {e}")))?;
                 let app_core = Arc::new(RwLock::new(app_core));
                 let app_core = InitializedAppCore::new(app_core).await?;
+                let mut pending_device_enrollment_code = None;
 
                 if let Some(pending_bootstrap) =
                     load_pending_account_bootstrap(storage.as_ref()).await?
                 {
+                    pending_device_enrollment_code =
+                        pending_bootstrap.device_enrollment_code.clone();
                     let resolution = reconcile_pending_runtime_account_bootstrap(
                         app_core.raw(),
                         Some(pending_bootstrap),
                     )
                     .await?;
-                    if resolution.action
-                        != aura_app::ui::workflows::account::PendingRuntimeBootstrapAction::None
-                    {
+                    let clear_pending_bootstrap = matches!(
+                        resolution.action,
+                        aura_app::ui::workflows::account::PendingRuntimeBootstrapAction::ClearedStalePending
+                    ) || matches!(
+                        resolution.action,
+                        aura_app::ui::workflows::account::PendingRuntimeBootstrapAction::InitializedFromPending
+                    ) && pending_device_enrollment_code.is_none();
+
+                    if clear_pending_bootstrap {
                         let reconciled_event = BootstrapEvent::new(
                             BootstrapSurface::Tui,
                             BootstrapEventKind::PendingBootstrapReconciled,
@@ -890,7 +922,7 @@ async fn handle_tui_launch(
                         tracing::info!(event = %reconciled_event, path = %base_path.display());
                         clear_pending_account_bootstrap(storage.as_ref()).await?;
                     }
-                    if resolution.account_ready {
+                    if resolution.account_ready && pending_device_enrollment_code.is_none() {
                         let finalized_event = BootstrapEvent::new(
                             BootstrapSurface::Tui,
                             BootstrapEventKind::RuntimeBootstrapFinalized,
@@ -909,6 +941,74 @@ async fn handle_tui_launch(
                 stdio.println(format_args!(
                     "AppCore initialized (with runtime bridge and reactive signals)"
                 ));
+
+                if let Some(device_enrollment_code) = pending_device_enrollment_code {
+                    let startup_core = app_core.raw().clone();
+                    let startup_storage = storage.clone();
+                    let startup_path = base_path.clone();
+                    tokio::spawn(async move {
+                        match aura_app::ui::workflows::invitation::import_invitation_details(
+                            &startup_core,
+                            &device_enrollment_code,
+                        )
+                        .await
+                        {
+                            Ok(invitation) => {
+                                match aura_app::ui::workflows::invitation::accept_device_enrollment_invitation(
+                                    &startup_core,
+                                    &invitation,
+                                )
+                                .await
+                                {
+                                    Ok(()) => {
+                                        let reconciled_event = BootstrapEvent::new(
+                                            BootstrapSurface::Tui,
+                                            BootstrapEventKind::PendingBootstrapReconciled,
+                                        );
+                                        tracing::info!(
+                                            event = %reconciled_event,
+                                            path = %startup_path.display()
+                                        );
+                                        if let Err(error) = clear_pending_account_bootstrap(
+                                            startup_storage.as_ref(),
+                                        )
+                                        .await
+                                        {
+                                            tracing::error!(
+                                                path = %startup_path.display(),
+                                                error = %error,
+                                                "failed to clear pending account bootstrap after device enrollment acceptance"
+                                            );
+                                            return;
+                                        }
+                                        let finalized_event = BootstrapEvent::new(
+                                            BootstrapSurface::Tui,
+                                            BootstrapEventKind::RuntimeBootstrapFinalized,
+                                        );
+                                        tracing::info!(
+                                            event = %finalized_event,
+                                            path = %startup_path.display()
+                                        );
+                                    }
+                                    Err(error) => {
+                                        tracing::error!(
+                                            path = %startup_path.display(),
+                                            error = %error,
+                                            "failed to accept pending startup device enrollment invitation"
+                                        );
+                                    }
+                                }
+                            }
+                            Err(error) => {
+                                tracing::error!(
+                                    path = %startup_path.display(),
+                                    error = %error,
+                                    "failed to import pending startup device enrollment invitation"
+                                );
+                            }
+                        }
+                    });
+                }
 
                 let ceremony_agent = agent.clone();
                 tokio::spawn(async move {

@@ -1421,7 +1421,7 @@ pub fn use_threshold_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -
 
 #[cfg(test)]
 mod tests {
-    use super::{merge_dm_like_channels, scoped_channel_snapshot};
+    use super::scoped_channel_snapshot;
     use aura_app::ui::types::{
         Channel as AppChannel, ChannelType, ChatState, Message, MessageDeliveryStatus,
     };
@@ -1449,6 +1449,21 @@ mod tests {
             last_activity: 0,
             last_finalized_epoch: 0,
         }
+    }
+
+    fn merge_dm_like_channels(incoming: &ChatState, previous: &ChatState) -> ChatState {
+        let mut merged = incoming.clone();
+        for channel in previous.all_channels() {
+            if crate::tui::chat_scope::is_dm_like_channel(channel)
+                && !merged.has_channel(&channel.id)
+            {
+                merged.add_channel(channel.clone());
+                for message in previous.messages_for_channel(&channel.id) {
+                    merged.apply_message(channel.id, message.clone());
+                }
+            }
+        }
+        merged
     }
 
     fn test_dm_channel(id: ChannelId, name: &str) -> AppChannel {

@@ -1,6 +1,7 @@
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
+use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -10,8 +11,12 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use aura_app::scenario_contract::{
+    IntentAction, SemanticCommandRequest, SemanticCommandResponse, SemanticCommandValue,
+};
 use aura_app::ui::contract::{
-    ControlId, FieldId, ListId, ModalId, OperationId, OperationState, ScreenId, UiSnapshot,
+    ControlId, FieldId, HarnessUiCommand, HarnessUiCommandReceipt, ListId, ModalId, OperationId,
+    OperationState, ScreenId, UiSnapshot,
 };
 use aura_app::ui_contract::RuntimeFact;
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
@@ -181,6 +186,7 @@ struct RunningSession {
 #[derive(Default)]
 struct UiSnapshotFeedState {
     latest: Option<UiSnapshot>,
+    version: u64,
 }
 
 #[allow(clippy::disallowed_types)]
@@ -200,6 +206,25 @@ pub struct LocalPtyBackend {
 }
 
 impl LocalPtyBackend {
+    fn reader_thread_alive(session: &RunningSession) -> bool {
+        session
+            .reader_thread
+            .as_ref()
+            .is_none_or(|thread| !thread.is_finished())
+    }
+
+    fn ensure_session_alive(&self, session: &RunningSession, context: &str) -> Result<()> {
+        if Self::reader_thread_alive(session) {
+            return Ok(());
+        }
+        let screen = Self::read_screen(&session.parser);
+        anyhow::bail!(
+            "local PTY instance {} exited before {context}; last_screen={:?}",
+            self.config.id,
+            self.select_authoritative_screen(screen)
+        );
+    }
+
     fn is_cargo_program(program: &str) -> bool {
         std::path::Path::new(program)
             .file_name()
@@ -216,6 +241,17 @@ impl LocalPtyBackend {
             .join(".tmp")
             .join("harness-ui")
             .join(format!("{:016x}.sock", hasher.finish()))
+    }
+
+    fn command_socket_path(&self) -> PathBuf {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.config.data_dir.hash(&mut hasher);
+        self.config.id.hash(&mut hasher);
+        "command".hash(&mut hasher);
+        workspace_root()
+            .join(".tmp")
+            .join("harness-ui")
+            .join(format!("{:016x}.cmd.sock", hasher.finish()))
     }
 
     pub fn new(config: InstanceConfig, pty_rows: Option<u16>, pty_cols: Option<u16>) -> Self {
@@ -274,6 +310,7 @@ impl LocalPtyBackend {
                     .state
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
+                guard.version = guard.version.saturating_add(1);
                 guard.latest = Some(snapshot);
                 feed.ready.notify_all();
             }
@@ -408,6 +445,95 @@ impl LocalPtyBackend {
         thread::sleep(Duration::from_millis(50));
         Ok(())
     }
+
+    fn send_harness_command(&mut self, command: &HarnessUiCommand) -> Result<()> {
+        let socket_path = Self::absolutize_path(self.command_socket_path());
+        let payload = serde_json::to_vec(command).context("failed to encode harness UI command")?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+
+        loop {
+            match UnixStream::connect(&socket_path) {
+                Ok(mut stream) => {
+                    let command_result: Result<()> = (|| {
+                        stream
+                            .write_all(&payload)
+                            .context("failed to write harness UI command")?;
+                        stream
+                            .flush()
+                            .context("failed to flush harness UI command")?;
+                        stream
+                            .shutdown(Shutdown::Write)
+                            .context("failed to half-close harness UI command socket")?;
+                        let mut receipt = Vec::new();
+                        stream
+                            .read_to_end(&mut receipt)
+                            .context("failed to read harness UI command receipt")?;
+                        let receipt = serde_json::from_slice::<HarnessUiCommandReceipt>(&receipt)
+                            .context("failed to decode harness UI command receipt")?;
+                        match receipt {
+                            HarnessUiCommandReceipt::Accepted => Ok(()),
+                            HarnessUiCommandReceipt::Rejected { reason } => {
+                                anyhow::bail!("TUI harness command rejected: {reason}")
+                            }
+                        }
+                    })();
+
+                    match command_result {
+                        Ok(()) => return Ok(()),
+                        Err(error)
+                            if error
+                                .downcast_ref::<std::io::Error>()
+                                .is_some_and(|io_error| {
+                                    matches!(
+                                        io_error.kind(),
+                                        ErrorKind::BrokenPipe
+                                            | ErrorKind::ConnectionAborted
+                                            | ErrorKind::ConnectionReset
+                                            | ErrorKind::UnexpectedEof
+                                    )
+                                }) =>
+                        {
+                            if Instant::now() >= deadline {
+                                return Err(anyhow::anyhow!(
+                                    "timed out waiting for TUI harness command socket {} to become ready (last error: {})",
+                                    socket_path.display(),
+                                    error
+                                ));
+                            }
+                            thread::sleep(Duration::from_millis(50));
+                            continue;
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        ErrorKind::NotFound
+                            | ErrorKind::ConnectionRefused
+                            | ErrorKind::ConnectionReset
+                    ) =>
+                {
+                    if Instant::now() >= deadline {
+                        return Err(anyhow::anyhow!(
+                            "timed out waiting for TUI harness command socket {} to become ready (last error: {})",
+                            socket_path.display(),
+                            error
+                        ));
+                    }
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!(
+                            "failed to connect TUI harness command socket {}",
+                            socket_path.display()
+                        )
+                    });
+                }
+            }
+        }
+    }
 }
 
 impl InstanceBackend for LocalPtyBackend {
@@ -474,6 +600,13 @@ impl InstanceBackend for LocalPtyBackend {
             command.env(
                 "AURA_TUI_UI_STATE_SOCKET",
                 ui_state_socket.to_string_lossy().to_string(),
+            );
+        }
+        if Self::env_value("AURA_TUI_COMMAND_SOCKET", &self.config.env).is_none() {
+            let command_socket = Self::absolutize_path(self.command_socket_path());
+            command.env(
+                "AURA_TUI_COMMAND_SOCKET",
+                command_socket.to_string_lossy().to_string(),
             );
         }
 
@@ -644,6 +777,7 @@ impl InstanceBackend for LocalPtyBackend {
             .session
             .as_ref()
             .with_context(|| format!("instance {} is not running", self.config.id))?;
+        self.ensure_session_alive(session, "reading authoritative UI snapshot")?;
         let guard = session
             .ui_snapshot_feed
             .state
@@ -672,10 +806,17 @@ impl InstanceBackend for LocalPtyBackend {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         loop {
             if let Some(snapshot) = guard.latest.clone() {
-                let version = snapshot.revision.semantic_seq;
+                let version = guard.version;
                 if after_version.map_or(true, |required| version > required) {
                     return Some(Ok(UiSnapshotEvent { snapshot, version }));
                 }
+            }
+            if !Self::reader_thread_alive(session) {
+                return Some(Err(anyhow::anyhow!(
+                    "local PTY instance {} exited before publishing a newer UI snapshot event; after_version={:?}",
+                    self.config.id,
+                    after_version
+                )));
             }
             let now = Instant::now();
             if now >= deadline {
@@ -811,8 +952,7 @@ impl InstanceBackend for LocalPtyBackend {
         let reader_alive = self
             .session
             .as_ref()
-            .and_then(|session| session.reader_thread.as_ref())
-            .map_or(true, |thread| !thread.is_finished());
+            .is_some_and(Self::reader_thread_alive);
         Ok(reader_alive)
     }
 
@@ -881,8 +1021,18 @@ impl RawUiBackend for LocalPtyBackend {
     }
 
     fn activate_control(&mut self, control_id: ControlId) -> Result<()> {
+        let target_screen = match control_id {
+            ControlId::NavNeighborhood => Some(ScreenId::Neighborhood),
+            ControlId::NavChat => Some(ScreenId::Chat),
+            ControlId::NavContacts => Some(ScreenId::Contacts),
+            ControlId::NavNotifications => Some(ScreenId::Notifications),
+            ControlId::NavSettings => Some(ScreenId::Settings),
+            _ => None,
+        };
         match control_id {
-            ControlId::SettingsAddDeviceButton | ControlId::SettingsRemoveDeviceButton => {
+            ControlId::SettingsAddDeviceButton
+            | ControlId::SettingsImportDeviceCodeButton
+            | ControlId::SettingsRemoveDeviceButton => {
                 let snapshot = self.ui_snapshot()?;
                 if snapshot.screen == aura_app::ui::contract::ScreenId::Settings {
                     let needs_devices_section = snapshot
@@ -906,6 +1056,21 @@ impl RawUiBackend for LocalPtyBackend {
             ) {
                 return self.send_keys("\r");
             }
+        }
+        if let Some(target_screen) = target_screen {
+            self.send_harness_command(&HarnessUiCommand::NavigateScreen {
+                screen: target_screen,
+            })?;
+            return Ok(());
+        }
+        if matches!(
+            control_id,
+            ControlId::SettingsAddDeviceButton
+                | ControlId::SettingsImportDeviceCodeButton
+                | ControlId::SettingsRemoveDeviceButton
+        ) {
+            self.send_harness_command(&HarnessUiCommand::ActivateControl { control_id })?;
+            return Ok(());
         }
         let sequence = control_id.activation_key().ok_or_else(|| {
             anyhow::anyhow!("control {control_id:?} does not have a PTY activation mapping")
@@ -952,17 +1117,14 @@ impl RawUiBackend for LocalPtyBackend {
     }
 
     fn activate_list_item(&mut self, list_id: ListId, item_id: &str) -> Result<()> {
-        let mut snapshot = self.ui_snapshot()?;
-        if matches!(list_id, ListId::SettingsSections)
-            && matches!(
-                snapshot.focused_control,
-                Some(ControlId::Screen(ScreenId::Settings))
-            )
-        {
-            self.send_keys("\u{1b}[B")?;
-            thread::sleep(Duration::from_millis(80));
-            snapshot = self.ui_snapshot()?;
+        if matches!(list_id, ListId::Navigation | ListId::SettingsSections) {
+            self.send_harness_command(&HarnessUiCommand::ActivateListItem {
+                list_id,
+                item_id: item_id.to_string(),
+            })?;
+            return Ok(());
         }
+        let snapshot = self.ui_snapshot()?;
         let list = snapshot
             .lists
             .iter()
@@ -1022,76 +1184,8 @@ impl RawUiBackend for LocalPtyBackend {
             }
             return Ok(());
         }
-        if matches!(list_id, ListId::Navigation) {
-            let list_len = list.items.len();
-            if list_len == 0 {
-                return Ok(());
-            }
-            self.send_keys("\x1b")?;
-            let forward_steps = (target_index + list_len - current_index) % list_len;
-            for _ in 0..forward_steps {
-                self.send_keys("\t")?;
-            }
-            return Ok(());
-        }
-        if matches!(list_id, ListId::SettingsSections) {
-            let max_attempts = list.items.len().saturating_mul(2).max(1);
-            for attempt in 0..max_attempts {
-                let current_snapshot = self.ui_snapshot()?;
-                let current_list = current_snapshot
-                    .lists
-                    .iter()
-                    .find(|candidate| candidate.id == list_id)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "list {list_id:?} is not visible in the current TUI snapshot"
-                        )
-                    })?;
-                let current_index = current_list
-                    .items
-                    .iter()
-                    .position(|item| item.selected)
-                    .unwrap_or(0);
-                if current_list
-                    .items
-                    .get(current_index)
-                    .map(|item| item.id.as_str() == item_id)
-                    .unwrap_or(false)
-                {
-                    return Ok(());
-                }
-                let sequence = if current_index > target_index {
-                    "\u{1b}[A"
-                } else {
-                    "\u{1b}[B"
-                };
-                eprintln!(
-                    "[local_pty activate_list_item stepwise] instance={} list={:?} item_id={} attempt={} current_index={} target_index={} sequence={}",
-                    self.config.id,
-                    list_id,
-                    item_id,
-                    attempt,
-                    current_index,
-                    target_index,
-                    sequence
-                );
-                self.send_keys(sequence)?;
-                thread::sleep(Duration::from_millis(80));
-            }
-            let final_snapshot = self.ui_snapshot()?;
-            let final_selected = final_snapshot
-                .lists
-                .iter()
-                .find(|candidate| candidate.id == list_id)
-                .and_then(|candidate| candidate.items.iter().find(|item| item.selected))
-                .map(|item| item.id.clone())
-                .unwrap_or_else(|| "<none>".to_string());
-            anyhow::bail!(
-                "failed to select item {item_id} in list {list_id:?}; final selection was {final_selected}"
-            );
-        }
         let delta = target_index as isize - current_index as isize;
-        let sequence = if matches!(list_id, ListId::SettingsSections | ListId::Homes) {
+        let sequence = if matches!(list_id, ListId::Homes) {
             if delta < 0 {
                 "\u{1b}[A"
             } else {
@@ -1144,6 +1238,138 @@ impl SharedSemanticBackend for LocalPtyBackend {
         after_version: Option<u64>,
     ) -> Option<Result<UiSnapshotEvent>> {
         self.wait_for_ui_snapshot_event(timeout, after_version)
+    }
+
+    fn submit_semantic_command(
+        &mut self,
+        request: SemanticCommandRequest,
+    ) -> Result<SemanticCommandResponse> {
+        match request.intent {
+            IntentAction::OpenScreen(screen) => {
+                self.send_harness_command(&HarnessUiCommand::NavigateScreen { screen })?;
+                Ok(SemanticCommandResponse::accepted_without_value())
+            }
+            IntentAction::OpenSettingsSection(section) => {
+                self.send_harness_command(&HarnessUiCommand::ActivateControl {
+                    control_id: ControlId::NavSettings,
+                })?;
+                self.send_harness_command(&HarnessUiCommand::ActivateListItem {
+                    list_id: ListId::SettingsSections,
+                    item_id: match section {
+                        aura_app::scenario_contract::SettingsSection::Devices => "devices",
+                    }
+                    .to_string(),
+                })?;
+                Ok(SemanticCommandResponse::accepted_without_value())
+            }
+            IntentAction::CreateAccount { account_name } => {
+                let submitted = self.submit_create_account(&account_name)?;
+                Ok(SemanticCommandResponse {
+                    submission: submitted.submission,
+                    handle: submitted.handle,
+                    value: SemanticCommandValue::None,
+                })
+            }
+            IntentAction::CreateHome { home_name } => {
+                let submitted = self.submit_create_home(&home_name)?;
+                Ok(SemanticCommandResponse {
+                    submission: submitted.submission,
+                    handle: submitted.handle,
+                    value: SemanticCommandValue::None,
+                })
+            }
+            IntentAction::StartDeviceEnrollment { device_name, .. } => {
+                self.send_harness_command(&HarnessUiCommand::ActivateControl {
+                    control_id: ControlId::NavSettings,
+                })?;
+                self.send_harness_command(&HarnessUiCommand::ActivateListItem {
+                    list_id: ListId::SettingsSections,
+                    item_id: "devices".to_string(),
+                })?;
+                self.activate_control(ControlId::SettingsAddDeviceButton)?;
+                wait_for_modal_visible(self, ModalId::AddDevice, Duration::from_secs(5))?;
+                self.fill_field(FieldId::DeviceName, &device_name)?;
+                self.activate_control(ControlId::ModalConfirmButton)?;
+                Ok(SemanticCommandResponse::accepted_without_value())
+            }
+            IntentAction::ImportDeviceEnrollmentCode { code } => {
+                self.fill_field(FieldId::DeviceImportCode, &code)?;
+                self.activate_control(ControlId::OnboardingImportDeviceButton)?;
+                Ok(SemanticCommandResponse::accepted_without_value())
+            }
+            IntentAction::RemoveSelectedDevice => {
+                self.send_harness_command(&HarnessUiCommand::ActivateControl {
+                    control_id: ControlId::NavSettings,
+                })?;
+                self.send_harness_command(&HarnessUiCommand::ActivateListItem {
+                    list_id: ListId::SettingsSections,
+                    item_id: "devices".to_string(),
+                })?;
+                self.activate_control(ControlId::SettingsRemoveDeviceButton)?;
+                wait_for_modal_visible(
+                    self,
+                    ModalId::SelectDeviceToRemove,
+                    Duration::from_secs(5),
+                )?;
+                self.activate_control(ControlId::ModalConfirmButton)?;
+                wait_for_modal_visible(self, ModalId::ConfirmRemoveDevice, Duration::from_secs(5))?;
+                self.activate_control(ControlId::ModalConfirmButton)?;
+                Ok(SemanticCommandResponse::accepted_without_value())
+            }
+            IntentAction::CreateContactInvitation {
+                receiver_authority_id,
+                ..
+            } => {
+                let submitted = self.submit_create_contact_invitation(&receiver_authority_id)?;
+                Ok(SemanticCommandResponse {
+                    submission: submitted.submission,
+                    handle: submitted.handle,
+                    value: SemanticCommandValue::ContactInvitationCode {
+                        code: submitted.value.code,
+                    },
+                })
+            }
+            IntentAction::AcceptContactInvitation { code } => {
+                let submitted = self.submit_accept_contact_invitation(&code)?;
+                Ok(SemanticCommandResponse {
+                    submission: submitted.submission,
+                    handle: submitted.handle,
+                    value: SemanticCommandValue::None,
+                })
+            }
+            IntentAction::InviteActorToChannel { authority_id } => {
+                let submitted = self.submit_invite_actor_to_channel(&authority_id)?;
+                Ok(SemanticCommandResponse {
+                    submission: submitted.submission,
+                    handle: submitted.handle,
+                    value: SemanticCommandValue::None,
+                })
+            }
+            IntentAction::AcceptPendingChannelInvitation => {
+                let submitted = self.submit_accept_pending_channel_invitation()?;
+                Ok(SemanticCommandResponse {
+                    submission: submitted.submission,
+                    handle: submitted.handle,
+                    value: SemanticCommandValue::None,
+                })
+            }
+            IntentAction::JoinChannel { channel_name } => {
+                let submitted = self.submit_join_channel(&channel_name)?;
+                Ok(SemanticCommandResponse {
+                    submission: submitted.submission,
+                    handle: submitted.handle,
+                    value: SemanticCommandValue::None,
+                })
+            }
+            IntentAction::SendChatMessage { message } => {
+                let submitted = self.submit_send_chat_message(&message)?;
+                Ok(SemanticCommandResponse {
+                    submission: submitted.submission,
+                    handle: submitted.handle,
+                    value: SemanticCommandValue::None,
+                })
+            }
+        }
     }
 
     fn submit_create_account(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
@@ -1720,6 +1946,20 @@ mod tests {
         assert!(source.contains(
             "wait_for_modal_visible(self, ModalId::CreateInvitation, Duration::from_secs(5))?;"
         ));
+    }
+
+    #[test]
+    fn local_frontend_conformance_preserves_navigation_and_settings_semantics() {
+        let source = include_str!("local_pty.rs");
+        assert!(source.contains("IntentAction::OpenScreen(screen) => {"));
+        assert!(source
+            .contains("self.send_harness_command(&HarnessUiCommand::NavigateScreen { screen })?;"));
+        assert!(source.contains("IntentAction::OpenSettingsSection(section) => {"));
+        assert!(source.contains("control_id: ControlId::NavSettings,"));
+        assert!(source.contains("list_id: ListId::SettingsSections,"));
+        assert!(
+            source.contains("aura_app::scenario_contract::SettingsSection::Devices => \"devices\"")
+        );
     }
 
     #[test]

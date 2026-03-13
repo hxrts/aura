@@ -21,6 +21,7 @@ bash scripts/check/harness-legacy-shared-quarantine.sh
 bash scripts/check/harness-scenario-config-boundary.sh
 bash scripts/check/harness-scenario-canonical-model.sh
 bash scripts/check/harness-shared-flow-metadata.sh
+bash scripts/check/harness-command-plane-boundary.sh
 bash scripts/check/harness-trace-determinism.sh
 bash scripts/check/harness-observation-determinism.sh
 bash scripts/check/harness-observation-surface.sh

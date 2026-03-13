@@ -27,8 +27,8 @@ inversion through the `RuntimeBridge` trait.
 - Push-based reactive flow: Intent → Journal → Reduce → ViewState → Signal → UI.
 - Frontend agnostic: Works with multiple platform frontends.
 - Shared-flow contract authority: semantic UI ids, flow support declarations,
-  and typed UI diagnostics are defined here rather than in frontend-specific
-  crates.
+  typed semantic command-plane metadata, and typed UI diagnostics are defined
+  here rather than in frontend-specific crates.
 
 ### Detailed Specifications
 
@@ -52,22 +52,25 @@ Contract alignment:
 
 ### InvariantSharedUiContractAuthority
 `aura-app` is the authoritative home for shared semantic UI identity,
-shared-flow parity declarations, shared screen/modal/list parity declarations,
-typed harness-visible diagnostics, shared focus/selection semantics, shared
-action/readiness metadata, and the machine-checkable screen/module map used for
-web/TUI parity enforcement.
+shared semantic command-plane types, shared-flow parity declarations, shared
+screen/modal/list parity declarations, typed harness-visible diagnostics,
+shared focus/selection semantics, shared action/readiness metadata, and the
+machine-checkable screen/module map used for web/TUI parity enforcement.
 
 Enforcement locus:
 - `src/ui_contract.rs` defines semantic ids, `UiSnapshot`,
   `RenderHeartbeat`, `RuntimeEventSnapshot`, `SHARED_FLOW_SUPPORT`,
   `SHARED_SCREEN_SUPPORT`, `SHARED_MODAL_SUPPORT`, and
-  `SHARED_LIST_SUPPORT`, plus `SHARED_SCREEN_MODULE_MAP`.
+  `SHARED_LIST_SUPPORT`, plus `SHARED_SCREEN_MODULE_MAP` and shared semantic
+  command-plane types.
 - `src/ui.rs` re-exports the contract for harness and frontend consumption.
 
 Failure mode:
 - Frontends drift in naming or capability and harness scenarios stop being
   portable across TUI and web.
 - Timeout diagnostics lose a single authoritative semantic contract.
+- Frontends invent local command request or readiness shapes and shared-flow
+  execution stops being uniform.
 
 Verification hooks:
 - `cargo test -p aura-app shared_flow_support_contract_is_consistent`

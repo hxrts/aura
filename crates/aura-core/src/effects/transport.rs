@@ -125,7 +125,8 @@ impl From<TransportError> for AuraError {
 /// Receipts prove that the sender executed the complete guard chain sequence.
 /// Recipients can validate receipts to ensure proper authorization and charging.
 /// Receipt chains provide audit trails for multi-hop forwarding scenarios.
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait TransportEffects: Send + Sync {
     /// Send an envelope to a destination authority
     ///

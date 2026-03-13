@@ -3,8 +3,8 @@ version = 1
 # Authoritative inventory for Phase 10 recovery work.
 # classification:
 #   - shared: expected to run on both TUI and web lanes
-#   - tui_only: intentionally retained only for TUI lane
-#   - web_only: intentionally retained only for web lane
+#   - tui_conformance: intentionally retained only for TUI frontend-conformance lane
+#   - web_conformance: intentionally retained only for web frontend-conformance lane
 #   - to_be_removed: superseded legacy scenario retained only until deletion
 # migration_status:
 #   - converted: uses the unified semantic scenario contract
@@ -78,7 +78,7 @@ notes = "Legacy moderator assignment scripted flow pending semantic replacement.
 [[scenario]]
 id = "quint-semantic-observation-smoke"
 path = "scenarios/harness/quint-semantic-observation-smoke.toml"
-classification = "tui_only"
+classification = "tui_conformance"
 migration_status = "converted"
 runtime_substrate = "real_runtime"
 notes = "Reference Quint-originated semantic flow executed through the local/TUI harness lane."
@@ -150,10 +150,10 @@ notes = "Legacy chat command scripted flow pending semantic replacement."
 [[scenario]]
 id = "scenario4-global-nav-and-help-e2e"
 path = "scenarios/harness/scenario4-global-nav-and-help-e2e.toml"
-classification = "to_be_removed"
+classification = "tui_conformance"
 migration_status = "legacy_pending_conversion"
 runtime_substrate = "real_runtime"
-notes = "Legacy navigation/help scripted flow pending semantic replacement."
+notes = "Intentional TUI frontend-conformance coverage for numeric navigation, focus stepping, and help-modal hotkeys; keep isolated from shared semantic product flows."
 
 [[scenario]]
 id = "scenario5-chat-modal-and-retry-e2e"
@@ -174,10 +174,10 @@ notes = "Legacy contacts/LAN scripted flow pending semantic replacement."
 [[scenario]]
 id = "scenario7-neighborhood-keypath-parity-e2e"
 path = "scenarios/harness/scenario7-neighborhood-keypath-parity-e2e.toml"
-classification = "to_be_removed"
+classification = "tui_conformance"
 migration_status = "legacy_pending_conversion"
 runtime_substrate = "real_runtime"
-notes = "Legacy keyboard-path parity scripted flow superseded by typed parity contract and scenarios."
+notes = "Intentional TUI frontend-conformance coverage for neighborhood key-paths and toast wiring; keep isolated from shared semantic product flows."
 
 [[scenario]]
 id = "scenario8-settings-devices-authority-e2e"
@@ -198,7 +198,7 @@ notes = "Legacy guardian/MFA scripted flow pending semantic replacement."
 [[scenario]]
 id = "semantic-observation-browser-smoke"
 path = "scenarios/harness/semantic-observation-browser-smoke.toml"
-classification = "web_only"
+classification = "web_conformance"
 migration_status = "converted"
 runtime_substrate = "real_runtime"
 notes = "Reference browser-only semantic observation smoke."
@@ -206,7 +206,7 @@ notes = "Reference browser-only semantic observation smoke."
 [[scenario]]
 id = "semantic-observation-tui-smoke"
 path = "scenarios/harness/semantic-observation-tui-smoke.toml"
-classification = "tui_only"
+classification = "tui_conformance"
 migration_status = "converted"
 runtime_substrate = "real_runtime"
 notes = "Reference TUI-only semantic observation smoke."
