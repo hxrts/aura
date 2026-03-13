@@ -21,8 +21,7 @@ use aura_app::ui::prelude::*;
 // Import portable account types and parsing helpers
 use aura_app::ui::types::{
     AccountBackup, AccountConfig, BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity,
-    BootstrapSurface,
-    PendingAccountBootstrap, PENDING_ACCOUNT_BOOTSTRAP_FILENAME,
+    BootstrapSurface, PendingAccountBootstrap, PENDING_ACCOUNT_BOOTSTRAP_FILENAME,
 };
 use aura_app::ui::workflows::account::{
     derive_recovered_context_id, parse_backup_code, prepare_pending_account_bootstrap,
@@ -298,9 +297,9 @@ async fn load_selected_runtime_identity(
         return Ok(None);
     };
 
-    serde_json::from_slice(&bytes).map(Some).map_err(|e| {
-        AuraError::internal(format!("Invalid selected runtime identity data: {e}"))
-    })
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|e| AuraError::internal(format!("Invalid selected runtime identity data: {e}")))
 }
 
 async fn persist_selected_runtime_identity(

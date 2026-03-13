@@ -11,6 +11,7 @@ use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::services::ceremony_runner::{
     CeremonyCommitMetadata, CeremonyInitRequest, CeremonyRunner,
 };
+use crate::runtime::services::RuntimeTaskRegistry;
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::effects::time::PhysicalTimeEffects;
@@ -29,6 +30,7 @@ pub struct InvitationServiceApi {
     handler: InvitationHandler,
     effects: Arc<AuraEffectSystem>,
     ceremony_runner: CeremonyRunner,
+    tasks: Arc<RuntimeTaskRegistry>,
 }
 
 impl std::fmt::Debug for InvitationServiceApi {
@@ -52,6 +54,7 @@ impl InvitationServiceApi {
             handler,
             effects,
             ceremony_runner,
+            tasks: Arc::new(RuntimeTaskRegistry::new()),
         })
     }
 
@@ -60,13 +63,54 @@ impl InvitationServiceApi {
         effects: Arc<AuraEffectSystem>,
         authority_context: AuthorityContext,
         ceremony_runner: CeremonyRunner,
+        tasks: Arc<RuntimeTaskRegistry>,
     ) -> AgentResult<Self> {
         let handler = InvitationHandler::new(authority_context)?;
         Ok(Self {
             handler,
             effects,
             ceremony_runner,
+            tasks,
         })
+    }
+
+    fn spawn_channel_invitation_exchange(&self, invitation: &Invitation) {
+        if invitation.receiver_id == invitation.sender_id {
+            return;
+        }
+
+        let invitation = invitation.clone();
+        let handler = self.handler.clone();
+        let effects = self.effects.clone();
+        let tasks = self.tasks.group(format!(
+            "invitation_service.channel_exchange.{}",
+            invitation.invitation_id
+        ));
+        let invitation_id = invitation.invitation_id.clone();
+        let sender_id = invitation.sender_id;
+        let receiver_id = invitation.receiver_id;
+        let fut = async move {
+            if let Err(error) = handler
+                .execute_channel_invitation_exchange_sender(effects, &invitation)
+                .await
+            {
+                tracing::error!(
+                    invitation_id = %invitation_id,
+                    sender_id = %sender_id,
+                    receiver_id = %receiver_id,
+                    error = %error,
+                    "channel invitation exchange sender failed"
+                );
+            }
+        };
+
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                tasks.spawn_local_named("sender_exchange", fut);
+            } else {
+                tasks.spawn_named("sender_exchange", fut);
+            }
+        }
     }
 
     fn should_track_ceremony(invitation_type: &InvitationType) -> bool {
@@ -154,6 +198,7 @@ impl InvitationServiceApi {
             )
             .await?;
         let _ = self.ensure_invitation_ceremony(&invitation).await?;
+        self.spawn_channel_invitation_exchange(&invitation);
         Ok(invitation)
     }
 

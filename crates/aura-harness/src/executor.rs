@@ -2815,6 +2815,7 @@ fn execute_shared_semantic_action(
                 step.value.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
+            let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
             let contract = IntentAction::InviteActorToChannel {
                 authority_id: authority_id.clone(),
             }
@@ -2826,11 +2827,24 @@ fn execute_shared_semantic_action(
                 &instance_id,
                 IntentAction::InviteActorToChannel { authority_id },
             )?;
-            record_submission_handle(
-                context,
-                &instance_id,
-                require_semantic_unit_submission(step, "invite_actor_to_channel", response)?,
-            );
+            let operation_handle =
+                require_semantic_unit_submission(step, "invite_actor_to_channel", response)?;
+            record_submission_handle(context, &instance_id, operation_handle.clone());
+            if let Some(handle) = operation_handle {
+                let remaining_ms = timeout_ms;
+                convergence_stage(
+                    step,
+                    "invite_actor_to_channel_operation",
+                    wait_for_operation_handle_state(
+                        step,
+                        tool_api,
+                        &instance_id,
+                        remaining_ms,
+                        &handle,
+                        OperationState::Succeeded,
+                    ),
+                )?;
+            }
             declare_post_operation_convergence(context, &instance_id, &contract);
             Ok(())
         }
@@ -3407,7 +3421,13 @@ fn ensure_chat_screen(
             wait_step.item_id = None;
             wait_step.operation_id = None;
             wait_step.operation_state = None;
-            wait_for_semantic_state(&wait_step, tool_api, context, instance_id, chat_enter_timeout)
+            wait_for_semantic_state(
+                &wait_step,
+                tool_api,
+                context,
+                instance_id,
+                chat_enter_timeout,
+            )
         }
         Err(error) if backend_kind == "local_pty" => {
             let _ = error;
@@ -3806,6 +3826,19 @@ fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
             .or(step.value.as_deref())
             .or(step.expect.as_deref());
         let matched = snapshot.has_runtime_event(kind, detail_needle)
+            || matches!(kind, RuntimeEventKind::ContactLinkReady)
+                && snapshot
+                    .lists
+                    .iter()
+                    .find(|candidate| candidate.id == ListId::Contacts)
+                    .map(|contacts| {
+                        if let Some(needle) = detail_needle {
+                            contacts.items.iter().any(|item| item.id.contains(needle))
+                        } else {
+                            !contacts.items.is_empty()
+                        }
+                    })
+                    .unwrap_or(false)
             || matches!(kind, RuntimeEventKind::ChannelMembershipReady)
                 && snapshot
                     .lists
@@ -4097,14 +4130,19 @@ fn ensure_post_operation_convergence_satisfied(
     let Some(pending) = context.pending_convergence.get(instance_id) else {
         return Ok(());
     };
-    if pending.is_empty() {
+    let remaining: Vec<_> = pending
+        .iter()
+        .filter(|required| !step_satisfies_barrier(step, required))
+        .cloned()
+        .collect();
+    if remaining.is_empty() {
         return Ok(());
     }
     bail!(
         "step {} convergence-contract violation for {:?}: pending {:?}",
         step.id,
         step.action,
-        pending
+        remaining
     );
 }
 
@@ -4125,6 +4163,20 @@ fn clear_satisfied_post_operation_convergence(
     instance_id: &str,
     step: &ScenarioStep,
 ) {
+    if let Some(shared_barrier) = cross_actor_satisfied_barrier(step) {
+        let mut cleared_instances = Vec::new();
+        for (pending_instance, pending) in &mut context.pending_convergence {
+            pending.retain(|required| required != &shared_barrier);
+            if pending.is_empty() {
+                cleared_instances.push(pending_instance.clone());
+            }
+        }
+        for pending_instance in cleared_instances {
+            context.pending_convergence.remove(&pending_instance);
+        }
+        return;
+    }
+
     let Some(pending) = context.pending_convergence.get_mut(instance_id) else {
         return;
     };
@@ -4134,11 +4186,24 @@ fn clear_satisfied_post_operation_convergence(
     }
 }
 
+fn cross_actor_satisfied_barrier(step: &ScenarioStep) -> Option<BarrierDeclaration> {
+    match (step.action, step.runtime_event_kind) {
+        (ScenarioAction::WaitFor, Some(RuntimeEventKind::PendingHomeInvitationReady)) => Some(
+            BarrierDeclaration::RuntimeEvent(RuntimeEventKind::PendingHomeInvitationReady),
+        ),
+        _ => None,
+    }
+}
+
 fn step_satisfies_barrier(step: &ScenarioStep, barrier: &BarrierDeclaration) -> bool {
     match (step.action, barrier) {
         (ScenarioAction::WaitFor, BarrierDeclaration::RuntimeEvent(expected)) => {
             step.runtime_event_kind == Some(*expected)
         }
+        (
+            ScenarioAction::JoinChannel,
+            BarrierDeclaration::RuntimeEvent(RuntimeEventKind::ChannelMembershipReady),
+        ) => true,
         (ScenarioAction::WaitFor, BarrierDeclaration::Readiness(expected)) => {
             step.readiness == Some(*expected)
         }
@@ -4237,7 +4302,10 @@ fn wait_for_semantic_state(
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let backend_kind = tool_api.backend_kind(instance_id).unwrap_or("unknown");
     let supports_ui_snapshot = tool_api.supports_ui_snapshot(instance_id).unwrap_or(false);
-    let required_newer_than = context.pending_projection_baseline.get(instance_id).copied();
+    let required_newer_than = context
+        .pending_projection_baseline
+        .get(instance_id)
+        .copied();
     let mut last_snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
     let mut snapshot_version = Some(last_snapshot.revision.semantic_seq);
     if baseline_satisfied(required_newer_than, &last_snapshot)
@@ -4287,7 +4355,8 @@ fn wait_for_semantic_state(
             std::thread::sleep(Duration::from_millis(40));
             fetch_ui_snapshot(tool_api, instance_id)?
         };
-        if baseline_satisfied(required_newer_than, &snapshot) && semantic_wait_matches(step, &snapshot)
+        if baseline_satisfied(required_newer_than, &snapshot)
+            && semantic_wait_matches(step, &snapshot)
         {
             context.pending_projection_baseline.remove(instance_id);
             return Ok(());
@@ -6251,6 +6320,51 @@ mod tests {
         assert!(
             error.to_string().contains("PendingHomeInvitationReady"),
             "error should surface the missing convergence requirement"
+        );
+    }
+
+    #[test]
+    fn join_channel_can_discharge_pending_channel_membership_convergence() {
+        let mut context = ScenarioContext::default();
+        context.pending_convergence.insert(
+            "bob".to_string(),
+            vec![BarrierDeclaration::RuntimeEvent(
+                RuntimeEventKind::ChannelMembershipReady,
+            )],
+        );
+        let step = crate::config::ScenarioStep {
+            id: "join-channel".to_string(),
+            instance: Some("bob".to_string()),
+            action: crate::config::ScenarioAction::JoinChannel,
+            ..Default::default()
+        };
+
+        ensure_post_operation_convergence_satisfied(&step, &context, "bob").unwrap_or_else(
+            |error| panic!("join_channel should satisfy pending convergence: {error}"),
+        );
+    }
+
+    #[test]
+    fn pending_home_invitation_wait_clears_cross_actor_convergence() {
+        let mut context = ScenarioContext::default();
+        context.pending_convergence.insert(
+            "alice".to_string(),
+            vec![BarrierDeclaration::RuntimeEvent(
+                RuntimeEventKind::PendingHomeInvitationReady,
+            )],
+        );
+        let step = crate::config::ScenarioStep {
+            id: "bob-pending-home-invitation-ready".to_string(),
+            instance: Some("bob".to_string()),
+            action: crate::config::ScenarioAction::WaitFor,
+            runtime_event_kind: Some(RuntimeEventKind::PendingHomeInvitationReady),
+            ..Default::default()
+        };
+
+        clear_satisfied_post_operation_convergence(&mut context, "bob", &step);
+        assert!(
+            context.pending_convergence.is_empty(),
+            "cross-actor pending-home convergence should clear across the shared flow"
         );
     }
 

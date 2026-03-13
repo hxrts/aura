@@ -84,7 +84,8 @@ fn promote_shared_session_envelopes(
 }
 
 // Implementation of ChoreographicEffects
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl ChoreographicEffects for AuraEffectSystem {
     async fn send_to_role_bytes(
         &self,

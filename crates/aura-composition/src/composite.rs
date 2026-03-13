@@ -140,7 +140,8 @@ pub enum CompositeError {
     },
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl Handler for CompositeHandler {
     // Adapter-style composite
     async fn execute_effect(
@@ -281,7 +282,8 @@ impl CompositeHandlerAdapter {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl Handler for CompositeHandlerAdapter {
     async fn execute_effect(
         &self,
@@ -312,7 +314,8 @@ impl Handler for CompositeHandlerAdapter {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl RegistrableHandler for CompositeHandlerAdapter {
     async fn execute_operation_bytes(
         &self,
@@ -352,7 +355,8 @@ impl HandlerRegistrableAdapter {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl RegistrableHandler for HandlerRegistrableAdapter {
     async fn execute_operation_bytes(
         &self,
@@ -390,7 +394,8 @@ mod tests {
     /// Minimal handler used for registration tests
     struct TestConsoleHandler;
 
-    #[async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
     impl Handler for TestConsoleHandler {
         async fn execute_effect(
             &self,

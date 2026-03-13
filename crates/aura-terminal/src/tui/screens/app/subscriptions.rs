@@ -27,6 +27,15 @@ use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::types::{Channel, Contact, Device, Invitation, Message, PendingRequest};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
 
+fn publish_ui_update(tx: &UiUpdateSender, update: UiUpdate) {
+    if tx.try_send(update.clone()).is_err() {
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            let _ = tx.send(update).await;
+        });
+    }
+}
+
 /// Shared authority id state for UI dispatch handlers.
 #[derive(Clone, Default)]
 pub struct SharedAuthorityId(Arc<RwLock<Option<AuthorityId>>>);
@@ -254,7 +263,7 @@ pub fn use_discovered_peers_subscription(
                 if let Some(ref tx) = update_tx {
                     let previous = last_lan_count.swap(new_count, Ordering::Relaxed);
                     if previous != new_count {
-                        let _ = tx.try_send(UiUpdate::LanPeersCountChanged(new_count));
+                        publish_ui_update(tx, UiUpdate::LanPeersCountChanged(new_count));
                     }
                 }
             })
@@ -302,7 +311,7 @@ pub fn use_contacts_subscription(
                 if let Some(ref tx) = update_tx {
                     let previous = last_contact_count.swap(new_count, Ordering::Relaxed);
                     if previous != new_count {
-                        let _ = tx.try_send(UiUpdate::ContactCountChanged(new_count));
+                        publish_ui_update(tx, UiUpdate::ContactCountChanged(new_count));
                     }
                     let facts = if new_count > 0 {
                         vec![RuntimeFact::ContactLinkReady {
@@ -312,10 +321,13 @@ pub fn use_contacts_subscription(
                     } else {
                         Vec::new()
                     };
-                    let _ = tx.try_send(UiUpdate::RuntimeFactsUpdated {
-                        replace_kinds: vec![RuntimeEventKind::ContactLinkReady],
-                        facts,
-                    });
+                    publish_ui_update(
+                        tx,
+                        UiUpdate::RuntimeFactsUpdated {
+                            replace_kinds: vec![RuntimeEventKind::ContactLinkReady],
+                            facts,
+                        },
+                    );
                 }
             })
             .await;
@@ -374,7 +386,7 @@ pub fn use_devices_subscription(
                 }
                 if settings_state.devices.len() >= 2 {
                     if let Some(tx) = update_tx.as_ref() {
-                        let _ = tx.try_send(UiUpdate::RuntimeBootstrapFinalized);
+                        publish_ui_update(tx, UiUpdate::RuntimeBootstrapFinalized);
                     }
                 }
             })
@@ -549,7 +561,8 @@ fn publish_scoped_channels(
         .map(|channel| channel.id.as_str())
         .collect::<Vec<_>>()
         .join("|");
-    let runtime_facts = scoped
+    let runtime_channels = chat_state.all_channels().cloned().collect::<Vec<_>>();
+    let runtime_facts = runtime_channels
         .iter()
         .flat_map(|channel| {
             let channel_fact = ChannelFactKey {
@@ -605,14 +618,17 @@ fn publish_scoped_channels(
     }
 
     if let Some(tx) = update_tx {
-        let _ = tx.try_send(UiUpdate::RuntimeFactsUpdated {
-            replace_kinds: vec![
-                RuntimeEventKind::ChannelMembershipReady,
-                RuntimeEventKind::RecipientPeersResolved,
-                RuntimeEventKind::MessageDeliveryReady,
-            ],
-            facts: runtime_facts,
-        });
+        publish_ui_update(
+            tx,
+            UiUpdate::RuntimeFactsUpdated {
+                replace_kinds: vec![
+                    RuntimeEventKind::ChannelMembershipReady,
+                    RuntimeEventKind::RecipientPeersResolved,
+                    RuntimeEventKind::MessageDeliveryReady,
+                ],
+                facts: runtime_facts,
+            },
+        );
         let channel_signature_changed = {
             let mut guard = last_channel_signature
                 .write()
@@ -628,11 +644,14 @@ fn publish_scoped_channels(
         if !(channel_changed || message_changed || channel_signature_changed) {
             return;
         }
-        let _ = tx.try_send(UiUpdate::ChatStateUpdated {
-            channel_count,
-            message_count,
-            selected_index: None,
-        });
+        publish_ui_update(
+            tx,
+            UiUpdate::ChatStateUpdated {
+                channel_count,
+                message_count,
+                selected_index: None,
+            },
+        );
     }
 }
 
@@ -1211,23 +1230,28 @@ pub fn use_invitations_subscription(
                 }
 
                 if let Some(ref tx) = update_tx {
-                    let facts = if inv_state.all_pending().iter().any(|invitation| {
-                        invitation.direction == aura_app::ui::types::InvitationDirection::Received
-                            && matches!(
+                    let facts = if inv_state
+                        .all_pending()
+                        .iter()
+                        .chain(inv_state.all_sent().iter())
+                        .any(|invitation| {
+                            matches!(
                                 invitation.invitation_type,
                                 aura_app::ui::types::InvitationType::Home
                                     | aura_app::ui::types::InvitationType::Chat
-                            )
-                            && invitation.status == aura_app::ui::types::InvitationStatus::Pending
-                    }) {
+                            ) && invitation.status == aura_app::ui::types::InvitationStatus::Pending
+                        }) {
                         vec![RuntimeFact::PendingHomeInvitationReady]
                     } else {
                         Vec::new()
                     };
-                    let _ = tx.try_send(UiUpdate::RuntimeFactsUpdated {
-                        replace_kinds: vec![RuntimeEventKind::PendingHomeInvitationReady],
-                        facts,
-                    });
+                    publish_ui_update(
+                        tx,
+                        UiUpdate::RuntimeFactsUpdated {
+                            replace_kinds: vec![RuntimeEventKind::PendingHomeInvitationReady],
+                            facts,
+                        },
+                    );
                 }
             })
             .await;
@@ -1365,7 +1389,7 @@ pub fn use_notifications_subscription(
             let total = invites.load(Ordering::Relaxed) + recovery.load(Ordering::Relaxed);
             let previous = last_total.swap(total, Ordering::Relaxed);
             if previous != total {
-                let _ = tx.try_send(UiUpdate::NotificationsCountChanged(total));
+                publish_ui_update(tx, UiUpdate::NotificationsCountChanged(total));
             }
         }
     };

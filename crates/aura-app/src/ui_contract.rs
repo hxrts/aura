@@ -66,6 +66,9 @@ pub enum HarnessUiCommand {
     NavigateScreen { screen: ScreenId },
     ActivateControl { control_id: ControlId },
     ActivateListItem { list_id: ListId, item_id: String },
+    AcceptPendingChannelInvitation,
+    JoinChannel { channel_name: String },
+    SendChatMessage { content: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -225,6 +225,7 @@ impl ServiceRegistry {
                     self.effects.clone(),
                     self.authority_context.clone(),
                     self.ceremony_runner.clone(),
+                    self.runtime_tasks.clone(),
                 )
             })
             .cloned()

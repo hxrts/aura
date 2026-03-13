@@ -18,7 +18,8 @@ use aura_mpst::LocalSessionType;
 /// This trait defines the unified interface for effect execution and session
 /// interpretation. All handlers in the Aura system implement this trait.
 /// Uses serialized bytes for parameters and results to enable trait object compatibility.
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait AuraHandler: Send + Sync {
     /// Execute an effect with serialized parameters and return serialized result
     async fn execute_effect(
@@ -62,7 +63,8 @@ impl CompositeHandlerAdapter {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl AuraHandler for CompositeHandlerAdapter {
     async fn execute_effect(
         &self,

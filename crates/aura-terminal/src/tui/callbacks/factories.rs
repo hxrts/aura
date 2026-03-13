@@ -17,6 +17,9 @@ use crate::tui::updates::{UiUpdate, UiUpdateSender};
 use aura_app::ui::signals::CONTACTS_SIGNAL;
 use aura_app::ui::types::InvitationBridgeType;
 use aura_app::ui::workflows::invitation::import_invitation_details;
+use aura_app::ui_contract::{
+    ChannelFactKey, InvitationFactKind, OperationState, RuntimeEventKind, RuntimeFact,
+};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::CeremonyId;
 use aura_core::AuthorityId;
@@ -36,6 +39,47 @@ async fn send_ui_update_reliable(tx: &UiUpdateSender, update: UiUpdate) {
     if tx.try_send(update.clone()).is_err() {
         let _ = tx.send(update).await;
     }
+}
+
+async fn wait_for_contact_link(
+    app_core: &Arc<async_lock::RwLock<aura_app::AppCore>>,
+    sender_id: AuthorityId,
+) -> bool {
+    const CONTACT_LINK_ATTEMPTS: usize = 150;
+    const CONTACT_LINK_DELAY_MS: u64 = 100;
+
+    for _ in 0..CONTACT_LINK_ATTEMPTS {
+        let has_contact = {
+            let core = app_core.read().await;
+            core.read(&*CONTACTS_SIGNAL)
+                .await
+                .ok()
+                .map(|contacts_state| {
+                    contacts_state
+                        .all_contacts()
+                        .any(|contact| contact.id == sender_id)
+                })
+                .unwrap_or(false)
+        };
+        if has_contact {
+            return true;
+        }
+
+        if let Some(runtime) = {
+            let core = app_core.read().await;
+            core.runtime().cloned()
+        } {
+            let _ = runtime.process_ceremony_messages().await;
+            let _ = runtime.trigger_discovery().await;
+            let _ = runtime.trigger_sync().await;
+            aura_app::ui::workflows::runtime::converge_runtime(&runtime).await;
+            let _ = aura_app::ui::workflows::system::refresh_account(app_core).await;
+        }
+
+        tokio::time::sleep(Duration::from_millis(CONTACT_LINK_DELAY_MS)).await;
+    }
+
+    false
 }
 
 #[derive(Clone, Copy)]
@@ -182,6 +226,8 @@ fn command_outcome_message(
 #[derive(Clone)]
 pub struct ChatCallbacks {
     pub on_send: SendCallback,
+    pub on_accept_pending_channel_invitation: NoArgCallback,
+    pub on_join_channel: JoinChannelCallback,
     pub on_retry_message: RetryMessageCallback,
     pub on_create_channel: CreateChannelCallback,
     pub on_set_topic: SetTopicCallback,
@@ -198,6 +244,11 @@ impl ChatCallbacks {
     ) -> Self {
         Self {
             on_send: Self::make_send(ctx.clone(), tx.clone()),
+            on_accept_pending_channel_invitation: Self::make_accept_pending_channel_invitation(
+                ctx.clone(),
+                tx.clone(),
+            ),
+            on_join_channel: Self::make_join_channel(ctx.clone(), tx.clone()),
             on_retry_message: Self::make_retry_message(ctx.clone(), tx.clone()),
             on_create_channel: Self::make_create_channel(ctx.clone(), tx.clone()),
             on_set_topic: Self::make_set_topic(ctx.clone(), tx.clone()),
@@ -205,6 +256,47 @@ impl ChatCallbacks {
             on_list_participants: Self::make_list_participants(ctx, tx),
         }
     }
+    fn make_accept_pending_channel_invitation(
+        ctx: Arc<IoContext>,
+        tx: UiUpdateSender,
+    ) -> NoArgCallback {
+        Arc::new(move || {
+            let ctx = ctx.clone();
+            let tx = tx.clone();
+            spawn_ctx(ctx.clone(), async move {
+                match ctx.dispatch(EffectCommand::AcceptPendingHomeInvitation).await {
+                    Ok(_) => {
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::RuntimeFactsUpdated {
+                                replace_kinds: vec![RuntimeEventKind::PendingHomeInvitationReady],
+                                facts: vec![],
+                            },
+                        )
+                        .await;
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::InvitationAccepted {
+                                invitation_id: "pending-home".to_string(),
+                            },
+                        )
+                        .await;
+                    }
+                    Err(error) => {
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::operation_failed(
+                                "AcceptPendingHomeInvitation",
+                                error.to_string(),
+                            ),
+                        )
+                        .await;
+                    }
+                }
+            });
+        })
+    }
+
     fn make_send(ctx: Arc<IoContext>, tx: UiUpdateSender) -> SendCallback {
         let strong_resolver =
             Arc::new(aura_app::ui::workflows::strong_command::CommandResolver::default());
@@ -212,6 +304,7 @@ impl ChatCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let strong_resolver = strong_resolver.clone();
+            let app_core = ctx.app_core_raw().clone();
             let channel_id_clone = channel_id;
             let content_clone = content;
 
@@ -487,6 +580,38 @@ impl ChatCallbacks {
 
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
+                        let (channel_name, member_count) = {
+                            let core = app_core.read().await;
+                            core.snapshot()
+                                .chat
+                                .all_channels()
+                                .find(|channel| channel.id.to_string() == channel_id_clone)
+                                .map(|channel| (Some(channel.name.clone()), channel.member_count))
+                                .unwrap_or((None, 1))
+                        };
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::RuntimeFactsUpdated {
+                                replace_kinds: vec![RuntimeEventKind::MessageCommitted],
+                                facts: vec![
+                                    RuntimeFact::MessageCommitted {
+                                        channel: ChannelFactKey {
+                                            id: Some(channel_id_clone.clone()),
+                                            name: channel_name.clone(),
+                                        },
+                                        content: content_clone.clone(),
+                                    },
+                                    RuntimeFact::MessageDeliveryReady {
+                                        channel: ChannelFactKey {
+                                            id: Some(channel_id_clone.clone()),
+                                            name: channel_name,
+                                        },
+                                        member_count,
+                                    },
+                                ],
+                            },
+                        )
+                        .await;
                         send_ui_update_reliable(&tx, UiUpdate::MessageSendCompleted).await;
                     }
                     Err(e) => {
@@ -527,6 +652,28 @@ impl ChatCallbacks {
                 });
             },
         )
+    }
+
+    fn make_join_channel(ctx: Arc<IoContext>, tx: UiUpdateSender) -> JoinChannelCallback {
+        Arc::new(move |channel_name: String| {
+            let ctx = ctx.clone();
+            let tx = tx.clone();
+            spawn_ctx(ctx.clone(), async move {
+                let cmd = EffectCommand::JoinChannel {
+                    channel: channel_name.clone(),
+                };
+                match ctx.dispatch(cmd).await {
+                    Ok(_) => {}
+                    Err(error) => {
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::operation_failed("JoinChannel", error.to_string()),
+                        )
+                        .await;
+                    }
+                }
+            });
+        })
     }
 
     fn make_list_participants(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdCallback {
@@ -719,32 +866,7 @@ impl ContactsCallbacks {
                                 invitation.invitation_type,
                                 InvitationBridgeType::Contact { .. }
                             ) {
-                                const CONTACT_LINK_ATTEMPTS: usize = 150;
-                                const CONTACT_LINK_DELAY_MS: u64 = 100;
-                                let mut linked = false;
-                                for _ in 0..CONTACT_LINK_ATTEMPTS {
-                                    let has_contact = {
-                                        let core = app_core.read().await;
-                                        core.read(&*CONTACTS_SIGNAL)
-                                            .await
-                                            .ok()
-                                            .map(|contacts_state| {
-                                                contacts_state.all_contacts().any(|contact| {
-                                                    contact.id == invitation.sender_id
-                                                })
-                                            })
-                                            .unwrap_or(false)
-                                    };
-                                    if has_contact {
-                                        linked = true;
-                                        break;
-                                    }
-                                    tokio::time::sleep(Duration::from_millis(
-                                        CONTACT_LINK_DELAY_MS,
-                                    ))
-                                    .await;
-                                }
-                                if !linked {
+                                if !wait_for_contact_link(&app_core, invitation.sender_id).await {
                                     send_ui_update_reliable(
                                         &tx,
                                         UiUpdate::operation_failed(
@@ -755,18 +877,52 @@ impl ContactsCallbacks {
                                     .await;
                                     return;
                                 }
+                                let contact_count = {
+                                    let core = app_core.read().await;
+                                    core.snapshot().contacts.contact_count()
+                                };
+                                send_ui_update_reliable(
+                                    &tx,
+                                    UiUpdate::RuntimeFactsUpdated {
+                                        replace_kinds: vec![
+                                            RuntimeEventKind::InvitationAccepted,
+                                            RuntimeEventKind::ContactLinkReady,
+                                        ],
+                                        facts: vec![
+                                            RuntimeFact::InvitationAccepted {
+                                                invitation_kind: InvitationFactKind::Contact,
+                                                authority_id: Some(
+                                                    invitation.sender_id.to_string(),
+                                                ),
+                                                operation_state: Some(OperationState::Succeeded),
+                                            },
+                                            RuntimeFact::ContactLinkReady {
+                                                authority_id: Some(
+                                                    invitation.sender_id.to_string(),
+                                                ),
+                                                contact_count: Some(contact_count),
+                                            },
+                                        ],
+                                    },
+                                )
+                                .await;
                             }
                         }
-                        let _ = tx.try_send(UiUpdate::InvitationImported {
-                            invitation_code: code_clone,
-                        });
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::InvitationImported {
+                                invitation_code: code_clone,
+                            },
+                        )
+                        .await;
                     }
                     Err(e) => {
                         tracing::error!(error = %e, "ImportInvitation dispatch failed");
-                        let _ = tx.try_send(UiUpdate::operation_failed(
-                            "ImportInvitation",
-                            e.to_string(),
-                        ));
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::operation_failed("ImportInvitation", e.to_string()),
+                        )
+                        .await;
                     }
                 }
             });
@@ -777,6 +933,7 @@ impl ContactsCallbacks {
         Arc::new(move |contact_id: String, channel: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
+            let channel_name = channel.clone();
             let cmd = EffectCommand::InviteUser {
                 target: contact_id,
                 channel,
@@ -784,16 +941,20 @@ impl ContactsCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
-                            "invite",
-                            "channel invitation sent",
-                        )));
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::InvitationCreated {
+                                invitation_code: channel_name,
+                            },
+                        )
+                        .await;
                     }
                     Err(error) => {
-                        let _ = tx.try_send(UiUpdate::operation_failed(
-                            "InviteUserToChannel",
-                            error.to_string(),
-                        ));
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::operation_failed("InviteUserToChannel", error.to_string()),
+                        )
+                        .await;
                     }
                 }
             });
@@ -883,13 +1044,71 @@ impl InvitationsCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let inv_id = invitation_id.clone();
+            let app_core = ctx.app_core_raw().clone();
             let cmd = EffectCommand::AcceptInvitation { invitation_id };
             spawn_ctx(ctx.clone(), async move {
+                let accepted_invitation = {
+                    let core = app_core.read().await;
+                    core.snapshot().invitations.invitation(&inv_id).cloned()
+                };
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::InvitationAccepted {
-                            invitation_id: inv_id,
-                        });
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::InvitationAccepted {
+                                invitation_id: inv_id.clone(),
+                            },
+                        )
+                        .await;
+                        let mut runtime_facts = Vec::new();
+                        let mut replace_kinds = vec![RuntimeEventKind::InvitationAccepted];
+                        if let Some(invitation) = accepted_invitation.as_ref() {
+                            let invitation_kind = if matches!(
+                                invitation.invitation_type,
+                                aura_app::views::invitations::InvitationType::Home
+                            ) {
+                                InvitationFactKind::Contact
+                            } else {
+                                InvitationFactKind::Generic
+                            };
+                            runtime_facts.push(RuntimeFact::InvitationAccepted {
+                                invitation_kind,
+                                authority_id: Some(invitation.from_id.to_string()),
+                                operation_state: Some(OperationState::Succeeded),
+                            });
+                            if invitation_kind == InvitationFactKind::Contact {
+                                if !wait_for_contact_link(&app_core, invitation.from_id).await {
+                                    send_ui_update_reliable(
+                                        &tx,
+                                        UiUpdate::operation_failed(
+                                            "AcceptInvitation",
+                                            "timed out waiting for contact link".to_string(),
+                                        ),
+                                    )
+                                    .await;
+                                    return;
+                                }
+                                let contact_count = {
+                                    let core = app_core.read().await;
+                                    core.snapshot().contacts.contact_count()
+                                };
+                                runtime_facts.push(RuntimeFact::ContactLinkReady {
+                                    authority_id: Some(invitation.from_id.to_string()),
+                                    contact_count: Some(contact_count),
+                                });
+                                replace_kinds.push(RuntimeEventKind::ContactLinkReady);
+                            }
+                        }
+                        if !runtime_facts.is_empty() {
+                            send_ui_update_reliable(
+                                &tx,
+                                UiUpdate::RuntimeFactsUpdated {
+                                    replace_kinds,
+                                    facts: runtime_facts,
+                                },
+                            )
+                            .await;
+                        }
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -908,9 +1127,13 @@ impl InvitationsCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::InvitationDeclined {
-                            invitation_id: inv_id,
-                        });
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::InvitationDeclined {
+                                invitation_id: inv_id,
+                            },
+                        )
+                        .await;
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -939,53 +1162,10 @@ impl InvitationsCallbacks {
                   ttl_secs: Option<u64>| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
-                let app_core = ctx.app_core_raw().clone();
-                let runtime = ctx.app_core().runtime();
                 spawn_ctx(ctx.clone(), async move {
-                    let result: crate::error::TerminalResult<String> = if invitation_type
-                        .eq_ignore_ascii_case("contact")
-                        || invitation_type.eq_ignore_ascii_case("personal")
-                    {
-                        let ttl_ms = ttl_secs.map(|secs| secs.saturating_mul(1000));
-                        let result: crate::error::TerminalResult<_> =
-                            if let Some(runtime) = runtime.clone() {
-                                runtime
-                                    .create_contact_invitation(receiver_id, None, message, ttl_ms)
-                                    .await
-                                    .map_err(crate::error::TerminalError::from)
-                            } else {
-                                aura_app::ui::workflows::invitation::create_contact_invitation(
-                                    &app_core,
-                                    receiver_id,
-                                    None,
-                                    message,
-                                    ttl_ms,
-                                )
-                                .await
-                                .map_err(crate::error::TerminalError::from)
-                            };
-                        match result {
-                            Ok(invitation) => {
-                                if let Some(runtime) = runtime.clone() {
-                                    runtime
-                                        .export_invitation(&invitation.invitation_id.to_string())
-                                        .await
-                                        .map_err(crate::error::TerminalError::from)
-                                } else {
-                                    aura_app::ui::workflows::invitation::export_invitation(
-                                        &app_core,
-                                        &invitation.invitation_id,
-                                    )
-                                    .await
-                                    .map_err(crate::error::TerminalError::from)
-                                }
-                            }
-                            Err(error) => Err(error),
-                        }
-                    } else {
-                        ctx.create_invitation_code(receiver_id, &invitation_type, message, ttl_secs)
-                            .await
-                    };
+                    let result = ctx
+                        .create_invitation_code(receiver_id, &invitation_type, message, ttl_secs)
+                        .await;
                     match result {
                         Ok(code) => {
                             let _ = copy_to_clipboard(&code);
@@ -1028,20 +1208,75 @@ impl InvitationsCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let code_clone = code.clone();
+            let app_core = ctx.app_core_raw().clone();
             let cmd = EffectCommand::ImportInvitation { code };
             spawn_ctx(ctx.clone(), async move {
+                let invitation = import_invitation_details(&app_core, &code_clone).await.ok();
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::InvitationImported {
-                            invitation_code: code_clone,
-                        });
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::InvitationImported {
+                                invitation_code: code_clone.clone(),
+                            },
+                        )
+                        .await;
+
+                        if let Some(invitation) = invitation.as_ref() {
+                            if matches!(
+                                invitation.invitation_type,
+                                InvitationBridgeType::Contact { .. }
+                            ) && !wait_for_contact_link(&app_core, invitation.sender_id).await
+                            {
+                                tracing::warn!(
+                                    sender_id = %invitation.sender_id,
+                                    "contact invitation import succeeded before contact-link convergence"
+                                );
+                                return;
+                            }
+                            if matches!(
+                                invitation.invitation_type,
+                                InvitationBridgeType::Contact { .. }
+                            ) {
+                                let contact_count = {
+                                    let core = app_core.read().await;
+                                    core.snapshot().contacts.contact_count()
+                                };
+                                send_ui_update_reliable(
+                                    &tx,
+                                    UiUpdate::RuntimeFactsUpdated {
+                                        replace_kinds: vec![
+                                            RuntimeEventKind::InvitationAccepted,
+                                            RuntimeEventKind::ContactLinkReady,
+                                        ],
+                                        facts: vec![
+                                            RuntimeFact::InvitationAccepted {
+                                                invitation_kind: InvitationFactKind::Contact,
+                                                authority_id: Some(
+                                                    invitation.sender_id.to_string(),
+                                                ),
+                                                operation_state: Some(OperationState::Succeeded),
+                                            },
+                                            RuntimeFact::ContactLinkReady {
+                                                authority_id: Some(
+                                                    invitation.sender_id.to_string(),
+                                                ),
+                                                contact_count: Some(contact_count),
+                                            },
+                                        ],
+                                    },
+                                )
+                                .await;
+                            }
+                        }
                     }
                     Err(e) => {
                         tracing::error!(error = %e, "ImportInvitation dispatch failed");
-                        let _ = tx.try_send(UiUpdate::operation_failed(
-                            "ImportInvitation",
-                            e.to_string(),
-                        ));
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::operation_failed("ImportInvitation", e.to_string()),
+                        )
+                        .await;
                     }
                 }
             });

@@ -275,7 +275,8 @@ impl FlowBudgetManager {
 // RuntimeService Implementation
 // =============================================================================
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl RuntimeService for FlowBudgetManager {
     fn name(&self) -> &'static str {
         "flow_budget_manager"

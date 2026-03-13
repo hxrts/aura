@@ -89,9 +89,7 @@ impl std::fmt::Debug for HarnessCommandReceiptHandle {
 
 impl HarnessCommandReceiptHandle {
     #[must_use]
-    pub fn new(
-        sender: oneshot::Sender<aura_app::ui::contract::HarnessUiCommandReceipt>,
-    ) -> Self {
+    pub fn new(sender: oneshot::Sender<aura_app::ui::contract::HarnessUiCommandReceipt>) -> Self {
         Self {
             sender: Arc::new(Mutex::new(Some(sender))),
         }

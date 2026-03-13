@@ -15,22 +15,26 @@ pub(super) fn handle_channel_selection_change(
     shared_channels: &Arc<std::sync::RwLock<Vec<Channel>>>,
     selected_channel_id: &Arc<std::sync::RwLock<Option<String>>>,
 ) {
-    if new_state.chat.selected_channel == current.chat.selected_channel {
-        return;
-    }
-
     let idx = new_state.chat.selected_channel;
 
     let channels = match shared_channels.read() {
         Ok(guard) => guard.clone(),
         Err(poisoned) => poisoned.into_inner().clone(),
     };
-    if let Some(channel) = channels.get(idx) {
-        if let Ok(mut guard) = selected_channel_id.write() {
-            *guard = Some(channel.id.clone());
-        }
-    } else if let Ok(mut guard) = selected_channel_id.write() {
-        *guard = None;
+    let next_selected = channels.get(idx).map(|channel| channel.id.clone());
+    let current_selected = selected_channel_id
+        .read()
+        .ok()
+        .and_then(|guard| guard.clone());
+
+    if new_state.chat.selected_channel == current.chat.selected_channel
+        && next_selected == current_selected
+    {
+        return;
+    }
+
+    if let Ok(mut guard) = selected_channel_id.write() {
+        *guard = next_selected;
     }
 }
 
@@ -127,5 +131,26 @@ mod tests {
         assert!(!create_branch.contains("runtime.export_invitation"));
         assert!(!import_branch.contains("runtime.import_invitation"));
         assert!(!import_branch.contains("runtime.accept_invitation"));
+    }
+
+    #[test]
+    fn invite_to_channel_dispatch_tracks_invitation_create_operation() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let shell_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
+        let shell_source = std::fs::read_to_string(&shell_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", shell_path.display()));
+
+        let invite_start = shell_source
+            .find("DispatchCommand::InviteSelectedContactToChannel")
+            .unwrap_or_else(|| panic!("missing InviteSelectedContactToChannel dispatch arm"));
+        let next_arm = shell_source[invite_start..]
+            .find("DispatchCommand::RemoveContact")
+            .map(|offset| invite_start + offset)
+            .unwrap_or_else(|| panic!("missing RemoveContact dispatch arm"));
+        let invite_branch = &shell_source[invite_start..next_arm];
+
+        assert!(invite_branch.contains("OperationId::invitation_create()"));
+        assert!(invite_branch.contains("OperationState::Submitting"));
+        assert!(invite_branch.contains("RuntimeEventKind::PendingHomeInvitationReady"));
     }
 }

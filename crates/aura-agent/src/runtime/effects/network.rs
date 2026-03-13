@@ -51,7 +51,8 @@ impl ConnectionId {
 }
 
 // Implementation of NetworkEffects
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl NetworkCoreEffects for AuraEffectSystem {
     async fn send_to_peer(
         &self,
@@ -175,7 +176,8 @@ impl NetworkCoreEffects for AuraEffectSystem {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl NetworkExtendedEffects for AuraEffectSystem {
     async fn receive_from(&self, _peer_id: uuid::Uuid) -> Result<Vec<u8>, NetworkError> {
         let peer_id = _peer_id;

@@ -137,9 +137,16 @@ impl ReactivePipeline {
 
         let updates = scheduler.subscribe();
 
-        tasks.spawn_named("scheduler", async move {
+        let fut = async move {
             scheduler.run().await;
-        });
+        };
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                tasks.spawn_local_named("scheduler", fut);
+            } else {
+                tasks.spawn_named("scheduler", fut);
+            }
+        }
 
         Self {
             fact_tx,

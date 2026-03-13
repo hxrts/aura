@@ -156,7 +156,7 @@ impl LanDiscoveryService {
             .unwrap_or(Ipv4Addr::BROADCAST);
         let broadcast_addr =
             UdpEndpoint::new(SocketAddrV4::new(broadcast_ip, self.config.port).to_string());
-        tasks.spawn_named("run", async move {
+        let fut = async move {
             loop {
                 if let Err(TimeError::Timeout { .. }) = time.sleep_ms(interval_ms).await {
                     continue;
@@ -211,7 +211,14 @@ impl LanDiscoveryService {
                     }
                 }
             }
-        })
+        };
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                tasks.spawn_local_named("run", fut)
+            } else {
+                tasks.spawn_named("run", fut)
+            }
+        }
     }
 
     fn start_listener<F>(&self, tasks: TaskGroup, on_discovered: F)
@@ -224,7 +231,7 @@ impl LanDiscoveryService {
         let metrics = self.metrics.clone();
         let on_discovered = Arc::new(on_discovered);
 
-        tasks.spawn_named("run", async move {
+        let fut = async move {
             let mut buf = vec![0u8; aura_rendezvous::MAX_PACKET_SIZE];
 
             loop {
@@ -292,6 +299,13 @@ impl LanDiscoveryService {
                     }
                 }
             }
-        })
+        };
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                tasks.spawn_local_named("run", fut)
+            } else {
+                tasks.spawn_named("run", fut)
+            }
+        }
     }
 }

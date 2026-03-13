@@ -64,8 +64,8 @@ use crate::tui::screens::app::subscriptions::{
     use_devices_subscription, use_discovered_peers_subscription, use_invitations_subscription,
     use_messages_subscription, use_nav_status_signals, use_neighborhood_home_meta_subscription,
     use_neighborhood_homes_subscription, use_notifications_subscription,
-    use_pending_requests_subscription, use_threshold_subscription, SharedDevices,
-    SharedNeighborhoodHomeMeta,
+    use_pending_requests_subscription, use_threshold_subscription, SharedChannels, SharedContacts,
+    SharedDevices, SharedMessages, SharedNeighborhoodHomeMeta,
 };
 use crate::tui::screens::router::Screen;
 use crate::tui::screens::{
@@ -83,8 +83,8 @@ use crate::tui::props::{
 };
 use crate::tui::state_machine::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
 use crate::tui::updates::{
-    harness_command_channel, ui_update_channel, HarnessCommandReceiver, UiUpdate,
-    UiUpdateReceiver, UiUpdateSender,
+    harness_command_channel, ui_update_channel, HarnessCommandReceiver, UiUpdate, UiUpdateReceiver,
+    UiUpdateSender,
 };
 use std::sync::Mutex;
 
@@ -163,9 +163,78 @@ fn read_selected_notification(
 fn execute_harness_followup_command(
     state: &mut TuiState,
     command: TuiCommand,
+    callbacks: &Option<CallbackRegistry>,
+    shared_contacts: &SharedContacts,
+    shared_channels: &SharedChannels,
     shared_devices: &SharedDevices,
+    shared_messages: &SharedMessages,
+    selected_channel: &std::sync::Arc<std::sync::RwLock<Option<String>>>,
 ) {
     match command {
+        TuiCommand::Dispatch(DispatchCommand::SendChatMessage { content }) => {
+            let Some(cb) = callbacks.as_ref() else {
+                state.toast_error("Chat callbacks are unavailable");
+                return;
+            };
+            let channels = match shared_channels.read() {
+                Ok(guard) => guard.clone(),
+                Err(poisoned) => poisoned.into_inner().clone(),
+            };
+            let committed_channel_id = selected_channel
+                .read()
+                .ok()
+                .and_then(|guard| guard.clone())
+                .filter(|channel_id| {
+                    channels.is_empty() || channels.iter().any(|channel| channel.id == *channel_id)
+                });
+            let visible_message_channel_id = shared_messages
+                .read()
+                .ok()
+                .and_then(|messages| messages.last().map(|message| message.channel_id.clone()))
+                .filter(|channel_id| {
+                    channels.is_empty() || channels.iter().any(|channel| channel.id == *channel_id)
+                });
+            if let Some(channel_id) = committed_channel_id
+                .or_else(|| resolve_committed_selected_channel_id(state, &channels))
+                .or(visible_message_channel_id)
+            {
+                (cb.chat.on_send)(channel_id, content);
+            } else {
+                state.toast_error(format!(
+                    "No committed channel selected (channels={} selected_index={} visible_messages={})",
+                    channels.len(),
+                    state.chat.selected_channel,
+                    shared_messages.read().ok().map_or(0, |messages| messages.len())
+                ));
+            }
+        }
+        TuiCommand::Dispatch(DispatchCommand::InviteSelectedContactToChannel) => {
+            let Some(cb) = callbacks.as_ref() else {
+                state.toast_error("Contact callbacks are unavailable");
+                return;
+            };
+            let contact_idx = state.contacts.selected_index;
+            let channel_idx = state.chat.selected_channel;
+            let contacts = match shared_contacts.read() {
+                Ok(guard) => guard.clone(),
+                Err(poisoned) => poisoned.into_inner().clone(),
+            };
+            let channels = match shared_channels.read() {
+                Ok(guard) => guard.clone(),
+                Err(poisoned) => poisoned.into_inner().clone(),
+            };
+            let Some(contact) = contacts.get(contact_idx) else {
+                state.toast_error("No contact selected");
+                return;
+            };
+            let Some(channel) = channels.get(channel_idx) else {
+                state.toast_error("No channel selected");
+                return;
+            };
+            state.set_operation_state(OperationId::invitation_create(), OperationState::Submitting);
+            state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
+            (cb.contacts.on_invite_to_channel)(contact.id.clone(), channel.name.clone());
+        }
         TuiCommand::Dispatch(DispatchCommand::OpenDeviceSelectModal) => {
             let current_devices = shared_devices
                 .read()
@@ -629,11 +698,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let mut screen = screen.clone();
             let mut should_exit = should_exit.clone();
             let app_ctx_for_commands = app_ctx.clone();
+            let callbacks_for_commands = props.callbacks.clone();
             let mut tui = tui.clone();
             let shared_contacts_for_commands = shared_contacts.clone();
             let shared_channels_for_commands = shared_channels.clone();
             let shared_devices_for_commands = shared_devices.clone();
             let shared_messages_for_commands = shared_messages.clone();
+            let tui_selected_for_commands = tui_selected_for_chat_screen.clone();
             async move {
                 #[allow(clippy::expect_used)]
                 let mut rx = {
@@ -646,17 +717,65 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 };
 
                 while let Some(submission) = rx.recv().await {
-                    let next_screen = tui.with_mut(|state| {
-                        let followup = apply_harness_command(state, submission.command);
+                    let app_snapshot_for_command = app_ctx_for_commands.snapshot();
+                    let harness_contacts_for_command = shared_contacts_for_commands
+                        .read()
+                        .ok()
+                        .map(|contacts| contacts.clone())
+                        .unwrap_or_default();
+                    let harness_channels_for_command = shared_channels_for_commands
+                        .read()
+                        .ok()
+                        .map(|channels| channels.clone())
+                        .unwrap_or_default();
+                    let harness_devices_for_command = shared_devices_for_commands
+                        .read()
+                        .ok()
+                        .map(|devices| devices.clone())
+                        .unwrap_or_default();
+                    let harness_messages_for_command = shared_messages_for_commands
+                        .read()
+                        .ok()
+                        .map(|messages| messages.clone())
+                        .unwrap_or_default();
+
+                    let apply_result = tui.with_mut(|state| {
+                        let followup = apply_harness_command(
+                            state,
+                            submission.command.clone(),
+                            TuiSemanticInputs {
+                                app_snapshot: &app_snapshot_for_command,
+                                contacts: &harness_contacts_for_command,
+                                settings_devices: &harness_devices_for_command,
+                                chat_channels: &harness_channels_for_command,
+                                chat_messages: &harness_messages_for_command,
+                            },
+                        )?;
                         for command in followup {
                             execute_harness_followup_command(
                                 state,
                                 command,
+                                &callbacks_for_commands,
+                                &shared_contacts_for_commands,
+                                &shared_channels_for_commands,
                                 &shared_devices_for_commands,
+                                &shared_messages_for_commands,
+                                &tui_selected_for_commands,
                             );
                         }
-                        state.screen()
+                        Ok::<_, String>(state.screen())
                     });
+                    let next_screen = match apply_result {
+                        Ok(screen) => screen,
+                        Err(error) => {
+                            submission.receipt.complete(
+                                aura_app::ui::contract::HarnessUiCommandReceipt::Rejected {
+                                    reason: error,
+                                },
+                            );
+                            continue;
+                        }
+                    };
                     if next_screen != screen.get() {
                         screen.set(next_screen);
                     }
@@ -1267,15 +1386,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 }
 
                                 if let Ok(mut guard) = tui_selected_for_updates.write() {
-                                    if committed_selection.is_none() || committed_index.is_some() {
-                                        *guard = shared_channels_for_updates.read().ok().and_then(
-                                            |channels| {
-                                                channels
-                                                    .get(state.chat.selected_channel)
-                                                    .map(|channel| channel.id.clone())
-                                            },
-                                        );
-                                    }
+                                    *guard = shared_channels_for_updates.read().ok().and_then(
+                                        |channels| {
+                                            channels
+                                                .get(state.chat.selected_channel)
+                                                .map(|channel| channel.id.clone())
+                                        },
+                                    );
                                 }
 
                                 // Auto-scroll to bottom when new messages arrive, but only if
@@ -1382,6 +1499,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             );
                         }
                         UiUpdate::InvitationCreated { invitation_code: _ } => {
+                            tui.with_mut(|state| {
+                                state.set_operation_state(
+                                    OperationId::invitation_create(),
+                                    OperationState::Succeeded,
+                                );
+                            });
                             enqueue_toast!(
                                 "Invitation created".to_string(),
                                 crate::tui::state_machine::ToastLevel::Success
@@ -1585,11 +1708,43 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             facts,
                         } => {
                             tui.with_mut(|state| {
+                                let invitation_accept_ready = facts.iter().any(|fact| {
+                                    matches!(
+                                        fact,
+                                        RuntimeFact::ContactLinkReady { .. }
+                                            | RuntimeFact::ChannelMembershipReady { .. }
+                                    )
+                                });
+                                let invitation_create_ready = facts.iter().any(|fact| {
+                                    matches!(fact, RuntimeFact::PendingHomeInvitationReady)
+                                });
                                 for kind in replace_kinds {
                                     state.clear_runtime_fact_kind(kind);
                                 }
                                 for fact in facts {
                                     state.upsert_runtime_fact(fact);
+                                }
+                                if invitation_accept_ready
+                                    && matches!(
+                                        state.operation_state(&OperationId::invitation_accept()),
+                                        Some(OperationState::Submitting)
+                                    )
+                                {
+                                    state.set_operation_state(
+                                        OperationId::invitation_accept(),
+                                        OperationState::Succeeded,
+                                    );
+                                }
+                                if invitation_create_ready
+                                    && matches!(
+                                        state.operation_state(&OperationId::invitation_create()),
+                                        Some(OperationState::Submitting)
+                                    )
+                                {
+                                    state.set_operation_state(
+                                        OperationId::invitation_create(),
+                                        OperationState::Succeeded,
+                                    );
                                 }
                             });
                         }
@@ -1701,10 +1856,20 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // UI-only errors (domain/runtime errors use ERROR_SIGNAL)
                         // =========================================================================
                         UiUpdate::OperationFailed { operation, error } => {
-                            if operation.to_ascii_lowercase().contains("invitation") {
+                            if matches!(operation.as_str(), "AcceptInvitation" | "ImportInvitation")
+                            {
                                 tui.with_mut(|state| {
                                     state.set_operation_state(
                                         OperationId::invitation_accept(),
+                                        OperationState::Failed,
+                                    );
+                                });
+                            }
+                            if matches!(operation.as_str(), "CreateInvitation" | "InviteUserToChannel")
+                            {
+                                tui.with_mut(|state| {
+                                    state.set_operation_state(
+                                        OperationId::invitation_create(),
                                         OperationState::Failed,
                                     );
                                 });
@@ -1955,6 +2120,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 *guard = Some(channel_id.to_string());
                                             }
                                         }
+                                    }
+                                    DispatchCommand::JoinChannel { channel_name } => {
+                                        new_state.router.go_to(Screen::Chat);
+                                        (cb.chat.on_join_channel)(channel_name);
+                                    }
+                                    DispatchCommand::AcceptPendingHomeInvitation => {
+                                        new_state.router.go_to(Screen::Chat);
+                                        (cb.chat.on_accept_pending_channel_invitation)();
                                     }
                                     DispatchCommand::SendChatMessage { content } => {
                                         let channels = match shared_channels_for_dispatch.read() {
@@ -2365,6 +2538,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             new_state.toast_error("No channel selected");
                                             continue;
                                         };
+                                        new_state.set_operation_state(
+                                            OperationId::invitation_create(),
+                                            OperationState::Submitting,
+                                        );
+                                        new_state.clear_runtime_fact_kind(
+                                            RuntimeEventKind::PendingHomeInvitationReady,
+                                        );
                                         (cb.contacts.on_invite_to_channel)(
                                             contact.id.clone(),
                                             channel.name.clone(),

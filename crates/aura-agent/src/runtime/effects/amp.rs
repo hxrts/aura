@@ -11,7 +11,8 @@ use aura_journal::DomainFact;
 use aura_protocol::amp::{AmpJournalEffects, ChannelMembershipFact, ChannelParticipantEvent};
 use aura_protocol::effects::TreeEffects;
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl AmpChannelEffects for AuraEffectSystem {
     async fn create_channel(
         &self,

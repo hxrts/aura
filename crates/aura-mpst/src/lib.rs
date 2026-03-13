@@ -87,7 +87,8 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 /// simpler runner adapter model, so `aura-macros` continues generating against
 /// this compatibility trait while the underlying dependency stack is on
 /// Telltale 3.0.
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait ChoreographicAdapter: Send {
     /// The error type for this adapter.
     type Error: std::error::Error + Send + Sync + 'static;
@@ -168,7 +169,8 @@ pub trait ChoreographicAdapter: Send {
 }
 
 /// Optional lifecycle hooks for compatibility runners.
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait ChoreographicAdapterExt: ChoreographicAdapter {
     /// Called before protocol execution starts.
     async fn setup(&mut self) -> Result<(), Self::Error>;

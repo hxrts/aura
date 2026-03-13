@@ -138,6 +138,7 @@ pub fn prev_ttl_preset(current_hours: u64) -> u64 {
     INVITATION_TTL_PRESETS[prev_index]
 }
 use crate::signal_defs::INVITATIONS_SIGNAL;
+use crate::ui::signals::CONTACTS_SIGNAL;
 use crate::workflows::runtime::{
     converge_runtime, ensure_runtime_peer_connectivity, require_runtime,
 };
@@ -154,6 +155,9 @@ use aura_core::identifiers::ChannelId;
 use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
 use aura_core::AuraError;
 use std::sync::Arc;
+
+const CONTACT_LINK_ATTEMPTS: usize = 32;
+const CONTACT_LINK_BACKOFF_MS: u64 = 100;
 
 #[cfg(feature = "signals")]
 async fn reconcile_accepted_channel_invitation(
@@ -516,7 +520,21 @@ pub async fn accept_invitation_by_str(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
 ) -> Result<(), AuraError> {
-    accept_invitation(app_core, &InvitationId::new(invitation_id)).await
+    let invitation = list_invitations(app_core)
+        .await
+        .invitation(invitation_id)
+        .cloned();
+
+    accept_invitation(app_core, &InvitationId::new(invitation_id)).await?;
+
+    if let Some(invitation) = invitation {
+        if invitation.invitation_type == crate::views::invitations::InvitationType::Home {
+            let runtime = require_runtime(app_core).await?;
+            wait_for_contact_link(app_core, &runtime, invitation.from_id).await?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Decline an invitation using typed InvitationId
@@ -587,6 +605,31 @@ pub async fn import_invitation(
         .await
         .map(|_| ()) // Discard InvitationInfo, just return success
         .map_err(|e| AuraError::agent(format!("Failed to import invitation: {e}")))
+}
+
+async fn wait_for_contact_link(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    contact_id: AuthorityId,
+) -> Result<(), AuraError> {
+    for attempt in 0..CONTACT_LINK_ATTEMPTS {
+        let linked = read_signal_or_default(app_core, &*CONTACTS_SIGNAL)
+            .await
+            .all_contacts()
+            .any(|contact| contact.id == contact_id);
+        if linked {
+            return Ok(());
+        }
+
+        converge_runtime(runtime).await;
+        if attempt + 1 < CONTACT_LINK_ATTEMPTS {
+            runtime.sleep_ms(CONTACT_LINK_BACKOFF_MS).await;
+        }
+    }
+
+    Err(AuraError::agent(format!(
+        "accepted contact invitation for {contact_id} but the contact never converged"
+    )))
 }
 
 // ============================================================================

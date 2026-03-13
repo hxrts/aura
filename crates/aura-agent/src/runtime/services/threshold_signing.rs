@@ -1434,7 +1434,8 @@ impl ThresholdSigningEffects for ThresholdSigningService {
 // RuntimeService Implementation
 // =============================================================================
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl RuntimeService for ThresholdSigningService {
     fn name(&self) -> &'static str {
         "threshold_signing"

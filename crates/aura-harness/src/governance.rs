@@ -19,7 +19,7 @@ use crate::config::{
     NON_CANONICAL_SCENARIO_FIELDS,
 };
 
-const COVERAGE_DOC: &str = "docs/997_ux_flow_coverage.md";
+const COVERAGE_DOC: &str = "docs/997_flow_coverage.md";
 const CORE_SHARED_SCENARIO_IDS: &[&str] = &[
     "scenario12-mixed-device-enrollment-removal-e2e",
     "scenario13-mixed-contact-channel-message-e2e",
@@ -29,7 +29,7 @@ pub enum GovernanceCheck {
     SharedScenarioContract,
     ScenarioLegality,
     CoreScenarioMechanics,
-    UxFlowCoverage,
+    UserFlowCoverage,
     UiParityContract,
     SettingsSurfaceContract,
     ScenarioCanonicalModel,
@@ -42,7 +42,7 @@ pub fn run(check: GovernanceCheck) -> Result<()> {
         GovernanceCheck::SharedScenarioContract => validate_shared_scenario_contract(),
         GovernanceCheck::ScenarioLegality => validate_scenario_legality(),
         GovernanceCheck::CoreScenarioMechanics => validate_core_scenario_mechanics(),
-        GovernanceCheck::UxFlowCoverage => validate_ux_flow_coverage(),
+        GovernanceCheck::UserFlowCoverage => validate_ux_flow_coverage(),
         GovernanceCheck::UiParityContract => validate_ui_parity_contract(),
         GovernanceCheck::SettingsSurfaceContract => validate_settings_surface_contract(),
         GovernanceCheck::ScenarioCanonicalModel => validate_scenario_canonical_model(),
@@ -195,7 +195,7 @@ pub fn validate_ux_flow_coverage() -> Result<()> {
         if is_ci() {
             bail!("AURA_ALLOW_FLOW_COVERAGE_SKIP=1 is not allowed in CI");
         }
-        println!("ux-flow-coverage: skipped via AURA_ALLOW_FLOW_COVERAGE_SKIP=1");
+        println!("user-flow-coverage: skipped via AURA_ALLOW_FLOW_COVERAGE_SKIP=1");
         return Ok(());
     }
 
@@ -205,7 +205,7 @@ pub fn validate_ux_flow_coverage() -> Result<()> {
     }
     let changed_files = changed_files()?;
     if changed_files.is_empty() {
-        println!("ux-flow-coverage: no changed files");
+        println!("user-flow-coverage: no changed files");
         return Ok(());
     }
 
@@ -246,7 +246,7 @@ pub fn validate_ux_flow_coverage() -> Result<()> {
     }
 
     if affected_flows.is_empty() {
-        println!("ux-flow-coverage: no typed shared-flow source mappings for changed files");
+        println!("user-flow-coverage: no typed shared-flow source mappings for changed files");
         return Ok(());
     }
 
@@ -279,13 +279,13 @@ pub fn validate_ux_flow_coverage() -> Result<()> {
     }
 
     if doc_touched && !coverage_metadata_touched {
-        println!("ux-flow-coverage: coverage doc updated for traceability");
+        println!("user-flow-coverage: coverage doc updated for traceability");
     }
     if !violations.is_empty() {
         bail!(violations.join(" | "));
     }
 
-    println!("ux-flow-coverage: clean");
+    println!("user-flow-coverage: clean");
     Ok(())
 }
 
@@ -525,7 +525,7 @@ pub fn validate_governance_wrappers() -> Result<()> {
             "scripts/check/harness-core-scenario-mechanics.sh",
             "core-scenario-mechanics",
         ),
-        ("scripts/check/ux-flow-coverage.sh", "ux-flow-coverage"),
+        ("scripts/check/user-flow-coverage.sh", "user-flow-coverage"),
         ("scripts/check/ui-parity-contract.sh", "ui-parity-contract"),
         (
             "scripts/check/harness-settings-surface-contract.sh",

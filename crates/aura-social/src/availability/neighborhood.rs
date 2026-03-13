@@ -127,7 +127,8 @@ where
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl<S, N> DataAvailability for NeighborhoodAvailability<S, N>
 where
     S: StorageEffects + Send + Sync,

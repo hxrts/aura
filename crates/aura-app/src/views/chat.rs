@@ -397,6 +397,59 @@ impl ChatState {
         self.channels.insert(channel.id, channel);
     }
 
+    /// Rebind an existing channel entry to a canonical identity, preserving visible state.
+    pub fn rebind_channel_identity(&mut self, from: &ChannelId, mut canonical: Channel) {
+        let canonical_id = canonical.id;
+        if *from == canonical.id {
+            self.upsert_channel(canonical);
+            return;
+        }
+
+        if let Some(previous) = self.channels.remove(from) {
+            if canonical.context_id.is_none() {
+                canonical.context_id = previous.context_id;
+            }
+            if canonical.topic.is_none() {
+                canonical.topic = previous.topic;
+            }
+            if canonical.member_ids.is_empty() {
+                canonical.member_ids = previous.member_ids;
+            }
+            canonical.member_count = canonical.member_count.max(previous.member_count);
+            canonical.unread_count = canonical.unread_count.max(previous.unread_count);
+            canonical.last_message = canonical.last_message.or(previous.last_message);
+            canonical.last_message_time =
+                canonical.last_message_time.or(previous.last_message_time);
+            canonical.last_activity = canonical.last_activity.max(previous.last_activity);
+            canonical.last_finalized_epoch = canonical
+                .last_finalized_epoch
+                .max(previous.last_finalized_epoch);
+        }
+
+        let mut merged_messages = self
+            .channel_messages
+            .remove(&canonical.id)
+            .unwrap_or_default();
+        if let Some(mut previous_messages) = self.channel_messages.remove(from) {
+            for message in &mut previous_messages {
+                message.channel_id = canonical.id;
+            }
+            for message in previous_messages {
+                if !merged_messages
+                    .iter()
+                    .any(|existing| existing.id == message.id)
+                {
+                    merged_messages.push(message);
+                }
+            }
+        }
+
+        self.channels.insert(canonical_id, canonical);
+        if !merged_messages.is_empty() {
+            self.channel_messages.insert(canonical_id, merged_messages);
+        }
+    }
+
     /// Ensure the canonical self channel exists for the given account authority.
     pub fn ensure_note_to_self_channel(&mut self, authority_id: AuthorityId) {
         let channel_id = note_to_self_channel_id(authority_id);
@@ -569,6 +622,21 @@ impl ChatState {
             if let Some(msg) = msgs.iter_mut().find(|m| m.id == message_id && m.is_own) {
                 if msg.delivery_status != MessageDeliveryStatus::Read {
                     msg.delivery_status = MessageDeliveryStatus::Read;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Mark an owned message as failed so the UI can expose retry affordances.
+    ///
+    /// Returns true if the message was found and updated.
+    pub fn mark_failed(&mut self, message_id: &str) -> bool {
+        for msgs in self.channel_messages.values_mut() {
+            if let Some(msg) = msgs.iter_mut().find(|m| m.id == message_id && m.is_own) {
+                if msg.delivery_status != MessageDeliveryStatus::Failed {
+                    msg.delivery_status = MessageDeliveryStatus::Failed;
                     return true;
                 }
             }
@@ -863,5 +931,59 @@ mod tests {
         // Should not panic on unknown channel
         let count = state.mark_finalized_up_to_epoch(&unknown_channel, 10);
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_rebind_channel_identity_moves_messages_to_canonical_channel() {
+        let mut state = ChatState::default();
+        let stale_id = ChannelId::from_bytes([7u8; 32]);
+        let canonical_id = ChannelId::from_bytes([8u8; 32]);
+        state.upsert_channel(Channel {
+            id: stale_id,
+            context_id: None,
+            name: "shared-parity-lab".to_string(),
+            topic: None,
+            channel_type: ChannelType::Home,
+            unread_count: 0,
+            is_dm: false,
+            member_ids: Vec::new(),
+            member_count: 1,
+            last_message: None,
+            last_message_time: None,
+            last_activity: 5,
+            last_finalized_epoch: 0,
+        });
+        let mut message = make_test_message("msg-1", None);
+        message.channel_id = stale_id;
+        state.apply_message(stale_id, message);
+
+        state.rebind_channel_identity(
+            &stale_id,
+            Channel {
+                id: canonical_id,
+                context_id: Some(ContextId::new_from_entropy([4u8; 32])),
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: Vec::new(),
+                member_count: 2,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            },
+        );
+
+        assert!(state.channel(&stale_id).is_none());
+        let canonical = state
+            .channel(&canonical_id)
+            .expect("canonical channel present");
+        assert_eq!(canonical.member_count, 2);
+        let messages = state.messages_for_channel(&canonical_id);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].channel_id, canonical_id);
+        assert_eq!(messages[0].content, "msg-1");
     }
 }

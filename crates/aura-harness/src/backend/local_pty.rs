@@ -24,7 +24,7 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use crate::backend::{
-    observe_operation, submit_accept_contact_invitation_via_shared_ui,
+    latest_invitation_code, observe_operation, submit_accept_contact_invitation_via_shared_ui,
     submit_invite_actor_to_channel_via_shared_ui, wait_for_modal_visible,
     wait_for_operation_submission, wait_for_screen_visible, ContactInvitationCode, InstanceBackend,
     RawUiBackend, SharedSemanticBackend, SubmittedAction, UiSnapshotEvent,
@@ -319,8 +319,10 @@ impl LocalPtyBackend {
     }
 
     fn submit_chat_command_via_ui(&mut self, command: &str) -> Result<()> {
-        self.activate_control(ControlId::NavChat)?;
-        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
+        if self.ui_snapshot()?.screen != ScreenId::Chat {
+            self.activate_control(ControlId::NavChat)?;
+            wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
+        }
         self.fill_field(FieldId::ChatInput, &format!("/{command}"))?;
         self.send_key(crate::tool_api::ToolKey::Enter, 1)
     }
@@ -468,8 +470,28 @@ impl LocalPtyBackend {
                         stream
                             .read_to_end(&mut receipt)
                             .context("failed to read harness UI command receipt")?;
+                        if receipt.is_empty() {
+                            return Err(std::io::Error::new(
+                                ErrorKind::UnexpectedEof,
+                                "empty harness UI command receipt",
+                            )
+                            .into());
+                        }
                         let receipt = serde_json::from_slice::<HarnessUiCommandReceipt>(&receipt)
-                            .context("failed to decode harness UI command receipt")?;
+                            .map_err(|error| {
+                                if error.classify() == serde_json::error::Category::Eof {
+                                    std::io::Error::new(
+                                        ErrorKind::UnexpectedEof,
+                                        format!(
+                                            "truncated harness UI command receipt: {error}"
+                                        ),
+                                    )
+                                    .into()
+                                } else {
+                                    anyhow::Error::new(error)
+                                        .context("failed to decode harness UI command receipt")
+                                }
+                            })?;
                         match receipt {
                             HarnessUiCommandReceipt::Accepted => Ok(()),
                             HarnessUiCommandReceipt::Rejected { reason } => {
@@ -514,6 +536,22 @@ impl LocalPtyBackend {
                             | ErrorKind::ConnectionReset
                     ) =>
                 {
+                    if self
+                        .session
+                        .as_ref()
+                        .and_then(|session| session.reader_thread.as_ref())
+                        .is_some_and(|thread| thread.is_finished())
+                    {
+                        let screen = self.snapshot().unwrap_or_default();
+                        let log_tail = self.tail_log(40).unwrap_or_default().join("\n");
+                        return Err(anyhow::anyhow!(
+                            "local PTY instance {} exited before the harness command plane became ready; socket={} screen={:?} log_tail={}",
+                            self.config.id,
+                            socket_path.display(),
+                            screen,
+                            log_tail
+                        ));
+                    }
                     if Instant::now() >= deadline {
                         return Err(anyhow::anyhow!(
                             "timed out waiting for TUI harness command socket {} to become ready (last error: {})",
@@ -949,10 +987,7 @@ impl InstanceBackend for LocalPtyBackend {
         if !running {
             return Ok(false);
         }
-        let reader_alive = self
-            .session
-            .as_ref()
-            .is_some_and(Self::reader_thread_alive);
+        let reader_alive = self.session.as_ref().is_some_and(Self::reader_thread_alive);
         Ok(reader_alive)
     }
 
@@ -1068,6 +1103,7 @@ impl RawUiBackend for LocalPtyBackend {
             ControlId::SettingsAddDeviceButton
                 | ControlId::SettingsImportDeviceCodeButton
                 | ControlId::SettingsRemoveDeviceButton
+                | ControlId::ContactsInviteToChannelButton
         ) {
             self.send_harness_command(&HarnessUiCommand::ActivateControl { control_id })?;
             return Ok(());
@@ -1117,7 +1153,10 @@ impl RawUiBackend for LocalPtyBackend {
     }
 
     fn activate_list_item(&mut self, list_id: ListId, item_id: &str) -> Result<()> {
-        if matches!(list_id, ListId::Navigation | ListId::SettingsSections) {
+        if matches!(
+            list_id,
+            ListId::Navigation | ListId::SettingsSections | ListId::Channels | ListId::Contacts
+        ) {
             self.send_harness_command(&HarnessUiCommand::ActivateListItem {
                 list_id,
                 item_id: item_id.to_string(),
@@ -1488,8 +1527,23 @@ impl SharedSemanticBackend for LocalPtyBackend {
             previous_operation,
             Duration::from_secs(5),
         )?;
-        wait_for_modal_visible(self, ModalId::InvitationCode, Duration::from_secs(5))?;
-        self.activate_control(ControlId::ModalCancelButton)?;
+        let code_deadline = Instant::now() + Duration::from_secs(5);
+        let code = loop {
+            let snapshot = self.ui_snapshot()?;
+            if let Some(code) = latest_invitation_code(&snapshot) {
+                break code;
+            }
+            if Instant::now() >= code_deadline {
+                anyhow::bail!(
+                    "submit_create_contact_invitation did not publish InvitationCodeReady"
+                );
+            }
+            thread::sleep(Duration::from_millis(50));
+        };
+
+        if self.ui_snapshot()?.open_modal == Some(ModalId::InvitationCode) {
+            self.activate_control(ControlId::ModalCancelButton)?;
+        }
         let close_deadline = Instant::now() + Duration::from_secs(5);
         loop {
             if self.ui_snapshot()?.open_modal != Some(ModalId::InvitationCode) {
@@ -1503,9 +1557,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
             thread::sleep(Duration::from_millis(50));
         }
         Ok(SubmittedAction::with_ui_operation(
-            ContactInvitationCode {
-                code: String::new(),
-            },
+            ContactInvitationCode { code },
             handle,
         ))
     }
@@ -1541,18 +1593,6 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     } if *member_count > 1 => channel.id.clone(),
                     _ => None,
                 });
-        let joined_channel_name =
-            snapshot
-                .runtime_events
-                .iter()
-                .find_map(|event| match &event.fact {
-                    RuntimeFact::ChannelMembershipReady {
-                        channel,
-                        member_count: Some(member_count),
-                        ..
-                    } if *member_count > 1 => channel.name.clone(),
-                    _ => None,
-                });
         let already_joined = previous_channel_count > 1 || joined_channel_id.is_some();
         if already_joined {
             if let Some(channel_id) = joined_channel_id {
@@ -1565,14 +1605,9 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     select_home_and_channel(self, &channel_id)?;
                 }
             }
-            if let Some(channel_name) =
-                joined_channel_name.filter(|name| !name.eq_ignore_ascii_case("note to self"))
-            {
-                let _ = self.submit_chat_command_via_ui(&format!("join {channel_name}"));
-            }
             return Ok(SubmittedAction::without_handle(()));
         }
-        self.submit_chat_command_via_ui("homeaccept")?;
+        self.send_harness_command(&HarnessUiCommand::AcceptPendingChannelInvitation)?;
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             let snapshot = self.ui_snapshot()?;
@@ -1594,16 +1629,6 @@ impl SharedSemanticBackend for LocalPtyBackend {
                         } if *member_count > 1 => channel.id.clone(),
                         _ => None,
                     });
-            let joined_channel_name = snapshot.runtime_events.iter().find_map(|event| match &event
-                .fact
-            {
-                RuntimeFact::ChannelMembershipReady {
-                    channel,
-                    member_count: Some(member_count),
-                    ..
-                } if *member_count > 1 => channel.name.clone(),
-                _ => None,
-            });
             let joined = channel_count > previous_channel_count || joined_channel_id.is_some();
             if joined {
                 if let Some(channel_id) = joined_channel_id {
@@ -1615,11 +1640,6 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     if selected_channel_id.as_deref() != Some(channel_id.as_str()) {
                         select_home_and_channel(self, &channel_id)?;
                     }
-                }
-                if let Some(channel_name) =
-                    joined_channel_name.filter(|name| !name.eq_ignore_ascii_case("note to self"))
-                {
-                    let _ = self.submit_chat_command_via_ui(&format!("join {channel_name}"));
                 }
                 return Ok(SubmittedAction::without_handle(()));
             }
@@ -1638,12 +1658,43 @@ impl SharedSemanticBackend for LocalPtyBackend {
     }
 
     fn submit_join_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
-        self.activate_control(ControlId::NavChat)
-            .context("submit_join_channel: nav_chat")?;
-        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))
-            .context("submit_join_channel: wait_chat")?;
-        self.submit_chat_command_via_ui(&format!("join {channel_name}"))
-            .context("submit_join_channel: join_command")?;
+        let prejoin_snapshot = self.ui_snapshot()?;
+        let already_joined_channel_id =
+            prejoin_snapshot
+                .runtime_events
+                .iter()
+                .find_map(|event| match &event.fact {
+                    RuntimeFact::ChannelMembershipReady {
+                        channel,
+                        member_count: Some(member_count),
+                        ..
+                    } if *member_count > 1
+                        && channel
+                            .name
+                            .as_deref()
+                            .map(|name: &str| name.eq_ignore_ascii_case(channel_name))
+                            .unwrap_or(false) =>
+                    {
+                        channel.id.clone()
+                    }
+                    _ => None,
+                });
+        if let Some(channel_id) = already_joined_channel_id {
+            let selected_channel_id = prejoin_snapshot
+                .selections
+                .iter()
+                .find(|selection| selection.list == ListId::Channels)
+                .map(|selection| selection.item_id.clone());
+            if selected_channel_id.as_deref() != Some(channel_id.as_str()) {
+                select_home_and_channel(self, &channel_id)?;
+            }
+            return Ok(SubmittedAction::without_handle(()));
+        }
+
+        self.send_harness_command(&HarnessUiCommand::JoinChannel {
+            channel_name: channel_name.to_string(),
+        })
+        .context("submit_join_channel: join_command")?;
         let joined_deadline = Instant::now() + Duration::from_secs(4);
         loop {
             let snapshot = self.ui_snapshot()?;
@@ -1707,39 +1758,6 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 .any(|message| message.content.contains(expected))
         }
 
-        fn send_once(backend: &mut LocalPtyBackend, message: &str) -> Result<()> {
-            backend.fill_field(FieldId::ChatInput, message)?;
-            let input_deadline = Instant::now() + Duration::from_millis(1200);
-            loop {
-                if backend.snapshot()?.contains(message) {
-                    break;
-                }
-                if Instant::now() >= input_deadline {
-                    backend.send_keys("\x1b")?;
-                    thread::sleep(Duration::from_millis(80));
-                    backend.send_keys("i")?;
-                    thread::sleep(Duration::from_millis(250));
-                    backend.type_text(message, 20)?;
-                    let retry_deadline = Instant::now() + Duration::from_millis(1200);
-                    loop {
-                        if backend.snapshot()?.contains(message) {
-                            break;
-                        }
-                        if Instant::now() >= retry_deadline {
-                            anyhow::bail!(
-                                "submit_send_chat_message: message never appeared in chat input"
-                            );
-                        }
-                        thread::sleep(Duration::from_millis(80));
-                    }
-                    break;
-                }
-                thread::sleep(Duration::from_millis(80));
-            }
-            backend.send_key(crate::tool_api::ToolKey::Enter, 1)?;
-            Ok(())
-        }
-
         self.activate_control(ControlId::NavChat)?;
         wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
         let previous_operation =
@@ -1780,7 +1798,9 @@ impl SharedSemanticBackend for LocalPtyBackend {
             }
         }
 
-        send_once(self, message)?;
+        self.send_harness_command(&HarnessUiCommand::SendChatMessage {
+            content: message.to_string(),
+        })?;
         let handle = wait_for_operation_submission(
             self,
             OperationId::send_message(),
@@ -1808,7 +1828,9 @@ impl SharedSemanticBackend for LocalPtyBackend {
             thread::sleep(Duration::from_millis(80));
         }
 
-        send_once(self, message)?;
+        self.send_harness_command(&HarnessUiCommand::SendChatMessage {
+            content: message.to_string(),
+        })?;
         let retry_deadline = Instant::now() + Duration::from_secs(3);
         loop {
             let snapshot = self.ui_snapshot()?;

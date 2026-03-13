@@ -38,6 +38,7 @@ use aura_core::{
         ChannelCloseParams, ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams,
         ChannelSendParams,
     },
+    effects::task::TaskSpawner,
     identifiers::{AuthorityId, ChannelId, ContextId, InvitationId},
     AuraError,
 };
@@ -45,6 +46,7 @@ use aura_journal::fact::{FactOptions, RelationalFact};
 use aura_journal::DomainFact;
 use aura_protocol::amp::{serialize_amp_message, AmpMessage};
 use std::collections::BTreeSet;
+use std::future::Future;
 use std::sync::Arc;
 const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const CHAT_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
@@ -183,6 +185,135 @@ async fn send_chat_fact_with_retry(
     Err(AuraError::agent(format!(
         "Failed to deliver chat fact to {peer} after {CHAT_FACT_SEND_MAX_ATTEMPTS} attempts: {message}"
     )))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_message_delivery_task<F>(spawner: &Arc<dyn TaskSpawner>, fut: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    spawner.spawn_cancellable(Box::pin(fut), spawner.cancellation_token());
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_message_delivery_task<F>(spawner: &Arc<dyn TaskSpawner>, fut: F)
+where
+    F: Future<Output = ()> + 'static,
+{
+    spawner.spawn_local_cancellable(Box::pin(fut), spawner.cancellation_token());
+}
+
+async fn mark_message_delivery_failed(
+    app_core: &Arc<RwLock<AppCore>>,
+    message_id: &str,
+) -> Result<(), AuraError> {
+    let updated =
+        with_chat_state(app_core, |chat_state| chat_state.mark_failed(message_id)).await?;
+    if !updated {
+        return Ok(());
+    }
+
+    #[cfg(feature = "instrumented")]
+    tracing::warn!(
+        message_id,
+        "marked message delivery as failed after remote fanout exhaustion"
+    );
+
+    Ok(())
+}
+
+async fn deliver_message_fact_remotely(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn RuntimeBridge>,
+    context_id: ContextId,
+    channel_id: ChannelId,
+    sender_id: AuthorityId,
+    fact: &RelationalFact,
+) -> Result<(), AuraError> {
+    let mut delivered_remote = false;
+    let mut recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
+    let mut failed_fanout = Vec::new();
+    let mut attempted_fanout_total = 0usize;
+    let mut last_connectivity_error: Option<String> = None;
+
+    for attempt in 0..REMOTE_DELIVERY_RETRY_ATTEMPTS {
+        if recipients.is_empty() {
+            converge_runtime(runtime).await;
+            runtime.sleep_ms(REMOTE_DELIVERY_RETRY_BACKOFF_MS).await;
+            recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
+            continue;
+        }
+
+        let mut channel_setup_errors = Vec::new();
+        for peer in recipients.iter().copied() {
+            if let Err(error) = runtime.ensure_peer_channel(context_id, peer).await {
+                channel_setup_errors.push(format!("{peer}: {error}"));
+            }
+        }
+
+        if let Err(error) = ensure_runtime_peer_connectivity(runtime, "send_message_ref").await {
+            let mut detail = error.to_string();
+            if !channel_setup_errors.is_empty() {
+                detail.push_str("; channel_setup=");
+                detail.push_str(&channel_setup_errors.join(", "));
+            }
+            last_connectivity_error = Some(detail);
+        }
+
+        failed_fanout.clear();
+        let mut attempted_fanout = 0usize;
+        for peer in recipients.iter().copied() {
+            attempted_fanout = attempted_fanout.saturating_add(1);
+            attempted_fanout_total = attempted_fanout_total.saturating_add(1);
+            if let Err(error) = send_chat_fact_with_retry(runtime, peer, context_id, fact).await {
+                failed_fanout.push(format!("{peer}: {error}"));
+            }
+        }
+
+        if attempted_fanout > 0 && failed_fanout.is_empty() {
+            delivered_remote = true;
+            break;
+        }
+
+        if attempt + 1 < REMOTE_DELIVERY_RETRY_ATTEMPTS {
+            converge_runtime(runtime).await;
+            runtime.sleep_ms(REMOTE_DELIVERY_RETRY_BACKOFF_MS).await;
+            recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
+        }
+    }
+
+    if !delivered_remote {
+        if recipients.is_empty() {
+            return Err(AuraError::agent(format!(
+                "No recipient peers resolved for channel {channel_id} after extended retries"
+            )));
+        }
+        if attempted_fanout_total == 0 {
+            return Err(AuraError::agent(format!(
+                "Remote delivery prerequisites never converged for channel {channel_id}: {}",
+                last_connectivity_error
+                    .unwrap_or_else(|| "no recipient fanout attempt executed".to_string())
+            )));
+        }
+        if !failed_fanout.is_empty() {
+            return Err(AuraError::agent(format!(
+                "Message fanout unavailable for all recipients on {channel_id} after extended retries: {}",
+                failed_fanout.join("; ")
+            )));
+        }
+    }
+
+    converge_runtime(runtime).await;
+    if let Err(_error) = ensure_runtime_peer_connectivity(runtime, "send_message_ref").await {
+        #[cfg(feature = "instrumented")]
+        tracing::warn!(
+            error = %_error,
+            channel_id = %channel_id,
+            "message send completed without reachable peers"
+        );
+    }
+
+    Ok(())
 }
 
 async fn ensure_runtime_note_to_self_channel(
@@ -449,7 +580,7 @@ async fn ensure_channel_visible_after_join(
             return;
         }
 
-        chat.upsert_channel(Channel {
+        let canonical = Channel {
             id: channel_id,
             context_id: Some(context_id),
             name: normalized_name.clone(),
@@ -463,7 +594,22 @@ async fn ensure_channel_visible_after_join(
             last_message_time: None,
             last_activity: 0,
             last_finalized_epoch: 0,
-        });
+        };
+
+        let stale_id = chat
+            .all_channels()
+            .find(|channel| {
+                channel.id != channel_id
+                    && !channel.is_dm
+                    && channel.name.eq_ignore_ascii_case(&normalized_name)
+            })
+            .map(|channel| channel.id);
+        if let Some(stale_id) = stale_id {
+            chat.rebind_channel_identity(&stale_id, canonical);
+            return;
+        }
+
+        chat.upsert_channel(canonical);
     })
     .await
 }
@@ -1744,97 +1890,41 @@ pub async fn send_message_ref(
                     .await
                     .map_err(|e| AuraError::agent(format!("Failed to persist message: {e}")))?;
 
-                let channel_requires_remote_delivery = true;
-                let mut delivered_remote = false;
-                let mut recipients =
-                    recipient_peers_for_channel(app_core, channel_id, sender_id).await;
-                let mut failed_fanout = Vec::new();
-                let mut attempted_fanout_total = 0usize;
-                let mut last_connectivity_error: Option<String> = None;
-                if channel_requires_remote_delivery {
-                    for attempt in 0..REMOTE_DELIVERY_RETRY_ATTEMPTS {
-                        if recipients.is_empty() {
-                            converge_runtime(&runtime).await;
-                            runtime.sleep_ms(REMOTE_DELIVERY_RETRY_BACKOFF_MS).await;
-                            recipients =
-                                recipient_peers_for_channel(app_core, channel_id, sender_id).await;
-                            continue;
-                        }
-
-                        let mut channel_setup_errors = Vec::new();
-                        for peer in recipients.iter().copied() {
-                            if let Err(error) = runtime.ensure_peer_channel(context_id, peer).await
-                            {
-                                channel_setup_errors.push(format!("{peer}: {error}"));
-                            }
-                        }
-
-                        if let Err(error) =
-                            ensure_runtime_peer_connectivity(&runtime, "send_message_ref").await
+                if let Some(spawner) = runtime.task_spawner() {
+                    let background_app_core = Arc::clone(app_core);
+                    let background_runtime = Arc::clone(&runtime);
+                    let background_fact = fact.clone();
+                    let background_message_id = message_id.clone();
+                    spawn_message_delivery_task(&spawner, async move {
+                        if let Err(_error) = deliver_message_fact_remotely(
+                            &background_app_core,
+                            &background_runtime,
+                            context_id,
+                            channel_id,
+                            sender_id,
+                            &background_fact,
+                        )
+                        .await
                         {
-                            let mut detail = error.to_string();
-                            if !channel_setup_errors.is_empty() {
-                                detail.push_str("; channel_setup=");
-                                detail.push_str(&channel_setup_errors.join(", "));
-                            }
-                            last_connectivity_error = Some(detail);
+                            #[cfg(feature = "instrumented")]
+                            tracing::warn!(
+                                error = %_error,
+                                channel_id = %channel_id,
+                                message_id = %background_message_id,
+                                "background remote message delivery failed"
+                            );
+                            let _ = mark_message_delivery_failed(
+                                &background_app_core,
+                                &background_message_id,
+                            )
+                            .await;
                         }
-
-                        failed_fanout.clear();
-                        let mut attempted_fanout = 0usize;
-                        for peer in recipients.iter().copied() {
-                            attempted_fanout = attempted_fanout.saturating_add(1);
-                            attempted_fanout_total = attempted_fanout_total.saturating_add(1);
-                            if let Err(error) =
-                                send_chat_fact_with_retry(&runtime, peer, context_id, &fact).await
-                            {
-                                failed_fanout.push(format!("{peer}: {error}"));
-                            }
-                        }
-
-                        if attempted_fanout > 0 && failed_fanout.is_empty() {
-                            delivered_remote = true;
-                            break;
-                        }
-
-                        if attempt + 1 < REMOTE_DELIVERY_RETRY_ATTEMPTS {
-                            converge_runtime(&runtime).await;
-                            runtime.sleep_ms(REMOTE_DELIVERY_RETRY_BACKOFF_MS).await;
-                            recipients =
-                                recipient_peers_for_channel(app_core, channel_id, sender_id).await;
-                        }
-                    }
-
-                    if !delivered_remote {
-                        if recipients.is_empty() {
-                            return Err(AuraError::agent(format!(
-                                "No recipient peers resolved for channel {channel_id} after extended retries"
-                            )));
-                        } else if attempted_fanout_total == 0 {
-                            return Err(AuraError::agent(format!(
-                                "Remote delivery prerequisites never converged for channel {channel_id}: {}",
-                                last_connectivity_error.unwrap_or_else(|| {
-                                    "no recipient fanout attempt executed".to_string()
-                                })
-                            )));
-                        } else if !failed_fanout.is_empty() {
-                            return Err(AuraError::agent(format!(
-                                "Message fanout unavailable for all recipients on {channel_id} after extended retries: {}",
-                                failed_fanout.join("; ")
-                            )));
-                        }
-                    }
-                }
-                converge_runtime(&runtime).await;
-                if let Err(_error) =
-                    ensure_runtime_peer_connectivity(&runtime, "send_message_ref").await
-                {
-                    #[cfg(feature = "instrumented")]
-                    tracing::warn!(
-                        error = %_error,
-                        channel_id = %channel_id,
-                        "message send completed without reachable peers"
-                    );
+                    });
+                } else {
+                    deliver_message_fact_remotely(
+                        app_core, &runtime, context_id, channel_id, sender_id, &fact,
+                    )
+                    .await?;
                 }
             }
 
@@ -2215,16 +2305,41 @@ pub async fn invite_authority_to_channel(
         ttl_ms,
     )
     .await?;
-
-    project_channel_peer_membership_with_context(
-        app_core,
-        channel_id,
-        Some(context_id),
-        receiver,
-        None,
-    )
-    .await?;
-    converge_runtime(&runtime).await;
+    if let Some(spawner) = runtime.task_spawner() {
+        let background_app_core = Arc::clone(app_core);
+        let background_runtime = Arc::clone(&runtime);
+        spawn_message_delivery_task(&spawner, async move {
+            if let Err(_error) = project_channel_peer_membership_with_context(
+                &background_app_core,
+                channel_id,
+                Some(context_id),
+                receiver,
+                None,
+            )
+            .await
+            {
+                #[cfg(feature = "instrumented")]
+                tracing::warn!(
+                    error = %_error,
+                    channel_id = %channel_id,
+                    receiver = %receiver,
+                    "background channel invitation projection failed"
+                );
+                return;
+            }
+            converge_runtime(&background_runtime).await;
+        });
+    } else {
+        project_channel_peer_membership_with_context(
+            app_core,
+            channel_id,
+            Some(context_id),
+            receiver,
+            None,
+        )
+        .await?;
+        converge_runtime(&runtime).await;
+    }
 
     Ok(invitation.invitation_id)
 }
@@ -2470,6 +2585,79 @@ mod tests {
         let channel = chat.channel(&channel_id).expect("channel should exist");
         assert_eq!(channel.context_id, Some(context_id));
         assert_eq!(channel.name, "slash-lab");
+    }
+
+    #[tokio::test]
+    async fn test_ensure_channel_visible_after_join_rebinds_same_name_placeholder_channel() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let stale_id = ChannelId::from_bytes(hash(b"join-visible-stale"));
+        let canonical_id = ChannelId::from_bytes(hash(b"join-visible-canonical"));
+        let context_id = ContextId::new_from_entropy([22u8; 32]);
+
+        with_chat_state(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: stale_id,
+                context_id: None,
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: Vec::new(),
+                member_count: 1,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+            chat.apply_message(
+                stale_id,
+                Message {
+                    id: "pre-canonical".to_string(),
+                    channel_id: stale_id,
+                    sender_id: AuthorityId::new_from_entropy([3u8; 32]),
+                    sender_name: "Alice".to_string(),
+                    content: "hello-from-tu1".to_string(),
+                    timestamp: 1,
+                    reply_to: None,
+                    is_own: false,
+                    is_read: false,
+                    delivery_status: MessageDeliveryStatus::Delivered,
+                    epoch_hint: None,
+                    is_finalized: false,
+                },
+            );
+        })
+        .await
+        .unwrap();
+
+        ensure_channel_visible_after_join(
+            &app_core,
+            canonical_id,
+            context_id,
+            Some("shared-parity-lab"),
+        )
+        .await
+        .expect("join visibility should rebind placeholder channel");
+
+        let chat = chat_snapshot(&app_core).await;
+        assert!(
+            chat.channel(&stale_id).is_none(),
+            "stale placeholder must be removed"
+        );
+        let channel = chat
+            .channel(&canonical_id)
+            .expect("canonical channel should exist");
+        assert_eq!(channel.context_id, Some(context_id));
+        assert_eq!(channel.name, "shared-parity-lab");
+        let messages = chat.messages_for_channel(&canonical_id);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].channel_id, canonical_id);
+        assert_eq!(messages[0].content, "hello-from-tu1");
     }
 
     #[tokio::test]

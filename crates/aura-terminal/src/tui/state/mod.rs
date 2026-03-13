@@ -58,6 +58,62 @@ use aura_app::ui::contract::{
 use aura_app::ui_contract::RuntimeFact;
 use std::collections::HashMap;
 
+#[derive(Clone, Debug)]
+struct TrackedOperation {
+    instance_id: OperationInstanceId,
+    state: OperationState,
+}
+
+#[derive(Clone, Debug, Default)]
+struct OperationTracker {
+    next_instance_nonce: u64,
+    entries: HashMap<OperationId, TrackedOperation>,
+}
+
+impl OperationTracker {
+    fn set_state(&mut self, operation_id: OperationId, state: OperationState) {
+        let needs_new_instance = matches!(state, OperationState::Submitting)
+            || !self.entries.contains_key(&operation_id);
+        if needs_new_instance {
+            let instance_id = self.next_instance_id(&operation_id);
+            self.entries
+                .insert(operation_id, TrackedOperation { instance_id, state });
+            return;
+        }
+
+        if let Some(entry) = self.entries.get_mut(&operation_id) {
+            entry.state = state;
+        }
+    }
+
+    fn clear(&mut self, operation_id: &OperationId) {
+        self.entries.remove(operation_id);
+    }
+
+    fn state(&self, operation_id: &OperationId) -> Option<OperationState> {
+        self.entries.get(operation_id).map(|entry| entry.state)
+    }
+
+    fn exported_snapshots(&self) -> Vec<OperationSnapshot> {
+        self.entries
+            .iter()
+            .map(|(id, tracked)| OperationSnapshot {
+                id: id.clone(),
+                instance_id: tracked.instance_id.clone(),
+                state: tracked.state,
+            })
+            .collect()
+    }
+
+    fn next_instance_id(&mut self, operation_id: &OperationId) -> OperationInstanceId {
+        self.next_instance_nonce += 1;
+        OperationInstanceId(format!(
+            "tui-op-{}-{}",
+            operation_id.0, self.next_instance_nonce
+        ))
+    }
+}
+
 /// Complete TUI state
 ///
 /// This struct captures all state needed to render the TUI and process events.
@@ -129,7 +185,7 @@ pub struct TuiState {
     pub current_authority_index: usize,
 
     /// Semantic operation states exported to the harness snapshot.
-    pub operation_states: HashMap<OperationId, OperationState>,
+    operation_states: OperationTracker,
 
     /// Last exported invite code for harness-visible semantic readiness.
     pub last_exported_invitation_code: Option<String>,
@@ -245,11 +301,16 @@ impl TuiState {
     }
 
     pub fn set_operation_state(&mut self, operation_id: OperationId, state: OperationState) {
-        self.operation_states.insert(operation_id, state);
+        self.operation_states.set_state(operation_id, state);
     }
 
     pub fn clear_operation_state(&mut self, operation_id: &OperationId) {
-        self.operation_states.remove(operation_id);
+        self.operation_states.clear(operation_id);
+    }
+
+    #[must_use]
+    pub fn operation_state(&self, operation_id: &OperationId) -> Option<OperationState> {
+        self.operation_states.state(operation_id)
     }
 
     pub fn upsert_runtime_fact(&mut self, fact: RuntimeFact) {
@@ -265,14 +326,7 @@ impl TuiState {
 
     #[must_use]
     pub fn exported_operation_snapshots(&self) -> Vec<OperationSnapshot> {
-        self.operation_states
-            .iter()
-            .map(|(id, state)| OperationSnapshot {
-                id: id.clone(),
-                instance_id: OperationInstanceId(format!("tui-op-{}", id.0)),
-                state: state.clone(),
-            })
-            .collect()
+        self.operation_states.exported_snapshots()
     }
 
     #[must_use]
@@ -462,5 +516,31 @@ impl TuiState {
             Some(QueuedModal::GuardianSetup(state)) => Some(state),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn operation_tracker_reissues_instance_id_on_new_submission() {
+        let mut state = TuiState::new();
+        let operation_id = OperationId::invitation_create();
+
+        state.set_operation_state(operation_id.clone(), OperationState::Submitting);
+        let first = state.exported_operation_snapshots();
+        assert_eq!(first.len(), 1);
+        let first_instance = first[0].instance_id.clone();
+
+        state.set_operation_state(operation_id.clone(), OperationState::Succeeded);
+        let second = state.exported_operation_snapshots();
+        assert_eq!(second[0].instance_id, first_instance);
+        assert_eq!(second[0].state, OperationState::Succeeded);
+
+        state.set_operation_state(operation_id, OperationState::Submitting);
+        let third = state.exported_operation_snapshots();
+        assert_eq!(third[0].state, OperationState::Submitting);
+        assert_ne!(third[0].instance_id, first_instance);
     }
 }

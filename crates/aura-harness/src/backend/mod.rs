@@ -12,6 +12,7 @@ use aura_app::ui::contract::{
     ControlId, FieldId, ListId, ModalId, OperationId, OperationInstanceId, OperationState,
     ScreenId, UiSnapshot,
 };
+use aura_app::ui_contract::RuntimeFact;
 use aura_app::ui_contract::ProjectionRevision;
 use std::time::Duration;
 use tokio::time::Instant;
@@ -428,8 +429,32 @@ where
         Duration::from_secs(30),
     )?;
     backend.activate_list_item(ListId::Contacts, authority_id)?;
+    let previous_operation =
+        observe_operation(&backend.ui_snapshot()?, &OperationId::invitation_create());
     backend.activate_control(ControlId::ContactsInviteToChannelButton)?;
-    Ok(SubmittedAction::without_handle(()))
+    let handle = wait_for_operation_submission(
+        backend,
+        OperationId::invitation_create(),
+        previous_operation,
+        Duration::from_secs(5),
+    )?;
+    Ok(SubmittedAction::with_ui_operation((), handle))
+}
+
+#[must_use]
+pub(crate) fn latest_invitation_code(snapshot: &UiSnapshot) -> Option<String> {
+    snapshot
+        .runtime_events
+        .iter()
+        .rev()
+        .find_map(|event| match &event.fact {
+            RuntimeFact::InvitationCodeReady {
+                source_operation,
+                code: Some(code),
+                ..
+            } if *source_operation == OperationId::invitation_create() => Some(code.clone()),
+            _ => None,
+        })
 }
 
 #[must_use]

@@ -454,7 +454,7 @@ impl RecoveryServiceApi {
         for guardian_id in guardians {
             let protocol_request = protocol_request.clone();
             let effects = effects.clone();
-            tasks.spawn_named(format!("guardian.{guardian_id}"), async move {
+            let fut = async move {
                 let account_fut = execute_recovery_protocol_account(
                     effects.clone(),
                     authority_id,
@@ -468,7 +468,14 @@ impl RecoveryServiceApi {
                     protocol_request.clone(),
                 );
                 let _ = tokio::join!(account_fut, coordinator_fut);
-            });
+            };
+            cfg_if::cfg_if! {
+                if #[cfg(target_arch = "wasm32")] {
+                    tasks.spawn_local_named(format!("guardian.{guardian_id}"), fut);
+                } else {
+                    tasks.spawn_named(format!("guardian.{guardian_id}"), fut);
+                }
+            }
         }
 
         Ok(())

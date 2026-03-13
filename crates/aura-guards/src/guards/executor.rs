@@ -402,7 +402,8 @@ impl<'a, E> BorrowedEffectInterpreter<'a, E> {
     }
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 impl<E> EffectInterpreter for EffectSystemInterpreter<E>
 where
     E: crate::guards::GuardEffects
@@ -483,7 +484,8 @@ where
     }
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 impl<'a, E> EffectInterpreter for BorrowedEffectInterpreter<'a, E>
 where
     E: crate::guards::GuardEffects

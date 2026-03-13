@@ -240,7 +240,8 @@ pub enum EffectResult {
 /// - Production: Real I/O operations
 /// - Simulation: Deterministic event recording
 /// - Testing: Mock responses
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait EffectInterpreter: Send + Sync {
     /// Execute an effect command asynchronously
     async fn execute(&self, cmd: EffectCommand) -> Result<EffectResult>;

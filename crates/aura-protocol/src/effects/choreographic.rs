@@ -8,7 +8,8 @@ use std::num::NonZeroU32;
 use uuid::Uuid;
 
 /// Choreographic effects for distributed protocol coordination
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait ChoreographicEffects: Send + Sync {
     /// Send raw bytes to a specific role in the choreography
     async fn send_to_role_bytes(
@@ -56,7 +57,8 @@ pub trait ChoreographicEffects: Send + Sync {
 }
 
 /// Blanket implementation for Arc<T> where T: ChoreographicEffects
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl<T: ChoreographicEffects + ?Sized> ChoreographicEffects for std::sync::Arc<T> {
     async fn send_to_role_bytes(
         &self,

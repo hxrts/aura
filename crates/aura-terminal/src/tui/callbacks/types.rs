@@ -52,6 +52,7 @@ pub type CreateInvitationCallbackType =
 /// to avoid race conditions with async channel selection updates.
 pub type SendCallback = TwoStringCallback;
 pub type ChannelSelectCallback = IdCallback;
+pub type JoinChannelCallback = IdCallback;
 pub type CreateChannelCallback = StringOptStringVecU8Callback;
 pub type RetryMessageCallback = ThreeStringCallback;
 pub type SetTopicCallback = TwoStringCallback;

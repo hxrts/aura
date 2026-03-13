@@ -142,7 +142,8 @@ impl std::error::Error for AvailabilityError {}
 ///     // ...
 /// }
 /// ```
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait DataAvailability: Send + Sync {
     /// The identifier type for replication units.
     ///
@@ -227,7 +228,8 @@ pub trait DataAvailability: Send + Sync {
 }
 
 /// Blanket implementation for Arc<T> where T: DataAvailability
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl<T: DataAvailability + ?Sized> DataAvailability for std::sync::Arc<T> {
     type UnitId = T::UnitId;
 

@@ -439,7 +439,8 @@ impl Default for LayeredBudget {
 ///     }
 /// }
 /// ```
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait RendezvousFlooder: Send + Sync {
     /// Flood a rendezvous packet into the network.
     ///
@@ -484,7 +485,8 @@ pub trait RendezvousFlooder: Send + Sync {
 }
 
 /// Blanket implementation for Arc<T> where T: RendezvousFlooder
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl<T: RendezvousFlooder + ?Sized> RendezvousFlooder for std::sync::Arc<T> {
     async fn flood(&self, packet: RendezvousPacket) -> Result<(), FloodError> {
         (**self).flood(packet).await

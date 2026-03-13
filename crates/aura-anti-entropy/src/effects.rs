@@ -131,7 +131,8 @@ impl aura_core::ProtocolErrorCode for SyncError {
 ///
 /// This trait defines the operations needed for tree synchronization across
 /// distributed replicas using digest exchange and operation reconciliation.
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait SyncEffects: Send + Sync {
     /// Perform anti-entropy sync with a peer
     ///

@@ -28,7 +28,12 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, RwLock};
 
-type ApplyFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+#[cfg(target_arch = "wasm32")]
+pub type ReactiveUpdateFuture<'a> = Pin<Box<dyn Future<Output = ()> + 'a>>;
+#[cfg(not(target_arch = "wasm32"))]
+pub type ReactiveUpdateFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+
+type ApplyFuture<'a> = ReactiveUpdateFuture<'a>;
 type ApplyFn<V, Delta> = Arc<dyn for<'a> Fn(&'a V, Delta) -> ApplyFuture<'a> + Send + Sync>;
 
 /// Sources of facts that flow into the scheduler
@@ -207,7 +212,7 @@ pub trait ReactiveView: Send + Sync {
     ///
     /// This function should be deterministic and idempotent - given the same
     /// sequence of facts, it should always produce the same view state.
-    fn update(&self, facts: &[Fact]) -> impl std::future::Future<Output = ()> + Send;
+    fn update<'a>(&'a self, facts: &'a [Fact]) -> ReactiveUpdateFuture<'a>;
 
     /// Get the view's identifier for dependency ordering
     fn view_id(&self) -> &str;
@@ -226,10 +231,7 @@ pub trait ReactiveView: Send + Sync {
 /// allowing us to store heterogeneous views in `Vec<Arc<dyn AnyView>>`.
 pub trait AnyView: Send + Sync {
     /// Update the view based on new facts
-    fn update<'a>(
-        &'a self,
-        facts: &'a [Fact],
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>>;
+    fn update<'a>(&'a self, facts: &'a [Fact]) -> ReactiveUpdateFuture<'a>;
 
     /// Get the view's identifier
     fn view_id(&self) -> &str;
@@ -239,11 +241,8 @@ pub trait AnyView: Send + Sync {
 }
 
 impl<T: ReactiveView> AnyView for T {
-    fn update<'a>(
-        &'a self,
-        facts: &'a [Fact],
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
-        Box::pin(ReactiveView::update(self, facts))
+    fn update<'a>(&'a self, facts: &'a [Fact]) -> ReactiveUpdateFuture<'a> {
+        ReactiveView::update(self, facts)
     }
 
     fn view_id(&self) -> &str {
@@ -659,14 +658,16 @@ where
     R: ViewReduction<Delta> + 'static,
     V: Send + Sync + 'static,
 {
-    async fn update(&self, facts: &[Fact]) {
-        // Step 1: Reduce facts to deltas (passing own_authority for contextual reduction)
-        let deltas = self.reduction.reduce(facts, self.own_authority);
+    fn update<'a>(&'a self, facts: &'a [Fact]) -> ReactiveUpdateFuture<'a> {
+        Box::pin(async move {
+            // Step 1: Reduce facts to deltas (passing own_authority for contextual reduction)
+            let deltas = self.reduction.reduce(facts, self.own_authority);
 
-        // Step 2: Apply each delta to the view
-        for delta in deltas {
-            (self.apply_fn)(&self.view, delta).await;
-        }
+            // Step 2: Apply each delta to the view
+            for delta in deltas {
+                (self.apply_fn)(&self.view, delta).await;
+            }
+        })
     }
 
     fn view_id(&self) -> &str {
@@ -887,9 +888,11 @@ mod tests {
     }
 
     impl ReactiveView for MockView {
-        async fn update(&self, facts: &[Fact]) {
-            let mut count = self.update_count.write().await;
-            *count += facts.len();
+        fn update<'a>(&'a self, facts: &'a [Fact]) -> ReactiveUpdateFuture<'a> {
+            Box::pin(async move {
+                let mut count = self.update_count.write().await;
+                *count += facts.len();
+            })
         }
 
         fn view_id(&self) -> &str {
@@ -1311,7 +1314,9 @@ mod tests {
     }
 
     impl ReactiveView for TestView {
-        async fn update(&self, _facts: &[Fact]) {}
+        fn update<'a>(&'a self, _facts: &'a [Fact]) -> ReactiveUpdateFuture<'a> {
+            Box::pin(async {})
+        }
 
         fn view_id(&self) -> &str {
             &self.id

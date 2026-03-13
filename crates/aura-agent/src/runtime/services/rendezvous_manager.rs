@@ -289,7 +289,8 @@ impl RendezvousManagerState {
 struct WasmUnsupportedUdpEffects;
 
 #[cfg(target_arch = "wasm32")]
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl UdpEffects for WasmUnsupportedUdpEffects {
     async fn udp_bind(
         &self,
@@ -1453,7 +1454,8 @@ impl RendezvousManager {
 // RuntimeService Implementation
 // =============================================================================
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl RuntimeService for RendezvousManager {
     fn name(&self) -> &'static str {
         "rendezvous_manager"

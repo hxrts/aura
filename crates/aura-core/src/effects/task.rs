@@ -1,7 +1,7 @@
 //! Runtime-agnostic task spawning traits.
 
 use async_trait::async_trait;
-use futures::future::BoxFuture;
+use futures::future::{BoxFuture, LocalBoxFuture};
 use std::sync::Arc;
 
 /// Cooperative cancellation token.
@@ -23,6 +23,16 @@ pub trait TaskSpawner: Send + Sync {
 
     /// Spawn a background task tied to a cancellation token.
     fn spawn_cancellable(&self, fut: BoxFuture<'static, ()>, token: Arc<dyn CancellationToken>);
+
+    /// Spawn a background task that may remain thread-local.
+    fn spawn_local(&self, fut: LocalBoxFuture<'static, ()>);
+
+    /// Spawn a thread-local background task tied to a cancellation token.
+    fn spawn_local_cancellable(
+        &self,
+        fut: LocalBoxFuture<'static, ()>,
+        token: Arc<dyn CancellationToken>,
+    );
 
     /// Return a cancellation token associated with this spawner.
     fn cancellation_token(&self) -> Arc<dyn CancellationToken>;

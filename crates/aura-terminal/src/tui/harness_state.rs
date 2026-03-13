@@ -84,8 +84,7 @@ fn bind_harness_command_listener() -> io::Result<Option<(UnixListener, HarnessSo
     }
     let listener = std::os::unix::net::UnixListener::bind(&path)?;
     listener.set_nonblocking(true)?;
-    UnixListener::from_std(listener)
-        .map(|listener| Some((listener, HarnessSocketGuard::new(path))))
+    UnixListener::from_std(listener).map(|listener| Some((listener, HarnessSocketGuard::new(path))))
 }
 
 fn last_written_snapshot() -> &'static Mutex<Option<String>> {
@@ -349,34 +348,35 @@ async fn write_harness_command_receipt(
 pub(crate) fn apply_harness_command(
     state: &mut TuiState,
     command: HarnessUiCommand,
-) -> Vec<TuiCommand> {
+    semantic_inputs: TuiSemanticInputs<'_>,
+) -> Result<Vec<TuiCommand>, String> {
     match command {
         HarnessUiCommand::NavigateScreen { screen } => {
             if let Some(screen) = screen_from_id(screen) {
                 state.router.go_to(screen);
             }
-            Vec::new()
+            Ok(Vec::new())
         }
         HarnessUiCommand::ActivateControl { control_id } => match control_id {
             ControlId::NavNeighborhood => {
                 state.router.go_to(Screen::Neighborhood);
-                Vec::new()
+                Ok(Vec::new())
             }
             ControlId::NavChat => {
                 state.router.go_to(Screen::Chat);
-                Vec::new()
+                Ok(Vec::new())
             }
             ControlId::NavContacts => {
                 state.router.go_to(Screen::Contacts);
-                Vec::new()
+                Ok(Vec::new())
             }
             ControlId::NavNotifications => {
                 state.router.go_to(Screen::Notifications);
-                Vec::new()
+                Ok(Vec::new())
             }
             ControlId::NavSettings => {
                 state.router.go_to(Screen::Settings);
-                Vec::new()
+                Ok(Vec::new())
             }
             ControlId::SettingsAddDeviceButton => {
                 select_settings_section(state, SettingsSection::Devices);
@@ -388,7 +388,7 @@ pub(crate) fn apply_harness_command(
                 state
                     .modal_queue
                     .enqueue(QueuedModal::SettingsAddDevice(modal_state));
-                Vec::new()
+                Ok(Vec::new())
             }
             ControlId::SettingsImportDeviceCodeButton => {
                 select_settings_section(state, SettingsSection::Devices);
@@ -405,13 +405,18 @@ pub(crate) fn apply_harness_command(
                             ToastLevel::Info,
                         ));
                 }
-                Vec::new()
+                Ok(Vec::new())
             }
             ControlId::SettingsRemoveDeviceButton => {
                 select_settings_section(state, SettingsSection::Devices);
-                vec![TuiCommand::Dispatch(DispatchCommand::OpenDeviceSelectModal)]
+                Ok(vec![TuiCommand::Dispatch(
+                    DispatchCommand::OpenDeviceSelectModal,
+                )])
             }
-            _ => Vec::new(),
+            ControlId::ContactsInviteToChannelButton => Ok(vec![TuiCommand::Dispatch(
+                DispatchCommand::InviteSelectedContactToChannel,
+            )]),
+            _ => Ok(Vec::new()),
         },
         HarnessUiCommand::ActivateListItem { list_id, item_id } => match list_id {
             ListId::Navigation => {
@@ -426,16 +431,51 @@ pub(crate) fn apply_harness_command(
                 if let Some(screen) = screen {
                     state.router.go_to(screen);
                 }
-                Vec::new()
+                Ok(Vec::new())
             }
             ListId::SettingsSections => {
                 if let Some(section) = settings_section_from_item_id(&item_id) {
                     select_settings_section(state, section);
                 }
-                Vec::new()
+                Ok(Vec::new())
             }
-            _ => Vec::new(),
+            ListId::Channels => {
+                let selected_index = semantic_inputs
+                    .chat_channels
+                    .iter()
+                    .position(|candidate| candidate.id == item_id)
+                    .ok_or_else(|| format!("channel list item {item_id} is not visible"))?;
+                state.router.go_to(Screen::Chat);
+                state.chat.selected_channel = selected_index;
+                Ok(Vec::new())
+            }
+            ListId::Contacts => {
+                let selected_index = semantic_inputs
+                    .contacts
+                    .iter()
+                    .position(|candidate| candidate.id == item_id)
+                    .ok_or_else(|| format!("contact list item {item_id} is not visible"))?;
+                state.router.go_to(Screen::Contacts);
+                state.contacts.selected_index = selected_index;
+                Ok(Vec::new())
+            }
+            _ => Ok(Vec::new()),
         },
+        HarnessUiCommand::AcceptPendingChannelInvitation => {
+            state.router.go_to(Screen::Chat);
+            Ok(vec![TuiCommand::Dispatch(
+                DispatchCommand::AcceptPendingHomeInvitation,
+            )])
+        }
+        HarnessUiCommand::JoinChannel { channel_name } => {
+            state.router.go_to(Screen::Chat);
+            Ok(vec![TuiCommand::Dispatch(DispatchCommand::JoinChannel {
+                channel_name,
+            })])
+        }
+        HarnessUiCommand::SendChatMessage { content } => Ok(vec![TuiCommand::Dispatch(
+            DispatchCommand::SendChatMessage { content },
+        )]),
     }
 }
 
@@ -845,7 +885,7 @@ mod tests {
     use crate::tui::state::modal_queue::QueuedModal;
     use crate::tui::state::views::{AccountSetupModalState, DeviceEnrollmentCeremonyModalState};
     use crate::tui::state::DispatchCommand;
-    use crate::tui::types::SettingsSection;
+    use crate::tui::types::{Channel as TuiChannel, SettingsSection};
     use crate::tui::updates::{harness_command_channel, HarnessCommandSubmission};
     use crate::tui::{TuiCommand, TuiState};
     use aura_app::ui::contract::{
@@ -996,7 +1036,15 @@ mod tests {
             HarnessUiCommand::NavigateScreen {
                 screen: ScreenId::Settings,
             },
-        );
+            TuiSemanticInputs {
+                app_snapshot: &StateSnapshot::default(),
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("navigation command should apply: {error}"));
 
         assert!(followup.is_empty());
         assert_eq!(state.screen(), Screen::Settings);
@@ -1010,7 +1058,15 @@ mod tests {
             HarnessUiCommand::ActivateControl {
                 control_id: ControlId::SettingsRemoveDeviceButton,
             },
-        );
+            TuiSemanticInputs {
+                app_snapshot: &StateSnapshot::default(),
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("remove device command should apply: {error}"));
 
         assert_eq!(state.screen(), Screen::Settings);
         assert_eq!(state.settings.section, SettingsSection::Devices);
@@ -1042,7 +1098,15 @@ mod tests {
             HarnessUiCommand::NavigateScreen {
                 screen: ScreenId::Settings,
             },
-        );
+            TuiSemanticInputs {
+                app_snapshot: &app_snapshot,
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("navigation command should apply: {error}"));
         let updated_snapshot = authoritative_ui_snapshot(
             &updated_state,
             TuiSemanticInputs {
@@ -1059,6 +1123,35 @@ mod tests {
             updated_snapshot.revision.semantic_seq > initial_snapshot.revision.semantic_seq,
             "semantic command application must publish a newer authoritative projection"
         );
+    }
+
+    #[test]
+    fn harness_command_channel_selection_uses_visible_channel_ids() {
+        let app_snapshot = StateSnapshot::default();
+        let channels = vec![
+            TuiChannel::new("channel:note-to-self", "Note to Self"),
+            TuiChannel::new("channel:shared", "Shared"),
+        ];
+        let mut state = TuiState::new();
+        let followup = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::ActivateListItem {
+                list_id: ListId::Channels,
+                item_id: "channel:shared".to_string(),
+            },
+            TuiSemanticInputs {
+                app_snapshot: &app_snapshot,
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &channels,
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("channel selection command should apply: {error}"));
+
+        assert!(followup.is_empty());
+        assert_eq!(state.screen(), Screen::Chat);
+        assert_eq!(state.chat.selected_channel, 1);
     }
 
     #[tokio::test]
@@ -1082,9 +1175,9 @@ mod tests {
         let apply_task = tokio::spawn(async move {
             let observed_submission =
                 tokio::time::timeout(Duration::from_secs(1), command_rx.recv())
-                .await
-                .unwrap_or_else(|_| panic!("timed out waiting for harness command submission"))
-                .unwrap_or_else(|| panic!("harness command channel closed unexpectedly"));
+                    .await
+                    .unwrap_or_else(|_| panic!("timed out waiting for harness command submission"))
+                    .unwrap_or_else(|| panic!("harness command channel closed unexpectedly"));
             match observed_submission {
                 HarnessCommandSubmission {
                     command:

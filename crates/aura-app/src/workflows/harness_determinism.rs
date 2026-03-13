@@ -58,7 +58,7 @@ fn derive_u64(
 
 fn harness_context() -> Option<HarnessContext> {
     cfg_if! {
-        if #[cfg(target_arch = "wasm32")] {
+        if #[cfg(all(target_arch = "wasm32", feature = "wasm"))] {
             let window = web_sys::window()?;
             let search = window.location().search().ok()?;
             let query = search.strip_prefix('?').unwrap_or(&search);
@@ -78,6 +78,8 @@ fn harness_context() -> Option<HarnessContext> {
                 scenario_seed: scenario_seed?,
                 instance_id: instance_id?,
             })
+        } else if #[cfg(target_arch = "wasm32")] {
+            None
         } else {
             std::env::var_os(HARNESS_MODE_KEY)?;
             Some(HarnessContext {

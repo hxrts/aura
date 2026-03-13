@@ -38,7 +38,8 @@ impl<E> NetworkMonitorHandler<E> {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl<E> NetworkChangeEffects for NetworkMonitorHandler<E>
 where
     E: NetworkChangeEffects + Send + Sync,
@@ -73,7 +74,8 @@ impl DebouncedNetworkChangeStream {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl NetworkChangeStream for DebouncedNetworkChangeStream {
     async fn next_change(&mut self) -> Result<Option<NetworkChange>, NetworkError> {
         let Some(change) = self.inner.next_change().await? else {

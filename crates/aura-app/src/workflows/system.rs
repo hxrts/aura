@@ -22,7 +22,9 @@ use crate::workflows::snapshot_policy::contacts_snapshot;
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::effects::task::TaskSpawner;
 use aura_core::AuraError;
+use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -239,6 +241,38 @@ async fn emit_chat_snapshot_signal(app_core: &Arc<RwLock<AppCore>>) -> Result<()
     emit_signal(app_core, &*CHAT_SIGNAL, chat, CHAT_SIGNAL_NAME).await
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_runtime_refresh_task<F>(spawner: &Arc<dyn TaskSpawner>, fut: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    spawner.spawn(Box::pin(fut));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_runtime_refresh_task<F>(spawner: &Arc<dyn TaskSpawner>, fut: F)
+where
+    F: Future<Output = ()> + 'static,
+{
+    spawner.spawn_local(Box::pin(fut));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_cancellable_runtime_refresh_task<F>(spawner: &Arc<dyn TaskSpawner>, fut: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    spawner.spawn_cancellable(Box::pin(fut), spawner.cancellation_token());
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_cancellable_runtime_refresh_task<F>(spawner: &Arc<dyn TaskSpawner>, fut: F)
+where
+    F: Future<Output = ()> + 'static,
+{
+    spawner.spawn_local_cancellable(Box::pin(fut), spawner.cancellation_token());
+}
+
 /// Refresh connection + network status derived from CONTACTS_SIGNAL.
 pub async fn refresh_connection_status_from_contacts(
     app_core: &Arc<RwLock<AppCore>>,
@@ -365,38 +399,35 @@ pub async fn install_contacts_refresh_hook(
     let refresh_pending = Arc::new(AtomicBool::new(false));
     let refresh_spawner = spawner.clone();
 
-    spawner.spawn_cancellable(
-        Box::pin(async move {
-            let mut stream = reactive.subscribe(&*CONTACTS_SIGNAL);
-            loop {
-                let Ok(_) = stream.recv().await else {
-                    break;
-                };
+    spawn_cancellable_runtime_refresh_task(&spawner, async move {
+        let mut stream = reactive.subscribe(&*CONTACTS_SIGNAL);
+        loop {
+            let Ok(_) = stream.recv().await else {
+                break;
+            };
 
-                if refresh_in_flight.swap(true, Ordering::SeqCst) {
-                    refresh_pending.store(true, Ordering::SeqCst);
-                    continue;
-                }
-
-                let refresh_app_core = app_core.clone();
-                let refresh_in_flight = refresh_in_flight.clone();
-                let refresh_pending = refresh_pending.clone();
-                refresh_spawner.spawn(Box::pin(async move {
-                    loop {
-                        let _ = refresh_connection_status_from_contacts(&refresh_app_core).await;
-
-                        if refresh_pending.swap(false, Ordering::SeqCst) {
-                            continue;
-                        }
-
-                        refresh_in_flight.store(false, Ordering::SeqCst);
-                        break;
-                    }
-                }));
+            if refresh_in_flight.swap(true, Ordering::SeqCst) {
+                refresh_pending.store(true, Ordering::SeqCst);
+                continue;
             }
-        }),
-        spawner.cancellation_token(),
-    );
+
+            let refresh_app_core = app_core.clone();
+            let refresh_in_flight = refresh_in_flight.clone();
+            let refresh_pending = refresh_pending.clone();
+            spawn_runtime_refresh_task(&refresh_spawner, async move {
+                loop {
+                    let _ = refresh_connection_status_from_contacts(&refresh_app_core).await;
+
+                    if refresh_pending.swap(false, Ordering::SeqCst) {
+                        continue;
+                    }
+
+                    refresh_in_flight.store(false, Ordering::SeqCst);
+                    break;
+                }
+            });
+        }
+    });
 
     Ok(())
 }
@@ -428,38 +459,35 @@ pub async fn install_chat_refresh_hook(app_core: &Arc<RwLock<AppCore>>) -> Resul
     let refresh_pending = Arc::new(AtomicBool::new(false));
     let refresh_spawner = spawner.clone();
 
-    spawner.spawn_cancellable(
-        Box::pin(async move {
-            let mut stream = reactive.subscribe(&*SYNC_STATUS_SIGNAL);
-            loop {
-                let Ok(_) = stream.recv().await else {
-                    break;
-                };
+    spawn_cancellable_runtime_refresh_task(&spawner, async move {
+        let mut stream = reactive.subscribe(&*SYNC_STATUS_SIGNAL);
+        loop {
+            let Ok(_) = stream.recv().await else {
+                break;
+            };
 
-                if refresh_in_flight.swap(true, Ordering::SeqCst) {
-                    refresh_pending.store(true, Ordering::SeqCst);
-                    continue;
-                }
-
-                let refresh_app_core = app_core.clone();
-                let refresh_in_flight = refresh_in_flight.clone();
-                let refresh_pending = refresh_pending.clone();
-                refresh_spawner.spawn(Box::pin(async move {
-                    loop {
-                        let _ = emit_chat_snapshot_signal(&refresh_app_core).await;
-
-                        if refresh_pending.swap(false, Ordering::SeqCst) {
-                            continue;
-                        }
-
-                        refresh_in_flight.store(false, Ordering::SeqCst);
-                        break;
-                    }
-                }));
+            if refresh_in_flight.swap(true, Ordering::SeqCst) {
+                refresh_pending.store(true, Ordering::SeqCst);
+                continue;
             }
-        }),
-        spawner.cancellation_token(),
-    );
+
+            let refresh_app_core = app_core.clone();
+            let refresh_in_flight = refresh_in_flight.clone();
+            let refresh_pending = refresh_pending.clone();
+            spawn_runtime_refresh_task(&refresh_spawner, async move {
+                loop {
+                    let _ = emit_chat_snapshot_signal(&refresh_app_core).await;
+
+                    if refresh_pending.swap(false, Ordering::SeqCst) {
+                        continue;
+                    }
+
+                    refresh_in_flight.store(false, Ordering::SeqCst);
+                    break;
+                }
+            });
+        }
+    });
 
     Ok(())
 }

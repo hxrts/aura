@@ -196,7 +196,8 @@ impl BroadcasterHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl SyncEffects for BroadcasterHandler {
     async fn sync_with_peer(&self, _peer_id: DeviceId) -> Result<SyncMetrics, SyncError> {
         // Broadcaster doesn't implement full sync - delegate to AntiEntropyHandler

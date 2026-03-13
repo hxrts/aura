@@ -160,6 +160,10 @@ pub enum DispatchCommand {
     SelectChannel {
         channel_id: ChannelId,
     },
+    AcceptPendingHomeInvitation,
+    JoinChannel {
+        channel_name: String,
+    },
     SendChatMessage {
         content: String,
     },

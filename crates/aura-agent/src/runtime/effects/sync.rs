@@ -5,7 +5,8 @@ use aura_core::identifiers::DeviceId;
 use aura_core::{AttestedOp, Hash32};
 use aura_protocol::effects::{BloomDigest, SyncEffects, SyncError};
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl SyncEffects for AuraEffectSystem {
     async fn sync_with_peer(&self, peer_id: DeviceId) -> Result<SyncMetrics, SyncError> {
         self.sync_handler.sync_with_peer(peer_id).await

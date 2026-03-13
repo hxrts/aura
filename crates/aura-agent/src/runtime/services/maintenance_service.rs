@@ -136,59 +136,106 @@ impl RuntimeMaintenanceService {
         tasks: TaskGroup,
         time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
     ) -> Result<(), ServiceError> {
-        let harness_mode = std::env::var_os("AURA_HARNESS_MODE").is_some();
-
-        if !harness_mode {
-            let invitation_handler = InvitationHandler::new(AuthorityContext::new_with_device(
-                self.authority_id,
-                self.device_id,
-            ))
-            .map_err(|error| ServiceError::startup_failed(self.name(), error.to_string()))?;
-            let effects = self.effects.clone();
-            tasks.spawn_interval_until_named(
-                "invitation_acceptance",
-                time_effects.clone(),
-                Duration::from_secs(2),
-                move || {
-                    let effects = effects.clone();
-                    let handler = invitation_handler.clone();
-                    async move {
-                        if let Err(error) = handler
-                            .process_contact_invitation_acceptances(effects.clone())
-                            .await
-                        {
-                            tracing::debug!(
-                                error = %error,
-                                "Failed to process contact invitation acceptances"
-                            );
-                        }
-                        true
-                    }
-                },
-            );
-
-            if let Some(rendezvous_handler) = self.rendezvous_handler.clone() {
-                let effects = self.effects.clone();
-                tasks.spawn_interval_until_named(
-                    "rendezvous_handshakes",
+        let invitation_handler = InvitationHandler::new(AuthorityContext::new_with_device(
+            self.authority_id,
+            self.device_id,
+        ))
+        .map_err(|error| ServiceError::startup_failed(self.name(), error.to_string()))?;
+        let effects = self.effects.clone();
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                tasks.spawn_local_interval_until_named(
+                    "invitation_acceptance",
                     time_effects.clone(),
                     Duration::from_secs(2),
                     move || {
                         let effects = effects.clone();
-                        let handler = rendezvous_handler.clone();
+                        let handler = invitation_handler.clone();
                         async move {
-                            if let Err(error) =
-                                handler.process_handshake_envelopes(effects.clone()).await
+                            if let Err(error) = handler
+                                .process_contact_invitation_acceptances(effects.clone())
+                                .await
                             {
                                 tracing::debug!(
                                     error = %error,
-                                    "Failed to process rendezvous handshake envelopes"
+                                    "Failed to process contact invitation acceptances"
                                 );
                             }
                             true
                         }
                     },
                 );
+            } else {
+                tasks.spawn_interval_until_named(
+                    "invitation_acceptance",
+                    time_effects.clone(),
+                    Duration::from_secs(2),
+                    move || {
+                        let effects = effects.clone();
+                        let handler = invitation_handler.clone();
+                        async move {
+                            if let Err(error) = handler
+                                .process_contact_invitation_acceptances(effects.clone())
+                                .await
+                            {
+                                tracing::debug!(
+                                    error = %error,
+                                    "Failed to process contact invitation acceptances"
+                                );
+                            }
+                            true
+                        }
+                    },
+                );
+            }
+        }
+
+        if let Some(rendezvous_handler) = self.rendezvous_handler.clone() {
+            let effects = self.effects.clone();
+            cfg_if::cfg_if! {
+                if #[cfg(target_arch = "wasm32")] {
+                    tasks.spawn_local_interval_until_named(
+                        "rendezvous_handshakes",
+                        time_effects.clone(),
+                        Duration::from_secs(2),
+                        move || {
+                            let effects = effects.clone();
+                            let handler = rendezvous_handler.clone();
+                            async move {
+                                if let Err(error) =
+                                    handler.process_handshake_envelopes(effects.clone()).await
+                                {
+                                    tracing::debug!(
+                                        error = %error,
+                                        "Failed to process rendezvous handshake envelopes"
+                                    );
+                                }
+                                true
+                            }
+                        },
+                    );
+                } else {
+                    tasks.spawn_interval_until_named(
+                        "rendezvous_handshakes",
+                        time_effects.clone(),
+                        Duration::from_secs(2),
+                        move || {
+                            let effects = effects.clone();
+                            let handler = rendezvous_handler.clone();
+                            async move {
+                                if let Err(error) =
+                                    handler.process_handshake_envelopes(effects.clone()).await
+                                {
+                                    tracing::debug!(
+                                        error = %error,
+                                        "Failed to process rendezvous handshake envelopes"
+                                    );
+                                }
+                                true
+                            }
+                        },
+                    );
+                }
             }
         }
 
@@ -250,48 +297,89 @@ impl RuntimeMaintenanceService {
             let effects = self.effects.clone();
             let authority_id = self.authority_id;
             let device_id = self.device_id;
-            tasks.spawn_interval_until_named(
-                "lan_descriptor_refresh",
-                time_effects,
-                Duration::from_secs(60),
-                move || {
-                    let rendezvous_manager = rendezvous_manager.clone();
-                    let lan_transport = lan_transport.clone();
-                    let effects = effects.clone();
-                    async move {
-                        let now_ms = match effects.time_effects().physical_time().await {
-                            Ok(time) => time.ts_ms,
-                            Err(_) => return true,
-                        };
-                        let context_id =
-                            ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
-                        if rendezvous_manager.needs_refresh(context_id, now_ms).await {
-                            if let Err(error) = publish_lan_descriptor_with(
-                                effects.clone(),
-                                authority_id,
-                                device_id,
-                                &rendezvous_manager,
-                                lan_transport.as_ref(),
-                            )
-                            .await
-                            {
-                                tracing::debug!(
-                                    error = %error,
-                                    "Failed to refresh LAN descriptor"
-                                );
+            cfg_if::cfg_if! {
+                if #[cfg(target_arch = "wasm32")] {
+                    tasks.spawn_local_interval_until_named(
+                        "lan_descriptor_refresh",
+                        time_effects,
+                        Duration::from_secs(60),
+                        move || {
+                            let rendezvous_manager = rendezvous_manager.clone();
+                            let lan_transport = lan_transport.clone();
+                            let effects = effects.clone();
+                            async move {
+                                let now_ms = match effects.time_effects().physical_time().await {
+                                    Ok(time) => time.ts_ms,
+                                    Err(_) => return true,
+                                };
+                                let context_id =
+                                    ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
+                                if rendezvous_manager.needs_refresh(context_id, now_ms).await {
+                                    if let Err(error) = publish_lan_descriptor_with(
+                                        effects.clone(),
+                                        authority_id,
+                                        device_id,
+                                        &rendezvous_manager,
+                                        lan_transport.as_ref(),
+                                    )
+                                    .await
+                                    {
+                                        tracing::debug!(
+                                            error = %error,
+                                            "Failed to refresh LAN descriptor"
+                                        );
+                                    }
+                                }
+                                true
                             }
-                        }
-                        true
-                    }
-                },
-            );
+                        },
+                    );
+                } else {
+                    tasks.spawn_interval_until_named(
+                        "lan_descriptor_refresh",
+                        time_effects,
+                        Duration::from_secs(60),
+                        move || {
+                            let rendezvous_manager = rendezvous_manager.clone();
+                            let lan_transport = lan_transport.clone();
+                            let effects = effects.clone();
+                            async move {
+                                let now_ms = match effects.time_effects().physical_time().await {
+                                    Ok(time) => time.ts_ms,
+                                    Err(_) => return true,
+                                };
+                                let context_id =
+                                    ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
+                                if rendezvous_manager.needs_refresh(context_id, now_ms).await {
+                                    if let Err(error) = publish_lan_descriptor_with(
+                                        effects.clone(),
+                                        authority_id,
+                                        device_id,
+                                        &rendezvous_manager,
+                                        lan_transport.as_ref(),
+                                    )
+                                    .await
+                                    {
+                                        tracing::debug!(
+                                            error = %error,
+                                            "Failed to refresh LAN descriptor"
+                                        );
+                                    }
+                                }
+                                true
+                            }
+                        },
+                    );
+                }
+            }
         }
 
         Ok(())
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl RuntimeService for RuntimeMaintenanceService {
     fn name(&self) -> &'static str {
         "runtime_maintenance"

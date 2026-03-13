@@ -157,7 +157,8 @@ impl PersistentSyncHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl SyncEffects for PersistentSyncHandler {
     async fn sync_with_peer(&self, _peer_id: DeviceId) -> Result<SyncMetrics, SyncError> {
         // No-op for local persistent sync; real networking handled by AntiEntropyHandler

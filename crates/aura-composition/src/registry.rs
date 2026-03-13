@@ -282,7 +282,8 @@ pub enum HandlerError {
 /// This trait defines the unified interface for effect execution and session
 /// interpretation. All handlers in the Aura system implement this trait.
 /// Uses serialized bytes for parameters and results to enable trait object compatibility.
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait Handler: Send + Sync {
     /// Execute an effect with serialized parameters and return serialized result
     async fn execute_effect(
@@ -383,7 +384,8 @@ impl RegistryError {
 ///
 /// This trait provides a type-erased interface for effect execution
 /// that can be used in trait objects.
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait RegistrableHandler: Send + Sync {
     /// Execute a specific operation within an effect type
     ///
@@ -628,7 +630,8 @@ impl EffectRegistry {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl Handler for EffectRegistry {
     async fn execute_effect(
         &self,
@@ -748,7 +751,8 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
     impl Handler for MockRegistrableHandler {
         // Adapter test shim
         async fn execute_effect(
@@ -790,7 +794,8 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
     impl RegistrableHandler for MockRegistrableHandler {
         // Adapter test shim
         async fn execute_operation_bytes(

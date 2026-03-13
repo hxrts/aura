@@ -116,7 +116,8 @@ pub struct ChannelSendParams {
     pub reply_to: Option<Vec<u8>>, // message id if available
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait AmpChannelEffects: Send + Sync {
     /// Create a channel within a relational context. Returns the ChannelId.
     async fn create_channel(
@@ -141,7 +142,8 @@ pub trait AmpChannelEffects: Send + Sync {
 }
 
 // Blanket impl for Arc<T>
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl<T: AmpChannelEffects + ?Sized> AmpChannelEffects for std::sync::Arc<T> {
     async fn create_channel(
         &self,

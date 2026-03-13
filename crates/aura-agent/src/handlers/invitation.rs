@@ -437,7 +437,6 @@ impl InvitationHandler {
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
-        let harness_mode = std::env::var_os("AURA_HARNESS_MODE").is_some();
 
         // Generate unique invitation ID
         let invitation_id =
@@ -461,19 +460,9 @@ impl InvitationHandler {
         // Build snapshot and prepare through service.
         // For channel invitations this must use the channel context so the
         // generated invitation facts and transport metadata are scoped correctly.
-        let snapshot = if harness_mode {
-            tokio::time::timeout(
-                std::time::Duration::from_secs(2),
-                self.build_snapshot_for_context(effects.as_ref(), invitation_context),
-            )
-            .await
-            .map_err(|_| {
-                AgentError::internal("Timed out building invitation guard snapshot".to_string())
-            })?
-        } else {
-            self.build_snapshot_for_context(effects.as_ref(), invitation_context)
-                .await
-        };
+        let snapshot = self
+            .build_snapshot_for_context(effects.as_ref(), invitation_context)
+            .await;
 
         let outcome = self.service.prepare_send_invitation(
             &snapshot,
@@ -485,21 +474,8 @@ impl InvitationHandler {
         );
 
         // Execute the outcome (handles denial and effects)
-        if harness_mode {
-            tokio::time::timeout(
-                std::time::Duration::from_secs(2),
-                execute_guard_outcome_for_accept(
-                    outcome,
-                    &self.context.authority,
-                    effects.as_ref(),
-                ),
-            )
-            .await
-            .map_err(|_| AgentError::internal("Timed out executing invitation guard outcome"))??;
-        } else {
-            execute_guard_outcome_for_accept(outcome, &self.context.authority, effects.as_ref())
-                .await?;
-        }
+        execute_guard_outcome_for_accept(outcome, &self.context.authority, effects.as_ref())
+            .await?;
 
         let invitation = Invitation {
             invitation_id: invitation_id.clone(),
@@ -514,25 +490,12 @@ impl InvitationHandler {
         };
 
         if let InvitationType::Contact { .. } = invitation.invitation_type {
-            let sender_contact_exists = if harness_mode {
-                tokio::time::timeout(
-                    std::time::Duration::from_secs(2),
-                    Self::sender_contact_exists(
-                        effects.as_ref(),
-                        invitation.sender_id,
-                        invitation.receiver_id,
-                    ),
-                )
-                .await
-                .map_err(|_| AgentError::internal("Timed out loading sender contact state"))?
-            } else {
-                Self::sender_contact_exists(
-                    effects.as_ref(),
-                    invitation.sender_id,
-                    invitation.receiver_id,
-                )
-                .await
-            };
+            let sender_contact_exists = Self::sender_contact_exists(
+                effects.as_ref(),
+                invitation.sender_id,
+                invitation.receiver_id,
+            )
+            .await;
             if !sender_contact_exists {
                 let contact_fact = ContactFact::Added {
                     context_id: invitation.context_id,
@@ -545,51 +508,24 @@ impl InvitationHandler {
                     },
                 };
 
-                if harness_mode {
-                    tokio::time::timeout(
-                        std::time::Duration::from_secs(2),
-                        effects.commit_generic_fact_bytes(
-                            invitation.context_id,
-                            CONTACT_FACT_TYPE_ID.into(),
-                            contact_fact.to_bytes(),
-                        ),
+                effects
+                    .commit_generic_fact_bytes(
+                        invitation.context_id,
+                        CONTACT_FACT_TYPE_ID.into(),
+                        contact_fact.to_bytes(),
                     )
                     .await
-                    .map_err(|_| AgentError::effects("Timed out committing contact fact"))?
                     .map_err(|e| AgentError::effects(format!("commit contact fact: {e}")))?;
-                } else {
-                    effects
-                        .commit_generic_fact_bytes(
-                            invitation.context_id,
-                            CONTACT_FACT_TYPE_ID.into(),
-                            contact_fact.to_bytes(),
-                        )
-                        .await
-                        .map_err(|e| AgentError::effects(format!("commit contact fact: {e}")))?;
-                }
             }
         }
 
         // Persist the invitation to storage (so it survives service recreation)
-        if harness_mode {
-            tokio::time::timeout(
-                std::time::Duration::from_secs(2),
-                Self::persist_created_invitation(
-                    effects.as_ref(),
-                    self.context.authority.authority_id(),
-                    &invitation,
-                ),
-            )
-            .await
-            .map_err(|_| AgentError::internal("Timed out persisting created invitation"))??;
-        } else {
-            Self::persist_created_invitation(
-                effects.as_ref(),
-                self.context.authority.authority_id(),
-                &invitation,
-            )
-            .await?;
-        }
+        Self::persist_created_invitation(
+            effects.as_ref(),
+            self.context.authority.authority_id(),
+            &invitation,
+        )
+        .await?;
 
         // Cache the pending invitation (for fast lookup within same service instance)
         self.invitation_cache
@@ -616,12 +552,7 @@ impl InvitationHandler {
                         .await?;
                 }
             }
-            InvitationType::Channel { .. } => {
-                if invitation.receiver_id != invitation.sender_id {
-                    self.execute_invitation_exchange_sender(effects.clone(), &invitation)
-                        .await?;
-                }
-            }
+            InvitationType::Channel { .. } => {}
         }
 
         Ok(invitation)
@@ -1031,6 +962,7 @@ impl InvitationHandler {
             .process_contact_invitation_acceptances(effects)
             .await
     }
+
 
     async fn resolve_contact_invitation(
         &self,
@@ -1991,6 +1923,14 @@ impl InvitationHandler {
     ) -> AgentResult<()> {
         self.execute_invitation_exchange_sender_vm(effects, invitation)
             .await
+    }
+
+    pub(crate) async fn execute_channel_invitation_exchange_sender(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        invitation: &Invitation,
+    ) -> AgentResult<()> {
+        self.execute_invitation_exchange_sender(effects, invitation).await
     }
 
     async fn execute_invitation_exchange_receiver(

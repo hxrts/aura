@@ -5,8 +5,6 @@
 //! `aura-agent` provides the implementation.
 
 use crate::core::default_context_id_for_authority;
-#[cfg(target_arch = "wasm32")]
-use crate::core::default_context_id_for_authority;
 use crate::core::AuraAgent;
 use crate::handlers::shared::context_commitment_from_journal;
 use crate::runtime::consensus::build_consensus_params;
@@ -56,9 +54,6 @@ use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
 use aura_social::moderation::{
     HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
 };
-use futures::{SinkExt, StreamExt};
-#[cfg(target_arch = "wasm32")]
-#[cfg(any(target_arch = "wasm32", not(target_arch = "wasm32")))]
 use futures::{SinkExt, StreamExt};
 #[cfg(target_arch = "wasm32")]
 use gloo_net::websocket::{futures::WebSocket, Message};
@@ -792,7 +787,70 @@ impl RuntimeBridge for AgentRuntimeBridge {
             Arc::new(effects.time_effects().clone());
         let remaining = Arc::new(std::sync::atomic::AtomicUsize::new(120));
 
+        #[cfg(not(target_arch = "wasm32"))]
         tasks.spawn_interval_until_named(
+            "runtime_bridge.channel_invitation_monitor",
+            time_effects.clone(),
+            std::time::Duration::from_millis(1000),
+            move || {
+                let _effects = effects.clone();
+                let reactive = reactive.clone();
+                let agent = agent.clone();
+                let invitation_ids = invitation_ids.clone();
+                let remaining = remaining.clone();
+
+                async move {
+                    let remaining_now = remaining.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    if remaining_now == 0 {
+                        return false;
+                    }
+
+                    let invitations = match reactive.read(&INVITATIONS_SIGNAL).await {
+                        Ok(state) => state,
+                        Err(_) => return true,
+                    };
+
+                    let mut all_accepted = true;
+                    let mut has_failure = false;
+
+                    for id in &invitation_ids {
+                        match invitations.invitation(id).map(|inv| inv.status) {
+                            Some(InvitationStatus::Accepted) => {}
+                            Some(InvitationStatus::Rejected)
+                            | Some(InvitationStatus::Expired)
+                            | Some(InvitationStatus::Revoked) => {
+                                has_failure = true;
+                                break;
+                            }
+                            _ => {
+                                all_accepted = false;
+                            }
+                        }
+                    }
+
+                    if has_failure {
+                        return false;
+                    }
+
+                    if all_accepted {
+                        let bridge = AgentRuntimeBridge::new(agent.clone());
+                        let _ = bridge
+                            .bump_channel_epoch(
+                                context,
+                                channel,
+                                "All invitations accepted".to_string(),
+                            )
+                            .await;
+                        return false;
+                    }
+
+                    true
+                }
+            },
+        );
+
+        #[cfg(target_arch = "wasm32")]
+        tasks.spawn_local_interval_until_named(
             "runtime_bridge.channel_invitation_monitor",
             time_effects,
             std::time::Duration::from_millis(1000),

@@ -485,6 +485,118 @@ where
         self.effects.end_session().await
     }
 
+    async fn send_value<M: serde::Serialize + Send + Sync>(
+        &mut self,
+        to: R,
+        msg: &M,
+    ) -> Result<(), AuraChoreographyError> {
+        self.ensure_runtime_admission().await?;
+        let role = self.map_role(to)?;
+        let payload = to_vec(msg).map_err(|err| AuraChoreographyError::SerializationFailed {
+            reason: err.to_string(),
+        })?;
+
+        let mut guard_receipt: Option<aura_core::Receipt> = None;
+        let type_name = std::any::type_name::<M>();
+
+        if let Some(context_id) = self.guard_config.context_id {
+            if let Some(guard_req) = self.guard_config.get_guard(type_name) {
+                let peer = self.role_map.get(&to).copied().unwrap_or(self.authority_id);
+
+                debug!(
+                    message_type = type_name,
+                    capability = %guard_req.capability,
+                    flow_cost = ?guard_req.flow_cost,
+                    context = ?context_id,
+                    peer = ?peer,
+                    "Evaluating guard chain for choreography send"
+                );
+
+                let mut guard = SendGuardChain::new(
+                    aura_guards::guards::CapabilityId::from(guard_req.capability.as_str()),
+                    context_id,
+                    peer,
+                    guard_req.flow_cost,
+                );
+
+                if let Some(ref leakage) = guard_req.leakage_budget {
+                    guard = guard.with_leakage_budget(leakage.clone());
+                }
+
+                let result = guard.evaluate(&*self.effects).await.map_err(|e| {
+                    AuraChoreographyError::InternalError {
+                        message: format!("guard chain evaluation failed: {e}"),
+                    }
+                })?;
+
+                if !result.authorized {
+                    return Err(AuraChoreographyError::ProtocolViolation {
+                        message: result
+                            .denial_reason
+                            .unwrap_or_else(|| "guard chain denied send".to_string()),
+                    });
+                }
+
+                debug!(
+                    message_type = type_name,
+                    receipt = ?result.receipt,
+                    "Guard chain authorized choreography send"
+                );
+
+                guard_receipt = result.receipt;
+            }
+        }
+
+        self.effects.send_to_role_bytes(role, payload).await?;
+
+        if let Some(ref coupler) = self.journal_coupler {
+            debug!(
+                message_type = type_name,
+                "Coupling journal operations after choreography send"
+            );
+
+            let coupling_result = coupler
+                .couple_with_send(&*self.effects, &guard_receipt)
+                .await
+                .map_err(|e| {
+                    warn!(
+                        message_type = type_name,
+                        error = %e,
+                        "Journal coupling failed after send (message was sent)"
+                    );
+                    AuraChoreographyError::InternalError {
+                        message: format!("journal coupling failed: {e}"),
+                    }
+                })?;
+
+            if coupling_result.operations_applied > 0usize {
+                debug!(
+                    message_type = type_name,
+                    operations_applied = coupling_result.operations_applied,
+                    "Journal coupling completed successfully"
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn recv_value<M: serde::de::DeserializeOwned + Send>(
+        &mut self,
+        from: R,
+    ) -> Result<M, AuraChoreographyError> {
+        self.ensure_runtime_admission().await?;
+        let role = self.map_role(from)?;
+        let payload = self.effects.receive_from_role_bytes(role).await?;
+        self.received.push(ReceivedMessage {
+            type_name: std::any::type_name::<M>(),
+            bytes: payload.clone(),
+        });
+        from_slice(&payload).map_err(|err| AuraChoreographyError::DeserializationFailed {
+            reason: err.to_string(),
+        })
+    }
+
     fn map_role(&self, role: R) -> Result<ChoreographicRole, AuraChoreographyError> {
         let authority_id = if role == self.self_role {
             self.authority_id
@@ -511,6 +623,7 @@ where
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[async_trait]
 impl<E, R> ChoreoHandler for AuraProtocolAdapter<E, R>
 where
@@ -530,103 +643,7 @@ where
         to: Self::Role,
         msg: &M,
     ) -> ChoreoResult<()> {
-        self.ensure_runtime_admission()
-            .await
-            .map_err(|error| TelltaleChoreographyError::ExecutionError(error.to_string()))?;
-        let role = map_runtime_role(self.map_role(to))?;
-        let payload =
-            to_vec(msg).map_err(|err| TelltaleChoreographyError::Serialization(err.to_string()))?;
-
-        // Track receipt from guard evaluation for journal coupling
-        let mut guard_receipt: Option<aura_core::Receipt> = None;
-        let type_name = std::any::type_name::<M>();
-
-        // Evaluate guard chain if configured
-        if let Some(context_id) = self.guard_config.context_id {
-            if let Some(guard_req) = self.guard_config.get_guard(type_name) {
-                let peer = self.role_map.get(&to).copied().unwrap_or(self.authority_id);
-
-                debug!(
-                    message_type = type_name,
-                    capability = %guard_req.capability,
-                    flow_cost = ?guard_req.flow_cost,
-                    context = ?context_id,
-                    peer = ?peer,
-                    "Evaluating guard chain for choreography send"
-                );
-
-                let mut guard = SendGuardChain::new(
-                    aura_guards::guards::CapabilityId::from(guard_req.capability.as_str()),
-                    context_id,
-                    peer,
-                    guard_req.flow_cost,
-                );
-
-                if let Some(ref leakage) = guard_req.leakage_budget {
-                    guard = guard.with_leakage_budget(leakage.clone());
-                }
-
-                let result = guard.evaluate(&*self.effects).await.map_err(|e| {
-                    TelltaleChoreographyError::ExecutionError(format!(
-                        "guard chain evaluation failed: {e}"
-                    ))
-                })?;
-
-                if !result.authorized {
-                    return Err(TelltaleChoreographyError::ExecutionError(
-                        result
-                            .denial_reason
-                            .unwrap_or_else(|| "guard chain denied send".to_string()),
-                    ));
-                }
-
-                debug!(
-                    message_type = type_name,
-                    receipt = ?result.receipt,
-                    "Guard chain authorized choreography send"
-                );
-
-                guard_receipt = result.receipt;
-            }
-        }
-
-        // Send the message
-        self.effects
-            .send_to_role_bytes(role, payload)
-            .await
-            .map_err(|error| TelltaleChoreographyError::ExecutionError(error.to_string()))?;
-
-        // Couple journal operations after successful send
-        if let Some(ref coupler) = self.journal_coupler {
-            debug!(
-                message_type = type_name,
-                "Coupling journal operations after choreography send"
-            );
-
-            let coupling_result = coupler
-                .couple_with_send(&*self.effects, &guard_receipt)
-                .await
-                .map_err(|e| {
-                    warn!(
-                        message_type = type_name,
-                        error = %e,
-                        "Journal coupling failed after send (message was sent)"
-                    );
-                    TelltaleChoreographyError::ExecutionError(format!(
-                        "journal coupling failed: {e}"
-                    ))
-                })?;
-
-            if coupling_result.operations_applied > 0 {
-                debug!(
-                    message_type = type_name,
-                    operations_applied = coupling_result.operations_applied,
-                    "Journal coupling completed successfully"
-                );
-            }
-        }
-
-        Ok(())
+        self.send_value(to, msg).await.map_err(map_runtime_error)
     }
 
     async fn recv<M: serde::de::DeserializeOwned + Send>(
@@ -634,21 +651,7 @@ where
         _ep: &mut Self::Endpoint,
         from: Self::Role,
     ) -> ChoreoResult<M> {
-        self.ensure_runtime_admission()
-            .await
-            .map_err(|error| TelltaleChoreographyError::ExecutionError(error.to_string()))?;
-        let role = map_runtime_role(self.map_role(from))?;
-        let payload = self
-            .effects
-            .receive_from_role_bytes(role)
-            .await
-            .map_err(|error| TelltaleChoreographyError::ExecutionError(error.to_string()))?;
-        self.received.push(ReceivedMessage {
-            type_name: std::any::type_name::<M>(),
-            bytes: payload.clone(),
-        });
-        from_slice(&payload)
-            .map_err(|err| TelltaleChoreographyError::Serialization(err.to_string()))
+        self.recv_value(from).await.map_err(map_runtime_error)
     }
 
     async fn choose(
@@ -690,6 +693,7 @@ where
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[async_trait]
 impl<E, R> ChoreoHandlerExt for AuraProtocolAdapter<E, R>
 where
@@ -709,7 +713,8 @@ where
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl<E, R> aura_mpst::ChoreographicAdapter for AuraProtocolAdapter<E, R>
 where
     E: ChoreographicEffects
@@ -727,20 +732,14 @@ where
         to: Self::Role,
         msg: M,
     ) -> Result<(), Self::Error> {
-        let mut endpoint = ();
-        ChoreoHandler::send(self, &mut endpoint, to, &msg)
-            .await
-            .map_err(map_telltale_error)
+        self.send_value(to, &msg).await
     }
 
     async fn recv<M: serde::de::DeserializeOwned + Send + 'static>(
         &mut self,
         from: Self::Role,
     ) -> Result<M, Self::Error> {
-        let mut endpoint = ();
-        ChoreoHandler::recv(self, &mut endpoint, from)
-            .await
-            .map_err(map_telltale_error)
+        self.recv_value(from).await
     }
 
     fn resolve_family(&self, family: &str) -> Result<Vec<Self::Role>, Self::Error> {
@@ -781,7 +780,8 @@ where
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl<E, R> ChoreographicAdapterExt for AuraProtocolAdapter<E, R>
 where
     E: ChoreographicEffects
@@ -881,6 +881,10 @@ fn map_runtime_role(
     result: Result<ChoreographicRole, AuraChoreographyError>,
 ) -> ChoreoResult<ChoreographicRole> {
     result.map_err(|error| TelltaleChoreographyError::ExecutionError(error.to_string()))
+}
+
+fn map_runtime_error(error: AuraChoreographyError) -> TelltaleChoreographyError {
+    TelltaleChoreographyError::ExecutionError(error.to_string())
 }
 
 fn map_telltale_error(error: TelltaleChoreographyError) -> AuraChoreographyError {

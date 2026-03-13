@@ -18,7 +18,7 @@ use crate::runtime::{
 };
 use aura_core::effects::task::{CancellationToken, TaskSpawner};
 use aura_core::effects::PhysicalTimeEffects;
-use futures::future::BoxFuture;
+use futures::future::{BoxFuture, LocalBoxFuture};
 use futures::FutureExt;
 #[cfg(not(target_arch = "wasm32"))]
 use parking_lot::Mutex;
@@ -159,6 +159,20 @@ impl TaskSupervisor {
         self.root.spawn_cancellable_named(name, fut);
     }
 
+    pub fn spawn_local_named<F>(&self, name: impl Into<String>, fut: F)
+    where
+        F: Future<Output = ()> + 'static,
+    {
+        self.root.spawn_local_named(name, fut);
+    }
+
+    pub fn spawn_local_cancellable_named<F>(&self, name: impl Into<String>, fut: F)
+    where
+        F: Future<Output = ()> + 'static,
+    {
+        self.root.spawn_local_cancellable_named(name, fut);
+    }
+
     pub fn spawn_interval_until_named<F, Fut>(
         &self,
         name: impl Into<String>,
@@ -171,6 +185,20 @@ impl TaskSupervisor {
     {
         self.root
             .spawn_interval_until_named(name, time_effects, interval, f);
+    }
+
+    pub fn spawn_local_interval_until_named<F, Fut>(
+        &self,
+        name: impl Into<String>,
+        time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
+        interval: Duration,
+        f: F,
+    ) where
+        F: FnMut() -> Fut + 'static,
+        Fut: Future<Output = bool> + 'static,
+    {
+        self.root
+            .spawn_local_interval_until_named(name, time_effects, interval, f);
     }
 
     pub fn spawn_child<F>(&self, name: impl Into<String>, fut: F)
@@ -302,6 +330,20 @@ impl TaskGroup {
         self.spawn_boxed(name.into(), Box::pin(fut), None);
     }
 
+    pub fn spawn_local_named<F>(&self, name: impl Into<String>, fut: F)
+    where
+        F: Future<Output = ()> + 'static,
+    {
+        self.spawn_boxed_local(name.into(), Box::pin(fut), None);
+    }
+
+    pub fn spawn_local_cancellable_named<F>(&self, name: impl Into<String>, fut: F)
+    where
+        F: Future<Output = ()> + 'static,
+    {
+        self.spawn_boxed_local(name.into(), Box::pin(fut), None);
+    }
+
     pub fn spawn_with_token<F>(
         &self,
         name: impl Into<String>,
@@ -332,6 +374,34 @@ impl TaskGroup {
     {
         let interval_ms = interval.as_millis().try_into().unwrap_or(u64::MAX);
         self.spawn_boxed(
+            name.into(),
+            Box::pin(async move {
+                loop {
+                    if !f().await {
+                        break;
+                    }
+
+                    if time_effects.sleep_ms(interval_ms).await.is_err() {
+                        break;
+                    }
+                }
+            }),
+            None,
+        );
+    }
+
+    pub fn spawn_local_interval_until_named<F, Fut>(
+        &self,
+        name: impl Into<String>,
+        time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
+        interval: Duration,
+        mut f: F,
+    ) where
+        F: FnMut() -> Fut + 'static,
+        Fut: Future<Output = bool> + 'static,
+    {
+        let interval_ms = interval.as_millis().try_into().unwrap_or(u64::MAX);
+        self.spawn_boxed_local(
             name.into(),
             Box::pin(async move {
                 loop {
@@ -558,7 +628,13 @@ impl TaskGroup {
                 .await
                 .unwrap_or(TaskOutcome::Panicked);
 
-                emit_task_completion(&group_name, &task_name_for_wrapper, task_id, &outcome);
+                emit_task_completion(
+                    diagnostics.as_ref(),
+                    &group_name,
+                    &task_name_for_wrapper,
+                    task_id,
+                    &outcome,
+                );
 
                 let _ = exit_tx.send(TaskExit {
                     task_id,
@@ -592,6 +668,95 @@ impl TaskGroup {
                 }
                 Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
             }
+        }
+    }
+
+    fn spawn_boxed_local(
+        &self,
+        task_name: String,
+        fut: LocalBoxFuture<'static, ()>,
+        external_token: Option<Arc<dyn CancellationToken>>,
+    ) {
+        let task_id = self.shared.next_task_id.fetch_add(1, Ordering::Relaxed);
+        let mut shutdown_rx = self.shared.shutdown_tx.subscribe();
+        let inherited = self.shared.inherited_cancellation.clone();
+        let exit_tx = self.shared.exit_tx.clone();
+        let notify = self.shared.notify.clone();
+        let group_name = self.shared.name.clone();
+        let diagnostics = self.shared.diagnostics.clone();
+        let task_name_for_wrapper = task_name.clone();
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let handle = tokio::task::spawn_local(async move {
+            let outcome = AssertUnwindSafe(async {
+                tokio::select! {
+                    _ = shutdown_cancelled(&mut shutdown_rx) => TaskOutcome::Cancelled,
+                    _ = inherited_cancelled(inherited.as_ref()) => TaskOutcome::Cancelled,
+                    _ = external_cancelled(external_token.as_deref()) => TaskOutcome::Cancelled,
+                    _ = fut => TaskOutcome::Completed,
+                }
+            })
+            .catch_unwind()
+            .await
+            .unwrap_or(TaskOutcome::Panicked);
+
+            emit_task_completion(
+                diagnostics.as_ref(),
+                &group_name,
+                &task_name_for_wrapper,
+                task_id,
+                &outcome,
+            );
+
+            let _ = exit_tx.send(TaskExit {
+                task_id,
+                task_name: task_name_for_wrapper,
+                outcome,
+            });
+            notify.notify_waiters();
+        });
+
+        #[cfg(not(target_arch = "wasm32"))]
+        self.shared
+            .tasks
+            .lock()
+            .insert(task_id, TaskMetadata { task_name, handle });
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.shared
+                .tasks
+                .lock()
+                .insert(task_id, TaskMetadata { task_name });
+
+            spawn_local(async move {
+                let outcome = AssertUnwindSafe(async {
+                    tokio::select! {
+                        _ = shutdown_cancelled(&mut shutdown_rx) => TaskOutcome::Cancelled,
+                        _ = inherited_cancelled(inherited.as_ref()) => TaskOutcome::Cancelled,
+                        _ = external_cancelled(external_token.as_deref()) => TaskOutcome::Cancelled,
+                        _ = fut => TaskOutcome::Completed,
+                    }
+                })
+                .catch_unwind()
+                .await
+                .unwrap_or(TaskOutcome::Panicked);
+
+                emit_task_completion(
+                    diagnostics.as_ref(),
+                    &group_name,
+                    &task_name_for_wrapper,
+                    task_id,
+                    &outcome,
+                );
+
+                let _ = exit_tx.send(TaskExit {
+                    task_id,
+                    task_name: task_name_for_wrapper,
+                    outcome,
+                });
+                notify.notify_waiters();
+            });
         }
     }
 }
@@ -640,6 +805,20 @@ impl TaskSpawner for TaskSupervisor {
     fn spawn_cancellable(&self, fut: BoxFuture<'static, ()>, token: Arc<dyn CancellationToken>) {
         self.root
             .spawn_boxed(COMPAT_TASK_NAME.to_string(), fut, Some(token));
+    }
+
+    fn spawn_local(&self, fut: LocalBoxFuture<'static, ()>) {
+        self.root
+            .spawn_boxed_local(COMPAT_TASK_NAME.to_string(), fut, None);
+    }
+
+    fn spawn_local_cancellable(
+        &self,
+        fut: LocalBoxFuture<'static, ()>,
+        token: Arc<dyn CancellationToken>,
+    ) {
+        self.root
+            .spawn_boxed_local(COMPAT_TASK_NAME.to_string(), fut, Some(token));
     }
 
     fn cancellation_token(&self) -> Arc<dyn CancellationToken> {

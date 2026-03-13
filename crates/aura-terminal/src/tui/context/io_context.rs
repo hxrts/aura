@@ -900,8 +900,7 @@ impl IoContext {
             };
             let nickname_suggestion =
                 nickname_suggestion.unwrap_or_else(|| "Imported Device".to_string());
-            let runtime_identity =
-                BootstrapRuntimeIdentity::new(subject_authority, device_id);
+            let runtime_identity = BootstrapRuntimeIdentity::new(subject_authority, device_id);
             let (authority_id, _context_id) = self
                 .account_files
                 .create_account_with_device_enrollment_runtime_identity(

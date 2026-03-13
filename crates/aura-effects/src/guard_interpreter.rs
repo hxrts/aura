@@ -141,7 +141,8 @@ where
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl<J, F, L, S, N, R, T> EffectInterpreter for ProductionEffectInterpreter<J, F, L, S, N, R, T>
 where
     J: JournalEffects + Send + Sync,
@@ -365,7 +366,8 @@ mod tests {
     // Mock implementations for testing
     struct MockJournalEffects;
 
-    #[async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
     impl JournalEffects for MockJournalEffects {
         async fn merge_facts(
             &self,
@@ -430,7 +432,8 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
     impl FlowBudgetEffects for MockFlowBudgetEffects {
         async fn charge_flow(
             &self,
@@ -463,7 +466,8 @@ mod tests {
 
     struct MockLeakageEffects;
 
-    #[async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
     impl LeakageEffects for MockLeakageEffects {
         async fn record_leakage(&self, _event: LeakageEvent) -> Result<()> {
             Ok(())
@@ -496,7 +500,8 @@ mod tests {
 
     struct MockStorageEffects;
 
-    #[async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
     impl StorageCoreEffects for MockStorageEffects {
         async fn store(
             &self,
@@ -528,7 +533,8 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
     impl StorageExtendedEffects for MockStorageEffects {
         async fn exists(
             &self,
@@ -573,7 +579,8 @@ mod tests {
 
     struct MockNetworkEffects;
 
-    #[async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
     impl NetworkCoreEffects for MockNetworkEffects {
         async fn send_to_peer(
             &self,
@@ -599,7 +606,8 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
     impl NetworkExtendedEffects for MockNetworkEffects {
         async fn receive_from(
             &self,
@@ -653,7 +661,8 @@ mod tests {
 
     struct MockRandomEffects;
 
-    #[async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
     impl RandomCoreEffects for MockRandomEffects {
         async fn random_bytes(&self, len: usize) -> Vec<u8> {
             vec![0x42; len]
@@ -673,7 +682,8 @@ mod tests {
     #[derive(Debug)]
     struct MockTimeEffects;
 
-    #[async_trait::async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
     impl PhysicalTimeEffects for MockTimeEffects {
         async fn physical_time(
             &self,
