@@ -344,6 +344,11 @@ This is the move-semantics side of the runtime model:
 - stale-owner rejection
 - owner-routed session effects
 
+Owner identity and capability are separate:
+
+- ownership says who currently controls the fragment
+- capability says what fragment-scoped work that owner may perform
+
 ```rust
 enum SessionIngress {
     NetworkEnvelope(TransportEnvelope),
@@ -418,6 +423,10 @@ This is why the runtime uses both abstractions at once:
 
 - actor services for host-side runtime structure
 - explicit move-style ownership for fragment/session transfer
+
+When delegation changes ownership, the runtime must also define whether the moved
+capability is transferred intact or attenuated to a narrower scope. That decision
+is part of the protocol/runtime contract, not a host-side convenience choice.
 
 The synchronous callback boundary is `VmBridgeEffects`. `AuraVmEffectHandler` and `AuraQueuedVmBridgeHandler` use it for session-local payload queues, blocked receive snapshots, branch choices, and scheduler signals. Async transport, guard-chain execution, journal coupling, and storage remain outside VM callbacks in `vm_host_bridge` and service loops.
 

@@ -29,11 +29,10 @@ use cfg_if::cfg_if;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 
 use super::lan_discovery::{LanDiscoveryMetrics, LanDiscoveryService};
-use super::service_actor::{validate_actor_transition, ActorLifecyclePhase};
-use super::state::{with_state_mut, with_state_mut_validated};
+use super::service_actor::{validate_actor_transition, ActorLifecyclePhase, ServiceActorHandle};
 
 /// Configuration for the rendezvous service manager
 #[derive(Debug, Clone)]
@@ -144,27 +143,110 @@ struct RendezvousState {
     descriptor_cache: HashMap<(ContextId, AuthorityId), RendezvousDescriptor>,
 }
 
+#[derive(Clone)]
+struct RendezvousSnapshot {
+    status: RendezvousManagerState,
+    service: Option<Arc<RendezvousService>>,
+    lan_discovery: Option<Arc<LanDiscoveryService>>,
+}
+
+enum RendezvousCommand {
+    Snapshot {
+        reply: oneshot::Sender<RendezvousSnapshot>,
+    },
+    CacheDescriptor {
+        descriptor: RendezvousDescriptor,
+        reply: oneshot::Sender<()>,
+    },
+    GetDescriptor {
+        context_id: ContextId,
+        peer: AuthorityId,
+        reply: oneshot::Sender<Option<RendezvousDescriptor>>,
+    },
+    GetAnyDescriptorForAuthority {
+        peer: AuthorityId,
+        reply: oneshot::Sender<Option<RendezvousDescriptor>>,
+    },
+    NeedsRefresh {
+        context_id: ContextId,
+        owner: AuthorityId,
+        refresh_window_ms: u64,
+        now_ms: u64,
+        reply: oneshot::Sender<bool>,
+    },
+    ContextsNeedingRefresh {
+        owner: AuthorityId,
+        refresh_window_ms: u64,
+        now_ms: u64,
+        reply: oneshot::Sender<Vec<ContextId>>,
+    },
+    ListCachedPeers {
+        owner: AuthorityId,
+        reply: oneshot::Sender<Vec<AuthorityId>>,
+    },
+    ListCachedPeerDevices {
+        owner: AuthorityId,
+        reply: oneshot::Sender<Vec<DeviceId>>,
+    },
+    ListCachedPeersForContext {
+        context_id: ContextId,
+        owner: AuthorityId,
+        reply: oneshot::Sender<Vec<AuthorityId>>,
+    },
+    CacheDiscoveredPeer {
+        local_authority_id: AuthorityId,
+        peer: DiscoveredPeer,
+        reply: oneshot::Sender<()>,
+    },
+    InstallLanDiscovery {
+        service: Arc<LanDiscoveryService>,
+        reply: oneshot::Sender<()>,
+    },
+    ClearLanDiscovery {
+        reply: oneshot::Sender<()>,
+    },
+    PruneLanPeers {
+        now_ms: u64,
+        max_age_ms: u64,
+        reply: oneshot::Sender<()>,
+    },
+    CleanupExpiredDescriptors {
+        now_ms: u64,
+        reply: oneshot::Sender<()>,
+    },
+    ListLanDiscoveredPeers {
+        reply: oneshot::Sender<Vec<DiscoveredPeer>>,
+    },
+    ListLanDiscoveredPeerDevices {
+        owner: AuthorityId,
+        reply: oneshot::Sender<Vec<DeviceId>>,
+    },
+    ListReachablePeerDevices {
+        owner: AuthorityId,
+        reply: oneshot::Sender<Vec<DeviceId>>,
+    },
+    ListReachablePeerDevicesForAuthority {
+        authority_id: AuthorityId,
+        reply: oneshot::Sender<Vec<DeviceId>>,
+    },
+    GetLanDiscoveredPeer {
+        authority_id: AuthorityId,
+        reply: oneshot::Sender<Option<DiscoveredPeer>>,
+    },
+    IsLanDiscoveryRunning {
+        reply: oneshot::Sender<bool>,
+    },
+}
+
 impl RendezvousState {
-    fn new() -> Self {
+    fn new_running(service: Arc<RendezvousService>) -> Self {
         Self {
-            status: RendezvousManagerState::Stopped,
-            service: None,
+            status: RendezvousManagerState::Running,
+            service: Some(service),
             lan_discovery: None,
             lan_discovered_peers: HashMap::new(),
             descriptor_cache: HashMap::new(),
         }
-    }
-
-    fn validate(&self) -> Result<(), String> {
-        // Running requires service; Stopping still has service while shutting down
-        if self.status == RendezvousManagerState::Running && self.service.is_none() {
-            return Err("rendezvous running without service".to_string());
-        }
-        // Service must be gone when fully stopped
-        if self.status == RendezvousManagerState::Stopped && self.service.is_some() {
-            return Err("rendezvous stopped with active service".to_string());
-        }
-        Ok(())
     }
 }
 
@@ -221,8 +303,8 @@ pub struct RendezvousManager {
     /// Configuration
     config: RendezvousManagerConfig,
 
-    /// Owned state (service, caches, lifecycle)
-    state: Arc<RwLock<RendezvousState>>,
+    /// Lifecycle state outside the actor for startup/shutdown/health fallback.
+    lifecycle_state: Arc<RwLock<RendezvousManagerState>>,
 
     /// Authority ID
     authority_id: AuthorityId,
@@ -235,6 +317,9 @@ pub struct RendezvousManager {
 
     /// Owned task group for service-local background work.
     tasks: Arc<RwLock<Option<TaskGroup>>>,
+
+    /// Typed command ingress for rendezvous-owned mutable state.
+    commands: Arc<RwLock<Option<ServiceActorHandle<RendezvousCommand>>>>,
 
     /// Serializes lifecycle transitions.
     lifecycle: Arc<Mutex<()>>,
@@ -252,11 +337,12 @@ impl RendezvousManager {
     ) -> Self {
         Self {
             config,
-            state: Arc::new(RwLock::new(RendezvousState::new())),
+            lifecycle_state: Arc::new(RwLock::new(RendezvousManagerState::Stopped)),
             authority_id,
             time,
             udp,
             tasks: Arc::new(RwLock::new(None)),
+            commands: Arc::new(RwLock::new(None)),
             lifecycle: Arc::new(Mutex::new(())),
         }
     }
@@ -282,17 +368,282 @@ impl RendezvousManager {
 
     /// Get the current state
     pub async fn state(&self) -> RendezvousManagerState {
-        self.state.read().await.status
+        match self.snapshot().await {
+            Ok(snapshot) => snapshot.status,
+            Err(_) => *self.lifecycle_state.read().await,
+        }
     }
 
     /// Check if the service is running
     pub async fn is_running(&self) -> bool {
-        self.state.read().await.status == RendezvousManagerState::Running
+        self.state().await == RendezvousManagerState::Running
+    }
+
+    async fn command_handle(&self) -> Result<ServiceActorHandle<RendezvousCommand>, ServiceError> {
+        self.commands.read().await.clone().ok_or_else(|| {
+            ServiceError::unavailable(
+                self.name(),
+                "rendezvous command actor unavailable; service is not fully started",
+            )
+        })
+    }
+
+    fn spawn_command_actor(
+        &self,
+        tasks: &TaskGroup,
+        mut state: RendezvousState,
+    ) -> ServiceActorHandle<RendezvousCommand> {
+        let (cmd_tx, mut cmd_rx) = mpsc::channel(64);
+
+        tasks.spawn_named("command_actor", async move {
+            while let Some(command) = cmd_rx.recv().await {
+                match command {
+                    RendezvousCommand::Snapshot { reply } => {
+                        let _ = reply.send(RendezvousSnapshot {
+                            status: state.status,
+                            service: state.service.clone(),
+                            lan_discovery: state.lan_discovery.clone(),
+                        });
+                    }
+                    RendezvousCommand::CacheDescriptor { descriptor, reply } => {
+                        let key = (descriptor.context_id, descriptor.authority_id);
+                        let descriptor = if let Some(existing) = state.descriptor_cache.get(&key) {
+                            let mut merged = descriptor.clone();
+                            if merged.device_id.is_none() {
+                                merged.device_id = existing.device_id;
+                            }
+                            merged
+                        } else {
+                            descriptor
+                        };
+                        state.descriptor_cache.insert(key, descriptor);
+                        let _ = reply.send(());
+                    }
+                    RendezvousCommand::GetDescriptor {
+                        context_id,
+                        peer,
+                        reply,
+                    } => {
+                        let value = state.descriptor_cache.get(&(context_id, peer)).cloned();
+                        let _ = reply.send(value);
+                    }
+                    RendezvousCommand::GetAnyDescriptorForAuthority { peer, reply } => {
+                        let value = state
+                            .descriptor_cache
+                            .values()
+                            .find(|descriptor| descriptor.authority_id == peer)
+                            .cloned()
+                            .or_else(|| {
+                                state
+                                    .lan_discovered_peers
+                                    .get(&peer)
+                                    .map(|discovered| discovered.descriptor.clone())
+                            });
+                        let _ = reply.send(value);
+                    }
+                    RendezvousCommand::NeedsRefresh {
+                        context_id,
+                        owner,
+                        refresh_window_ms,
+                        now_ms,
+                        reply,
+                    } => {
+                        let value = state
+                            .descriptor_cache
+                            .get(&(context_id, owner))
+                            .map(|desc| {
+                                let refresh_threshold =
+                                    desc.valid_until.saturating_sub(refresh_window_ms);
+                                now_ms >= refresh_threshold
+                            })
+                            .unwrap_or(true);
+                        let _ = reply.send(value);
+                    }
+                    RendezvousCommand::ContextsNeedingRefresh {
+                        owner,
+                        refresh_window_ms,
+                        now_ms,
+                        reply,
+                    } => {
+                        let contexts = state
+                            .descriptor_cache
+                            .iter()
+                            .filter(|((_, auth), desc)| {
+                                *auth == owner && {
+                                    let refresh_threshold =
+                                        desc.valid_until.saturating_sub(refresh_window_ms);
+                                    now_ms >= refresh_threshold
+                                }
+                            })
+                            .map(|((ctx, _), _)| *ctx)
+                            .collect();
+                        let _ = reply.send(contexts);
+                    }
+                    RendezvousCommand::ListCachedPeers { owner, reply } => {
+                        let peers = state
+                            .descriptor_cache
+                            .keys()
+                            .filter(|(_, auth)| *auth != owner)
+                            .map(|(_, auth)| *auth)
+                            .collect::<std::collections::HashSet<_>>()
+                            .into_iter()
+                            .collect();
+                        let _ = reply.send(peers);
+                    }
+                    RendezvousCommand::ListCachedPeerDevices { owner, reply } => {
+                        let devices = state
+                            .descriptor_cache
+                            .values()
+                            .filter_map(|descriptor| {
+                                (descriptor.authority_id != owner)
+                                    .then_some(descriptor.device_id)
+                                    .flatten()
+                            })
+                            .collect::<std::collections::HashSet<_>>()
+                            .into_iter()
+                            .collect();
+                        let _ = reply.send(devices);
+                    }
+                    RendezvousCommand::ListCachedPeersForContext {
+                        context_id,
+                        owner,
+                        reply,
+                    } => {
+                        let peers = state
+                            .descriptor_cache
+                            .keys()
+                            .filter(|(ctx, auth)| *ctx == context_id && *auth != owner)
+                            .map(|(_, auth)| *auth)
+                            .collect();
+                        let _ = reply.send(peers);
+                    }
+                    RendezvousCommand::CacheDiscoveredPeer {
+                        local_authority_id,
+                        peer,
+                        reply,
+                    } => {
+                        state
+                            .lan_discovered_peers
+                            .insert(peer.authority_id, peer.clone());
+                        state.descriptor_cache.insert(
+                            (peer.descriptor.context_id, peer.descriptor.authority_id),
+                            peer.descriptor.clone(),
+                        );
+                        let local_context =
+                            aura_core::context::EffectContext::with_authority(local_authority_id)
+                                .context_id();
+                        state.descriptor_cache.insert(
+                            (local_context, peer.descriptor.authority_id),
+                            peer.descriptor.clone(),
+                        );
+                        let _ = reply.send(());
+                    }
+                    RendezvousCommand::InstallLanDiscovery { service, reply } => {
+                        state.lan_discovery = Some(service);
+                        let _ = reply.send(());
+                    }
+                    RendezvousCommand::ClearLanDiscovery { reply } => {
+                        state.lan_discovery = None;
+                        let _ = reply.send(());
+                    }
+                    RendezvousCommand::PruneLanPeers {
+                        now_ms,
+                        max_age_ms,
+                        reply,
+                    } => {
+                        state.lan_discovered_peers.retain(|_, peer| {
+                            now_ms.saturating_sub(peer.discovered_at_ms) < max_age_ms
+                        });
+                        let _ = reply.send(());
+                    }
+                    RendezvousCommand::CleanupExpiredDescriptors { now_ms, reply } => {
+                        state
+                            .descriptor_cache
+                            .retain(|_, descriptor| descriptor.is_valid(now_ms));
+                        let _ = reply.send(());
+                    }
+                    RendezvousCommand::ListLanDiscoveredPeers { reply } => {
+                        let peers = state.lan_discovered_peers.values().cloned().collect();
+                        let _ = reply.send(peers);
+                    }
+                    RendezvousCommand::ListLanDiscoveredPeerDevices { owner, reply } => {
+                        let devices = state
+                            .lan_discovered_peers
+                            .values()
+                            .filter_map(|peer| {
+                                (peer.authority_id != owner)
+                                    .then_some(peer.descriptor.device_id)
+                                    .flatten()
+                            })
+                            .collect::<std::collections::HashSet<_>>()
+                            .into_iter()
+                            .collect();
+                        let _ = reply.send(devices);
+                    }
+                    RendezvousCommand::ListReachablePeerDevices { owner, reply } => {
+                        let mut devices = state
+                            .descriptor_cache
+                            .values()
+                            .filter_map(|descriptor| {
+                                (descriptor.authority_id != owner)
+                                    .then_some(descriptor.device_id)
+                                    .flatten()
+                            })
+                            .chain(state.lan_discovered_peers.values().filter_map(|peer| {
+                                (peer.authority_id != owner)
+                                    .then_some(peer.descriptor.device_id)
+                                    .flatten()
+                            }))
+                            .collect::<std::collections::HashSet<_>>()
+                            .into_iter()
+                            .collect::<Vec<_>>();
+                        devices.sort();
+                        let _ = reply.send(devices);
+                    }
+                    RendezvousCommand::ListReachablePeerDevicesForAuthority {
+                        authority_id,
+                        reply,
+                    } => {
+                        let mut devices = state
+                            .descriptor_cache
+                            .values()
+                            .filter_map(|descriptor| {
+                                (descriptor.authority_id == authority_id)
+                                    .then_some(descriptor.device_id)
+                                    .flatten()
+                            })
+                            .chain(state.lan_discovered_peers.values().filter_map(|peer| {
+                                (peer.authority_id == authority_id)
+                                    .then_some(peer.descriptor.device_id)
+                                    .flatten()
+                            }))
+                            .collect::<std::collections::HashSet<_>>()
+                            .into_iter()
+                            .collect::<Vec<_>>();
+                        devices.sort();
+                        let _ = reply.send(devices);
+                    }
+                    RendezvousCommand::GetLanDiscoveredPeer {
+                        authority_id,
+                        reply,
+                    } => {
+                        let peer = state.lan_discovered_peers.get(&authority_id).cloned();
+                        let _ = reply.send(peer);
+                    }
+                    RendezvousCommand::IsLanDiscoveryRunning { reply } => {
+                        let running = state.lan_discovery.is_some();
+                        let _ = reply.send(running);
+                    }
+                }
+            }
+        });
+
+        ServiceActorHandle::new(self.name(), cmd_tx)
     }
 
     async fn start_managed(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
         let _lifecycle_guard = self.lifecycle.lock().await;
-        let current_state = self.state.read().await.status;
+        let current_state = *self.lifecycle_state.read().await;
         if current_state == RendezvousManagerState::Running {
             return Ok(());
         }
@@ -302,12 +653,7 @@ impl RendezvousManager {
             ActorLifecyclePhase::Starting,
         )?;
 
-        with_state_mut_validated(
-            &self.state,
-            |state| state.status = RendezvousManagerState::Starting,
-            |state| state.validate(),
-        )
-        .await;
+        *self.lifecycle_state.write().await = RendezvousManagerState::Starting;
 
         let rendezvous_config = RendezvousConfig {
             descriptor_validity_ms: self.config.descriptor_validity.as_millis() as u64,
@@ -316,18 +662,12 @@ impl RendezvousManager {
             max_relay_hops: 3,
         };
 
-        let service = RendezvousService::new(self.authority_id, rendezvous_config);
+        let service = Arc::new(RendezvousService::new(self.authority_id, rendezvous_config));
         let service_tasks = context.tasks().group(self.name());
-
-        with_state_mut_validated(
-            &self.state,
-            |state| {
-                state.service = Some(Arc::new(service));
-                state.status = RendezvousManagerState::Running;
-            },
-            |state| state.validate(),
-        )
-        .await;
+        let command_handle =
+            self.spawn_command_actor(&service_tasks, RendezvousState::new_running(service));
+        *self.commands.write().await = Some(command_handle);
+        *self.lifecycle_state.write().await = RendezvousManagerState::Running;
 
         if self.config.auto_cleanup_enabled {
             self.start_cleanup_task(service_tasks.clone());
@@ -336,15 +676,11 @@ impl RendezvousManager {
         #[cfg(not(target_arch = "wasm32"))]
         if self.config.lan_discovery.enabled {
             if let Err(error) = self.start_lan_discovery(service_tasks.clone()).await {
-                with_state_mut_validated(
-                    &self.state,
-                    |state| {
-                        state.service = None;
-                        state.status = RendezvousManagerState::Failed;
-                    },
-                    |state| state.validate(),
-                )
-                .await;
+                self.commands.write().await.take();
+                *self.lifecycle_state.write().await = RendezvousManagerState::Failed;
+                let _ = service_tasks
+                    .shutdown_with_timeout(Self::SHUTDOWN_TIMEOUT)
+                    .await;
                 return Err(error);
             }
         }
@@ -362,7 +698,7 @@ impl RendezvousManager {
 
     async fn stop_managed(&self) -> Result<(), ServiceError> {
         let _lifecycle_guard = self.lifecycle.lock().await;
-        let current_state = self.state.read().await.status;
+        let current_state = *self.lifecycle_state.read().await;
         if current_state == RendezvousManagerState::Stopped {
             return Ok(());
         }
@@ -372,14 +708,10 @@ impl RendezvousManager {
             ActorLifecyclePhase::Stopping,
         )?;
 
-        with_state_mut_validated(
-            &self.state,
-            |state| state.status = RendezvousManagerState::Stopping,
-            |state| state.validate(),
-        )
-        .await;
+        *self.lifecycle_state.write().await = RendezvousManagerState::Stopping;
 
         self.stop_lan_discovery().await;
+        self.commands.write().await.take();
 
         let task_shutdown_error = if let Some(tasks) = self.tasks.write().await.take() {
             tasks
@@ -396,15 +728,7 @@ impl RendezvousManager {
             None
         };
 
-        with_state_mut_validated(
-            &self.state,
-            |state| {
-                state.service = None;
-                state.status = RendezvousManagerState::Stopped;
-            },
-            |state| state.validate(),
-        )
-        .await;
+        *self.lifecycle_state.write().await = RendezvousManagerState::Stopped;
 
         tracing::info!(
             event = "runtime.service.rendezvous.stopped",
@@ -413,12 +737,7 @@ impl RendezvousManager {
         );
         match task_shutdown_error {
             Some(error) => {
-                with_state_mut_validated(
-                    &self.state,
-                    |state| state.status = RendezvousManagerState::Failed,
-                    |state| state.validate(),
-                )
-                .await;
+                *self.lifecycle_state.write().await = RendezvousManagerState::Failed;
                 Err(error)
             }
             None => Ok(()),
@@ -427,12 +746,12 @@ impl RendezvousManager {
 
     fn start_cleanup_task(&self, tasks: TaskGroup) {
         let interval = self.config.cleanup_interval;
-        let state = self.state.clone();
         let time = self.time.clone();
+        let commands = self.commands.clone();
 
         tasks.spawn_periodic("descriptor_cleanup", time.clone(), interval, move || {
-            let state = state.clone();
             let time = time.clone();
+            let commands = commands.clone();
             async move {
                 let now_ms = match time.physical_time().await {
                     Ok(t) => t.ts_ms,
@@ -446,12 +765,14 @@ impl RendezvousManager {
                     }
                 };
 
-                with_state_mut(&state, |state| {
-                    state
-                        .descriptor_cache
-                        .retain(|_, descriptor| descriptor.is_valid(now_ms));
-                })
-                .await;
+                if let Some(commands) = commands.read().await.clone() {
+                    let _ = commands
+                        .request(|reply| RendezvousCommand::CleanupExpiredDescriptors {
+                            now_ms,
+                            reply,
+                        })
+                        .await;
+                }
                 true
             }
         });
@@ -460,6 +781,13 @@ impl RendezvousManager {
     // ========================================================================
     // Descriptor Operations
     // ========================================================================
+
+    async fn snapshot(&self) -> Result<RendezvousSnapshot, ServiceError> {
+        self.command_handle()
+            .await?
+            .request(|reply| RendezvousCommand::Snapshot { reply })
+            .await
+    }
 
     /// Publish a transport descriptor for a context
     ///
@@ -473,11 +801,10 @@ impl RendezvousManager {
         effects: &E,
     ) -> Result<aura_rendezvous::GuardOutcome, String> {
         let service = self
-            .state
-            .read()
+            .snapshot()
             .await
+            .map_err(|error| error.to_string())?
             .service
-            .clone()
             .ok_or("Rendezvous manager not started")?;
 
         let hints = Self::relay_first_order(
@@ -503,11 +830,10 @@ impl RendezvousManager {
         effects: &E,
     ) -> Result<aura_rendezvous::GuardOutcome, String> {
         let service = self
-            .state
-            .read()
+            .snapshot()
             .await
+            .map_err(|error| error.to_string())?
             .service
-            .clone()
             .ok_or("Rendezvous manager not started")?;
 
         let hints = Self::relay_first_order(
@@ -523,21 +849,12 @@ impl RendezvousManager {
 
     /// Cache a peer's descriptor
     pub async fn cache_descriptor(&self, descriptor: RendezvousDescriptor) -> Result<(), String> {
-        with_state_mut(&self.state, |state| {
-            let key = (descriptor.context_id, descriptor.authority_id);
-            let descriptor = if let Some(existing) = state.descriptor_cache.get(&key) {
-                let mut merged = descriptor.clone();
-                if merged.device_id.is_none() {
-                    merged.device_id = existing.device_id;
-                }
-                merged
-            } else {
-                descriptor
-            };
-            state.descriptor_cache.insert(key, descriptor);
-        })
-        .await;
-        Ok(())
+        self.command_handle()
+            .await
+            .map_err(|error| error.to_string())?
+            .request(|reply| RendezvousCommand::CacheDescriptor { descriptor, reply })
+            .await
+            .map_err(|error| error.to_string())
     }
 
     /// Get a cached descriptor for a peer
@@ -546,12 +863,16 @@ impl RendezvousManager {
         context_id: ContextId,
         peer: AuthorityId,
     ) -> Option<RendezvousDescriptor> {
-        self.state
-            .read()
+        self.command_handle()
             .await
-            .descriptor_cache
-            .get(&(context_id, peer))
-            .cloned()
+            .ok()?
+            .request(|reply| RendezvousCommand::GetDescriptor {
+                context_id,
+                peer,
+                reply,
+            })
+            .await
+            .ok()?
     }
 
     /// Get any cached descriptor for a peer authority regardless of context.
@@ -564,52 +885,47 @@ impl RendezvousManager {
         &self,
         peer: AuthorityId,
     ) -> Option<RendezvousDescriptor> {
-        let state = self.state.read().await;
-        state
-            .descriptor_cache
-            .values()
-            .find(|descriptor| descriptor.authority_id == peer)
-            .cloned()
-            .or_else(|| {
-                state
-                    .lan_discovered_peers
-                    .get(&peer)
-                    .map(|discovered| discovered.descriptor.clone())
-            })
+        self.command_handle()
+            .await
+            .ok()?
+            .request(|reply| RendezvousCommand::GetAnyDescriptorForAuthority { peer, reply })
+            .await
+            .ok()?
     }
 
     /// Check if our descriptor needs refresh in a context
     pub async fn needs_refresh(&self, context_id: ContextId, now_ms: u64) -> bool {
-        self.state
-            .read()
-            .await
-            .descriptor_cache
-            .get(&(context_id, self.authority_id))
-            .map(|desc| {
-                let refresh_threshold = desc
-                    .valid_until
-                    .saturating_sub(self.config.refresh_window.as_millis() as u64);
-                now_ms >= refresh_threshold
-            })
-            .unwrap_or(true)
+        let refresh_window_ms = self.config.refresh_window.as_millis() as u64;
+        match self.command_handle().await {
+            Ok(commands) => commands
+                .request(|reply| RendezvousCommand::NeedsRefresh {
+                    context_id,
+                    owner: self.authority_id,
+                    refresh_window_ms,
+                    now_ms,
+                    reply,
+                })
+                .await
+                .unwrap_or(true),
+            Err(_) => true,
+        }
     }
 
     /// Get contexts needing descriptor refresh
     pub async fn contexts_needing_refresh(&self, now_ms: u64) -> Vec<ContextId> {
         let refresh_window_ms = self.config.refresh_window.as_millis() as u64;
-        self.state
-            .read()
-            .await
-            .descriptor_cache
-            .iter()
-            .filter(|((_, auth), desc)| {
-                *auth == self.authority_id && {
-                    let refresh_threshold = desc.valid_until.saturating_sub(refresh_window_ms);
-                    now_ms >= refresh_threshold
-                }
-            })
-            .map(|((ctx, _), _)| *ctx)
-            .collect()
+        match self.command_handle().await {
+            Ok(commands) => commands
+                .request(|reply| RendezvousCommand::ContextsNeedingRefresh {
+                    owner: self.authority_id,
+                    refresh_window_ms,
+                    now_ms,
+                    reply,
+                })
+                .await
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
     }
 
     // ========================================================================
@@ -629,19 +945,12 @@ impl RendezvousManager {
         effects: &E,
     ) -> Result<aura_rendezvous::GuardOutcome, String> {
         let service = self
-            .state
-            .read()
+            .snapshot()
             .await
+            .map_err(|error| error.to_string())?
             .service
-            .clone()
             .ok_or("Rendezvous manager not started")?;
-        let descriptor = self
-            .state
-            .read()
-            .await
-            .descriptor_cache
-            .get(&(context_id, peer))
-            .cloned();
+        let descriptor = self.get_descriptor(context_id, peer).await;
         let descriptor = match descriptor {
             Some(value) => value,
             None => self
@@ -682,11 +991,10 @@ impl RendezvousManager {
         epoch: u64,
     ) -> Result<RendezvousFact, String> {
         let service = self
-            .state
-            .read()
+            .snapshot()
             .await
+            .map_err(|error| error.to_string())?
             .service
-            .clone()
             .ok_or("Rendezvous manager not started")?;
 
         Ok(service.create_channel_established_fact(context_id, peer, channel_id, epoch))
@@ -705,11 +1013,10 @@ impl RendezvousManager {
         snapshot: &aura_rendezvous::GuardSnapshot,
     ) -> Result<aura_rendezvous::GuardOutcome, String> {
         let service = self
-            .state
-            .read()
+            .snapshot()
             .await
+            .map_err(|error| error.to_string())?
             .service
-            .clone()
             .ok_or("Rendezvous manager not started")?;
 
         Ok(service.prepare_relay_request(context_id, relay, target, snapshot))
@@ -724,45 +1031,45 @@ impl RendezvousManager {
     /// Returns unique AuthorityIds for all peers with cached descriptors.
     /// Useful for peer discovery integration with sync.
     pub async fn list_cached_peers(&self) -> Vec<AuthorityId> {
-        self.state
-            .read()
-            .await
-            .descriptor_cache
-            .keys()
-            .filter(|(_, auth)| *auth != self.authority_id)
-            .map(|(_, auth)| *auth)
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect()
+        match self.command_handle().await {
+            Ok(commands) => commands
+                .request(|reply| RendezvousCommand::ListCachedPeers {
+                    owner: self.authority_id,
+                    reply,
+                })
+                .await
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
     }
 
     /// List cached peer devices with explicit device identity.
     pub async fn list_cached_peer_devices(&self) -> Vec<DeviceId> {
-        self.state
-            .read()
-            .await
-            .descriptor_cache
-            .values()
-            .filter_map(|descriptor| {
-                (descriptor.authority_id != self.authority_id)
-                    .then_some(descriptor.device_id)
-                    .flatten()
-            })
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect()
+        match self.command_handle().await {
+            Ok(commands) => commands
+                .request(|reply| RendezvousCommand::ListCachedPeerDevices {
+                    owner: self.authority_id,
+                    reply,
+                })
+                .await
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
     }
 
     /// List all cached peers for a specific context (excluding self)
     pub async fn list_cached_peers_for_context(&self, context_id: ContextId) -> Vec<AuthorityId> {
-        self.state
-            .read()
-            .await
-            .descriptor_cache
-            .keys()
-            .filter(|(ctx, auth)| *ctx == context_id && *auth != self.authority_id)
-            .map(|(_, auth)| *auth)
-            .collect()
+        match self.command_handle().await {
+            Ok(commands) => commands
+                .request(|reply| RendezvousCommand::ListCachedPeersForContext {
+                    context_id,
+                    owner: self.authority_id,
+                    reply,
+                })
+                .await
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
     }
 
     /// Return recoverable direct candidates for background direct-upgrade attempts.
@@ -775,13 +1082,7 @@ impl RendezvousManager {
         peer: AuthorityId,
         interfaces: &LocalInterfaces,
     ) -> Vec<TransportHint> {
-        let descriptor = self
-            .state
-            .read()
-            .await
-            .descriptor_cache
-            .get(&(context_id, peer))
-            .cloned();
+        let descriptor = self.get_descriptor(context_id, peer).await;
         let Some(descriptor) = descriptor else {
             return Vec::new();
         };
@@ -809,7 +1110,7 @@ impl RendezvousManager {
             return Ok(());
         }
 
-        if self.state.read().await.lan_discovery.is_some() {
+        if self.is_lan_discovery_running().await {
             return Ok(());
         }
 
@@ -828,41 +1129,24 @@ impl RendezvousManager {
             )
         })?;
 
-        let state = self.state.clone();
         let local_authority_id = self.authority_id;
         let lan_cache_tasks = tasks.group("lan_peer_cache");
+        let commands = self.command_handle().await?;
 
         let lan_tasks = tasks.group("lan_discovery");
         lan_service.start(lan_tasks, move |peer: DiscoveredPeer| {
-            let state = state.clone();
             let peer_clone = peer.clone();
             let lan_cache_tasks = lan_cache_tasks.clone();
+            let commands = commands.clone();
 
             lan_cache_tasks.spawn_named("cache_discovered_peer", async move {
-                with_state_mut(&state, |state| {
-                    state
-                        .lan_discovered_peers
-                        .insert(peer_clone.authority_id, peer_clone.clone());
-                    // Cache under the peer's own context_id (original behavior)
-                    state.descriptor_cache.insert(
-                        (
-                            peer_clone.descriptor.context_id,
-                            peer_clone.descriptor.authority_id,
-                        ),
-                        peer_clone.descriptor.clone(),
-                    );
-                    // Also cache under the local user's default context_id so that
-                    // is_peer_online() and resolve_peer_addr() (which look up by
-                    // local context) can find the descriptor.
-                    let local_context =
-                        aura_core::context::EffectContext::with_authority(local_authority_id)
-                            .context_id();
-                    state.descriptor_cache.insert(
-                        (local_context, peer_clone.descriptor.authority_id),
-                        peer_clone.descriptor,
-                    );
-                })
-                .await;
+                let _ = commands
+                    .request(|reply| RendezvousCommand::CacheDiscoveredPeer {
+                        local_authority_id,
+                        peer: peer_clone.clone(),
+                        reply,
+                    })
+                    .await;
 
                 tracing::info!(
                     event = "runtime.service.rendezvous.lan_peer_cached",
@@ -874,12 +1158,13 @@ impl RendezvousManager {
         });
 
         let lan_service = Arc::new(lan_service);
-        with_state_mut_validated(
-            &self.state,
-            |state| state.lan_discovery = Some(lan_service),
-            |state| state.validate(),
-        )
-        .await;
+        self.command_handle()
+            .await?
+            .request(|reply| RendezvousCommand::InstallLanDiscovery {
+                service: lan_service,
+                reply,
+            })
+            .await?;
 
         tracing::info!(
             event = "runtime.service.rendezvous.lan_started",
@@ -892,12 +1177,11 @@ impl RendezvousManager {
 
     /// Stop LAN discovery
     pub async fn stop_lan_discovery(&self) {
-        with_state_mut_validated(
-            &self.state,
-            |state| state.lan_discovery = None,
-            |state| state.validate(),
-        )
-        .await;
+        if let Ok(commands) = self.command_handle().await {
+            let _ = commands
+                .request(|reply| RendezvousCommand::ClearLanDiscovery { reply })
+                .await;
+        }
         tracing::info!(
             event = "runtime.service.rendezvous.lan_stopped",
             component = "rendezvous_manager",
@@ -910,7 +1194,11 @@ impl RendezvousManager {
     ///
     /// Should be called after publishing a descriptor to start announcing on LAN.
     pub async fn set_lan_descriptor(&self, descriptor: RendezvousDescriptor) {
-        let service = self.state.read().await.lan_discovery.clone();
+        let service = self
+            .snapshot()
+            .await
+            .ok()
+            .and_then(|snapshot| snapshot.lan_discovery);
         if let Some(service) = service.as_ref() {
             service.set_descriptor(descriptor).await;
         }
@@ -918,7 +1206,11 @@ impl RendezvousManager {
 
     /// Get LAN discovery metrics, if LAN discovery is enabled and running.
     pub async fn lan_metrics(&self) -> Option<LanDiscoveryMetrics> {
-        let service = self.state.read().await.lan_discovery.clone();
+        let service = self
+            .snapshot()
+            .await
+            .ok()
+            .and_then(|snapshot| snapshot.lan_discovery);
         match service {
             Some(service) => Some(service.metrics().await),
             None => None,
@@ -929,30 +1221,27 @@ impl RendezvousManager {
     ///
     /// Returns a copy of all peers discovered via LAN broadcast.
     pub async fn list_lan_discovered_peers(&self) -> Vec<DiscoveredPeer> {
-        self.state
-            .read()
-            .await
-            .lan_discovered_peers
-            .values()
-            .cloned()
-            .collect()
+        match self.command_handle().await {
+            Ok(commands) => commands
+                .request(|reply| RendezvousCommand::ListLanDiscoveredPeers { reply })
+                .await
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
     }
 
     /// List LAN-discovered peer devices with explicit device identity.
     pub async fn list_lan_discovered_peer_devices(&self) -> Vec<DeviceId> {
-        self.state
-            .read()
-            .await
-            .lan_discovered_peers
-            .values()
-            .filter_map(|peer| {
-                (peer.authority_id != self.authority_id)
-                    .then_some(peer.descriptor.device_id)
-                    .flatten()
-            })
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect()
+        match self.command_handle().await {
+            Ok(commands) => commands
+                .request(|reply| RendezvousCommand::ListLanDiscoveredPeerDevices {
+                    owner: self.authority_id,
+                    reply,
+                })
+                .await
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
     }
 
     /// List all reachable peer devices known to rendezvous.
@@ -961,25 +1250,16 @@ impl RendezvousManager {
     /// Higher-level social semantics remain authority-based, but endpoint
     /// selection must operate only on explicit device identities.
     pub async fn list_reachable_peer_devices(&self) -> Vec<DeviceId> {
-        let state = self.state.read().await;
-        let mut devices = state
-            .descriptor_cache
-            .values()
-            .filter_map(|descriptor| {
-                (descriptor.authority_id != self.authority_id)
-                    .then_some(descriptor.device_id)
-                    .flatten()
-            })
-            .chain(state.lan_discovered_peers.values().filter_map(|peer| {
-                (peer.authority_id != self.authority_id)
-                    .then_some(peer.descriptor.device_id)
-                    .flatten()
-            }))
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        devices.sort();
-        devices
+        match self.command_handle().await {
+            Ok(commands) => commands
+                .request(|reply| RendezvousCommand::ListReachablePeerDevices {
+                    owner: self.authority_id,
+                    reply,
+                })
+                .await
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
     }
 
     /// List reachable device ids for a specific peer authority.
@@ -991,25 +1271,18 @@ impl RendezvousManager {
         &self,
         authority_id: AuthorityId,
     ) -> Vec<DeviceId> {
-        let state = self.state.read().await;
-        let mut devices = state
-            .descriptor_cache
-            .values()
-            .filter_map(|descriptor| {
-                (descriptor.authority_id == authority_id)
-                    .then_some(descriptor.device_id)
-                    .flatten()
-            })
-            .chain(state.lan_discovered_peers.values().filter_map(|peer| {
-                (peer.authority_id == authority_id)
-                    .then_some(peer.descriptor.device_id)
-                    .flatten()
-            }))
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        devices.sort();
-        devices
+        match self.command_handle().await {
+            Ok(commands) => commands
+                .request(
+                    |reply| RendezvousCommand::ListReachablePeerDevicesForAuthority {
+                        authority_id,
+                        reply,
+                    },
+                )
+                .await
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
     }
 
     /// Get a specific LAN-discovered peer
@@ -1017,17 +1290,26 @@ impl RendezvousManager {
         &self,
         authority_id: AuthorityId,
     ) -> Option<DiscoveredPeer> {
-        self.state
-            .read()
+        self.command_handle()
             .await
-            .lan_discovered_peers
-            .get(&authority_id)
-            .cloned()
+            .ok()?
+            .request(|reply| RendezvousCommand::GetLanDiscoveredPeer {
+                authority_id,
+                reply,
+            })
+            .await
+            .ok()?
     }
 
     /// Check if LAN discovery is enabled and running
     pub async fn is_lan_discovery_running(&self) -> bool {
-        self.state.read().await.lan_discovery.is_some()
+        match self.command_handle().await {
+            Ok(commands) => commands
+                .request(|reply| RendezvousCommand::IsLanDiscoveryRunning { reply })
+                .await
+                .unwrap_or(false),
+            Err(_) => false,
+        }
     }
 
     /// Clear expired LAN-discovered peers
@@ -1039,12 +1321,15 @@ impl RendezvousManager {
             Err(_) => return,
         };
 
-        with_state_mut(&self.state, |state| {
-            state
-                .lan_discovered_peers
-                .retain(|_, peer| now_ms.saturating_sub(peer.discovered_at_ms) < max_age_ms);
-        })
-        .await;
+        if let Ok(commands) = self.command_handle().await {
+            let _ = commands
+                .request(|reply| RendezvousCommand::PruneLanPeers {
+                    now_ms,
+                    max_age_ms,
+                    reply,
+                })
+                .await;
+        }
     }
 
     /// Trigger an on-demand discovery refresh
@@ -1080,7 +1365,11 @@ impl RendezvousManager {
         let addr = UdpEndpoint::new(addr.to_string());
 
         // Get the LAN discovery service for sending
-        let lan = self.state.read().await.lan_discovery.clone();
+        let lan = self
+            .snapshot()
+            .await
+            .ok()
+            .and_then(|snapshot| snapshot.lan_discovery);
         if let Some(lan) = lan.as_ref() {
             // Use the LAN socket to send the invite code
             // The invitation is sent as a simple UDP packet
@@ -1170,13 +1459,13 @@ impl RuntimeService for RendezvousManager {
 impl RendezvousManager {
     /// Get the service health status asynchronously
     pub async fn health_async(&self) -> ServiceHealth {
-        let (status, has_service, has_lan_discovery) = {
-            let state = self.state.read().await;
-            (
-                state.status,
-                state.service.is_some(),
-                state.lan_discovery.is_some(),
-            )
+        let (status, has_service, has_lan_discovery) = match self.snapshot().await {
+            Ok(snapshot) => (
+                snapshot.status,
+                snapshot.service.is_some(),
+                snapshot.lan_discovery.is_some(),
+            ),
+            Err(_) => (*self.lifecycle_state.read().await, false, false),
         };
 
         match status {
@@ -1195,6 +1484,11 @@ impl RendezvousManager {
                 if self.tasks.read().await.is_none() {
                     return ServiceHealth::Unhealthy {
                         reason: "service task group missing".to_string(),
+                    };
+                }
+                if self.commands.read().await.is_none() {
+                    return ServiceHealth::Unhealthy {
+                        reason: "service command actor missing".to_string(),
                     };
                 }
                 if self.config.lan_discovery.enabled {

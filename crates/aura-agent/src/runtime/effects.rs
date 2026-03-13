@@ -539,7 +539,7 @@ impl AuraEffectSystem {
         &self,
         session_id: crate::runtime::RuntimeChoreographySessionId,
         owner_label: impl Into<String>,
-    ) -> Result<(), String> {
+    ) -> Result<crate::runtime::subsystems::choreography::SessionOwnerCapability, String> {
         self.choreography_state
             .write()
             .claim_session_owner(session_id, owner_label)
@@ -547,14 +547,33 @@ impl AuraEffectSystem {
     }
 
     /// Ensure the current owner record still matches the expected local owner.
-    pub fn ensure_runtime_choreography_session_owner(
+    pub fn ensure_runtime_choreography_session_owner_capability(
         &self,
         session_id: crate::runtime::RuntimeChoreographySessionId,
-        expected_owner: &str,
+        expected_capability: &crate::runtime::subsystems::choreography::SessionOwnerCapability,
     ) -> Result<(), String> {
         self.choreography_state
             .read()
-            .ensure_session_owner(session_id, expected_owner)
+            .ensure_session_owner(session_id, expected_capability)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Atomically transfer authoritative ownership for one active runtime choreography session.
+    pub fn transfer_runtime_choreography_session_owner(
+        &self,
+        session_id: crate::runtime::RuntimeChoreographySessionId,
+        expected_capability: &crate::runtime::subsystems::choreography::SessionOwnerCapability,
+        next_owner_label: impl Into<String>,
+        next_scope: crate::runtime::subsystems::choreography::SessionOwnerCapabilityScope,
+    ) -> Result<crate::runtime::subsystems::choreography::SessionOwnerCapability, String> {
+        self.choreography_state
+            .write()
+            .transfer_session_owner(
+                session_id,
+                expected_capability,
+                next_owner_label,
+                next_scope,
+            )
             .map_err(|error| error.to_string())
     }
 

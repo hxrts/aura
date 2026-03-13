@@ -206,6 +206,13 @@ Async host work resumes outside the VM step boundary in Layer 6 runtime services
 That owner may be hosted by an actor, but the effect-routing rule is still ownership-based:
 session-bound effects execute because the caller is the current owner, not merely because it runs inside a service actor.
 
+The runtime must also distinguish owner identity from owner capability:
+
+- owner identity identifies the current fragment/session owner
+- owner capability authorizes specific session-bound effects within fragment scope
+
+Both checks matter for effect routing, especially across delegation boundaries.
+
 See `crates/aura-agent/ARCHITECTURE.md` for the complete ownership model.
 
 ## Layer Placement

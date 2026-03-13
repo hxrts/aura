@@ -12,7 +12,9 @@ use crate::runtime::open_owned_manifest_vm_session_admitted;
 use crate::runtime::services::ceremony_runner::{
     CeremonyCommitMetadata, CeremonyInitRequest, CeremonyRunner,
 };
-use crate::runtime::services::{CeremonyTracker, ReconfigurationManager, RuntimeTaskRegistry};
+use crate::runtime::services::{
+    CeremonyTracker, ReconfigurationManager, RuntimeTaskRegistry, SessionDelegationTransfer,
+};
 use crate::runtime::vm_host_bridge::AuraVmHostWaitStatus;
 use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId};
 use aura_core::crypto::Ed25519Signature;
@@ -1978,11 +1980,13 @@ impl RecoveryServiceApi {
         self.reconfiguration
             .delegate_session(
                 &self.effects,
-                Some(context_id),
-                session_id,
-                *previous_guardian,
-                new_profile.authority_id,
-                Some("guardian_handoff".to_string()),
+                SessionDelegationTransfer::new(
+                    session_id,
+                    *previous_guardian,
+                    new_profile.authority_id,
+                    "guardian_handoff",
+                )
+                .with_context(context_id),
             )
             .await
             .map_err(|e| {

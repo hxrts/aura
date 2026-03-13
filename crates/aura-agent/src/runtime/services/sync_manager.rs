@@ -4,10 +4,10 @@
 //! Provides lifecycle management and configuration for automatic background sync.
 
 use super::runtime_tasks::TaskGroup;
-use super::service_actor::{validate_actor_transition, ActorLifecyclePhase};
+use super::service_actor::{validate_actor_transition, ActorLifecyclePhase, ServiceActorHandle};
 use super::state::{with_state_mut, with_state_mut_validated};
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
-use super::ReconfigurationManager;
+use super::{ReconfigurationManager, SessionDelegationTransfer};
 use crate::core::default_context_id_for_authority;
 use crate::runtime::vm_host_bridge::{AuraVmHostWaitStatus, AuraVmRoundDisposition};
 use crate::runtime::{
@@ -28,7 +28,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 use telltale_vm::vm::StepResult;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use uuid::Uuid;
 
 /// Configuration for the sync service manager
@@ -125,6 +125,31 @@ struct SyncState {
     peers: Vec<DeviceId>,
 }
 
+#[derive(Clone)]
+struct SyncStateSnapshot {
+    service: Option<Arc<SyncService>>,
+    status: SyncManagerState,
+    peers: Vec<DeviceId>,
+}
+
+enum SyncCommand {
+    SnapshotState {
+        reply: oneshot::Sender<SyncStateSnapshot>,
+    },
+    InstallService {
+        service: Arc<SyncService>,
+        reply: oneshot::Sender<()>,
+    },
+    AddPeer {
+        peer: DeviceId,
+        reply: oneshot::Sender<()>,
+    },
+    RemovePeer {
+        peer: DeviceId,
+        reply: oneshot::Sender<()>,
+    },
+}
+
 impl SyncState {
     fn new(initial_peers: Vec<DeviceId>) -> Self {
         Self {
@@ -175,6 +200,8 @@ pub struct SyncServiceManager {
     merkle_verifier: Option<Arc<MerkleVerifier>>,
     /// Owned maintenance task group for service-local loops.
     maintenance_tasks: Arc<RwLock<Option<TaskGroup>>>,
+    /// Typed command ingress for sync-owned mutable state.
+    commands: Arc<RwLock<Option<ServiceActorHandle<SyncCommand>>>>,
     /// Serializes lifecycle transitions.
     lifecycle: Arc<Mutex<()>>,
     /// Reconfiguration/session-footprint state for sync choreography delegation.
@@ -182,6 +209,85 @@ pub struct SyncServiceManager {
 }
 
 impl SyncServiceManager {
+    async fn command_handle(&self) -> Result<ServiceActorHandle<SyncCommand>, ServiceError> {
+        self.commands.read().await.clone().ok_or_else(|| {
+            ServiceError::unavailable(
+                self.name(),
+                "sync command actor unavailable; service is not fully started",
+            )
+        })
+    }
+
+    fn spawn_command_actor(&self, tasks: &TaskGroup) -> ServiceActorHandle<SyncCommand> {
+        let (cmd_tx, mut cmd_rx) = mpsc::channel(64);
+        let state = self.state.clone();
+
+        tasks.spawn_named("command_actor", async move {
+            while let Some(command) = cmd_rx.recv().await {
+                match command {
+                    SyncCommand::SnapshotState { reply } => {
+                        let state = state.read().await;
+                        let _ = reply.send(SyncStateSnapshot {
+                            service: state.service.clone(),
+                            status: state.status,
+                            peers: state.peers.clone(),
+                        });
+                    }
+                    SyncCommand::InstallService { service, reply } => {
+                        with_state_mut_validated(
+                            &state,
+                            |state| {
+                                state.service = Some(service);
+                                state.status = SyncManagerState::Running;
+                            },
+                            |state| state.validate(),
+                        )
+                        .await;
+                        let _ = reply.send(());
+                    }
+                    SyncCommand::AddPeer { peer, reply } => {
+                        with_state_mut(&state, |state| {
+                            if !state.peers.contains(&peer) {
+                                state.peers.push(peer);
+                                tracing::debug!("Added peer {} to sync manager", peer);
+                            }
+                        })
+                        .await;
+                        let _ = reply.send(());
+                    }
+                    SyncCommand::RemovePeer { peer, reply } => {
+                        with_state_mut(&state, |state| {
+                            state.peers.retain(|p| p != &peer);
+                            tracing::debug!("Removed peer {} from sync manager", peer);
+                        })
+                        .await;
+                        let _ = reply.send(());
+                    }
+                }
+            }
+        });
+
+        ServiceActorHandle::new(self.name(), cmd_tx)
+    }
+
+    async fn state_snapshot(&self) -> Result<SyncStateSnapshot, ServiceError> {
+        match self.command_handle().await {
+            Ok(commands) => {
+                commands
+                    .request(|reply| SyncCommand::SnapshotState { reply })
+                    .await
+            }
+            Err(_) => {
+                let state = self.state.read().await;
+                Ok(SyncStateSnapshot {
+                    service: state.service.clone(),
+                    status: state.status,
+                    peers: state.peers.clone(),
+                })
+            }
+        }
+    }
+
     /// Create a new sync service manager
     pub fn new(config: SyncManagerConfig) -> Self {
         Self {
@@ -189,6 +295,7 @@ impl SyncServiceManager {
             state: Arc::new(RwLock::new(SyncState::new(config.initial_peers))),
             merkle_verifier: None,
             maintenance_tasks: Arc::new(RwLock::new(None)),
+            commands: Arc::new(RwLock::new(None)),
             lifecycle: Arc::new(Mutex::new(())),
             reconfiguration: ReconfigurationManager::new(),
         }
@@ -208,6 +315,7 @@ impl SyncServiceManager {
             state: Arc::new(RwLock::new(SyncState::new(config.initial_peers))),
             merkle_verifier: Some(Arc::new(MerkleVerifier::new(indexed_journal, time))),
             maintenance_tasks: Arc::new(RwLock::new(None)),
+            commands: Arc::new(RwLock::new(None)),
             lifecycle: Arc::new(Mutex::new(())),
             reconfiguration: ReconfigurationManager::new(),
         }
@@ -220,12 +328,15 @@ impl SyncServiceManager {
 
     /// Get the current state
     pub async fn state(&self) -> SyncManagerState {
-        self.state.read().await.status
+        self.state_snapshot()
+            .await
+            .map(|snapshot| snapshot.status)
+            .unwrap_or(SyncManagerState::Stopped)
     }
 
     /// Check if the service is running
     pub async fn is_running(&self) -> bool {
-        self.state.read().await.status == SyncManagerState::Running
+        self.state().await == SyncManagerState::Running
     }
 
     async fn start_managed(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
@@ -288,21 +399,23 @@ impl SyncServiceManager {
                 |state| state.validate(),
             )
             .await;
-            return Err(ServiceError::startup_failed("sync_service", error.to_string()));
+            return Err(ServiceError::startup_failed(
+                "sync_service",
+                error.to_string(),
+            ));
         }
 
         let maintenance_group = context.tasks().group(self.name());
+        let command_handle = self.spawn_command_actor(&maintenance_group);
+        *self.commands.write().await = Some(command_handle);
         self.spawn_maintenance_task(maintenance_group.clone(), context.time_effects());
-
-        with_state_mut_validated(
-            &self.state,
-            |state| {
-                state.service = Some(Arc::new(service));
-                state.status = SyncManagerState::Running;
-            },
-            |state| state.validate(),
-        )
-        .await;
+        self.command_handle()
+            .await?
+            .request(|reply| SyncCommand::InstallService {
+                service: Arc::new(service),
+                reply,
+            })
+            .await?;
         *self.maintenance_tasks.write().await = Some(maintenance_group);
 
         tracing::info!(
@@ -349,7 +462,12 @@ impl SyncServiceManager {
             };
 
         // Stop the underlying service
-        let service = self.state.read().await.service.clone();
+        let service = self
+            .state_snapshot()
+            .await
+            .ok()
+            .and_then(|snapshot| snapshot.service);
+        self.commands.write().await.take();
         if let Some(service) = service.as_ref() {
             let now_instant = SyncService::monotonic_now();
             if let Err(error) = service.stop(now_instant).await {
@@ -361,7 +479,10 @@ impl SyncServiceManager {
                     |state| state.validate(),
                 )
                 .await;
-                return Err(ServiceError::shutdown_failed(self.name(), error.to_string()));
+                return Err(ServiceError::shutdown_failed(
+                    self.name(),
+                    error.to_string(),
+                ));
             }
         }
 
@@ -418,7 +539,17 @@ impl SyncServiceManager {
                 let manager = manager.clone();
                 let time_effects = time_effects.clone();
                 async move {
-                    let status = manager.state.read().await.status;
+                    let snapshot = match manager.state_snapshot().await {
+                        Ok(snapshot) => snapshot,
+                        Err(error) => {
+                            tracing::debug!(
+                                error = %error,
+                                "Sync maintenance skipped because command actor is unavailable"
+                            );
+                            return true;
+                        }
+                    };
+                    let status = snapshot.status;
                     if matches!(
                         status,
                         SyncManagerState::Stopped
@@ -436,7 +567,7 @@ impl SyncServiceManager {
                         }
                     };
 
-                    if let Some(service) = manager.state.read().await.service.clone() {
+                    if let Some(service) = snapshot.service {
                         if let Err(e) = service
                             .maintenance_cleanup(
                                 now_ms,
@@ -470,9 +601,9 @@ impl SyncServiceManager {
             + Sync,
     {
         let service = self
-            .state
-            .read()
+            .state_snapshot()
             .await
+            .map_err(|error| error.to_string())?
             .service
             .clone()
             .ok_or("Sync service not started")?;
@@ -486,47 +617,58 @@ impl SyncServiceManager {
 
     /// Add a peer to the known peers list
     pub async fn add_peer(&self, peer: DeviceId) {
-        with_state_mut(&self.state, |state| {
-            if !state.peers.contains(&peer) {
-                state.peers.push(peer);
-                tracing::debug!("Added peer {} to sync manager", peer);
-            }
-        })
-        .await;
+        if let Ok(commands) = self.command_handle().await {
+            let _ = commands
+                .request(|reply| SyncCommand::AddPeer { peer, reply })
+                .await;
+        } else {
+            with_state_mut(&self.state, |state| {
+                if !state.peers.contains(&peer) {
+                    state.peers.push(peer);
+                    tracing::debug!("Added peer {} to sync manager", peer);
+                }
+            })
+            .await;
+        }
     }
 
     /// Remove a peer from the known peers list
     pub async fn remove_peer(&self, peer: &DeviceId) {
-        with_state_mut(&self.state, |state| {
-            state.peers.retain(|p| p != peer);
-            tracing::debug!("Removed peer {} from sync manager", peer);
-        })
-        .await;
+        if let Ok(commands) = self.command_handle().await {
+            let _ = commands
+                .request(|reply| SyncCommand::RemovePeer { peer: *peer, reply })
+                .await;
+        } else {
+            with_state_mut(&self.state, |state| {
+                state.peers.retain(|p| p != peer);
+                tracing::debug!("Removed peer {} from sync manager", peer);
+            })
+            .await;
+        }
     }
 
     /// Get the list of known peers
     pub async fn peers(&self) -> Vec<DeviceId> {
-        self.state.read().await.peers.clone()
+        self.state_snapshot()
+            .await
+            .map(|snapshot| snapshot.peers)
+            .unwrap_or_default()
     }
 
     /// Get service health information
     pub async fn sync_service_health(&self) -> Option<aura_sync::services::SyncServiceHealth> {
-        self.state
-            .read()
+        self.state_snapshot()
             .await
-            .service
-            .as_ref()
-            .map(|s| s.get_health())
+            .ok()
+            .and_then(|snapshot| snapshot.service.map(|s| s.get_health()))
     }
 
     /// Get service metrics
     pub async fn metrics(&self) -> Option<aura_sync::services::ServiceMetrics> {
-        self.state
-            .read()
+        self.state_snapshot()
             .await
-            .service
-            .as_ref()
-            .map(|s| s.get_metrics())
+            .ok()
+            .and_then(|snapshot| snapshot.service.map(|s| s.get_metrics()))
     }
 
     /// Get the configuration
@@ -898,11 +1040,15 @@ impl SyncServiceManager {
         self.reconfiguration
             .delegate_session(
                 &effects,
-                Some(default_context_id_for_authority(from_authority)),
-                session_id,
-                from_authority,
-                to_authority,
-                bundle_id,
+                SessionDelegationTransfer::new(
+                    session_id,
+                    from_authority,
+                    to_authority,
+                    bundle_id.ok_or_else(|| {
+                        "epoch rotation delegation requires bundle evidence".to_string()
+                    })?,
+                )
+                .with_context(default_context_id_for_authority(from_authority)),
             )
             .await
             .map_err(|e| format!("epoch rotation delegation failed: {e}"))

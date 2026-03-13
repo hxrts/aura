@@ -250,7 +250,9 @@ mod tests {
         subsystem.attach_fact_sink(tx);
         drop(rx);
 
-        let result = subsystem.publish_facts(FactSource::Journal(Vec::new())).await;
+        let result = subsystem
+            .publish_facts(FactSource::Journal(Vec::new()))
+            .await;
         assert!(matches!(result, Err(JournalSubsystemError::SinkClosed)));
     }
 }

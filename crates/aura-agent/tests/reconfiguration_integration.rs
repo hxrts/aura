@@ -2,7 +2,10 @@
 
 #![allow(clippy::expect_used)]
 
-use aura_agent::{AgentConfig, AuraEffectSystem, CoherenceStatus, ReconfigurationManager};
+use aura_agent::{
+    AgentConfig, AuraEffectSystem, CoherenceStatus, ReconfigurationManager,
+    SessionDelegationTransfer,
+};
 use aura_core::{AuthorityId, ComposedBundle, SessionFootprint, SessionId};
 use aura_effects::RuntimeCapabilityHandler;
 use aura_journal::fact::{FactContent, ProtocolRelationalFact, RelationalFact};
@@ -43,11 +46,12 @@ async fn device_migration_delegation_persists_audit_fact_and_coherence() {
     let receipt = manager
         .delegate_session(
             &effects,
-            None,
-            session_id,
-            from_authority,
-            to_authority,
-            Some("device_migration".to_string()),
+            SessionDelegationTransfer::new(
+                session_id,
+                from_authority,
+                to_authority,
+                "device_migration",
+            ),
         )
         .await
         .expect("delegate session");
@@ -95,11 +99,12 @@ async fn delegation_requires_pre_registered_bundle_evidence() {
     let err = manager
         .delegate_session(
             &effects,
-            None,
-            session_id,
-            from_authority,
-            to_authority,
-            Some("unregistered_bundle".to_string()),
+            SessionDelegationTransfer::new(
+                session_id,
+                from_authority,
+                to_authority,
+                "unregistered_bundle",
+            ),
         )
         .await
         .expect_err("delegation without pre-registered bundle must fail closed");
@@ -128,11 +133,12 @@ async fn delegation_requires_reconfiguration_capability() {
     let err = manager
         .delegate_session(
             &effects,
-            None,
-            session_id,
-            from_authority,
-            to_authority,
-            Some("device_migration".to_string()),
+            SessionDelegationTransfer::new(
+                session_id,
+                from_authority,
+                to_authority,
+                "device_migration",
+            ),
         )
         .await
         .expect_err("delegation without reconfiguration capability must fail closed");
@@ -235,11 +241,12 @@ async fn guardian_handoff_delegation_records_guardian_bundle() {
     manager
         .delegate_session(
             &effects,
-            None,
-            session_id,
-            previous_guardian,
-            replacement_guardian,
-            Some("guardian_handoff".to_string()),
+            SessionDelegationTransfer::new(
+                session_id,
+                previous_guardian,
+                replacement_guardian,
+                "guardian_handoff",
+            ),
         )
         .await
         .expect("guardian handoff delegation");

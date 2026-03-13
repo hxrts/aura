@@ -13,13 +13,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::runtime::{
+    RuntimeDiagnostic, RuntimeDiagnosticKind, RuntimeDiagnosticSeverity, RuntimeDiagnosticSink,
+};
 use aura_core::effects::task::{CancellationToken, TaskSpawner};
 use aura_core::effects::PhysicalTimeEffects;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use crate::runtime::{
-    RuntimeDiagnostic, RuntimeDiagnosticKind, RuntimeDiagnosticSeverity, RuntimeDiagnosticSink,
-};
 #[cfg(not(target_arch = "wasm32"))]
 use parking_lot::Mutex;
 #[cfg(target_arch = "wasm32")]

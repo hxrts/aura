@@ -1,2 +1,1 @@
-# Temporary legacy exemptions while remaining VM/session callers are migrated onto runtime/session_ingress.rs.
-^crates/aura-agent/src/handlers/recovery_service\.rs:
+# No temporary exemptions. Session mutation must stay on runtime/session_ingress.rs.

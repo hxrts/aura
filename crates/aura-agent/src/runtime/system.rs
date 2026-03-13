@@ -5,7 +5,8 @@
 use super::services::ceremony_runner::CeremonyRunner;
 use super::services::{
     AuthorityManager, AuthorityStatus, CeremonyTracker, ContextManager, FlowBudgetManager,
-    LanTransportService, ReceiptManager, ReconfigurationManager, RendezvousManager, RuntimeService,
+    LanTransportListenerService, LanTransportService, ReactivePipelineService, ReceiptManager,
+    ReconfigurationManager, RendezvousManager, RuntimeMaintenanceService, RuntimeService,
     RuntimeServiceContext, RuntimeTaskRegistry, ServiceError, ServiceErrorKind, ServiceHealth,
     SocialManager, SyncServiceManager, ThresholdSigningService,
 };
@@ -13,8 +14,7 @@ use super::{
     AuraEffectSystem, EffectContext, EffectExecutor, LifecycleManager, RuntimeDiagnosticSink,
 };
 use crate::core::{AgentConfig, AuthorityContext};
-use crate::handlers::{InvitationHandler, RendezvousHandler};
-use crate::reactive::{ReactivePipeline, SchedulerConfig};
+use crate::handlers::RendezvousHandler;
 use crate::task_registry::TaskSupervisionError;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
@@ -24,8 +24,7 @@ use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::transport::TransportEnvelope;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::effects::{AmpChannelEffects, ChannelCreateParams, ChannelJoinParams};
-use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::identifiers::AuthorityId;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::util::serialization::from_slice;
 use aura_core::DeviceId;
@@ -41,8 +40,8 @@ use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 #[cfg(not(target_arch = "wasm32"))]
 use futures::{SinkExt, StreamExt};
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncReadExt;
@@ -58,7 +57,7 @@ const FACT_SYNC_REQUEST_CONTENT_TYPE: &str = "application/aura-fact-sync-request
 #[cfg(not(target_arch = "wasm32"))]
 const FACT_SYNC_RESPONSE_CONTENT_TYPE: &str = "application/aura-fact-sync-response";
 
-fn sync_peer_reconcile_interval(sync_manager: &SyncServiceManager) -> Duration {
+pub(crate) fn sync_peer_reconcile_interval(sync_manager: &SyncServiceManager) -> Duration {
     sync_manager.config().auto_sync_interval.clamp(
         MIN_SYNC_PEER_RECONCILE_INTERVAL,
         MAX_SYNC_PEER_RECONCILE_INTERVAL,
@@ -140,9 +139,7 @@ impl RuntimeActivityGate {
             .store(RuntimeActivityState::Stopped.as_u8(), Ordering::SeqCst);
     }
 
-    pub fn ensure_accepting_public_operations(
-        &self,
-    ) -> Result<(), RuntimePublicOperationError> {
+    pub fn ensure_accepting_public_operations(&self) -> Result<(), RuntimePublicOperationError> {
         match self.state() {
             RuntimeActivityState::Running => Ok(()),
             state => Err(RuntimePublicOperationError::NotAccepting { state }),
@@ -180,12 +177,6 @@ pub struct RuntimeSystem {
     /// Rendezvous manager (optional, for peer discovery and channel establishment)
     rendezvous_manager: Option<RendezvousManager>,
 
-    /// Rendezvous handler (optional, for handshake processing)
-    rendezvous_handler: Option<RendezvousHandler>,
-
-    /// LAN transport service (optional, for TCP listener + advertise addrs)
-    lan_transport: Option<Arc<LanTransportService>>,
-
     /// Social manager (optional, for social topology and relay selection)
     social_manager: Option<SocialManager>,
 
@@ -197,6 +188,15 @@ pub struct RuntimeSystem {
 
     /// Threshold signing service (shared state across runtime operations)
     threshold_signing: ThresholdSigningService,
+
+    /// Service-owned reactive pipeline.
+    reactive_pipeline_service: ReactivePipelineService,
+
+    /// Service-owned LAN transport listeners.
+    lan_listener_service: Option<LanTransportListenerService>,
+
+    /// Service-owned runtime maintenance loops.
+    maintenance_service: RuntimeMaintenanceService,
 
     /// Reconfiguration manager for link/delegate operations.
     reconfiguration_manager: ReconfigurationManager,
@@ -216,11 +216,6 @@ pub struct RuntimeSystem {
 
     /// Authority ID
     authority_id: AuthorityId,
-
-    /// Reactive scheduler pipeline (facts → scheduler → view updates).
-    ///
-    /// This is optional while the single fact pipeline work is being completed.
-    reactive_pipeline: Option<ReactivePipeline>,
 }
 
 impl RuntimeSystem {
@@ -238,12 +233,24 @@ impl RuntimeSystem {
         config: AgentConfig,
         authority_id: AuthorityId,
     ) -> Self {
+        let device_id = config.device_id;
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
         let time_effects: Arc<dyn PhysicalTimeEffects> =
             Arc::new(effect_system.time_effects().clone());
         let ceremony_tracker = CeremonyTracker::new(time_effects);
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
+        let reactive_pipeline_service =
+            ReactivePipelineService::new(effect_system.clone(), authority_id, diagnostics.clone());
+        let maintenance_service = RuntimeMaintenanceService::new(
+            effect_system.clone(),
+            authority_id,
+            device_id,
+            None,
+            None,
+            None,
+            None,
+        );
         let runtime_tasks = Arc::new(RuntimeTaskRegistry::with_diagnostics(diagnostics.clone()));
         Self {
             effect_executor,
@@ -255,19 +262,19 @@ impl RuntimeSystem {
             lifecycle_manager,
             sync_manager: None,
             rendezvous_manager: None,
-            rendezvous_handler: None,
-            lan_transport: None,
             social_manager: None,
             ceremony_tracker,
             ceremony_runner,
             threshold_signing,
+            reactive_pipeline_service,
+            lan_listener_service: None,
+            maintenance_service,
             reconfiguration_manager: ReconfigurationManager::new(),
             runtime_tasks,
             activity_gate: Arc::new(RuntimeActivityGate::new()),
             diagnostics,
             config,
             authority_id,
-            reactive_pipeline: None,
         }
     }
 
@@ -286,12 +293,24 @@ impl RuntimeSystem {
         config: AgentConfig,
         authority_id: AuthorityId,
     ) -> Self {
+        let device_id = config.device_id;
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
         let time_effects: Arc<dyn PhysicalTimeEffects> =
             Arc::new(effect_system.time_effects().clone());
         let ceremony_tracker = CeremonyTracker::new(time_effects);
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
+        let reactive_pipeline_service =
+            ReactivePipelineService::new(effect_system.clone(), authority_id, diagnostics.clone());
+        let maintenance_service = RuntimeMaintenanceService::new(
+            effect_system.clone(),
+            authority_id,
+            device_id,
+            Some(sync_manager.clone()),
+            None,
+            None,
+            None,
+        );
         let runtime_tasks = Arc::new(RuntimeTaskRegistry::with_diagnostics(diagnostics.clone()));
         Self {
             effect_executor,
@@ -303,19 +322,19 @@ impl RuntimeSystem {
             lifecycle_manager,
             sync_manager: Some(sync_manager),
             rendezvous_manager: None,
-            rendezvous_handler: None,
-            lan_transport: None,
             social_manager: None,
             ceremony_tracker,
             ceremony_runner,
             threshold_signing,
+            reactive_pipeline_service,
+            lan_listener_service: None,
+            maintenance_service,
             reconfiguration_manager: ReconfigurationManager::new(),
             runtime_tasks,
             activity_gate: Arc::new(RuntimeActivityGate::new()),
             diagnostics,
             config,
             authority_id,
-            reactive_pipeline: None,
         }
     }
 
@@ -334,12 +353,24 @@ impl RuntimeSystem {
         config: AgentConfig,
         authority_id: AuthorityId,
     ) -> Self {
+        let device_id = config.device_id;
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
         let time_effects: Arc<dyn PhysicalTimeEffects> =
             Arc::new(effect_system.time_effects().clone());
         let ceremony_tracker = CeremonyTracker::new(time_effects);
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
+        let reactive_pipeline_service =
+            ReactivePipelineService::new(effect_system.clone(), authority_id, diagnostics.clone());
+        let maintenance_service = RuntimeMaintenanceService::new(
+            effect_system.clone(),
+            authority_id,
+            device_id,
+            None,
+            Some(rendezvous_manager.clone()),
+            None,
+            None,
+        );
         let runtime_tasks = Arc::new(RuntimeTaskRegistry::with_diagnostics(diagnostics.clone()));
         Self {
             effect_executor,
@@ -351,19 +382,19 @@ impl RuntimeSystem {
             lifecycle_manager,
             sync_manager: None,
             rendezvous_manager: Some(rendezvous_manager),
-            rendezvous_handler: None,
-            lan_transport: None,
             social_manager: None,
             ceremony_tracker,
             ceremony_runner,
             threshold_signing,
+            reactive_pipeline_service,
+            lan_listener_service: None,
+            maintenance_service,
             reconfiguration_manager: ReconfigurationManager::new(),
             runtime_tasks,
             activity_gate: Arc::new(RuntimeActivityGate::new()),
             diagnostics,
             config,
             authority_id,
-            reactive_pipeline: None,
         }
     }
 
@@ -385,12 +416,27 @@ impl RuntimeSystem {
         config: AgentConfig,
         authority_id: AuthorityId,
     ) -> Self {
+        let device_id = config.device_id;
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
         let time_effects: Arc<dyn PhysicalTimeEffects> =
             Arc::new(effect_system.time_effects().clone());
         let ceremony_tracker = CeremonyTracker::new(time_effects);
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
+        let reactive_pipeline_service =
+            ReactivePipelineService::new(effect_system.clone(), authority_id, diagnostics.clone());
+        let lan_listener_service = lan_transport.clone().map(|lan_transport| {
+            LanTransportListenerService::new(effect_system.clone(), lan_transport)
+        });
+        let maintenance_service = RuntimeMaintenanceService::new(
+            effect_system.clone(),
+            authority_id,
+            device_id,
+            sync_manager.clone(),
+            rendezvous_manager.clone(),
+            rendezvous_handler.clone(),
+            lan_transport.clone(),
+        );
         let runtime_tasks = Arc::new(RuntimeTaskRegistry::with_diagnostics(diagnostics.clone()));
         Self {
             effect_executor,
@@ -402,19 +448,19 @@ impl RuntimeSystem {
             lifecycle_manager,
             sync_manager,
             rendezvous_manager,
-            rendezvous_handler,
-            lan_transport,
             social_manager,
             ceremony_tracker,
             ceremony_runner,
             threshold_signing,
+            reactive_pipeline_service,
+            lan_listener_service,
+            maintenance_service,
             reconfiguration_manager: ReconfigurationManager::new(),
             runtime_tasks,
             activity_gate: Arc::new(RuntimeActivityGate::new()),
             diagnostics,
             config,
             authority_id,
-            reactive_pipeline: None,
         }
     }
 
@@ -455,151 +501,6 @@ impl RuntimeSystem {
         self.diagnostics.clone()
     }
 
-    /// Start background maintenance tasks (cleanup, pruning).
-    pub fn start_maintenance_tasks(&self) {
-        let tasks = self.runtime_tasks.clone();
-        let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
-            Arc::new(self.effect_system.time_effects().clone());
-        let sync_manager = self.sync_manager.clone();
-        let rendezvous_manager = self.rendezvous_manager.clone();
-        let rendezvous_handler = self.rendezvous_handler.clone();
-        let lan_transport = self.lan_transport.clone();
-        let effects = self.effect_system.clone();
-        let authority_id = self.authority_id;
-        let device_id = self.device_id();
-
-        let harness_mode = std::env::var_os("AURA_HARNESS_MODE").is_some();
-
-        if !harness_mode {
-            if let Ok(invitation_handler) = InvitationHandler::new(
-                AuthorityContext::new_with_device(self.authority_id, self.device_id()),
-            ) {
-                let effects = self.effect_system.clone();
-                let handler = invitation_handler.clone();
-                let interval = Duration::from_secs(2);
-                tasks.spawn_interval_until_named(
-                    "maintenance.invitation_acceptance",
-                    time_effects.clone(),
-                    interval,
-                    move || {
-                        let effects = effects.clone();
-                        let handler = handler.clone();
-                        async move {
-                            if let Err(e) = handler
-                                .process_contact_invitation_acceptances(effects.clone())
-                                .await
-                            {
-                                tracing::debug!(
-                                    error = %e,
-                                    "Failed to process contact invitation acceptances"
-                                );
-                            }
-                            true
-                        }
-                    },
-                );
-            }
-
-            if let Some(rendezvous_handler) = rendezvous_handler {
-                let effects = self.effect_system.clone();
-                let handler = rendezvous_handler.clone();
-                let interval = Duration::from_secs(2);
-                tasks.spawn_interval_until_named(
-                    "maintenance.rendezvous_handshakes",
-                    time_effects.clone(),
-                    interval,
-                    move || {
-                        let effects = effects.clone();
-                        let handler = handler.clone();
-                        async move {
-                            if let Err(e) =
-                                handler.process_handshake_envelopes(effects.clone()).await
-                            {
-                                tracing::debug!(
-                                    error = %e,
-                                    "Failed to process rendezvous handshake envelopes"
-                                );
-                            }
-                            true
-                        }
-                    },
-                );
-            }
-        }
-
-        if let (Some(sync_manager), Some(rendezvous_manager)) =
-            (sync_manager.clone(), rendezvous_manager.clone())
-        {
-            let interval = sync_peer_reconcile_interval(&sync_manager);
-            tasks.spawn_interval_until_named(
-                "maintenance.sync_peer_reconcile",
-                time_effects.clone(),
-                interval,
-                move || {
-                    let sync_manager = sync_manager.clone();
-                    let rendezvous_manager = rendezvous_manager.clone();
-                    async move {
-                        let desired_peers: std::collections::HashSet<DeviceId> = rendezvous_manager
-                            .list_reachable_peer_devices()
-                            .await
-                            .into_iter()
-                            .collect();
-
-                        let current_peers = sync_manager.peers().await;
-                        for peer in current_peers.iter() {
-                            if !desired_peers.contains(peer) {
-                                sync_manager.remove_peer(peer).await;
-                            }
-                        }
-
-                        for peer in desired_peers {
-                            sync_manager.add_peer(peer).await;
-                        }
-
-                        true
-                    }
-                },
-            );
-        }
-
-        if let (Some(rendezvous_manager), Some(lan_transport)) = (rendezvous_manager, lan_transport)
-        {
-            let interval = Duration::from_secs(60);
-            tasks.spawn_interval_until_named(
-                "maintenance.lan_descriptor_refresh",
-                time_effects.clone(),
-                interval,
-                move || {
-                    let rendezvous_manager = rendezvous_manager.clone();
-                    let lan_transport = lan_transport.clone();
-                    let effects = effects.clone();
-                    async move {
-                        let now_ms = match effects.time_effects().physical_time().await {
-                            Ok(t) => t.ts_ms,
-                            Err(_) => return true,
-                        };
-                        let context_id =
-                            ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
-                        if rendezvous_manager.needs_refresh(context_id, now_ms).await {
-                            if let Err(e) = publish_lan_descriptor_with(
-                                effects.clone(),
-                                authority_id,
-                                device_id,
-                                &rendezvous_manager,
-                                lan_transport.as_ref(),
-                            )
-                            .await
-                            {
-                                tracing::debug!(error = %e, "Failed to refresh LAN descriptor");
-                            }
-                        }
-                        true
-                    }
-                },
-            );
-        }
-    }
-
     /// Get the runtime task spawner as a trait object.
     pub fn task_spawner(&self) -> Arc<dyn TaskSpawner> {
         self.runtime_tasks.clone()
@@ -624,58 +525,9 @@ impl RuntimeSystem {
         self.effect_system.clone()
     }
 
-    /// Start the reactive scheduler pipeline (facts → scheduler → view updates).
-    ///
-    /// This is a best-effort wiring step; the pipeline becomes fully useful once
-    /// the runtime publishes typed facts into it.
-    pub async fn start_reactive_pipeline(&mut self) -> Result<(), String> {
-        if self.reactive_pipeline.is_some() {
-            return Ok(());
-        }
-
-        let time_effects: Arc<dyn PhysicalTimeEffects> =
-            Arc::new(self.effect_system.time_effects().clone());
-        let pipeline_tasks = self.runtime_tasks.group("reactive_pipeline");
-
-        let pipeline = ReactivePipeline::start(
-            pipeline_tasks,
-            SchedulerConfig::default(),
-            self.effect_system.fact_registry(),
-            time_effects,
-            self.effect_system.clone(),
-            self.authority_id,
-            self.effect_system.reactive_handler(),
-            self.diagnostics.clone(),
-        );
-
-        // Attach the scheduler ingestion channel to the effect system so all journal commits
-        // go through the single typed-fact pipeline.
-        self.effect_system.attach_fact_sink(pipeline.fact_sender());
-
-        // Attach the view update sender so callers can await fact processing completion.
-        self.effect_system
-            .attach_view_update_sender(pipeline.update_sender());
-
-        // Replay existing persisted facts to seed scheduler-driven UI signals.
-        let existing = self
-            .effect_system
-            .load_committed_facts(self.authority_id)
-            .await
-            .map_err(|e| e.to_string())?;
-        if !existing.is_empty() {
-            pipeline
-                .publish_journal_facts(existing)
-                .await
-                .map_err(|error| error.to_string())?;
-        }
-
-        self.reactive_pipeline = Some(pipeline);
-        Ok(())
-    }
-
-    /// Access the running reactive pipeline (if started).
-    pub fn reactive_pipeline(&self) -> Option<&ReactivePipeline> {
-        self.reactive_pipeline.as_ref()
+    /// Check whether the service-owned reactive pipeline is running.
+    pub async fn reactive_pipeline_running(&self) -> bool {
+        self.reactive_pipeline_service.is_running().await
     }
 
     /// Start runtime services using the RuntimeService trait.
@@ -703,281 +555,9 @@ impl RuntimeSystem {
         for service in self.runtime_services_in_start_order()? {
             self.start_runtime_service(service, &service_context)
                 .await?;
-            if service.name() == "rendezvous_manager" {
-                if let Err(error) = self.publish_lan_descriptor().await {
-                    tracing::warn!(
-                        event = "runtime.service.lifecycle.post_start_failed",
-                        service = service.name(),
-                        error = %error,
-                        "Service-specific post-start action failed"
-                    );
-                }
-            }
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        if self.lan_transport.is_some() {
-            self.start_lan_transport_listener();
         }
 
         Ok(())
-    }
-
-    async fn publish_lan_descriptor(&self) -> Result<(), ServiceError> {
-        let Some(rendezvous_manager) = &self.rendezvous_manager else {
-            return Ok(());
-        };
-        let Some(lan_transport) = &self.lan_transport else {
-            return Ok(());
-        };
-        publish_lan_descriptor_with(
-            self.effect_system.clone(),
-            self.authority_id,
-            self.device_id(),
-            rendezvous_manager,
-            lan_transport.as_ref(),
-        )
-        .await
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn start_lan_transport_listener(&self) {
-        let Some(lan_transport) = &self.lan_transport else {
-            return;
-        };
-
-        let tcp_accept_group = self.runtime_tasks.group("lan_transport.tcp");
-        let tcp_connection_group = tcp_accept_group.group("connections");
-        let listener = lan_transport.listener();
-        let websocket_listener = lan_transport.websocket_listener();
-        let effects = self.effect_system.clone();
-        let metrics = lan_transport.metrics_handle();
-        let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
-            Arc::new(effects.time_effects().clone());
-        tcp_accept_group.spawn_cancellable_named("accept_loop", async move {
-            loop {
-                let (mut stream, addr) = match listener.accept().await {
-                    Ok((stream, addr)) => (stream, addr),
-                    Err(err) => {
-                        tracing::warn!(error = %err, "LAN transport accept failed");
-                        let now_ms = time_effects
-                            .physical_time()
-                            .await
-                            .ok()
-                            .map(|t| t.ts_ms)
-                            .unwrap_or(0);
-                        let mut metrics = metrics.write().await;
-                        metrics.accept_errors = metrics.accept_errors.saturating_add(1);
-                        if now_ms > 0 {
-                            metrics.last_error_ms = now_ms;
-                        }
-                        continue;
-                    }
-                };
-
-                let effects = effects.clone();
-                let metrics = metrics.clone();
-                let time_effects = time_effects.clone();
-                let connection_group = tcp_connection_group.clone();
-                let now_ms = time_effects
-                    .physical_time()
-                    .await
-                    .ok()
-                    .map(|t| t.ts_ms)
-                    .unwrap_or(0);
-                {
-                    let mut metrics = metrics.write().await;
-                    metrics.connections_accepted = metrics.connections_accepted.saturating_add(1);
-                    if now_ms > 0 {
-                        metrics.last_accept_ms = now_ms;
-                    }
-                }
-                connection_group.spawn_named(format!("connection.{addr}"), async move {
-                    let mut len_buf = [0u8; 4];
-                    if let Err(err) = stream.read_exact(&mut len_buf).await {
-                        tracing::debug!(error = %err, addr = %addr, "LAN transport read len failed");
-                        let now_ms = time_effects
-                            .physical_time()
-                            .await
-                            .ok()
-                            .map(|t| t.ts_ms)
-                            .unwrap_or(0);
-                        let mut metrics = metrics.write().await;
-                        metrics.read_errors = metrics.read_errors.saturating_add(1);
-                        if now_ms > 0 {
-                            metrics.last_error_ms = now_ms;
-                        }
-                        return;
-                    }
-                    let len = u32::from_be_bytes(len_buf) as usize;
-                    if len == 0 || len > 1024 * 1024 {
-                        tracing::debug!(addr = %addr, len = len, "LAN transport invalid frame size");
-                        let now_ms = time_effects
-                            .physical_time()
-                            .await
-                            .ok()
-                            .map(|t| t.ts_ms)
-                            .unwrap_or(0);
-                        let mut metrics = metrics.write().await;
-                        metrics.decode_errors = metrics.decode_errors.saturating_add(1);
-                        if now_ms > 0 {
-                            metrics.last_error_ms = now_ms;
-                        }
-                        return;
-                    }
-                    let mut payload = vec![0u8; len];
-                    if let Err(err) = stream.read_exact(&mut payload).await {
-                        tracing::debug!(error = %err, addr = %addr, "LAN transport read payload failed");
-                        let now_ms = time_effects
-                            .physical_time()
-                            .await
-                            .ok()
-                            .map(|t| t.ts_ms)
-                            .unwrap_or(0);
-                        let mut metrics = metrics.write().await;
-                        metrics.read_errors = metrics.read_errors.saturating_add(1);
-                        if now_ms > 0 {
-                            metrics.last_error_ms = now_ms;
-                        }
-                        return;
-                    }
-
-                    let envelope = match aura_core::util::serialization::from_slice(&payload) {
-                        Ok(envelope) => envelope,
-                        Err(err) => {
-                            tracing::debug!(error = %err, addr = %addr, "LAN transport decode failed");
-                            let now_ms = time_effects
-                                .physical_time()
-                                .await
-                                .ok()
-                                .map(|t| t.ts_ms)
-                                .unwrap_or(0);
-                            let mut metrics = metrics.write().await;
-                            metrics.decode_errors = metrics.decode_errors.saturating_add(1);
-                            if now_ms > 0 {
-                                metrics.last_error_ms = now_ms;
-                            }
-                            return;
-                        }
-                    };
-                    let now_ms = time_effects
-                        .physical_time()
-                        .await
-                        .ok()
-                        .map(|t| t.ts_ms)
-                        .unwrap_or(0);
-                    {
-                        let mut metrics = metrics.write().await;
-                        metrics.frames_received = metrics.frames_received.saturating_add(1);
-                        metrics.bytes_received = metrics.bytes_received.saturating_add(len as u64);
-                        if now_ms > 0 {
-                            metrics.last_frame_ms = now_ms;
-                        }
-                    }
-
-                    let _ = handle_inbound_transport_envelope(effects, envelope).await;
-                });
-            }
-        });
-
-        let websocket_accept_group = self.runtime_tasks.group("lan_transport.websocket");
-        let websocket_connection_group = websocket_accept_group.group("connections");
-        let effects = self.effect_system.clone();
-        let metrics = lan_transport.metrics_handle();
-        let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
-            Arc::new(self.effect_system.time_effects().clone());
-        websocket_accept_group.spawn_cancellable_named("accept_loop", async move {
-            loop {
-                let (stream, addr) = match websocket_listener.accept().await {
-                    Ok((stream, addr)) => (stream, addr),
-                    Err(err) => {
-                        tracing::warn!(error = %err, "LAN websocket accept failed");
-                        continue;
-                    }
-                };
-
-                let effects = effects.clone();
-                let metrics = metrics.clone();
-                let time_effects = time_effects.clone();
-                let connection_group = websocket_connection_group.clone();
-                connection_group.spawn_named(format!("connection.{addr}"), async move {
-                    let websocket = match accept_async(stream).await {
-                        Ok(websocket) => websocket,
-                        Err(err) => {
-                            tracing::debug!(error = %err, addr = %addr, "LAN websocket handshake failed");
-                            return;
-                        }
-                    };
-                    let (mut sink, mut stream) = websocket.split();
-                    while let Some(message) = stream.next().await {
-                        let message = match message {
-                            Ok(message) => message,
-                            Err(err) => {
-                                tracing::debug!(error = %err, addr = %addr, "LAN websocket read failed");
-                                return;
-                            }
-                        };
-
-                        if !message.is_binary() {
-                            continue;
-                        }
-
-                        let payload = message.into_data();
-                        let envelope = match aura_core::util::serialization::from_slice::<TransportEnvelope>(&payload) {
-                            Ok(envelope) => envelope,
-                            Err(err) => {
-                                tracing::debug!(error = %err, addr = %addr, "LAN websocket decode failed");
-                                let mut metrics = metrics.write().await;
-                                metrics.decode_errors = metrics.decode_errors.saturating_add(1);
-                                continue;
-                            }
-                        };
-
-                        let now_ms = time_effects
-                            .physical_time()
-                            .await
-                            .ok()
-                            .map(|t| t.ts_ms)
-                            .unwrap_or(0);
-                        {
-                            let mut metrics = metrics.write().await;
-                            metrics.frames_received = metrics.frames_received.saturating_add(1);
-                            metrics.bytes_received =
-                                metrics.bytes_received.saturating_add(payload.len() as u64);
-                            if now_ms > 0 {
-                                metrics.last_frame_ms = now_ms;
-                            }
-                        }
-
-                        if let Some(response) =
-                            handle_inbound_transport_envelope(effects.clone(), envelope).await
-                        {
-                            match aura_core::util::serialization::to_vec(&response) {
-                                Ok(bytes) => {
-                                    if let Err(err) =
-                                        sink.send(tokio_tungstenite::tungstenite::Message::Binary(bytes)).await
-                                    {
-                                        tracing::debug!(
-                                            error = %err,
-                                            addr = %addr,
-                                            "LAN websocket response send failed"
-                                        );
-                                        return;
-                                    }
-                                }
-                                Err(err) => {
-                                    tracing::debug!(
-                                        error = %err,
-                                        addr = %addr,
-                                        "LAN websocket response encode failed"
-                                    );
-                                }
-                            }
-                        }
-                    }
-                });
-            }
-        });
     }
 
     async fn stop_services(&self) -> Result<(), ServiceError> {
@@ -1002,6 +582,7 @@ impl RuntimeSystem {
 
     fn runtime_services(&self) -> Vec<&dyn RuntimeService> {
         let mut services: Vec<&dyn RuntimeService> = vec![
+            &self.reactive_pipeline_service,
             &self.flow_budget_manager,
             &self.receipt_manager,
             &self.ceremony_tracker,
@@ -1016,6 +597,10 @@ impl RuntimeSystem {
         if let Some(sync_manager) = &self.sync_manager {
             services.push(sync_manager);
         }
+        if let Some(lan_listener_service) = &self.lan_listener_service {
+            services.push(lan_listener_service);
+        }
+        services.push(&self.maintenance_service);
         services
     }
 
@@ -1161,7 +746,7 @@ impl RuntimeSystem {
         self.social_manager.is_some()
     }
 
-    pub async fn shutdown_typed(mut self, ctx: &EffectContext) -> Result<(), RuntimeShutdownError> {
+    pub async fn shutdown_typed(self, ctx: &EffectContext) -> Result<(), RuntimeShutdownError> {
         let prior_state = self.activity_gate.begin_shutdown();
         if prior_state != RuntimeActivityState::Running {
             tracing::info!(
@@ -1182,15 +767,12 @@ impl RuntimeSystem {
             stage = "reactive_pipeline",
             "Starting runtime shutdown"
         );
-        let reactive_pipeline = self.reactive_pipeline.take();
-        if let Some(pipeline) = reactive_pipeline {
-            if let Err(error) = pipeline.shutdown().await {
-                tracing::warn!(
-                    event = "runtime.shutdown.reactive_pipeline_signal_failed",
-                    error = %error,
-                    "Reactive pipeline shutdown signal was unavailable during runtime shutdown"
-                );
-            }
+        if let Err(error) = self.reactive_pipeline_service.stop().await {
+            tracing::warn!(
+                event = "runtime.shutdown.reactive_pipeline_signal_failed",
+                error = %error,
+                "Reactive pipeline shutdown failed during runtime shutdown"
+            );
         }
 
         tracing::info!(
@@ -1320,6 +902,273 @@ fn sort_runtime_services_by_dependencies(
     }
 
     Ok(ordered)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn spawn_lan_transport_listener_tasks(
+    parent_tasks: crate::runtime::services::runtime_tasks::TaskGroup,
+    effects: Arc<AuraEffectSystem>,
+    lan_transport: Arc<LanTransportService>,
+) {
+    let tcp_accept_group = parent_tasks.group("tcp");
+    let tcp_connection_group = tcp_accept_group.group("connections");
+    let listener = lan_transport.listener();
+    let websocket_listener = lan_transport.websocket_listener();
+    let metrics = lan_transport.metrics_handle();
+    let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
+        Arc::new(effects.time_effects().clone());
+    let websocket_effects = effects.clone();
+    tcp_accept_group.spawn_cancellable_named("accept_loop", async move {
+        loop {
+            let (mut stream, addr) = match listener.accept().await {
+                Ok((stream, addr)) => (stream, addr),
+                Err(err) => {
+                    tracing::warn!(error = %err, "LAN transport accept failed");
+                    let now_ms = time_effects
+                        .physical_time()
+                        .await
+                        .ok()
+                        .map(|t| t.ts_ms)
+                        .unwrap_or(0);
+                    let mut metrics = metrics.write().await;
+                    metrics.accept_errors = metrics.accept_errors.saturating_add(1);
+                    if now_ms > 0 {
+                        metrics.last_error_ms = now_ms;
+                    }
+                    continue;
+                }
+            };
+
+            let effects = effects.clone();
+            let metrics = metrics.clone();
+            let time_effects = time_effects.clone();
+            let connection_group = tcp_connection_group.clone();
+            let now_ms = time_effects
+                .physical_time()
+                .await
+                .ok()
+                .map(|t| t.ts_ms)
+                .unwrap_or(0);
+            {
+                let mut metrics = metrics.write().await;
+                metrics.connections_accepted = metrics.connections_accepted.saturating_add(1);
+                if now_ms > 0 {
+                    metrics.last_accept_ms = now_ms;
+                }
+            }
+            connection_group.spawn_named(format!("connection.{addr}"), async move {
+                let mut len_buf = [0u8; 4];
+                if let Err(err) = stream.read_exact(&mut len_buf).await {
+                    tracing::debug!(error = %err, addr = %addr, "LAN transport read len failed");
+                    let now_ms = time_effects
+                        .physical_time()
+                        .await
+                        .ok()
+                        .map(|t| t.ts_ms)
+                        .unwrap_or(0);
+                    let mut metrics = metrics.write().await;
+                    metrics.read_errors = metrics.read_errors.saturating_add(1);
+                    if now_ms > 0 {
+                        metrics.last_error_ms = now_ms;
+                    }
+                    return;
+                }
+                let len = u32::from_be_bytes(len_buf) as usize;
+                if len == 0 || len > 1024 * 1024 {
+                    tracing::debug!(addr = %addr, len = len, "LAN transport invalid frame size");
+                    let now_ms = time_effects
+                        .physical_time()
+                        .await
+                        .ok()
+                        .map(|t| t.ts_ms)
+                        .unwrap_or(0);
+                    let mut metrics = metrics.write().await;
+                    metrics.decode_errors = metrics.decode_errors.saturating_add(1);
+                    if now_ms > 0 {
+                        metrics.last_error_ms = now_ms;
+                    }
+                    return;
+                }
+                let mut payload = vec![0u8; len];
+                if let Err(err) = stream.read_exact(&mut payload).await {
+                    tracing::debug!(
+                        error = %err,
+                        addr = %addr,
+                        "LAN transport read payload failed"
+                    );
+                    let now_ms = time_effects
+                        .physical_time()
+                        .await
+                        .ok()
+                        .map(|t| t.ts_ms)
+                        .unwrap_or(0);
+                    let mut metrics = metrics.write().await;
+                    metrics.read_errors = metrics.read_errors.saturating_add(1);
+                    if now_ms > 0 {
+                        metrics.last_error_ms = now_ms;
+                    }
+                    return;
+                }
+
+                let envelope = match aura_core::util::serialization::from_slice(&payload) {
+                    Ok(envelope) => envelope,
+                    Err(err) => {
+                        tracing::debug!(error = %err, addr = %addr, "LAN transport decode failed");
+                        let now_ms = time_effects
+                            .physical_time()
+                            .await
+                            .ok()
+                            .map(|t| t.ts_ms)
+                            .unwrap_or(0);
+                        let mut metrics = metrics.write().await;
+                        metrics.decode_errors = metrics.decode_errors.saturating_add(1);
+                        if now_ms > 0 {
+                            metrics.last_error_ms = now_ms;
+                        }
+                        return;
+                    }
+                };
+                let now_ms = time_effects
+                    .physical_time()
+                    .await
+                    .ok()
+                    .map(|t| t.ts_ms)
+                    .unwrap_or(0);
+                {
+                    let mut metrics = metrics.write().await;
+                    metrics.frames_received = metrics.frames_received.saturating_add(1);
+                    metrics.bytes_received = metrics.bytes_received.saturating_add(len as u64);
+                    if now_ms > 0 {
+                        metrics.last_frame_ms = now_ms;
+                    }
+                }
+
+                let _ = handle_inbound_transport_envelope(effects, envelope).await;
+            });
+        }
+    });
+
+    let websocket_accept_group = parent_tasks.group("websocket");
+    let websocket_connection_group = websocket_accept_group.group("connections");
+    let metrics = lan_transport.metrics_handle();
+    let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
+        Arc::new(websocket_effects.time_effects().clone());
+    websocket_accept_group.spawn_cancellable_named("accept_loop", async move {
+        loop {
+            let (stream, addr) = match websocket_listener.accept().await {
+                Ok((stream, addr)) => (stream, addr),
+                Err(err) => {
+                    tracing::warn!(error = %err, "LAN websocket accept failed");
+                    continue;
+                }
+            };
+
+            let effects = websocket_effects.clone();
+            let metrics = metrics.clone();
+            let time_effects = time_effects.clone();
+            let connection_group = websocket_connection_group.clone();
+            connection_group.spawn_named(format!("connection.{addr}"), async move {
+                let websocket = match accept_async(stream).await {
+                    Ok(websocket) => websocket,
+                    Err(err) => {
+                        tracing::debug!(
+                            error = %err,
+                            addr = %addr,
+                            "LAN websocket handshake failed"
+                        );
+                        return;
+                    }
+                };
+                let (mut sink, mut stream) = websocket.split();
+                while let Some(message) = stream.next().await {
+                    let message = match message {
+                        Ok(message) => message,
+                        Err(err) => {
+                            tracing::debug!(
+                                error = %err,
+                                addr = %addr,
+                                "LAN websocket read failed"
+                            );
+                            return;
+                        }
+                    };
+
+                    if !message.is_binary() {
+                        continue;
+                    }
+
+                    let payload = message.into_data();
+                    let envelope = match aura_core::util::serialization::from_slice::<
+                        TransportEnvelope,
+                    >(&payload)
+                    {
+                        Ok(envelope) => envelope,
+                        Err(err) => {
+                            tracing::debug!(
+                                error = %err,
+                                addr = %addr,
+                                "LAN websocket decode failed"
+                            );
+                            let mut metrics = metrics.write().await;
+                            metrics.decode_errors = metrics.decode_errors.saturating_add(1);
+                            continue;
+                        }
+                    };
+
+                    let now_ms = time_effects
+                        .physical_time()
+                        .await
+                        .ok()
+                        .map(|t| t.ts_ms)
+                        .unwrap_or(0);
+                    {
+                        let mut metrics = metrics.write().await;
+                        metrics.frames_received = metrics.frames_received.saturating_add(1);
+                        metrics.bytes_received =
+                            metrics.bytes_received.saturating_add(payload.len() as u64);
+                        if now_ms > 0 {
+                            metrics.last_frame_ms = now_ms;
+                        }
+                    }
+
+                    if let Some(response) =
+                        handle_inbound_transport_envelope(effects.clone(), envelope).await
+                    {
+                        match aura_core::util::serialization::to_vec(&response) {
+                            Ok(bytes) => {
+                                if let Err(err) = sink
+                                    .send(tokio_tungstenite::tungstenite::Message::Binary(bytes))
+                                    .await
+                                {
+                                    tracing::debug!(
+                                        error = %err,
+                                        addr = %addr,
+                                        "LAN websocket response send failed"
+                                    );
+                                    return;
+                                }
+                            }
+                            Err(err) => {
+                                tracing::debug!(
+                                    error = %err,
+                                    addr = %addr,
+                                    "LAN websocket response encode failed"
+                                );
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn spawn_lan_transport_listener_tasks(
+    _parent_tasks: crate::runtime::services::runtime_tasks::TaskGroup,
+    _effects: Arc<AuraEffectSystem>,
+    _lan_transport: Arc<LanTransportService>,
+) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1478,7 +1327,7 @@ async fn handle_inbound_transport_envelope(
     None
 }
 
-async fn publish_lan_descriptor_with(
+pub(crate) async fn publish_lan_descriptor_with(
     effects: Arc<AuraEffectSystem>,
     authority_id: AuthorityId,
     device_id: DeviceId,
@@ -1555,6 +1404,7 @@ async fn publish_lan_descriptor_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::builder::EffectSystemBuilder;
     use crate::runtime::services::SyncManagerConfig;
 
     #[test]
@@ -1614,5 +1464,23 @@ mod tests {
             sync_peer_reconcile_interval(&manager),
             Duration::from_secs(1)
         );
+    }
+
+    #[test]
+    fn runtime_services_include_runtime_maintenance() {
+        let authority_id = AuthorityId::new_from_entropy([11u8; 32]);
+        let runtime = EffectSystemBuilder::testing()
+            .with_authority(authority_id)
+            .build_sync()
+            .expect("build_sync should succeed in testing mode");
+
+        let service_names = runtime
+            .runtime_services_in_start_order()
+            .expect("runtime services should sort cleanly")
+            .into_iter()
+            .map(RuntimeService::name)
+            .collect::<Vec<_>>();
+
+        assert!(service_names.contains(&"runtime_maintenance"));
     }
 }

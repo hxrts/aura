@@ -5,7 +5,7 @@
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::{AuthorityId, ContextId, DeviceId, SessionId};
 use aura_protocol::effects::{ChoreographicRole, ChoreographyMetrics, RoleIndex};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::sync::Arc;
 use std::thread::ThreadId;
@@ -56,6 +56,50 @@ impl fmt::Display for RuntimeChoreographySessionId {
 pub struct SessionOwnerRecord {
     /// Stable local owner label.
     pub owner_label: String,
+    /// Current capability proving authority to act for this owner.
+    pub capability: SessionOwnerCapability,
+}
+
+/// Scope granted to one current runtime session owner capability.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionOwnerCapabilityScope {
+    /// Grants authority across the full runtime session.
+    Session,
+    /// Grants authority only to the listed fragments.
+    Fragments(BTreeSet<String>),
+}
+
+/// Capability proving current authority to act on one runtime session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionOwnerCapability {
+    pub session_id: RuntimeChoreographySessionId,
+    pub owner_label: String,
+    pub generation: u64,
+    pub scope: SessionOwnerCapabilityScope,
+}
+
+impl SessionOwnerCapability {
+    pub fn full_session(
+        session_id: RuntimeChoreographySessionId,
+        owner_label: impl Into<String>,
+        generation: u64,
+    ) -> Self {
+        Self {
+            session_id,
+            owner_label: owner_label.into(),
+            generation,
+            scope: SessionOwnerCapabilityScope::Session,
+        }
+    }
+
+    pub fn allows_full_session(&self) -> bool {
+        matches!(self.scope, SessionOwnerCapabilityScope::Session)
+    }
+
+    pub fn with_scope(mut self, scope: SessionOwnerCapabilityScope) -> Self {
+        self.scope = scope;
+        self
+    }
 }
 
 /// Errors raised while managing runtime session ownership.
@@ -80,6 +124,15 @@ pub enum SessionOwnershipError {
     OwnerMismatch {
         session_id: RuntimeChoreographySessionId,
         expected_owner: String,
+    },
+    /// The caller's capability is stale or insufficient for the current owner record.
+    #[error(
+        "runtime session {session_id} rejected capability for owner {expected_owner}; current generation is {current_generation}"
+    )]
+    CapabilityMismatch {
+        session_id: RuntimeChoreographySessionId,
+        expected_owner: String,
+        current_generation: u64,
     },
 }
 
@@ -128,6 +181,7 @@ impl ChoreographySessionState {
 pub struct ChoreographyState {
     sessions: HashMap<RuntimeChoreographySessionId, ChoreographySessionState>,
     session_owners: HashMap<RuntimeChoreographySessionId, SessionOwnerRecord>,
+    session_owner_generations: HashMap<RuntimeChoreographySessionId, u64>,
     task_bindings: HashMap<ExecutionBindingKey, RuntimeChoreographySessionId>,
     session_inbox_notifiers: HashMap<RuntimeChoreographySessionId, Arc<Notify>>,
     session_inboxes: HashMap<RuntimeChoreographySessionId, Vec<TransportEnvelope>>,
@@ -394,7 +448,7 @@ impl ChoreographyState {
         &mut self,
         session_id: RuntimeChoreographySessionId,
         owner_label: impl Into<String>,
-    ) -> Result<(), SessionOwnershipError> {
+    ) -> Result<SessionOwnerCapability, SessionOwnershipError> {
         let owner_label = owner_label.into();
         if !self.sessions.contains_key(&session_id) {
             return Err(SessionOwnershipError::MissingOwner { session_id });
@@ -408,28 +462,50 @@ impl ChoreographyState {
                     requested_owner: owner_label,
                 });
             }
-            return Ok(());
+            return Ok(existing.capability.clone());
         }
 
-        self.session_owners
-            .insert(session_id, SessionOwnerRecord { owner_label });
-        Ok(())
+        let generation = self
+            .session_owner_generations
+            .entry(session_id)
+            .and_modify(|generation| *generation = generation.saturating_add(1))
+            .or_insert(1);
+        let capability =
+            SessionOwnerCapability::full_session(session_id, owner_label.clone(), *generation);
+        self.session_owners.insert(
+            session_id,
+            SessionOwnerRecord {
+                owner_label,
+                capability: capability.clone(),
+            },
+        );
+        Ok(capability)
     }
 
     /// Ensure the requested owner still holds the active session.
     pub fn ensure_session_owner(
         &self,
         session_id: RuntimeChoreographySessionId,
-        expected_owner: &str,
+        expected_capability: &SessionOwnerCapability,
     ) -> Result<(), SessionOwnershipError> {
         let Some(owner) = self.session_owners.get(&session_id) else {
             return Err(SessionOwnershipError::MissingOwner { session_id });
         };
 
-        if owner.owner_label != expected_owner {
+        if owner.owner_label != expected_capability.owner_label {
             return Err(SessionOwnershipError::OwnerMismatch {
                 session_id,
-                expected_owner: expected_owner.to_string(),
+                expected_owner: expected_capability.owner_label.clone(),
+            });
+        }
+
+        if owner.capability.generation != expected_capability.generation
+            || owner.capability.scope != expected_capability.scope
+        {
+            return Err(SessionOwnershipError::CapabilityMismatch {
+                session_id,
+                expected_owner: expected_capability.owner_label.clone(),
+                current_generation: owner.capability.generation,
             });
         }
 
@@ -440,11 +516,40 @@ impl ChoreographyState {
     pub fn release_session_owner(
         &mut self,
         session_id: RuntimeChoreographySessionId,
-        expected_owner: &str,
+        expected_capability: &SessionOwnerCapability,
     ) -> Result<(), SessionOwnershipError> {
-        self.ensure_session_owner(session_id, expected_owner)?;
+        self.ensure_session_owner(session_id, expected_capability)?;
         self.session_owners.remove(&session_id);
         Ok(())
+    }
+
+    /// Atomically transfer authoritative ownership for one active session.
+    pub fn transfer_session_owner(
+        &mut self,
+        session_id: RuntimeChoreographySessionId,
+        expected_capability: &SessionOwnerCapability,
+        next_owner_label: impl Into<String>,
+        next_scope: SessionOwnerCapabilityScope,
+    ) -> Result<SessionOwnerCapability, SessionOwnershipError> {
+        self.ensure_session_owner(session_id, expected_capability)?;
+
+        let next_owner_label = next_owner_label.into();
+        let generation = self
+            .session_owner_generations
+            .entry(session_id)
+            .and_modify(|generation| *generation = generation.saturating_add(1))
+            .or_insert(1);
+        let next_capability =
+            SessionOwnerCapability::full_session(session_id, next_owner_label.clone(), *generation)
+                .with_scope(next_scope);
+        self.session_owners.insert(
+            session_id,
+            SessionOwnerRecord {
+                owner_label: next_owner_label,
+                capability: next_capability.clone(),
+            },
+        );
+        Ok(next_capability)
     }
 
     /// Snapshot the current owner for one active session.
@@ -569,14 +674,89 @@ mod tests {
         state
             .start_session(session_id, context_id, vec![role], role, Some(1000), 0)
             .expect("session starts");
-        state
+        let capability = state
             .claim_session_owner(session_id, "owner-a")
             .expect("owner claims session");
         state.end_session(10).expect("session ends");
 
         assert!(matches!(
-            state.ensure_session_owner(session_id, "owner-a"),
+            state.ensure_session_owner(session_id, &capability),
             Err(SessionOwnershipError::MissingOwner { .. })
         ));
+    }
+
+    #[test]
+    fn reclaiming_owner_invalidates_stale_capability_generation() {
+        let authority_id = DeviceId::from_uuid(Uuid::from_bytes([9; 16]));
+        let role = ChoreographicRole::new(
+            authority_id,
+            AuthorityId::new_from_entropy([3u8; 32]),
+            RoleIndex::new(0).expect("role index"),
+        );
+        let session_id = RuntimeChoreographySessionId::from_uuid(Uuid::from_u128(48));
+        let context_id = ContextId::new_from_entropy([11; 32]);
+        let mut state = ChoreographyState::new();
+
+        state
+            .start_session(session_id, context_id, vec![role], role, Some(1000), 0)
+            .expect("session starts");
+        let first = state
+            .claim_session_owner(session_id, "owner-a")
+            .expect("owner claims session");
+        state
+            .release_session_owner(session_id, &first)
+            .expect("owner releases session");
+        let second = state
+            .claim_session_owner(session_id, "owner-a")
+            .expect("owner reclaims session");
+
+        assert!(second.generation > first.generation);
+        assert!(matches!(
+            state.ensure_session_owner(session_id, &first),
+            Err(SessionOwnershipError::CapabilityMismatch { .. })
+        ));
+        assert!(state.ensure_session_owner(session_id, &second).is_ok());
+    }
+
+    #[test]
+    fn transfer_session_owner_is_atomic_and_invalidates_old_capability() {
+        let authority_id = DeviceId::from_uuid(Uuid::from_bytes([10; 16]));
+        let role = ChoreographicRole::new(
+            authority_id,
+            AuthorityId::new_from_entropy([4u8; 32]),
+            RoleIndex::new(0).expect("role index"),
+        );
+        let session_id = RuntimeChoreographySessionId::from_uuid(Uuid::from_u128(49));
+        let context_id = ContextId::new_from_entropy([12; 32]);
+        let mut state = ChoreographyState::new();
+
+        state
+            .start_session(session_id, context_id, vec![role], role, Some(1000), 0)
+            .expect("session starts");
+        let original = state
+            .claim_session_owner(session_id, "owner-a")
+            .expect("owner claims session");
+        let transferred = state
+            .transfer_session_owner(
+                session_id,
+                &original,
+                "owner-b",
+                SessionOwnerCapabilityScope::Fragments(BTreeSet::from([
+                    "fragment.alpha".to_string()
+                ])),
+            )
+            .expect("ownership transfers");
+
+        assert_eq!(transferred.owner_label, "owner-b");
+        assert!(matches!(
+            transferred.scope,
+            SessionOwnerCapabilityScope::Fragments(_)
+        ));
+        assert!(matches!(
+            state.ensure_session_owner(session_id, &original),
+            Err(SessionOwnershipError::OwnerMismatch { .. })
+                | Err(SessionOwnershipError::CapabilityMismatch { .. })
+        ));
+        assert!(state.ensure_session_owner(session_id, &transferred).is_ok());
     }
 }

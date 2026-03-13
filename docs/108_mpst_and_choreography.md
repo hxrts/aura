@@ -74,6 +74,13 @@ Production runtime ownership is fragment-scoped. The admitted unit is one VM fra
 The host runtime may use actor services to supervise the surrounding work, but
 fragment ownership itself remains a singular move boundary with stale-owner rejection.
 
+Owner record and capability are also distinct here:
+
+- ownership answers which local runtime currently owns the fragment
+- capability answers which fragment-scoped effects that owner may drive
+
+Delegation must define both the ownership handoff and the capability scope that moves with it.
+
 Host-side async code must preserve that ownership model. External network,
 timer, and callback work enters through canonical ingress and is routed to the current local owner before any session mutation occurs.
 

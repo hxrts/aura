@@ -176,10 +176,32 @@ Rules:
 - The owner is either a per-session actor or an authoritative choreography runtime loop.
 - Network, timer, and external events are queued before touching session state.
 - Session ownership and task ownership move together.
-- Session-bound effects execute only under the current owner.
+- Session-bound effects execute only under the current owner capability.
 
 The current owner may be hosted by an actor, but ownership itself remains a
 single-owner move boundary, not a shared mutable actor coordination pattern.
+
+### Owner Record vs Owner Capability
+
+`aura-agent` treats these as distinct runtime concepts:
+
+- the owner record answers who currently owns the session or endpoint
+- the owner capability answers what that owner may currently do
+
+Rules:
+
+- owner-record transitions are ownership changes, not implicit authorization grants
+- owner-capability checks are authorization decisions, not ownership changes
+- a valid owner record without the required capability is insufficient for session-bound work
+- a stale capability without the current owner record is invalid
+- delegation must update both the owner record and the relevant capability state
+
+Owner identity and owner capability are distinct concepts:
+
+- the owner record identifies who currently owns the session or endpoint
+- the owner capability identifies which owner-routed effects that owner may perform
+
+The runtime must validate both. Ownership alone is not a sufficient authorization check.
 
 ### Session Ingress
 
@@ -282,6 +304,14 @@ Runtime consequences:
 
 Actor messaging may carry delegation requests, but it does not replace the move.
 The transfer itself is an ownership handoff with stale-owner invalidation.
+
+Transfer and attenuation are separate concepts:
+
+- transfer changes the authoritative owner
+- attenuation narrows the capability scope that moves with the new owner
+
+If the runtime cannot state which one is happening and under which protocol rule,
+it must reject the delegation path.
 
 ## Async Primitives
 

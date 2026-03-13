@@ -283,7 +283,7 @@ impl EffectSystemBuilder {
         effect_system.initialize_biscuit_cache().await;
 
         // Build runtime system with configured services
-        let mut system = RuntimeSystem::new_with_services(
+        let system = RuntimeSystem::new_with_services(
             effect_executor,
             effect_system.clone(),
             context_manager,
@@ -305,12 +305,6 @@ impl EffectSystemBuilder {
         aura_app::signal_defs::register_app_signals(&system.effects().reactive_handler())
             .await
             .map_err(|e| format!("Failed to register app signals: {e}"))?;
-
-        // Start reactive pipeline (facts → scheduler).
-        system.start_reactive_pipeline().await?;
-
-        // Start runtime maintenance tasks (cleanup/pruning).
-        system.start_maintenance_tasks();
 
         // Start runtime services (sync, rendezvous, social, etc).
         system.start_services().await.map_err(|e| e.to_string())?;
@@ -372,7 +366,8 @@ mod tests {
             .with_authority(authority_id)
             .build_sync()
             .expect("build_sync should succeed in testing mode");
-        assert!(runtime.reactive_pipeline().is_some());
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        assert!(rt.block_on(runtime.reactive_pipeline_running()));
     }
 
     #[test]
@@ -427,7 +422,10 @@ mod tests {
                 .expect("shutdown_typed should cancel runtime-owned load");
 
             assert!(tasks.active_tasks().is_empty());
-            assert_eq!(activity_gate.state(), crate::runtime::RuntimeActivityState::Stopped);
+            assert_eq!(
+                activity_gate.state(),
+                crate::runtime::RuntimeActivityState::Stopped
+            );
         });
     }
 }

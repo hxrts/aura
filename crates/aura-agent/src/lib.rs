@@ -217,7 +217,9 @@ pub use runtime::{
 
 // Sync service types
 #[cfg(feature = "choreo-backend-telltale-vm")]
-pub use runtime::services::{SyncManagerConfig, SyncManagerState, SyncServiceManager};
+pub use runtime::services::{
+    SessionDelegationTransfer, SyncManagerConfig, SyncManagerState, SyncServiceManager,
+};
 
 // Rendezvous service types
 #[cfg(feature = "choreo-backend-telltale-vm")]

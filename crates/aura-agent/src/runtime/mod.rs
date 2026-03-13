@@ -142,7 +142,10 @@ pub use aura_guards::guards::journal::{
 };
 
 // Subsystem re-exports (available for incremental adoption
-pub use subsystems::choreography::RuntimeChoreographySessionId;
+#[allow(unused_imports)]
+pub use subsystems::choreography::{
+    RuntimeChoreographySessionId, SessionOwnerCapability, SessionOwnerCapabilityScope,
+};
 #[allow(unused_imports)]
 pub use subsystems::{ChoreographyState, CryptoSubsystem, JournalSubsystem, TransportSubsystem};
 

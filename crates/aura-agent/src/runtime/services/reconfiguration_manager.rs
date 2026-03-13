@@ -23,6 +23,40 @@ pub struct ReconfigurationManager {
     runtime_capabilities: RuntimeCapabilityHandler,
 }
 
+/// Typed runtime delegation request for one session ownership transfer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionDelegationTransfer {
+    pub context_id: Option<ContextId>,
+    pub session_id: SessionId,
+    pub from_authority: AuthorityId,
+    pub to_authority: AuthorityId,
+    pub bundle_id: String,
+}
+
+impl SessionDelegationTransfer {
+    #[must_use]
+    pub fn new(
+        session_id: SessionId,
+        from_authority: AuthorityId,
+        to_authority: AuthorityId,
+        bundle_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            context_id: None,
+            session_id,
+            from_authority,
+            to_authority,
+            bundle_id: bundle_id.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_context(mut self, context_id: ContextId) -> Self {
+        self.context_id = Some(context_id);
+        self
+    }
+}
+
 impl Default for ReconfigurationManager {
     fn default() -> Self {
         Self::new()
@@ -113,11 +147,7 @@ impl ReconfigurationManager {
     pub async fn delegate_session(
         &self,
         effects: &AuraEffectSystem,
-        context_id: Option<ContextId>,
-        session_id: SessionId,
-        from_authority: AuthorityId,
-        to_authority: AuthorityId,
-        bundle_id: Option<String>,
+        transfer: SessionDelegationTransfer,
     ) -> Result<DelegationReceipt, String> {
         self.require_reconfiguration_capability("session delegation")
             .await?;
@@ -131,9 +161,13 @@ impl ReconfigurationManager {
             origin: None,
         };
 
-        let bundle_id = bundle_id.ok_or_else(|| {
-            "delegation requires pre-registered reconfiguration bundle evidence".to_string()
-        })?;
+        let SessionDelegationTransfer {
+            context_id,
+            session_id,
+            from_authority,
+            to_authority,
+            bundle_id,
+        } = transfer;
 
         let receipt = {
             let mut controller = self.controller.write().await;
@@ -287,5 +321,28 @@ fn default_runtime_capability_handler() -> RuntimeCapabilityHandler {
     #[cfg(not(feature = "choreo-backend-telltale-vm"))]
     {
         RuntimeCapabilityHandler::from_pairs([(CAPABILITY_RECONFIGURATION, true)])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_delegation_transfer_keeps_context_separate_from_bundle_evidence() {
+        let session_id = SessionId::new_from_entropy([1; 32]);
+        let from_authority = AuthorityId::new_from_entropy([2; 32]);
+        let to_authority = AuthorityId::new_from_entropy([3; 32]);
+        let context_id = ContextId::new_from_entropy([4; 32]);
+
+        let transfer =
+            SessionDelegationTransfer::new(session_id, from_authority, to_authority, "bundle-a")
+                .with_context(context_id);
+
+        assert_eq!(transfer.session_id, session_id);
+        assert_eq!(transfer.from_authority, from_authority);
+        assert_eq!(transfer.to_authority, to_authority);
+        assert_eq!(transfer.context_id, Some(context_id));
+        assert_eq!(transfer.bundle_id, "bundle-a");
     }
 }

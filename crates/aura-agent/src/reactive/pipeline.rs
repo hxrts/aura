@@ -20,11 +20,11 @@ use super::{
     ChatSignalView, ContactsSignalView, HomeSignalView, InvitationsSignalView, RecoverySignalView,
 };
 use super::{FactSource, ReactiveScheduler, SchedulerConfig};
+use crate::runtime::services::runtime_tasks::TaskGroup;
+use crate::runtime::AuraEffectSystem;
 use crate::runtime::{
     RuntimeDiagnostic, RuntimeDiagnosticKind, RuntimeDiagnosticSeverity, RuntimeDiagnosticSink,
 };
-use crate::runtime::services::runtime_tasks::TaskGroup;
-use crate::runtime::AuraEffectSystem;
 use crate::task_registry::TaskSupervisor;
 
 /// Owns the running scheduler + the single fact publication mechanism.

@@ -88,7 +88,8 @@ impl RuntimeMaintenanceService {
         self.mark_state(MaintenanceServiceState::Starting).await;
 
         let tasks = context.tasks().group(self.name());
-        self.spawn_loops(tasks.clone(), context.time_effects()).await?;
+        self.spawn_loops(tasks.clone(), context.time_effects())
+            .await?;
         *self.tasks.write().await = Some(tasks);
         self.mark_state(MaintenanceServiceState::Running).await;
         Ok(())
@@ -229,6 +230,23 @@ impl RuntimeMaintenanceService {
         if let (Some(rendezvous_manager), Some(lan_transport)) =
             (self.rendezvous_manager.clone(), self.lan_transport.clone())
         {
+            if let Err(error) = publish_lan_descriptor_with(
+                self.effects.clone(),
+                self.authority_id,
+                self.device_id,
+                &rendezvous_manager,
+                lan_transport.as_ref(),
+            )
+            .await
+            {
+                tracing::warn!(
+                    event = "runtime.service.lifecycle.post_start_failed",
+                    service = self.name(),
+                    error = %error,
+                    "Maintenance service failed to publish the initial LAN descriptor"
+                );
+            }
+
             let effects = self.effects.clone();
             let authority_id = self.authority_id;
             let device_id = self.device_id;
