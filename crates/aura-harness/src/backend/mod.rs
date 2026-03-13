@@ -12,8 +12,8 @@ use aura_app::ui::contract::{
     ControlId, FieldId, ListId, ModalId, OperationId, OperationInstanceId, OperationState,
     ScreenId, UiSnapshot,
 };
-use aura_app::ui_contract::RuntimeFact;
 use aura_app::ui_contract::ProjectionRevision;
+use aura_app::ui_contract::RuntimeFact;
 use std::time::Duration;
 use tokio::time::Instant;
 

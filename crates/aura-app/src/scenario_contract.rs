@@ -1087,6 +1087,7 @@ impl IntentAction {
                         BarrierDeclaration::Screen(ScreenId::Chat),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
                         BarrierDeclaration::Quiescence(QuiescenceState::Settled),
+                        BarrierDeclaration::RuntimeEvent(RuntimeEventKind::MessageDeliveryReady),
                     ],
                     before_next_intent: vec![
                         BarrierDeclaration::RuntimeEvent(RuntimeEventKind::MessageCommitted),
@@ -2135,6 +2136,27 @@ mod tests {
             modal: ModalId::AddDevice
         }
         .matches_declaration(&BarrierDeclaration::Screen(ScreenId::Settings)));
+    }
+
+    #[test]
+    fn send_chat_message_requires_delivery_ready_before_issue() {
+        let contract = IntentAction::SendChatMessage {
+            message: "hello".to_string(),
+        }
+        .contract();
+
+        assert!(contract
+            .barriers
+            .before_issue
+            .contains(&BarrierDeclaration::RuntimeEvent(
+                RuntimeEventKind::MessageDeliveryReady,
+            )));
+        assert!(contract
+            .barriers
+            .before_next_intent
+            .contains(&BarrierDeclaration::RuntimeEvent(
+                RuntimeEventKind::MessageCommitted,
+            )));
     }
 
     #[test]

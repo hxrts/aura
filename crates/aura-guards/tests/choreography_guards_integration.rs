@@ -1,5 +1,5 @@
 //! Integration tests for the choreography-first guard architecture described in
-//! [`docs/108_mpst_and_choreography.md`].
+//! [`docs/110_mpst_and_choreography.md`].
 //!
 //! These tests demonstrate that choreographic annotations automatically generate
 //! `EffectCommand` sequences that execute through the unified interpreter infrastructure.

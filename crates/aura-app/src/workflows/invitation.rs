@@ -389,6 +389,10 @@ pub async fn accept_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &InvitationId,
 ) -> Result<(), AuraError> {
+    let accepted_invitation = list_invitations(app_core)
+        .await
+        .invitation(invitation_id.as_str())
+        .cloned();
     let runtime = require_runtime(app_core).await?;
 
     runtime
@@ -407,6 +411,14 @@ pub async fn accept_invitation(
             .is_ok()
         {
             break;
+        }
+    }
+
+    if accepted_invitation.as_ref().is_some_and(|invitation| {
+        invitation.invitation_type == crate::views::invitations::InvitationType::Home
+    }) {
+        if let Some(invitation) = accepted_invitation {
+            wait_for_contact_link(app_core, &runtime, invitation.from_id).await?;
         }
     }
 
@@ -520,21 +532,7 @@ pub async fn accept_invitation_by_str(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
 ) -> Result<(), AuraError> {
-    let invitation = list_invitations(app_core)
-        .await
-        .invitation(invitation_id)
-        .cloned();
-
-    accept_invitation(app_core, &InvitationId::new(invitation_id)).await?;
-
-    if let Some(invitation) = invitation {
-        if invitation.invitation_type == crate::views::invitations::InvitationType::Home {
-            let runtime = require_runtime(app_core).await?;
-            wait_for_contact_link(app_core, &runtime, invitation.from_id).await?;
-        }
-    }
-
-    Ok(())
+    accept_invitation(app_core, &InvitationId::new(invitation_id)).await
 }
 
 /// Decline an invitation using typed InvitationId

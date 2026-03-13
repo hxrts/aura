@@ -1128,7 +1128,7 @@ impl ProtocolRelationalFact {
 /// - `Protocol(RotateFact)` - Lifecycle rotation/upgrade marker
 ///
 /// New protocol facts must be added to the `ProtocolRelationalFact` enum and documented
-/// in `docs/103_journal.md` (criteria + reduction rules).
+/// in `docs/105_journal.md` (criteria + reduction rules).
 ///
 /// ## Domain-Level Facts (via Generic + FactRegistry)
 ///

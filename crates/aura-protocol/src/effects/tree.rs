@@ -18,7 +18,7 @@
 //!
 //! ## References
 //!
-//! - [`docs/105_effect_system.md`](../../../../docs/105_effect_system.md) - Effect system architecture
+//! - [`docs/103_effect_system.md`](../../../../docs/103_effect_system.md) - Effect system architecture
 //! - [`docs/102_authority_and_identity.md`](../../../../docs/102_authority_and_identity.md) - Tree operations
 
 use async_trait::async_trait;
@@ -75,7 +75,7 @@ pub struct Snapshot {
 /// 2. Run threshold ceremony (separate) → Collect signatures → `AttestedOp`
 /// 3. Apply operation → `apply_attested_op()` → Updates tree state
 ///
-/// See: [`docs/105_effect_system.md`](../../../../docs/105_effect_system.md) for architectural guidelines
+/// See: [`docs/103_effect_system.md`](../../../../docs/103_effect_system.md) for architectural guidelines
 #[async_trait]
 pub trait TreeEffects: Send + Sync {
     // ===== State Queries =====

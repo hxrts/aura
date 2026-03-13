@@ -479,19 +479,17 @@ impl LocalPtyBackend {
                         }
                         let receipt = serde_json::from_slice::<HarnessUiCommandReceipt>(&receipt)
                             .map_err(|error| {
-                                if error.classify() == serde_json::error::Category::Eof {
-                                    std::io::Error::new(
-                                        ErrorKind::UnexpectedEof,
-                                        format!(
-                                            "truncated harness UI command receipt: {error}"
-                                        ),
-                                    )
-                                    .into()
-                                } else {
-                                    anyhow::Error::new(error)
-                                        .context("failed to decode harness UI command receipt")
-                                }
-                            })?;
+                            if error.classify() == serde_json::error::Category::Eof {
+                                std::io::Error::new(
+                                    ErrorKind::UnexpectedEof,
+                                    format!("truncated harness UI command receipt: {error}"),
+                                )
+                                .into()
+                            } else {
+                                anyhow::Error::new(error)
+                                    .context("failed to decode harness UI command receipt")
+                            }
+                        })?;
                         match receipt {
                             HarnessUiCommandReceipt::Accepted => Ok(()),
                             HarnessUiCommandReceipt::Rejected { reason } => {

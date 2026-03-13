@@ -15,6 +15,7 @@ use aura_app::ui::contract::{
     ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState,
     RuntimeEventKind, ScreenId, ToastKind, UiReadiness,
 };
+use aura_app::ui_contract::QuiescenceState;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
@@ -160,6 +161,8 @@ pub struct ScenarioStep {
     pub modal_id: Option<ModalId>,
     /// Semantic readiness reference for typed scenario expectations.
     pub readiness: Option<UiReadiness>,
+    /// Semantic quiescence reference for typed scenario expectations.
+    pub quiescence: Option<QuiescenceState>,
     /// Semantic runtime-event reference for typed scenario expectations.
     pub runtime_event_kind: Option<RuntimeEventKind>,
     /// Semantic operation identifier for typed lifecycle expectations.

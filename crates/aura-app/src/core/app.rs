@@ -465,7 +465,7 @@ impl AppCore {
     /// deterministic ordering based on intent content.
     ///
     /// Biscuit authorization is available when integrating with aura-agent runtime
-    /// (see docs/104_authorization.md for details).
+    /// (see docs/106_authorization.md for details).
     #[cfg(any(feature = "app-internals", test))]
     pub fn dispatch(&mut self, intent: Intent) -> Result<String, IntentError> {
         self.validate_intent(&intent)?;
@@ -1021,7 +1021,7 @@ impl AppCore {
     /// # See Also
     ///
     /// - `docs/102_authority_and_identity.md` - Authority model and multi-authority devices
-    /// - `docs/107_operation_categories.md` - Ceremony lifecycle and requirements
+    /// - `docs/109_operation_categories.md` - Ceremony lifecycle and requirements
     pub async fn initiate_device_threshold_ceremony(
         &self,
         threshold_k: FrostThreshold,

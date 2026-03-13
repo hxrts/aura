@@ -52,6 +52,8 @@ const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const CHAT_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
 const AMP_SEND_RETRY_ATTEMPTS: usize = 6;
 const AMP_SEND_RETRY_BACKOFF_MS: u64 = 75;
+const CHANNEL_CONTEXT_RETRY_ATTEMPTS: usize = 12;
+const CHANNEL_CONTEXT_RETRY_BACKOFF_MS: u64 = 100;
 const REMOTE_DELIVERY_RETRY_ATTEMPTS: usize = 24;
 const REMOTE_DELIVERY_RETRY_BACKOFF_MS: u64 = 250;
 
@@ -913,6 +915,27 @@ pub(crate) async fn authoritative_context_id_for_channel(
         .and_then(|home| home.context_id)
 }
 
+async fn require_authoritative_context_id_for_channel(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn RuntimeBridge>,
+    channel_id: ChannelId,
+    operation: &str,
+) -> Result<ContextId, AuraError> {
+    for attempt in 0..CHANNEL_CONTEXT_RETRY_ATTEMPTS {
+        if let Some(context_id) = authoritative_context_id_for_channel(app_core, channel_id).await {
+            return Ok(context_id);
+        }
+        if attempt + 1 < CHANNEL_CONTEXT_RETRY_ATTEMPTS {
+            converge_runtime(runtime).await;
+            runtime.sleep_ms(CHANNEL_CONTEXT_RETRY_BACKOFF_MS).await;
+        }
+    }
+
+    Err(AuraError::agent(format!(
+        "{operation} requires an authoritative context for channel {channel_id}"
+    )))
+}
+
 async fn ensure_home_state_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
@@ -1055,6 +1078,7 @@ async fn warm_channel_connectivity(
         let _ = runtime.ensure_peer_channel(context_id, peer).await;
     }
     converge_runtime(runtime).await;
+    let _ = crate::workflows::system::refresh_account(app_core).await;
 }
 
 /// Resolve recipient peers for a channel view from known channel, home, contact, and discovery state.
@@ -2241,8 +2265,13 @@ pub async fn invite_authority_to_channel(
     ttl_ms: Option<u64>,
 ) -> Result<InvitationId, AuraError> {
     let runtime = require_runtime(app_core).await?;
-    let context_id =
-        context_id_for_channel(app_core, channel_id, Some(runtime.authority_id())).await?;
+    let mut context_id = require_authoritative_context_id_for_channel(
+        app_core,
+        &runtime,
+        channel_id,
+        "channel invitation bootstrap",
+    )
+    .await?;
 
     // Channel invitations must carry bootstrap key material so recipients can
     // decrypt channel traffic immediately after acceptance.
@@ -2265,9 +2294,20 @@ pub async fn invite_authority_to_channel(
     };
     if maybe_bootstrap.is_none() {
         for attempt in 1..=AMP_SEND_RETRY_ATTEMPTS {
+            converge_runtime(&runtime).await;
             runtime
                 .sleep_ms(AMP_SEND_RETRY_BACKOFF_MS * attempt as u64)
                 .await;
+            if let Ok(authoritative_context) = require_authoritative_context_id_for_channel(
+                app_core,
+                &runtime,
+                channel_id,
+                "channel invitation bootstrap",
+            )
+            .await
+            {
+                context_id = authoritative_context;
+            }
             match runtime
                 .amp_create_channel_bootstrap(context_id, channel_id, invitees.clone())
                 .await
@@ -2327,6 +2367,13 @@ pub async fn invite_authority_to_channel(
                 );
                 return;
             }
+            warm_channel_connectivity(
+                &background_app_core,
+                &background_runtime,
+                channel_id,
+                context_id,
+            )
+            .await;
             converge_runtime(&background_runtime).await;
         });
     } else {
@@ -2338,6 +2385,7 @@ pub async fn invite_authority_to_channel(
             None,
         )
         .await?;
+        warm_channel_connectivity(app_core, &runtime, channel_id, context_id).await;
         converge_runtime(&runtime).await;
     }
 

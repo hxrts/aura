@@ -264,7 +264,10 @@ impl ChatCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(EffectCommand::AcceptPendingHomeInvitation).await {
+                match ctx
+                    .dispatch(EffectCommand::AcceptPendingHomeInvitation)
+                    .await
+                {
                     Ok(_) => {
                         send_ui_update_reliable(
                             &tx,

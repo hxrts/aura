@@ -839,6 +839,14 @@ fn execute_step(
         let instance_id = resolve_required_instance(step, context)?;
         ensure_post_operation_convergence_satisfied(step, context, &instance_id)?;
         let intent = shared_intent_action(binding, step, context)?;
+        wait_for_declared_before_issue_barriers(
+            step,
+            tool_api,
+            step_budget_ms,
+            context,
+            &instance_id,
+            &intent.contract(),
+        )?;
         enforce_action_preconditions(step, tool_api, context, &intent)?;
         return execute_shared_semantic_action(binding, step, tool_api, step_budget_ms, context);
     }
@@ -2948,6 +2956,69 @@ fn enforce_action_preconditions(
     );
 }
 
+fn wait_for_declared_before_issue_barriers(
+    step: &ScenarioStep,
+    tool_api: &mut ToolApi,
+    step_budget_ms: u64,
+    context: &mut ScenarioContext,
+    instance_id: &str,
+    contract: &SharedActionContract,
+) -> Result<()> {
+    if contract.barriers.before_issue.is_empty() {
+        return Ok(());
+    }
+    let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    for barrier in &contract.barriers.before_issue {
+        let remaining_ms = deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis()
+            .max(1) as u64;
+        convergence_stage(
+            step,
+            &format!("before_issue::{barrier:?}"),
+            wait_for_declared_barrier(step, tool_api, context, instance_id, remaining_ms, barrier),
+        )?;
+    }
+    Ok(())
+}
+
+fn wait_for_declared_barrier(
+    step: &ScenarioStep,
+    tool_api: &mut ToolApi,
+    context: &mut ScenarioContext,
+    instance_id: &str,
+    timeout_ms: u64,
+    barrier: &BarrierDeclaration,
+) -> Result<()> {
+    let mut wait_step = semantic_wait_step(step);
+    match barrier {
+        BarrierDeclaration::Readiness(readiness) => {
+            wait_step.readiness = Some(*readiness);
+        }
+        BarrierDeclaration::Quiescence(quiescence) => {
+            wait_step.quiescence = Some(quiescence.clone());
+        }
+        BarrierDeclaration::Screen(screen) => {
+            wait_step.screen_id = Some(*screen);
+        }
+        BarrierDeclaration::Modal(modal) => {
+            wait_step.modal_id = Some(*modal);
+        }
+        BarrierDeclaration::RuntimeEvent(kind) => {
+            wait_step.runtime_event_kind = Some(*kind);
+        }
+        BarrierDeclaration::OperationState {
+            operation_id,
+            state,
+        } => {
+            wait_step.operation_id = Some(operation_id.clone());
+            wait_step.operation_state = Some(*state);
+        }
+    }
+    wait_for_semantic_state(&wait_step, tool_api, context, instance_id, timeout_ms)
+}
+
 #[cfg(test)]
 fn wait_contract_matches_barrier(
     contract: &WaitContractRef<'_>,
@@ -3523,6 +3594,7 @@ fn semantic_wait_step(step: &ScenarioStep) -> ScenarioStep {
     wait_step.field_id = None;
     wait_step.modal_id = None;
     wait_step.readiness = None;
+    wait_step.quiescence = None;
     wait_step.operation_id = None;
     wait_step.operation_state = None;
     wait_step.list_id = None;
@@ -3819,6 +3891,11 @@ fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
             return false;
         }
     }
+    if let Some(quiescence) = step.quiescence.as_ref() {
+        if snapshot.quiescence.state != *quiescence {
+            return false;
+        }
+    }
     if let Some(kind) = step.runtime_event_kind {
         let detail_needle = step
             .contains
@@ -3967,6 +4044,9 @@ fn semantic_wait_description(step: &ScenarioStep) -> String {
     }
     if let Some(readiness) = step.readiness {
         return format!("readiness={readiness:?}");
+    }
+    if let Some(quiescence) = step.quiescence.as_ref() {
+        return format!("quiescence={quiescence:?}");
     }
     if let Some(kind) = step.runtime_event_kind {
         return format!("runtime_event={kind:?}");

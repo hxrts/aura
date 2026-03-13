@@ -963,7 +963,6 @@ impl InvitationHandler {
             .await
     }
 
-
     async fn resolve_contact_invitation(
         &self,
         effects: &AuraEffectSystem,
@@ -1930,7 +1929,8 @@ impl InvitationHandler {
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,
     ) -> AgentResult<()> {
-        self.execute_invitation_exchange_sender(effects, invitation).await
+        self.execute_invitation_exchange_sender(effects, invitation)
+            .await
     }
 
     async fn execute_invitation_exchange_receiver(

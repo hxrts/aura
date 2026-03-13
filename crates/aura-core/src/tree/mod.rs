@@ -4,7 +4,7 @@
 //! pure structures with no business logic.
 //!
 //! **Key Types**:
-//! - **Epoch**: Monotonically increasing epoch counter for key rotation (per docs/111_rendezvous.md)
+//! - **Epoch**: Monotonically increasing epoch counter for key rotation (per docs/113_rendezvous.md)
 //! - **Policy**: Meet-semilattice (⊓) threshold policy (Any, Threshold, All);
 //!   more restrictive is smaller per docs/002_theoretical_model.md
 //! - **LeafNode**: Device or guardian leaf in tree
@@ -16,8 +16,8 @@
 //! **Design Principles**:
 //! - Content-addressed: Operations identified by content hash (CID)
 //! - Deterministic: Reproducible commitments from structure
-//! - Policy semilattice: Refinement forms partial order (per docs/106_consensus.md)
-//! - Fact-based: AttestedOps are immutable atomic facts (per docs/103_journal.md)
+//! - Policy semilattice: Refinement forms partial order (per docs/108_consensus.md)
+//! - Fact-based: AttestedOps are immutable atomic facts (per docs/105_journal.md)
 //!
 //! **Verification Model**:
 //! - `verify_attested_op`: Cryptographic signature check against provided key

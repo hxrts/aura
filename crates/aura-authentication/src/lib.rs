@@ -77,7 +77,7 @@ pub mod dkd;
 
 /// Operation category map (A/B/C) for protocol gating and review.
 ///
-/// Note: Categories should be reviewed against `docs/107_operation_categories.md`.
+/// Note: Categories should be reviewed against `docs/109_operation_categories.md`.
 pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
     ("auth:challenge", "A"),
     ("auth:proof", "A"),

@@ -1481,12 +1481,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // Invitations
                         // =========================================================================
                         UiUpdate::InvitationAccepted { invitation_id: _ } => {
-                            tui.with_mut(|state| {
-                                state.set_operation_state(
-                                    OperationId::invitation_accept(),
-                                    OperationState::Succeeded,
-                                );
-                            });
                             enqueue_toast!(
                                 "Invitation accepted".to_string(),
                                 crate::tui::state_machine::ToastLevel::Success
@@ -1538,12 +1532,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             });
                         }
                         UiUpdate::InvitationImported { invitation_code: _ } => {
-                            tui.with_mut(|state| {
-                                state.set_operation_state(
-                                    OperationId::invitation_accept(),
-                                    OperationState::Succeeded,
-                                );
-                            });
                             enqueue_toast!(
                                 "Invitation imported".to_string(),
                                 crate::tui::state_machine::ToastLevel::Success
