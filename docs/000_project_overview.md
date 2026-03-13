@@ -50,7 +50,7 @@ The documents below cover theory, technical components, implementation guidance,
 
 [Runtime](120_runtime.md) describes lifecycle management, guard chain execution, and service composition.
 
-[Harness UX Determinism Design Note](121_harness_ux_determinism.md) defines the shared UX contract, authoritative observation rules, and browser freshness model for parity-critical harness flows.
+[User Flow Harness](121_user_flow_harness.md) defines the shared UX contract, authoritative observation rules, and browser freshness model for parity-critical harness flows.
 
 [Consensus](106_consensus.md) specifies single-shot agreement for non-monotone operations with witness attestation.
 
@@ -90,7 +90,7 @@ The documents below cover theory, technical components, implementation guidance,
 
 [Testing Guide](804_testing_guide.md) covers test patterns, fixtures, conformance testing, and runtime harness.
 
-[Harness UX Determinism Design Note](121_harness_ux_determinism.md) explains the determinism model for shared-flow harness execution, revisioned observation, and trace conformance.
+[User Flow Harness](121_user_flow_harness.md) explains the determinism model for shared-flow harness execution, revisioned observation, and trace conformance.
 
 [Simulation Guide](805_simulation_guide.md) explains deterministic simulation for debugging and property verification.
 

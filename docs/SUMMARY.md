@@ -26,7 +26,7 @@
 - [Simulation Infrastructure Reference](118_simulator.md)
 - [Formal Verification Reference](119_verification.md)
 - [Runtime](120_runtime.md)
-- [Harness UX Determinism Design Note](121_harness_ux_determinism.md)
+- [User Flow Harness](121_user_flow_harness.md)
 - [Hello World Guide](801_hello_world_guide.md)
 - [Effects and Handlers Guide](802_effects_guide.md)
 - [Choreography Development Guide](803_choreography_guide.md)
