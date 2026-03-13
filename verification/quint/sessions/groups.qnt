@@ -10,7 +10,7 @@
 // Safety: Members can only be added/removed through the proposal flow.
 // Liveness: Pending changes must be confirmed or the proposal expires.
 //
-// See: docs/114_social_architecture.md
+// See: docs/115_social_architecture.md
 
 module protocol_groups {
   // ============ TYPE DEFINITIONS ============

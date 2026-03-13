@@ -12,7 +12,7 @@
 // == Terminology ==
 // Journals are namespaced by AuthorityId (for authority journals) or
 // ContextId (for relational context journals). This spec models authority
-// journals. See docs/103_journal.md for the full journal model.
+// journals. See docs/105_journal.md for the full journal model.
 //
 // == Lean Correspondence ==
 // Module: Aura.Domain.Journal (verification/lean/Aura/Domain/Journal/)
@@ -26,7 +26,7 @@
 // - Types: Fact, FactId, Journal, JournalNamespace
 // - Functions: merge, reduce
 //
-// See: docs/103_journal.md
+// See: docs/105_journal.md
 
 module protocol_journal {
   // ==================== TYPE DEFINITIONS ====================
@@ -40,7 +40,7 @@ module protocol_journal {
   type SessionId = str
 
   // How was this fact authorized?
-  // See docs/103_journal.md for AttestedOp structure.
+  // See docs/105_journal.md for AttestedOp structure.
   type FactAuthorization =
     | AuthThreshold             // k-of-n threshold signature (AttestedOp)
     | AuthSingleDevice          // Single device signature
@@ -48,7 +48,7 @@ module protocol_journal {
 
   // A single journal fact.
   // Facts are immutable and identified by hash.
-  // See docs/103_journal.md §2 for the Fact model.
+  // See docs/105_journal.md §2 for the Fact model.
   type Fact = {
     id: FactId,                    // Unique identifier (content hash)
     namespace: AuthorityId,        // Journal namespace (authority owner)
@@ -61,7 +61,7 @@ module protocol_journal {
   }
 
   // Derived state computed by reducing the fact log.
-  // See docs/103_journal.md §4 for TreeStateSummary.
+  // See docs/105_journal.md §4 for TreeStateSummary.
   type AuthorityState = {
     authority: AuthorityId,         // Namespace owner
     devices: Set[AuthorityId],      // Current device set (derived from tree)
@@ -313,7 +313,7 @@ module protocol_journal {
 
   // ==================== CRDT MERGE OPERATIONS ====================
   // These implement the state-based CRDT merge for journal synchronization.
-  // See docs/103_journal.md §3 for semilattice structure.
+  // See docs/105_journal.md §3 for semilattice structure.
   // Lean: Aura.Domain.Journal.Semilattice
 
   // Merge two fact lists (union with deduplication by id).
@@ -376,7 +376,7 @@ module protocol_journal {
 
   // ==================== REDUCE DETERMINISM ====================
   // Reduce computes derived state from the fact log.
-  // See docs/103_journal.md §4 for reduction semantics.
+  // See docs/105_journal.md §4 for reduction semantics.
   // Lean: Aura.Domain.Journal.reduce_deterministic
 
   // Compute device set from fact list by replaying facts.

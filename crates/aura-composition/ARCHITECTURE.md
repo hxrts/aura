@@ -39,7 +39,7 @@ Verification hooks:
 
 Contract alignment:
 - [Aura System Architecture](../../docs/001_system_architecture.md) defines layer placement.
-- [Effect System and Runtime](../../docs/105_effect_system.md) defines handler assembly rules.
+- [Effect System and Runtime](../../docs/103_effect_system.md) defines handler assembly rules.
 ## Boundaries
 - Depends only on aura-core and aura-effects.
 - No domain crates or higher layers.

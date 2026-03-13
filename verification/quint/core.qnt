@@ -24,7 +24,7 @@
 // - Effects: crates/aura-core/src/effects/*.rs
 // - State machine: crates/aura-protocol/src/runtime.rs
 //
-// See: docs/102_authority_and_identity.md, docs/112_relational_contexts.md
+// See: docs/102_authority_and_identity.md, docs/114_relational_contexts.md
 
 module protocol_core {
 

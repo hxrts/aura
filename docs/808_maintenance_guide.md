@@ -2,7 +2,7 @@
 
 This guide covers practical workflows for the Maintenance and OTA (Over-the-Air) update system in Aura. Use it for snapshots, cache invalidation, and distributed upgrades.
 
-For the maintenance architecture specification, see [Distributed Maintenance Architecture](115_maintenance.md).
+For the maintenance architecture specification, see [Distributed Maintenance Architecture](116_maintenance.md).
 
 ## Maintenance Philosophy
 

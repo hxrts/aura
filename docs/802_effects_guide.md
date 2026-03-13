@@ -2,7 +2,7 @@
 
 This guide covers how to work with Aura's algebraic effect system. Use it when you need to extend the system at its boundaries: adding handlers, implementing platform support, or creating new effect traits.
 
-For the full effect system specification, see [Effect System](105_effect_system.md).
+For the full effect system specification, see [Effect System](103_effect_system.md).
 
 ## 1. Code Location
 
@@ -214,7 +214,7 @@ See [Testing Guide](804_testing_guide.md) for comprehensive testing patterns.
 
 For deeper understanding of the effect system architecture, see:
 
-- [Effect System](105_effect_system.md) - Full specification
+- [Effect System](103_effect_system.md) - Full specification
 - [Cryptographic Architecture](100_crypto.md) - Crypto handler requirements
 - [System Architecture](001_system_architecture.md) - Layer boundaries
 

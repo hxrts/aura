@@ -26,7 +26,7 @@ Home membership terminology is:
 
 `AuthorityId` (see [Identifiers and Boundaries](101_identifiers_and_boundaries.md)) selects the journal namespace associated with the authority. The identifier does not encode structure or membership. The authority publishes its current public key and root commitment inside its own journal.
 
-Authorities can interact with other authorities through [Relational Contexts](112_relational_contexts.md). These interactions do not change the authority's internal structure. The authority remains isolated except where relational state is explicitly shared.
+Authorities can interact with other authorities through [Relational Contexts](114_relational_contexts.md). These interactions do not change the authority's internal structure. The authority remains isolated except where relational state is explicitly shared.
 
 ## 2. Account Authorities
 
@@ -452,9 +452,9 @@ Verification code is in `aura-core/src/tree/verification.rs`. Type definitions a
 
 ## See Also
 
-- [Journal System](103_journal.md) for fact semantics and reduction flows
-- [Relational Contexts](112_relational_contexts.md) for cross-authority relationship management
-- [Consensus](106_consensus.md) for threshold signing and agreement
+- [Journal System](105_journal.md) for fact semantics and reduction flows
+- [Relational Contexts](114_relational_contexts.md) for cross-authority relationship management
+- [Consensus](108_consensus.md) for threshold signing and agreement
 - [Identifiers and Boundaries](101_identifiers_and_boundaries.md) for context isolation mechanisms
 - [Cryptographic Architecture](100_crypto.md) for FROST and signing modes
 - [Effects and Handlers Guide](802_effects_guide.md) for practical implementation patterns

@@ -49,7 +49,7 @@ Verification hooks:
 
 Contract alignment:
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines `InvariantUniqueCommitPerInstance`.
-- [Consensus](../../docs/106_consensus.md) defines protocol details.
+- [Consensus](../../docs/108_consensus.md) defines protocol details.
 
 ### InvariantCommitRequiresThreshold
 Every accepted commit must include a valid threshold attestation set for the configured witness policy.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOC_PATH="docs/108_mpst_and_choreography.md"
+DOC_PATH="docs/110_mpst_and_choreography.md"
 
 if [[ ! -f "$DOC_PATH" ]]; then
   echo "Missing choreography audit doc: $DOC_PATH"

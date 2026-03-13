@@ -4,7 +4,7 @@
 
 Aura uses algebraic effects to abstract system capabilities. Effect traits define abstract interfaces for cryptography, storage, networking, time, and randomness. Handlers implement these traits with concrete behavior. Context propagation ensures consistent execution across async boundaries.
 
-This document covers effect trait design, handler patterns, and the context model. See [Runtime](120_runtime.md) for lifecycle management, service composition, and guard chain execution.
+This document covers effect trait design, handler patterns, and the context model. See [Runtime](104_runtime.md) for lifecycle management, service composition, and guard chain execution.
 
 The `aura-agent` runtime uses structured concurrency with explicit session ownership.
 Session-bound effects execute only under the current owner via canonical ingress.
@@ -80,7 +80,7 @@ Application-specific effect traits should remain in their application layer. Do 
 
 Database operations use existing effect traits rather than a dedicated `DatabaseEffects` layer. `JournalEffects` in `aura-core` provides fact insertion for monotone operations. Non-monotone operations use `aura-consensus` protocols driven by session types and the guard chain.
 
-Reactive queries are handled via `QueryEffects` and `ReactiveEffects`. The coordination pattern follows two orthogonal dimensions described in [Database Architecture](113_database.md). Authority scope determines single versus cross-authority operations. Agreement level determines monotone versus consensus operations.
+Reactive queries are handled via `QueryEffects` and `ReactiveEffects`. The coordination pattern follows two orthogonal dimensions described in [Database Architecture](107_database.md). Authority scope determines single versus cross-authority operations. Agreement level determines monotone versus consensus operations.
 
 ## Handler Design
 
@@ -156,7 +156,7 @@ pub trait ReactiveEffects: Send + Sync {
 }
 ```
 
-The trait defines four core operations for reactive state. The `read` method returns the current value. The `emit` method updates the value. The `subscribe` method returns a stream of changes. The `register` method initializes a signal with a default value. See [Runtime](120_runtime.md) for reactive scheduling implementation.
+The trait defines four core operations for reactive state. The `read` method returns the current value. The `emit` method updates the value. The `subscribe` method returns a stream of changes. The `register` method initializes a signal with a default value. See [Runtime](104_runtime.md) for reactive scheduling implementation.
 
 ## QueryEffects Trait
 
@@ -183,7 +183,7 @@ pub trait QueryEffects: Send + Sync {
 }
 ```
 
-The `Query` trait converts queries to Datalog programs and defines capability requirements. The `QueryEffects` trait executes queries and manages subscriptions. Query isolation levels control consistency requirements. See [Database Architecture](113_database.md) for complete query system documentation.
+The `Query` trait converts queries to Datalog programs and defines capability requirements. The `QueryEffects` trait executes queries and manages subscriptions. Query isolation levels control consistency requirements. See [Database Architecture](107_database.md) for complete query system documentation.
 
 ## Determinism Rules
 
@@ -246,4 +246,4 @@ let system = TestRuntime::new()
     .build();
 ```
 
-This snippet creates a test runtime with mock handlers for all effects. It provides deterministic time and network control. Tests use in-memory storage and mock networking to execute protocols without side effects. See [Test Infrastructure Reference](117_testkit.md) for test patterns.
+This snippet creates a test runtime with mock handlers for all effects. It provides deterministic time and network control. Tests use in-memory storage and mock networking to execute protocols without side effects. See [Test Infrastructure Reference](118_testkit.md) for test patterns.

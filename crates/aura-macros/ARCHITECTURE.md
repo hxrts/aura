@@ -41,7 +41,7 @@ Verification hooks:
 
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines annotation semantics for guards and leakage.
-- [MPST and Choreography](../../docs/108_mpst_and_choreography.md) defines projection expectations.
+- [MPST and Choreography](../../docs/110_mpst_and_choreography.md) defines projection expectations.
 ## Boundaries
 - No runtime code or effect implementations.
 - Generated code uses types from aura-mpst for choreographies.

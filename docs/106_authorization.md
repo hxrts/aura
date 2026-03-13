@@ -105,4 +105,4 @@ The `Cap` type in `aura-core/src/domain/journal.rs` wraps serialized Biscuit tok
 
 `BiscuitAuthorizationBridge` in `aura-guards/src/authorization.rs` handles guard chain integration. `TokenAuthority` and `BiscuitTokenManager` in `aura-authorization/src/biscuit_token.rs` handle token creation and attenuation. `ResourceScope` in `aura-core/src/types/scope.rs` defines authority-centric resource patterns.
 
-See [Transport and Information Flow](109_transport_and_information_flow.md) for flow budget details. See [Journal](103_journal.md) for fact commit semantics.
+See [Transport and Information Flow](111_transport_and_information_flow.md) for flow budget details. See [Journal](105_journal.md) for fact commit semantics.

@@ -12,7 +12,7 @@ Verification suits protocols with complex state machines or security-critical pr
 
 Unit tests suffice for simple, well-understood behavior. Do not over-invest in verification for straightforward code.
 
-See [Formal Verification Reference](119_verification.md) for the complete architecture documentation.
+See [Formal Verification Reference](120_verification.md) for the complete architecture documentation.
 
 ## Writing Quint Specifications
 
@@ -647,4 +647,4 @@ This section maps Quint model invariants to Lean theorem proofs, providing trace
 
 ## Related Documentation
 
-See [Formal Verification Reference](119_verification.md) for architecture details. See [Simulation Guide](805_simulation_guide.md) for trace replay. See [Testing Guide](804_testing_guide.md) for conformance testing. See [Project Structure](999_project_structure.md#invariant-traceability) for the invariant index and traceability matrix.
+See [Formal Verification Reference](120_verification.md) for architecture details. See [Simulation Guide](805_simulation_guide.md) for trace replay. See [Testing Guide](804_testing_guide.md) for conformance testing. See [Project Structure](999_project_structure.md#invariant-traceability) for the invariant index and traceability matrix.

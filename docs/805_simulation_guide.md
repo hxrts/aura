@@ -9,7 +9,7 @@ Simulation suits scenarios that unit tests cannot address. Use simulation for fa
 Do not use simulation for simple unit tests. Direct effect handler testing is faster and simpler for single-component validation.
 Do not treat simulation as the default end-to-end correctness oracle for user-facing flows. Aura's primary feedback loop remains the real-runtime harness running against the real software stack.
 
-See [Simulation Infrastructure Reference](118_simulator.md) for the complete architecture documentation.
+See [Simulation Infrastructure Reference](119_simulator.md) for the complete architecture documentation.
 
 ## Simulation vs Harness
 
@@ -430,6 +430,6 @@ Prefer TOML scenarios for human-readable tests. Prefer Quint actions for specifi
 
 ## Related Documentation
 
-- [Simulation Infrastructure Reference](118_simulator.md) - Handler APIs
+- [Simulation Infrastructure Reference](119_simulator.md) - Handler APIs
 - [Verification and MBT Guide](806_verification_guide.md) - Quint workflows
 - [Testing Guide](804_testing_guide.md) - Conformance testing

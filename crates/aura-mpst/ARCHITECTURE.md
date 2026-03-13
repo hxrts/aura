@@ -41,7 +41,7 @@ Verification hooks:
 
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines MPST safety and duality.
-- [MPST and Choreography](../../docs/108_mpst_and_choreography.md) defines runtime projection rules.
+- [MPST and Choreography](../../docs/110_mpst_and_choreography.md) defines runtime projection rules.
 ## Boundaries
 - No multi-party coordination logic (only types and runtime abstractions).
 - Protocol implementations belong in feature crates (Layer 5).

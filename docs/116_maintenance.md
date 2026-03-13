@@ -195,11 +195,11 @@ Backups use existing storage and verification effects. No separate protocol exis
 
 ## 8. Automatic Synchronization
 
-Automatic synchronization implements periodic journal replication between devices. The synchronization service coordinates peer discovery, session management, and fact exchange. All synchronization uses the journal primitives described in [Journal](103_journal.md).
+Automatic synchronization implements periodic journal replication between devices. The synchronization service coordinates peer discovery, session management, and fact exchange. All synchronization uses the journal primitives described in [Journal](105_journal.md).
 
 ### 8.1 Peer Discovery and Selection
 
-Devices discover sync peers through the rendezvous system described in [Rendezvous](111_rendezvous.md). The peer manager maintains metadata for each discovered peer. This metadata includes connection state, trust level, sync success rate, and active session count.
+Devices discover sync peers through the rendezvous system described in [Rendezvous](113_rendezvous.md). The peer manager maintains metadata for each discovered peer. This metadata includes connection state, trust level, sync success rate, and active session count.
 
 ```rust
 pub struct PeerMetadata {

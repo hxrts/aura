@@ -11,7 +11,7 @@
 //    Consensus round for the same authority, the system never enters
 //    a deadlocked or inconsistent state."
 //
-// See: docs/106_consensus.md, docs/112_relational_contexts.md
+// See: docs/108_consensus.md, docs/114_relational_contexts.md
 
 module protocol_cross_interaction {
     // ==================== TYPE DEFINITIONS ====================

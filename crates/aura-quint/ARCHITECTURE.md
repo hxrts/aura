@@ -40,7 +40,7 @@ Verification hooks:
 - just test-crate aura-quint
 
 Contract alignment:
-- [Verification](../../docs/119_verification.md) defines model-checking expectations.
+- [Verification](../../docs/120_verification.md) defines model-checking expectations.
 - [Project Structure](../../docs/999_project_structure.md#invariant-traceability) defines canonical invariant naming.
 ## Boundaries
 - Quint specifications live in verification/quint/.
@@ -67,5 +67,5 @@ Verification hooks:
 - `just test-crate aura-quint`
 
 Contract alignment:
-- [Formal Verification Reference](../../docs/119_verification.md) defines cross-validation boundaries.
+- [Formal Verification Reference](../../docs/120_verification.md) defines cross-validation boundaries.
 - [Verification Coverage Report](../../docs/998_verification_coverage.md) tracks bridge module inventory.

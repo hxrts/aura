@@ -346,4 +346,4 @@ Candidates are returned in priority order: same-home relays first, then 1-hop an
 
 ## See Also
 
-[Database Architecture](113_database.md) describes fact storage and queries. [Transport and Information Flow](109_transport_and_information_flow.md) covers AMP messaging. [Authorization](104_authorization.md) describes capability evaluation. [Rendezvous Architecture](111_rendezvous.md) details the four-layer discovery model integration.
+[Database Architecture](107_database.md) describes fact storage and queries. [Transport and Information Flow](111_transport_and_information_flow.md) covers AMP messaging. [Authorization](106_authorization.md) describes capability evaluation. [Rendezvous Architecture](113_rendezvous.md) details the four-layer discovery model integration.

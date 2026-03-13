@@ -8,9 +8,9 @@ Formal verification of these properties uses Quint model checking (`verification
 
 The contract applies to the following aspects of the system.
 
-Effect handlers and protocols operate within the 8-layer architecture described in [Aura System Architecture](001_system_architecture.md). Journals and reducers are covered by this contract. The journal specification appears in [Authority and Identity](102_authority_and_identity.md) and [Journal](103_journal.md). Aura Consensus is documented in [Consensus](106_consensus.md).
+Effect handlers and protocols operate within the 8-layer architecture described in [Aura System Architecture](001_system_architecture.md). Journals and reducers are covered by this contract. The journal specification appears in [Authority and Identity](102_authority_and_identity.md) and [Journal](105_journal.md). Aura Consensus is documented in [Consensus](108_consensus.md).
 
-Relational contexts and rendezvous flows fall under this contract. Relational contexts are specified in [Relational Contexts](112_relational_contexts.md). Transport semantics appear in [Transport and Information Flow](109_transport_and_information_flow.md). Rendezvous flows are detailed in [Rendezvous Architecture](111_rendezvous.md).
+Relational contexts and rendezvous flows fall under this contract. Relational contexts are specified in [Relational Contexts](114_relational_contexts.md). Transport semantics appear in [Transport and Information Flow](111_transport_and_information_flow.md). Rendezvous flows are detailed in [Rendezvous Architecture](113_rendezvous.md).
 Shared notation appears in [Theoretical Model](002_theoretical_model.md#shared-terms-and-notation).
 
 ### 1.1 Terminology Alignment
@@ -51,7 +51,7 @@ Verified by: `Aura.Proofs.Journal`, `journal/core.qnt`
 
 ### 2.2 Charge-Before-Send
 
-Every transport observable is preceded by `CapGuard`, `FlowGuard`, and `JournalCoupler`. See [Runtime](120_runtime.md) and [Authorization](104_authorization.md). No packet is emitted without a successful charge. Guard evaluation is pure over a prepared snapshot and yields commands that an interpreter executes, so the chain never blocks on embedded I/O.
+Every transport observable is preceded by `CapGuard`, `FlowGuard`, and `JournalCoupler`. See [Runtime](104_runtime.md) and [Authorization](106_authorization.md). No packet is emitted without a successful charge. Guard evaluation is pure over a prepared snapshot and yields commands that an interpreter executes, so the chain never blocks on embedded I/O.
 
 Flow budgets satisfy monotonicity: charging never increases available budget (`monotonic_decrease`). Charging the exact remaining amount results in zero budget (`exact_charge`).
 
@@ -129,7 +129,7 @@ The system detects witnesses who vote for conflicting results:
 - Completeness: All equivocations are detectable given sufficient evidence
 - Honest safety: Honest witnesses are never falsely accused
 
-Types like `HasEquivocated` and `HasEquivocatedInSet` exclude conflicting shares from consensus. See [Consensus](106_consensus.md).
+Types like `HasEquivocated` and `HasEquivocatedInSet` exclude conflicting shares from consensus. See [Consensus](108_consensus.md).
 
 Verified by: `Aura.Proofs.Consensus.Equivocation`, `consensus/adversary.qnt`
 
@@ -166,7 +166,7 @@ Commitment tree operations resolve conflicts using the stable ordering described
 
 ### 2.10 Receipt Chain
 
-Multi-hop forwarding requires signed receipts. Downstream peers reject messages lacking a chain rooted in their relational context. See [Transport and Information Flow](109_transport_and_information_flow.md). This prevents unauthorized message propagation.
+Multi-hop forwarding requires signed receipts. Downstream peers reject messages lacking a chain rooted in their relational context. See [Transport and Information Flow](111_transport_and_information_flow.md). This prevents unauthorized message propagation.
 
 ## 3. Protocol-Specific Guarantees
 
@@ -219,7 +219,7 @@ Fast-path consensus completes in `2×Δ_net` (two message delays) when all witne
 
 ### 4.2 Fallback Consensus
 
-Fallback consensus eventually completes under partial synchrony with bounded message delays. The fallback timeout is `T_fallback = 2×Δ_net` in formal verification (implementations may use up to `3×Δ_net` for margin). Gossip ensures progress if a majority of witnesses re-transmit proposals. See [Consensus](106_consensus.md) for timeout configuration.
+Fallback consensus eventually completes under partial synchrony with bounded message delays. The fallback timeout is `T_fallback = 2×Δ_net` in formal verification (implementations may use up to `3×Δ_net` for margin). Gossip ensures progress if a majority of witnesses re-transmit proposals. See [Consensus](108_consensus.md) for timeout configuration.
 
 Verified by: `Aura.Proofs.Consensus.Liveness`, `consensus/liveness.qnt`
 
@@ -231,7 +231,7 @@ Verified by: `journal/anti_entropy.qnt`
 
 ### 4.4 Rendezvous
 
-Offer and answer envelopes flood gossip neighborhoods. Secure channels can be established as long as at least one bidirectional path remains between parties. See [Rendezvous Architecture](111_rendezvous.md).
+Offer and answer envelopes flood gossip neighborhoods. Secure channels can be established as long as at least one bidirectional path remains between parties. See [Rendezvous Architecture](113_rendezvous.md).
 
 ### 4.5 Flow Budgets
 
@@ -302,7 +302,7 @@ Downstream peers detect misbehavior via missing receipts or inconsistent budget 
 
 ### 8.4 Device Compromise
 
-A compromised device reveals its share and journal copy. It cannot reconstitute the account without meeting the branch policy. Recovery relies on relational contexts as described in [Relational Contexts](112_relational_contexts.md).
+A compromised device reveals its share and journal copy. It cannot reconstitute the account without meeting the branch policy. Recovery relies on relational contexts as described in [Relational Contexts](114_relational_contexts.md).
 
 Device compromise is recoverable because the threshold prevents a single device from acting unilaterally. Guardians can revoke the compromised device and issue a new one. Compromised nonces are excluded from future consensus (`InvariantCompromisedNoncesExcluded`).
 
@@ -310,16 +310,16 @@ Device compromise is recoverable because the threshold prevents a single device 
 
 Journals eventually converge after replicas exchange all facts. This is eventual consistency. Authorities that have seen the same fact set arrive at identical states.
 
-Operations guarded by Aura Consensus achieve operation-scoped agreement. Once a commit fact is accepted, all honest replicas agree on that operation result. See [Consensus](106_consensus.md).
+Operations guarded by Aura Consensus achieve operation-scoped agreement. Once a commit fact is accepted, all honest replicas agree on that operation result. See [Consensus](108_consensus.md).
 This does not define a single global linearizable log for all operations.
 
-Causal delivery is not enforced at the transport layer. Choreographies enforce ordering via session types instead. See [Multi-party Session Types and Choreography](108_mpst_and_choreography.md).
+Causal delivery is not enforced at the transport layer. Choreographies enforce ordering via session types instead. See [Multi-party Session Types and Choreography](110_mpst_and_choreography.md).
 
 Each authority's view of its own journal is monotone. Once it observes a fact locally, it will never un-see it. This is monotonic read-after-write consistency.
 
 ## 10. Failure Handling
 
-Timeouts trigger fallback consensus. See [Consensus](106_consensus.md) for `T_fallback` guidelines. Fallback consensus allows the system to make progress during temporary network instability.
+Timeouts trigger fallback consensus. See [Consensus](108_consensus.md) for `T_fallback` guidelines. Fallback consensus allows the system to make progress during temporary network instability.
 
 Partition recovery relies on anti-entropy. Authorities merge fact sets when connectivity returns. The journal is the single source of truth for state.
 
@@ -339,7 +339,7 @@ Configure witness sets using the parameter bounds declared in §2.3.3 for the ac
 
 Tune gossip fanout and timeout parameters based on observed round-trip times and network topology. Conservative parameters ensure liveness under poor conditions.
 
-Monitor receipt acceptance rates, consensus backlog, and budget utilization. See [Distributed Maintenance Architecture](115_maintenance.md) for monitoring guidance. Early detection of synchrony violations prevents cascading failures.
+Monitor receipt acceptance rates, consensus backlog, and budget utilization. See [Distributed Maintenance Architecture](116_maintenance.md) for monitoring guidance. Early detection of synchrony violations prevents cascading failures.
 
 ## 12. Verification Coverage
 
@@ -360,20 +360,20 @@ See [Verification Coverage Report](998_verification_coverage.md) for metrics and
 
 [Aura System Architecture](001_system_architecture.md) describes runtime layering.
 
-[Authorization](104_authorization.md) describes guard chain ordering.
+[Authorization](106_authorization.md) describes guard chain ordering.
 
 [Theoretical Model](002_theoretical_model.md) covers the formal calculus and semilattice laws.
 
 [Authority and Identity](102_authority_and_identity.md) documents reduction ordering.
 
-[Journal](103_journal.md) and [Distributed Maintenance Architecture](115_maintenance.md) cover fact storage and convergence.
+[Journal](105_journal.md) and [Distributed Maintenance Architecture](116_maintenance.md) cover fact storage and convergence.
 
-[Relational Contexts](112_relational_contexts.md) documents cross-authority state.
+[Relational Contexts](114_relational_contexts.md) documents cross-authority state.
 
-[Consensus](106_consensus.md) describes fast path and fallback consensus.
+[Consensus](108_consensus.md) describes fast path and fallback consensus.
 
-[Transport and Information Flow](109_transport_and_information_flow.md) documents transport semantics.
+[Transport and Information Flow](111_transport_and_information_flow.md) documents transport semantics.
 
-[Authorization](104_authorization.md) covers `CapGuard` and `FlowGuard` sequencing.
+[Authorization](106_authorization.md) covers `CapGuard` and `FlowGuard` sequencing.
 
 [Verification Coverage Report](998_verification_coverage.md) tracks formal verification status.

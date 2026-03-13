@@ -9,7 +9,7 @@
 // Safety: Reserved values are disjoint across authorities within same epoch.
 // Liveness: Protocol completes when reservation is recorded and finalized.
 //
-// See: docs/112_relational_contexts.md (counter leases)
+// See: docs/114_relational_contexts.md (counter leases)
 
 module protocol_counter {
   // ============ TYPE DEFINITIONS ============

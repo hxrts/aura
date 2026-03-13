@@ -111,7 +111,7 @@ Relational contexts are shared journals for cross-authority state. Each context 
 pub struct ContextId(Uuid);
 ```
 
-`ContextId` identifies the shared namespace. Participation is expressed by writing relational facts. Profile data, nicknames, and relationship state live in context journals. See [Authority and Identity](102_authority_and_identity.md) for commitment tree details and [Relational Contexts](112_relational_contexts.md) for context patterns.
+`ContextId` identifies the shared namespace. Participation is expressed by writing relational facts. Profile data, nicknames, and relationship state live in context journals. See [Authority and Identity](102_authority_and_identity.md) for commitment tree details and [Relational Contexts](114_relational_contexts.md) for context patterns.
 
 ### 2.3 Contextual identity
 
@@ -162,7 +162,7 @@ trait FactReducer {
 }
 ```
 
-Reduction runs on demand or is cached for performance. Cached views are invalidated when new facts arrive. The reduction pipeline supports incremental updates for large fact sets. See [Journal](103_journal.md) for the complete reduction architecture.
+Reduction runs on demand or is cached for performance. Cached views are invalidated when new facts arrive. The reduction pipeline supports incremental updates for large fact sets. See [Journal](105_journal.md) for the complete reduction architecture.
 
 ### 3.4 Flow budget facts
 
@@ -227,7 +227,7 @@ enum TimeStamp {
 }
 ```
 
-Time access happens through `PhysicalTimeEffects`, `LogicalClockEffects`, and `OrderClockEffects`. Application code does not call system time directly. See [Effect System](105_effect_system.md) for handler implementation patterns.
+Time access happens through `PhysicalTimeEffects`, `LogicalClockEffects`, and `OrderClockEffects`. Application code does not call system time directly. See [Effect System](103_effect_system.md) for handler implementation patterns.
 
 ### 4.3 Context propagation
 
@@ -296,7 +296,7 @@ pub struct Receipt {
 }
 ```
 
-The `prev` field links receipts in a per-hop chain. This chain provides accountability for multi-hop message forwarding. See [Transport and Information Flow](109_transport_and_information_flow.md) for receipt verification and [Authorization](104_authorization.md) for Biscuit integration.
+The `prev` field links receipts in a per-hop chain. This chain provides accountability for multi-hop message forwarding. See [Transport and Information Flow](111_transport_and_information_flow.md) for receipt verification and [Authorization](106_authorization.md) for Biscuit integration.
 
 ## 6. Choreographic Protocols
 
@@ -325,7 +325,7 @@ The namespace attribute scopes the protocol. Annotations compile into guard requ
 
 Projection extracts each role's local view from the global type. The local view specifies what messages the role sends and receives. Execution interprets the local view against the effect system.
 
-Production execution uses `AuraChoreoEngine` with the Telltale VM and the host bridge in Layer 6. Startup is manifest-driven and admitted by construction. Generated runner surfaces still exist for testing and migration support, but they are not the production execution model. See [MPST and Choreography](108_mpst_and_choreography.md) for projection rules and runtime details.
+Production execution uses `AuraChoreoEngine` with the Telltale VM and the host bridge in Layer 6. Startup is manifest-driven and admitted by construction. Generated runner surfaces still exist for testing and migration support, but they are not the production execution model. See [MPST and Choreography](110_mpst_and_choreography.md) for projection rules and runtime details.
 
 ### 6.3 Annotation effects
 
@@ -355,7 +355,7 @@ enum OperationCategory {
 }
 ```
 
-The category determines user experience and system behavior. See [Operation Categories](107_operation_categories.md) for classification rules and ceremony contracts.
+The category determines user experience and system behavior. See [Operation Categories](109_operation_categories.md) for classification rules and ceremony contracts.
 
 ### 7.3 Fast path and fallback
 
@@ -380,7 +380,7 @@ pub struct CommitFact {
 
 CommitFacts are inserted into the relevant journal namespace. Reducers process CommitFacts to update derived state. The signature proves that a threshold of participants agreed.
 
-The `consensus_id` binds the decision to a specific prestate and operation. This binding prevents reusing signatures across unrelated operations. Prestate binding ensures that consensus decisions apply to the expected state. See [Consensus](106_consensus.md) for protocol details.
+The `consensus_id` binds the decision to a specific prestate and operation. This binding prevents reusing signatures across unrelated operations. Prestate binding ensures that consensus decisions apply to the expected state. See [Consensus](108_consensus.md) for protocol details.
 
 ## 8. Transport and Networking
 
@@ -398,7 +398,7 @@ trait SecureChannel {
 }
 ```
 
-Channels are established through rendezvous or direct connection. The abstraction hides transport details from application code. See [Rendezvous Architecture](111_rendezvous.md) for channel establishment.
+Channels are established through rendezvous or direct connection. The abstraction hides transport details from application code. See [Rendezvous Architecture](113_rendezvous.md) for channel establishment.
 
 ### 8.2 Rendezvous and peer discovery
 
@@ -406,13 +406,13 @@ Rendezvous enables authorities to find each other without centralized directorie
 
 The social topology provides routing hints. Home and neighborhood membership influences relay selection. Authorities prefer relays operated by trusted peers. Fallback uses public rendezvous servers when social relays are unavailable.
 
-Envelope encryption ensures that rendezvous servers learn nothing about message content or recipients. The sender encrypts to the recipient's public key. The server sees only opaque blobs with timing metadata. See [Social Architecture](114_social_architecture.md) for topology details.
+Envelope encryption ensures that rendezvous servers learn nothing about message content or recipients. The sender encrypts to the recipient's public key. The server sees only opaque blobs with timing metadata. See [Social Architecture](115_social_architecture.md) for topology details.
 
 ### 8.3 Asynchronous message patterns
 
 AMP provides patterns for reliable asynchronous messaging. Messages may arrive out of order. Delivery may be delayed by offline peers. AMP handles acknowledgment, retry, and ordering.
 
-Channels support both synchronous request-response and asynchronous fire-and-forget patterns. The pattern choice depends on operation requirements. See [Asynchronous Message Patterns](110_amp.md) for implementation details.
+Channels support both synchronous request-response and asynchronous fire-and-forget patterns. The pattern choice depends on operation requirements. See [Asynchronous Message Patterns](112_amp.md) for implementation details.
 
 ## 9. Crate Architecture
 
@@ -477,7 +477,7 @@ The threshold is configurable per authority. A 2-of-3 threshold balances securit
 
 Authorization uses Biscuit tokens with cryptographic attenuation. Capabilities can only be restricted, never expanded. Delegation chains are verifiable without contacting the issuer.
 
-The guard chain enforces capabilities at runtime. Biscuit Datalog queries check predicates against facts. See [Authorization](104_authorization.md) for token structure and evaluation.
+The guard chain enforces capabilities at runtime. Biscuit Datalog queries check predicates against facts. See [Authorization](106_authorization.md) for token structure and evaluation.
 
 ### 10.3 Context isolation
 
@@ -553,4 +553,4 @@ Consensus failures have specific handling. Fast path failures fall back to gossi
 
 The journal provides durability. Uncommitted facts are replayed after restart. Committed facts are immutable. This design simplifies recovery logic.
 
-Device recovery uses guardian protocols. Guardians hold encrypted recovery shares. A threshold of guardians can restore account access. See [Relational Contexts](112_relational_contexts.md) for recovery patterns.
+Device recovery uses guardian protocols. Guardians hold encrypted recovery shares. A threshold of guardians can restore account access. See [Relational Contexts](114_relational_contexts.md) for recovery patterns.

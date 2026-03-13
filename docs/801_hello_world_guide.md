@@ -85,7 +85,7 @@ choreography! {
 }
 ```
 
-The choreography defines a global protocol. Alice sends a ping to Bob. Bob responds with a pong. [Guard capabilities](104_authorization.md) control access and flow costs manage rate limiting.
+The choreography defines a global protocol. Alice sends a ping to Bob. Bob responds with a pong. [Guard capabilities](106_authorization.md) control access and flow costs manage rate limiting.
 
 Implement the Alice session:
 
@@ -110,7 +110,7 @@ pub async fn execute_alice_session<E: PingPongEffects>(
 }
 ```
 
-Alice serializes the ping message and sends it to Bob. She then waits for Bob's response and deserializes the pong message. See [Effect System](105_effect_system.md) for details on effect-based execution.
+Alice serializes the ping message and sends it to Bob. She then waits for Bob's response and deserializes the pong message. See [Effect System](103_effect_system.md) for details on effect-based execution.
 
 ## Local Deployment
 
@@ -240,6 +240,6 @@ See [Project Structure](999_project_structure.md#invariant-traceability) for det
 
 You now have a working Aura development environment. The hello world protocol demonstrates basic choreographic programming concepts.
 
-Continue with [Effects and Handlers Guide](802_effects_guide.md) to learn about effect systems, platform implementation, and handler patterns. Learn choreographic programming in [Choreography Guide](803_choreography_guide.md). For session type theory, see [MPST and Choreography](108_mpst_and_choreography.md).
+Continue with [Effects and Handlers Guide](802_effects_guide.md) to learn about effect systems, platform implementation, and handler patterns. Learn choreographic programming in [Choreography Guide](803_choreography_guide.md). For session type theory, see [MPST and Choreography](110_mpst_and_choreography.md).
 
 Explore testing and simulation in [Testing Guide](804_testing_guide.md) and [Simulation Guide](805_simulation_guide.md).

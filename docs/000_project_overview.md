@@ -42,43 +42,43 @@ The documents below cover theory, technical components, implementation guidance,
 
 [Authority and Identity](102_authority_and_identity.md) describes opaque authorities, commitment trees, and relational context structure.
 
-[Journal](103_journal.md) specifies fact-based journals, validation rules, and deterministic reduction flows.
+[Journal](105_journal.md) specifies fact-based journals, validation rules, and deterministic reduction flows.
 
-[Authorization](104_authorization.md) covers capability semantics, Biscuit token integration, and guard chain authorization.
+[Authorization](106_authorization.md) covers capability semantics, Biscuit token integration, and guard chain authorization.
 
-[Effect System](105_effect_system.md) documents effect traits, handler design, and context propagation.
+[Effect System](103_effect_system.md) documents effect traits, handler design, and context propagation.
 
-[Runtime](120_runtime.md) describes lifecycle management, guard chain execution, and service composition.
+[Runtime](104_runtime.md) describes lifecycle management, guard chain execution, and service composition.
 
 [User Flow Harness](121_user_flow_harness.md) defines the shared UX contract, authoritative observation rules, and browser freshness model for parity-critical harness flows.
 
-[Consensus](106_consensus.md) specifies single-shot agreement for non-monotone operations with witness attestation.
+[Consensus](108_consensus.md) specifies single-shot agreement for non-monotone operations with witness attestation.
 
-[Operation Categories](107_operation_categories.md) defines A/B/C operation tiers, K1/K2/K3 key generation, and agreement levels.
+[Operation Categories](109_operation_categories.md) defines A/B/C operation tiers, K1/K2/K3 key generation, and agreement levels.
 
-[MPST and Choreography](108_mpst_and_choreography.md) covers multi-party session types and choreographic protocol projection.
+[MPST and Choreography](110_mpst_and_choreography.md) covers multi-party session types and choreographic protocol projection.
 
-[Transport and Information Flow](109_transport_and_information_flow.md) specifies guard chain enforcement, secure channels, and flow receipts.
+[Transport and Information Flow](111_transport_and_information_flow.md) specifies guard chain enforcement, secure channels, and flow receipts.
 
-[Aura Messaging Protocol (AMP)](110_amp.md) documents reliable async messaging with acknowledgment and ordering patterns.
+[Aura Messaging Protocol (AMP)](112_amp.md) documents reliable async messaging with acknowledgment and ordering patterns.
 
-[Rendezvous Architecture](111_rendezvous.md) covers context-scoped peer discovery and encrypted envelope exchange.
+[Rendezvous Architecture](113_rendezvous.md) covers context-scoped peer discovery and encrypted envelope exchange.
 
-[Relational Contexts](112_relational_contexts.md) specifies guardian bindings, recovery grants, and cross-authority journals.
+[Relational Contexts](114_relational_contexts.md) specifies guardian bindings, recovery grants, and cross-authority journals.
 
-[Database Architecture](113_database.md) defines the query layer using journals, Biscuit predicates, and CRDT views.
+[Database Architecture](107_database.md) defines the query layer using journals, Biscuit predicates, and CRDT views.
 
-[Social Architecture](114_social_architecture.md) describes the three-tier model of messages, homes, and neighborhoods.
+[Social Architecture](115_social_architecture.md) describes the three-tier model of messages, homes, and neighborhoods.
 
-[Distributed Maintenance Architecture](115_maintenance.md) covers snapshots, garbage collection, and system evolution.
+[Distributed Maintenance Architecture](116_maintenance.md) covers snapshots, garbage collection, and system evolution.
 
-[CLI and Terminal User Interface](116_cli_tui.md) specifies command-line and TUI interfaces for Aura operations.
+[CLI and Terminal User Interface](117_cli_tui.md) specifies command-line and TUI interfaces for Aura operations.
 
-[Test Infrastructure Reference](117_testkit.md) documents test fixtures, mock handlers, and scenario builders.
+[Test Infrastructure Reference](118_testkit.md) documents test fixtures, mock handlers, and scenario builders.
 
-[Simulation Infrastructure Reference](118_simulator.md) covers deterministic simulation with virtual time and fault injection.
+[Simulation Infrastructure Reference](119_simulator.md) covers deterministic simulation with virtual time and fault injection.
 
-[Formal Verification Reference](119_verification.md) describes Quint model checking and Lean theorem proving integration.
+[Formal Verification Reference](120_verification.md) describes Quint model checking and Lean theorem proving integration.
 
 ### 3. Developer Guides
 

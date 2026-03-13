@@ -1,6 +1,6 @@
 # Journal
 
-This document describes the journal architecture and state reduction system in Aura. It explains how journals implement CRDT semantics, how facts are structured, and how reduction produces deterministic state for account authorities and relational contexts. It describes the reduction pipeline, flow budget semantics, and integration with the effect system. It defines the invariants that ensure correctness. See [Maintenance](115_maintenance.md) for the end-to-end snapshot and garbage collection pipeline.
+This document describes the journal architecture and state reduction system in Aura. It explains how journals implement CRDT semantics, how facts are structured, and how reduction produces deterministic state for account authorities and relational contexts. It describes the reduction pipeline, flow budget semantics, and integration with the effect system. It defines the invariants that ensure correctness. See [Maintenance](116_maintenance.md) for the end-to-end snapshot and garbage collection pipeline.
 
 ## Hybrid Journal Model (Facts + Capabilities)
 
@@ -13,7 +13,7 @@ The fact journal is stored and merged as a semilattice. Capabilities are refined
 
 ## 1. Journal Namespaces
 
-Aura maintains a separate journal namespace for each authority and each [relational context](112_relational_contexts.md). A journal namespace stores all facts relevant to the entity it represents. A namespace is identified by an `AuthorityId` (see [Authority and Identity](102_authority_and_identity.md)) or a `ContextId` and no namespace shares state with another. Identifier definitions appear in [Identifiers and Boundaries](101_identifiers_and_boundaries.md).
+Aura maintains a separate journal namespace for each authority and each [relational context](114_relational_contexts.md). A journal namespace stores all facts relevant to the entity it represents. A namespace is identified by an `AuthorityId` (see [Authority and Identity](102_authority_and_identity.md)) or a `ContextId` and no namespace shares state with another. Identifier definitions appear in [Identifiers and Boundaries](101_identifiers_and_boundaries.md).
 
 A journal namespace evolves through fact insertion. Facts accumulate monotonically. No fact is removed except through garbage collection rules that preserve logical meaning.
 
@@ -345,7 +345,7 @@ See [Tree Operation Verification](102_authority_and_identity.md#8-tree-operation
 **Checks**
 - Ensure `spent` deltas are non-negative and reference the active epoch for the `(ContextId, peer)` pair.
 - Reject facts that would decrease the recorded `spent` (monotone requirement).
-- Validate receipt signatures associated with the charge (see `109_transport_and_information_flow.md`).
+- Validate receipt signatures associated with the charge (see `111_transport_and_information_flow.md`).
 
 **Responsible Effects**
 - `FlowBudgetEffects` (or FlowGuard) produce the fact and enforce monotonicity before inserting.
@@ -366,7 +366,7 @@ By clearly separating validation responsibilities, runtime authors know which ef
 
 ## 14. Consistency Metadata Schema
 
-Facts carry consistency metadata for tracking agreement level, propagation status, and acknowledgments. See [Operation Categories](107_operation_categories.md) for the full consistency metadata type definitions.
+Facts carry consistency metadata for tracking agreement level, propagation status, and acknowledgments. See [Operation Categories](109_operation_categories.md) for the full consistency metadata type definitions.
 
 ### 14.1 Fact Schema Fields
 
@@ -393,8 +393,8 @@ The Journal API provides methods for acknowledgment tracking: `record_ack` recor
 
 ## See Also
 
-- [Database Architecture](113_database.md) for query system and Datalog integration
-- [Operation Categories](107_operation_categories.md) for consistency metadata types
-- [Maintenance](115_maintenance.md) for snapshot and garbage collection pipeline
-- [Relational Contexts](112_relational_contexts.md) for context journal structure
+- [Database Architecture](107_database.md) for query system and Datalog integration
+- [Operation Categories](109_operation_categories.md) for consistency metadata types
+- [Maintenance](116_maintenance.md) for snapshot and garbage collection pipeline
+- [Relational Contexts](114_relational_contexts.md) for context journal structure
 - [Authority and Identity](102_authority_and_identity.md) for commitment tree operations

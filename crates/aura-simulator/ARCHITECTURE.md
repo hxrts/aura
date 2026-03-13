@@ -43,7 +43,7 @@ Verification hooks:
 
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines deterministic interpretation constraints.
-- [Simulator](../../docs/118_simulator.md) defines replay and determinism expectations.
+- [Simulator](../../docs/119_simulator.md) defines replay and determinism expectations.
 ## Boundaries
 - Must NOT be imported by Layers 1-5.
 - Composable fault injection combines with production effects.
@@ -70,7 +70,7 @@ Verification hooks:
 - `just test-crate aura-simulator`
 
 Contract alignment:
-- [Formal Verification Reference](../../docs/119_verification.md) defines envelope comparison policy.
+- [Formal Verification Reference](../../docs/120_verification.md) defines envelope comparison policy.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines runtime conformance constraints.
 
 ### Canonical Artifact Mapping
@@ -99,5 +99,5 @@ Verification hooks:
 - `just test-crate aura-simulator`
 
 Contract alignment:
-- [Formal Verification Reference](../../docs/119_verification.md) defines required surfaces and envelope classes.
+- [Formal Verification Reference](../../docs/120_verification.md) defines required surfaces and envelope classes.
 - [Verification Coverage Report](../../docs/998_verification_coverage.md) tracks parity coverage lanes and schema references.

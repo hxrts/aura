@@ -1,6 +1,6 @@
 # MPST and Choreography
 
-This document describes the architecture of choreographic protocols in Aura. It explains how global protocols are defined, projected, and executed. It defines the structure of local session types, the integration with the [Effect System](105_effect_system.md), and the use of [guard chains](104_authorization.md) and journal coupling.
+This document describes the architecture of choreographic protocols in Aura. It explains how global protocols are defined, projected, and executed. It defines the structure of local session types, the integration with the [Effect System](103_effect_system.md), and the use of [guard chains](106_authorization.md) and journal coupling.
 
 ## 1. DSL and Projection
 
@@ -287,7 +287,7 @@ let result = execute_guarded_choreography(
 
 Aura supports multiple execution environments for the same choreography definitions. Production execution uses admitted VM sessions with real effect handlers. Simulation execution uses deterministic time and fault injection. Test utilities may use narrower runner surfaces when that improves isolation.
 
-Each environment preserves the same protocol structure and admission semantics where applicable. Choreography execution also captures conformance artifacts for native/WASM parity testing. See [Test Infrastructure Reference](117_testkit.md) for artifact surfaces and effect classification.
+Each environment preserves the same protocol structure and admission semantics where applicable. Choreography execution also captures conformance artifacts for native/WASM parity testing. See [Test Infrastructure Reference](118_testkit.md) for artifact surfaces and effect classification.
 
 ## 7. Example Protocols
 
@@ -396,7 +396,7 @@ Is this operation establishing or modifying cryptographic relationships?
                No coordination needed
 ```
 
-See [Consensus - Operation Categories](106_consensus.md#17-operation-categories) for detailed categorization.
+See [Consensus - Operation Categories](108_consensus.md#17-operation-categories) for detailed categorization.
 
 ## 9. Choreography Inventory
 

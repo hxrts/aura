@@ -48,7 +48,7 @@ Verification hooks:
 
 Contract alignment:
 - [Aura System Architecture](../../docs/001_system_architecture.md) defines dependency inversion.
-- [Effect System and Runtime](../../docs/105_effect_system.md) defines purity boundaries.
+- [Effect System and Runtime](../../docs/103_effect_system.md) defines purity boundaries.
 
 ### InvariantSharedUiContractAuthority
 `aura-app` is the authoritative home for shared semantic UI identity,

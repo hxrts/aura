@@ -2,7 +2,7 @@
 
 This guide covers how to write tests for Aura protocols using the testing infrastructure. It includes unit testing, integration testing, property-based testing, conformance testing, and runtime harness validation.
 
-For infrastructure details, see [Test Infrastructure Reference](117_testkit.md).
+For infrastructure details, see [Test Infrastructure Reference](118_testkit.md).
 For the deterministic shared-flow design rules, see [User Flow Harness](121_user_flow_harness.md).
 
 ## 1. Core Philosophy
@@ -651,6 +651,6 @@ over it with text-based assertions.
 
 ## Related Documentation
 
-- [Test Infrastructure Reference](117_testkit.md) - Infrastructure details
+- [Test Infrastructure Reference](118_testkit.md) - Infrastructure details
 - [Simulation Guide](805_simulation_guide.md) - Fault injection testing
 - [Verification Guide](806_verification_guide.md) - Formal methods

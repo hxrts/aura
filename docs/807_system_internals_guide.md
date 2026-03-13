@@ -4,7 +4,7 @@ This guide covers deep system patterns for contributors working on Aura core. Us
 
 ## 1. Guard Chain Internals
 
-The guard chain coordinates authorization, flow budgets, and journal effects in strict sequence. See [Authorization](104_authorization.md) for the full specification.
+The guard chain coordinates authorization, flow budgets, and journal effects in strict sequence. See [Authorization](106_authorization.md) for the full specification.
 
 ### Three-Phase Pattern
 
@@ -334,8 +334,8 @@ Run `just check-arch` before submitting changes. The checker validates:
 
 ## Related Documentation
 
-- [Effect System](105_effect_system.md) - Effect specification
-- [Runtime](120_runtime.md) - Runtime specification
-- [Authorization](104_authorization.md) - Guard chain specification
+- [Effect System](103_effect_system.md) - Effect specification
+- [Runtime](104_runtime.md) - Runtime specification
+- [Authorization](106_authorization.md) - Guard chain specification
 - [System Architecture](001_system_architecture.md) - Layer boundaries
-- [CLI and TUI](116_cli_tui.md) - Terminal specification
+- [CLI and TUI](117_cli_tui.md) - Terminal specification

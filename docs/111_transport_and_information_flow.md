@@ -20,7 +20,7 @@ This structure identifies a single secure channel. One channel exists per `(Cont
 
 ## 2. Guard Chain
 
-All transport sends pass through the guard chain defined in [Authorization](104_authorization.md). CapGuard evaluates Biscuit capabilities and sovereign policy. FlowGuard charges the per-context flow budget and produces a receipt. JournalCoupler records the accompanying facts atomically. Each stage must succeed before the next stage executes. Guard evaluation runs synchronously over a prepared `GuardSnapshot` and returns `EffectCommand` data. An async interpreter executes those commands so guards never perform I/O directly.
+All transport sends pass through the guard chain defined in [Authorization](106_authorization.md). CapGuard evaluates Biscuit capabilities and sovereign policy. FlowGuard charges the per-context flow budget and produces a receipt. JournalCoupler records the accompanying facts atomically. Each stage must succeed before the next stage executes. Guard evaluation runs synchronously over a prepared `GuardSnapshot` and returns `EffectCommand` data. An async interpreter executes those commands so guards never perform I/O directly.
 
 ## 3. Flow Budget and Receipts
 
@@ -95,23 +95,23 @@ The network layer does not reveal authority structure. Context identifiers do no
 Secure channels follow a lifecycle aligned with rendezvous and epoch semantics:
 
 1. **Establishment**:
-   - Ranch rendezvous per [Rendezvous Architecture](111_rendezvous.md) to exchange descriptors inside the [relational context](112_relational_contexts.md) journal.
+   - Ranch rendezvous per [Rendezvous Architecture](113_rendezvous.md) to exchange descriptors inside the [relational context](114_relational_contexts.md) journal.
    - Each descriptor contains transport hints, a handshake PSK derived from the context key, and a `punch_nonce`.
    - Once both parties receive offer/answer envelopes, they perform Noise IKpsk2 using the context-derived keys and establish a QUIC or relay-backed channel bound to `(ContextId, peer)`.
 
 2. **Steady state**:
    - Guard chain enforces CapGuard → FlowGuard → JournalCoupler for every send.
-   - FlowBudget receipts created on each hop are inserted into the [relational context](112_relational_contexts.md) journal so downstream peers can audit path compliance.
+   - FlowBudget receipts created on each hop are inserted into the [relational context](114_relational_contexts.md) journal so downstream peers can audit path compliance.
 
 3. **Re-keying on epoch change**:
-   - When the account or context epoch changes (as recorded in [Authority and Identity](102_authority_and_identity.md) / [Relational Contexts](112_relational_contexts.md)), the channel detects the mismatch, tears down the existing Noise session, and triggers rendezvous to derive fresh keys.
+   - When the account or context epoch changes (as recorded in [Authority and Identity](102_authority_and_identity.md) / [Relational Contexts](114_relational_contexts.md)), the channel detects the mismatch, tears down the existing Noise session, and triggers rendezvous to derive fresh keys.
    - Existing receipts are marked invalid for the new epoch, preventing replay.
 
 4. **Teardown**:
    - Channels close explicitly when contexts end or when FlowGuard hits the configured budget limit.
    - Receipts emitted during teardown propagate through the relational context journal so guardians or auditors can verify all hops charged their budgets up to the final packet.
 
-By tying establishment and teardown to relational context journals, receipts become part of the same fact set tracked in `115_maintenance.md`, ensuring long-term accountability.
+By tying establishment and teardown to relational context journals, receipts become part of the same fact set tracked in `116_maintenance.md`, ensuring long-term accountability.
 
 ## 8. Privacy-by-Design Patterns
 
@@ -225,7 +225,7 @@ The combination ensures that:
 
 ## 9. Sync Status and Delivery Tracking
 
-Category A (optimistic) operations require UI feedback for sync and delivery status. Anti-entropy provides the underlying sync mechanism, but users need visibility into progress. See [Operation Categories](107_operation_categories.md) for the full consistency metadata type definitions.
+Category A (optimistic) operations require UI feedback for sync and delivery status. Anti-entropy provides the underlying sync mechanism, but users need visibility into progress. See [Operation Categories](109_operation_categories.md) for the full consistency metadata type definitions.
 
 ### 9.1 Propagation Status
 
@@ -338,7 +338,7 @@ Category B and C operations have different confirmation models:
 
 Lifecycle modes (A1/A2/A3) apply within these categories: A1/A2 updates are usable immediately but must be treated as provisional until A3 consensus finalization. Soft-safe A2 should publish convergence certificates and reversion facts so UI and transport can surface any reversion risk during the soft window.
 
-See [Consensus - Operation Categories](106_consensus.md#17-operation-categories) for categorization details.
+See [Consensus - Operation Categories](108_consensus.md#17-operation-categories) for categorization details.
 
 ## 10. Anti-Entropy Sync Protocol
 

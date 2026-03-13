@@ -16,7 +16,7 @@ The contract applies to information flows across privacy boundaries:
 - Receipt chains: Multi-hop forwarding accountability
 - Epoch boundaries: Temporal isolation of budget and receipt state
 
-Related specifications: [Authorization](104_authorization.md), [Transport and Information Flow](109_transport_and_information_flow.md), and [Theoretical Model](002_theoretical_model.md).
+Related specifications: [Authorization](106_authorization.md), [Transport and Information Flow](111_transport_and_information_flow.md), and [Theoretical Model](002_theoretical_model.md).
 Shared notation appears in [Theoretical Model](002_theoretical_model.md#shared-terms-and-notation).
 
 ### 1.1 Terminology Alignment
@@ -380,11 +380,11 @@ See [Verification Coverage Report](998_verification_coverage.md) for metrics and
 
 [Aura System Architecture](001_system_architecture.md) describes runtime layering and the guard chain.
 
-[Authorization](104_authorization.md) covers CapGuard, FlowGuard, and Biscuit integration.
+[Authorization](106_authorization.md) covers CapGuard, FlowGuard, and Biscuit integration.
 
-[Transport and Information Flow](109_transport_and_information_flow.md) documents transport semantics and receipts.
+[Transport and Information Flow](111_transport_and_information_flow.md) documents transport semantics and receipts.
 
-[Relational Contexts](112_relational_contexts.md) documents cross-authority state and context isolation.
+[Relational Contexts](114_relational_contexts.md) documents cross-authority state and context isolation.
 
 [Verification Coverage Report](998_verification_coverage.md) tracks formal verification status.
 

@@ -27,7 +27,7 @@
 // - Protocol: crates/aura-consensus/src/consensus/protocol.rs
 // - FROST: crates/aura-core/src/crypto/tree_signing.rs
 //
-// See: docs/106_consensus.md
+// See: docs/108_consensus.md
 
 module protocol_consensus {
     // ==================== TYPE DEFINITIONS ====================

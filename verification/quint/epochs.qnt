@@ -10,7 +10,7 @@
 // - Epoch transitions don't invalidate in-flight operations
 // - Receipt chains maintain causality
 //
-// See: docs/109_transport_and_information_flow.md, docs/115_maintenance.md
+// See: docs/111_transport_and_information_flow.md, docs/116_maintenance.md
 
 module protocol_epochs {
     // ==================== TYPE DEFINITIONS ====================

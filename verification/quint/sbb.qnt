@@ -13,7 +13,7 @@
 // Safety: Blocked peers cannot deliver messages to blocking peers.
 // Liveness: Envelopes reach all non-blocked peers in same partition.
 //
-// See: docs/109_transport_and_information_flow.md, docs/114_social_architecture.md
+// See: docs/111_transport_and_information_flow.md, docs/115_social_architecture.md
 
 module protocol_sbb {
   // ============ TYPE DEFINITIONS ============

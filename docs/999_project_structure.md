@@ -2,7 +2,7 @@
 
 This document provides the authoritative reference for Aura's crate organization, dependencies, and development policies.
 
-The **primary specifications** live in `docs/` (e.g., consensus in `docs/106_consensus.md`, ceremony lifecycles in `docs/107_operation_categories.md`). The `work/` directory is non-authoritative scratch and may be removed.
+The **primary specifications** live in `docs/` (e.g., consensus in `docs/108_consensus.md`, ceremony lifecycles in `docs/109_operation_categories.md`). The `work/` directory is non-authoritative scratch and may be removed.
 
 ## 8-Layer Architecture
 

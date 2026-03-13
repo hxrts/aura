@@ -22,7 +22,7 @@
 // - Facts: crates/aura-invitation/src/facts.rs
 // - Guards: crates/aura-invitation/src/guards.rs
 //
-// See: docs/112_relational_contexts.md
+// See: docs/114_relational_contexts.md
 
 module invitation {
   // ==================== TYPE DEFINITIONS ====================

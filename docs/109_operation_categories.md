@@ -12,7 +12,7 @@ Operations in Aura fall into three categories based on their effect timing and s
 | B | Deferred | Pending until confirmed | Medium-risk policy/membership changes |
 | C | Consensus-Gated | Blocked until ceremony completes | Cryptographic context establishment |
 
-Agreement modes are orthogonal to categories. Operations can use provisional or soft-safe fast paths, but any durable shared state must be consensus-finalized (A3). See [Consensus](106_consensus.md) for the fast-path and finalization taxonomy.
+Agreement modes are orthogonal to categories. Operations can use provisional or soft-safe fast paths, but any durable shared state must be consensus-finalized (A3). See [Consensus](108_consensus.md) for the fast-path and finalization taxonomy.
 
 ### 1.1 Key Generation Methods
 
@@ -577,10 +577,10 @@ Right: Channel creation is optimistic. Show immediately, sync status later.
 
 ## See Also
 
-- [Consensus](106_consensus.md) for fast path and fallback consensus
-- [Journal](103_journal.md) for fact semantics and reduction flows
-- [AMP Protocol](110_amp.md) for channel encryption and key derivation
-- [Relational Contexts](112_relational_contexts.md) for context vs channel distinction
-- [Choreography Guide](108_mpst_and_choreography.md) for session types in Category C
-- [Transport](109_transport_and_information_flow.md) for sync status tracking
-- [Effect System](105_effect_system.md) for effect policies
+- [Consensus](108_consensus.md) for fast path and fallback consensus
+- [Journal](105_journal.md) for fact semantics and reduction flows
+- [AMP Protocol](112_amp.md) for channel encryption and key derivation
+- [Relational Contexts](114_relational_contexts.md) for context vs channel distinction
+- [Choreography Guide](110_mpst_and_choreography.md) for session types in Category C
+- [Transport](111_transport_and_information_flow.md) for sync status tracking
+- [Effect System](103_effect_system.md) for effect policies

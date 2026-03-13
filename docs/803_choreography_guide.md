@@ -2,7 +2,7 @@
 
 This guide covers how to build distributed protocols using Aura's choreographic programming system. Use it when you need to coordinate multiple parties with session types, CRDTs, and multi-phase workflows.
 
-For theoretical foundations, see [MPST and Choreography](108_mpst_and_choreography.md). For operation categorization, see [Operation Categories](107_operation_categories.md).
+For theoretical foundations, see [MPST and Choreography](110_mpst_and_choreography.md). For operation categorization, see [Operation Categories](109_operation_categories.md).
 
 ## 1. When to Use Choreography
 
@@ -21,7 +21,7 @@ This pipeline applies to all Layer 4/5 choreographies and all Category C ceremon
 
 ### Phase 1: Classification and Facts
 
-Classify the operation using [Operation Categories](107_operation_categories.md):
+Classify the operation using [Operation Categories](109_operation_categories.md):
 - **Category A**: Local operations, no coordination
 - **Category B**: Optimistic CRDT operations, eventual consistency
 - **Category C**: Ceremonies requiring threshold agreement
@@ -80,7 +80,7 @@ choreography! {
 
 **Annotation syntax**: `Role[guard_capability = "...", flow_cost = N, journal_facts = "..."] -> Target: Message`
 
-Select the narrowest `TimeStamp` domain for each time field. See [Effect System](105_effect_system.md) for time domains.
+Select the narrowest `TimeStamp` domain for each time field. See [Effect System](103_effect_system.md) for time domains.
 
 ### Phase 3: Runtime Wiring
 
@@ -134,7 +134,7 @@ See `crates/aura-consensus/src/protocol/` for canonical examples.
 
 ## 3. CRDT Integration
 
-CRDTs handle state consistency in choreographic protocols. See [Journal](103_journal.md) for CRDT theory.
+CRDTs handle state consistency in choreographic protocols. See [Journal](105_journal.md) for CRDT theory.
 
 ### CRDT Coordinator
 
@@ -360,7 +360,7 @@ pub async fn execute_with_circuit_breaker<T>(
 
 ## 6. Guard Chain Integration
 
-The guard chain enforces authorization, flow budgets, and journal commits. See [Authorization](104_authorization.md) for the full specification.
+The guard chain enforces authorization, flow budgets, and journal commits. See [Authorization](106_authorization.md) for the full specification.
 
 ### Guard Chain Pattern
 
@@ -495,9 +495,9 @@ See [Simulation Guide](805_simulation_guide.md) for fault injection and adversar
 
 ## Related Documentation
 
-- [MPST and Choreography](108_mpst_and_choreography.md) - Session type theory
-- [Operation Categories](107_operation_categories.md) - Category A/B/C classification
-- [Authorization](104_authorization.md) - Guard chain specification
-- [Journal](103_journal.md) - CRDT and fact semantics
+- [MPST and Choreography](110_mpst_and_choreography.md) - Session type theory
+- [Operation Categories](109_operation_categories.md) - Category A/B/C classification
+- [Authorization](106_authorization.md) - Guard chain specification
+- [Journal](105_journal.md) - CRDT and fact semantics
 - [Testing Guide](804_testing_guide.md) - Test patterns
 - [Simulation Guide](805_simulation_guide.md) - Fault injection testing

@@ -51,14 +51,14 @@ This reference defines the identifiers that appear in Aura documents. Every othe
 
 | Identifier | Type | Purpose |
 |------------|------|---------|
-| `ConsensusId` | `Hash32` | Consensus instance identifier derived from prestate hash, operation hash, and nonce. Binds operations to prestates through hash commitment. See [Consensus](106_consensus.md). |
+| `ConsensusId` | `Hash32` | Consensus instance identifier derived from prestate hash, operation hash, and nonce. Binds operations to prestates through hash commitment. See [Consensus](108_consensus.md). |
 | `FrostParticipantId` | `NonZeroU16` | Threshold signing participant. Must be non-zero for FROST protocol compatibility. Scoped to signing sessions. |
 
 ## 7. Social Topology Identifiers
 
 | Identifier | Type | Purpose |
 |------------|------|---------|
-| `HomeId` | `[u8; 32]` | Home in the urban social topology. Each user resides in exactly one home. See [Social Architecture](114_social_architecture.md). |
+| `HomeId` | `[u8; 32]` | Home in the urban social topology. Each user resides in exactly one home. See [Social Architecture](115_social_architecture.md). |
 | `NeighborhoodId` | `[u8; 32]` | Neighborhood (collection of homes with 1-hop link relationships). Enables governance and traversal policies. |
 
 ## 8. Tree Identifiers
@@ -76,7 +76,7 @@ This reference defines the identifiers that appear in Aura documents. Every othe
 
 Fields: `ctx: ContextId`, `src: AuthorityId`, `dst: AuthorityId`, `epoch: Epoch`, `cost: FlowCost`, `nonce: FlowNonce`, `prev: Hash32`, `sig: ReceiptSig`.
 
-See [Transport and Information Flow](109_transport_and_information_flow.md) for receipt propagation.
+See [Transport and Information Flow](111_transport_and_information_flow.md) for receipt propagation.
 
 ## 10. Derived Keys
 
@@ -86,4 +86,4 @@ The derivation inputs never include device identifiers. Derived keys inherit the
 
 ## See Also
 
-[Authority and Identity](102_authority_and_identity.md) describes the authority model in detail. [Relational Contexts](112_relational_contexts.md) covers cross-authority relationships. [Transport and Information Flow](109_transport_and_information_flow.md) documents receipt chains and flow budgets. [Social Architecture](114_social_architecture.md) defines homes and neighborhoods.
+[Authority and Identity](102_authority_and_identity.md) describes the authority model in detail. [Relational Contexts](114_relational_contexts.md) covers cross-authority relationships. [Transport and Information Flow](111_transport_and_information_flow.md) documents receipt chains and flow budgets. [Social Architecture](115_social_architecture.md) defines homes and neighborhoods.

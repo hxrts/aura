@@ -181,12 +181,12 @@ Is this a Layer 2 domain crate?
 
 | Task | Doc | Code |
 |------|-----|------|
-| Adding effect trait | `docs/105_effect_system.md` | `aura-core/src/effects/` |
-| Building choreography | `docs/108_mpst_and_choreography.md` | Feature crate + `aura-mpst` |
+| Adding effect trait | `docs/103_effect_system.md` | `aura-core/src/effects/` |
+| Building choreography | `docs/110_mpst_and_choreography.md` | Feature crate + `aura-mpst` |
 | Understanding authorities | `docs/102_authority_and_identity.md` | `aura-core/src/authority.rs` |
-| Implementing consensus | `docs/106_consensus.md` | `aura-consensus/` |
-| Working with journals | `docs/103_journal.md` | `aura-journal/` |
-| Recovery flows | `docs/112_relational_contexts.md` | `aura-recovery/` |
+| Implementing consensus | `docs/108_consensus.md` | `aura-consensus/` |
+| Working with journals | `docs/105_journal.md` | `aura-journal/` |
+| Recovery flows | `docs/114_relational_contexts.md` | `aura-recovery/` |
 | Architecture debugging | `docs/999_project_structure.md` | `just check-arch` |
 
 ### By Concept
@@ -195,29 +195,29 @@ Is this a Layer 2 domain crate?
 |---------|---------------|
 | Authorities & identity | `docs/102_authority_and_identity.md` |
 | Commitment trees | `docs/102_authority_and_identity.md` |
-| Consensus | `docs/106_consensus.md` |
-| Effect system | `docs/105_effect_system.md` |
-| Runtime | `docs/120_runtime.md` |
-| Protocols & choreography | `docs/108_mpst_and_choreography.md` |
+| Consensus | `docs/108_consensus.md` |
+| Effect system | `docs/103_effect_system.md` |
+| Runtime | `docs/104_runtime.md` |
+| Protocols & choreography | `docs/110_mpst_and_choreography.md` |
 | Guard chain | `docs/001_system_architecture.md` §5 |
-| Journals & facts | `docs/103_journal.md` |
-| State reduction | `docs/103_journal.md` |
+| Journals & facts | `docs/105_journal.md` |
+| State reduction | `docs/105_journal.md` |
 | Privacy & flow budgets | `docs/003_information_flow_contract.md` |
-| Relational contexts | `docs/112_relational_contexts.md` |
-| Transport & receipts | `docs/109_transport_and_information_flow.md` |
-| Rendezvous | `docs/111_rendezvous.md` |
-| Social topology | `docs/114_social_architecture.md` |
+| Relational contexts | `docs/114_relational_contexts.md` |
+| Transport & receipts | `docs/111_transport_and_information_flow.md` |
+| Rendezvous | `docs/113_rendezvous.md` |
+| Social topology | `docs/115_social_architecture.md` |
 | Cryptography | `docs/100_crypto.md` |
-| Authorization & Biscuit | `docs/104_authorization.md` |
+| Authorization & Biscuit | `docs/106_authorization.md` |
 | Identifiers & boundaries | `docs/101_identifiers_and_boundaries.md` |
-| Operation categories | `docs/107_operation_categories.md` |
-| Database & queries | `docs/113_database.md` |
+| Operation categories | `docs/109_operation_categories.md` |
+| Database & queries | `docs/107_database.md` |
 | Distributed systems | `docs/004_distributed_systems_contract.md` |
 | Theoretical model | `docs/002_theoretical_model.md` |
 | Testing | `docs/804_testing_guide.md` |
 | Simulation | `docs/805_simulation_guide.md` |
 | Verification (Quint/Lean) | `docs/806_verification_guide.md` |
-| Maintenance & OTA | `docs/115_maintenance.md`, `docs/808_maintenance_guide.md` |
+| Maintenance & OTA | `docs/116_maintenance.md`, `docs/808_maintenance_guide.md` |
 | Effects & handlers | `docs/802_effects_guide.md` |
 | Choreography | `docs/803_choreography_guide.md` |
 | System internals | `docs/807_system_internals_guide.md` |

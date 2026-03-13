@@ -1,10 +1,10 @@
 # Consensus
 
-This document describes the architecture of Aura Consensus. It defines the problem model, protocol phases, data structures, and integration with [journals](103_journal.md). It explains how consensus provides single-shot agreement for non-monotone operations such as account updates or relational context operations.
+This document describes the architecture of Aura Consensus. It defines the problem model, protocol phases, data structures, and integration with [journals](105_journal.md). It explains how consensus provides single-shot agreement for non-monotone operations such as account updates or relational context operations.
 
 ## 1. Problem Model
 
-Aura uses consensus only for operations that cannot be expressed as monotone growth. Consensus produces a commit fact. The commit fact is inserted into one or more [journals](103_journal.md) and drives deterministic reduction. Aura does not maintain a global log. Consensus operates in the scope of an authority or a relational context.
+Aura uses consensus only for operations that cannot be expressed as monotone growth. Consensus produces a commit fact. The commit fact is inserted into one or more [journals](105_journal.md) and drives deterministic reduction. Aura does not maintain a global log. Consensus operates in the scope of an authority or a relational context.
 
 Consensus is single-shot. It agrees on a single operation and a single prestate. Commit facts are immutable and merge by join in journal namespaces.
 
@@ -35,7 +35,7 @@ Each consensus instance independently agrees on:
 - Sequential linearization across instances
 - Automatic operation dependencies
 
-**To sequence operations, use session types** (`docs/108_mpst_and_choreography.md`) executed through Aura’s Telltale-backed choreography runtime (`execute_as` runners or VM backend):
+**To sequence operations, use session types** (`docs/110_mpst_and_choreography.md`) executed through Aura’s Telltale-backed choreography runtime (`execute_as` runners or VM backend):
 
 ```rust
 use aura_mpst::{choreography, Role};
@@ -73,7 +73,7 @@ async fn sequential_device_updates<C: EffectContext>(
 }
 ```
 
-**Cross-reference:** See `docs/113_database.md` §8 for database transaction integration.
+**Cross-reference:** See `docs/107_database.md` §8 for database transaction integration.
 
 ## 2. Core Protocol
 
@@ -407,7 +407,7 @@ Any witness reaching threshold broadcasts the commit fact. The first valid thres
 
 Consensus emits commit facts. Journals merge commit facts using set union. Reduction interprets commit facts as confirmed non-monotone events.
 
-Account journals integrate commit facts that represent tree operations. [Relational context](112_relational_contexts.md) journals integrate commit facts that represent guardian bindings or recovery grants.
+Account journals integrate commit facts that represent tree operations. [Relational context](114_relational_contexts.md) journals integrate commit facts that represent guardian bindings or recovery grants.
 
 Reduction remains deterministic. Commit facts simply appear as additional facts in the semilattice.
 
@@ -1076,5 +1076,5 @@ The helper `HasEquivocatedInSet` excludes conflict batches that contain conflict
 
 ## See Also
 
-- [Operation Categories](107_operation_categories.md) - When consensus is required and ceremony lifecycle
-- [Relational Contexts](112_relational_contexts.md) - Consensus integration for relational operations
+- [Operation Categories](109_operation_categories.md) - When consensus is required and ceremony lifecycle
+- [Relational Contexts](114_relational_contexts.md) - Consensus integration for relational operations

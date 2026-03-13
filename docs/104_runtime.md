@@ -4,7 +4,7 @@
 
 The Aura runtime assembles effect handlers into working systems. It manages lifecycle, executes the guard chain, schedules reactive updates, and exposes services through `AuraAgent`. The `AppCore` provides a unified interface for all frontends.
 
-This document covers runtime composition and execution. See [Effect System](105_effect_system.md) for trait definitions and handler design.
+This document covers runtime composition and execution. See [Effect System](103_effect_system.md) for trait definitions and handler design.
 The `aura-agent` crate-level runtime contract, including structured concurrency,
 canonical ingress, ownership, typed errors, and CI policy gates, lives in
 `crates/aura-agent/ARCHITECTURE.md`.
@@ -129,7 +129,7 @@ This approach keeps time-based policy in the runtime layer and preserves determi
 
 ## Guard Chain Execution
 
-The runtime enforces guard chain sequencing defined in [Authorization](104_authorization.md). Each projected choreography message expands to three phases. First, snapshot preparation gathers capability frontier, budget headroom, and metadata. Second, pure guard evaluation runs synchronously over the snapshot. Third, command interpretation executes the resulting effect commands.
+The runtime enforces guard chain sequencing defined in [Authorization](106_authorization.md). Each projected choreography message expands to three phases. First, snapshot preparation gathers capability frontier, budget headroom, and metadata. Second, pure guard evaluation runs synchronously over the snapshot. Third, command interpretation executes the resulting effect commands.
 
 ```mermaid
 flowchart LR

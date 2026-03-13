@@ -425,6 +425,6 @@ Hardware Security Module support would require a new `HsmCryptoHandler` implemen
 
 ## See Also
 
-- [Effect System](105_effect_system.md) for effect trait patterns
+- [Effect System](103_effect_system.md) for effect trait patterns
 - [Project Structure](999_project_structure.md) for 8-layer architecture
 - [Effects and Handlers Guide](802_effects_guide.md) for handler implementation guidance

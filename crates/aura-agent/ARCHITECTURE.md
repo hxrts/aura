@@ -512,7 +512,7 @@ Verification hooks:
 - `just test-crate aura-agent`
 
 Contract alignment:
-- [Runtime](../../docs/120_runtime.md) defines service actor patterns.
+- [Runtime](../../docs/104_runtime.md) defines service actor patterns.
 
 Architectural note:
 - actor services are the correct abstraction for runtime supervision
@@ -535,7 +535,7 @@ Verification hooks:
 - `just ci-choreo-parity`
 
 Contract alignment:
-- [Effect System](../../docs/105_effect_system.md) defines session-local VM bridge.
+- [Effect System](../../docs/103_effect_system.md) defines session-local VM bridge.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines canonical execution.
 
 Architectural note:
@@ -559,7 +559,7 @@ Verification hooks:
 - `just test-crate aura-agent`
 
 Contract alignment:
-- [Runtime](../../docs/120_runtime.md) defines session management.
+- [Runtime](../../docs/104_runtime.md) defines session management.
 
 ### InvariantRuntimeCompositionBoundary
 
@@ -580,7 +580,7 @@ Verification hooks:
 
 Contract alignment:
 - [Aura System Architecture](../../docs/001_system_architecture.md) defines layer boundaries.
-- [Effect System](../../docs/105_effect_system.md) defines composition constraints.
+- [Effect System](../../docs/103_effect_system.md) defines composition constraints.
 
 ### InvariantBridgeOwnershipAgent
 
@@ -599,7 +599,7 @@ Verification hooks:
 - `just ci-conformance-contracts`
 
 Contract alignment:
-- [Formal Verification Reference](../../docs/119_verification.md) defines runtime parity lanes.
+- [Formal Verification Reference](../../docs/120_verification.md) defines runtime parity lanes.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines runtime admission guarantees.
 
 ### InvariantFatalViolations

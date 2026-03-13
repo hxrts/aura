@@ -296,7 +296,7 @@ Writing to stderr while iocraft is in fullscreen can corrupt the terminal buffer
 
 The policy is enforced with type-level stdio tokens in `crates/aura-terminal/src/handlers/tui_stdio.rs`. The token used before fullscreen is consumed while iocraft is running. This prevents accidental `println!` and `eprintln!` calls in the fullscreen scope.
 
-This policy aligns with [Privacy and Information Flow](003_information_flow_contract.md) and [Effect System](105_effect_system.md).
+This policy aligns with [Privacy and Information Flow](003_information_flow_contract.md) and [Effect System](103_effect_system.md).
 
 ## Errors and user feedback
 
@@ -502,13 +502,13 @@ Status indicators are rendered in `MessageBubble` (`crates/aura-terminal/src/tui
 - `propagation`: Sync status (Local, Syncing, Complete, Failed)
 - `acknowledgment`: Which peers have acked (for delivery tracking)
 
-See [Operation Categories](107_operation_categories.md) for the full consistency metadata type definitions and [AMP Protocol](110_amp.md) for the acknowledgment flow.
+See [Operation Categories](109_operation_categories.md) for the full consistency metadata type definitions and [AMP Protocol](112_amp.md) for the acknowledgment flow.
 
 ## See also
 
 - [Aura System Architecture](001_system_architecture.md)
 - [Privacy and Information Flow](003_information_flow_contract.md)
-- [Effect System](105_effect_system.md)
-- [Runtime](120_runtime.md)
-- [AMP Protocol](110_amp.md) for message delivery acknowledgments
-- [Operation Categories](107_operation_categories.md) for status tracking patterns
+- [Effect System](103_effect_system.md)
+- [Runtime](104_runtime.md)
+- [AMP Protocol](112_amp.md) for message delivery acknowledgments
+- [Operation Categories](109_operation_categories.md) for status tracking patterns
