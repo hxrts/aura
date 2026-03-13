@@ -338,4 +338,4 @@ Run `just check-arch` before submitting changes. The checker validates:
 - [Runtime](104_runtime.md) - Runtime specification
 - [Authorization](106_authorization.md) - Guard chain specification
 - [System Architecture](001_system_architecture.md) - Layer boundaries
-- [CLI and TUI](117_cli_tui.md) - Terminal specification
+- [CLI and TUI](117_user_interface.md) - Terminal specification

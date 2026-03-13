@@ -72,7 +72,7 @@ The documents below cover theory, technical components, implementation guidance,
 
 [Distributed Maintenance Architecture](116_maintenance.md) covers snapshots, garbage collection, and system evolution.
 
-[CLI and Terminal User Interface](117_cli_tui.md) specifies command-line and TUI interfaces for Aura operations.
+[CLI and Terminal User Interface](117_user_interface.md) specifies command-line and TUI interfaces for Aura operations.
 
 [Test Infrastructure Reference](118_testkit.md) documents test fixtures, mock handlers, and scenario builders.
 

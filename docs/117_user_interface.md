@@ -1,4 +1,4 @@
-# CLI and Terminal User Interface
+# User Interface
 
 This document describes the `aura-terminal` user interface layer. It covers the non-interactive CLI commands and the iocraft-based TUI. It also describes how both frontends share `aura-app` through `AppCore` and the reactive signal system.
 

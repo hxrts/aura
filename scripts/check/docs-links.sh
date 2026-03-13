@@ -116,29 +116,26 @@ while IFS= read -r record; do
   path_part="${target%%#*}"
   [[ -z "$path_part" ]] && continue
 
-  # Only validate links that point to docs/.
-  if [[ "$path_part" != *docs/* && "$path_part" != docs/* && "$path_part" != /docs/* ]]; then
-    continue
-  fi
-
+  # Resolve the link path
   if [[ "$path_part" == /docs/* ]]; then
     resolved="$(normalize_path "$ROOT/${path_part#/}")"
   elif [[ "$path_part" == docs/* ]]; then
     resolved="$(normalize_path "$ROOT/$path_part")"
+  elif [[ "$path_part" == /* ]]; then
+    # Absolute path not under docs/ - skip
+    continue
   else
+    # Relative path - resolve from source file's directory
     resolved="$(normalize_path "$ROOT/$(dirname "$src_file")/$path_part")"
   fi
 
-  checked=$((checked + 1))
-  # Enforce that docs links actually resolve under repo docs/.
+  # Only validate links that resolve to docs/
   case "$resolved" in
     "$docs_root"/*) ;;
-    *)
-      missing=$((missing + 1))
-      echo "invalid docs link: $src_file:$src_line -> $target (resolved outside docs/: ${resolved#$ROOT/})"
-      continue
-      ;;
+    *) continue ;;
   esac
+
+  checked=$((checked + 1))
 
   if [[ ! -f "$resolved" ]]; then
     missing=$((missing + 1))
@@ -154,9 +151,10 @@ done < <(
   done < <(rg -l -0 --pcre2 '\[[^\]]+\]\([^)]*docs/' crates)
 
   # Check markdown files in docs/ (internal cross-references)
+  # Include both explicit docs/ paths and relative .md links
   while IFS= read -r -d '' file; do
     perl -ne 'while (/\[[^\]]+\]\(([^)]+)\)/g) { print "$ARGV\t$.\t$1\n"; }' "$file"
-  done < <(rg -l -0 --pcre2 '\[[^\]]+\]\([^)]*docs/' docs)
+  done < <(rg -l -0 --pcre2 '\[[^\]]+\]\([^)]*\.md' docs)
 
   # Check markdown files in tests/, examples/, scenarios/, .github/
   for dir in tests examples scenarios .github; do
@@ -207,14 +205,17 @@ if [[ "$FIX_MODE" == true || "$DRY_RUN" == true ]] && [[ "${#broken_links[@]}" -
     echo "=== Fixing broken links ==="
   fi
 
-  # Build a map of doc basenames (without number prefix) to actual filenames
-  declare -A doc_map=()
+  # Build maps for matching: by name and by number prefix
+  declare -A doc_map_by_name=()
+  declare -A doc_map_by_number=()
   while IFS= read -r -d '' doc_file; do
     doc_name="$(basename "$doc_file")"
     # Extract the name part after the number prefix (e.g., "103_journal.md" -> "journal")
-    if [[ "$doc_name" =~ ^[0-9]+_(.+)\.md$ ]]; then
-      name_part="${BASH_REMATCH[1]}"
-      doc_map["$name_part"]="$doc_name"
+    if [[ "$doc_name" =~ ^([0-9]+)_(.+)\.md$ ]]; then
+      number_part="${BASH_REMATCH[1]}"
+      name_part="${BASH_REMATCH[2]}"
+      doc_map_by_name["$name_part"]="$doc_name"
+      doc_map_by_number["$number_part"]="$doc_name"
     fi
   done < <(find "$docs_root" -maxdepth 1 -name '*.md' -print0 2>/dev/null)
 
@@ -228,29 +229,38 @@ if [[ "$FIX_MODE" == true || "$DRY_RUN" == true ]] && [[ "${#broken_links[@]}" -
     old_target="${rest%%|*}"
     old_basename="${rest##*|}"
 
-    # Extract the name part from the old basename
-    if [[ "$old_basename" =~ ^[0-9]+_(.+)\.md$ ]]; then
-      name_part="${BASH_REMATCH[1]}"
-      if [[ -n "${doc_map[$name_part]:-}" ]]; then
-        new_basename="${doc_map[$name_part]}"
-        if [[ "$old_basename" != "$new_basename" ]]; then
-          # Compute the new target by replacing the basename
-          new_target="${old_target/$old_basename/$new_basename}"
+    new_basename=""
 
-          if [[ "$DRY_RUN" == true ]]; then
-            echo "  $src_file: $old_target -> $new_target"
-            affected_files[$src_file]=1
+    # Extract number and name parts from the old basename
+    if [[ "$old_basename" =~ ^([0-9]+)_(.+)\.md$ ]]; then
+      number_part="${BASH_REMATCH[1]}"
+      name_part="${BASH_REMATCH[2]}"
+
+      # First try matching by name (handles renumbering)
+      if [[ -n "${doc_map_by_name[$name_part]:-}" ]]; then
+        new_basename="${doc_map_by_name[$name_part]}"
+      # Then try matching by number (handles renaming)
+      elif [[ -n "${doc_map_by_number[$number_part]:-}" ]]; then
+        new_basename="${doc_map_by_number[$number_part]}"
+      fi
+
+      if [[ -n "$new_basename" && "$old_basename" != "$new_basename" ]]; then
+        # Compute the new target by replacing the basename
+        new_target="${old_target/$old_basename/$new_basename}"
+
+        if [[ "$DRY_RUN" == true ]]; then
+          echo "  $src_file: $old_target -> $new_target"
+          affected_files[$src_file]=1
+        else
+          # Accumulate replacements per file
+          if [[ -z "${file_replacements[$src_file]:-}" ]]; then
+            file_replacements[$src_file]="s|$old_basename|$new_basename|g"
           else
-            # Accumulate replacements per file
-            if [[ -z "${file_replacements[$src_file]:-}" ]]; then
-              file_replacements[$src_file]="s|$old_basename|$new_basename|g"
-            else
-              file_replacements[$src_file]="${file_replacements[$src_file]}; s|$old_basename|$new_basename|g"
-            fi
+            file_replacements[$src_file]="${file_replacements[$src_file]}; s|$old_basename|$new_basename|g"
           fi
-          fixed_count=$((fixed_count + 1))
         fi
-      else
+        fixed_count=$((fixed_count + 1))
+      elif [[ -z "$new_basename" ]]; then
         echo "  warning: no match found for $old_basename in $src_file"
       fi
     fi

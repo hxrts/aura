@@ -1,169 +1,86 @@
 # User Flow Harness
 
-This document defines the harness architecture for testing parity-critical user flows.
-It supplements [Testing Guide](804_testing_guide.md).
-The harness validates that shared flows execute identically across TUI and browser frontends.
+This document defines the harness contract for parity-critical user flows. It supplements [Testing Guide](804_testing_guide.md). Crate placement follows [Project Structure](999_project_structure.md).
 
 ## 1. Purpose
 
-The harness orchestrates multi-instance scenario execution against real frontends.
-It submits typed semantic commands, observes authoritative projections, and validates deterministic behavior.
-Shared flows run through one semantic contract rather than through frontend-specific scripting.
+`aura-harness` is the multi-instance orchestration crate for end-to-end Aura validation. It starts local, browser, and SSH-backed instances. It runs shared scenarios against real frontends instead of renderer-specific scripts.
 
-## 2. Semantic Command Plane
+The default correctness lane is the real runtime with real TUI or web surfaces. The harness is not a replacement for simulator, Quint, or unit-level validation. Those systems provide supporting evidence and alternate execution environments.
 
-Shared scenarios execute through a typed command plane defined in `aura-app::scenario_contract`.
-Commands include account creation, contact invitation, channel membership, and message sending.
-Each command returns a typed response containing a value, submission state, and operation handle.
+## 2. Execution Lanes
 
-The `SharedSemanticBackend` trait defines the command submission interface.
+The harness has two execution lanes.
 
-```rust
-pub trait SharedSemanticBackend {
-    fn shared_projection(&self) -> Result<UiSnapshot>;
-    fn submit_semantic_command(
-        &mut self,
-        request: SemanticCommandRequest,
-    ) -> Result<SemanticCommandResponse>;
-    fn wait_for_shared_projection_event(
-        &self,
-        timeout: Duration,
-        after_version: Option<u64>,
-    ) -> Option<Result<UiSnapshotEvent>>;
-}
-```
+- The shared semantic lane submits typed intent commands and waits on typed semantic contracts.
+- The frontend-conformance lane validates renderer-specific wiring such as PTY keys, DOM selectors, focus movement, and control bindings.
 
-This trait abstracts command submission across backend implementations.
-Both `LocalPtyBackend` and `PlaywrightBrowserBackend` implement this interface.
-Commands flow through the real app update loop rather than through renderer shortcuts.
+Shared scenarios must run in the shared semantic lane. That lane must not issue raw UI requests such as `SendKeys`, `SendKey`, `ClickButton`, `FillInput`, or `FillField`. Frontend-conformance coverage may use those mechanics on purpose.
 
-## 3. Execution Lanes
+## 3. Scenario Sources
 
-The harness distinguishes two execution lanes.
-Shared semantic scenarios use typed commands and projection waits.
-Frontend conformance scenarios use raw UI mechanics for renderer-specific validation.
+The canonical shared scenario source is `aura-app::scenario_contract`. Converted shared scenarios load as semantic definitions and become `ScenarioCanonicalModel::SemanticSharedFlow`. Those scenarios keep typed semantic steps and do not keep mirrored legacy `ScenarioStep` graphs.
 
-The shared semantic lane targets product workflow correctness.
-Failures in this lane indicate product bugs or command bridge issues.
-The conformance lane validates that frontend controls map correctly to shared semantics.
-Failures there indicate renderer or control binding issues.
+The harness still contains a compatibility bridge for legacy scripted scenarios. That bridge supports migration work and frontend-conformance coverage. It is not the canonical input surface for shared flows.
 
-Shared scenarios cannot call raw UI methods.
-This separation prevents renderer timing from contaminating shared flow validation.
+Shared scenario governance depends on `scenarios/harness_inventory.toml`. The inventory classifies scenarios as shared, TUI conformance, web conformance, or removal candidates. Governance checks use that classification to enforce lane policy.
 
-## 4. Backend Abstraction
+## 4. Backend Model
 
-Each backend implements three traits.
-`InstanceBackend` provides lifecycle management, health checks, and basic observation.
-`RawUiBackend` provides click, keystroke, and fill operations for conformance testing.
-`SharedSemanticBackend` provides the semantic command plane for shared flows.
+All backends implement `InstanceBackend`. That trait covers lifecycle, health checks, snapshots, log tails, and basic input. `RawUiBackend` adds renderer-driven actions for conformance coverage.
 
-The `BackendHandle` enum dispatches to the appropriate backend implementation.
+`LocalPtyBackend` and `PlaywrightBrowserBackend` also implement `SharedSemanticBackend`. They expose `shared_projection()`, `submit_semantic_command()`, and projection-event waits. Shared commands enter the real frontend update path instead of a harness-only shortcut.
 
-```rust
-pub enum BackendHandle {
-    Local(LocalPtyBackend),
-    Browser(Box<PlaywrightBrowserBackend>),
-    Ssh(SshTunnelBackend),
-}
-```
-
-Local PTY backends communicate with the running app via Unix socket RPC.
-Browser backends communicate via a Node.js Playwright driver subprocess.
-Both translate semantic commands into real app update events.
+`SshTunnelBackend` is orchestration-only. It validates SSH security defaults and tunnel setup. It does not implement the raw UI or shared semantic contracts.
 
 ## 5. Observation Model
 
-`UiSnapshot` is the authoritative semantic observation surface.
-It contains screen state, modal state, list contents, and runtime events.
-Every snapshot carries revision metadata for monotone freshness validation.
+`UiSnapshot` is the authoritative observation surface for parity-critical flows. Each snapshot carries `ProjectionRevision`, quiescence state, selections, lists, operations, toasts, and runtime events. Browser observation also carries render-heartbeat data through the browser bridge.
 
-Parity-critical waits resolve against typed readiness contracts.
-The harness provides helper functions for common wait patterns.
+Parity-critical waits must bind to typed contracts. Those contracts include readiness, screen or modal visibility, runtime events, quiescence, operation handles, and strictly newer projections. Raw text matching and raw DOM scraping are diagnostics only.
 
-```rust
-fn wait_for_modal_visible(
-    backend: &dyn InstanceBackend,
-    modal_id: ModalId,
-    timeout: Duration,
-) -> Result<()>;
+Observation paths must be side-effect free. Reads must not repair state or retry hidden actions. Recovery remains explicit and separate from observation.
 
-fn wait_for_screen_visible(
-    backend: &dyn InstanceBackend,
-    screen_id: ScreenId,
-    timeout: Duration,
-) -> Result<()>;
-```
+## 6. Semantic Command Plane
 
-These functions poll `ui_snapshot()` until the condition holds or timeout expires.
-Raw text or DOM inspection is diagnostic only and must not determine success.
+Shared commands are typed `IntentAction` requests. Examples include account creation, device enrollment, contact invitations, channel membership, and chat sends. Each command returns a typed response with submission metadata and an operation handle when the contract defines one.
 
-## 6. Operation Handles
+The executor records projection baselines before command submission. Post-action waits require a strictly newer authoritative projection or another declared barrier. This rule prevents stale snapshots from satisfying success-path assertions.
 
-Semantic commands return operation handles for tracking async completion.
-The handle contains an operation ID and instance ID.
-The harness can observe operation state through the projection.
-
-```rust
-pub fn observe_operation(
-    snapshot: &UiSnapshot,
-    operation_id: &OperationId,
-) -> Option<ObservedOperation>;
-
-pub fn wait_for_operation_submission(
-    backend: &dyn InstanceBackend,
-    operation_id: OperationId,
-    previous: Option<ObservedOperation>,
-    timeout: Duration,
-) -> Result<UiOperationHandle>;
-```
-
-Operation observation detects state changes without side effects.
-The wait function polls until the operation reaches the expected submission state.
+Unsupported semantic commands must fail closed. The harness must not silently fall back to renderer-specific behavior in the shared semantic lane.
 
 ## 7. Scenario Execution
 
-The `ScenarioExecutor` drives scenario steps within budget constraints.
-Each step has a timeout and the scenario has a global budget.
-The executor tracks flow state across instances and validates action preconditions.
+`ScenarioExecutor` enforces per-step budgets and an optional global budget. It records canonical trace events, state transitions, and step metrics. It also enforces shared-flow preconditions for account, contact, channel, and messaging phases.
 
-Flow state machines govern action sequencing.
+Shared scenarios must declare convergence barriers before the next typed intent when the flow requires one. Governance validates those barriers against typed expectations. This keeps shared execution aligned with runtime events and authoritative state changes.
 
-| Phase | States |
-|-------|--------|
-| Account | New, Ready |
-| Contact | None, InvitationReady, Linked |
-| Channel | None, InvitationPending, MembershipReady |
-| Messaging | None, Ready, Visible |
+The executor can also run frontend-conformance scenarios. Those runs still produce traces and diagnostics. They are not the primary parity oracle for shared business flows.
 
-The executor validates that each action is permitted given current state.
-State transitions are recorded for trace validation.
+## 8. Determinism And Replay
 
-## 8. Canonical Traces
+Run configuration validation is config-first. Invalid run files, scenario files, capability mismatches, storage collisions, SSH policy violations, and browser runtime gaps fail before execution starts.
 
-Every scenario run produces a canonical trace.
-The trace contains action events, transition events, and terminal facts.
-Trace shape conformance is part of parity validation.
+Determinism comes from `build_seed_bundle()`. The harness derives a run seed, scenario seed, fault seed, and per-instance seeds from the run configuration. The event stream uses monotonically increasing event identifiers.
 
-A shared flow is deterministic when repeated runs produce identical trace shapes.
-The harness derives per-scenario and per-instance seeds from the run configuration.
-Identical seeds must produce identical semantic traces.
+Replay bundles store the run config, tool API version, tool action log, routing metadata, and seed bundle. Replay checks response shape compatibility and reruns the recorded actions against a fresh coordinator. Deterministic shared flows are expected to preserve semantic trace shape under identical inputs.
 
-## 9. Revision Freshness
+## 9. Runtime Substrate
 
-Every parity-critical transition must advance monotonic revision metadata.
-Post-action observation must require a strictly newer snapshot than the pre-action baseline.
-Render heartbeat divergence indicates stale state rather than completion.
+The harness supports `real` and `simulator` runtime substrates. The real substrate is the default lane. The simulator substrate is an alternate deterministic runtime controller for fault injection and transcript capture.
 
-Browser cache invalidation occurs at declared lifecycle boundaries.
-Session start, authority switch, device import, and storage reset are lifecycle events.
-Flow-specific cache invalidation is not allowed.
+Simulator substrate runs currently support local instances only. Browser instances are not allowed in simulator mode. Shared user-flow correctness still belongs to the real frontend lane even when simulator support is enabled for controlled experiments.
 
-## 10. Harness Mode Constraints
+## 10. Governance And Policy
 
-Harness mode may add instrumentation and render stability hooks.
-Harness mode must not change product business semantics.
-Any harness-only branch that changes parity-critical flow meaning is a defect.
+Harness governance is typed first. `aura-harness` exposes governance checks for shared scenario contracts, canonical model enforcement, barrier legality, user-flow coverage, UI parity metadata, wrapper integrity, and legacy shared-flow quarantine.
 
-Allowlisted harness mode hooks carry owner and justification metadata.
-The policy script `scripts/check/ux-policy-guardrails.sh` enforces these constraints.
+The main repository policy entry points are `scripts/check/shared-flow-policy.sh`, `scripts/check/user-flow-policy-guardrails.sh`, and `scripts/check/user-flow-guidance-sync.sh`. The corresponding aggregate commands are `just ci-shared-flow-policy`, `just ci-user-flow-policy`, and `just ci-harness-matrix-inventory`.
+
+Harness mode may add instrumentation and render-stability hooks. It must not change parity-critical business semantics. Allowlisted exceptions must carry owner, justification, and design-note metadata.
+
+## 11. Boundaries
+
+`aura-harness` is tooling. It is not the authority for domain semantics, effect traits, or protocol safety rules. Those contracts remain owned by `aura-core`, `aura-app`, and the other runtime and specification crates.
+
+The harness drives instances through process boundaries and typed tool surfaces. It must not mutate protocol state out of band. Shared UX identifiers, parity metadata, and observation shapes remain owned by `aura-app::ui_contract`.

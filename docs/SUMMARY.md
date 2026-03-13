@@ -22,7 +22,7 @@
 - [Relational Contexts](114_relational_contexts.md)
 - [Social Architecture](115_social_architecture.md)
 - [Distributed Maintenance Architecture](116_maintenance.md)
-- [CLI and Terminal User Interface](117_cli_tui.md)
+- [CLI and Terminal User Interface](117_user_interface.md)
 - [Test Infrastructure Reference](118_testkit.md)
 - [Simulation Infrastructure Reference](119_simulator.md)
 - [Formal Verification Reference](120_verification.md)
