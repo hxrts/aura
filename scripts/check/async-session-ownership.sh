@@ -13,6 +13,14 @@ fail() {
 
 [[ -f "$allowlist_file" ]] || fail "missing allowlist: $allowlist_file"
 
+# Authoritative session-mutation entrypoints live in:
+# - crates/aura-agent/src/runtime/session_ingress.rs
+# - crates/aura-agent/src/runtime/vm_host_bridge.rs
+#
+# Production handlers/services may use only the owner-routed surface exposed by
+# `open_owned_manifest_vm_session_admitted(...)` and `OwnedVmSession`.
+# Lower-level raw session APIs are banned outside runtime internals.
+
 violations=()
 legacy_exemptions=0
 
@@ -33,12 +41,14 @@ while IFS= read -r match; do
 done < <(
   rg -n \
     -e 'open_manifest_vm_session_admitted' \
+    -e 'ChoreographicEffects::start_session\(' \
+    -e 'ChoreographicEffects::end_session\(' \
     -e 'inject_vm_receive' \
     -e 'effects\.start_session\(' \
     -e 'self\.effects\.start_session\(' \
     -e 'effects\.end_session\(' \
     -e 'self\.effects\.end_session\(' \
-    crates/aura-agent/src/handlers crates/aura-agent/src/runtime/services -g '*.rs' \
+    crates/aura-agent/src/handlers crates/aura-agent/src/runtime/services crates/aura-agent/src/runtime_bridge -g '*.rs' \
     | rg -v ':\s*//!|:\s*//|:\s*/\*'
 )
 

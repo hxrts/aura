@@ -849,6 +849,100 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn async_ingress_reordering_preserves_communication_identity() {
+        let authority_id = AuthorityId::from_uuid(Uuid::from_bytes([0x61; 16]));
+        let peer_authority = AuthorityId::from_uuid(Uuid::from_bytes([0x62; 16]));
+        let effects = test_effects(authority_id);
+        let session_id = Uuid::from_u128(0x6162);
+        let self_role = authority_device_role(authority_id, 0);
+        let peer_role = authority_device_role(peer_authority, 1);
+
+        effects
+            .start_session(session_id, vec![self_role, peer_role])
+            .await
+            .expect("session starts");
+
+        let context_id = ContextId::new_from_entropy(hash(session_id.as_bytes()));
+        for (message_id, replay_key, payload) in [
+            ("msg-2", "replay-2", b"second".to_vec()),
+            ("msg-1", "replay-1", b"first".to_vec()),
+        ] {
+            let mut metadata = HashMap::new();
+            metadata.insert(
+                "content-type".to_string(),
+                "application/aura-choreography".to_string(),
+            );
+            metadata.insert("session-id".to_string(), session_id.to_string());
+            metadata.insert("message-id".to_string(), message_id.to_string());
+            metadata.insert("replay-key".to_string(), replay_key.to_string());
+            effects.requeue_envelope(TransportEnvelope {
+                destination: authority_id,
+                source: peer_authority,
+                context: context_id,
+                payload,
+                metadata,
+                receipt: None,
+            });
+        }
+
+        let session_runtime_id = RuntimeChoreographySessionId::from_uuid(session_id);
+        let snapshot = effects
+            .choreography_state
+            .read()
+            .session_inbox_snapshot(session_runtime_id);
+        let identities = snapshot
+            .iter()
+            .map(|envelope| {
+                (
+                    envelope
+                        .metadata
+                        .get("message-id")
+                        .cloned()
+                        .expect("message id preserved"),
+                    envelope
+                        .metadata
+                        .get("replay-key")
+                        .cloned()
+                        .expect("replay key preserved"),
+                    envelope.payload.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            identities,
+            vec![
+                ("msg-2".to_string(), "replay-2".to_string(), b"second".to_vec()),
+                ("msg-1".to_string(), "replay-1".to_string(), b"first".to_vec()),
+            ],
+            "host ingress reordering may change arrival order, but communication identity must survive unchanged"
+        );
+
+        for expected in [
+            ("msg-2", "replay-2", b"second".to_vec()),
+            ("msg-1", "replay-1", b"first".to_vec()),
+        ] {
+            let envelope = take_session_envelope(
+                effects.as_ref(),
+                session_runtime_id,
+                peer_authority,
+                context_id,
+            )
+            .expect("session envelope should be available");
+            assert_eq!(
+                envelope.metadata.get("message-id").map(String::as_str),
+                Some(expected.0)
+            );
+            assert_eq!(
+                envelope.metadata.get("replay-key").map(String::as_str),
+                Some(expected.1)
+            );
+            assert_eq!(envelope.payload, expected.2);
+        }
+
+        effects.end_session().await.expect("session ends");
+    }
+
+    #[tokio::test]
     async fn receive_reports_timeout_without_polling_loop() {
         let authority_id = AuthorityId::from_uuid(Uuid::from_bytes([17; 16]));
         let peer_authority = AuthorityId::from_uuid(Uuid::from_bytes([18; 16]));

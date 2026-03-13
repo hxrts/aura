@@ -12,6 +12,7 @@ use super::services::{
 };
 use super::{
     AuraEffectSystem, EffectContext, EffectExecutor, LifecycleManager, RuntimeDiagnosticSink,
+    RuntimeShutdownEvent,
 };
 use crate::core::{AgentConfig, AuthorityContext};
 use crate::handlers::RendezvousHandler;
@@ -750,7 +751,7 @@ impl RuntimeSystem {
         let prior_state = self.activity_gate.begin_shutdown();
         if prior_state != RuntimeActivityState::Running {
             tracing::info!(
-                event = "runtime.shutdown.already_in_progress",
+                event = RuntimeShutdownEvent::AlreadyInProgress.as_event_name(),
                 previous_state = ?prior_state,
                 "Runtime shutdown requested after shutdown had already started"
             );
@@ -763,20 +764,20 @@ impl RuntimeSystem {
 
         // Drain the reactive scheduler before cancelling the broader runtime task tree.
         tracing::info!(
-            event = "runtime.shutdown.stage",
+            event = RuntimeShutdownEvent::Stage.as_event_name(),
             stage = "reactive_pipeline",
             "Starting runtime shutdown"
         );
         if let Err(error) = self.reactive_pipeline_service.stop().await {
             tracing::warn!(
-                event = "runtime.shutdown.reactive_pipeline_signal_failed",
+                event = RuntimeShutdownEvent::ReactivePipelineSignalFailed.as_event_name(),
                 error = %error,
                 "Reactive pipeline shutdown failed during runtime shutdown"
             );
         }
 
         tracing::info!(
-            event = "runtime.shutdown.stage",
+            event = RuntimeShutdownEvent::Stage.as_event_name(),
             stage = "task_tree",
             "Cancelling runtime task tree"
         );
@@ -785,7 +786,7 @@ impl RuntimeSystem {
             .await
         {
             tracing::warn!(
-                event = "runtime.shutdown.task_tree_escalated",
+                event = RuntimeShutdownEvent::TaskTreeEscalated.as_event_name(),
                 error = %error,
                 "Runtime task tree required forced shutdown"
             );
@@ -794,13 +795,13 @@ impl RuntimeSystem {
 
         // Stop services after background runtime work has been cancelled.
         tracing::info!(
-            event = "runtime.shutdown.stage",
+            event = RuntimeShutdownEvent::Stage.as_event_name(),
             stage = "services",
             "Stopping runtime services"
         );
         if let Err(e) = self.stop_services().await {
             tracing::warn!(
-                event = "runtime.shutdown.services_failed",
+                event = RuntimeShutdownEvent::ServicesFailed.as_event_name(),
                 error = %e,
                 "Failed to stop runtime services during shutdown"
             );
@@ -815,13 +816,13 @@ impl RuntimeSystem {
         } = self;
 
         tracing::info!(
-            event = "runtime.shutdown.stage",
+            event = RuntimeShutdownEvent::Stage.as_event_name(),
             stage = "lifecycle_manager",
             "Shutting down lifecycle manager"
         );
         if let Err(error) = lifecycle_manager.shutdown(ctx).await {
             tracing::warn!(
-                event = "runtime.shutdown.lifecycle_failed",
+                event = RuntimeShutdownEvent::LifecycleFailed.as_event_name(),
                 error = %error,
                 "Lifecycle manager shutdown failed"
             );
@@ -1386,7 +1387,9 @@ pub(crate) async fn publish_lan_descriptor_with(
             rendezvous_manager
                 .cache_descriptor(descriptor.clone())
                 .await
-                .map_err(|e| ServiceError::startup_failed("rendezvous_cache", e))?;
+                .map_err(|error| {
+                    ServiceError::startup_failed("rendezvous_cache", error.to_string())
+                })?;
             rendezvous_manager.set_lan_descriptor(descriptor).await;
         } else {
             tracing::warn!("LAN descriptor publish succeeded without descriptor payload");

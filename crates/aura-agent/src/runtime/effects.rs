@@ -528,14 +528,14 @@ impl AuraEffectSystem {
     }
 
     /// Snapshot the runtime choreography session bound to the current task.
-    pub fn current_runtime_choreography_session_id(
+    pub(crate) fn current_runtime_choreography_session_id(
         &self,
     ) -> Option<crate::runtime::RuntimeChoreographySessionId> {
         self.choreography_state.read().current_session_id()
     }
 
     /// Claim authoritative ownership for one active runtime choreography session.
-    pub fn claim_runtime_choreography_session_owner(
+    pub(crate) fn claim_runtime_choreography_session_owner(
         &self,
         session_id: crate::runtime::RuntimeChoreographySessionId,
         owner_label: impl Into<String>,
@@ -547,7 +547,7 @@ impl AuraEffectSystem {
     }
 
     /// Ensure the current owner record still matches the expected local owner.
-    pub fn ensure_runtime_choreography_session_owner_capability(
+    pub(crate) fn ensure_runtime_choreography_session_owner_capability(
         &self,
         session_id: crate::runtime::RuntimeChoreographySessionId,
         expected_capability: &crate::runtime::subsystems::choreography::SessionOwnerCapability,
@@ -558,27 +558,71 @@ impl AuraEffectSystem {
             .map_err(|error| error.to_string())
     }
 
+    /// Snapshot the authoritative local owner label for the current bound choreography session.
+    pub(crate) fn current_runtime_choreography_session_owner_label(
+        &self,
+    ) -> Result<String, String> {
+        let session_id = self
+            .current_runtime_choreography_session_id()
+            .ok_or_else(|| {
+                "cannot resolve runtime session owner label without an active choreography session"
+                    .to_string()
+            })?;
+        self.choreography_state
+            .read()
+            .session_owner(session_id)
+            .map(|owner| owner.owner_label.clone())
+            .ok_or_else(|| format!("runtime session {session_id} has no owner record"))
+    }
+
     /// Atomically transfer authoritative ownership for one active runtime choreography session.
-    pub fn transfer_runtime_choreography_session_owner(
+    pub(crate) fn transfer_runtime_choreography_session_owner(
         &self,
         session_id: crate::runtime::RuntimeChoreographySessionId,
         expected_capability: &crate::runtime::subsystems::choreography::SessionOwnerCapability,
         next_owner_label: impl Into<String>,
         next_scope: crate::runtime::subsystems::choreography::SessionOwnerCapabilityScope,
     ) -> Result<crate::runtime::subsystems::choreography::SessionOwnerCapability, String> {
-        self.choreography_state
+        let next_owner_label = next_owner_label.into();
+        let mut choreography_state = self.choreography_state.write();
+        choreography_state
+            .ensure_session_owner(session_id, expected_capability)
+            .map_err(|error| error.to_string())?;
+
+        let transferred_fragments = self
+            .vm_fragment_registry
             .write()
+            .transfer_session_if_present(
+                session_id,
+                &expected_capability.owner_label,
+                &next_owner_label,
+            )
+            .map_err(|error| error.to_string())?;
+
+        let next_capability = choreography_state
             .transfer_session_owner(
                 session_id,
                 expected_capability,
-                next_owner_label,
+                next_owner_label.clone(),
                 next_scope,
             )
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+
+        if transferred_fragments > 0 {
+            tracing::info!(
+                session_id = %session_id,
+                from_owner = %expected_capability.owner_label,
+                to_owner = %next_owner_label,
+                fragment_count = transferred_fragments,
+                "transferred runtime choreography session owner and fragment ownership together"
+            );
+        }
+
+        Ok(next_capability)
     }
 
     /// Claim local ownership for every fragment described by one manifest in the current session.
-    pub fn claim_vm_fragments_for_manifest(
+    pub(crate) fn claim_vm_fragments_for_manifest(
         &self,
         owner_label: impl Into<String>,
         manifest: &CompositionManifest,
@@ -607,28 +651,8 @@ impl AuraEffectSystem {
         Ok(claimed)
     }
 
-    /// Transfer local ownership for every fragment in one runtime session.
-    pub fn transfer_vm_fragments_for_session(
-        &self,
-        session_id: crate::runtime::RuntimeChoreographySessionId,
-        from_owner: &str,
-        to_owner: &str,
-    ) -> Result<(), String> {
-        self.vm_fragment_registry
-            .write()
-            .transfer_session(session_id, from_owner, to_owner)
-            .map_err(|error| error.to_string())?;
-        tracing::info!(
-            session_id = %session_id,
-            from_owner = %from_owner,
-            to_owner = %to_owner,
-            "transferred local VM fragment ownership"
-        );
-        Ok(())
-    }
-
     /// Release all locally owned fragments for one runtime session.
-    pub fn release_vm_fragments_for_session(
+    pub(crate) fn release_vm_fragments_for_session(
         &self,
         session_id: crate::runtime::RuntimeChoreographySessionId,
     ) -> Vec<VmFragmentId> {

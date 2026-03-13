@@ -11,8 +11,6 @@ use aura_core::identifiers::AuthorityId;
 use aura_protocol::amp::deserialize_amp_message;
 use cfg_if::cfg_if;
 #[cfg(target_arch = "wasm32")]
-use futures::channel::oneshot;
-#[cfg(target_arch = "wasm32")]
 use futures::SinkExt;
 #[cfg(target_arch = "wasm32")]
 use gloo_net::websocket::{futures::WebSocket, Message};
@@ -24,9 +22,6 @@ use std::future::Future;
 use std::net::SocketAddr;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen_futures::spawn_local;
-
 const NETWORK_CONTENT_TYPE: &str = "application/aura-network";
 const CONNECTION_ID_PREFIX: &str = "conn-";
 
@@ -421,13 +416,7 @@ where
     Mk: FnOnce() -> Fut + 'static,
     Fut: Future<Output = Result<(), String>> + 'static,
 {
-    let (tx, rx) = oneshot::channel();
-    spawn_local(async move {
-        let _ = tx.send(make_fut().await);
-    });
-
-    rx.await
-        .map_err(|_| "WebSocket task dropped before completion".to_string())?
+    make_fut().await
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

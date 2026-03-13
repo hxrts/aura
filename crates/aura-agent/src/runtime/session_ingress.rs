@@ -24,6 +24,7 @@ use super::vm_host_bridge::{
     BlockedVmReceive,
 };
 use super::{AuraChoreoEngine, AuraEffectSystem, AuraVmSchedulerSignals};
+use super::{AuraLinkBoundary, RuntimeBoundaryError, RuntimeSessionEvent};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeSessionOwner {
@@ -47,7 +48,7 @@ pub enum SessionIngressError {
     InvalidIngressRouting {
         session_id: RuntimeChoreographySessionId,
         owner_label: String,
-        details: String,
+        details: RuntimeBoundaryError,
     },
     #[error("failed to start owned runtime session {session_id} for {owner_label}: {message}")]
     SessionStart {
@@ -112,9 +113,11 @@ impl From<SessionOwnershipError> for SessionIngressError {
             } => SessionIngressError::InvalidIngressRouting {
                 session_id,
                 owner_label: expected_owner,
-                details: format!(
-                    "session capability no longer valid; current generation is {current_generation}"
-                ),
+                details: RuntimeBoundaryError::CapabilityRejected {
+                    details: format!(
+                        "session capability no longer valid; current generation is {current_generation}"
+                    ),
+                },
             },
             SessionOwnershipError::OwnerConflict {
                 session_id,
@@ -123,7 +126,9 @@ impl From<SessionOwnershipError> for SessionIngressError {
             } => SessionIngressError::InvalidIngressRouting {
                 session_id,
                 owner_label: requested_owner,
-                details: format!("session already owned by {existing_owner}"),
+                details: RuntimeBoundaryError::CapabilityRejected {
+                    details: format!("session already owned by {existing_owner}"),
+                },
             },
         }
     }
@@ -132,6 +137,7 @@ impl From<SessionOwnershipError> for SessionIngressError {
 pub struct OwnedVmSession {
     effects: Arc<AuraEffectSystem>,
     owner: RuntimeSessionOwner,
+    routing_boundary: AuraLinkBoundary,
     engine: AuraChoreoEngine<AuraQueuedVmBridgeHandler>,
     handler: Arc<AuraQueuedVmBridgeHandler>,
     vm_session_id: telltale_vm::SessionId,
@@ -143,7 +149,7 @@ fn log_session_owner_assigned(
     context: &'static str,
 ) {
     tracing::debug!(
-        event = "runtime.session.owner.assigned",
+        event = RuntimeSessionEvent::OwnerAssigned.as_event_name(),
         session_id = %owner.session_id,
         owner_label = %owner.owner_label,
         capability_generation = owner.capability.generation,
@@ -161,7 +167,7 @@ fn log_session_owner_rejected(
     error: &str,
 ) {
     tracing::warn!(
-        event = "runtime.session.owner.rejected",
+        event = RuntimeSessionEvent::OwnerRejected.as_event_name(),
         session_id = %session_id,
         owner_label,
         protocol_id,
@@ -178,7 +184,7 @@ fn log_session_owner_transferred(
     context: &'static str,
 ) {
     tracing::info!(
-        event = "runtime.session.owner.transferred",
+        event = RuntimeSessionEvent::OwnerTransferred.as_event_name(),
         session_id = %previous_owner.session_id,
         from_owner_label = %previous_owner.owner_label,
         from_generation = previous_owner.capability.generation,
@@ -198,7 +204,7 @@ fn log_session_owner_transfer_rejected(
     context: &'static str,
 ) {
     tracing::warn!(
-        event = "runtime.session.owner.transfer_rejected",
+        event = RuntimeSessionEvent::OwnerTransferRejected.as_event_name(),
         session_id = %previous_owner.session_id,
         from_owner_label = %previous_owner.owner_label,
         from_generation = previous_owner.capability.generation,
@@ -220,7 +226,7 @@ fn log_session_ingress_received(
     payload_bytes: usize,
 ) {
     tracing::debug!(
-        event = "runtime.session.ingress.received",
+        event = RuntimeSessionEvent::IngressReceived.as_event_name(),
         session_id = %owner.session_id,
         owner_label = %owner.owner_label,
         capability_generation = owner.capability.generation,
@@ -240,7 +246,7 @@ fn log_session_ingress_dropped(
     active_role: Option<&str>,
 ) {
     tracing::warn!(
-        event = "runtime.session.ingress.dropped",
+        event = RuntimeSessionEvent::IngressDropped.as_event_name(),
         session_id = %owner.session_id,
         owner_label = %owner.owner_label,
         capability_generation = owner.capability.generation,
@@ -255,6 +261,10 @@ fn log_session_ingress_dropped(
 impl OwnedVmSession {
     pub fn owner(&self) -> &RuntimeSessionOwner {
         &self.owner
+    }
+
+    pub fn routing_boundary(&self) -> &AuraLinkBoundary {
+        &self.routing_boundary
     }
 
     pub fn queue_send_bytes(&self, payload: Vec<u8>) {
@@ -286,7 +296,10 @@ impl OwnedVmSession {
             None,
             0,
         );
-        if let Err(error) = self.effects.assert_owned_choreography_session(&self.owner) {
+        if let Err(error) = self
+            .effects
+            .assert_owned_choreography_boundary(&self.owner, &self.routing_boundary)
+        {
             log_session_ingress_dropped(&self.owner, "advance_round", &error, Some(active_role));
             return Err(error);
         }
@@ -327,7 +340,10 @@ impl OwnedVmSession {
             None,
             0,
         );
-        if let Err(error) = self.effects.assert_owned_choreography_session(&self.owner) {
+        if let Err(error) = self
+            .effects
+            .assert_owned_choreography_boundary(&self.owner, &self.routing_boundary)
+        {
             log_session_ingress_dropped(
                 &self.owner,
                 "advance_round_until_receive",
@@ -374,7 +390,10 @@ impl OwnedVmSession {
             Some(receive.to_role.as_str()),
             receive.payload.len(),
         );
-        if let Err(error) = self.effects.assert_owned_choreography_session(&self.owner) {
+        if let Err(error) = self
+            .effects
+            .assert_owned_choreography_boundary(&self.owner, &self.routing_boundary)
+        {
             log_session_ingress_dropped(&self.owner, "blocked_receive", &error, None);
             return Err(error);
         }
@@ -406,16 +425,28 @@ impl OwnedVmSession {
             .await
     }
 
+    pub fn transfer_owner_in_place(
+        &mut self,
+        next_owner_label: impl Into<String>,
+        next_boundary: AuraLinkBoundary,
+    ) -> Result<(), SessionIngressError> {
+        let next_scope = next_boundary.capability_scope.clone();
+        let next_owner = self.effects.transfer_owned_choreography_session_owner(
+            self.owner.clone(),
+            next_owner_label,
+            next_scope,
+        )?;
+        self.routing_boundary = next_boundary;
+        self.owner = next_owner;
+        Ok(())
+    }
+
     pub fn transfer_owner(
         mut self,
         next_owner_label: impl Into<String>,
         next_scope: SessionOwnerCapabilityScope,
     ) -> Result<Self, SessionIngressError> {
-        self.owner = self.effects.transfer_owned_choreography_session_owner(
-            self.owner,
-            next_owner_label,
-            next_scope,
-        )?;
+        self.transfer_owner_in_place(next_owner_label, AuraLinkBoundary::for_scope(next_scope))?;
         Ok(self)
     }
 }
@@ -440,6 +471,7 @@ pub async fn open_owned_manifest_vm_session_admitted(
     let owner = effects
         .start_owned_choreography_session(owner_label, session_uuid, roles)
         .await?;
+    let routing_boundary = AuraLinkBoundary::for_manifest(manifest);
 
     match open_manifest_vm_session_admitted(
         effects.as_ref(),
@@ -454,6 +486,7 @@ pub async fn open_owned_manifest_vm_session_admitted(
         Ok((engine, handler, vm_session_id)) => Ok(OwnedVmSession {
             effects,
             owner,
+            routing_boundary,
             engine,
             handler,
             vm_session_id,
@@ -534,14 +567,17 @@ impl AuraEffectSystem {
                 .ok_or_else(|| SessionIngressError::InvalidIngressRouting {
                     session_id,
                     owner_label: owner_label.to_string(),
-                    details: "no choreography session bound to current task".to_string(),
+                    details: RuntimeBoundaryError::MissingTaskBinding,
                 })?;
 
         if current_session_id != session_id {
             return Err(SessionIngressError::InvalidIngressRouting {
                 session_id,
                 owner_label: owner_label.to_string(),
-                details: format!("current task bound to session {current_session_id}"),
+                details: RuntimeBoundaryError::SessionBindingMismatch {
+                    expected_session_id: session_id,
+                    bound_session_id: current_session_id,
+                },
             });
         }
 
@@ -606,16 +642,28 @@ impl AuraEffectSystem {
         &self,
         owner: &RuntimeSessionOwner,
     ) -> Result<(), SessionIngressError> {
-        self.assert_runtime_choreography_session_binding(owner.session_id, &owner.owner_label)?;
+        self.assert_owned_choreography_boundary(
+            owner,
+            &AuraLinkBoundary::for_scope(SessionOwnerCapabilityScope::Session),
+        )?;
 
         if !owner.capability.allows_full_session() {
             return Err(SessionIngressError::InvalidIngressRouting {
                 session_id: owner.session_id,
                 owner_label: owner.owner_label.clone(),
-                details: "current capability does not authorize full-session ingress".to_string(),
+                details: RuntimeBoundaryError::FullSessionCapabilityRequired,
             });
         }
 
+        Ok(())
+    }
+
+    pub fn assert_owned_choreography_boundary(
+        &self,
+        owner: &RuntimeSessionOwner,
+        boundary: &AuraLinkBoundary,
+    ) -> Result<(), SessionIngressError> {
+        self.assert_runtime_choreography_session_binding(owner.session_id, &owner.owner_label)?;
         self.ensure_runtime_choreography_session_owner_capability(
             owner.session_id,
             &owner.capability,
@@ -623,8 +671,21 @@ impl AuraEffectSystem {
         .map_err(|error| SessionIngressError::InvalidIngressRouting {
             session_id: owner.session_id,
             owner_label: owner.owner_label.clone(),
-            details: error,
-        })
+            details: RuntimeBoundaryError::CapabilityRejected { details: error },
+        })?;
+
+        if !boundary.is_allowed_by(&owner.capability.scope) {
+            return Err(SessionIngressError::InvalidIngressRouting {
+                session_id: owner.session_id,
+                owner_label: owner.owner_label.clone(),
+                details: RuntimeBoundaryError::BoundaryScopeRejected {
+                    boundary: boundary.clone(),
+                    capability_scope: owner.capability.scope.clone(),
+                },
+            });
+        }
+
+        Ok(())
     }
 
     pub fn transfer_owned_choreography_session_owner(
@@ -641,7 +702,7 @@ impl AuraEffectSystem {
         .map_err(|error| SessionIngressError::InvalidIngressRouting {
             session_id: owner.session_id,
             owner_label: owner.owner_label.clone(),
-            details: error,
+            details: RuntimeBoundaryError::CapabilityRejected { details: error },
         })?;
 
         let next_owner_label = next_owner_label.into();
@@ -707,10 +768,31 @@ mod tests {
     use super::*;
     use crate::core::AgentConfig;
     use aura_core::AuthorityId;
+    use aura_mpst::{CompositionLinkSpec, CompositionManifest};
     use aura_protocol::effects::{ChoreographicRole, RoleIndex};
+    use std::collections::BTreeSet;
 
     fn test_authority(byte: u8) -> AuthorityId {
         AuthorityId::from_uuid(Uuid::from_bytes([byte; 16]))
+    }
+
+    fn linked_manifest(protocol_id: &str, bundle_id: &str) -> CompositionManifest {
+        CompositionManifest {
+            protocol_name: protocol_id.to_string(),
+            protocol_namespace: None,
+            protocol_qualified_name: protocol_id.to_string(),
+            protocol_id: protocol_id.to_string(),
+            role_names: vec!["Role".to_string()],
+            required_capabilities: Vec::new(),
+            determinism_policy_ref: None,
+            delegation_constraints: Vec::new(),
+            link_specs: vec![CompositionLinkSpec {
+                role: "Role".to_string(),
+                bundle_id: bundle_id.to_string(),
+                imports: Vec::new(),
+                exports: Vec::new(),
+            }],
+        }
     }
 
     #[tokio::test]
@@ -758,5 +840,141 @@ mod tests {
             .end_owned_choreography_session(&transferred)
             .await
             .expect("close transferred session");
+    }
+
+    #[tokio::test]
+    async fn transferring_runtime_session_owner_moves_fragment_ownership_together() {
+        let authority = test_authority(0x33);
+        let effects =
+            AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), authority)
+                .expect("test effect system");
+        let roles = vec![ChoreographicRole::for_authority(
+            authority,
+            RoleIndex::new(0).expect("role index"),
+        )];
+        let session_uuid = Uuid::from_bytes([0x44; 16]);
+        let original = effects
+            .start_owned_choreography_session("owner-a", session_uuid, roles)
+            .await
+            .expect("start owned session");
+        let manifest = linked_manifest("aura.test.protocol", "bundle-a");
+        effects
+            .claim_vm_fragments_for_manifest("owner-a", &manifest)
+            .expect("claim fragment ownership");
+
+        let transferred = effects
+            .transfer_owned_choreography_session_owner(
+                original,
+                "owner-b",
+                SessionOwnerCapabilityScope::Session,
+            )
+            .expect("transfer owner");
+
+        let snapshot = effects.vm_fragment_snapshot();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].1.owner_label, "owner-b");
+        assert!(matches!(
+            snapshot[0].1.bundle_id.as_deref(),
+            Some("bundle-a")
+        ));
+
+        effects
+            .end_owned_choreography_session(&transferred)
+            .await
+            .expect("close transferred session");
+    }
+
+    #[tokio::test]
+    async fn fragment_scoped_owner_accepts_matching_boundary_and_rejects_wrong_boundary() {
+        let authority = test_authority(0x55);
+        let effects =
+            AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), authority)
+                .expect("test effect system");
+        let roles = vec![ChoreographicRole::for_authority(
+            authority,
+            RoleIndex::new(0).expect("role index"),
+        )];
+        let session_uuid = Uuid::from_bytes([0x66; 16]);
+        let original = effects
+            .start_owned_choreography_session("owner-a", session_uuid, roles)
+            .await
+            .expect("start owned session");
+
+        let transferred = effects
+            .transfer_owned_choreography_session_owner(
+                original,
+                "owner-b",
+                SessionOwnerCapabilityScope::Fragments(BTreeSet::from([
+                    "bundle:bundle-a".to_string()
+                ])),
+            )
+            .expect("transfer owner");
+
+        let allowed_boundary =
+            AuraLinkBoundary::for_scope(SessionOwnerCapabilityScope::Fragments(BTreeSet::from([
+                "bundle:bundle-a".to_string(),
+            ])));
+        effects
+            .assert_owned_choreography_boundary(&transferred, &allowed_boundary)
+            .expect("matching boundary should be accepted");
+
+        let rejected_boundary =
+            AuraLinkBoundary::for_scope(SessionOwnerCapabilityScope::Fragments(BTreeSet::from([
+                "bundle:bundle-b".to_string(),
+            ])));
+        let rejected = effects
+            .assert_owned_choreography_boundary(&transferred, &rejected_boundary)
+            .expect_err("wrong boundary should be rejected");
+        assert!(matches!(
+            rejected,
+            SessionIngressError::InvalidIngressRouting { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn attenuating_owner_capability_rejects_stale_generation_even_for_same_owner_label() {
+        let authority = test_authority(0x77);
+        let effects =
+            AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), authority)
+                .expect("test effect system");
+        let roles = vec![ChoreographicRole::for_authority(
+            authority,
+            RoleIndex::new(0).expect("role index"),
+        )];
+        let session_uuid = Uuid::from_bytes([0x88; 16]);
+        let original = effects
+            .start_owned_choreography_session("owner-a", session_uuid, roles)
+            .await
+            .expect("start owned session");
+        let stale_full_capability = original.clone();
+
+        let attenuated = effects
+            .transfer_owned_choreography_session_owner(
+                original,
+                "owner-a",
+                SessionOwnerCapabilityScope::Fragments(BTreeSet::from([
+                    "bundle:bundle-a".to_string()
+                ])),
+            )
+            .expect("attenuate owner capability");
+        let attenuated_boundary =
+            AuraLinkBoundary::for_scope(SessionOwnerCapabilityScope::Fragments(BTreeSet::from([
+                "bundle:bundle-a".to_string(),
+            ])));
+
+        effects
+            .assert_owned_choreography_boundary(&attenuated, &attenuated_boundary)
+            .expect("attenuated capability should authorize its delegated boundary");
+        assert!(
+            matches!(
+                effects.assert_owned_choreography_boundary(
+                    &stale_full_capability,
+                    &attenuated_boundary,
+                ),
+                Err(SessionIngressError::InvalidIngressRouting { .. })
+                    | Err(SessionIngressError::StaleOwner { .. })
+            ),
+            "stale capability generation must be rejected even if the owner label is unchanged"
+        );
     }
 }

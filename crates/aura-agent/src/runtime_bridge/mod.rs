@@ -4,18 +4,25 @@
 //! enabling the dependency inversion where `aura-app` defines the trait and
 //! `aura-agent` provides the implementation.
 
+use crate::core::default_context_id_for_authority;
+#[cfg(target_arch = "wasm32")]
+use crate::core::default_context_id_for_authority;
 use crate::core::AuraAgent;
 use crate::handlers::shared::context_commitment_from_journal;
 use crate::runtime::consensus::build_consensus_params;
+use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyInitRequest};
+use crate::runtime::services::ServiceError;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
     BridgeAuthorityInfo, BridgeDeviceInfo, InvitationInfo, LanPeerInfo, RendezvousStatus,
     RuntimeBridge, SettingsBridgeState, SyncStatus,
 };
 use aura_app::signal_defs::INVITATIONS_SIGNAL;
+use aura_app::ui::workflows::authority::{authority_key_prefix, deserialize_authority};
 use aura_app::views::invitations::InvitationStatus;
 use aura_app::IntentError;
 use aura_app::ReactiveHandler;
+use aura_core::ceremony::SupersessionReason;
 use aura_core::effects::{
     amp::{
         AmpChannelEffects, AmpCiphertext, ChannelBootstrapPackage, ChannelCloseParams,
@@ -49,8 +56,8 @@ use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
 use aura_social::moderation::{
     HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
 };
+use futures::{SinkExt, StreamExt};
 #[cfg(target_arch = "wasm32")]
-use futures::channel::oneshot;
 #[cfg(any(target_arch = "wasm32", not(target_arch = "wasm32")))]
 use futures::{SinkExt, StreamExt};
 #[cfg(target_arch = "wasm32")]
@@ -61,14 +68,6 @@ use std::sync::Arc;
 use tokio_tungstenite::connect_async;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_tungstenite::tungstenite::Message;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen_futures::spawn_local;
-
-use crate::core::default_context_id_for_authority;
-use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyInitRequest};
-use crate::runtime::services::ServiceError;
-use aura_app::ui::workflows::authority::{authority_key_prefix, deserialize_authority};
-use aura_core::ceremony::SupersessionReason;
 
 mod amp;
 mod consensus;
@@ -409,14 +408,7 @@ where
     Fut: core::future::Future<Output = Result<T, IntentError>> + 'static,
     T: 'static,
 {
-    let (tx, rx) = oneshot::channel();
-    spawn_local(async move {
-        let _ = tx.send(make_fut().await);
-    });
-
-    rx.await.map_err(|_| {
-        IntentError::internal_error("Fact sync websocket task dropped before completion")
-    })?
+    make_fut().await
 }
 
 #[async_trait]

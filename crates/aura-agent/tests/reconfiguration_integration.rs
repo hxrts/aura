@@ -4,7 +4,7 @@
 
 use aura_agent::{
     AgentConfig, AuraEffectSystem, CoherenceStatus, ReconfigurationManager,
-    SessionDelegationTransfer,
+    ReconfigurationManagerError, SessionDelegationTransfer, SessionOwnerCapabilityScope,
 };
 use aura_core::{AuthorityId, ComposedBundle, SessionFootprint, SessionId};
 use aura_effects::RuntimeCapabilityHandler;
@@ -43,7 +43,7 @@ async fn device_migration_delegation_persists_audit_fact_and_coherence() {
         .record_native_session(from_authority, session_id)
         .await;
 
-    let receipt = manager
+    let outcome = manager
         .delegate_session(
             &effects,
             SessionDelegationTransfer::new(
@@ -55,10 +55,20 @@ async fn device_migration_delegation_persists_audit_fact_and_coherence() {
         )
         .await
         .expect("delegate session");
+    let receipt = outcome.receipt;
+    let witness = outcome.witness;
 
     assert_eq!(receipt.session_id, session_id);
     assert_eq!(receipt.from_authority, from_authority);
     assert_eq!(receipt.to_authority, to_authority);
+    assert_eq!(
+        witness.link_boundary.bundle_id.as_deref(),
+        Some("device_migration")
+    );
+    assert_eq!(
+        witness.link_boundary.capability_scope,
+        witness.capability_scope
+    );
     assert_eq!(manager.verify_coherence().await, CoherenceStatus::Coherent);
 
     let committed = effects
@@ -109,7 +119,10 @@ async fn delegation_requires_pre_registered_bundle_evidence() {
         .await
         .expect_err("delegation without pre-registered bundle must fail closed");
 
-    assert!(err.contains("pre-registered bundle"));
+    assert!(matches!(
+        err,
+        ReconfigurationManagerError::BundleNotRegistered { .. }
+    ));
 }
 
 #[tokio::test]
@@ -143,7 +156,47 @@ async fn delegation_requires_reconfiguration_capability() {
         .await
         .expect_err("delegation without reconfiguration capability must fail closed");
 
-    assert!(err.contains("requires runtime capability `reconfiguration`"));
+    assert!(matches!(
+        err,
+        ReconfigurationManagerError::MissingCapability { .. }
+    ));
+}
+
+#[tokio::test]
+async fn delegation_rejects_boundary_scope_mismatch() {
+    let from_authority = authority(31);
+    let to_authority = authority(32);
+    let session_id = session(33);
+    let effects = AuraEffectSystem::simulation_for_test_for_authority(
+        &AgentConfig::default(),
+        from_authority,
+    )
+    .expect("simulation effect system");
+    let manager = ReconfigurationManager::new();
+    manager
+        .record_native_session(from_authority, session_id)
+        .await;
+
+    let err = manager
+        .delegate_session(
+            &effects,
+            SessionDelegationTransfer::new(
+                session_id,
+                from_authority,
+                to_authority,
+                "device_migration",
+            )
+            .with_capability_scope(SessionOwnerCapabilityScope::Fragments(
+                BTreeSet::from(["bundle:wrong-bundle".to_string()]),
+            )),
+        )
+        .await
+        .expect_err("boundary/scope mismatch must fail closed");
+
+    assert!(matches!(
+        err,
+        ReconfigurationManagerError::InvalidLinkBoundary { .. }
+    ));
 }
 
 #[tokio::test]
@@ -221,7 +274,10 @@ async fn bundle_linking_requires_reconfiguration_capability() {
         .await
         .expect_err("bundle linking without reconfiguration capability must fail closed");
 
-    assert!(err.contains("requires runtime capability `reconfiguration`"));
+    assert!(matches!(
+        err,
+        ReconfigurationManagerError::MissingCapability { .. }
+    ));
 }
 
 #[tokio::test]

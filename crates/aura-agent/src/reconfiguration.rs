@@ -53,7 +53,7 @@ pub enum SessionFootprintClass {
 }
 
 /// Mutable runtime controller for link/delegate operations.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ReconfigurationController {
     bundles: HashMap<String, ComposedBundle>,
     footprints: HashMap<AuthorityId, SessionFootprint>,

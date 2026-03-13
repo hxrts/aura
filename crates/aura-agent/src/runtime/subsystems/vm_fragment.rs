@@ -150,6 +150,30 @@ impl VmFragmentRegistry {
         Ok(())
     }
 
+    /// Transfer all fragments for one session when fragments are present.
+    ///
+    /// Returns the number of transferred fragments. Sessions without locally
+    /// owned fragments are not treated as an error because some runtime-owned
+    /// choreography sessions never admit linked VM fragments.
+    pub fn transfer_session_if_present(
+        &mut self,
+        session_id: RuntimeChoreographySessionId,
+        from_owner: &str,
+        to_owner: &str,
+    ) -> Result<usize, VmFragmentOwnershipError> {
+        let fragment_count = self
+            .owners
+            .keys()
+            .filter(|fragment_id| fragment_id.session_id == session_id)
+            .count();
+        if fragment_count == 0 {
+            return Ok(0);
+        }
+
+        self.transfer_session(session_id, from_owner, to_owner)?;
+        Ok(fragment_count)
+    }
+
     /// Release all fragments bound to one runtime session.
     pub fn release_session(
         &mut self,

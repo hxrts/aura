@@ -49,9 +49,13 @@ pub mod shared_transport;
 pub mod simulation_factory;
 
 // Cross-cutting concerns
+pub mod contracts;
 pub mod diagnostics;
+pub mod errors;
+pub mod instrumentation;
 pub mod reliability;
 pub mod session_ingress;
+pub mod task_supervisor;
 
 // Choreography integration
 pub mod choreography_adapter;
@@ -83,6 +87,12 @@ pub use choreography_adapter::{
     MessageGuardRequirements,
 };
 pub use context::EffectContext;
+pub use contracts::{AuraDelegationCoherence, AuraDelegationWitness, AuraLinkBoundary};
+#[allow(unused_imports)] // Re-exported for public API
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub use contracts::{
+    AuraRuntimeAdmissionEvidence, AuraRuntimeAdmissionEvidenceKind, AuraRuntimeEnvelopeAdmission,
+};
 pub use diagnostics::{
     RuntimeDiagnostic, RuntimeDiagnosticKind, RuntimeDiagnosticSeverity, RuntimeDiagnosticSink,
 };
@@ -93,6 +103,10 @@ pub use effect_trace_capture::{
     EffectTraceCaptureError, EffectTraceCaptureOptions,
 };
 pub use effects::AuraEffectSystem;
+pub use errors::RuntimeBoundaryError;
+pub use instrumentation::{
+    RuntimeReconfigurationEvent, RuntimeSessionEvent, RuntimeShutdownEvent, RuntimeVmEvent,
+};
 #[allow(unused_imports)] // Re-exported for public API
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use parity_policy::{AuraEnvelopeParityError, AuraEnvelopeParityPolicy};
@@ -104,6 +118,8 @@ pub use session_ingress::{
 pub use shared_transport::SharedTransport;
 #[allow(unused_imports)] // Re-exported for public API
 pub use system::{RuntimeActivityGate, RuntimeActivityState, RuntimePublicOperationError};
+#[allow(unused_imports)] // Re-exported for public API
+pub use task_supervisor::{TaskGroup, TaskSupervisionError, TaskSupervisor};
 #[allow(unused_imports)] // Re-exported for public API
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use vm_effect_handler::{AuraVmEffectEvent, AuraVmEffectHandler};

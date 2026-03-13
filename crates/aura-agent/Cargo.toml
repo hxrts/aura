@@ -126,6 +126,7 @@ telltale-types = { workspace = true }
 telltale-theory = { workspace = true }
 tempfile = { workspace = true }
 wasm-bindgen-test = "0.3"
+loom = "0.7"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 criterion = { workspace = true }

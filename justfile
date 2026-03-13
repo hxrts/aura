@@ -474,6 +474,13 @@ ci-choreo-parity:
     cargo test -p aura-agent --features choreo-backend-telltale-vm --test telltale_vm_parity -q
     cargo test -p aura-agent --features choreo-backend-telltale-vm --lib parity_policy::tests -q
 
+# Choreography concurrency contract gates (link/delegate coherence + canonical fallback)
+ci-choreo-concurrency-contracts:
+    mkdir -p artifacts/choreo-concurrency-contracts
+    AURA_CONFORMANCE_WRITE_ARTIFACTS=1 \
+    AURA_CONFORMANCE_ARTIFACT_DIR="${PWD}/artifacts/choreo-concurrency-contracts" \
+    cargo test -p aura-agent --features choreo-backend-telltale-vm --test telltale_vm_concurrent_contracts -- --nocapture
+
 # WASM choreography backend matrix for aura-agent
 
 # Note: do not use `--all-features` for aura-agent because choreography backends are exclusive.
@@ -579,6 +586,9 @@ ci-runtime-shutdown-order:
 ci-async-service-actor-ownership:
     bash scripts/check/async-service-actor-ownership.sh
 
+ci-runtime-instrumentation-schema:
+    bash scripts/check/runtime-instrumentation-schema.sh
+
 # Quint typecheck
 ci-quint-typecheck:
     just quint check
@@ -662,6 +672,7 @@ ci-conformance: ci-conformance-policy
     set -euo pipefail
     just ci-conformance-strict
     just ci-conformance-contracts
+    just ci-choreo-concurrency-contracts
     just ci-simulator-telltale-parity
     cargo test -p aura-testkit --test conformance_golden_fixtures -- --nocapture
     just ci-conformance-itf

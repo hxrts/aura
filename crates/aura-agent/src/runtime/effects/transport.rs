@@ -8,8 +8,6 @@ use aura_core::{AuthorityId, ContextId};
 use aura_effects::transport::TransportConfig;
 use aura_rendezvous::TransportHint;
 use cfg_if::cfg_if;
-#[cfg(target_arch = "wasm32")]
-use futures::channel::oneshot;
 #[cfg(not(target_arch = "wasm32"))]
 use futures::SinkExt;
 #[cfg(target_arch = "wasm32")]
@@ -28,9 +26,6 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen_futures::spawn_local;
-
 // Implementation of TransportEffects
 #[async_trait]
 impl TransportEffects for AuraEffectSystem {
@@ -375,13 +370,7 @@ where
     Mk: FnOnce() -> Fut + 'static,
     Fut: Future<Output = Result<(), String>> + 'static,
 {
-    let (tx, rx) = oneshot::channel();
-    spawn_local(async move {
-        let _ = tx.send(make_fut().await);
-    });
-
-    rx.await
-        .map_err(|_| "WebSocket task dropped before completion".to_string())?
+    make_fut().await
 }
 
 #[cfg(test)]

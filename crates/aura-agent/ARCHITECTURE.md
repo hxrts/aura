@@ -164,6 +164,10 @@ This boundary also defines the split in responsibility:
 - session mutation authority is owner-routed
 - ownership transfer across `delegate` is explicit and singular rather than shared through actor state
 
+The host/VM boundary must also preserve Telltale's communication identity and replay semantics.
+Host buffering, retries, and task scheduling may delay or reorder work internally, but they must
+not rewrite the identity used by replay or envelope checks.
+
 ## Session Ownership
 
 Telltale-facing session state follows strict ownership rules.
@@ -220,6 +224,38 @@ struct SessionHandle {
 }
 ```
 
+The sanctioned session-mutation entrypoints are intentionally small:
+
+- `open_owned_manifest_vm_session_admitted(...)`
+- `OwnedVmSession::queue_send_bytes(...)`
+- `OwnedVmSession::advance_round(...)`
+- `OwnedVmSession::advance_round_with_signals(...)`
+- `OwnedVmSession::inject_blocked_receive(...)`
+- `OwnedVmSession::close(...)`
+- `handle_owned_vm_round(...)`
+
+Rules:
+
+- Production handler and service code may mutate Telltale session state only through these owner-routed APIs.
+- Raw `open_manifest_vm_session_admitted(...)`, direct `start_session(...)`, and direct `end_session(...)` are runtime-internal implementation details.
+- Lower-level session mutation stays quarantined to `runtime/session_ingress.rs`, `runtime/vm_host_bridge.rs`, and the choreography runtime internals that implement the ingress contract.
+- New public session-mutation entrypoints require an `ARCHITECTURE.md` update and a matching CI policy update.
+
+### Effect Path Classes
+
+`aura-agent` classifies runtime effect paths into three ownership classes:
+
+- `service-owned`: lifecycle, maintenance, discovery, shutdown, reactive scheduling
+- `session-owned`: VM/session mutation, blocked-receive injection, owner-routed round advancement
+- `capability-gated trust-boundary APIs`: commands that cross subsystem or authority boundaries and must validate current capability scope as well as owner record
+
+Rules:
+
+- Service-owned effects are supervised by the owning service actor and never mutate session state directly.
+- Session-owned effects require the current owner record and current owner capability.
+- Capability-gated trust-boundary APIs must fail closed on stale owner, stale capability, or wrong-boundary routing.
+- Routing must make link boundaries explicit rather than flattening multiple protocol fragments into one ambient authority scope.
+
 ### Ownership Transitions
 
 Owner-visible state transitions:
@@ -244,6 +280,32 @@ No transition may create overlapping owners.
 
 Correctness never depends on uncontrolled host scheduling. If the runtime cannot
 show that a path is envelope-safe, it serializes execution.
+
+Telltale's canonical execution at concurrency `n = 1` is the reference behavior.
+Higher concurrency is a refinement only when it stays inside the admitted
+envelope relation. In practical runtime terms that means:
+
+- `Canonical` is the correctness baseline
+- `EnvelopeAdmitted` requires explicit admission and evidence
+- failed admission or failed certificate validation degrades to canonical execution
+- host-side optimization may not widen safety-visible behavior beyond the admitted envelope
+
+### Envelope Admission Contract
+
+Operational envelope admission is a runtime gate, not a comment-level convention.
+
+The runtime must record and enforce:
+
+- which determinism / concurrency profile was requested
+- which evidence or certificate admitted the profile
+- whether execution stayed canonical or entered an admitted refinement
+- why fallback occurred when admission failed
+
+This is the host-facing projection of Telltale's envelope relation:
+
+- safety-visible observations must remain equivalent to the canonical reference
+- every admitted step must have a declared witness path
+- profile-side obligations must be checked before execution widens
 
 ### Current Path Classification
 
@@ -290,6 +352,16 @@ Runtime consequences:
 - Linked protocols remain session-disjoint unless composition explicitly shares state.
 - Cross-boundary effect routing is explicit.
 - Ad hoc shared mutable state across linked boundaries is forbidden.
+- `link` must preserve Telltale coherence and harmony obligations at runtime, not just compile-time compatibility.
+
+The runtime therefore models `link` through explicit boundary objects rather than ambient state.
+A boundary object must carry enough information to answer:
+
+- which bundle/fragment boundary this effect belongs to
+- which owner capability scope is valid at that boundary
+- whether a route crosses a boundary that requires explicit reconfiguration handling
+
+Wrong-boundary routing is a runtime error and must be rejected before the VM observes the step.
 
 ### Delegate Boundary
 
@@ -301,6 +373,7 @@ Runtime consequences:
 - Capability/effect context transfers with the endpoint.
 - Stale-owner access after delegation is forbidden.
 - Ambiguous local ownership is rejected before the VM observes the transfer.
+- Fragment ownership and session footprint state move with the transfer rather than lagging behind it.
 
 Actor messaging may carry delegation requests, but it does not replace the move.
 The transfer itself is an ownership handoff with stale-owner invalidation.
@@ -312,6 +385,36 @@ Transfer and attenuation are separate concepts:
 
 If the runtime cannot state which one is happening and under which protocol rule,
 it must reject the delegation path.
+
+In concrete runtime terms, a successful delegation must move one owned bundle:
+
+- session owner record
+- owner capability
+- VM fragment ownership
+- runtime footprint / reconfiguration state
+- delegation audit witness
+
+If these do not move together, the transfer is incomplete and must be treated as a runtime error.
+
+### Theorem-pack / Invariant Alignment
+
+Telltale's theorem pack and invariant space matter at runtime.
+`aura-agent` should consume them as executable gates for advanced modes rather than
+as proof-only background context.
+
+The runtime must preserve:
+
+- coherence-sensitive session and edge state
+- harmony-sensitive reconfiguration steps (`link`, `delegate`)
+- adequacy-relevant observable traces
+- determinism-profile obligations for admitted concurrency
+- replay / communication identity stability across async ingress
+
+Implications:
+
+- advanced runtime modes should be capability- and evidence-gated
+- missing invariant evidence must cause rejection or fallback, never silent widening
+- instrumentation must make envelope admission, delegation witnesses, and fallback reconstructible
 
 ## Async Primitives
 

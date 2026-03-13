@@ -49,7 +49,11 @@ pub(crate) use ota_manager::OtaManager;
 pub use ota_manager::UpdateStatus;
 pub use reactive_pipeline_service::ReactivePipelineService;
 pub use receipt_manager::{ReceiptManager, ReceiptManagerConfig};
-pub use reconfiguration_manager::{ReconfigurationManager, SessionDelegationTransfer};
+#[allow(unused_imports)] // Re-exported for public API as live handoff surfaces land.
+pub use reconfiguration_manager::{
+    ActiveSessionDelegationError, ReconfigurationManager, ReconfigurationManagerError,
+    SessionDelegationOutcome, SessionDelegationTransfer,
+};
 pub(crate) use recovery_manager::RecoveryManager;
 pub(crate) use rendezvous_cache_manager::RendezvousCacheManager;
 pub use rendezvous_manager::{RendezvousManager, RendezvousManagerConfig};

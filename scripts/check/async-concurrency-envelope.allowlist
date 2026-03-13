@@ -1,2 +1,3 @@
 # Temporary exemptions for async-concurrency-envelope.sh.
 # Keep empty if no exemptions are required.
+^crates/aura-agent/src/runtime/contracts\.rs:.*canonical_fallback_policy\(

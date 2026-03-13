@@ -817,4 +817,44 @@ mod tests {
         assert_eq!(diagnostic.kind, RuntimeDiagnosticKind::SupervisedTaskFailed);
         assert_eq!(diagnostic.severity, RuntimeDiagnosticSeverity::Warn);
     }
+
+    #[test]
+    fn loom_shutdown_race_does_not_leave_task_registered() {
+        loom::model(|| {
+            use loom::sync::atomic::{AtomicBool, Ordering};
+            use loom::sync::{Arc as LoomArc, Mutex as LoomMutex};
+            use loom::thread;
+
+            let active = LoomArc::new(LoomMutex::new(Vec::<u8>::new()));
+            let cancelled = LoomArc::new(AtomicBool::new(false));
+
+            let register_active = LoomArc::clone(&active);
+            let register_cancelled = LoomArc::clone(&cancelled);
+            let register = thread::spawn(move || {
+                {
+                    let mut tasks = register_active.lock().unwrap();
+                    tasks.push(1);
+                }
+                if register_cancelled.load(Ordering::Acquire) {
+                    let mut tasks = register_active.lock().unwrap();
+                    tasks.retain(|task| *task != 1);
+                }
+            });
+
+            let shutdown_active = LoomArc::clone(&active);
+            let shutdown_cancelled = LoomArc::clone(&cancelled);
+            let shutdown = thread::spawn(move || {
+                shutdown_cancelled.store(true, Ordering::Release);
+                let mut tasks = shutdown_active.lock().unwrap();
+                tasks.retain(|task| *task != 1);
+            });
+
+            register.join().expect("register thread");
+            shutdown.join().expect("shutdown thread");
+            assert!(
+                active.lock().unwrap().is_empty(),
+                "task bookkeeping should not leak active entries across shutdown races"
+            );
+        });
+    }
 }

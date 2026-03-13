@@ -13,7 +13,7 @@ use aura_rendezvous::{
 };
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace, warn};
 
 /// LAN discovery service combining announcer and listener tasks.
@@ -22,8 +22,8 @@ pub struct LanDiscoveryService {
     authority_id: AuthorityId,
     time: Arc<dyn PhysicalTimeEffects>,
     socket: Arc<dyn UdpEndpointEffects>,
-    state: Arc<RwLock<LanDiscoveryState>>,
-    metrics: Arc<RwLock<LanDiscoveryMetrics>>,
+    state: Arc<Mutex<LanDiscoveryState>>,
+    metrics: Arc<Mutex<LanDiscoveryMetrics>>,
 }
 
 #[derive(Debug, Default)]
@@ -88,13 +88,13 @@ impl LanDiscoveryService {
             authority_id,
             time,
             socket,
-            state: Arc::new(RwLock::new(LanDiscoveryState::default())),
-            metrics: Arc::new(RwLock::new(LanDiscoveryMetrics::default())),
+            state: Arc::new(Mutex::new(LanDiscoveryState::default())),
+            metrics: Arc::new(Mutex::new(LanDiscoveryMetrics::default())),
         })
     }
 
     async fn with_state_mut<R>(&self, op: impl FnOnce(&mut LanDiscoveryState) -> R) -> R {
-        let mut guard = self.state.write().await;
+        let mut guard = self.state.lock().await;
         let result = op(&mut guard);
         #[cfg(debug_assertions)]
         {
@@ -139,7 +139,7 @@ impl LanDiscoveryService {
 
     /// Get a snapshot of LAN discovery metrics.
     pub async fn metrics(&self) -> LanDiscoveryMetrics {
-        self.metrics.read().await.clone()
+        self.metrics.lock().await.clone()
     }
 
     fn start_announcer(&self, tasks: TaskGroup) {
@@ -162,8 +162,11 @@ impl LanDiscoveryService {
                     continue;
                 }
 
-                let desc_guard = state.read().await;
-                let Some(desc) = desc_guard.descriptor.as_ref() else {
+                let descriptor = {
+                    let guard = state.lock().await;
+                    guard.descriptor.clone()
+                };
+                let Some(desc) = descriptor.as_ref() else {
                     continue;
                 };
 
@@ -171,7 +174,7 @@ impl LanDiscoveryService {
                     Ok(t) => t.ts_ms,
                     Err(err) => {
                         warn!(error = %err, "LAN announcer: failed to read physical time");
-                        let mut metrics = metrics.write().await;
+                        let mut metrics = metrics.lock().await;
                         metrics.announcement_errors = metrics.announcement_errors.saturating_add(1);
                         continue;
                     }
@@ -180,14 +183,14 @@ impl LanDiscoveryService {
                 let packet = LanDiscoveryPacket::new(authority_id, desc.clone(), timestamp_ms);
                 let Some(bytes) = packet.to_bytes() else {
                     warn!("LAN announcer: failed to serialize packet");
-                    let mut metrics = metrics.write().await;
+                    let mut metrics = metrics.lock().await;
                     metrics.announcement_errors = metrics.announcement_errors.saturating_add(1);
                     metrics.last_error_ms = timestamp_ms;
                     continue;
                 };
                 if bytes.len() > aura_rendezvous::MAX_PACKET_SIZE {
                     warn!(size = bytes.len(), "LAN announcer: packet too large");
-                    let mut metrics = metrics.write().await;
+                    let mut metrics = metrics.lock().await;
                     metrics.announcement_errors = metrics.announcement_errors.saturating_add(1);
                     metrics.last_error_ms = timestamp_ms;
                     continue;
@@ -196,13 +199,13 @@ impl LanDiscoveryService {
                 match socket.send_to(&bytes, &broadcast_addr).await {
                     Ok(n) => {
                         trace!(authority = %authority_id, bytes = n, "LAN announcement sent");
-                        let mut metrics = metrics.write().await;
+                        let mut metrics = metrics.lock().await;
                         metrics.announcements_sent = metrics.announcements_sent.saturating_add(1);
                         metrics.last_announce_ms = timestamp_ms;
                     }
                     Err(e) => {
                         warn!(error = %e, "Failed to send LAN announcement");
-                        let mut metrics = metrics.write().await;
+                        let mut metrics = metrics.lock().await;
                         metrics.announcement_errors = metrics.announcement_errors.saturating_add(1);
                         metrics.last_error_ms = timestamp_ms;
                     }
@@ -235,7 +238,7 @@ impl LanDiscoveryService {
                             }
                         };
                         {
-                            let mut metrics = metrics.write().await;
+                            let mut metrics = metrics.lock().await;
                             metrics.packets_received = metrics.packets_received.saturating_add(1);
                             if received_at_ms > 0 {
                                 metrics.last_packet_ms = received_at_ms;
@@ -244,7 +247,7 @@ impl LanDiscoveryService {
 
                         let Some(packet) = LanDiscoveryPacket::from_bytes(&buf[..len]) else {
                             trace!(addr = %src_addr, len = len, "Received non-Aura LAN packet");
-                            let mut metrics = metrics.write().await;
+                            let mut metrics = metrics.lock().await;
                             metrics.packets_invalid = metrics.packets_invalid.saturating_add(1);
                             if received_at_ms > 0 {
                                 metrics.last_error_ms = received_at_ms;
@@ -267,7 +270,7 @@ impl LanDiscoveryService {
 
                         info!(authority = %peer.authority_id, addr = %peer.source_addr, discovered_at_ms = discovered_at_ms, "LAN peer discovered");
                         {
-                            let mut metrics = metrics.write().await;
+                            let mut metrics = metrics.lock().await;
                             metrics.peers_discovered = metrics.peers_discovered.saturating_add(1);
                             if discovered_at_ms > 0 {
                                 metrics.last_discovered_ms = discovered_at_ms;
@@ -281,7 +284,7 @@ impl LanDiscoveryService {
                             Ok(t) => t.ts_ms,
                             Err(_) => 0,
                         };
-                        let mut metrics = metrics.write().await;
+                        let mut metrics = metrics.lock().await;
                         metrics.receive_errors = metrics.receive_errors.saturating_add(1);
                         if now_ms > 0 {
                             metrics.last_error_ms = now_ms;

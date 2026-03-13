@@ -1989,6 +1989,7 @@ impl RecoveryServiceApi {
                 .with_context(context_id),
             )
             .await
+            .map(|_| ())
             .map_err(|e| {
                 AgentError::internal(format!("guardian handoff delegation failed: {e}"))
             })?;

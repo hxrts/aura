@@ -13,7 +13,7 @@ fail() {
 
 [[ -f "$target" ]] || fail "missing target: $target"
 
-reactive_line="$(rg -n "self\\.reactive_pipeline\\.take\\(\\)" "$target" | cut -d: -f1 | head -n1)"
+reactive_line="$(rg -n "self\\.reactive_pipeline_service\\.stop\\(\\)\\.await" "$target" | cut -d: -f1 | head -n1)"
 task_tree_line="$(rg -n "shutdown_with_timeout\\(Duration::from_secs\\(5\\)\\)" "$target" | cut -d: -f1 | head -n1)"
 stop_services_line="$(rg -n "self\\.stop_services\\(\\)\\.await" "$target" | cut -d: -f1 | head -n1)"
 lifecycle_line="$(rg -n "lifecycle_manager\\.shutdown\\(ctx\\)\\.await" "$target" | cut -d: -f1 | head -n1)"

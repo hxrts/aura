@@ -7,8 +7,8 @@ use crate::runtime::vm_hardening::{
     AuraVmSchedulerSignalsProvider,
 };
 use crate::runtime::{
-    build_vm_config, AuraChoreoEngine, AuraEffectSystem, AuraVmHardeningProfile,
-    AuraVmParityProfile,
+    build_vm_config, AuraChoreoEngine, AuraEffectSystem, AuraRuntimeEnvelopeAdmission,
+    AuraVmHardeningProfile, AuraVmParityProfile, RuntimeVmEvent,
 };
 use aura_core::effects::{VmBridgeEffects, VmBridgePendingSend};
 use aura_core::AuraVmDeterminismProfileV1;
@@ -268,15 +268,20 @@ fn effective_host_bridge_policy(
     policy: AuraVmProtocolExecutionPolicy,
 ) -> (
     AuraVmProtocolExecutionPolicy,
+    AuraRuntimeEnvelopeAdmission,
     Option<AuraVmConcurrencyEnvelopeError>,
     Option<AuraVmConcurrencyEnvelopeError>,
 ) {
     if policy.is_canonical_only() {
-        (policy, None, None)
+        let admission = AuraRuntimeEnvelopeAdmission::from_policy(protocol_id, policy, policy);
+        (policy, admission, None, None)
     } else {
         let effective_policy = policy.canonical_fallback_policy();
+        let admission =
+            AuraRuntimeEnvelopeAdmission::from_policy(protocol_id, policy, effective_policy);
         (
             effective_policy,
+            admission,
             Some(AuraVmConcurrencyEnvelopeError::AdmissionDenied {
                 protocol_id: protocol_id.to_string(),
                 requested_policy_ref: policy.policy_ref.to_string(),
@@ -293,39 +298,36 @@ fn effective_host_bridge_policy(
     }
 }
 
-fn log_concurrency_profile_selection(
-    protocol_id: &str,
-    requested_policy: AuraVmProtocolExecutionPolicy,
-    effective_policy: AuraVmProtocolExecutionPolicy,
-) {
+fn log_concurrency_profile_selection(admission: &AuraRuntimeEnvelopeAdmission) {
     tracing::debug!(
-        event = "runtime.vm.concurrency_profile.selected",
-        protocol_id,
-        requested_policy_ref = requested_policy.policy_ref,
-        requested_profile = requested_policy.concurrency_profile().as_ref(),
-        requested_runtime_mode = requested_policy.runtime_mode.as_ref(),
-        effective_policy_ref = effective_policy.policy_ref,
-        effective_profile = effective_policy.concurrency_profile().as_ref(),
-        effective_runtime_mode = effective_policy.runtime_mode.as_ref(),
+        event = RuntimeVmEvent::ConcurrencyProfileSelected.as_event_name(),
+        protocol_id = admission.protocol_id,
+        requested_policy_ref = admission.requested_policy_ref,
+        requested_profile = admission.requested_profile.as_ref(),
+        requested_runtime_mode = admission.requested_runtime_mode.as_ref(),
+        effective_policy_ref = admission.effective_policy_ref,
+        effective_profile = admission.effective_profile.as_ref(),
+        effective_runtime_mode = admission.effective_runtime_mode.as_ref(),
+        evidence = ?admission.evidence,
+        canonical_fallback = admission.activated_fallback(),
         "Selected runtime concurrency profile for VM session"
     );
 }
 
 fn log_concurrency_profile_fallback(
-    protocol_id: &str,
-    requested_policy: AuraVmProtocolExecutionPolicy,
-    effective_policy: AuraVmProtocolExecutionPolicy,
+    admission: &AuraRuntimeEnvelopeAdmission,
     error: &AuraVmConcurrencyEnvelopeError,
 ) {
     tracing::warn!(
-        event = "runtime.vm.concurrency_profile.fallback",
-        protocol_id,
-        requested_policy_ref = requested_policy.policy_ref,
-        requested_profile = requested_policy.concurrency_profile().as_ref(),
-        requested_runtime_mode = requested_policy.runtime_mode.as_ref(),
-        effective_policy_ref = effective_policy.policy_ref,
-        effective_profile = effective_policy.concurrency_profile().as_ref(),
-        effective_runtime_mode = effective_policy.runtime_mode.as_ref(),
+        event = RuntimeVmEvent::ConcurrencyProfileFallback.as_event_name(),
+        protocol_id = admission.protocol_id,
+        requested_policy_ref = admission.requested_policy_ref,
+        requested_profile = admission.requested_profile.as_ref(),
+        requested_runtime_mode = admission.requested_runtime_mode.as_ref(),
+        effective_policy_ref = admission.effective_policy_ref,
+        effective_profile = admission.effective_profile.as_ref(),
+        effective_runtime_mode = admission.effective_runtime_mode.as_ref(),
+        evidence = ?admission.evidence,
         error_kind = error.error_kind(),
         error = %error,
         "Fell back to canonical VM runtime profile"
@@ -334,7 +336,7 @@ fn log_concurrency_profile_fallback(
 
 fn log_concurrency_profile_admission_failed(error: &AuraVmConcurrencyEnvelopeError) {
     tracing::warn!(
-        event = "runtime.vm.concurrency_profile.admission_failed",
+        event = RuntimeVmEvent::ConcurrencyProfileAdmissionFailed.as_event_name(),
         error_kind = error.error_kind(),
         error = %error,
         "Denied requested VM concurrency profile"
@@ -429,15 +431,15 @@ pub async fn open_role_scoped_vm_session_admitted(
                 source,
             }
         })?;
-    let (effective_policy, admission_denied, fallback_activated) =
+    let (effective_policy, admission, admission_denied, fallback_activated) =
         effective_host_bridge_policy(protocol_id, requested_policy);
     if let Some(error) = admission_denied.as_ref() {
         log_concurrency_profile_admission_failed(error);
     }
     if let Some(error) = fallback_activated.as_ref() {
-        log_concurrency_profile_fallback(protocol_id, requested_policy, effective_policy, error);
+        log_concurrency_profile_fallback(&admission, error);
     }
-    log_concurrency_profile_selection(protocol_id, requested_policy, effective_policy);
+    log_concurrency_profile_selection(&admission);
     apply_protocol_execution_policy(&mut config, effective_policy);
     let scheduler_input = scheduler_control_input_for_image(
         &image,
@@ -463,7 +465,7 @@ pub async fn open_role_scoped_vm_session_admitted(
         .await
         .map_err(|source| AuraVmSessionOpenError::SessionOpen {
             protocol_id: protocol_id.to_string(),
-            policy_ref: effective_policy.policy_ref.to_string(),
+            policy_ref: admission.effective_policy_ref().to_string(),
             source,
         })?;
     Ok((engine, handler, sid))
@@ -484,13 +486,6 @@ pub async fn open_manifest_vm_session_admitted(
     ),
     AuraVmSessionOpenError,
 > {
-    #[allow(clippy::disallowed_methods)] // Caller locations provide a stable local-owner label for runtime arbitration.
-    #[track_caller]
-    fn caller_owner_label() -> String {
-        let caller = std::panic::Location::caller();
-        format!("{}:{}:{}", caller.file(), caller.line(), caller.column())
-    }
-
     let role_names = manifest
         .role_names
         .iter()
@@ -502,8 +497,14 @@ pub async fn open_manifest_vm_session_admitted(
         .map(String::as_str)
         .collect::<Vec<_>>();
     let claimed_session_id = effects.current_runtime_choreography_session_id();
+    let current_owner_label = effects
+        .current_runtime_choreography_session_owner_label()
+        .map_err(|message| AuraVmSessionOpenError::FragmentClaim {
+            protocol_id: manifest.protocol_id.clone(),
+            message,
+        })?;
     let _claimed_fragments = effects
-        .claim_vm_fragments_for_manifest(caller_owner_label(), manifest)
+        .claim_vm_fragments_for_manifest(current_owner_label, manifest)
         .map_err(|message| AuraVmSessionOpenError::FragmentClaim {
             protocol_id: manifest.protocol_id.clone(),
             message,
@@ -1068,10 +1069,10 @@ mod tests {
         let global_type = GlobalType::End;
         let local_types = BTreeMap::from([("Role".to_string(), LocalTypeR::End)]);
 
-        effects
-            .start_session(session_id, roles)
+        let owner = effects
+            .start_owned_choreography_session("vm_host_bridge_test_owner", session_id, roles)
             .await
-            .expect("session starts");
+            .expect("owned session starts");
 
         let (mut engine, _handler, sid) = open_manifest_vm_session_admitted(
             effects.as_ref(),
@@ -1094,7 +1095,10 @@ mod tests {
             .any(|(fragment, _)| fragment.fragment_key == "bundle:bundle-b"));
 
         close_and_reap_vm_session(&mut engine, sid).expect("session closes");
-        effects.end_session().await.expect("session ends");
+        effects
+            .end_owned_choreography_session(&owner)
+            .await
+            .expect("owned session ends");
         assert!(effects.vm_fragment_snapshot().is_empty());
     }
 
@@ -1120,10 +1124,10 @@ mod tests {
         let global_type = GlobalType::End;
         let local_types = BTreeMap::from([("Role".to_string(), LocalTypeR::End)]);
 
-        effects
-            .start_session(session_id, roles)
+        let owner = effects
+            .start_owned_choreography_session("vm_host_bridge_test_owner", session_id, roles)
             .await
-            .expect("session starts");
+            .expect("owned session starts");
 
         let (mut engine, _handler, sid) = open_manifest_vm_session_admitted(
             effects.as_ref(),
@@ -1152,6 +1156,9 @@ mod tests {
         assert!(!engine.session_requires_envelope_artifact(sid));
         assert!(engine.session_runtime_selector(sid).is_none());
 
-        effects.end_session().await.expect("session ends");
+        effects
+            .end_owned_choreography_session(&owner)
+            .await
+            .expect("owned session ends");
     }
 }

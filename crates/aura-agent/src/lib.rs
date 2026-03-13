@@ -217,9 +217,7 @@ pub use runtime::{
 
 // Sync service types
 #[cfg(feature = "choreo-backend-telltale-vm")]
-pub use runtime::services::{
-    SessionDelegationTransfer, SyncManagerConfig, SyncManagerState, SyncServiceManager,
-};
+pub use runtime::services::{SyncManagerConfig, SyncManagerState, SyncServiceManager};
 
 // Rendezvous service types
 #[cfg(feature = "choreo-backend-telltale-vm")]
@@ -235,9 +233,14 @@ pub use reconfiguration::{
     CoherenceStatus, ReconfigurationController, ReconfigurationError, SessionFootprintClass,
 };
 #[cfg(feature = "choreo-backend-telltale-vm")]
-pub use runtime::services::ReconfigurationManager;
-#[cfg(feature = "choreo-backend-telltale-vm")]
 pub use runtime::services::ThresholdSigningService;
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub use runtime::services::{
+    ReconfigurationManager, ReconfigurationManagerError, SessionDelegationOutcome,
+    SessionDelegationTransfer,
+};
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub use runtime::SessionOwnerCapabilityScope;
 
 // Re-export core types for convenience
 #[cfg(feature = "choreo-backend-telltale-vm")]
