@@ -41,6 +41,13 @@ ownership, effect registry, builder infrastructure, and choreography adapters.
 
 `aura-agent` uses structured concurrency as the only production async model.
 
+This model is intentionally split:
+
+- actor services solve long-lived runtime supervision and lifecycle
+- move semantics solve session and endpoint ownership transfer
+
+Do not collapse those into one generic async pattern.
+
 Rules:
 
 - Every long-lived async subsystem has one named owner.
@@ -71,6 +78,17 @@ Each actor maintains:
 - Explicit lifecycle state machine.
 - Owned child task group for internal loops.
 - Authoritative health derived from actor state.
+
+This actor pattern is the runtime-structure layer.
+It is the right tool for:
+
+- startup and shutdown ordering
+- retries and maintenance loops
+- panic and join supervision
+- health reporting
+- named task ownership
+
+It is not the ownership-transfer primitive for Telltale sessions or delegated endpoints.
 
 ### Service Lifecycle
 
@@ -140,9 +158,17 @@ The only legal path from external async input to session mutation:
 
 This canonical ingress rule is an architectural invariant.
 
+This boundary also defines the split in responsibility:
+
+- host runtime structure is actor-supervised
+- session mutation authority is owner-routed
+- ownership transfer across `delegate` is explicit and singular rather than shared through actor state
+
 ## Session Ownership
 
 Telltale-facing session state follows strict ownership rules.
+
+This is the move-semantics side of the runtime design.
 
 Rules:
 
@@ -151,6 +177,9 @@ Rules:
 - Network, timer, and external events are queued before touching session state.
 - Session ownership and task ownership move together.
 - Session-bound effects execute only under the current owner.
+
+The current owner may be hosted by an actor, but ownership itself remains a
+single-owner move boundary, not a shared mutable actor coordination pattern.
 
 ### Session Ingress
 
@@ -251,6 +280,9 @@ Runtime consequences:
 - Stale-owner access after delegation is forbidden.
 - Ambiguous local ownership is rejected before the VM observes the transfer.
 
+Actor messaging may carry delegation requests, but it does not replace the move.
+The transfer itself is an ownership handoff with stale-owner invalidation.
+
 ## Async Primitives
 
 ### Preferred
@@ -349,6 +381,10 @@ Verification hooks:
 Contract alignment:
 - [Runtime](../../docs/120_runtime.md) defines service actor patterns.
 
+Architectural note:
+- actor services are the correct abstraction for runtime supervision
+- they are not the abstraction that defines session ownership transfer
+
 ### InvariantCanonicalIngress
 
 External events reach session state only through typed ingress and the current owner.
@@ -368,6 +404,10 @@ Verification hooks:
 Contract alignment:
 - [Effect System](../../docs/105_effect_system.md) defines session-local VM bridge.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines canonical execution.
+
+Architectural note:
+- session ownership is explicit and singular
+- delegation is modeled as a move, not as ambient access through a service actor
 
 ### InvariantSessionOwnership
 

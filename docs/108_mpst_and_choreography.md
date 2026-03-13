@@ -58,11 +58,21 @@ Aura has one production choreography backend:
 The authoritative async ownership contract for how `aura-agent` hosts these
 sessions lives in `crates/aura-agent/ARCHITECTURE.md`.
 
+That contract is intentionally split:
+
+- actor services structure the long-lived host runtime
+- move semantics define fragment, session, and endpoint ownership transfer
+
+This distinction matters because `delegate` is not merely another actor message.
+
 Direct generated-runner execution is test and migration support only.
 
 Production runtime ownership is fragment-scoped. The admitted unit is one VM fragment derived from the generated `CompositionManifest`. A manifest without `link` metadata yields one protocol fragment. A manifest with `link` metadata yields one fragment per linked bundle.
 
 `delegate` and `link` define how ownership moves. Local runtime services claim fragment ownership through `AuraEffectSystem`. Runtime transfer goes through `ReconfigurationManager`. The runtime rejects ambiguous local ownership before a transfer reaches the VM.
+
+The host runtime may use actor services to supervise the surrounding work, but
+fragment ownership itself remains a singular move boundary with stale-owner rejection.
 
 Host-side async code must preserve that ownership model. External network,
 timer, and callback work enters through canonical ingress and is routed to the current local owner before any session mutation occurs.

@@ -9,6 +9,13 @@ The `aura-agent` crate-level runtime contract, including structured concurrency,
 canonical ingress, ownership, typed errors, and CI policy gates, lives in
 `crates/aura-agent/ARCHITECTURE.md`.
 
+That contract is intentionally opinionated about the split of responsibilities:
+
+- actor services own long-lived runtime supervision, lifecycle, and maintenance
+- move semantics own session and endpoint ownership transfer
+
+Those are related concerns, but they are not the same abstraction boundary.
+
 ## Structured Concurrency
 
 `aura-agent` uses structured concurrency as the only production async model.
@@ -44,6 +51,16 @@ Each actor maintains:
 - Explicit lifecycle state machine.
 - Owned child task group for internal loops.
 - Authoritative health derived from actor state.
+
+This actor layer is the runtime supervision layer. Use it for:
+
+- service lifecycle
+- task ownership
+- shutdown ordering
+- retries and maintenance loops
+- health reporting
+
+Do not treat actor mailboxes as the ownership-transfer primitive for sessions or delegated endpoints.
 
 ### Async Primitives
 
@@ -320,6 +337,13 @@ The runtime manages the lifecycle of distributed protocols. Choreographies defin
 
 Each active session or fragment has exactly one current local owner. The owner is either a per-session actor or an authoritative choreography runtime loop. This invariant is enforced through the canonical ingress pattern.
 
+This is the move-semantics side of the runtime model:
+
+- one current owner
+- explicit transfer
+- stale-owner rejection
+- owner-routed session effects
+
 ```rust
 enum SessionIngress {
     NetworkEnvelope(TransportEnvelope),
@@ -334,6 +358,8 @@ struct SessionHandle {
 ```
 
 Network, timer, and external events are queued before touching session state. Session ownership and task ownership move together. Session-bound effects execute only under the current owner.
+
+The owner may be implemented by an actor, but the transfer of ownership is still an explicit move boundary rather than shared actor state.
 
 ### Ownership Transitions
 
@@ -387,6 +413,11 @@ Session creation and lifecycle are managed as choreographic protocols. The `Sess
 Aura executes production choreography sessions through the Telltale VM in Layer 6. Production startup is manifest-driven. Generated `CompositionManifest` metadata defines the protocol id, required capabilities, determinism profile reference, link constraints, and delegation constraints for each choreography. `AuraChoreoEngine` runs admitted VM sessions and exposes deterministic trace, replay, and envelope-validation APIs.
 
 Runtime ownership is fragment-scoped. One admitted VM fragment has one local owner at a time. A choreography without link metadata is one fragment. A choreography with link metadata yields one fragment per linked bundle. Ownership claims, transfer, and release flow through `AuraEffectSystem` and `ReconfigurationManager`.
+
+This is why the runtime uses both abstractions at once:
+
+- actor services for host-side runtime structure
+- explicit move-style ownership for fragment/session transfer
 
 The synchronous callback boundary is `VmBridgeEffects`. `AuraVmEffectHandler` and `AuraQueuedVmBridgeHandler` use it for session-local payload queues, blocked receive snapshots, branch choices, and scheduler signals. Async transport, guard-chain execution, journal coupling, and storage remain outside VM callbacks in `vm_host_bridge` and service loops.
 
