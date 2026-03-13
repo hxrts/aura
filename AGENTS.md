@@ -62,11 +62,11 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
 - **Unified encryption-at-rest**: `aura-effects::EncryptedStorage` wraps `StorageEffects`; no ad-hoc storage encryption
 - **Shared UX contract ownership**: parity-critical UI ids, focus semantics, action contracts, and parity metadata come from `aura-app::ui_contract`
 - **Harness mode discipline**: `AURA_HARNESS_MODE` may change instrumentation or rendering stability, but must not change parity-critical business-flow semantics
-- **Harness mode exceptions**: allowlisted harness-only hooks must carry owner, justification, and design-note metadata in `scripts/check/ux-policy-guardrails.sh`
+- **Harness mode exceptions**: allowlisted harness-only hooks must carry owner, justification, and design-note metadata in `scripts/check/user-flow-policy-guardrails.sh`
 - **Browser bridge compatibility**: changes to browser harness bridge or observation surfaces must update `crates/aura-web/ARCHITECTURE.md` and `docs/804_testing_guide.md`
 - **Parity exception metadata**: every `ParityException` must have structured metadata in `aura-app::ui_contract` including reason code, scope, affected surface, and doc reference
 - **Parity-critical waits**: use authoritative readiness, event, or quiescence contracts; raw sleeps, raw polling, and fallback text/DOM checks are diagnostics only
-- **Shared UX documentation sync**: shared UX contract or policy changes must update the mapped authoritative targets enforced by `scripts/check/ux-guidance-sync.sh`
+- **Shared user-flow documentation sync**: shared user-flow contract or policy changes must update the mapped authoritative targets enforced by `scripts/check/user-flow-guidance-sync.sh`
 - **Shared scenario boundary**: shared scenarios stay actor-based and semantic-only; the legacy scripted scenario language is quarantined to explicit non-shared fixtures
 - **Typed governance first**: extend typed validator domains before adding new shell policy logic; `scripts/check/` wrappers should stay thin and workflow-oriented
 
@@ -267,6 +267,6 @@ Four domains via effect traits (no direct `SystemTime::now()` or chrono):
 
 - Prefer specific file paths over broad searches
 - Use `just check-arch` before complex refactoring
-- For shared UX or harness policy work, run `just ci-ux-policy`
+- For shared user-flow or harness policy work, run `just ci-user-flow-policy`
 - Use `.claude/skills/` for project-specific knowledge
 - Batch operations and parallel tool calls when possible

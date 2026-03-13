@@ -13,14 +13,14 @@ See [Formal Verification Reference](119_verification.md#assurance-summary) for t
 
 | Metric | Count |
 |--------|-------|
-| Quint Specifications | 41 |
+| Quint Specifications | 42 |
 | Quint Invariants | 191 |
 | Quint Temporal Properties | 11 |
 | Quint Type Definitions | 362 |
 | Lean Source Files | 38 |
 | Lean Theorems | 118 |
 | Conformance Fixtures | 4 |
-| ITF Trace Harnesses | 8 |
+| ITF Trace Harnesses | 9 |
 | Testkit Tests | 113 |
 | Bridge Modules | 4 |
 | CI Verification Gates | 11 |
@@ -42,7 +42,7 @@ Formal protocol specifications in `verification/quint/` organized by subsystem.
 | sessions/ | 4 | core, choreography, groups, locking |
 | amp/ | 1 | channel |
 | liveness/ | 3 | connectivity, timing, properties |
-| harness/ | 8 | amp_channel, counter, dkg, flows, groups, locking, recovery, resharing |
+| harness/ | 9 | amp_channel, counter, dkg, flows, groups, locking, recovery, resharing, semantic_observation_smoke |
 | tui/ | 4 | demo_recovery, flows, signals, state |
 
 Harness modules generate ITF traces on demand via `just quint-generate-traces`. Traces are not checked into the repository. CI runs `just ci-conformance-itf` to generate traces and replay them through Rust handlers.

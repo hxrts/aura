@@ -14,7 +14,7 @@ else
     elif git rev-parse --verify HEAD >/dev/null 2>&1; then
       diff_range="HEAD"
     else
-      echo "ux-guidance-sync: unable to compute diff range; skipping"
+      echo "user-flow-guidance-sync: unable to compute diff range; skipping"
       exit 0
     fi
   fi
@@ -22,7 +22,7 @@ else
 fi
 
 if [[ -z "${changed_files//[[:space:]]/}" ]]; then
-  echo "ux-guidance-sync: no changed files"
+  echo "user-flow-guidance-sync: no changed files"
   exit 0
 fi
 
@@ -33,11 +33,21 @@ while IFS= read -r file; do
   changed_list+=("$file")
 done <<< "$changed_files"
 
+canonical_changed_path() {
+  case "$1" in
+    docs/997_ux_flow_coverage.md) echo "docs/997_flow_coverage.md" ;;
+    scripts/check/ux-flow-coverage.sh) echo "scripts/check/user-flow-coverage.sh" ;;
+    scripts/check/ux-guidance-sync.sh) echo "scripts/check/user-flow-guidance-sync.sh" ;;
+    scripts/check/ux-policy-guardrails.sh) echo "scripts/check/user-flow-policy-guardrails.sh" ;;
+    *) echo "$1" ;;
+  esac
+}
+
 has_changed() {
   local target="$1"
   local file
   for file in "${changed_list[@]}"; do
-    [[ "$file" == "$target" ]] && return 0
+    [[ "$(canonical_changed_path "$file")" == "$target" ]] && return 0
   done
   return 1
 }
@@ -46,7 +56,7 @@ matches_any_rule_source() {
   local rule_id="$1"
   local file
   for file in "${changed_list[@]}"; do
-    case "$rule_id:$file" in
+    case "$rule_id:$(canonical_changed_path "$file")" in
       testing_guide_sync:crates/aura-app/src/ui_contract.rs|\
       testing_guide_sync:crates/aura-harness/src/*|\
       testing_guide_sync:crates/aura-harness/playwright-driver/*|\
@@ -56,27 +66,27 @@ matches_any_rule_source() {
       testing_guide_sync:scripts/check/shared-flow-policy.sh|\
       testing_guide_sync:scripts/check/ui-parity-contract.sh|\
       testing_guide_sync:scripts/check/harness-ui-state-evented.sh|\
-      testing_guide_sync:scripts/check/ux-policy-guardrails.sh)
+      testing_guide_sync:scripts/check/user-flow-policy-guardrails.sh)
         return 0
         ;;
       coverage_report_sync:crates/aura-app/src/ui_contract.rs|\
       coverage_report_sync:scenarios/harness/*|\
       coverage_report_sync:scenarios/harness_inventory.toml|\
-      coverage_report_sync:scripts/check/ux-flow-coverage.sh)
+      coverage_report_sync:scripts/check/user-flow-coverage.sh)
         return 0
         ;;
       agent_guidance_sync:scripts/check/shared-flow-policy.sh|\
       agent_guidance_sync:scripts/check/ui-parity-contract.sh|\
       agent_guidance_sync:scripts/check/harness-ui-state-evented.sh|\
-      agent_guidance_sync:scripts/check/ux-guidance-sync.sh|\
-      agent_guidance_sync:scripts/check/ux-policy-guardrails.sh)
+      agent_guidance_sync:scripts/check/user-flow-guidance-sync.sh|\
+      agent_guidance_sync:scripts/check/user-flow-policy-guardrails.sh)
         return 0
         ;;
       skills_guidance_sync:scripts/check/shared-flow-policy.sh|\
       skills_guidance_sync:scripts/check/ui-parity-contract.sh|\
       skills_guidance_sync:scripts/check/harness-ui-state-evented.sh|\
-      skills_guidance_sync:scripts/check/ux-guidance-sync.sh|\
-      skills_guidance_sync:scripts/check/ux-policy-guardrails.sh)
+      skills_guidance_sync:scripts/check/user-flow-guidance-sync.sh|\
+      skills_guidance_sync:scripts/check/user-flow-policy-guardrails.sh)
         return 0
         ;;
     esac
@@ -132,8 +142,8 @@ if matches_any_rule_source coverage_report_sync; then
   triggered=$((triggered + 1))
   check_rule \
     coverage_report_sync \
-    "Shared-flow coverage, scenario inventory, and parity classification changes must update the UX flow coverage report." \
-    docs/997_ux_flow_coverage.md || violations=$((violations + 1))
+    "Shared-flow coverage, scenario inventory, parity classification changes, and release/update matrix changes must update the user flow coverage report." \
+    docs/997_flow_coverage.md || violations=$((violations + 1))
 fi
 
 if matches_any_rule_source agent_guidance_sync; then
@@ -155,13 +165,13 @@ if matches_any_rule_source skills_guidance_sync; then
 fi
 
 if [[ "$triggered" -eq 0 ]]; then
-  echo "ux-guidance-sync: no mapped shared-UX guidance changes"
+  echo "user-flow-guidance-sync: no mapped shared-user-flow guidance changes"
   exit 0
 fi
 
 if [[ "$violations" -gt 0 ]]; then
-  echo "ux-guidance-sync: $violations violation(s)"
+  echo "user-flow-guidance-sync: $violations violation(s)"
   exit 1
 fi
 
-echo "ux-guidance-sync: clean"
+echo "user-flow-guidance-sync: clean"

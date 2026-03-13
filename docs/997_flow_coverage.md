@@ -1,10 +1,10 @@
-# UX Flow Coverage Report
+# User Flow Coverage Report
 
-This document tracks end-to-end UX coverage for Aura's runtime harness scenarios across TUI and web surfaces.
+This document tracks end-to-end user coverage for Aura's runtime harness scenarios across TUI and web surfaces.
 
 ## Coverage Boundary Statement
 
-UX flow coverage validates user-visible behavior and interaction wiring through runtime harness scenarios.
+User flow coverage validates user-visible behavior and interaction wiring through runtime harness scenarios.
 It does not replace protocol conformance, theorem proofs, or differential parity lanes.
 Use this report for UI/product flow traceability and regression targeting.
 
@@ -22,11 +22,11 @@ The harness coverage model has two explicit lanes:
 
 | Metric | Count |
 |--------|-------|
-| Harness UX Scenarios | 13 |
+| Harness User Flow Scenarios | 13 |
 | Parity-Critical Scenarios (TUI + Web) | 11 |
 | Mixed-Runtime Scenarios (TUI + Web distinct keys) | 2 |
 | Auxiliary Coverage Scenarios | 8 |
-| Core UX Flow Domains | 11 |
+| Core User Flow Domains | 11 |
 
 ## Coverage Classes
 
@@ -62,7 +62,7 @@ protocol correctness, and it does not replace conformance or verification lanes.
 Scenarios 4 and 7 are retained as TUI frontend-conformance coverage. They are
 not part of the shared semantic product-flow suite.
 
-## UX Flow Matrix
+## User Flow Matrix
 
 | Flow Domain | Main Coverage | Secondary Coverage | Runtime Context |
 |------------|----------------|--------------------|-----------------|
@@ -92,6 +92,37 @@ These scenarios are maintained as focused supplements and smoke checks:
 | `access-override.toml` | Access override modal flow |
 | `shared-storage.toml` | Shared-storage user flow |
 | `cross-authority-contact.toml` | Cross-authority contact + neighborhood path |
+
+## Planned Release And Update Validation Matrix
+
+This matrix is the planned coverage target for harness-driven validation of
+module and OTA distribution/update behavior.
+
+The intended rollout order is:
+
+1. mechanism validation matrix
+2. candidate-release rehearsal matrix
+3. live-release promotion gates
+
+Mechanism validation proves the lifecycle machinery itself under synthetic
+releases and controlled failures. Candidate-release rehearsal proves that one
+specific release works before promotion or real cutover.
+
+| Order | Domain | Mode | Target | Example Coverage Goal | Status |
+|------|--------|------|--------|------------------------|--------|
+| 1 | OTA | Mechanism validation | Native host shell + runtime payload | Synthetic release publication, staging, bootloader handoff, health confirmation, rollback | Planned |
+| 2 | OTA | Mechanism validation | Browser-extension host shell + runtime payload | Synthetic extension-target OTA staging, compatibility block, handoff, recovery | Planned |
+| 3 | OTA | Mechanism validation | Mobile host shell + runtime payload | Synthetic mobile-target staging, blocked activation when host shell is too old | Planned |
+| 4 | Module | Mechanism validation | Generic module lifecycle | Synthetic module discovery, verification, staging, admission, cutover, rollback | Planned |
+| 5 | Module | Mechanism validation | Cross-host artifact availability | Non-executing hosts serve artifacts to execution-compatible hosts | Planned |
+| 6 | OTA | Candidate-release rehearsal | Specific Aura runtime release | Candidate runtime release staged and rehearsed before promotion/cutover | Planned |
+| 7 | Module | Candidate-release rehearsal | Specific module release | Candidate module release staged and rehearsed before promotion/cutover | Planned |
+| 8 | Example module | Candidate-release rehearsal | Browser-extension host | Candidate Example module release exercised end to end before promotion | Planned |
+| 9 | OTA | Promotion gate | Release operation | Real cutover remains blocked until rehearsal passes | Planned |
+| 10 | Module | Promotion gate | Release operation | Real publication/activation remains blocked until rehearsal passes | Planned |
+
+This matrix should remain typed-lifecycle driven. It should not be satisfied by
+log scraping or ad hoc manual release notes.
 
 ## Coverage Expectations
 
@@ -124,14 +155,19 @@ of the portability contract unless explicitly promoted into the shared contract.
    selected shared channel rather than frontend-specific ordering.
 5. Changes to renderer-specific control wiring should add or update
    frontend-conformance coverage rather than weakening the shared semantic lane.
+6. Changes to OTA or module release/update architecture should update the
+   planned release/update matrix above when they add, remove, or reorder
+   mechanism-validation or release-rehearsal coverage.
 
 ### CI Enforcement
 
 Fast CI currently uses two separate gates:
 
-- `just ci-ux-flow-coverage` enforces traceability heuristics between changed UX-facing source files, canonical scenarios, and this report
+- `just ci-user-flow-coverage` enforces traceability heuristics between changed user flow-facing source files, canonical scenarios, and this report
 - `AURA_ALLOW_FLOW_COVERAGE_SKIP=1` is a local-only escape hatch; CI rejects it
-- `just ci-ux-policy` enforces documentation and contributor-guidance updates for shared UX contract and determinism surfaces via `scripts/check/ux-guidance-sync.sh`
+- `just ci-user-flow-policy` enforces documentation and contributor-guidance updates for shared user flow contract and determinism surfaces via `scripts/check/user-flow-guidance-sync.sh`
+- OTA and module release/update validation rows in this report are part of that same user-flow guidance surface and must be kept in sync as the release matrix evolves
+- The release/update rows are expected to land in staged order: mechanism validation first, candidate rehearsal second, and promotion-gate coverage last
 - `just ci-harness-matrix-inventory` enforces that converted scenario classification drives the TUI/web matrix lanes
 - shared semantic scenarios and frontend-conformance scenarios are expected to
   remain distinct classifications; CI policy should reject shared-flow drift
@@ -139,7 +175,7 @@ Fast CI currently uses two separate gates:
 
 Current limitation:
 
-- `ci-ux-flow-coverage` still infers some ownership from filenames and does not yet prove that the correct scenario set changed
+- `ci-user-flow-coverage` still infers some ownership from filenames and does not yet prove that the correct scenario set changed
 - docs updates and coverage traceability are distinct concerns; this report should not claim stronger behavioral enforcement than CI actually provides
 
 ### Residual Risk Areas
@@ -153,7 +189,7 @@ Current limitation:
 ## References
 
 - [Testing Guide](804_testing_guide.md)
-- [UX Guidance Sync Gate](../scripts/check/ux-guidance-sync.sh)
+- [User Flow Guidance Sync Gate](../scripts/check/user-flow-guidance-sync.sh)
 - [Simulation Guide](805_simulation_guide.md)
 - [Verification Coverage Report](998_verification_coverage.md)
 - [Project Structure](999_project_structure.md)

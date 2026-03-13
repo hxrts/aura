@@ -35,6 +35,6 @@
 - [Verification and MBT Guide](806_verification_guide.md)
 - [System Internals Guide](807_system_internals_guide.md)
 - [Distributed Maintenance Guide](808_maintenance_guide.md)
-- [UX Flow Coverage Report](997_ux_flow_coverage.md)
+- [User Flow Coverage Report](997_flow_coverage.md)
 - [Verification Coverage Report](998_verification_coverage.md)
 - [Project Structure](999_project_structure.md)

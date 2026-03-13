@@ -87,10 +87,10 @@ source of truth.
 
 All long-lived services implement a shared lifecycle state machine:
 
-- `New`: Initial state before startup.
-- `Starting`: Initialization in progress.
+- `new`: Initial state before startup.
+- `starting`: Initialization in progress.
 - `Running`: Actor alive and command path available.
-- `Stopping`: Graceful shutdown in progress.
+- `stopping`: Graceful shutdown in progress.
 - `Stopped`: No live owned tasks and no live command handling.
 - `Failed`: Observable failure state.
 

@@ -11,7 +11,7 @@ if [[ -z "$diff_range" ]]; then
   elif git rev-parse --verify HEAD >/dev/null 2>&1; then
     diff_range="HEAD"
   else
-    echo "ux-policy-guardrails: unable to compute diff range; skipping"
+    echo "user-flow-policy-guardrails: unable to compute diff range; skipping"
     exit 0
   fi
 fi
@@ -154,7 +154,7 @@ is_allowlisted_harness_entrypoint_file() {
     .github/workflows/ci.yml|\
     .github/workflows/harness.yml|\
     scripts/check/harness-boundary-policy.sh|\
-    scripts/check/ux-policy-guardrails.sh|\
+    scripts/check/user-flow-policy-guardrails.sh|\
     scripts/harness/run-matrix.sh|\
     docs/804_testing_guide.md|\
     .claude/skills/harness-run/SKILL.md)
@@ -349,8 +349,8 @@ while IFS= read -r raw_line; do
 done < <(git diff --unified=0 --no-color "$diff_range")
 
 if [[ "$violations" -gt 0 ]]; then
-  echo "ux-policy-guardrails: $violations violation(s)"
+  echo "user-flow-policy-guardrails: $violations violation(s)"
   exit 1
 fi
 
-echo "ux-policy-guardrails: clean"
+echo "user-flow-policy-guardrails: clean"

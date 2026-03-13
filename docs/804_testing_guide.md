@@ -104,12 +104,12 @@ For migration and cleanup discipline:
 - prefer extending typed governance in `cargo run -p aura-harness --bin aura-harness --quiet -- governance ...` over adding standalone shell policy logic
 
 The authoritative written update map for these surfaces lives in
-`scripts/check/ux-guidance-sync.sh` and is enforced by `just ci-ux-policy`.
+`scripts/check/user-flow-guidance-sync.sh` and is enforced by `just ci-user-flow-policy`.
 The authoritative frontend matrix for converted shared scenarios comes from
 `scenarios/harness_inventory.toml` and is enforced by
 `just ci-harness-matrix-inventory`.
 Allowlisted harness-mode hooks must carry explicit owner, justification, and
-design-note references in `scripts/check/ux-policy-guardrails.sh`.
+design-note references in `scripts/check/user-flow-policy-guardrails.sh`.
 Changes to the browser harness bridge request/response or observation surface
 must update both `crates/aura-web/ARCHITECTURE.md` and this guide so
 compatibility expectations stay explicit.

@@ -605,14 +605,14 @@ ci-docs-semantic-drift:
 ci-verification-coverage:
     scripts/check/verification-coverage.sh
 
-# Verify UX flow coverage mapping remains aligned with changed flow surfaces
-ci-ux-flow-coverage:
-    scripts/check/ux-flow-coverage.sh
+# Verify user flow coverage mapping remains aligned with changed flow surfaces
+ci-user-flow-coverage:
+    scripts/check/user-flow-coverage.sh
 
-# Verify shared UX policy guardrails and required docs/guidance sync
-ci-ux-policy:
-    scripts/check/ux-policy-guardrails.sh
-    scripts/check/ux-guidance-sync.sh
+# Verify shared user-flow policy guardrails and required docs/guidance sync
+ci-user-flow-policy:
+    scripts/check/user-flow-policy-guardrails.sh
+    scripts/check/user-flow-guidance-sync.sh
 
 # Choreography wiring lint
 ci-choreo:
@@ -799,8 +799,8 @@ ci-dry-run profile="push":
     add_step "Clippy Check"               "nix develop --command just ci-clippy"
     add_step "Build Check"                "nix develop --command just ci-build"
     add_step "Architecture Check"         "nix develop --command scripts/check/arch.sh --quick"
-    add_step "UX Flow Coverage"           "nix develop --command just ci-ux-flow-coverage"
-    add_step "UX Policy"                  "nix develop --command just ci-ux-policy"
+    add_step "User Flow Coverage"         "nix develop --command just ci-user-flow-coverage"
+    add_step "User Flow Policy"           "nix develop --command just ci-user-flow-policy"
     add_step "Shared Flow Policy"         "nix develop --command just ci-shared-flow-policy"
     add_step "Tests + Protocol Compat"    "nix develop --command bash -lc 'just ci-test && just ci-protocol-compat'"
 
@@ -976,31 +976,29 @@ summary:
 
     echo "# Summary" > "$out"; echo "" >> "$out"
 
-    declare -A dirs; declare -a root_files
+    root_count=0
     while IFS= read -r f; do
-        rel="${f#$docs/}"
-        [ "$rel" = "SUMMARY.md" ] && continue
-        case "$f" in "$build_dir"/*) continue ;; esac
-        if [[ "$rel" == */* ]]; then
-            dir="${rel%%/*}"; dirs[$dir]+="$f"$'\n'
-        else
-            root_files+=("$f")
-        fi
-    done < <(find "$docs" -type f -name '*.md' -not -name 'SUMMARY.md' -not -path "$build_dir/*" | LC_ALL=C sort)
-
-    for f in "${root_files[@]}"; do
+        [ -n "$f" ] || continue
         echo "- [$(get_title "$f")](${f#$docs/})" >> "$out"
-    done
+        root_count=$((root_count + 1))
+    done < <(find "$docs" -maxdepth 1 -type f -name '*.md' -not -name 'SUMMARY.md' | LC_ALL=C sort)
 
-    for dir in $(printf '%s\n' "${!dirs[@]}" | LC_ALL=C sort); do
-        [ ${#root_files[@]} -gt 0 ] && echo "" >> "$out"
-        echo "# $(echo "$dir" | tr '_-' '  ' | awk '{for(i=1;i<=NF;i++){$i=toupper(substr($i,1,1))substr($i,2)}}1')" >> "$out"
-        echo "" >> "$out"
+    while IFS= read -r dir_path; do
+        [ -n "$dir_path" ] || continue
+        dir="${dir_path#$docs/}"
+        has_files=0
         while IFS= read -r f; do
-            [ -z "$f" ] && continue
+            [ -n "$f" ] || continue
+            if [ "$has_files" -eq 0 ]; then
+                [ "$root_count" -gt 0 ] && echo "" >> "$out"
+                echo "# $(echo "$dir" | tr '_-' '  ' | awk '{for(i=1;i<=NF;i++){$i=toupper(substr($i,1,1))substr($i,2)}}1')" >> "$out"
+                echo "" >> "$out"
+                has_files=1
+                root_count=1
+            fi
             echo "- [$(get_title "$f")](${f#$docs/})" >> "$out"
-        done < <(echo -n "${dirs[$dir]}" | LC_ALL=C sort)
-    done
+        done < <(find "$dir_path" -type f -name '*.md' | LC_ALL=C sort)
+    done < <(find "$docs" -mindepth 1 -maxdepth 1 -type d -not -name 'book' | LC_ALL=C sort)
     echo "Wrote $out"
 
 # Build and serve the docs book with live reload (after regenerating summary)

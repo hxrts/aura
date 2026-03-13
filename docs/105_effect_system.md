@@ -201,7 +201,7 @@ This split exists because Telltale host callbacks are synchronous. The callback 
 
 Async host work resumes outside the VM step boundary in Layer 6 runtime services. `vm_host_bridge` observes `VmBridgeEffects` state, performs transport and guard-chain work, and injects completed results back into the VM. This preserves deterministic VM progression while keeping Aura's runtime async.
 
-`aura-agent` runtime code preserves this boundary through canonical ingress and explicit session ownership. Network callbacks, timers, and background tasks route typed `SessionIngress` to the current local owner. Each active session has exactly one owner at any time.
+`aura-agent` runtime code preserves this boundary through canonical ingress and explicit session ownership. Network callbacks, timers, and background tasks route typed session-ingress messages to the current local owner. Each active session has exactly one owner at any time.
 
 That owner may be hosted by an actor, but the effect-routing rule is still ownership-based:
 session-bound effects execute because the caller is the current owner, not merely because it runs inside a service actor.
