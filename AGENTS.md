@@ -12,6 +12,7 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
 
 - **Primary specs**: `docs/` directory (authoritative)
 - **Architecture**: `docs/001_system_architecture.md`, `docs/999_project_structure.md`
+- **Per-crate architecture docs**: each crate root has an `ARCHITECTURE.md` that explains the crate's purpose, boundaries, invariants, and key integration points; read it before making non-trivial changes in that crate
 - **Scratch**: `work/` is non-authoritative and may be removed
 
 ## Development Commands
@@ -86,7 +87,7 @@ Use `cfg_if::cfg_if!` to group related conditional items when it improves readab
 
 ### Layer 5 Conventions
 
-- Each crate includes `ARCHITECTURE.md` with facts, invariants, operation categories
+- Each Layer 5 crate exposes its operation categories and keeps them aligned with its crate-root `ARCHITECTURE.md`
 - Each crate exposes `OPERATION_CATEGORIES` mapping operations to A/B/C classes
 - Runtime-owned caches (invitation/rendezvous descriptors) live in L6 handlers, not L5
 - Facts use versioned binary encoding with JSON fallback; bump schema constants on breaking changes
