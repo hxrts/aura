@@ -235,6 +235,14 @@ enum ChannelInvitationBootstrapError {
         channel_id: ChannelId,
         receiver_id: AuthorityId,
     },
+    #[error(
+        "Failed to create channel invitation for channel {channel_id} and receiver {receiver_id}: {detail}"
+    )]
+    CreateFailed {
+        channel_id: ChannelId,
+        receiver_id: AuthorityId,
+        detail: String,
+    },
 }
 
 impl ChannelInvitationBootstrapError {
@@ -276,6 +284,17 @@ impl ChannelInvitationBootstrapError {
             )
             .with_detail(format!(
                 "channel_id={channel_id}; receiver_id={receiver_id}; detail=create_channel_invitation_timeout"
+            )),
+            Self::CreateFailed {
+                channel_id,
+                receiver_id,
+                detail,
+            } => SemanticOperationError::new(
+                SemanticFailureDomain::Invitation,
+                SemanticFailureCode::InternalError,
+            )
+            .with_detail(format!(
+                "channel_id={channel_id}; receiver_id={receiver_id}; detail={detail}"
             )),
         }
     }
@@ -683,7 +702,15 @@ pub async fn create_channel_invitation(
     {
         Ok(invitation) => invitation,
         Err(error) => {
-            return Err(super::error::runtime_call("create channel invitation", error).into());
+            return fail_channel_invitation(
+                app_core,
+                ChannelInvitationBootstrapError::CreateFailed {
+                    channel_id,
+                    receiver_id: receiver,
+                    detail: error.to_string(),
+                },
+            )
+            .await;
         }
     };
     publish_invitation_operation_status(
@@ -807,6 +834,13 @@ pub async fn accept_invitation(
     } else {
         SemanticOperationKind::AcceptPendingChannelInvitation
     };
+    publish_invitation_operation_status(
+        app_core,
+        OperationId::invitation_accept(),
+        operation_kind,
+        SemanticOperationPhase::WorkflowDispatched,
+    )
+    .await?;
     let runtime = require_runtime(app_core).await?;
 
     if let Err(error) = runtime.accept_invitation(invitation_id.as_str()).await {
@@ -898,6 +932,13 @@ pub async fn accept_imported_invitation(
     invitation: &crate::runtime_bridge::InvitationInfo,
 ) -> Result<(), AuraError> {
     let operation_kind = semantic_kind_for_bridge_invitation(invitation);
+    publish_invitation_operation_status(
+        app_core,
+        OperationId::invitation_accept(),
+        operation_kind,
+        SemanticOperationPhase::WorkflowDispatched,
+    )
+    .await?;
     if matches!(
         invitation.invitation_type,
         crate::runtime_bridge::InvitationBridgeType::DeviceEnrollment { .. }
@@ -1769,6 +1810,75 @@ mod tests {
             .detail
             .as_deref()
             .is_some_and(|detail| detail.contains(&receiver_id.to_string())));
+    }
+
+    #[test]
+    fn test_channel_invitation_create_failure_maps_to_typed_semantic_failure() {
+        let channel_id = ChannelId::from_bytes([49u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([50u8; 32]);
+        let error = ChannelInvitationBootstrapError::CreateFailed {
+            channel_id,
+            receiver_id,
+            detail: "bridge create failed".to_string(),
+        };
+        let semantic = error.semantic_error();
+        assert_eq!(semantic.domain, SemanticFailureDomain::Invitation);
+        assert_eq!(semantic.code, SemanticFailureCode::InternalError);
+        assert!(semantic
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains(&channel_id.to_string())));
+        assert!(semantic
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains(&receiver_id.to_string())));
+        assert!(semantic
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("bridge create failed")));
+    }
+
+    #[tokio::test]
+    async fn test_fail_channel_invitation_publishes_terminal_failure_fact() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+
+        let channel_id = ChannelId::from_bytes([51u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([52u8; 32]);
+        let result = fail_channel_invitation::<()>(
+            &app_core,
+            ChannelInvitationBootstrapError::CreateFailed {
+                channel_id,
+                receiver_id,
+                detail: "typed create failure".to_string(),
+            },
+        )
+        .await;
+
+        assert!(result.is_err());
+
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| matches!(
+            fact,
+            AuthoritativeSemanticFact::OperationStatus {
+                operation_id,
+                status,
+                ..
+            } if *operation_id == OperationId::invitation_create()
+                && status.kind == SemanticOperationKind::InviteActorToChannel
+                && status.phase == SemanticOperationPhase::Failed
+                && status.error.as_ref().is_some_and(|error|
+                    error.domain == SemanticFailureDomain::Invitation
+                        && error.code == SemanticFailureCode::InternalError
+                        && error.detail.as_deref().is_some_and(|detail| detail.contains("typed create failure"))
+                )
+        )));
     }
 
     #[test]
