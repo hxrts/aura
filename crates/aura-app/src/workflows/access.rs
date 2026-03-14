@@ -23,8 +23,8 @@ struct AccessScope {
     peers: Vec<AuthorityId>,
 }
 
-fn map_runtime_error(operation: &str, error: impl std::fmt::Display) -> AuraError {
-    AuraError::agent(format!("{operation} failed: {error}"))
+fn map_runtime_error(operation: &'static str, error: impl std::fmt::Display) -> AuraError {
+    super::error::runtime_call(operation, error).into()
 }
 
 async fn send_relational_fact_with_retry(
@@ -49,10 +49,13 @@ async fn send_relational_fact_with_retry(
         }
     }
 
-    let message = last_error.unwrap_or_else(|| "unknown transport error".to_string());
-    Err(AuraError::agent(format!(
-        "Failed to deliver access configuration fact to {peer} after {ACCESS_FACT_SEND_MAX_ATTEMPTS} attempts: {message}"
-    )))
+    let detail = last_error.unwrap_or_else(|| "unknown transport error".to_string());
+    Err(super::error::WorkflowError::DeliveryFailed {
+        peer: peer.to_string(),
+        attempts: ACCESS_FACT_SEND_MAX_ATTEMPTS,
+        detail,
+    }
+    .into())
 }
 
 async fn resolve_scope_by_channel_id(

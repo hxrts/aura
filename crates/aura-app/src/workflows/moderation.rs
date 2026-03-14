@@ -258,7 +258,7 @@ async fn commit_and_fanout(
     runtime
         .commit_relational_facts(std::slice::from_ref(&fact))
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to commit moderation fact: {e}")))?;
+        .map_err(|e| super::error::runtime_call("commit moderation fact", e))?;
 
     let actor = runtime.authority_id();
     let mut fanout = BTreeSet::new();
@@ -303,9 +303,12 @@ async fn send_moderation_fact_with_retry(
     }
 
     let message = last_error.unwrap_or_else(|| "unknown transport error".to_string());
-    Err(AuraError::agent(format!(
-        "Failed to deliver moderation fact to {peer} after {MODERATION_FACT_SEND_MAX_ATTEMPTS} attempts: {message}"
-    )))
+    Err(super::error::WorkflowError::DeliveryFailed {
+        peer: peer.to_string(),
+        attempts: MODERATION_FACT_SEND_MAX_ATTEMPTS,
+        detail: message,
+    }
+    .into())
 }
 
 async fn apply_local_home_projection<F>(
@@ -398,7 +401,7 @@ pub async fn kick_user_resolved(
             participant: target_id,
         })
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to enforce kick membership leave: {e}")))?;
+        .map_err(|e| super::error::runtime_call("enforce kick membership leave", e))?;
 
     Ok(())
 }
@@ -493,9 +496,10 @@ pub async fn unban_user_resolved(
     }
 
     let runtime = { require_runtime(app_core).await? };
-    let now_ms = runtime.current_time_ms().await.map_err(|e| {
-        AuraError::agent(format!("Failed to read timestamp for unban operation: {e}"))
-    })?;
+    let now_ms = runtime
+        .current_time_ms()
+        .await
+        .map_err(|e| super::error::runtime_call("read timestamp for unban", e))?;
     let fact = HomeUnbanFact::new_ms(
         scope.context_id,
         None,
@@ -606,11 +610,10 @@ pub async fn unmute_user_resolved(
     }
 
     let runtime = { require_runtime(app_core).await? };
-    let now_ms = runtime.current_time_ms().await.map_err(|e| {
-        AuraError::agent(format!(
-            "Failed to read timestamp for unmute operation: {e}"
-        ))
-    })?;
+    let now_ms = runtime
+        .current_time_ms()
+        .await
+        .map_err(|e| super::error::runtime_call("read timestamp for unmute", e))?;
     let fact = HomeUnmuteFact::new_ms(
         scope.context_id,
         None,
@@ -656,9 +659,10 @@ pub async fn pin_message(
         scope.home_id,
         message_id.to_string(),
         runtime.authority_id(),
-        runtime.current_time_ms().await.map_err(|e| {
-            AuraError::agent(format!("Failed to read timestamp for pin operation: {e}"))
-        })?,
+        runtime
+            .current_time_ms()
+            .await
+            .map_err(|e| super::error::runtime_call("read timestamp for pin", e))?,
     )
     .to_generic();
     commit_and_fanout(&runtime, &scope, fact, &[]).await?;
@@ -684,9 +688,10 @@ pub async fn unpin_message(
         scope.home_id,
         message_id.to_string(),
         runtime.authority_id(),
-        runtime.current_time_ms().await.map_err(|e| {
-            AuraError::agent(format!("Failed to read timestamp for unpin operation: {e}"))
-        })?,
+        runtime
+            .current_time_ms()
+            .await
+            .map_err(|e| super::error::runtime_call("read timestamp for unpin", e))?,
     )
     .to_generic();
     commit_and_fanout(&runtime, &scope, fact, &[]).await?;

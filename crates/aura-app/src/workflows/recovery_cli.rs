@@ -132,7 +132,7 @@ pub async fn initiate_recovery_protocol<
     protocol_handler
         .handle_recovery_initiation(request, effects, effects, effects)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to initiate recovery protocol: {e}")))?;
+        .map_err(|e| super::error::runtime_call("initiate recovery protocol", e))?;
     Ok(())
 }
 
@@ -180,7 +180,7 @@ pub async fn generate_guardian_approval<E: PhysicalTimeEffects>(
     let physical_time = effects
         .physical_time()
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to get physical time: {e}")))?;
+        .map_err(|e| super::error::runtime_call("get physical time", e))?;
     let timestamp_ms = physical_time.ts_ms;
 
     // Deterministic partial signature derived from the request hash
@@ -264,7 +264,7 @@ pub async fn list_recovery_fact_keys<E: JournalEffects>(
     let current = effects
         .get_journal()
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to get journal: {e}")))?;
+        .map_err(|e| super::error::journal_op("get journal", e))?;
 
     let recovery_facts: Vec<String> = current
         .facts
@@ -296,7 +296,7 @@ pub async fn record_recovery_dispute<T: Serialize, E: JournalEffects + TimeEffec
     let dispute_journal = effects
         .get_journal()
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to get journal: {e}")))?;
+        .map_err(|e| super::error::journal_op("get journal", e))?;
 
     let evidence_key = format!("recovery_evidence.{evidence_id}");
     if let Some(value) = dispute_journal.facts.get(&evidence_key) {
@@ -305,7 +305,7 @@ pub async fn record_recovery_dispute<T: Serialize, E: JournalEffects + TimeEffec
             FactValue::Bytes(bytes) => serde_json::from_slice(bytes),
             _ => Ok(serde_json::Value::Null),
         }
-        .map_err(|e| AuraError::agent(format!("Failed to parse evidence JSON: {e}")))?;
+        .map_err(|e| super::error::fact_encoding(e))?;
 
         if let Some(dispute_window_ends) = evidence_json
             .get("dispute_window_ends_at_ms")
@@ -313,18 +313,20 @@ pub async fn record_recovery_dispute<T: Serialize, E: JournalEffects + TimeEffec
         {
             let current_time = effects.current_timestamp().await;
             if current_time > dispute_window_ends {
-                return Err(AuraError::agent(format!(
-                    "Dispute window has closed for evidence {evidence_id}"
-                )));
+                return Err(super::error::WorkflowError::Precondition(
+                    "Dispute window has closed for evidence",
+                )
+                .into());
             }
         }
     }
 
     let existing_dispute_key = format!("recovery_dispute.{evidence_id}.{guardian_authority}");
     if dispute_journal.facts.contains_key(&existing_dispute_key) {
-        return Err(AuraError::agent(format!(
-            "Guardian {guardian_authority} has already filed a dispute for evidence {evidence_id}"
-        )));
+        return Err(super::error::WorkflowError::Precondition(
+            "Guardian has already filed a dispute for this evidence",
+        )
+        .into());
     }
 
     let dispute_key = format!("recovery_dispute.{evidence_id}.{guardian_authority}");

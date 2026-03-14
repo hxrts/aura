@@ -298,7 +298,7 @@ pub async fn has_runtime_account_config(
     runtime
         .has_account_config()
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to check account config: {e}")))
+        .map_err(|e| AuraError::from(super::error::runtime_call("check account config", e)))
 }
 
 /// Persist first-run account configuration for the current runtime authority.
@@ -311,7 +311,7 @@ pub async fn initialize_runtime_account(
     runtime
         .initialize_account(&pending_bootstrap.nickname_suggestion)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to initialize account: {e}")))?;
+        .map_err(|e| AuraError::from(super::error::runtime_call("initialize account", e)))?;
     finalize_runtime_account_bootstrap(app_core, pending_bootstrap.nickname_suggestion).await
 }
 

@@ -91,7 +91,7 @@ pub async fn update_mfa_policy(
     runtime
         .set_mfa_policy(policy)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to update MFA policy: {e}")))?;
+        .map_err(|e| super::error::runtime_call("update MFA policy", e))?;
 
     refresh_settings_from_runtime(app_core).await?;
     Ok(())
@@ -111,7 +111,7 @@ pub async fn update_nickname(
     runtime
         .set_nickname_suggestion(&name)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to update nickname: {e}")))?;
+        .map_err(|e| super::error::runtime_call("update nickname", e))?;
 
     refresh_settings_from_runtime(app_core).await?;
     Ok(())

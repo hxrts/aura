@@ -49,7 +49,7 @@ pub async fn require_runtime(
     let core = app_core.read().await;
     core.runtime()
         .cloned()
-        .ok_or_else(|| AuraError::agent("Runtime bridge not available"))
+        .ok_or_else(|| AuraError::from(super::error::WorkflowError::RuntimeUnavailable))
 }
 
 /// Yield to the scheduler once without binding workflows to a runtime crate.
@@ -110,12 +110,14 @@ pub async fn ensure_runtime_peer_connectivity(
     let lan_peers = runtime.get_lan_peers().await;
 
     if connected_peers == 0 {
-        return Err(AuraError::agent(format!(
-            "Missing connectivity prerequisite for {flow}: connected_peers={connected_peers} sync_peers={} discovered_peers={} lan_peers={}",
-            sync_peers.len(),
-            discovered_peers.len(),
-            lan_peers.len()
-        )));
+        return Err(super::error::WorkflowError::ConnectivityRequired {
+            flow: flow.to_string(),
+            connected_peers,
+            sync_peers: sync_peers.len(),
+            discovered_peers: discovered_peers.len(),
+            lan_peers: lan_peers.len(),
+        }
+        .into());
     }
 
     Ok(())

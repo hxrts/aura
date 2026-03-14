@@ -189,7 +189,7 @@ pub async fn force_sync(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError
         let core = app_core.read().await;
         core.trigger_sync()
             .await
-            .map_err(|e| AuraError::agent(format!("Failed to trigger sync: {e}")))
+            .map_err(|e| super::error::runtime_call("trigger sync", e).into())
     };
 
     // Update status based on result
@@ -248,7 +248,7 @@ pub async fn request_state(
         let core = app_core.read().await;
         core.sync_with_peer(&peer_id.to_string())
             .await
-            .map_err(|e| AuraError::agent(format!("Failed to sync with peer: {e}")))
+            .map_err(|e| AuraError::from(super::error::runtime_call("sync with peer", e)))
     };
 
     // Update status based on result

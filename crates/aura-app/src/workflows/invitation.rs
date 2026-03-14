@@ -527,8 +527,8 @@ async fn reconcile_accepted_channel_invitation(
                 .await;
     }
     let authoritative_context = authoritative_context.ok_or_else(|| {
-        AuraError::agent(format!(
-            "Accepted channel invitation for {channel_id} but no authoritative context was materialized"
+        AuraError::from(super::error::WorkflowError::Precondition(
+            "Accepted channel invitation but no authoritative context was materialized",
         ))
     })?;
     crate::workflows::messaging::project_channel_peer_membership_with_context(
@@ -583,7 +583,7 @@ pub async fn create_contact_invitation(
     let invitation = runtime
         .create_contact_invitation(receiver, nickname, message, ttl_ms)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to create contact invitation: {e}")))?;
+        .map_err(|e| AuraError::from(super::error::runtime_call("create contact invitation", e)))?;
     publish_invitation_operation_status(
         app_core,
         OperationId::invitation_create(),
@@ -611,7 +611,7 @@ pub async fn create_guardian_invitation(
     let invitation = runtime
         .create_guardian_invitation(receiver, subject, message, ttl_ms)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to create guardian invitation: {e}")))?;
+        .map_err(|e| AuraError::from(super::error::runtime_call("create guardian invitation", e)))?;
     publish_invitation_operation_status(
         app_core,
         OperationId::invitation_create(),
@@ -683,15 +683,7 @@ pub async fn create_channel_invitation(
     {
         Ok(invitation) => invitation,
         Err(error) => {
-            let semantic_error = crate::ui_contract::SemanticOperationError::new(
-                crate::ui_contract::SemanticFailureDomain::Internal,
-                crate::ui_contract::SemanticFailureCode::InternalError,
-            )
-            .with_detail(format!("detail={error}"));
-            return Err(AuraError::agent(format!(
-                "Failed to create channel invitation: {}; semantic_error={semantic_error:?}",
-                error
-            )));
+            return Err(super::error::runtime_call("create channel invitation", error).into());
         }
     };
     publish_invitation_operation_status(
@@ -739,7 +731,7 @@ pub async fn import_invitation_details(
     runtime
         .import_invitation(code)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to import invitation: {e}")))
+        .map_err(|e| AuraError::from(super::error::runtime_call("import invitation", e)))
 }
 
 // ============================================================================
@@ -763,7 +755,7 @@ pub async fn export_invitation(
     let code = runtime
         .export_invitation(invitation_id.as_str())
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to export invitation: {e}")))?;
+        .map_err(|e| AuraError::from(super::error::runtime_call("export invitation", e)))?;
     publish_invitation_operation_status(
         app_core,
         OperationId::invitation_create(),
@@ -1039,7 +1031,7 @@ pub async fn accept_device_enrollment_invitation(
     runtime
         .accept_invitation(invitation.invitation_id.as_str())
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {e}")))?;
+        .map_err(|e| AuraError::from(super::error::runtime_call("accept invitation", e)))?;
     converge_runtime(&runtime).await;
 
     let expected_min_devices = 2_usize;
@@ -1121,7 +1113,7 @@ pub async fn decline_invitation(
     runtime
         .decline_invitation(invitation_id.as_str())
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to decline invitation: {e}")))
+        .map_err(|e| AuraError::from(super::error::runtime_call("decline invitation", e)))
 }
 
 /// Decline an invitation by string ID (legacy/convenience API).
@@ -1146,7 +1138,7 @@ pub async fn cancel_invitation(
     runtime
         .cancel_invitation(invitation_id.as_str())
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to cancel invitation: {e}")))
+        .map_err(|e| AuraError::from(super::error::runtime_call("cancel invitation", e)))
 }
 
 /// Cancel an invitation by string ID (legacy/convenience API).
@@ -1174,7 +1166,7 @@ pub async fn import_invitation(
         .import_invitation(code)
         .await
         .map(|_| ()) // Discard InvitationInfo, just return success
-        .map_err(|e| AuraError::agent(format!("Failed to import invitation: {e}")))
+        .map_err(|e| AuraError::from(super::error::runtime_call("import invitation", e)))
 }
 
 async fn wait_for_contact_link(
@@ -1406,7 +1398,7 @@ pub async fn accept_pending_home_invitation(
         }
     }
 
-    Err(AuraError::agent("No pending home invitation found"))
+    Err(super::error::WorkflowError::Precondition("No pending home invitation found").into())
 }
 
 #[cfg(test)]

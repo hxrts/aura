@@ -1061,7 +1061,7 @@ check_workflows() {
   # Direct runtime error strings
   local runtime_str
   runtime_str=$(rg --no-heading "Runtime bridge not available" crates/aura-app/src/workflows -g "*.rs" \
-    | grep -v "crates/aura-app/src/workflows/runtime.rs" | grep -v '\.contains(' || true)
+    | grep -v "crates/aura-app/src/workflows/runtime.rs" | grep -v "crates/aura-app/src/workflows/error.rs" | grep -v '\.contains(' || true)
   emit_hits "Direct runtime error strings" "$runtime_str"
 
   # Direct parsing

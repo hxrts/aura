@@ -90,11 +90,11 @@ pub fn require_admin(snapshot: Option<&StateSnapshot>, operation: &str) -> Resul
     let role = snapshot.and_then(|s| s.homes.current_home().map(|h| h.my_role));
     match role {
         Some(HomeRole::Moderator | HomeRole::Member) => Ok(()),
-        Some(HomeRole::Participant) => Err(AuraError::agent(format!(
-            "Permission denied: {operation} requires administrator privileges",
+        Some(HomeRole::Participant) => Err(AuraError::permission_denied(format!(
+            "{operation} requires administrator privileges",
         ))),
-        None => Err(AuraError::agent(format!(
-            "Permission denied: {operation} requires a home context",
+        None => Err(AuraError::permission_denied(format!(
+            "{operation} requires a home context",
         ))),
     }
 }

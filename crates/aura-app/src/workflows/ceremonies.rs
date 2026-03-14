@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 
+use super::error::{ceremony_op, WorkflowError};
 use crate::runtime_bridge::KeyRotationCeremonyStatus;
 use crate::AppCore;
 use aura_core::identifiers::{AuthorityId, CeremonyId};
@@ -26,7 +27,7 @@ pub async fn start_guardian_ceremony(
     let core = app_core.read().await;
     core.initiate_guardian_ceremony(threshold_k, total_n, &guardian_ids)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to start guardian ceremony: {e}")))
+        .map_err(|e| ceremony_op("start guardian ceremony", e).into())
 }
 
 /// Start a device threshold (multifactor) ceremony.
@@ -39,7 +40,7 @@ pub async fn start_device_threshold_ceremony(
     let core = app_core.read().await;
     core.initiate_device_threshold_ceremony(threshold_k, total_n, &device_ids)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to start device threshold ceremony: {e}")))
+        .map_err(|e| ceremony_op("start device threshold ceremony", e).into())
 }
 
 /// Start a device enrollment ("add device") ceremony.
@@ -61,13 +62,13 @@ pub async fn start_device_enrollment_ceremony(
     let runtime = {
         let core = app_core.read().await;
         core.runtime().cloned().ok_or_else(|| {
-            AuraError::agent("Failed to start device enrollment: runtime unavailable")
+            AuraError::from(WorkflowError::RuntimeUnavailable)
         })?
     };
     runtime
         .initiate_device_enrollment_ceremony(nickname_suggestion, invitee_authority_id)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to start device enrollment: {e}")))
+        .map_err(|e| ceremony_op("start device enrollment", e).into())
 }
 /// Start a device removal ("remove device") ceremony.
 pub async fn start_device_removal_ceremony(
@@ -77,13 +78,13 @@ pub async fn start_device_removal_ceremony(
     let runtime = {
         let core = app_core.read().await;
         core.runtime().cloned().ok_or_else(|| {
-            AuraError::agent("Failed to start device removal: runtime unavailable")
+            AuraError::from(WorkflowError::RuntimeUnavailable)
         })?
     };
     runtime
         .initiate_device_removal_ceremony(device_id)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to start device removal: {e}")))
+        .map_err(|e| ceremony_op("start device removal", e).into())
 }
 
 /// Polling policy for ceremonies.
@@ -159,7 +160,7 @@ pub async fn get_key_rotation_ceremony_status(
     let core = app_core.read().await;
     core.get_key_rotation_ceremony_status(ceremony_id)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to get ceremony status: {e}")))
+        .map_err(|e| ceremony_op("get ceremony status", e).into())
 }
 
 /// Cancel a key rotation ceremony (best effort).
@@ -170,7 +171,7 @@ pub async fn cancel_key_rotation_ceremony(
     let core = app_core.read().await;
     core.cancel_key_rotation_ceremony(ceremony_id)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to cancel ceremony: {e}")))
+        .map_err(|e| ceremony_op("cancel ceremony", e).into())
 }
 
 /// Poll a key rotation ceremony until completion or failure using a policy.

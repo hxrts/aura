@@ -22,12 +22,12 @@ where
     let current_epoch = effects
         .get_current_epoch()
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to load epoch: {e}")))?;
+        .map_err(|e| super::error::runtime_call("load epoch", e))?;
 
     let state_digest = effects
         .get_current_commitment()
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to load commitment: {e}")))?;
+        .map_err(|e| super::error::runtime_call("load commitment", e))?;
 
     let mut id_bytes = [0u8; 16];
     id_bytes.copy_from_slice(&state_digest.0[..16]);

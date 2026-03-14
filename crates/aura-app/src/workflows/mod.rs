@@ -64,6 +64,7 @@
 //! ```
 
 pub mod access;
+pub mod error;
 pub mod account;
 pub mod admin;
 pub mod amp;

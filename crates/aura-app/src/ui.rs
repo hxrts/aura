@@ -181,11 +181,11 @@ pub mod types {
         AccountConfig, BanRecord, BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity,
         BootstrapSurface, CeremonyProgress, Channel, ChannelType, ChatState, Contact,
         ContactsState, Guardian, GuardianBinding, GuardianStatus, HomeMember, HomeRole, HomeState,
-        HomesState, InvitationDirection, InvitationStatus, InvitationsState,
-        KickRecord, Message, MessageDeliveryStatus, MuteRecord, MySuggestion, NeighborHome,
-        NeighborhoodState, OneHopLinkType, PendingAccountBootstrap, RecoveryApproval,
-        RecoveryProcess, RecoveryProcessStatus, RecoveryState, SecurityLevel, SuggestionPolicy,
-        TraversalPosition, BACKUP_PREFIX, BACKUP_VERSION,
+        HomesState, InvitationDirection, InvitationStatus, InvitationsState, KickRecord, Message,
+        MessageDeliveryStatus, MuteRecord, MySuggestion, NeighborHome, NeighborhoodState,
+        OneHopLinkType, PendingAccountBootstrap, RecoveryApproval, RecoveryProcess,
+        RecoveryProcessStatus, RecoveryState, SecurityLevel, SuggestionPolicy, TraversalPosition,
+        BACKUP_PREFIX, BACKUP_VERSION,
     };
     pub use crate::workflows::account::{
         can_submit_account_setup, is_valid_nickname_suggestion, prepare_pending_account_bootstrap,

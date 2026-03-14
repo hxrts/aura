@@ -316,9 +316,10 @@ impl JoinChannelError {
             Self::MissingAuthoritativeContext { channel_id } => AuraError::not_found(format!(
                 "JoinChannel requires an authoritative context for channel {channel_id}"
             )),
-            Self::Transport { channel_id, detail } => AuraError::agent(format!(
-                "JoinChannel failed for channel {channel_id}: {detail}"
-            )),
+            Self::Transport {
+                channel_id: _,
+                detail,
+            } => super::error::runtime_call("join channel transport", detail).into(),
         }
     }
 }
@@ -508,9 +509,12 @@ async fn send_chat_fact_with_retry(
     }
 
     let message = last_error.unwrap_or_else(|| "unknown transport error".to_string());
-    Err(AuraError::agent(format!(
-        "Failed to deliver chat fact to {peer} after {CHAT_FACT_SEND_MAX_ATTEMPTS} attempts: {message}"
-    )))
+    Err(super::error::WorkflowError::DeliveryFailed {
+        peer: peer.to_string(),
+        attempts: CHAT_FACT_SEND_MAX_ATTEMPTS,
+        detail: message,
+    }
+    .into())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -610,22 +614,35 @@ async fn deliver_message_fact_remotely(
 
     if !delivered_remote {
         if recipients.is_empty() {
-            return Err(AuraError::agent(format!(
-                "No recipient peers resolved for channel {channel_id} after extended retries"
-            )));
+            return Err(super::error::WorkflowError::DeliveryFailed {
+                peer: channel_id.to_string(),
+                attempts: REMOTE_DELIVERY_RETRY_ATTEMPTS,
+                detail: "no recipient peers resolved after extended retries".to_string(),
+            }
+            .into());
         }
         if attempted_fanout_total == 0 {
-            return Err(AuraError::agent(format!(
-                "Remote delivery prerequisites never converged for channel {channel_id}: {}",
-                last_connectivity_error
-                    .unwrap_or_else(|| "no recipient fanout attempt executed".to_string())
-            )));
+            return Err(super::error::WorkflowError::DeliveryFailed {
+                peer: channel_id.to_string(),
+                attempts: REMOTE_DELIVERY_RETRY_ATTEMPTS,
+                detail: format!(
+                    "delivery prerequisites never converged: {}",
+                    last_connectivity_error
+                        .unwrap_or_else(|| "no recipient fanout attempt executed".to_string())
+                ),
+            }
+            .into());
         }
         if !failed_fanout.is_empty() {
-            return Err(AuraError::agent(format!(
-                "Message fanout unavailable for all recipients on {channel_id} after extended retries: {}",
-                failed_fanout.join("; ")
-            )));
+            return Err(super::error::WorkflowError::DeliveryFailed {
+                peer: channel_id.to_string(),
+                attempts: REMOTE_DELIVERY_RETRY_ATTEMPTS,
+                detail: format!(
+                    "message fanout unavailable for all recipients: {}",
+                    failed_fanout.join("; ")
+                ),
+            }
+            .into());
         }
     }
 
@@ -666,9 +683,7 @@ async fn ensure_runtime_note_to_self_channel(
             false
         }
         Err(error) => {
-            return Err(AuraError::agent(format!(
-                "Failed to create note-to-self channel: {error}"
-            )));
+            return Err(super::error::runtime_call("create note-to-self channel", error).into());
         }
     };
 
@@ -681,9 +696,7 @@ async fn ensure_runtime_note_to_self_channel(
         .await
     {
         if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists {
-            return Err(AuraError::agent(format!(
-                "Failed to join note-to-self channel: {error}"
-            )));
+            return Err(super::error::runtime_call("join note-to-self channel", error).into());
         }
     }
 
@@ -702,9 +715,7 @@ async fn ensure_runtime_note_to_self_channel(
         runtime
             .commit_relational_facts(std::slice::from_ref(&fact))
             .await
-            .map_err(|e| {
-                AuraError::agent(format!("Failed to persist note-to-self channel: {e}"))
-            })?;
+            .map_err(|e| super::error::runtime_call("persist note-to-self channel", e))?;
     }
 
     with_chat_state(app_core, |chat_state| {
@@ -867,9 +878,7 @@ async fn try_join_via_pending_channel_invitation(
 
     if let Err(error) = runtime.accept_invitation(invitation_id.as_str()).await {
         if classify_invitation_accept_error(&error) != InvitationAcceptErrorClass::AlreadyHandled {
-            return Err(AuraError::agent(format!(
-                "Failed to accept pending channel invitation: {error}"
-            )));
+            return Err(super::error::runtime_call("accept pending channel invitation", error).into());
         }
     }
 
@@ -1046,9 +1055,10 @@ async fn apply_authoritative_membership_projection(
         ensure_channel_visible_after_join(app_core, channel_id, context_id, name_hint).await?;
         let chat = chat_snapshot(app_core).await;
         if chat.channel(&channel_id).is_none() {
-            return Err(AuraError::agent(format!(
-                "join projection missing canonical channel {channel_id}"
-            )));
+            return Err(super::error::WorkflowError::Precondition(
+                "join projection missing canonical channel",
+            )
+            .into());
         }
         return Ok(());
     }
@@ -1338,7 +1348,7 @@ pub(crate) async fn require_authoritative_context_id_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
     channel_id: ChannelId,
-    operation: &str,
+    _operation: &str,
 ) -> Result<ContextId, AuraError> {
     for attempt in 0..CHANNEL_CONTEXT_RETRY_ATTEMPTS {
         if let Some(context_id) = authoritative_context_id_for_channel(app_core, channel_id).await {
@@ -1350,9 +1360,10 @@ pub(crate) async fn require_authoritative_context_id_for_channel(
         }
     }
 
-    Err(AuraError::agent(format!(
-        "{operation} requires an authoritative context for channel {channel_id}"
-    )))
+    Err(super::error::WorkflowError::Precondition(
+        "authoritative context required for channel",
+    )
+    .into())
 }
 
 async fn ensure_home_state_for_channel(
@@ -1675,7 +1686,7 @@ pub async fn create_channel(
         channel_id = runtime
             .amp_create_channel(params)
             .await
-            .map_err(|e| AuraError::agent(format!("Failed to create channel: {e}")))?;
+            .map_err(|e| super::error::runtime_call("create channel", e))?;
 
         runtime
             .amp_join_channel(ChannelJoinParams {
@@ -1684,7 +1695,7 @@ pub async fn create_channel(
                 participant: runtime.authority_id(),
             })
             .await
-            .map_err(|e| AuraError::agent(format!("Failed to join channel: {e}")))?;
+            .map_err(|e| super::error::runtime_call("join channel", e))?;
 
         let fact = ChatFact::channel_created_ms(
             context_id,
@@ -1700,7 +1711,7 @@ pub async fn create_channel(
         runtime
             .commit_relational_facts(std::slice::from_ref(&fact))
             .await
-            .map_err(|e| AuraError::agent(format!("Failed to persist channel: {e}")))?;
+            .map_err(|e| super::error::runtime_call("persist channel", e))?;
 
         let mut attempted_fanout = 0usize;
         let mut failed_fanout = Vec::new();
@@ -1788,7 +1799,7 @@ pub async fn create_channel(
                 runtime
                     .amp_create_channel_bootstrap(context_id, channel_id, member_ids.clone())
                     .await
-                    .map_err(|e| AuraError::agent(format!("Failed to bootstrap channel: {e}")))?,
+                    .map_err(|e| super::error::runtime_call("bootstrap channel", e))?,
             )
         } else {
             None
@@ -1860,7 +1871,7 @@ pub async fn create_channel(
             runtime
                 .start_channel_invitation_monitor(invitation_ids, context_id, channel_id)
                 .await
-                .map_err(|e| AuraError::agent(format!("{e}")))?;
+                .map_err(|e| super::error::runtime_call("start channel invitation monitor", e))?;
         }
     }
 
@@ -1994,7 +2005,7 @@ pub async fn leave_channel(
             participant: runtime.authority_id(),
         })
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to leave channel: {e}")))?;
+        .map_err(|e| super::error::runtime_call("leave channel", e))?;
 
     // Preserve canonical channel identity for future join operations.
     apply_authoritative_membership_projection(app_core, channel_id, context_id, false, None)
@@ -2059,7 +2070,7 @@ pub async fn close_channel(
             channel: channel_id,
         })
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to close channel: {e}")))?;
+        .map_err(|e| super::error::runtime_call("close channel", e))?;
 
     let fact =
         ChatFact::channel_closed_ms(context_id, channel_id, timestamp_ms, runtime.authority_id())
@@ -2068,7 +2079,7 @@ pub async fn close_channel(
     runtime
         .commit_relational_facts(&[fact])
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to persist channel close: {e}")))?;
+        .map_err(|e| super::error::runtime_call("persist channel close", e))?;
 
     Ok(())
 }
@@ -2099,7 +2110,7 @@ pub async fn set_topic(
     runtime
         .channel_set_topic(context_id, channel_id, text.to_string(), timestamp_ms)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to set channel topic: {e}")))?;
+        .map_err(|e| super::error::runtime_call("set channel topic", e))?;
 
     Ok(())
 }
@@ -2202,9 +2213,7 @@ pub async fn send_message_ref(
             runtime
                 .commit_relational_facts(std::slice::from_ref(&fact))
                 .await
-                .map_err(|e| {
-                    AuraError::agent(format!("Failed to persist note-to-self message: {e}"))
-                })?;
+                .map_err(|e| super::error::runtime_call("persist note-to-self message", e))?;
             (sender_id, message_id)
         } else {
             let message_id = next_message_id(channel_id, sender_id, timestamp_ms, content);
@@ -2307,7 +2316,7 @@ pub async fn send_message_ref(
             let maybe_fact = if let Some(cipher) = maybe_cipher {
                 let wire = AmpMessage::new(cipher.header.clone(), cipher.ciphertext.clone());
                 let sealed = serialize_amp_message(&wire)
-                    .map_err(|e| AuraError::agent(format!("Failed to encode AMP message: {e}")))?;
+                    .map_err(|e| super::error::fact_encoding(e))?;
 
                 // Extract epoch from the AMP header (used for consensus finalization tracking)
                 epoch_hint = Some(cipher.header.chan_epoch as u32);
@@ -2343,7 +2352,7 @@ pub async fn send_message_ref(
                         FactOptions::default().with_ack_tracking(),
                     )
                     .await
-                    .map_err(|e| AuraError::agent(format!("Failed to persist message: {e}")))?;
+                    .map_err(|e| super::error::runtime_call("persist message", e))?;
 
                 if let Some(spawner) = runtime.task_spawner() {
                     let background_app_core = Arc::clone(app_core);
@@ -2524,9 +2533,9 @@ pub async fn start_direct_chat_with_authority(
             .await;
         if let Err(error) = create_result {
             if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists {
-                return Err(AuraError::agent(format!(
-                    "Failed to create direct channel: {error}"
-                )));
+                return Err(
+                    super::error::runtime_call("create direct channel", error).into(),
+                );
             }
         }
 
@@ -2537,7 +2546,7 @@ pub async fn start_direct_chat_with_authority(
                 participant: runtime.authority_id(),
             })
             .await
-            .map_err(|error| AuraError::agent(format!("Failed to join direct channel: {error}")))?;
+            .map_err(|error| super::error::runtime_call("join direct channel", error))?;
 
         runtime
             .amp_join_channel(ChannelJoinParams {
@@ -2547,7 +2556,7 @@ pub async fn start_direct_chat_with_authority(
             })
             .await
             .map_err(|error| {
-                AuraError::agent(format!("Failed to add contact to direct channel: {error}"))
+                super::error::runtime_call("add contact to direct channel", error)
             })?;
 
         let fact = ChatFact::channel_created_ms(
@@ -2564,9 +2573,7 @@ pub async fn start_direct_chat_with_authority(
         runtime
             .commit_relational_facts(std::slice::from_ref(&fact))
             .await
-            .map_err(|error| {
-                AuraError::agent(format!("Failed to persist direct channel: {error}"))
-            })?;
+            .map_err(|error| super::error::runtime_call("persist direct channel", error))?;
 
         send_chat_fact_with_retry(&runtime, contact_authority, context_id, &fact).await?;
 

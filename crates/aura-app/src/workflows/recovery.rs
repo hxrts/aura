@@ -88,7 +88,7 @@ pub async fn start_recovery(
     let ceremony_id = runtime
         .initiate_guardian_ceremony(threshold_k, total_n, &guardian_ids)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to start recovery: {e}")))?;
+        .map_err(|e| super::error::runtime_call("start recovery", e))?;
 
     // Create recovery state with initial process
     let recovery_process = RecoveryProcess {
@@ -128,13 +128,14 @@ pub async fn start_recovery_from_state(
     let state = get_recovery_status(app_core).await?;
 
     if state.guardian_count() == 0 {
-        return Err(AuraError::agent(
+        return Err(super::error::WorkflowError::Precondition(
             "No guardians configured. Add guardians in Threshold settings first.",
-        ));
+        )
+        .into());
     }
 
     if state.active_recovery().is_some() {
-        return Err(AuraError::agent("Recovery already in progress"));
+        return Err(super::error::WorkflowError::Precondition("Recovery already in progress").into());
     }
 
     let guardian_ids: Vec<AuthorityId> = state.all_guardians().map(|g| g.id).collect();
@@ -173,7 +174,7 @@ pub async fn toggle_guardian_contact(
         runtime
             .create_guardian_invitation(contact, subject, None, None)
             .await
-            .map_err(|e| AuraError::agent(format!("Failed to create guardian invitation: {e}")))?;
+            .map_err(|e| super::error::runtime_call("create guardian invitation", e))?;
     }
 
     with_recovery_state(app_core, |state| -> Result<(), AuraError> {
@@ -248,7 +249,7 @@ pub async fn approve_recovery(
     runtime
         .respond_to_guardian_ceremony(ceremony_id, true, None)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to approve recovery: {e}")))
+        .map_err(|e| super::error::runtime_call("approve recovery", e).into())
 }
 
 /// Commit a GuardianBinding fact via the runtime bridge (demo/testing helper).
@@ -269,7 +270,7 @@ pub async fn commit_guardian_binding(
     runtime
         .commit_relational_facts(&[fact])
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to commit guardian binding: {e}")))
+        .map_err(|e| super::error::runtime_call("commit guardian binding", e).into())
 }
 
 /// Dispute a recovery request
@@ -287,7 +288,7 @@ pub async fn dispute_recovery(
     runtime
         .respond_to_guardian_ceremony(ceremony_id, false, Some(reason))
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to dispute recovery: {e}")))
+        .map_err(|e| super::error::runtime_call("dispute recovery", e).into())
 }
 
 /// Get current recovery status
@@ -318,7 +319,7 @@ pub async fn get_ceremony_status(
     runtime
         .get_ceremony_status(ceremony_id)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to get ceremony status: {e}")))
+        .map_err(|e| super::error::runtime_call("get ceremony status", e).into())
 }
 
 impl CeremonyStatusLike for CeremonyStatus {

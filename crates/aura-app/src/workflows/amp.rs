@@ -1,5 +1,6 @@
 //! AMP workflows (channel state inspection and maintenance).
 
+use super::error::runtime_call;
 use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::{hash, AuraError, Hash32};
 use aura_journal::fact::{
@@ -16,7 +17,7 @@ pub async fn inspect_channel<E: AmpJournalEffects>(
 ) -> Result<ChannelEpochState, AuraError> {
     get_channel_state(effects, context, channel)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to get channel state: {e}")))
+        .map_err(|e| runtime_call("get channel state", e).into())
 }
 
 /// Propose an AMP channel epoch bump.
@@ -27,7 +28,9 @@ pub async fn propose_bump<E: AmpJournalEffects>(
 ) -> Result<ProposedChannelEpochBump, AuraError> {
     let state = inspect_channel(effects, context, channel).await?;
     if state.pending_bump.is_some() {
-        return Err(AuraError::agent("Channel already has a pending bump"));
+        return Err(
+            super::error::WorkflowError::Precondition("Channel already has a pending bump").into(),
+        );
     }
 
     let proposal = ProposedChannelEpochBump {
@@ -46,7 +49,7 @@ pub async fn propose_bump<E: AmpJournalEffects>(
             aura_journal::ProtocolRelationalFact::AmpProposedChannelEpochBump(proposal.clone()),
         ))
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to insert bump proposal: {e}")))?;
+        .map_err(|e| runtime_call("insert bump proposal", e))?;
 
     Ok(proposal)
 }
@@ -77,7 +80,7 @@ pub async fn create_checkpoint<E: AmpJournalEffects>(
             aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint.clone()),
         ))
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to create checkpoint: {e}")))?;
+        .map_err(|e| runtime_call("create checkpoint", e))?;
 
     Ok(checkpoint)
 }

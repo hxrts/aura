@@ -17,10 +17,6 @@ use std::sync::Arc;
 const MODERATOR_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const MODERATOR_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
 
-fn map_runtime_error(operation: &str, error: impl std::fmt::Display) -> AuraError {
-    AuraError::agent(format!("{operation} failed: {error}"))
-}
-
 async fn send_moderator_fact_with_retry(
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
     peer: AuthorityId,
@@ -44,9 +40,7 @@ async fn send_moderator_fact_with_retry(
     }
 
     let message = last_error.unwrap_or_else(|| "unknown transport error".to_string());
-    Err(AuraError::agent(format!(
-        "Failed to deliver moderator fact to {peer} after {MODERATOR_FACT_SEND_MAX_ATTEMPTS} attempts: {message}"
-    )))
+    Err(super::error::runtime_call("Send moderator fact", message).into())
 }
 
 async fn resolve_target_authority(
@@ -285,7 +279,7 @@ pub async fn grant_moderator_resolved(
         let now_ms = runtime
             .current_time_ms()
             .await
-            .map_err(|e| map_runtime_error("Grant moderator timestamp", e))?;
+            .map_err(|e| super::error::runtime_call("Grant moderator timestamp", e))?;
         let actor = runtime.authority_id();
         let fact =
             HomeGrantModeratorFact::new_ms(scope.context_id, target_id, actor, now_ms).to_generic();
@@ -293,7 +287,7 @@ pub async fn grant_moderator_resolved(
         runtime
             .commit_relational_facts(std::slice::from_ref(&fact))
             .await
-            .map_err(|e| map_runtime_error("Commit moderator grant fact", e))?;
+            .map_err(|e| super::error::runtime_call("Commit moderator grant fact", e))?;
 
         for peer in scope.peers {
             if peer == actor {
@@ -301,7 +295,7 @@ pub async fn grant_moderator_resolved(
             }
             send_moderator_fact_with_retry(&runtime, peer, scope.context_id, &fact)
                 .await
-                .map_err(|e| map_runtime_error("Send moderator grant fact", e))?;
+                .map_err(|e| super::error::runtime_call("Send moderator grant fact", e))?;
         }
     }
 
@@ -386,7 +380,7 @@ pub async fn revoke_moderator_resolved(
         let now_ms = runtime
             .current_time_ms()
             .await
-            .map_err(|e| map_runtime_error("Revoke moderator timestamp", e))?;
+            .map_err(|e| super::error::runtime_call("Revoke moderator timestamp", e))?;
         let actor = runtime.authority_id();
         let fact = HomeRevokeModeratorFact::new_ms(scope.context_id, target_id, actor, now_ms)
             .to_generic();
@@ -394,7 +388,7 @@ pub async fn revoke_moderator_resolved(
         runtime
             .commit_relational_facts(std::slice::from_ref(&fact))
             .await
-            .map_err(|e| map_runtime_error("Commit moderator revoke fact", e))?;
+            .map_err(|e| super::error::runtime_call("Commit moderator revoke fact", e))?;
 
         for peer in scope.peers {
             if peer == actor {
@@ -402,7 +396,7 @@ pub async fn revoke_moderator_resolved(
             }
             send_moderator_fact_with_retry(&runtime, peer, scope.context_id, &fact)
                 .await
-                .map_err(|e| map_runtime_error("Send moderator revoke fact", e))?;
+                .map_err(|e| super::error::runtime_call("Send moderator revoke fact", e))?;
         }
     }
 

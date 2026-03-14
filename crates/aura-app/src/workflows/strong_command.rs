@@ -1131,7 +1131,7 @@ pub async fn execute_planned(
 
     let consistency_state = wait_for_consistency(app_core, &plan, requirement).await;
     if !consistency_state.satisfies(requirement) {
-        return Err(AuraError::agent(format!(
+        return Err(AuraError::invalid(format!(
             "command consistency requirement '{}' not met (state='{}')",
             consistency_requirement_label(requirement),
             consistency_state_label(consistency_state)

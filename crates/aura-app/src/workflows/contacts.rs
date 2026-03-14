@@ -12,6 +12,7 @@ use crate::AppCore;
 use async_lock::RwLock;
 use aura_chat::ChatFact;
 use aura_core::identifiers::ChannelId;
+use super::error::runtime_call;
 use aura_core::AuraError;
 use aura_journal::DomainFact;
 use aura_relational::ContactFact;
@@ -49,7 +50,7 @@ pub async fn add_contact(
     runtime
         .commit_relational_facts(&[fact])
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to add contact: {e}")))?;
+        .map_err(|e| runtime_call("add contact", e))?;
 
     Ok(())
 }
@@ -95,7 +96,7 @@ pub async fn add_contacts_batch(
     runtime
         .commit_relational_facts(&facts)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to add contacts: {e}")))?;
+        .map_err(|e| runtime_call("add contacts", e))?;
 
     Ok(())
 }
@@ -135,7 +136,7 @@ pub async fn update_contact_nickname(
     runtime
         .commit_relational_facts(&[fact])
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to commit contact nickname: {e}")))?;
+        .map_err(|e| runtime_call("commit contact nickname", e))?;
 
     Ok(())
 }
@@ -165,7 +166,7 @@ pub async fn remove_contact(
     runtime
         .commit_relational_facts(&[fact])
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to remove contact: {e}")))?;
+        .map_err(|e| runtime_call("remove contact", e))?;
 
     Ok(())
 }
@@ -198,7 +199,7 @@ pub async fn set_read_receipt_policy(
     runtime
         .commit_relational_facts(&[fact])
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to update read receipt policy: {e}")))?;
+        .map_err(|e| runtime_call("update read receipt policy", e))?;
 
     Ok(())
 }
@@ -253,7 +254,7 @@ pub async fn emit_read_receipts(
         runtime
             .commit_relational_facts(&facts)
             .await
-            .map_err(|e| AuraError::agent(format!("Failed to emit read receipts: {e}")))?;
+            .map_err(|e| runtime_call("emit read receipts", e))?;
     }
 
     Ok(count)

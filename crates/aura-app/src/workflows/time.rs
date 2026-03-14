@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 
+use super::error::runtime_call;
 use crate::workflows::runtime::require_runtime;
 use crate::AppCore;
 use aura_core::AuraError;
@@ -15,7 +16,7 @@ pub async fn current_time_ms(app_core: &Arc<RwLock<AppCore>>) -> Result<u64, Aur
     runtime
         .current_time_ms()
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to get time: {e}")))
+        .map_err(|e| runtime_call("get current time", e).into())
 }
 
 /// Sleep through the runtime bridge so callers stay runtime-neutral.

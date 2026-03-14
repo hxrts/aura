@@ -106,13 +106,13 @@ pub async fn list_peers(
     let sync_peers = app_core_guard
         .sync_peers()
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to query sync peers: {e}")))?;
+        .map_err(|e| AuraError::from(super::error::runtime_call("query sync peers", e)))?;
 
     // Get discovered peers (AuthorityIds from rendezvous)
     let discovered_peers = app_core_guard
         .discover_peers()
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to query discovered peers: {e}")))?;
+        .map_err(|e| AuraError::from(super::error::runtime_call("query discovered peers", e)))?;
 
     // Combine into a list of strings
     let mut peer_list: Vec<String> = sync_peers.iter().map(|d| format!("sync:{d}")).collect();
@@ -142,7 +142,7 @@ pub async fn discover_peers(
     let discovered_count = app_core_guard
         .discover_peers()
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to discover peers: {e}")))?
+        .map_err(|e| AuraError::from(super::error::runtime_call("discover peers", e)))?
         .len();
 
     // Emit discovered peers signal
@@ -262,7 +262,7 @@ async fn emit_discovered_peers_signal(
     let rendezvous_peers = app_core_guard
         .discover_peers()
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to refresh discovered peers: {e}")))?;
+        .map_err(|e| AuraError::from(super::error::runtime_call("refresh discovered peers", e)))?;
     let lan_peers = app_core_guard.get_lan_peers().await;
 
     // Get invited peer IDs to mark peers as invited

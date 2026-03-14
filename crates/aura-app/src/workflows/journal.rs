@@ -1,5 +1,6 @@
 //! Helpers for journal fact encoding and persistence.
 
+use super::error::{fact_encoding, journal_op};
 use aura_core::effects::JournalEffects;
 use aura_core::identifiers::ContextId;
 use aura_core::{AuraError, FactValue, Journal};
@@ -10,7 +11,7 @@ use serde::Serialize;
 pub fn encode_fact_content(content: FactContent) -> Result<FactValue, AuraError> {
     serde_json::to_vec(&content)
         .map(FactValue::Bytes)
-        .map_err(|e| AuraError::agent(format!("Failed to encode fact content: {e}")))
+        .map_err(|e| fact_encoding(AuraError::serialization(e.to_string())).into())
 }
 
 /// Encode a generic relational fact payload into a FactValue.
@@ -20,7 +21,7 @@ pub fn encode_relational_generic<T: Serialize>(
     payload: &T,
 ) -> Result<FactValue, AuraError> {
     let payload_bytes = serde_json::to_vec(payload)
-        .map_err(|e| AuraError::agent(format!("Failed to serialize fact payload: {e}")))?;
+        .map_err(|e| fact_encoding(AuraError::serialization(e.to_string())))?;
 
     let envelope = aura_core::types::facts::FactEnvelope {
         type_id: aura_core::types::facts::FactTypeId::from(kind),
@@ -49,15 +50,15 @@ pub async fn persist_fact_value<E: JournalEffects>(
     let current = effects
         .get_journal()
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to load journal: {e}")))?;
+        .map_err(|e| journal_op("load journal", e))?;
     let merged = effects
         .merge_facts(current, delta)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to merge journal facts: {e}")))?;
+        .map_err(|e| journal_op("merge facts", e))?;
     effects
         .persist_journal(&merged)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to persist journal: {e}")))?;
+        .map_err(|e| journal_op("persist journal", e))?;
 
     Ok(())
 }
