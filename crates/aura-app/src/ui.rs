@@ -129,13 +129,15 @@ pub mod types {
         AppError, AuthFailure, ErrorCategory, NetworkErrorCode, SyncStage, ToastLevel,
     };
     pub use crate::runtime_bridge::{
-        BoxedRuntimeBridge, CeremonyKind, InvitationBridgeType, LanPeerInfo, RendezvousStatus,
-        RuntimeBridge, RuntimeStatus, SyncStatus as RuntimeSyncStatus,
+        BoxedRuntimeBridge, CeremonyKind, InvitationBridgeStatus, InvitationBridgeType,
+        InvitationInfo, LanPeerInfo, RendezvousStatus, RuntimeBridge, RuntimeStatus,
+        SyncStatus as RuntimeSyncStatus,
     };
     pub use crate::thresholds::{
         default_channel_threshold, default_guardian_threshold, normalize_channel_threshold,
         normalize_guardian_threshold, normalize_recovery_threshold,
     };
+    pub use crate::views::invitations::Invitation;
     pub use crate::workflows::authority::{
         authority_key_prefix, authority_storage_key, deserialize_authority, serialize_authority,
         AuthorityRecord,
@@ -179,7 +181,7 @@ pub mod types {
         AccountConfig, BanRecord, BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity,
         BootstrapSurface, CeremonyProgress, Channel, ChannelType, ChatState, Contact,
         ContactsState, Guardian, GuardianBinding, GuardianStatus, HomeMember, HomeRole, HomeState,
-        HomesState, Invitation, InvitationDirection, InvitationStatus, InvitationsState,
+        HomesState, InvitationDirection, InvitationStatus, InvitationsState,
         KickRecord, Message, MessageDeliveryStatus, MuteRecord, MySuggestion, NeighborHome,
         NeighborhoodState, OneHopLinkType, PendingAccountBootstrap, RecoveryApproval,
         RecoveryProcess, RecoveryProcessStatus, RecoveryState, SecurityLevel, SuggestionPolicy,

@@ -131,7 +131,7 @@ async fn publish_authoritative_operation_failure_to_tui(
 }
 
 fn semantic_kind_for_bridge_invitation(
-    invitation: Option<&aura_app::runtime_bridge::InvitationInfo>,
+    invitation: Option<&aura_app::ui::types::InvitationInfo>,
 ) -> SemanticOperationKind {
     match invitation.map(|invitation| &invitation.invitation_type) {
         Some(InvitationBridgeType::Contact { .. }) => {
@@ -142,10 +142,10 @@ fn semantic_kind_for_bridge_invitation(
 }
 
 fn semantic_kind_for_view_invitation(
-    invitation: Option<&aura_app::views::invitations::Invitation>,
+    invitation: Option<&aura_app::ui::types::Invitation>,
 ) -> SemanticOperationKind {
     match invitation.map(|invitation| invitation.invitation_type) {
-        Some(aura_app::views::invitations::InvitationType::Home) => {
+        Some(aura_app::ui::types::InvitationType::Home) => {
             SemanticOperationKind::AcceptContactInvitation
         }
         _ => SemanticOperationKind::AcceptPendingChannelInvitation,
@@ -153,7 +153,7 @@ fn semantic_kind_for_view_invitation(
 }
 
 fn invitation_import_runtime_fact_update(
-    invitation: Option<&aura_app::runtime_bridge::InvitationInfo>,
+    invitation: Option<&aura_app::ui::types::InvitationInfo>,
 ) -> Option<UiUpdate> {
     let invitation = invitation?;
     if matches!(
@@ -175,7 +175,7 @@ fn invitation_import_runtime_fact_update(
 
 fn invitation_import_success_updates(
     code: &str,
-    invitation: Option<&aura_app::runtime_bridge::InvitationInfo>,
+    invitation: Option<&aura_app::ui::types::InvitationInfo>,
 ) -> Vec<UiUpdate> {
     let mut updates = vec![UiUpdate::InvitationImported {
         invitation_code: code.to_string(),
@@ -1285,7 +1285,7 @@ impl InvitationsCallbacks {
                         if let Some(invitation) = accepted_invitation.as_ref() {
                             let invitation_kind = if matches!(
                                 invitation.invitation_type,
-                                aura_app::views::invitations::InvitationType::Home
+                                aura_app::ui::types::InvitationType::Home
                             ) {
                                 InvitationFactKind::Contact
                             } else {
@@ -2447,7 +2447,7 @@ impl CallbackRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_app::runtime_bridge::{InvitationBridgeStatus, InvitationInfo};
+    use aura_app::ui::types::{InvitationBridgeStatus, InvitationInfo};
 
     fn authority(value: &str) -> AuthorityId {
         value.parse().expect("valid authority id")
