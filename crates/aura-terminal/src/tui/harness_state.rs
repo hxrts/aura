@@ -299,19 +299,22 @@ async fn process_harness_command_stream(mut stream: UnixStream) -> bool {
             return true;
         }
     };
-    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(10);
+    const MAX_RETRIES: u32 = 200; // 200 × 50ms = 10s budget
+    const RETRY_INTERVAL_MS: u64 = 50;
+    let mut attempts = 0u32;
     let receipt = loop {
         let command_tx = active_harness_command_sender()
             .lock()
             .ok()
             .and_then(|guard| guard.clone());
         let Some(command_tx) = command_tx else {
-            if tokio::time::Instant::now() >= deadline {
+            attempts += 1;
+            if attempts >= MAX_RETRIES {
                 break HarnessUiCommandReceipt::Rejected {
                     reason: "TUI harness command plane is temporarily unavailable".to_string(),
                 };
             }
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_INTERVAL_MS)).await;
             continue;
         };
 
@@ -325,14 +328,15 @@ async fn process_harness_command_stream(mut stream: UnixStream) -> bool {
         {
             Ok(()) => {}
             Err(error) => {
-                if tokio::time::Instant::now() >= deadline {
+                attempts += 1;
+                if attempts >= MAX_RETRIES {
                     break HarnessUiCommandReceipt::Rejected {
                         reason: format!(
                             "failed to submit harness command into shell ingress: {error}"
                         ),
                     };
                 }
-                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_INTERVAL_MS)).await;
                 continue;
             }
         }
@@ -340,12 +344,13 @@ async fn process_harness_command_stream(mut stream: UnixStream) -> bool {
         match receipt_rx.await {
             Ok(receipt) => break receipt,
             Err(error) => {
-                if tokio::time::Instant::now() >= deadline {
+                attempts += 1;
+                if attempts >= MAX_RETRIES {
                     break HarnessUiCommandReceipt::Rejected {
                         reason: format!("harness command dropped before application: {error}"),
                     };
                 }
-                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_INTERVAL_MS)).await;
             }
         }
     };
