@@ -163,14 +163,12 @@ use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
 use aura_core::AuraError;
 use std::sync::Arc;
-use std::time::Duration;
 use thiserror::Error;
 
 const CONTACT_LINK_ATTEMPTS: usize = 32;
 const CONTACT_LINK_BACKOFF_MS: u64 = 100;
 const CHANNEL_BOOTSTRAP_RETRY_ATTEMPTS: usize = 6;
 const CHANNEL_BOOTSTRAP_RETRY_BACKOFF_MS: u64 = 75;
-const CHANNEL_INVITATION_CREATE_TIMEOUT_MS: u64 = 3_000;
 
 fn has_pending_home_or_channel_invitation(invitations: &InvitationsState) -> bool {
     invitations
@@ -476,7 +474,7 @@ pub async fn refresh_authoritative_contact_link_readiness(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
     let contacts = read_signal_or_default(app_core, &*CONTACTS_SIGNAL).await;
-    let contact_count = contacts.contact_count();
+    let contact_count = contacts.contact_count() as u32;
     let replacements = contacts
         .all_contacts()
         .map(|contact| AuthoritativeSemanticFact::ContactLinkReady {
@@ -672,21 +670,19 @@ pub async fn create_channel_invitation(
     )
     .await?;
 
-    let invitation = match tokio::time::timeout(
-        Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS),
-        runtime.create_channel_invitation(
+    let invitation = match runtime
+        .create_channel_invitation(
             receiver,
             home_id,
             Some(context_id),
             Some(bootstrap),
             message,
             ttl_ms,
-        ),
-    )
-    .await
+        )
+        .await
     {
-        Ok(Ok(invitation)) => invitation,
-        Ok(Err(error)) => {
+        Ok(invitation) => invitation,
+        Err(error) => {
             let semantic_error = crate::ui_contract::SemanticOperationError::new(
                 crate::ui_contract::SemanticFailureDomain::Internal,
                 crate::ui_contract::SemanticFailureCode::InternalError,
@@ -696,16 +692,6 @@ pub async fn create_channel_invitation(
                 "Failed to create channel invitation: {}; semantic_error={semantic_error:?}",
                 error
             )));
-        }
-        Err(_) => {
-            return fail_channel_invitation(
-                app_core,
-                ChannelInvitationBootstrapError::CreateTimedOut {
-                    channel_id,
-                    receiver_id: receiver,
-                },
-            )
-            .await;
         }
     };
     publish_invitation_operation_status(
@@ -868,7 +854,7 @@ pub async fn accept_invitation(
             }
             let contact_count = read_signal_or_default(app_core, &*CONTACTS_SIGNAL)
                 .await
-                .contact_count();
+                .contact_count() as u32;
             publish_authoritative_semantic_fact(
                 app_core,
                 AuthoritativeSemanticFact::ContactLinkReady {
@@ -977,7 +963,7 @@ pub async fn accept_imported_invitation(
             }
             let contact_count = read_signal_or_default(app_core, &*CONTACTS_SIGNAL)
                 .await
-                .contact_count();
+                .contact_count() as u32;
             publish_authoritative_semantic_fact(
                 app_core,
                 AuthoritativeSemanticFact::ContactLinkReady {
