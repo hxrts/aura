@@ -116,6 +116,24 @@ compatibility expectations stay explicit.
 Parity exceptions must remain typed metadata in `aura-app::ui_contract` with a
 reason code, scope, affected surface, and authoritative doc reference.
 
+### Release And Update Matrix Expectations
+
+OTA and module release/update validation must follow the same semantic-lane
+contract as other parity-critical shared flows.
+
+For planned coverage in [Flow Coverage](997_flow_coverage.md), each release row
+must define:
+
+- typed command/control surfaces for publication, staging, cutover, health
+  confirmation, rollback, and promotion-state transitions
+- typed lifecycle evidence for publication, artifact availability,
+  verification, staging, compatibility blocking, cutover, health, and rollback
+- a designated primary harness lane, which is expected to be the shared
+  semantic lane for lifecycle validation
+
+Frontend-conformance coverage may validate release-screen wiring, but it does
+not satisfy OTA/module lifecycle validation on its own.
+
 ## 2. The `#[aura_test]` Macro
 
 The macro provides async test setup with tracing and timeout:

@@ -124,6 +124,22 @@ specific release works before promotion or real cutover.
 This matrix should remain typed-lifecycle driven. It should not be satisfied by
 log scraping or ad hoc manual release notes.
 
+### Typed Release Validation Contract
+
+Each planned release/update row above must map to a typed harness contract
+before it is counted as implemented.
+
+| Coverage Entry | Typed command/control surface | Typed lifecycle evidence | Primary lane |
+|---------------|-------------------------------|--------------------------|--------------|
+| OTA mechanism validation | `PublishSyntheticOtaRelease`, `StageOtaCandidate`, `TriggerBootloaderHandoff`, `ConfirmCandidateHealth`, `RollbackOtaCandidate` | `OtaReleasePublished`, `OtaArtifactAvailable`, `OtaStaged`, `OtaCompatibilityBlocked`, `OtaCandidateLaunched`, `OtaHealthConfirmed`, `OtaRolledBack` | Shared semantic lane |
+| OTA candidate-release rehearsal | `PublishCandidateOtaRelease`, `StageOtaCandidate`, `ApproveOtaCutover`, `ConfirmCandidateHealth`, `RollbackOtaCandidate` | `OtaCandidatePublished`, `OtaStaged`, `OtaPromotionStateChanged`, `OtaCandidateLaunched`, `OtaHealthConfirmed`, `OtaRehearsalPassed` | Shared semantic lane |
+| Module mechanism validation | `PublishSyntheticModuleRelease`, `StageModuleCandidate`, `PrepareModuleAdmission`, `CommitModuleCutover`, `RollbackModuleCutover` | `ModuleReleasePublished`, `ModuleArtifactAvailable`, `ModuleVerified`, `ModuleStaged`, `ModuleAdmissionPrepared`, `ModuleCutoverCommitted`, `ModuleRolledBack` | Shared semantic lane |
+| Module candidate-release rehearsal | `PublishCandidateModuleRelease`, `StageModuleCandidate`, `ApproveModuleCutover`, `CommitModuleCutover`, `RollbackModuleCutover` | `ModuleCandidatePublished`, `ModuleStaged`, `ModulePromotionStateChanged`, `ModuleCutoverCommitted`, `ModuleHealthConfirmed`, `ModuleRehearsalPassed` | Shared semantic lane |
+
+These rows are intentionally semantic-lane requirements. Frontend-conformance
+coverage may validate renderer wiring for release screens or controls, but it
+does not satisfy release/update lifecycle coverage on its own.
+
 ## Coverage Expectations
 
 ### Shared Flow Contract Expectations
