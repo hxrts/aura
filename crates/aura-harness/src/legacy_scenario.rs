@@ -30,6 +30,7 @@ pub enum ScenarioAction {
     ExtractVar,
     CreateAccount,
     CreateHome,
+    CreateChannel,
     StartDeviceEnrollment,
     ImportDeviceEnrollmentCode,
     RemoveSelectedDevice,
@@ -85,6 +86,7 @@ impl fmt::Display for ScenarioAction {
             Self::ExtractVar => "extract_var",
             Self::CreateAccount => "create_account",
             Self::CreateHome => "create_home",
+            Self::CreateChannel => "create_channel",
             Self::StartDeviceEnrollment => "start_device_enrollment",
             Self::ImportDeviceEnrollmentCode => "import_device_enrollment_code",
             Self::RemoveSelectedDevice => "remove_selected_device",
@@ -271,6 +273,15 @@ impl ScenarioStep {
                     self.action,
                 )?,
             })),
+            ScenarioAction::CreateChannel => {
+                Some(SemanticAction::Intent(IntentAction::CreateChannel {
+                    channel_name: required_field(
+                        self.value.clone().or_else(|| self.expect.clone()),
+                        "value",
+                        self.action,
+                    )?,
+                }))
+            }
             ScenarioAction::StartDeviceEnrollment => Some(SemanticAction::Intent(
                 IntentAction::StartDeviceEnrollment {
                     device_name: required_field(

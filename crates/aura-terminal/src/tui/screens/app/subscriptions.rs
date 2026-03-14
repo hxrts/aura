@@ -16,7 +16,12 @@ use aura_app::ui::signals::{
     NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
 };
 use aura_app::ui::types::{ChatState, ContactsState, HomesState};
-use aura_app::ui_contract::{AuthoritativeSemanticFact, RuntimeEventKind, RuntimeFact};
+use aura_app::ui::workflows::invitation::refresh_authoritative_contact_link_readiness;
+use aura_app::ui::workflows::messaging::refresh_authoritative_channel_membership_readiness;
+use aura_app::ui_contract::{
+    AuthoritativeSemanticFact, OperationId, RuntimeEventKind, RuntimeFact, SemanticOperationKind,
+    SemanticOperationPhase, SemanticOperationStatus,
+};
 use aura_core::AuthorityId;
 
 use crate::tui::chat_scope::{
@@ -366,6 +371,7 @@ pub fn use_contacts_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let contacts = shared_contacts.clone();
+        let refresh_app_core = app_ctx.app_core.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 let contact_list: Vec<Contact> =
@@ -383,6 +389,12 @@ pub fn use_contacts_subscription(
                         publish_ui_update(tx, UiUpdate::ContactCountChanged(new_count));
                     }
                 }
+
+                let refresh_app_core = refresh_app_core.clone();
+                tokio::spawn(async move {
+                    let _ =
+                        refresh_authoritative_contact_link_readiness(refresh_app_core.raw()).await;
+                });
             })
             .await;
         }
@@ -692,6 +704,7 @@ pub fn use_channels_subscription(
         let latest_homes_state = latest_homes_state.clone();
         let latest_discovered_peers = latest_discovered_peers.clone();
         let selected_channel_id = selected_channel_id.clone();
+        let refresh_app_core = app_ctx.app_core.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 let mut stabilized = latest_chat_state
@@ -777,6 +790,13 @@ pub fn use_channels_subscription(
                     &stabilized,
                     scope.as_deref(),
                 );
+
+                let refresh_app_core = refresh_app_core.clone();
+                tokio::spawn(async move {
+                    let _ =
+                        refresh_authoritative_channel_membership_readiness(refresh_app_core.raw())
+                            .await;
+                });
             })
             .await;
         }
@@ -1243,19 +1263,33 @@ pub fn use_authoritative_semantic_facts_subscription(
                         return;
                     };
                     for fact in facts.iter() {
-                        if let AuthoritativeSemanticFact::OperationStatus {
-                            operation_id,
-                            status,
-                            ..
-                        } = fact
-                        {
-                            publish_ui_update(
-                                tx,
-                                UiUpdate::AuthoritativeOperationStatus {
-                                    operation_id: operation_id.clone(),
-                                    status: status.clone(),
-                                },
-                            );
+                        match fact {
+                            AuthoritativeSemanticFact::OperationStatus {
+                                operation_id,
+                                status,
+                                ..
+                            } => {
+                                publish_ui_update(
+                                    tx,
+                                    UiUpdate::AuthoritativeOperationStatus {
+                                        operation_id: operation_id.clone(),
+                                        status: status.clone(),
+                                    },
+                                );
+                            }
+                            AuthoritativeSemanticFact::ContactLinkReady { .. } => {
+                                publish_ui_update(
+                                    tx,
+                                    UiUpdate::AuthoritativeOperationStatus {
+                                        operation_id: OperationId::invitation_accept(),
+                                        status: SemanticOperationStatus::new(
+                                            SemanticOperationKind::AcceptContactInvitation,
+                                            SemanticOperationPhase::Succeeded,
+                                        ),
+                                    },
+                                );
+                            }
+                            _ => {}
                         }
                     }
                     let mapped = facts

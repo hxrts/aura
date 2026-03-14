@@ -888,6 +888,37 @@ mod tests {
     }
 
     #[test]
+    fn barrier_validator_requires_join_channel_convergence_before_next_intent() {
+        let definition = ScenarioDefinition {
+            id: "join-barriers".to_string(),
+            goal: "test join channel barriers".to_string(),
+            steps: vec![
+                ScenarioStep {
+                    id: "join".to_string(),
+                    actor: Some(ActorId("alice".to_string())),
+                    timeout_ms: Some(1000),
+                    action: SemanticAction::Intent(IntentAction::JoinChannel {
+                        channel_name: "shared".to_string(),
+                    }),
+                },
+                ScenarioStep {
+                    id: "next-intent".to_string(),
+                    actor: Some(ActorId("alice".to_string())),
+                    timeout_ms: Some(1000),
+                    action: SemanticAction::Intent(IntentAction::SendChatMessage {
+                        message: "hello".to_string(),
+                    }),
+                },
+            ],
+        };
+
+        let error = validate_declared_barriers(&definition)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("ChannelMembershipReady"));
+    }
+
+    #[test]
     fn changed_files_parser_normalizes_env_lines() {
         let files = split_lines(
             "crates\\\\aura-ui\\\\src\\\\app.rs\n\nscenarios/harness/shared-settings-parity.toml\n",

@@ -57,6 +57,7 @@ pub enum IntentKind {
     OpenScreen,
     CreateAccount,
     CreateHome,
+    CreateChannel,
     StartDeviceEnrollment,
     ImportDeviceEnrollmentCode,
     OpenSettingsSection,
@@ -70,10 +71,11 @@ pub enum IntentKind {
 }
 
 impl IntentKind {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::OpenScreen,
         Self::CreateAccount,
         Self::CreateHome,
+        Self::CreateChannel,
         Self::StartDeviceEnrollment,
         Self::ImportDeviceEnrollmentCode,
         Self::OpenSettingsSection,
@@ -585,6 +587,9 @@ pub enum IntentAction {
     CreateHome {
         home_name: String,
     },
+    CreateChannel {
+        channel_name: String,
+    },
     StartDeviceEnrollment {
         device_name: String,
         code_name: String,
@@ -620,6 +625,7 @@ impl IntentAction {
             Self::OpenScreen(_) => IntentKind::OpenScreen,
             Self::CreateAccount { .. } => IntentKind::CreateAccount,
             Self::CreateHome { .. } => IntentKind::CreateHome,
+            Self::CreateChannel { .. } => IntentKind::CreateChannel,
             Self::StartDeviceEnrollment { .. } => IntentKind::StartDeviceEnrollment,
             Self::ImportDeviceEnrollmentCode { .. } => IntentKind::ImportDeviceEnrollmentCode,
             Self::OpenSettingsSection(_) => IntentKind::OpenSettingsSection,
@@ -741,6 +747,31 @@ impl IntentAction {
                     "create_home_convergence_timeout".to_string(),
                 ],
             },
+            Self::CreateChannel { .. } => SharedActionContract {
+                intent: IntentKind::CreateChannel,
+                preconditions: vec![
+                    ActionPrecondition::Screen(ScreenId::Chat),
+                    ActionPrecondition::Readiness(UiReadiness::Ready),
+                    ActionPrecondition::Quiescence(QuiescenceState::Settled),
+                ],
+                barriers: SharedActionBarrierMetadata {
+                    before_issue: vec![
+                        BarrierDeclaration::Screen(ScreenId::Chat),
+                        BarrierDeclaration::Readiness(UiReadiness::Ready),
+                        BarrierDeclaration::Quiescence(QuiescenceState::Settled),
+                    ],
+                    before_next_intent: vec![BarrierDeclaration::Readiness(UiReadiness::Ready)],
+                },
+                post_operation_convergence: None,
+                focus_semantics: FocusSemantics::Screen(ScreenId::Chat),
+                selection_semantics: SelectionSemantics::List(ListId::Channels),
+                transitions: vec![AuthoritativeTransitionKind::Screen(ScreenId::Chat)],
+                terminal_success: vec![TerminalSuccessKind::Readiness(UiReadiness::Ready)],
+                terminal_failure_codes: vec![
+                    "create_channel_issue_failed".to_string(),
+                    "create_channel_timeout".to_string(),
+                ],
+            },
             Self::StartDeviceEnrollment { .. } => SharedActionContract {
                 intent: IntentKind::StartDeviceEnrollment,
                 preconditions: vec![
@@ -755,14 +786,18 @@ impl IntentAction {
                         BarrierDeclaration::Quiescence(QuiescenceState::Settled),
                     ],
                     before_next_intent: vec![
-                        BarrierDeclaration::Modal(ModalId::AddDevice),
+                        BarrierDeclaration::OperationState {
+                            operation_id: OperationId::device_enrollment(),
+                            state: OperationState::Succeeded,
+                        },
+                        BarrierDeclaration::Readiness(UiReadiness::Ready),
                         BarrierDeclaration::RuntimeEvent(
                             RuntimeEventKind::DeviceEnrollmentCodeReady,
                         ),
                     ],
                 },
                 post_operation_convergence: None,
-                focus_semantics: FocusSemantics::Control(ControlId::SettingsAddDeviceButton),
+                focus_semantics: FocusSemantics::Screen(ScreenId::Settings),
                 selection_semantics: SelectionSemantics::List(ListId::Devices),
                 transitions: vec![AuthoritativeTransitionKind::Operation(
                     OperationId::device_enrollment(),
@@ -853,22 +888,15 @@ impl IntentAction {
                         BarrierDeclaration::Quiescence(QuiescenceState::Settled),
                     ],
                     before_next_intent: vec![
-                        BarrierDeclaration::Modal(ModalId::SelectDeviceToRemove),
-                        BarrierDeclaration::Modal(ModalId::ConfirmRemoveDevice),
                         BarrierDeclaration::Screen(ScreenId::Settings),
+                        BarrierDeclaration::Readiness(UiReadiness::Ready),
                     ],
                 },
                 post_operation_convergence: None,
-                focus_semantics: FocusSemantics::Control(ControlId::SettingsRemoveDeviceButton),
+                focus_semantics: FocusSemantics::Screen(ScreenId::Settings),
                 selection_semantics: SelectionSemantics::List(ListId::Devices),
-                transitions: vec![AuthoritativeTransitionKind::Operation(
-                    OperationId::device_enrollment(),
-                )],
+                transitions: vec![AuthoritativeTransitionKind::Screen(ScreenId::Settings)],
                 terminal_success: vec![
-                    TerminalSuccessKind::OperationState {
-                        operation_id: OperationId::device_enrollment(),
-                        state: OperationState::Succeeded,
-                    },
                     TerminalSuccessKind::Screen(ScreenId::Settings),
                     TerminalSuccessKind::Readiness(UiReadiness::Ready),
                 ],
@@ -899,7 +927,7 @@ impl IntentAction {
                     ],
                 },
                 post_operation_convergence: None,
-                focus_semantics: FocusSemantics::Control(ControlId::ContactsCreateInvitationButton),
+                focus_semantics: FocusSemantics::Screen(ScreenId::Contacts),
                 selection_semantics: SelectionSemantics::List(ListId::Contacts),
                 transitions: vec![AuthoritativeTransitionKind::Operation(
                     OperationId::invitation_create(),
@@ -978,7 +1006,7 @@ impl IntentAction {
                     )],
                     violation_code: "channel_membership_convergence_required".to_string(),
                 }),
-                focus_semantics: FocusSemantics::Control(ControlId::ModalConfirmButton),
+                focus_semantics: FocusSemantics::Screen(ScreenId::Chat),
                 selection_semantics: SelectionSemantics::PreservesCurrent,
                 transitions: vec![AuthoritativeTransitionKind::Operation(
                     OperationId::invitation_accept(),
@@ -1010,16 +1038,25 @@ impl IntentAction {
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
                         BarrierDeclaration::Quiescence(QuiescenceState::Settled),
                     ],
-                    before_next_intent: vec![BarrierDeclaration::Readiness(UiReadiness::Ready)],
+                    before_next_intent: vec![
+                        BarrierDeclaration::Readiness(UiReadiness::Ready),
+                        BarrierDeclaration::RuntimeEvent(RuntimeEventKind::ChannelMembershipReady),
+                    ],
                 },
-                post_operation_convergence: None,
-                focus_semantics: FocusSemantics::Control(ControlId::ChatNewGroupButton),
+                post_operation_convergence: Some(PostOperationConvergenceContract {
+                    required_before_next_intent: vec![BarrierDeclaration::RuntimeEvent(
+                        RuntimeEventKind::ChannelMembershipReady,
+                    )],
+                    violation_code: "channel_membership_convergence_required".to_string(),
+                }),
+                focus_semantics: FocusSemantics::Screen(ScreenId::Chat),
                 selection_semantics: SelectionSemantics::List(ListId::Channels),
                 transitions: vec![AuthoritativeTransitionKind::RuntimeEvent(
                     RuntimeEventKind::ChannelJoined,
                 )],
                 terminal_success: vec![
                     TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::ChannelJoined),
+                    TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::ChannelMembershipReady),
                     TerminalSuccessKind::Readiness(UiReadiness::Ready),
                 ],
                 terminal_failure_codes: vec![
@@ -1057,7 +1094,7 @@ impl IntentAction {
                     )],
                     violation_code: "pending_home_invitation_convergence_required".to_string(),
                 }),
-                focus_semantics: FocusSemantics::Control(ControlId::ContactsInviteToChannelButton),
+                focus_semantics: FocusSemantics::Screen(ScreenId::Contacts),
                 selection_semantics: SelectionSemantics::List(ListId::Contacts),
                 transitions: vec![AuthoritativeTransitionKind::Operation(
                     OperationId::invitation_create(),
@@ -1095,7 +1132,7 @@ impl IntentAction {
                     ],
                 },
                 post_operation_convergence: None,
-                focus_semantics: FocusSemantics::Field(FieldId::ChatInput),
+                focus_semantics: FocusSemantics::Screen(ScreenId::Chat),
                 selection_semantics: SelectionSemantics::List(ListId::Channels),
                 transitions: vec![AuthoritativeTransitionKind::RuntimeEvent(
                     RuntimeEventKind::MessageCommitted,
@@ -1292,6 +1329,7 @@ pub enum SemanticActionKind {
     OpenScreen,
     CreateAccount,
     CreateHome,
+    CreateChannel,
     StartDeviceEnrollment,
     ImportDeviceEnrollmentCode,
     OpenSettingsSection,
@@ -1402,6 +1440,11 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
             SemanticActionKind::CreateHome => ScenarioAction::Intent(IntentAction::CreateHome {
                 home_name: required(value.value, "value", value.action)?,
             }),
+            SemanticActionKind::CreateChannel => {
+                ScenarioAction::Intent(IntentAction::CreateChannel {
+                    channel_name: required(value.value, "value", value.action)?,
+                })
+            }
             SemanticActionKind::StartDeviceEnrollment => {
                 ScenarioAction::Intent(IntentAction::StartDeviceEnrollment {
                     device_name: required(value.value, "value", value.action)?,
@@ -1890,6 +1933,9 @@ mod tests {
             IntentAction::CreateHome {
                 home_name: "harbor".to_string(),
             },
+            IntentAction::CreateChannel {
+                channel_name: "shared-parity".to_string(),
+            },
             IntentAction::StartDeviceEnrollment {
                 device_name: "phone".to_string(),
                 code_name: "device_code".to_string(),
@@ -1943,6 +1989,9 @@ mod tests {
             IntentAction::CreateHome {
                 home_name: "harbor".to_string(),
             },
+            IntentAction::CreateChannel {
+                channel_name: "shared-parity".to_string(),
+            },
             IntentAction::StartDeviceEnrollment {
                 device_name: "phone".to_string(),
                 code_name: "device_code".to_string(),
@@ -1994,6 +2043,9 @@ mod tests {
             },
             IntentAction::CreateHome {
                 home_name: "harbor".to_string(),
+            },
+            IntentAction::CreateChannel {
+                channel_name: "shared-parity".to_string(),
             },
             IntentAction::StartDeviceEnrollment {
                 device_name: "phone".to_string(),
@@ -2157,6 +2209,51 @@ mod tests {
             .contains(&BarrierDeclaration::RuntimeEvent(
                 RuntimeEventKind::MessageCommitted,
             )));
+    }
+
+    #[test]
+    fn shared_intent_contracts_do_not_encode_renderer_control_paths() {
+        for intent in [
+            IntentAction::CreateChannel {
+                channel_name: "ops".to_string(),
+            },
+            IntentAction::StartDeviceEnrollment {
+                device_name: "mobile".to_string(),
+                code_name: "device_code".to_string(),
+            },
+            IntentAction::RemoveSelectedDevice,
+            IntentAction::CreateContactInvitation {
+                receiver_authority_id: "authority:test".to_string(),
+                code_name: None,
+            },
+            IntentAction::AcceptPendingChannelInvitation,
+            IntentAction::JoinChannel {
+                channel_name: "ops".to_string(),
+            },
+            IntentAction::InviteActorToChannel {
+                authority_id: "authority:test".to_string(),
+            },
+            IntentAction::SendChatMessage {
+                message: "hello".to_string(),
+            },
+        ] {
+            let contract = intent.contract();
+            assert!(
+                matches!(contract.focus_semantics, FocusSemantics::Screen(_)),
+                "shared intent {:?} must describe semantic screen focus, got {:?}",
+                intent.kind(),
+                contract.focus_semantics
+            );
+            assert!(
+                !contract
+                    .barriers
+                    .before_next_intent
+                    .iter()
+                    .any(|barrier| matches!(barrier, BarrierDeclaration::Modal(_))),
+                "shared intent {:?} must not require modal mechanics in semantic barriers",
+                intent.kind()
+            );
+        }
     }
 
     #[test]

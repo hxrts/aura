@@ -18,10 +18,9 @@ use super::EffectCommand;
 
 // Re-export workflows for convenience
 pub use aura_app::ui::workflows::invitation::{
-    accept_invitation, accept_invitation_by_str, cancel_invitation_by_str,
-    create_channel_invitation, create_contact_invitation, create_guardian_invitation,
-    decline_invitation_by_str, export_invitation, export_invitation_by_str,
-    import_invitation_details,
+    accept_invitation_by_str, cancel_invitation_by_str, create_channel_invitation,
+    create_contact_invitation, create_guardian_invitation, decline_invitation_by_str,
+    export_invitation, export_invitation_by_str, import_invitation_details,
 };
 
 async fn resolve_contact_authority_id(
@@ -251,7 +250,12 @@ pub async fn handle_invitations(
                             | InvitationBridgeType::Channel { .. }
                             | InvitationBridgeType::Guardian { .. }
                     ) {
-                        if let Err(e) = accept_invitation(app_core, &invitation.invitation_id).await
+                        if let Err(e) =
+                            aura_app::ui::workflows::invitation::accept_imported_invitation(
+                                app_core,
+                                &invitation,
+                            )
+                            .await
                         {
                             return Some(Err(OpError::InvalidArgument(format!(
                                 "Failed to accept invitation: {e}"

@@ -63,14 +63,59 @@ pub enum ModalId {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HarnessUiCommand {
-    NavigateScreen { screen: ScreenId },
-    ActivateControl { control_id: ControlId },
-    ActivateListItem { list_id: ListId, item_id: String },
-    CreateAccount { account_name: String },
-    CreateHome { home_name: String },
+    NavigateScreen {
+        screen: ScreenId,
+    },
+    OpenSettingsSection {
+        section: crate::scenario_contract::SettingsSection,
+    },
+    DismissTransient,
+    ActivateControl {
+        control_id: ControlId,
+    },
+    ActivateListItem {
+        list_id: ListId,
+        item_id: String,
+    },
+    CreateAccount {
+        account_name: String,
+    },
+    CreateHome {
+        home_name: String,
+    },
+    CreateChannel {
+        channel_name: String,
+    },
+    SelectHome {
+        home_id: String,
+    },
+    StartDeviceEnrollment {
+        device_name: String,
+    },
+    ImportDeviceEnrollmentCode {
+        code: String,
+    },
+    RemoveSelectedDevice,
+    CreateContactInvitation {
+        receiver_authority_id: String,
+    },
+    ImportInvitation {
+        code: String,
+    },
+    InviteActorToChannel {
+        authority_id: String,
+        channel_id: String,
+    },
     AcceptPendingChannelInvitation,
-    JoinChannel { channel_name: String },
-    SendChatMessage { content: String },
+    JoinChannel {
+        channel_name: String,
+    },
+    SelectChannel {
+        channel_id: String,
+    },
+    SendChatMessage {
+        content: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -831,15 +876,14 @@ impl AuthoritativeSemanticFact {
             Self::OperationStatus {
                 operation_id,
                 instance_id,
-                status,
+                ..
             } => format!(
-                "operation_status:{}:{}:{:?}",
+                "operation_status:{}:{}",
                 operation_id.0,
                 instance_id
                     .as_ref()
                     .map(|value| value.0.as_str())
-                    .unwrap_or("*"),
-                status.kind
+                    .unwrap_or("*")
             ),
             Self::ContactLinkReady { authority_id, .. } => {
                 format!("contact_link_ready:{authority_id}")
@@ -3260,6 +3304,28 @@ mod tests {
         };
 
         assert_eq!(fact.kind(), AuthoritativeSemanticFactKind::PeerChannelReady);
+    }
+
+    #[test]
+    fn authoritative_operation_status_key_replaces_prior_kind_for_same_operation() {
+        let contact_invite = AuthoritativeSemanticFact::OperationStatus {
+            operation_id: OperationId::invitation_create(),
+            instance_id: None,
+            status: SemanticOperationStatus::new(
+                SemanticOperationKind::CreateContactInvitation,
+                SemanticOperationPhase::Succeeded,
+            ),
+        };
+        let channel_invite = AuthoritativeSemanticFact::OperationStatus {
+            operation_id: OperationId::invitation_create(),
+            instance_id: None,
+            status: SemanticOperationStatus::new(
+                SemanticOperationKind::InviteActorToChannel,
+                SemanticOperationPhase::WorkflowDispatched,
+            ),
+        };
+
+        assert_eq!(contact_invite.key(), channel_invite.key());
     }
 
     #[test]

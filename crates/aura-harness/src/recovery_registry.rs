@@ -40,14 +40,12 @@ pub struct RecoveryMetadata {
     pub class: FallbackPathClass,
 }
 
-pub const REGISTERED_RECOVERIES: &[RecoveryMetadata] = &[
-    RecoveryMetadata {
-        path: RecoveryPath::AcceptContactInvitationContactsFallback,
-        code: RecoveryPath::AcceptContactInvitationContactsFallback.code(),
-        owner_module: RecoveryPath::AcceptContactInvitationContactsFallback.owner_module(),
-        class: FallbackPathClass::BoundedSecondary,
-    },
-];
+pub const REGISTERED_RECOVERIES: &[RecoveryMetadata] = &[RecoveryMetadata {
+    path: RecoveryPath::AcceptContactInvitationContactsFallback,
+    code: RecoveryPath::AcceptContactInvitationContactsFallback.code(),
+    owner_module: RecoveryPath::AcceptContactInvitationContactsFallback.owner_module(),
+    class: FallbackPathClass::BoundedSecondary,
+}];
 
 pub fn run_registered_recovery<T>(
     path: RecoveryPath,

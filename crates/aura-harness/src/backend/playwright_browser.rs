@@ -1220,6 +1220,7 @@ mod tests {
         for intent in [
             "IntentAction::CreateAccount",
             "IntentAction::CreateHome",
+            "IntentAction::CreateChannel",
             "IntentAction::CreateContactInvitation",
             "IntentAction::AcceptContactInvitation",
             "IntentAction::InviteActorToChannel",

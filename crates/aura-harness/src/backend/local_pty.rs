@@ -24,10 +24,9 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use crate::backend::{
-    latest_invitation_code, observe_operation, submit_accept_contact_invitation_via_shared_ui,
-    submit_invite_actor_to_channel_via_shared_ui, wait_for_modal_visible,
-    wait_for_operation_submission, wait_for_screen_visible, ContactInvitationCode, InstanceBackend,
-    RawUiBackend, SharedSemanticBackend, SubmittedAction, UiSnapshotEvent,
+    latest_invitation_code, observe_operation, wait_for_operation_submission,
+    ContactInvitationCode, InstanceBackend, RawUiBackend, SharedSemanticBackend, SubmittedAction,
+    UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
 use crate::screen_normalization::{authoritative_screen, has_nav_header};
@@ -52,60 +51,20 @@ fn snapshot_has_real_home(snapshot: &UiSnapshot) -> bool {
 }
 
 fn select_home_and_channel(backend: &mut LocalPtyBackend, channel_id: &str) -> Result<()> {
-    backend.activate_control(ControlId::NavNeighborhood)?;
-    wait_for_screen_visible(backend, ScreenId::Neighborhood, Duration::from_secs(5))?;
-    backend.send_keys("\x1b")?;
-    thread::sleep(Duration::from_millis(120));
-    let home_deadline = Instant::now() + Duration::from_secs(15);
-    let mut selected_home = false;
-    loop {
-        let snapshot = backend.ui_snapshot()?;
-        let has_home = snapshot
-            .lists
-            .iter()
-            .find(|list| list.id == ListId::Homes)
-            .is_some_and(|list| list.items.iter().any(|item| item.id == channel_id));
-        if has_home {
-            match backend.activate_list_item(ListId::Homes, channel_id) {
-                Ok(()) => {
-                    selected_home = true;
-                    backend.send_keys("\r")?;
-                    thread::sleep(Duration::from_millis(250));
-                }
-                Err(error) => {
-                    tracing::debug!(
-                        "select_home_and_channel: home {channel_id} selection did not converge: {error}"
-                    );
-                }
-            }
-            break;
-        }
-        if Instant::now() >= home_deadline {
-            break;
-        }
-        thread::sleep(Duration::from_millis(80));
-    }
-    backend.activate_control(ControlId::NavChat)?;
-    wait_for_screen_visible(backend, ScreenId::Chat, Duration::from_secs(5))?;
-    backend.activate_list_item(ListId::Channels, channel_id)?;
-    backend.send_keys("\r")?;
-    thread::sleep(Duration::from_millis(150));
-    let committed = backend
-        .ui_snapshot()?
-        .selections
+    let snapshot = backend.ui_snapshot()?;
+    let home_visible = snapshot
+        .lists
         .iter()
-        .find(|selection| selection.list == ListId::Channels)
-        .is_some_and(|selection| selection.item_id == channel_id);
-    if !committed {
-        backend.activate_list_item(ListId::Channels, channel_id)?;
-        backend.send_keys("\r")?;
-        thread::sleep(Duration::from_millis(150));
+        .find(|list| list.id == ListId::Homes)
+        .is_some_and(|list| list.items.iter().any(|item| item.id == channel_id));
+    if home_visible {
+        backend.send_harness_command(&HarnessUiCommand::SelectHome {
+            home_id: channel_id.to_string(),
+        })?;
     }
-    if !selected_home {
-        tracing::debug!(
-            "select_home_and_channel: home {channel_id} not visible, fell back to chat selection"
-        );
-    }
+    backend.send_harness_command(&HarnessUiCommand::SelectChannel {
+        channel_id: channel_id.to_string(),
+    })?;
     Ok(())
 }
 
@@ -315,15 +274,6 @@ impl LocalPtyBackend {
             }
             let _ = fs::remove_file(socket_path);
         }))
-    }
-
-    fn submit_chat_command_via_ui(&mut self, command: &str) -> Result<()> {
-        if self.ui_snapshot()?.screen != ScreenId::Chat {
-            self.activate_control(ControlId::NavChat)?;
-            wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
-        }
-        self.fill_field(FieldId::ChatInput, &format!("/{command}"))?;
-        self.send_key(crate::tool_api::ToolKey::Enter, 1)
     }
 
     fn default_command(&self) -> (String, Vec<String>) {
@@ -1267,17 +1217,9 @@ impl LocalPtyBackend {
     fn submit_start_device_enrollment(&mut self, device_name: &str) -> Result<SubmittedAction<()>> {
         let previous_operation =
             observe_operation(&self.ui_snapshot()?, &OperationId::device_enrollment());
-        self.send_harness_command(&HarnessUiCommand::ActivateControl {
-            control_id: ControlId::NavSettings,
+        self.send_harness_command(&HarnessUiCommand::StartDeviceEnrollment {
+            device_name: device_name.to_string(),
         })?;
-        self.send_harness_command(&HarnessUiCommand::ActivateListItem {
-            list_id: ListId::SettingsSections,
-            item_id: "devices".to_string(),
-        })?;
-        self.activate_control(ControlId::SettingsAddDeviceButton)?;
-        wait_for_modal_visible(self, ModalId::AddDevice, Duration::from_secs(5))?;
-        self.fill_field(FieldId::DeviceName, device_name)?;
-        self.activate_control(ControlId::ModalConfirmButton)?;
         let handle = wait_for_operation_submission(
             self,
             OperationId::device_enrollment(),
@@ -1290,8 +1232,9 @@ impl LocalPtyBackend {
     fn submit_import_device_enrollment_code(&mut self, code: &str) -> Result<SubmittedAction<()>> {
         let previous_operation =
             observe_operation(&self.ui_snapshot()?, &OperationId::device_enrollment());
-        self.fill_field(FieldId::DeviceImportCode, code)?;
-        self.activate_control(ControlId::OnboardingImportDeviceButton)?;
+        self.send_harness_command(&HarnessUiCommand::ImportDeviceEnrollmentCode {
+            code: code.to_string(),
+        })?;
         let handle = wait_for_operation_submission(
             self,
             OperationId::device_enrollment(),
@@ -1325,16 +1268,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 Ok(SemanticCommandResponse::accepted_without_value())
             }
             IntentAction::OpenSettingsSection(section) => {
-                self.send_harness_command(&HarnessUiCommand::ActivateControl {
-                    control_id: ControlId::NavSettings,
-                })?;
-                self.send_harness_command(&HarnessUiCommand::ActivateListItem {
-                    list_id: ListId::SettingsSections,
-                    item_id: match section {
-                        aura_app::scenario_contract::SettingsSection::Devices => "devices",
-                    }
-                    .to_string(),
-                })?;
+                self.send_harness_command(&HarnessUiCommand::OpenSettingsSection { section })?;
                 Ok(SemanticCommandResponse::accepted_without_value())
             }
             IntentAction::CreateAccount { account_name } => {
@@ -1370,22 +1304,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 })
             }
             IntentAction::RemoveSelectedDevice => {
-                self.send_harness_command(&HarnessUiCommand::ActivateControl {
-                    control_id: ControlId::NavSettings,
-                })?;
-                self.send_harness_command(&HarnessUiCommand::ActivateListItem {
-                    list_id: ListId::SettingsSections,
-                    item_id: "devices".to_string(),
-                })?;
-                self.activate_control(ControlId::SettingsRemoveDeviceButton)?;
-                wait_for_modal_visible(
-                    self,
-                    ModalId::SelectDeviceToRemove,
-                    Duration::from_secs(5),
-                )?;
-                self.activate_control(ControlId::ModalConfirmButton)?;
-                wait_for_modal_visible(self, ModalId::ConfirmRemoveDevice, Duration::from_secs(5))?;
-                self.activate_control(ControlId::ModalConfirmButton)?;
+                self.send_harness_command(&HarnessUiCommand::RemoveSelectedDevice)?;
                 Ok(SemanticCommandResponse::accepted_without_value())
             }
             IntentAction::CreateContactInvitation {
@@ -1419,6 +1338,14 @@ impl SharedSemanticBackend for LocalPtyBackend {
             }
             IntentAction::AcceptPendingChannelInvitation => {
                 let submitted = self.submit_accept_pending_channel_invitation()?;
+                Ok(SemanticCommandResponse {
+                    submission: submitted.submission,
+                    handle: submitted.handle,
+                    value: SemanticCommandValue::None,
+                })
+            }
+            IntentAction::CreateChannel { channel_name } => {
+                let submitted = self.submit_create_channel(&channel_name)?;
                 Ok(SemanticCommandResponse {
                     submission: submitted.submission,
                     handle: submitted.handle,
@@ -1512,7 +1439,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
                         .map(|item| item.id.clone())
                 });
             if let Some(home_id) = created_home {
-                self.activate_list_item(ListId::Homes, &home_id)?;
+                self.send_harness_command(&HarnessUiCommand::SelectHome { home_id })?;
                 return Ok(SubmittedAction::with_ui_operation((), handle));
             }
             if Instant::now() >= deadline {
@@ -1523,17 +1450,23 @@ impl SharedSemanticBackend for LocalPtyBackend {
         anyhow::bail!("submit_create_home did not produce a non-placeholder home")
     }
 
+    fn submit_create_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
+        self.send_harness_command(&HarnessUiCommand::CreateChannel {
+            channel_name: channel_name.to_string(),
+        })
+        .context("submit_create_channel: create_channel_command")?;
+        Ok(SubmittedAction::without_handle(()))
+    }
+
     fn submit_create_contact_invitation(
         &mut self,
         receiver_authority_id: &str,
     ) -> Result<SubmittedAction<ContactInvitationCode>> {
         let previous_operation =
             observe_operation(&self.ui_snapshot()?, &OperationId::invitation_create());
-        self.activate_control(ControlId::ContactsCreateInvitationButton)?;
-        wait_for_modal_visible(self, ModalId::CreateInvitation, Duration::from_secs(5))?;
-        self.activate_list_item(ListId::InvitationTypes, "contact")?;
-        self.fill_field(FieldId::InvitationReceiver, receiver_authority_id)?;
-        self.activate_control(ControlId::ModalConfirmButton)?;
+        self.send_harness_command(&HarnessUiCommand::CreateContactInvitation {
+            receiver_authority_id: receiver_authority_id.to_string(),
+        })?;
         let handle = wait_for_operation_submission(
             self,
             OperationId::invitation_create(),
@@ -1555,7 +1488,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
         };
 
         if self.ui_snapshot()?.open_modal == Some(ModalId::InvitationCode) {
-            self.activate_control(ControlId::ModalCancelButton)?;
+            self.send_harness_command(&HarnessUiCommand::DismissTransient)?;
         }
         let close_deadline = Instant::now() + Duration::from_secs(5);
         loop {
@@ -1576,14 +1509,47 @@ impl SharedSemanticBackend for LocalPtyBackend {
     }
 
     fn submit_accept_contact_invitation(&mut self, code: &str) -> Result<SubmittedAction<()>> {
-        submit_accept_contact_invitation_via_shared_ui(self, code)
+        let previous_operation =
+            observe_operation(&self.ui_snapshot()?, &OperationId::invitation_accept());
+        self.send_harness_command(&HarnessUiCommand::ImportInvitation {
+            code: code.to_string(),
+        })?;
+        let handle = wait_for_operation_submission(
+            self,
+            OperationId::invitation_accept(),
+            previous_operation,
+            Duration::from_secs(5),
+        )?;
+        Ok(SubmittedAction::with_ui_operation((), handle))
     }
 
     fn submit_invite_actor_to_channel(
         &mut self,
         authority_id: &str,
     ) -> Result<SubmittedAction<()>> {
-        submit_invite_actor_to_channel_via_shared_ui(self, authority_id)
+        let snapshot = self.ui_snapshot()?;
+        let previous_operation = observe_operation(&snapshot, &OperationId::invitation_create());
+        let channel_id = snapshot
+            .selections
+            .iter()
+            .find(|selection| selection.list == ListId::Channels)
+            .map(|selection| selection.item_id.clone())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "submit_invite_actor_to_channel requires an authoritative selected channel"
+                )
+            })?;
+        self.send_harness_command(&HarnessUiCommand::InviteActorToChannel {
+            authority_id: authority_id.to_string(),
+            channel_id,
+        })?;
+        let handle = wait_for_operation_submission(
+            self,
+            OperationId::invitation_create(),
+            previous_operation,
+            Duration::from_secs(5),
+        )?;
+        Ok(SubmittedAction::with_ui_operation((), handle))
     }
 
     fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>> {
@@ -1715,48 +1681,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
             channel_name: channel_name.to_string(),
         })
         .context("submit_join_channel: join_command")?;
-        let joined_deadline = Instant::now() + Duration::from_secs(4);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            let joined_channel_id =
-                snapshot
-                    .runtime_events
-                    .iter()
-                    .find_map(|event| match &event.fact {
-                        RuntimeFact::ChannelMembershipReady { channel, .. }
-                            if channel
-                                .name
-                                .as_deref()
-                                .map(|name: &str| name.eq_ignore_ascii_case(channel_name))
-                                .unwrap_or(false) =>
-                        {
-                            channel.id.clone()
-                        }
-                        _ => None,
-                    });
-            let joined = joined_channel_id.is_some();
-            if joined || Instant::now() >= joined_deadline {
-                if joined {
-                    if let Some(channel_id) = joined_channel_id {
-                        let selected_channel_id = snapshot
-                            .selections
-                            .iter()
-                            .find(|selection| selection.list == ListId::Channels)
-                            .map(|selection| selection.item_id.clone());
-                        if selected_channel_id.as_deref() != Some(channel_id.as_str()) {
-                            select_home_and_channel(self, &channel_id)?;
-                        }
-                    }
-                    return Ok(SubmittedAction::without_handle(()));
-                }
-                break;
-            }
-            thread::sleep(Duration::from_millis(80));
-        }
-        anyhow::bail!(
-            "submit_join_channel: authoritative ChannelMembershipReady not observed for channel {}",
-            channel_name
-        )
+        Ok(SubmittedAction::without_handle(()))
     }
 
     fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>> {
@@ -1767,10 +1692,6 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 .any(|message| message.content.contains(expected))
         }
 
-        self.activate_control(ControlId::NavChat)?;
-        wait_for_screen_visible(self, ScreenId::Chat, Duration::from_secs(5))?;
-        let previous_operation =
-            observe_operation(&self.ui_snapshot()?, &OperationId::send_message());
         let snapshot = self.ui_snapshot()?;
         if let Some(channel_id) = unique_shared_channel_candidate(&snapshot) {
             let selected_channel_id = snapshot
@@ -1781,32 +1702,21 @@ impl SharedSemanticBackend for LocalPtyBackend {
             if selected_channel_id.as_deref() != Some(channel_id.as_str()) {
                 let _ = select_home_and_channel(self, &channel_id);
             }
-        }
-        if let Some(channels) = snapshot
+        } else if let Some(channels) = snapshot
             .lists
             .iter()
             .find(|list| list.id == ListId::Channels)
         {
             let selected = channels.items.iter().any(|item| item.selected);
             if !selected && channels.items.len() == 1 {
-                self.send_keys("h")?;
-                thread::sleep(Duration::from_millis(80));
-                for sequence in ["k", "j"] {
-                    self.send_keys(sequence)?;
-                    thread::sleep(Duration::from_millis(80));
-                    let updated = self.ui_snapshot()?;
-                    let visible_selected = updated
-                        .lists
-                        .iter()
-                        .find(|list| list.id == ListId::Channels)
-                        .is_some_and(|list| list.items.iter().any(|item| item.selected));
-                    if visible_selected {
-                        break;
-                    }
-                }
+                self.send_harness_command(&HarnessUiCommand::SelectChannel {
+                    channel_id: channels.items[0].id.clone(),
+                })?;
             }
         }
 
+        let previous_operation =
+            observe_operation(&self.ui_snapshot()?, &OperationId::send_message());
         self.send_harness_command(&HarnessUiCommand::SendChatMessage {
             content: message.to_string(),
         })?;
@@ -1963,21 +1873,44 @@ mod tests {
     }
 
     #[test]
-    fn local_shared_intent_methods_use_semantic_harness_commands_for_onboarding() {
+    fn local_shared_intent_methods_use_semantic_harness_commands_for_shared_flows() {
         let source = include_str!("local_pty.rs");
+        let invitation_start = source
+            .find("fn submit_create_contact_invitation")
+            .unwrap_or_else(|| panic!("missing submit_create_contact_invitation"));
+        let invitation_end = source[invitation_start..]
+            .find("fn submit_accept_contact_invitation")
+            .map(|offset| invitation_start + offset)
+            .unwrap_or_else(|| panic!("missing submit_accept_contact_invitation"));
+        let invitation_branch = &source[invitation_start..invitation_end];
         assert!(source.contains("fn submit_create_account"));
-        assert!(
-            source.contains("self.send_harness_command(&HarnessUiCommand::CreateAccount {")
-        );
+        assert!(source.contains("self.send_harness_command(&HarnessUiCommand::CreateAccount {"));
         assert!(source.contains("fn submit_create_home"));
-        assert!(
-            source.contains("self.send_harness_command(&HarnessUiCommand::CreateHome {")
-        );
+        assert!(source.contains("self.send_harness_command(&HarnessUiCommand::CreateHome {"));
         assert!(source.contains("fn submit_create_contact_invitation"));
+        assert!(source
+            .contains("self.send_harness_command(&HarnessUiCommand::CreateContactInvitation {"));
         assert!(
-            source.contains("self.activate_control(ControlId::ContactsCreateInvitationButton)?;")
+            source.contains("self.send_harness_command(&HarnessUiCommand::StartDeviceEnrollment {")
         );
-        assert!(source.contains(
+        assert!(source
+            .contains("self.send_harness_command(&HarnessUiCommand::ImportDeviceEnrollmentCode {"));
+        assert!(
+            source.contains("self.send_harness_command(&HarnessUiCommand::RemoveSelectedDevice)?;")
+        );
+        assert!(
+            source.contains("self.send_harness_command(&HarnessUiCommand::InviteActorToChannel {")
+        );
+        assert!(source.contains("self.send_harness_command(&HarnessUiCommand::SelectChannel {"));
+        assert!(source.contains("self.send_harness_command(&HarnessUiCommand::SelectHome {"));
+        assert!(invitation_branch
+            .contains("self.send_harness_command(&HarnessUiCommand::DismissTransient)?;"));
+        assert!(!invitation_branch
+            .contains("self.activate_control(ControlId::ContactsCreateInvitationButton)?;"));
+        assert!(
+            !invitation_branch.contains("self.activate_control(ControlId::ModalCancelButton)?;")
+        );
+        assert!(!invitation_branch.contains(
             "wait_for_modal_visible(self, ModalId::CreateInvitation, Duration::from_secs(5))?;"
         ));
     }
@@ -1989,11 +1922,9 @@ mod tests {
         assert!(source
             .contains("self.send_harness_command(&HarnessUiCommand::NavigateScreen { screen })?;"));
         assert!(source.contains("IntentAction::OpenSettingsSection(section) => {"));
-        assert!(source.contains("control_id: ControlId::NavSettings,"));
-        assert!(source.contains("list_id: ListId::SettingsSections,"));
-        assert!(
-            source.contains("aura_app::scenario_contract::SettingsSection::Devices => \"devices\"")
-        );
+        assert!(source.contains(
+            "self.send_harness_command(&HarnessUiCommand::OpenSettingsSection { section })?;"
+        ));
     }
 
     #[test]

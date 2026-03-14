@@ -16,7 +16,7 @@ pub type TerminalResult<T> = Result<T, TerminalError>;
 /// Canonical terminal error taxonomy.
 ///
 /// Each variant maps to an `ErrorCategory` for consistent behavior across frontends.
-#[derive(Debug, Error, Clone)]
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum TerminalError {
     #[error("Invalid input: {0}")]
     Input(String),
@@ -35,6 +35,34 @@ pub enum TerminalError {
 }
 
 impl TerminalError {
+    /// Stable error code for UI and telemetry.
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Input(_) => "TERM_INPUT",
+            Self::Config(_) => "TERM_CONFIG",
+            Self::Capability(_) => "TERM_CAPABILITY",
+            Self::NotFound(_) => "TERM_NOT_FOUND",
+            Self::Network(_) => "TERM_NETWORK",
+            Self::NotImplemented(_) => "TERM_NOT_IMPLEMENTED",
+            Self::Operation(_) => "TERM_OPERATION",
+        }
+    }
+
+    /// Underlying message without the display prefix.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Input(message)
+            | Self::Config(message)
+            | Self::Capability(message)
+            | Self::NotFound(message)
+            | Self::Network(message)
+            | Self::NotImplemented(message)
+            | Self::Operation(message) => message,
+        }
+    }
+
     /// Get the error category for this error.
     ///
     /// Uses the portable `ErrorCategory` for consistent behavior.

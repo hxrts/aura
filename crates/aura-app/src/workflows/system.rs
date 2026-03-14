@@ -208,6 +208,7 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
     // Refresh invitations state
     let _ = super::invitation::list_invitations(app_core).await;
     let _ = super::invitation::refresh_authoritative_invitation_readiness(app_core).await;
+    let _ = super::invitation::refresh_authoritative_contact_link_readiness(app_core).await;
 
     // Refresh settings state
     let _ = super::settings::refresh_settings_from_runtime(app_core).await;

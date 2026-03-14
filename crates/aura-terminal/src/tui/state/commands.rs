@@ -201,6 +201,10 @@ pub enum DispatchCommand {
     /// from reactive subscriptions.
     OpenCreateInvitationModal,
     InviteSelectedContactToChannel,
+    InviteActorToChannel {
+        authority_id: AuthorityId,
+        channel_id: String,
+    },
     /// Invite the currently selected LAN peer.
     InviteLanPeer,
     StartChat,

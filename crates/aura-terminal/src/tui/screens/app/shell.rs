@@ -46,6 +46,7 @@ use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::CeremonyId;
 use aura_core::types::FrostThreshold;
 
+use crate::error::TerminalError;
 use crate::tui::callbacks::CallbackRegistry;
 use crate::tui::components::{
     DiscoveredPeerInfo, Footer, NavBar, ToastContainer, ToastLevel, ToastMessage,
@@ -84,8 +85,8 @@ use crate::tui::props::{
 };
 use crate::tui::state_machine::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
 use crate::tui::updates::{
-    harness_command_channel, ui_update_channel, HarnessCommandReceiver, UiUpdate, UiUpdateReceiver,
-    UiUpdateSender,
+    harness_command_channel, ui_update_channel, HarnessCommandReceiver, UiOperation,
+    UiOperationFailure, UiUpdate, UiUpdateReceiver, UiUpdateSender,
 };
 use std::sync::Mutex;
 
@@ -103,6 +104,34 @@ enum NotificationSelection {
     ReceivedInvitation(String),
     SentInvitation(String),
     RecoveryRequest(String),
+}
+
+fn terminal_error_to_toast_level(error: &TerminalError) -> crate::tui::state_machine::ToastLevel {
+    match error.category().toast_severity() {
+        aura_app::errors::ToastLevel::Info => crate::tui::state_machine::ToastLevel::Info,
+        aura_app::errors::ToastLevel::Success => crate::tui::state_machine::ToastLevel::Success,
+        aura_app::errors::ToastLevel::Warning => crate::tui::state_machine::ToastLevel::Warning,
+        aura_app::errors::ToastLevel::Error => crate::tui::state_machine::ToastLevel::Error,
+    }
+}
+
+fn format_ui_operation_failure(failure: &UiOperationFailure) -> String {
+    let category = failure.error.category();
+    format!(
+        "[{}] {}: {}. Hint: {}",
+        failure.error.code(),
+        failure.operation.label(),
+        failure.error.message(),
+        category.resolution_hint(),
+    )
+}
+
+async fn send_optional_ui_update_required(tx: &Option<UiUpdateSender>, update: UiUpdate) {
+    if let Some(tx) = tx {
+        if tx.try_send(update.clone()).is_err() {
+            let _ = tx.send(update).await;
+        }
+    }
 }
 
 fn read_selected_notification(
@@ -188,6 +217,57 @@ fn execute_harness_followup_command(
             state.set_operation_state(OperationId::create_home(), OperationState::Submitting);
             (cb.neighborhood.on_create_home)(name, description);
         }
+        TuiCommand::Dispatch(DispatchCommand::SelectChannel { channel_id }) => {
+            let channels = match shared_channels.read() {
+                Ok(guard) => guard.clone(),
+                Err(poisoned) => poisoned.into_inner().clone(),
+            };
+            if let Some(idx) = channels.iter().position(|channel| channel.id == channel_id) {
+                state.router.go_to(Screen::Chat);
+                state.chat.selected_channel = idx;
+                if let Ok(mut guard) = selected_channel.write() {
+                    *guard = Some(channel_id.to_string());
+                }
+            } else {
+                state.toast_error("Selected channel is no longer visible");
+            }
+        }
+        TuiCommand::Dispatch(DispatchCommand::ImportDeviceEnrollmentDuringOnboarding { code }) => {
+            let Some(cb) = callbacks.as_ref() else {
+                state.toast_error("App callbacks are unavailable");
+                return;
+            };
+            state.set_operation_state(OperationId::device_enrollment(), OperationState::Submitting);
+            (cb.app.on_import_device_enrollment_during_onboarding)(code);
+        }
+        TuiCommand::Dispatch(DispatchCommand::CreateInvitation {
+            receiver_id,
+            invitation_type,
+            message,
+            ttl_secs,
+        }) => {
+            let Some(cb) = callbacks.as_ref() else {
+                state.toast_error("Invitation callbacks are unavailable");
+                return;
+            };
+            state.set_operation_state(OperationId::invitation_create(), OperationState::Submitting);
+            state.clear_runtime_fact_kind(RuntimeEventKind::InvitationCodeReady);
+            (cb.invitations.on_create)(
+                receiver_id,
+                invitation_type.as_str().to_string(),
+                message,
+                ttl_secs,
+            );
+        }
+        TuiCommand::Dispatch(DispatchCommand::ImportInvitation { code }) => {
+            let Some(cb) = callbacks.as_ref() else {
+                state.toast_error("Invitation callbacks are unavailable");
+                return;
+            };
+            state.set_operation_state(OperationId::invitation_accept(), OperationState::Submitting);
+            state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
+            (cb.invitations.on_import)(code);
+        }
         TuiCommand::Dispatch(DispatchCommand::JoinChannel { channel_name }) => {
             let Some(cb) = callbacks.as_ref() else {
                 state.toast_error("Chat callbacks are unavailable");
@@ -267,6 +347,50 @@ fn execute_harness_followup_command(
             state.set_operation_state(OperationId::invitation_create(), OperationState::Submitting);
             state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
             (cb.contacts.on_invite_to_channel)(contact.id.clone(), channel.name.clone());
+        }
+        TuiCommand::Dispatch(DispatchCommand::InviteActorToChannel {
+            authority_id,
+            channel_id,
+        }) => {
+            let Some(cb) = callbacks.as_ref() else {
+                state.toast_error("Contact callbacks are unavailable");
+                return;
+            };
+            let channels = match shared_channels.read() {
+                Ok(guard) => guard.clone(),
+                Err(poisoned) => poisoned.into_inner().clone(),
+            };
+            let channel_id_string = channel_id.to_string();
+            let Some(channel) = channels
+                .iter()
+                .find(|channel| channel.id == channel_id_string)
+            else {
+                state.toast_error(format!(
+                    "Selected channel is stale or unavailable: {channel_id}"
+                ));
+                return;
+            };
+            state.set_operation_state(OperationId::invitation_create(), OperationState::Submitting);
+            state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
+            (cb.contacts.on_invite_to_channel)(authority_id.to_string(), channel.id.clone());
+        }
+        TuiCommand::Dispatch(DispatchCommand::AddDevice {
+            name,
+            invitee_authority_id,
+        }) => {
+            let Some(cb) = callbacks.as_ref() else {
+                state.toast_error("Settings callbacks are unavailable");
+                return;
+            };
+            state.set_operation_state(OperationId::device_enrollment(), OperationState::Submitting);
+            (cb.settings.on_add_device)(name, invitee_authority_id);
+        }
+        TuiCommand::Dispatch(DispatchCommand::RemoveDevice { device_id }) => {
+            let Some(cb) = callbacks.as_ref() else {
+                state.toast_error("Settings callbacks are unavailable");
+                return;
+            };
+            (cb.settings.on_remove_device)(device_id);
         }
         TuiCommand::Dispatch(DispatchCommand::OpenDeviceSelectModal) => {
             let current_devices = shared_devices
@@ -512,6 +636,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Devices subscription: SharedDevices for dispatch handlers to read
     // =========================================================================
     let shared_devices = use_devices_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
+    let callbacks_ref = hooks.use_ref(|| Arc::new(std::sync::RwLock::new(props.callbacks.clone())));
+    let shared_callbacks = callbacks_ref.read().clone();
+    if let Ok(mut guard) = shared_callbacks.write() {
+        *guard = props.callbacks.clone();
+    }
 
     // =========================================================================
     // Invitations subscription: SharedInvitations for notification action dispatch
@@ -732,7 +861,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let mut screen = screen.clone();
             let mut should_exit = should_exit.clone();
             let app_ctx_for_commands = app_ctx.clone();
-            let callbacks_for_commands = props.callbacks.clone();
+            let shared_callbacks_for_commands = shared_callbacks.clone();
             let mut tui = tui.clone();
             let shared_contacts_for_commands = shared_contacts.clone();
             let shared_channels_for_commands = shared_channels.clone();
@@ -774,6 +903,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         .unwrap_or_default();
 
                     let apply_result = tui.with_mut(|state| {
+                        let callbacks_for_commands = shared_callbacks_for_commands
+                            .read()
+                            .ok()
+                            .and_then(|guard| guard.clone());
                         let followup = apply_harness_command(
                             state,
                             submission.command.clone(),
@@ -870,10 +1003,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         hooks.use_future({
             let mut nickname_suggestion_state = nickname_suggestion_state.clone();
             let app_core = app_ctx.app_core.clone();
+            let app_ctx_for_updates = app_ctx.clone();
             // Toast queue migration: mutate TuiState via TuiStateHandle (always bumps render version)
             let mut tui = tui.clone();
             let shared_contacts_for_updates = shared_contacts.clone();
             let shared_channels_for_updates = shared_channels.clone();
+            let shared_devices_for_updates = shared_devices.clone();
             let shared_messages_for_updates = shared_messages.clone();
             // Shared selection state for messages subscription synchronization
             let tui_selected_for_updates = tui_selected;
@@ -1542,8 +1677,45 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 _ => OperationState::Submitting,
                             };
                             tui.with_mut(|state| {
-                                state.set_operation_state(operation_id, next_state);
+                                state.set_authoritative_operation_state(operation_id, next_state);
                             });
+                            let export_state = tui.read_clone();
+                            let app_snapshot = app_ctx_for_updates.snapshot();
+                            let harness_contacts = shared_contacts_for_updates
+                                .read()
+                                .ok()
+                                .map(|contacts| contacts.clone())
+                                .unwrap_or_default();
+                            let harness_channels = shared_channels_for_updates
+                                .read()
+                                .ok()
+                                .map(|channels| channels.clone())
+                                .unwrap_or_default();
+                            let harness_devices = shared_devices_for_updates
+                                .read()
+                                .ok()
+                                .map(|devices| devices.clone())
+                                .unwrap_or_default();
+                            let harness_messages = shared_messages_for_updates
+                                .read()
+                                .ok()
+                                .map(|messages| messages.clone())
+                                .unwrap_or_default();
+                            if let Err(error) = maybe_export_ui_snapshot(
+                                &export_state,
+                                TuiSemanticInputs {
+                                    app_snapshot: &app_snapshot,
+                                    contacts: &harness_contacts,
+                                    settings_devices: &harness_devices,
+                                    chat_channels: &harness_channels,
+                                    chat_messages: &harness_messages,
+                                },
+                            ) {
+                                tracing::warn!(
+                                    error = %error,
+                                    "failed to publish TUI harness snapshot after authoritative operation status update"
+                                );
+                            }
                         }
                         UiUpdate::InvitationImported { invitation_code: _ } => {
                             enqueue_toast!(
@@ -1821,20 +1993,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // =========================================================================
                         // UI-only errors (domain/runtime errors use ERROR_SIGNAL)
                         // =========================================================================
-                        UiUpdate::OperationFailed { operation, error } => {
+                        UiUpdate::OperationFailed { failure } => {
+                            let message = format_ui_operation_failure(&failure);
+                            let toast_level = terminal_error_to_toast_level(&failure.error);
                             // For account creation, show error in the modal instead of toast.
-                            if operation == "CreateAccount" {
+                            if failure.operation.routes_to_account_setup_modal() {
                                 tui.with_mut(|state| {
                                     state.modal_queue.update_active(|modal| {
                                         if let QueuedModal::AccountSetup(ref mut s) = modal {
-                                            s.set_error(error.clone());
+                                            s.set_error(message.clone());
                                         }
                                     });
                                 });
                             } else {
                                 enqueue_toast!(
-                                    format!("{} failed: {}", operation, error),
-                                    crate::tui::state_machine::ToastLevel::Error
+                                    message,
+                                    toast_level
                                 );
                             }
                         }
@@ -2486,6 +2660,35 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             channel.name.clone(),
                                         );
                                     }
+                                    DispatchCommand::InviteActorToChannel {
+                                        authority_id,
+                                        channel_id,
+                                    } => {
+                                        let channels = match shared_channels_for_dispatch.read() {
+                                            Ok(guard) => guard.clone(),
+                                            Err(poisoned) => poisoned.into_inner().clone(),
+                                        };
+                                        let channel_id_string = channel_id.to_string();
+                                        let Some(channel) =
+                                            channels.iter().find(|channel| channel.id == channel_id_string)
+                                        else {
+                                            new_state.toast_error(format!(
+                                                "Selected channel is stale or unavailable: {channel_id}"
+                                            ));
+                                            continue;
+                                        };
+                                        new_state.set_operation_state(
+                                            OperationId::invitation_create(),
+                                            OperationState::Submitting,
+                                        );
+                                        new_state.clear_runtime_fact_kind(
+                                            RuntimeEventKind::PendingHomeInvitationReady,
+                                        );
+                                        (cb.contacts.on_invite_to_channel)(
+                                            authority_id.to_string(),
+                                            channel.id.clone(),
+                                        );
+                                    }
                                     DispatchCommand::RemoveContact { contact_id } => {
                                         (cb.contacts.on_remove_contact)(contact_id.to_string());
                                     }
@@ -2783,12 +2986,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             Ok(t) => t,
                                             Err(e) => {
                                                 tracing::error!("Invalid threshold for guardian ceremony: {}", e);
-                                                if let Some(tx) = update_tx_for_ceremony.clone() {
-                                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                                        "guardian-ceremony-failed",
-                                                        format!("Invalid threshold: {e}"),
-                                                    )));
-                                                }
+                                                let update_tx = update_tx_for_ceremony.clone();
+                                                let tasks = tasks_for_events.clone();
+                                                tasks.spawn(async move {
+                                                    send_optional_ui_update_required(
+                                                        &update_tx,
+                                                        UiUpdate::operation_failed(
+                                                            UiOperation::StartGuardianCeremony,
+                                                            TerminalError::Input(e.to_string()),
+                                                        ),
+                                                    )
+                                                    .await;
+                                                });
                                                 continue;
                                             }
                                         };
@@ -2879,10 +3088,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     );
 
                                                     if let Some(tx) = update_tx {
-                                                        let _ = tx.try_send(UiUpdate::operation_failed(
-                                                            "Guardian ceremony",
-                                                            e.to_string(),
-                                                        ));
+                                                        send_optional_ui_update_required(
+                                                            &Some(tx),
+                                                            UiUpdate::operation_failed(
+                                                                UiOperation::StartGuardianCeremony,
+                                                                TerminalError::Operation(
+                                                                    e.to_string(),
+                                                                ),
+                                                            ),
+                                                        )
+                                                        .await;
                                                     }
                                                 }
                                             }
@@ -2904,12 +3119,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             Ok(t) => t,
                                             Err(e) => {
                                                 tracing::error!("Invalid threshold for multifactor ceremony: {}", e);
-                                                if let Some(tx) = update_tx_for_ceremony.clone() {
-                                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                                        "mfa-ceremony-failed",
-                                                        format!("Invalid threshold: {e}"),
-                                                    )));
-                                                }
+                                                let update_tx = update_tx_for_ceremony.clone();
+                                                let tasks = tasks_for_events.clone();
+                                                tasks.spawn(async move {
+                                                    send_optional_ui_update_required(
+                                                        &update_tx,
+                                                        UiUpdate::operation_failed(
+                                                            UiOperation::StartMultifactorCeremony,
+                                                            TerminalError::Input(e.to_string()),
+                                                        ),
+                                                    )
+                                                    .await;
+                                                });
                                                 continue;
                                             }
                                         };
@@ -3007,10 +3228,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     );
 
                                                     if let Some(tx) = update_tx {
-                                                        let _ = tx.try_send(UiUpdate::operation_failed(
-                                                            "Multifactor ceremony",
-                                                            e.to_string(),
-                                                        ));
+                                                        send_optional_ui_update_required(
+                                                            &Some(tx),
+                                                            UiUpdate::operation_failed(
+                                                                UiOperation::StartMultifactorCeremony,
+                                                                TerminalError::Operation(
+                                                                    e.to_string(),
+                                                                ),
+                                                            ),
+                                                        )
+                                                        .await;
                                                     }
                                                 }
                                             }
@@ -3029,12 +3256,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             let ceremony_id_typed = CeremonyId::new(ceremony_id.clone());
                                             if let Err(e) = cancel_key_rotation_ceremony(app, &ceremony_id_typed).await {
                                                 tracing::error!("Failed to cancel guardian ceremony: {}", e);
-                                                if let Some(tx) = update_tx.clone() {
-                                                    let _ = tx.try_send(UiUpdate::operation_failed(
-                                                        "Cancel guardian ceremony",
-                                                        e.to_string(),
-                                                    ));
-                                                }
+                                                send_optional_ui_update_required(
+                                                    &update_tx,
+                                                    UiUpdate::operation_failed(
+                                                        UiOperation::CancelGuardianCeremony,
+                                                        TerminalError::Operation(e.to_string()),
+                                                    ),
+                                                )
+                                                .await;
                                                 return;
                                             }
 
@@ -3059,12 +3288,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             let ceremony_id_typed = CeremonyId::new(ceremony_id.clone());
                                             if let Err(e) = cancel_key_rotation_ceremony(app, &ceremony_id_typed).await {
                                                 tracing::error!("Failed to cancel ceremony: {}", e);
-                                                if let Some(tx) = update_tx.clone() {
-                                                    let _ = tx.try_send(UiUpdate::operation_failed(
-                                                        "Cancel ceremony",
-                                                        e.to_string(),
-                                                    ));
-                                                }
+                                                send_optional_ui_update_required(
+                                                    &update_tx,
+                                                    UiUpdate::operation_failed(
+                                                        UiOperation::CancelKeyRotationCeremony,
+                                                        TerminalError::Operation(e.to_string()),
+                                                    ),
+                                                )
+                                                .await;
                                                 return;
                                             }
 

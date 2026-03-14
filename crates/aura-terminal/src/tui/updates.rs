@@ -17,8 +17,8 @@
 //!
 //! - **Domain/runtime failures** emit `ERROR_SIGNAL` (via dispatch/operational handlers) and are
 //!   surfaced centrally by the app shell as error toasts (or routed into the account setup modal).
-//! - **UI-only failures** (e.g., account file I/O during setup) use `UiUpdate::OperationFailed` and
-//!   are handled by the same shell processor.
+//! - **UI-only failures** (e.g., account file I/O during setup) use typed
+//!   `UiUpdate::OperationFailed` payloads and are handled by the same shell processor.
 //!
 //! ## Usage
 //!
@@ -44,6 +44,7 @@
 //! });
 //! ```
 
+use crate::error::TerminalError;
 use crate::tui::components::ToastMessage;
 use crate::tui::types::{Device, MfaPolicy};
 use aura_app::ui::contract::HarnessUiCommand;
@@ -108,6 +109,43 @@ impl HarnessCommandReceiptHandle {
 pub struct HarnessCommandSubmission {
     pub command: HarnessUiCommand,
     pub receipt: HarnessCommandReceiptHandle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiOperation {
+    CreateAccount,
+    UpdateThreshold,
+    ImportDeviceEnrollmentCode,
+    StartGuardianCeremony,
+    StartMultifactorCeremony,
+    CancelGuardianCeremony,
+    CancelKeyRotationCeremony,
+}
+
+impl UiOperation {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::CreateAccount => "Create account",
+            Self::UpdateThreshold => "Update threshold",
+            Self::ImportDeviceEnrollmentCode => "Import device enrollment code",
+            Self::StartGuardianCeremony => "Start guardian ceremony",
+            Self::StartMultifactorCeremony => "Start multifactor ceremony",
+            Self::CancelGuardianCeremony => "Cancel guardian ceremony",
+            Self::CancelKeyRotationCeremony => "Cancel key rotation ceremony",
+        }
+    }
+
+    #[must_use]
+    pub const fn routes_to_account_setup_modal(self) -> bool {
+        matches!(self, Self::CreateAccount)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiOperationFailure {
+    pub operation: UiOperation,
+    pub error: TerminalError,
 }
 
 /// All UI updates flow through this enum.
@@ -444,20 +482,17 @@ pub enum UiUpdate {
     ///
     /// This is used for operations that don't have a specific success variant
     /// or when we want to show an error toast.
-    OperationFailed {
-        /// Name of the operation that failed
-        operation: String,
-        /// Error message
-        error: String,
-    },
+    OperationFailed { failure: UiOperationFailure },
 }
 
 impl UiUpdate {
     /// Create an operation failed update with toast
-    pub fn operation_failed(operation: impl Into<String>, error: impl Into<String>) -> Self {
+    pub fn operation_failed(operation: UiOperation, error: impl Into<TerminalError>) -> Self {
         Self::OperationFailed {
-            operation: operation.into(),
-            error: error.into(),
+            failure: UiOperationFailure {
+                operation,
+                error: error.into(),
+            },
         }
     }
 
@@ -515,13 +550,19 @@ mod tests {
 
     #[test]
     fn test_operation_failed() {
-        let update = UiUpdate::operation_failed("UpdateNickname", "Network error");
+        let update = UiUpdate::operation_failed(
+            UiOperation::CreateAccount,
+            TerminalError::Network("Network error".to_string()),
+        );
         assert!(update.is_error());
 
         match update {
-            UiUpdate::OperationFailed { operation, error } => {
-                assert_eq!(operation, "UpdateNickname");
-                assert_eq!(error, "Network error");
+            UiUpdate::OperationFailed { failure } => {
+                assert_eq!(failure.operation, UiOperation::CreateAccount);
+                assert_eq!(
+                    failure.error,
+                    TerminalError::Network("Network error".to_string())
+                );
             }
             _ => panic!("Expected OperationFailed"),
         }

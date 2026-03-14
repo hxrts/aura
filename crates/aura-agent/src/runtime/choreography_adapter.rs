@@ -877,18 +877,8 @@ where
 /// Public API alias for the choreography adapter.
 pub use AuraHandlerAdapter as ChoreographyAdapter;
 
-fn map_runtime_role(
-    result: Result<ChoreographicRole, AuraChoreographyError>,
-) -> ChoreoResult<ChoreographicRole> {
-    result.map_err(|error| TelltaleChoreographyError::ExecutionError(error.to_string()))
-}
-
 fn map_runtime_error(error: AuraChoreographyError) -> TelltaleChoreographyError {
     TelltaleChoreographyError::ExecutionError(error.to_string())
-}
-
-fn map_telltale_error(error: TelltaleChoreographyError) -> AuraChoreographyError {
-    aura_protocol::effects::choreographic::map_telltale_choreography_error(error)
 }
 
 fn capability_key_ref(key: &str) -> String {

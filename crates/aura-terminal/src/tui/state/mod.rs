@@ -86,6 +86,14 @@ impl OperationTracker {
         }
     }
 
+    fn set_authoritative_state(&mut self, operation_id: OperationId, state: OperationState) {
+        if let Some(entry) = self.entries.get_mut(&operation_id) {
+            entry.state = state;
+            return;
+        }
+        self.set_state(operation_id, state);
+    }
+
     fn clear(&mut self, operation_id: &OperationId) {
         self.entries.remove(operation_id);
     }
@@ -302,6 +310,15 @@ impl TuiState {
 
     pub fn set_operation_state(&mut self, operation_id: OperationId, state: OperationState) {
         self.operation_states.set_state(operation_id, state);
+    }
+
+    pub fn set_authoritative_operation_state(
+        &mut self,
+        operation_id: OperationId,
+        state: OperationState,
+    ) {
+        self.operation_states
+            .set_authoritative_state(operation_id, state);
     }
 
     pub fn clear_operation_state(&mut self, operation_id: &OperationId) {
@@ -542,5 +559,28 @@ mod tests {
         let third = state.exported_operation_snapshots();
         assert_eq!(third[0].state, OperationState::Submitting);
         assert_ne!(third[0].instance_id, first_instance);
+    }
+
+    #[test]
+    fn operation_tracker_preserves_instance_id_for_authoritative_updates() {
+        let mut state = TuiState::new();
+        state.set_operation_state(OperationId::invitation_accept(), OperationState::Submitting);
+        let first = state.exported_operation_snapshots();
+        let first_instance = first[0].instance_id.clone();
+
+        state.set_authoritative_operation_state(
+            OperationId::invitation_accept(),
+            OperationState::Submitting,
+        );
+        let second = state.exported_operation_snapshots();
+        assert_eq!(second[0].instance_id, first_instance);
+
+        state.set_authoritative_operation_state(
+            OperationId::invitation_accept(),
+            OperationState::Succeeded,
+        );
+        let third = state.exported_operation_snapshots();
+        assert_eq!(third[0].instance_id, first_instance);
+        assert_eq!(third[0].state, OperationState::Succeeded);
     }
 }

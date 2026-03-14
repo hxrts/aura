@@ -244,6 +244,22 @@ async fn submit_semantic_command(
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
             Ok(SemanticCommandResponse::accepted_without_value())
         }
+        IntentAction::CreateChannel { channel_name } => {
+            let timestamp_ms = context_workflows::current_time_ms(controller.app_core())
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            messaging_workflows::create_channel(
+                controller.app_core(),
+                &channel_name,
+                None,
+                &[],
+                1,
+                timestamp_ms,
+            )
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
         IntentAction::StartDeviceEnrollment { device_name, .. } => {
             controller.set_screen(UiScreen::Settings);
             controller.set_settings_section(browser_settings_section(SettingsSection::Devices));
@@ -322,7 +338,7 @@ async fn submit_semantic_command(
             let invitation = invitation_workflows::import_invitation_details(&app_core, &code)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            invitation_workflows::accept_invitation(&app_core, &invitation.invitation_id)
+            invitation_workflows::accept_imported_invitation(&app_core, &invitation)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
             Ok(SemanticCommandResponse::accepted_without_value())

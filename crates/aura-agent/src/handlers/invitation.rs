@@ -121,6 +121,35 @@ pub struct InvitationResult {
     pub error: Option<String>,
 }
 
+#[derive(Debug)]
+pub(crate) struct DeferredInvitationNetworkEffects {
+    commands: Vec<aura_invitation::guards::EffectCommand>,
+}
+
+impl DeferredInvitationNetworkEffects {
+    fn new(commands: Vec<aura_invitation::guards::EffectCommand>) -> Self {
+        Self { commands }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.commands.is_empty()
+    }
+
+    pub(crate) fn commands(&self) -> &[aura_invitation::guards::EffectCommand] {
+        &self.commands
+    }
+
+    pub(crate) fn into_commands(self) -> Vec<aura_invitation::guards::EffectCommand> {
+        self.commands
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct PreparedInvitation {
+    pub(crate) invitation: Invitation,
+    pub(crate) deferred_network_effects: DeferredInvitationNetworkEffects,
+}
+
 struct ChannelInviteDetails {
     context_id: ContextId,
     channel_id: ChannelId,
@@ -436,6 +465,37 @@ impl InvitationHandler {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
+        let prepared = self
+            .prepare_invitation_with_context(
+                effects.clone(),
+                receiver_id,
+                invitation_type,
+                context_override,
+                message,
+                expires_in_ms,
+            )
+            .await?;
+
+        execute_invitation_effect_commands(
+            prepared.deferred_network_effects.commands,
+            &self.context.authority,
+            effects.as_ref(),
+            true,
+        )
+        .await?;
+
+        Ok(prepared.invitation)
+    }
+
+    pub(crate) async fn prepare_invitation_with_context(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        receiver_id: AuthorityId,
+        invitation_type: InvitationType,
+        context_override: Option<ContextId>,
+        message: Option<String>,
+        expires_in_ms: Option<u64>,
+    ) -> AgentResult<PreparedInvitation> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
         // Generate unique invitation ID
@@ -473,9 +533,15 @@ impl InvitationHandler {
             invitation_id.clone(),
         );
 
-        // Execute the outcome (handles denial and effects)
-        execute_guard_outcome_for_accept(outcome, &self.context.authority, effects.as_ref())
-            .await?;
+        let (local_effects, deferred_network_effects) =
+            split_invitation_send_guard_outcome(outcome, &self.context.authority)?;
+        execute_invitation_effect_commands(
+            local_effects,
+            &self.context.authority,
+            effects.as_ref(),
+            false,
+        )
+        .await?;
 
         let invitation = Invitation {
             invitation_id: invitation_id.clone(),
@@ -555,7 +621,10 @@ impl InvitationHandler {
             InvitationType::Channel { .. } => {}
         }
 
-        Ok(invitation)
+        Ok(PreparedInvitation {
+            invitation,
+            deferred_network_effects,
+        })
     }
 
     /// Accept an invitation
@@ -651,19 +720,6 @@ impl InvitationHandler {
             tracing::debug!(
                 invitation_id = %invitation_id,
                 "No contact resolution for invitation (not a contact invitation or already resolved)"
-            );
-        }
-
-        // Best-effort sender notification for contact acceptance. Keep acceptance
-        // successful even when notification delivery fails.
-        if let Err(error) = self
-            .notify_contact_invitation_acceptance(effects.as_ref(), invitation_id)
-            .await
-        {
-            tracing::warn!(
-                invitation_id = %invitation_id,
-                error = %error,
-                "Contact acceptance notification failed; continuing"
             );
         }
 
@@ -943,7 +999,7 @@ impl InvitationHandler {
         })
     }
 
-    async fn notify_contact_invitation_acceptance(
+    pub(crate) async fn notify_contact_invitation_acceptance(
         &self,
         effects: &AuraEffectSystem,
         invitation_id: &InvitationId,
@@ -2282,6 +2338,34 @@ pub async fn execute_guard_outcome_for_accept(
     authority: &AuthorityContext,
     effects: &AuraEffectSystem,
 ) -> AgentResult<()> {
+    let (local_effects, deferred_network_effects) =
+        split_invitation_send_guard_outcome(outcome, authority)?;
+    execute_invitation_effect_commands(local_effects, authority, effects, false).await?;
+    execute_invitation_effect_commands(deferred_network_effects.commands, authority, effects, true)
+        .await
+}
+
+fn resolve_charge_peer(
+    commands: &[aura_invitation::guards::EffectCommand],
+    fallback: AuthorityId,
+) -> AuthorityId {
+    commands
+        .iter()
+        .find_map(|command| match command {
+            aura_invitation::guards::EffectCommand::NotifyPeer { peer, .. } => Some(*peer),
+            aura_invitation::guards::EffectCommand::RecordReceipt { peer, .. } => *peer,
+            _ => None,
+        })
+        .unwrap_or(fallback)
+}
+
+fn split_invitation_send_guard_outcome(
+    outcome: aura_invitation::guards::GuardOutcome,
+    authority: &AuthorityContext,
+) -> AgentResult<(
+    Vec<aura_invitation::guards::EffectCommand>,
+    DeferredInvitationNetworkEffects,
+)> {
     if outcome.is_denied() {
         let reason = outcome
             .decision
@@ -2294,11 +2378,45 @@ pub async fn execute_guard_outcome_for_accept(
         )));
     }
 
+    let mut local_effects = Vec::new();
+    let mut deferred_network_effects = Vec::new();
+    for command in outcome.effects {
+        match command {
+            aura_invitation::guards::EffectCommand::ChargeFlowBudget { .. }
+            | aura_invitation::guards::EffectCommand::NotifyPeer { .. }
+            | aura_invitation::guards::EffectCommand::RecordReceipt { .. } => {
+                deferred_network_effects.push(command);
+            }
+            aura_invitation::guards::EffectCommand::JournalAppend { .. } => {
+                local_effects.push(command);
+            }
+        }
+    }
+
+    tracing::debug!(
+        authority = %authority.authority_id(),
+        local_effect_count = local_effects.len(),
+        deferred_network_effect_count = deferred_network_effects.len(),
+        "Prepared invitation guard outcome with deferred network side effects"
+    );
+
+    Ok((
+        local_effects,
+        DeferredInvitationNetworkEffects::new(deferred_network_effects),
+    ))
+}
+
+pub(crate) async fn execute_invitation_effect_commands(
+    commands: Vec<aura_invitation::guards::EffectCommand>,
+    authority: &AuthorityContext,
+    effects: &AuraEffectSystem,
+    best_effort_network_failures: bool,
+) -> AgentResult<()> {
     let context_id = authority.default_context_id();
-    let charge_peer = resolve_charge_peer(&outcome.effects, authority.authority_id());
+    let charge_peer = resolve_charge_peer(&commands, authority.authority_id());
     let mut pending_receipt: Option<Receipt> = None;
 
-    for command in outcome.effects {
+    for command in commands {
         let is_network_side_effect = matches!(
             command,
             aura_invitation::guards::EffectCommand::ChargeFlowBudget { .. }
@@ -2317,11 +2435,11 @@ pub async fn execute_guard_outcome_for_accept(
         .await
         {
             Ok(()) => {}
-            Err(error) if is_network_side_effect => {
+            Err(error) if best_effort_network_failures && is_network_side_effect => {
                 tracing::warn!(
                     authority = %authority.authority_id(),
                     context = %context_id,
-                    "Invitation accept continuing after best-effort network side-effect failure: {}",
+                    "Invitation side effect continuing after best-effort network failure: {}",
                     error
                 );
             }
@@ -2330,20 +2448,6 @@ pub async fn execute_guard_outcome_for_accept(
     }
 
     Ok(())
-}
-
-fn resolve_charge_peer(
-    commands: &[aura_invitation::guards::EffectCommand],
-    fallback: AuthorityId,
-) -> AuthorityId {
-    commands
-        .iter()
-        .find_map(|command| match command {
-            aura_invitation::guards::EffectCommand::NotifyPeer { peer, .. } => Some(*peer),
-            aura_invitation::guards::EffectCommand::RecordReceipt { peer, .. } => *peer,
-            _ => None,
-        })
-        .unwrap_or(fallback)
 }
 
 async fn execute_effect_command(

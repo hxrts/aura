@@ -268,7 +268,7 @@ impl DispatchHelper {
                 Ok(response) => self.handle_op_response(response).await,
                 Err(e) => {
                     tracing::error!("dispatch operation error: {e}");
-                    Err(TerminalError::Operation(e.to_string()))
+                    Err(e)
                 }
             }
         } else {

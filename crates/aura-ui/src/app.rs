@@ -1521,7 +1521,8 @@ fn submit_runtime_modal_action(
                             &app_core,
                             &invitation,
                         )
-                        .await {
+                        .await
+                        {
                             Ok(()) => {
                                 let _ =
                                     settings_workflows::refresh_settings_from_runtime(&app_core)

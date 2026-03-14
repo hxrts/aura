@@ -13,22 +13,24 @@ use crate::tui::components::ToastMessage;
 use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
 use crate::tui::types::{AccessLevel, MfaPolicy};
-use crate::tui::updates::{UiUpdate, UiUpdateSender};
+use crate::tui::updates::{UiOperation, UiUpdate, UiUpdateSender};
 use aura_app::ui::types::InvitationBridgeType;
 use aura_app::ui::workflows::invitation::import_invitation_details;
 use aura_app::ui::workflows::semantic_facts::{
     publish_authoritative_operation_failure, publish_authoritative_operation_phase,
 };
 use aura_app::ui_contract::{
-    ChannelFactKey, InvitationFactKind, OperationId, OperationState, RuntimeEventKind,
-    RuntimeFact, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
-    SemanticOperationKind, SemanticOperationPhase,
+    ChannelFactKey, InvitationFactKind, OperationId, OperationState, RuntimeEventKind, RuntimeFact,
+    SemanticFailureCode, SemanticFailureDomain, SemanticOperationError, SemanticOperationKind,
+    SemanticOperationPhase, SemanticOperationStatus,
 };
 use aura_core::identifiers::CeremonyId;
 use aura_core::AuthorityId;
 use futures::FutureExt;
 
 use super::types::*;
+
+const SEMANTIC_DISPATCH_TIMEOUT_MS: u64 = 3_000;
 
 #[allow(clippy::needless_pass_by_value)] // Arc clone pattern for task spawning
 fn spawn_ctx<F>(ctx: Arc<IoContext>, fut: F)
@@ -38,35 +40,217 @@ where
     ctx.tasks().spawn(fut);
 }
 
-async fn send_ui_update_reliable(tx: &UiUpdateSender, update: UiUpdate) {
+async fn send_ui_update_required(tx: &UiUpdateSender, update: UiUpdate) {
     if tx.try_send(update.clone()).is_err() {
         let _ = tx.send(update).await;
     }
 }
 
-async fn publish_authoritative_operation_phase_from_ctx(
+async fn send_ui_update_reliable(tx: &UiUpdateSender, update: UiUpdate) {
+    send_ui_update_required(tx, update).await;
+}
+
+fn send_ui_update_lossy(tx: &UiUpdateSender, update: UiUpdate) -> bool {
+    tx.try_send(update).is_ok()
+}
+
+fn enqueue_ui_update_required(ctx: Arc<IoContext>, tx: UiUpdateSender, update: UiUpdate) {
+    spawn_ctx(ctx, async move {
+        send_ui_update_required(&tx, update).await;
+    });
+}
+
+async fn publish_authoritative_operation_status_to_tui<F>(
     ctx: &IoContext,
+    tx: &UiUpdateSender,
+    operation_id: OperationId,
+    status: SemanticOperationStatus,
+    publish: F,
+) where
+    F: Future<Output = Result<(), aura_core::AuraError>> + Send + 'static,
+{
+    send_ui_update_required(
+        tx,
+        UiUpdate::AuthoritativeOperationStatus {
+            operation_id,
+            status,
+        },
+    )
+    .await;
+    let tasks = ctx.tasks();
+    tasks.spawn(async move {
+        if let Err(error) = publish.await {
+            tracing::warn!(error = %error, "authoritative operation status publish failed");
+        }
+    });
+}
+
+async fn publish_authoritative_operation_phase_to_tui(
+    ctx: &IoContext,
+    tx: &UiUpdateSender,
     operation_id: OperationId,
     kind: SemanticOperationKind,
     phase: SemanticOperationPhase,
 ) {
-    let _ = publish_authoritative_operation_phase(ctx.app_core_raw(), operation_id, kind, phase).await;
+    let status = SemanticOperationStatus::new(kind, phase);
+    let app_core = Arc::clone(ctx.app_core_raw());
+    publish_authoritative_operation_status_to_tui(
+        ctx,
+        tx,
+        operation_id.clone(),
+        status,
+        async move { publish_authoritative_operation_phase(&app_core, operation_id, kind, phase).await },
+    )
+    .await;
 }
 
-async fn publish_authoritative_operation_failure_from_ctx(
+async fn publish_authoritative_operation_failure_to_tui(
     ctx: &IoContext,
+    tx: &UiUpdateSender,
     operation_id: OperationId,
     kind: SemanticOperationKind,
     detail: impl Into<String>,
 ) {
-    let _ = publish_authoritative_operation_failure(
-        ctx.app_core_raw(),
-        operation_id,
-        kind,
-        SemanticOperationError::new(SemanticFailureDomain::Command, SemanticFailureCode::InternalError)
-            .with_detail(detail.into()),
+    let error = SemanticOperationError::new(
+        SemanticFailureDomain::Command,
+        SemanticFailureCode::InternalError,
+    )
+    .with_detail(detail.into());
+    let status = SemanticOperationStatus::failed(kind, error.clone());
+    let app_core = Arc::clone(ctx.app_core_raw());
+    publish_authoritative_operation_status_to_tui(
+        ctx,
+        tx,
+        operation_id.clone(),
+        status,
+        async move {
+            publish_authoritative_operation_failure(&app_core, operation_id, kind, error).await
+        },
     )
     .await;
+}
+
+fn semantic_kind_for_bridge_invitation(
+    invitation: Option<&aura_app::runtime_bridge::InvitationInfo>,
+) -> SemanticOperationKind {
+    match invitation.map(|invitation| &invitation.invitation_type) {
+        Some(InvitationBridgeType::Contact { .. }) => {
+            SemanticOperationKind::AcceptContactInvitation
+        }
+        _ => SemanticOperationKind::AcceptPendingChannelInvitation,
+    }
+}
+
+fn semantic_kind_for_view_invitation(
+    invitation: Option<&aura_app::views::invitations::Invitation>,
+) -> SemanticOperationKind {
+    match invitation.map(|invitation| invitation.invitation_type) {
+        Some(aura_app::views::invitations::InvitationType::Home) => {
+            SemanticOperationKind::AcceptContactInvitation
+        }
+        _ => SemanticOperationKind::AcceptPendingChannelInvitation,
+    }
+}
+
+fn invitation_import_runtime_fact_update(
+    invitation: Option<&aura_app::runtime_bridge::InvitationInfo>,
+) -> Option<UiUpdate> {
+    let invitation = invitation?;
+    if matches!(
+        invitation.invitation_type,
+        InvitationBridgeType::Contact { .. }
+    ) {
+        Some(UiUpdate::RuntimeFactsUpdated {
+            replace_kinds: vec![RuntimeEventKind::InvitationAccepted],
+            facts: vec![RuntimeFact::InvitationAccepted {
+                invitation_kind: InvitationFactKind::Contact,
+                authority_id: Some(invitation.sender_id.to_string()),
+                operation_state: Some(OperationState::Succeeded),
+            }],
+        })
+    } else {
+        None
+    }
+}
+
+fn invitation_import_success_updates(
+    code: &str,
+    invitation: Option<&aura_app::runtime_bridge::InvitationInfo>,
+) -> Vec<UiUpdate> {
+    let mut updates = vec![UiUpdate::InvitationImported {
+        invitation_code: code.to_string(),
+    }];
+    if let Some(update) = invitation_import_runtime_fact_update(invitation) {
+        updates.push(update);
+    }
+    updates
+}
+
+async fn run_invitation_import_flow(ctx: Arc<IoContext>, tx: UiUpdateSender, code: String) {
+    let app_core = ctx.app_core_raw().clone();
+    let invitation = import_invitation_details(&app_core, &code).await.ok();
+    let operation_kind = semantic_kind_for_bridge_invitation(invitation.as_ref());
+    publish_authoritative_operation_phase_to_tui(
+        ctx.as_ref(),
+        &tx,
+        OperationId::invitation_accept(),
+        operation_kind,
+        SemanticOperationPhase::WorkflowDispatched,
+    )
+    .await;
+    match ctx
+        .dispatch(EffectCommand::ImportInvitation { code: code.clone() })
+        .await
+    {
+        Ok(_) => {
+            publish_authoritative_operation_phase_to_tui(
+                ctx.as_ref(),
+                &tx,
+                OperationId::invitation_accept(),
+                operation_kind,
+                SemanticOperationPhase::Succeeded,
+            )
+            .await;
+            for update in invitation_import_success_updates(&code, invitation.as_ref()) {
+                send_ui_update_required(&tx, update).await;
+            }
+        }
+        Err(error) => {
+            tracing::error!(error = %error, "ImportInvitation dispatch failed");
+            publish_authoritative_operation_failure_to_tui(
+                ctx.as_ref(),
+                &tx,
+                OperationId::invitation_accept(),
+                operation_kind,
+                error.to_string(),
+            )
+            .await;
+            send_ui_update_required(
+                &tx,
+                UiUpdate::ToastAdded(ToastMessage::error(
+                    "invitation",
+                    format!("Import invitation failed: {error}"),
+                )),
+            )
+            .await;
+        }
+    }
+}
+
+fn enqueue_invalid_lan_authority_toast(
+    ctx: Arc<IoContext>,
+    tx: UiUpdateSender,
+    authority_id: String,
+    error: String,
+) {
+    enqueue_ui_update_required(
+        ctx,
+        tx,
+        UiUpdate::ToastAdded(ToastMessage::error(
+            "lan",
+            format!("Invalid authority id '{authority_id}': {error}"),
+        )),
+    );
 }
 
 #[derive(Clone, Copy)]
@@ -435,31 +619,27 @@ impl ChatCallbacks {
                             {
                                 Ok(result) => {
                                     if let Some(channel_name) = joined_channel_name.as_deref() {
-                                        for _ in 0..40 {
-                                            if let Ok(chat) =
-                                                aura_app::ui::workflows::messaging::get_chat_state(
-                                                    ctx.app_core_raw(),
-                                                )
-                                                .await
+                                        if let Ok(chat) =
+                                            aura_app::ui::workflows::messaging::get_chat_state(
+                                                ctx.app_core_raw(),
+                                            )
+                                            .await
+                                        {
+                                            if let Some(channel) =
+                                                chat.all_channels().find(|candidate| {
+                                                    candidate
+                                                        .name
+                                                        .eq_ignore_ascii_case(channel_name)
+                                                })
                                             {
-                                                if let Some(channel) =
-                                                    chat.all_channels().find(|candidate| {
-                                                        candidate
-                                                            .name
-                                                            .eq_ignore_ascii_case(channel_name)
-                                                    })
-                                                {
-                                                    send_ui_update_reliable(
-                                                        &tx,
-                                                        UiUpdate::ChannelSelected(
-                                                            channel.id.to_string(),
-                                                        ),
-                                                    )
-                                                    .await;
-                                                    break;
-                                                }
+                                                send_ui_update_required(
+                                                    &tx,
+                                                    UiUpdate::ChannelSelected(
+                                                        channel.id.to_string(),
+                                                    ),
+                                                )
+                                                .await;
                                             }
-                                            tokio::time::sleep(Duration::from_millis(100)).await;
                                         }
                                     }
                                     let state_label = match result.consistency_state {
@@ -615,7 +795,11 @@ impl ChatCallbacks {
                 spawn_ctx(ctx.clone(), async move {
                     match ctx.dispatch(cmd).await {
                         Ok(_) => {
-                            let _ = tx.try_send(UiUpdate::MessageRetried { message_id: msg_id });
+                            send_ui_update_required(
+                                &tx,
+                                UiUpdate::MessageRetried { message_id: msg_id },
+                            )
+                            .await;
                         }
                         Err(_e) => {
                             // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -664,16 +848,24 @@ impl ChatCallbacks {
                 .await
                 {
                     Ok(participants) => {
-                        let _ = tx.try_send(UiUpdate::ChannelInfoParticipants {
-                            channel_id: channel_id_clone,
-                            participants,
-                        });
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ChannelInfoParticipants {
+                                channel_id: channel_id_clone,
+                                participants,
+                            },
+                        )
+                        .await;
                     }
                     Err(e) => {
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                            "participants",
-                            e.to_string(),
-                        )));
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::error(
+                                "participants",
+                                e.to_string(),
+                            )),
+                        )
+                        .await;
                     }
                 }
             });
@@ -695,13 +887,18 @@ impl ChatCallbacks {
                 spawn_ctx(ctx.clone(), async move {
                     match ctx.dispatch(cmd).await {
                         Ok(_) => {
-                            let _ = tx.try_send(UiUpdate::ChannelCreated(channel_name));
+                            send_ui_update_required(&tx, UiUpdate::ChannelCreated(channel_name))
+                                .await;
                         }
                         Err(e) => {
-                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                "create-channel",
-                                e.to_string(),
-                            )));
+                            send_ui_update_required(
+                                &tx,
+                                UiUpdate::ToastAdded(ToastMessage::error(
+                                    "create-channel",
+                                    e.to_string(),
+                                )),
+                            )
+                            .await;
                         }
                     }
                 });
@@ -722,10 +919,14 @@ impl ChatCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::TopicSet {
-                            channel: ch,
-                            topic: t,
-                        });
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::TopicSet {
+                                channel: ch,
+                                topic: t,
+                            },
+                        )
+                        .await;
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -790,10 +991,14 @@ impl ContactsCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::NicknameUpdated {
-                            contact_id: contact_id_clone,
-                            nickname: nickname_clone,
-                        });
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::NicknameUpdated {
+                                contact_id: contact_id_clone,
+                                nickname: nickname_clone,
+                            },
+                        )
+                        .await;
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -812,9 +1017,13 @@ impl ContactsCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::ChatStarted {
-                            contact_id: contact_id_clone,
-                        });
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ChatStarted {
+                                contact_id: contact_id_clone,
+                            },
+                        )
+                        .await;
                     }
                     Err(e) => {
                         tracing::error!(error = %e, contact_id = %contact_id_clone, "StartDirectChat dispatch failed");
@@ -829,52 +1038,8 @@ impl ContactsCallbacks {
         Arc::new(move |code: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            let code_clone = code.clone();
-            let app_core = ctx.app_core_raw().clone();
-            let cmd = EffectCommand::ImportInvitation { code };
             spawn_ctx(ctx.clone(), async move {
-                let invitation = import_invitation_details(&app_core, &code_clone).await.ok();
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        if let Some(invitation) = invitation.as_ref() {
-                            if matches!(
-                                invitation.invitation_type,
-                                InvitationBridgeType::Contact { .. }
-                            ) {
-                                send_ui_update_reliable(
-                                    &tx,
-                                    UiUpdate::RuntimeFactsUpdated {
-                                        replace_kinds: vec![RuntimeEventKind::InvitationAccepted],
-                                        facts: vec![RuntimeFact::InvitationAccepted {
-                                            invitation_kind: InvitationFactKind::Contact,
-                                            authority_id: Some(invitation.sender_id.to_string()),
-                                            operation_state: Some(OperationState::Succeeded),
-                                        }],
-                                    },
-                                )
-                                .await;
-                            }
-                        }
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::InvitationImported {
-                                invitation_code: code_clone,
-                            },
-                        )
-                        .await;
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "ImportInvitation dispatch failed");
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::error(
-                                "invitation",
-                                format!("Import invitation failed: {e}"),
-                            )),
-                        )
-                        .await;
-                    }
-                }
+                run_invitation_import_flow(ctx, tx, code).await;
             });
         })
     }
@@ -889,26 +1054,104 @@ impl ContactsCallbacks {
                 channel,
             };
             spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::InvitationCreated {
-                                invitation_code: channel_name,
-                            },
-                        )
-                        .await;
+                let task_result = std::panic::AssertUnwindSafe(async {
+                    publish_authoritative_operation_phase_to_tui(
+                        ctx.as_ref(),
+                        &tx,
+                        OperationId::invitation_create(),
+                        SemanticOperationKind::InviteActorToChannel,
+                        SemanticOperationPhase::WorkflowDispatched,
+                    )
+                    .await;
+                    match tokio::time::timeout(
+                        Duration::from_millis(SEMANTIC_DISPATCH_TIMEOUT_MS),
+                        ctx.dispatch(cmd),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => {
+                            publish_authoritative_operation_phase_to_tui(
+                                ctx.as_ref(),
+                                &tx,
+                                OperationId::invitation_create(),
+                                SemanticOperationKind::InviteActorToChannel,
+                                SemanticOperationPhase::Succeeded,
+                            )
+                            .await;
+                            send_ui_update_reliable(
+                                &tx,
+                                UiUpdate::InvitationCreated {
+                                    invitation_code: channel_name,
+                                },
+                            )
+                            .await;
+                        }
+                        Ok(Err(error)) => {
+                            send_ui_update_reliable(
+                                &tx,
+                                UiUpdate::ToastAdded(ToastMessage::error(
+                                    "invitation",
+                                    format!("Invite to channel failed: {error}"),
+                                )),
+                            )
+                            .await;
+                            publish_authoritative_operation_failure_to_tui(
+                                ctx.as_ref(),
+                                &tx,
+                                OperationId::invitation_create(),
+                                SemanticOperationKind::InviteActorToChannel,
+                                error.to_string(),
+                            )
+                            .await;
+                        }
+                        Err(_) => {
+                            let detail = format!(
+                                "invite_to_channel dispatch timed out after {}ms",
+                                SEMANTIC_DISPATCH_TIMEOUT_MS
+                            );
+                            send_ui_update_reliable(
+                                &tx,
+                                UiUpdate::ToastAdded(ToastMessage::error(
+                                    "invitation",
+                                    format!("Invite to channel failed: {detail}"),
+                                )),
+                            )
+                            .await;
+                            publish_authoritative_operation_failure_to_tui(
+                                ctx.as_ref(),
+                                &tx,
+                                OperationId::invitation_create(),
+                                SemanticOperationKind::InviteActorToChannel,
+                                detail,
+                            )
+                            .await;
+                        }
                     }
-                    Err(error) => {
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::error(
-                                "invitation",
-                                format!("Invite to channel failed: {error}"),
-                            )),
-                        )
-                        .await;
-                    }
+                })
+                .catch_unwind()
+                .await;
+
+                if let Err(panic) = task_result {
+                    let detail = if let Some(message) = panic.downcast_ref::<&str>() {
+                        format!("invite_to_channel callback panicked: {message}")
+                    } else if let Some(message) = panic.downcast_ref::<String>() {
+                        format!("invite_to_channel callback panicked: {message}")
+                    } else {
+                        "invite_to_channel callback panicked".to_string()
+                    };
+                    send_ui_update_reliable(
+                        &tx,
+                        UiUpdate::ToastAdded(ToastMessage::error("invitation", detail.clone())),
+                    )
+                    .await;
+                    publish_authoritative_operation_failure_to_tui(
+                        ctx.as_ref(),
+                        &tx,
+                        OperationId::invitation_create(),
+                        SemanticOperationKind::InviteActorToChannel,
+                        detail,
+                    )
+                    .await;
                 }
             });
         })
@@ -936,10 +1179,12 @@ impl ContactsCallbacks {
             let parsed_authority_id = match authority_id.parse::<AuthorityId>() {
                 Ok(id) => id,
                 Err(error) => {
-                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                        "lan",
-                        format!("Invalid authority id '{authority_id}': {error}"),
-                    )));
+                    enqueue_invalid_lan_authority_toast(
+                        ctx.clone(),
+                        tx.clone(),
+                        authority_id,
+                        error.to_string(),
+                    );
                     return;
                 }
             };
@@ -951,9 +1196,13 @@ impl ContactsCallbacks {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         ctx.mark_peer_invited(&authority_id_clone).await;
-                        let _ = tx.try_send(UiUpdate::LanPeerInvited {
-                            peer_id: authority_id_clone,
-                        });
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::LanPeerInvited {
+                                peer_id: authority_id_clone,
+                            },
+                        )
+                        .await;
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -1004,8 +1253,26 @@ impl InvitationsCallbacks {
                     let core = app_core.read().await;
                     core.snapshot().invitations.invitation(&inv_id).cloned()
                 };
+                let operation_kind =
+                    semantic_kind_for_view_invitation(accepted_invitation.as_ref());
+                publish_authoritative_operation_phase_to_tui(
+                    ctx.as_ref(),
+                    &tx,
+                    OperationId::invitation_accept(),
+                    operation_kind,
+                    SemanticOperationPhase::WorkflowDispatched,
+                )
+                .await;
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
+                        publish_authoritative_operation_phase_to_tui(
+                            ctx.as_ref(),
+                            &tx,
+                            OperationId::invitation_accept(),
+                            operation_kind,
+                            SemanticOperationPhase::Succeeded,
+                        )
+                        .await;
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::InvitationAccepted {
@@ -1041,8 +1308,15 @@ impl InvitationsCallbacks {
                             .await;
                         }
                     }
-                    Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                    Err(error) => {
+                        publish_authoritative_operation_failure_to_tui(
+                            ctx.as_ref(),
+                            &tx,
+                            OperationId::invitation_accept(),
+                            operation_kind,
+                            error.to_string(),
+                        )
+                        .await;
                     }
                 }
             });
@@ -1141,53 +1415,8 @@ impl InvitationsCallbacks {
         Arc::new(move |code: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            let code_clone = code.clone();
-            let app_core = ctx.app_core_raw().clone();
-            let cmd = EffectCommand::ImportInvitation { code };
             spawn_ctx(ctx.clone(), async move {
-                let invitation = import_invitation_details(&app_core, &code_clone).await.ok();
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::InvitationImported {
-                                invitation_code: code_clone.clone(),
-                            },
-                        )
-                        .await;
-
-                        if let Some(invitation) = invitation.as_ref() {
-                            if matches!(
-                                invitation.invitation_type,
-                                InvitationBridgeType::Contact { .. }
-                            ) {
-                                send_ui_update_reliable(
-                                    &tx,
-                                    UiUpdate::RuntimeFactsUpdated {
-                                        replace_kinds: vec![RuntimeEventKind::InvitationAccepted],
-                                        facts: vec![RuntimeFact::InvitationAccepted {
-                                            invitation_kind: InvitationFactKind::Contact,
-                                            authority_id: Some(invitation.sender_id.to_string()),
-                                            operation_state: Some(OperationState::Succeeded),
-                                        }],
-                                    },
-                                )
-                                .await;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "ImportInvitation dispatch failed");
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::error(
-                                "invitation",
-                                format!("Import invitation failed: {e}"),
-                            )),
-                        )
-                        .await;
-                    }
-                }
+                run_invitation_import_flow(ctx, tx, code).await;
             });
         })
     }
@@ -1225,7 +1454,7 @@ impl RecoveryCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::RecoveryStarted);
+                        send_ui_update_required(&tx, UiUpdate::RecoveryStarted).await;
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -1243,9 +1472,13 @@ impl RecoveryCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::GuardianAdded {
-                            contact_id: "unknown".to_string(),
-                        });
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::GuardianAdded {
+                                contact_id: "unknown".to_string(),
+                            },
+                        )
+                        .await;
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -1266,9 +1499,13 @@ impl RecoveryCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::GuardianSelected {
-                            contact_id: contact_id_clone,
-                        });
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::GuardianSelected {
+                                contact_id: contact_id_clone,
+                            },
+                        )
+                        .await;
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -1289,9 +1526,13 @@ impl RecoveryCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::ApprovalSubmitted {
-                            request_id: request_id_clone,
-                        });
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ApprovalSubmitted {
+                                request_id: request_id_clone,
+                            },
+                        )
+                        .await;
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -1346,7 +1587,7 @@ impl SettingsCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::MfaPolicyChanged(policy));
+                        send_ui_update_required(&tx, UiUpdate::MfaPolicyChanged(policy)).await;
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -1368,7 +1609,11 @@ impl SettingsCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::NicknameSuggestionChanged(name_clone));
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::NicknameSuggestionChanged(name_clone),
+                        )
+                        .await;
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -1385,10 +1630,14 @@ impl SettingsCallbacks {
             let config = match crate::tui::effects::ThresholdConfig::new(threshold_k, threshold_n) {
                 Ok(config) => config,
                 Err(error) => {
-                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                        "threshold",
-                        error,
-                    )));
+                    enqueue_ui_update_required(
+                        ctx.clone(),
+                        tx.clone(),
+                        UiUpdate::operation_failed(
+                            UiOperation::UpdateThreshold,
+                            crate::error::TerminalError::Input(error),
+                        ),
+                    );
                     return;
                 }
             };
@@ -1396,10 +1645,14 @@ impl SettingsCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::ThresholdChanged {
-                            k: threshold_k,
-                            n: threshold_n,
-                        });
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ThresholdChanged {
+                                k: threshold_k,
+                                n: threshold_n,
+                            },
+                        )
+                        .await;
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -1415,8 +1668,9 @@ impl SettingsCallbacks {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
                 spawn_ctx(ctx.clone(), async move {
-                    publish_authoritative_operation_phase_from_ctx(
+                    publish_authoritative_operation_phase_to_tui(
                         ctx.as_ref(),
+                        &tx,
                         OperationId::device_enrollment(),
                         SemanticOperationKind::StartDeviceEnrollment,
                         SemanticOperationPhase::WorkflowDispatched,
@@ -1428,8 +1682,9 @@ impl SettingsCallbacks {
                     {
                         Ok(start) => start,
                         Err(error) => {
-                            publish_authoritative_operation_failure_from_ctx(
+                            publish_authoritative_operation_failure_to_tui(
                                 ctx.as_ref(),
+                                &tx,
                                 OperationId::device_enrollment(),
                                 SemanticOperationKind::StartDeviceEnrollment,
                                 error.to_string(),
@@ -1458,8 +1713,9 @@ impl SettingsCallbacks {
                         },
                     )
                     .await;
-                    publish_authoritative_operation_phase_from_ctx(
+                    publish_authoritative_operation_phase_to_tui(
                         ctx.as_ref(),
+                        &tx,
                         OperationId::device_enrollment(),
                         SemanticOperationKind::StartDeviceEnrollment,
                         SemanticOperationPhase::Succeeded,
@@ -1475,20 +1731,24 @@ impl SettingsCallbacks {
                         )
                         .await
                     {
-                        let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
-                            ceremony_id: status.ceremony_id.to_string(),
-                            kind: status.kind,
-                            accepted_count: status.accepted_count,
-                            total_count: status.total_count,
-                            threshold: status.threshold,
-                            is_complete: status.is_complete,
-                            has_failed: status.has_failed,
-                            accepted_participants: status.accepted_participants.clone(),
-                            error_message: status.error_message.clone(),
-                            pending_epoch: status.pending_epoch,
-                            agreement_mode: status.agreement_mode,
-                            reversion_risk: status.reversion_risk,
-                        });
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::KeyRotationCeremonyStatus {
+                                ceremony_id: status.ceremony_id.to_string(),
+                                kind: status.kind,
+                                accepted_count: status.accepted_count,
+                                total_count: status.total_count,
+                                threshold: status.threshold,
+                                is_complete: status.is_complete,
+                                has_failed: status.has_failed,
+                                accepted_participants: status.accepted_participants.clone(),
+                                error_message: status.error_message.clone(),
+                                pending_epoch: status.pending_epoch,
+                                agreement_mode: status.agreement_mode,
+                                reversion_risk: status.reversion_risk,
+                            },
+                        )
+                        .await;
                     }
 
                     let app = ctx.app_core_raw().clone();
@@ -1500,20 +1760,23 @@ impl SettingsCallbacks {
                             ceremony_id,
                             tokio::time::Duration::from_millis(500),
                             |status| {
-                                let _ = tx_monitor.try_send(UiUpdate::KeyRotationCeremonyStatus {
-                                    ceremony_id: status.ceremony_id.to_string(),
-                                    kind: status.kind,
-                                    accepted_count: status.accepted_count,
-                                    total_count: status.total_count,
-                                    threshold: status.threshold,
-                                    is_complete: status.is_complete,
-                                    has_failed: status.has_failed,
-                                    accepted_participants: status.accepted_participants.clone(),
-                                    error_message: status.error_message.clone(),
-                                    pending_epoch: status.pending_epoch,
-                                    agreement_mode: status.agreement_mode,
-                                    reversion_risk: status.reversion_risk,
-                                });
+                                let _ = send_ui_update_lossy(
+                                    &tx_monitor,
+                                    UiUpdate::KeyRotationCeremonyStatus {
+                                        ceremony_id: status.ceremony_id.to_string(),
+                                        kind: status.kind,
+                                        accepted_count: status.accepted_count,
+                                        total_count: status.total_count,
+                                        threshold: status.threshold,
+                                        is_complete: status.is_complete,
+                                        has_failed: status.has_failed,
+                                        accepted_participants: status.accepted_participants.clone(),
+                                        error_message: status.error_message.clone(),
+                                        pending_epoch: status.pending_epoch,
+                                        agreement_mode: status.agreement_mode,
+                                        reversion_risk: status.reversion_risk,
+                                    },
+                                );
                             },
                             tokio::time::sleep,
                         )
@@ -1539,10 +1802,14 @@ impl SettingsCallbacks {
                     }
                 };
 
-                let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
-                    "device-removal-started",
-                    "Device removal started",
-                )));
+                send_ui_update_required(
+                    &tx,
+                    UiUpdate::ToastAdded(ToastMessage::info(
+                        "device-removal-started",
+                        "Device removal started",
+                    )),
+                )
+                .await;
 
                 #[cfg(feature = "development")]
                 {
@@ -1573,20 +1840,27 @@ impl SettingsCallbacks {
                     .await
                     {
                         Ok(status) if status.is_complete => {
-                            let _ =
-                                tx_monitor.try_send(UiUpdate::ToastAdded(ToastMessage::success(
+                            send_ui_update_required(
+                                &tx_monitor,
+                                UiUpdate::ToastAdded(ToastMessage::success(
                                     "device-removal-complete",
                                     "Device removal complete",
-                                )));
+                                )),
+                            )
+                            .await;
                         }
                         Ok(status) if status.has_failed => {
                             let msg = status
                                 .error_message
                                 .unwrap_or_else(|| "Device removal failed".to_string());
-                            let _ = tx_monitor.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                "device-removal-failed",
-                                msg,
-                            )));
+                            send_ui_update_required(
+                                &tx_monitor,
+                                UiUpdate::ToastAdded(ToastMessage::error(
+                                    "device-removal-failed",
+                                    msg,
+                                )),
+                            )
+                            .await;
                         }
                         Ok(_) => {}
                         Err(_e) => {
@@ -1607,8 +1881,9 @@ impl SettingsCallbacks {
             let tx = tx.clone();
             let should_complete_onboarding = !ctx.has_account();
             spawn_ctx(ctx.clone(), async move {
-                publish_authoritative_operation_phase_from_ctx(
+                publish_authoritative_operation_phase_to_tui(
                     ctx.as_ref(),
+                    &tx,
                     OperationId::device_enrollment(),
                     SemanticOperationKind::ImportDeviceEnrollmentCode,
                     SemanticOperationPhase::WorkflowDispatched,
@@ -1616,33 +1891,40 @@ impl SettingsCallbacks {
                 .await;
                 match ctx.import_device_enrollment_code(&code).await {
                     Ok(()) => {
-                        publish_authoritative_operation_phase_from_ctx(
+                        publish_authoritative_operation_phase_to_tui(
                             ctx.as_ref(),
+                            &tx,
                             OperationId::device_enrollment(),
                             SemanticOperationKind::ImportDeviceEnrollmentCode,
                             SemanticOperationPhase::Succeeded,
                         )
                         .await;
                         if should_complete_onboarding {
-                            let _ = tx.try_send(UiUpdate::AccountCreated);
+                            send_ui_update_required(&tx, UiUpdate::AccountCreated).await;
                         }
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
-                            "devices",
-                            "Device enrollment invitation accepted",
-                        )));
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::success(
+                                "devices",
+                                "Device enrollment invitation accepted",
+                            )),
+                        )
+                        .await;
                     }
                     Err(e) => {
-                        publish_authoritative_operation_failure_from_ctx(
+                        publish_authoritative_operation_failure_to_tui(
                             ctx.as_ref(),
+                            &tx,
                             OperationId::device_enrollment(),
                             SemanticOperationKind::ImportDeviceEnrollmentCode,
                             e.to_string(),
                         )
                         .await;
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                            "devices",
-                            e.to_string(),
-                        )));
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::operation_failed(UiOperation::ImportDeviceEnrollmentCode, e),
+                        )
+                        .await;
                     }
                 }
             });
@@ -1707,9 +1989,13 @@ impl NeighborhoodCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::HomeEntered {
-                            home_id: home_id_clone,
-                        });
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::HomeEntered {
+                                home_id: home_id_clone,
+                            },
+                        )
+                        .await;
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -1731,7 +2017,7 @@ impl NeighborhoodCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::NavigatedHome);
+                        send_ui_update_required(&tx, UiUpdate::NavigatedHome).await;
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -1753,7 +2039,7 @@ impl NeighborhoodCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::NavigatedToLimited);
+                        send_ui_update_required(&tx, UiUpdate::NavigatedToLimited).await;
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -1783,16 +2069,24 @@ impl NeighborhoodCallbacks {
                     match ctx.dispatch(cmd).await {
                         Ok(_) => {
                             let action = if assign { "granted" } else { "revoked" };
-                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
-                                "moderation",
-                                format!("Moderator designation {action} for {target_id}"),
-                            )));
+                            send_ui_update_required(
+                                &tx,
+                                UiUpdate::ToastAdded(ToastMessage::success(
+                                    "moderation",
+                                    format!("Moderator designation {action} for {target_id}"),
+                                )),
+                            )
+                            .await;
                         }
                         Err(e) => {
-                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                "moderation",
-                                format!("Failed to update moderator designation: {e}"),
-                            )));
+                            send_ui_update_required(
+                                &tx,
+                                UiUpdate::ToastAdded(ToastMessage::error(
+                                    "moderation",
+                                    format!("Failed to update moderator designation: {e}"),
+                                )),
+                            )
+                            .await;
                         }
                     }
                 });
@@ -1809,8 +2103,9 @@ impl NeighborhoodCallbacks {
                 name: Some(display_name.clone()),
             };
             spawn_ctx(ctx.clone(), async move {
-                publish_authoritative_operation_phase_from_ctx(
+                publish_authoritative_operation_phase_to_tui(
                     ctx.as_ref(),
+                    &tx,
                     OperationId::create_home(),
                     SemanticOperationKind::CreateHome,
                     SemanticOperationPhase::WorkflowDispatched,
@@ -1818,21 +2113,27 @@ impl NeighborhoodCallbacks {
                 .await;
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        publish_authoritative_operation_phase_from_ctx(
+                        publish_authoritative_operation_phase_to_tui(
                             ctx.as_ref(),
+                            &tx,
                             OperationId::create_home(),
                             SemanticOperationKind::CreateHome,
                             SemanticOperationPhase::Succeeded,
                         )
                         .await;
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
-                            "home",
-                            format!("Home '{display_name}' created"),
-                        )));
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::success(
+                                "home",
+                                format!("Home '{display_name}' created"),
+                            )),
+                        )
+                        .await;
                     }
                     Err(error) => {
-                        publish_authoritative_operation_failure_from_ctx(
+                        publish_authoritative_operation_failure_to_tui(
                             ctx.as_ref(),
+                            &tx,
                             OperationId::create_home(),
                             SemanticOperationKind::CreateHome,
                             error.to_string(),
@@ -1862,10 +2163,14 @@ impl NeighborhoodCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
-                            "neighborhood",
-                            format!("Neighborhood '{display_name}' ready"),
-                        )));
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::success(
+                                "neighborhood",
+                                format!("Neighborhood '{display_name}' ready"),
+                            )),
+                        )
+                        .await;
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -1886,16 +2191,24 @@ impl NeighborhoodCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
-                            "neighborhood",
-                            "Home added to neighborhood",
-                        )));
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::success(
+                                "neighborhood",
+                                "Home added to neighborhood",
+                            )),
+                        )
+                        .await;
                     }
                     Err(e) => {
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                            "neighborhood",
-                            format!("Failed to add home to neighborhood: {e}"),
-                        )));
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::error(
+                                "neighborhood",
+                                format!("Failed to add home to neighborhood: {e}"),
+                            )),
+                        )
+                        .await;
                     }
                 }
             });
@@ -1913,16 +2226,24 @@ impl NeighborhoodCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
-                            "neighborhood",
-                            "OneHopLink linked",
-                        )));
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::success(
+                                "neighborhood",
+                                "OneHopLink linked",
+                            )),
+                        )
+                        .await;
                     }
                     Err(e) => {
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                            "neighborhood",
-                            format!("Failed to link one_hop_link: {e}"),
-                        )));
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::error(
+                                "neighborhood",
+                                format!("Failed to link one_hop_link: {e}"),
+                            )),
+                        )
+                        .await;
                     }
                 }
             });
@@ -1956,8 +2277,9 @@ impl AppCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             spawn_ctx(ctx.clone(), async move {
-                publish_authoritative_operation_phase_from_ctx(
+                publish_authoritative_operation_phase_to_tui(
                     ctx.as_ref(),
+                    &tx,
                     OperationId::account_create(),
                     SemanticOperationKind::CreateAccount,
                     SemanticOperationPhase::WorkflowDispatched,
@@ -1978,8 +2300,9 @@ impl AppCallbacks {
                         )
                         .await;
 
-                        publish_authoritative_operation_phase_from_ctx(
+                        publish_authoritative_operation_phase_to_tui(
                             ctx.as_ref(),
+                            &tx,
                             OperationId::account_create(),
                             SemanticOperationKind::CreateAccount,
                             SemanticOperationPhase::Succeeded,
@@ -1989,8 +2312,9 @@ impl AppCallbacks {
                     }
                     Ok(Err(e)) => {
                         tracing::error!("tui create_account callback failed: {e}");
-                        publish_authoritative_operation_failure_from_ctx(
+                        publish_authoritative_operation_failure_to_tui(
                             ctx.as_ref(),
+                            &tx,
                             OperationId::account_create(),
                             SemanticOperationKind::CreateAccount,
                             e.to_string(),
@@ -1998,17 +2322,15 @@ impl AppCallbacks {
                         .await;
                         send_ui_update_reliable(
                             &tx,
-                            UiUpdate::OperationFailed {
-                                operation: "CreateAccount".to_string(),
-                                error: e.to_string(),
-                            },
+                            UiUpdate::operation_failed(UiOperation::CreateAccount, e),
                         )
                         .await;
                     }
                     Err(_) => {
                         tracing::error!("tui create_account callback panicked");
-                        publish_authoritative_operation_failure_from_ctx(
+                        publish_authoritative_operation_failure_to_tui(
                             ctx.as_ref(),
+                            &tx,
                             OperationId::account_create(),
                             SemanticOperationKind::CreateAccount,
                             "panic in CreateAccount callback",
@@ -2016,10 +2338,12 @@ impl AppCallbacks {
                         .await;
                         send_ui_update_reliable(
                             &tx,
-                            UiUpdate::OperationFailed {
-                                operation: "CreateAccount".to_string(),
-                                error: "panic in CreateAccount callback".to_string(),
-                            },
+                            UiUpdate::operation_failed(
+                                UiOperation::CreateAccount,
+                                crate::error::TerminalError::Operation(
+                                    "panic in CreateAccount callback".to_string(),
+                                ),
+                            ),
                         )
                         .await;
                     }
@@ -2036,8 +2360,9 @@ impl AppCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             spawn_ctx(ctx.clone(), async move {
-                publish_authoritative_operation_phase_from_ctx(
+                publish_authoritative_operation_phase_to_tui(
                     ctx.as_ref(),
+                    &tx,
                     OperationId::device_enrollment(),
                     SemanticOperationKind::ImportDeviceEnrollmentCode,
                     SemanticOperationPhase::WorkflowDispatched,
@@ -2045,8 +2370,9 @@ impl AppCallbacks {
                 .await;
                 match ctx.import_device_enrollment_code(&code).await {
                     Ok(()) => {
-                        publish_authoritative_operation_phase_from_ctx(
+                        publish_authoritative_operation_phase_to_tui(
                             ctx.as_ref(),
+                            &tx,
                             OperationId::device_enrollment(),
                             SemanticOperationKind::ImportDeviceEnrollmentCode,
                             SemanticOperationPhase::Succeeded,
@@ -2063,8 +2389,9 @@ impl AppCallbacks {
                         .await;
                     }
                     Err(e) => {
-                        publish_authoritative_operation_failure_from_ctx(
+                        publish_authoritative_operation_failure_to_tui(
                             ctx.as_ref(),
+                            &tx,
                             OperationId::device_enrollment(),
                             SemanticOperationKind::ImportDeviceEnrollmentCode,
                             e.to_string(),
@@ -2072,7 +2399,7 @@ impl AppCallbacks {
                         .await;
                         send_ui_update_reliable(
                             &tx,
-                            UiUpdate::ToastAdded(ToastMessage::error("devices", e.to_string())),
+                            UiUpdate::operation_failed(UiOperation::ImportDeviceEnrollmentCode, e),
                         )
                         .await;
                     }
@@ -2114,5 +2441,71 @@ impl CallbackRegistry {
             neighborhood: NeighborhoodCallbacks::new(ctx.clone(), tx.clone()),
             app: AppCallbacks::new(ctx, tx),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_app::runtime_bridge::{InvitationBridgeStatus, InvitationInfo};
+
+    fn authority(value: &str) -> AuthorityId {
+        value.parse().expect("valid authority id")
+    }
+
+    fn contact_invitation() -> InvitationInfo {
+        InvitationInfo {
+            invitation_id: "inv-contact".into(),
+            sender_id: authority("authority-00000000-0000-0000-0000-000000000001"),
+            receiver_id: authority("authority-00000000-0000-0000-0000-000000000002"),
+            invitation_type: InvitationBridgeType::Contact { nickname: None },
+            status: InvitationBridgeStatus::Pending,
+            created_at_ms: 0,
+            expires_at_ms: None,
+            message: None,
+        }
+    }
+
+    fn channel_invitation() -> InvitationInfo {
+        InvitationInfo {
+            invitation_id: "inv-channel".into(),
+            sender_id: authority("authority-00000000-0000-0000-0000-000000000001"),
+            receiver_id: authority("authority-00000000-0000-0000-0000-000000000002"),
+            invitation_type: InvitationBridgeType::Channel {
+                home_id: "home-test".to_string(),
+                nickname_suggestion: None,
+            },
+            status: InvitationBridgeStatus::Pending,
+            created_at_ms: 0,
+            expires_at_ms: None,
+            message: None,
+        }
+    }
+
+    #[test]
+    fn invitation_import_success_updates_emit_import_before_runtime_fact() {
+        let updates = invitation_import_success_updates("code-123", Some(&contact_invitation()));
+
+        assert!(matches!(
+            updates.first(),
+            Some(UiUpdate::InvitationImported { invitation_code })
+                if invitation_code == "code-123"
+        ));
+        assert!(matches!(
+            updates.get(1),
+            Some(UiUpdate::RuntimeFactsUpdated { .. })
+        ));
+    }
+
+    #[test]
+    fn invitation_import_success_updates_skip_runtime_fact_for_non_contact_invites() {
+        let updates = invitation_import_success_updates("code-456", Some(&channel_invitation()));
+
+        assert_eq!(updates.len(), 1);
+        assert!(matches!(
+            updates.first(),
+            Some(UiUpdate::InvitationImported { invitation_code })
+                if invitation_code == "code-456"
+        ));
     }
 }

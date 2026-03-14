@@ -140,9 +140,7 @@ pub fn prev_ttl_preset(current_hours: u64) -> u64 {
 use crate::signal_defs::INVITATIONS_SIGNAL;
 use crate::ui::signals::CONTACTS_SIGNAL;
 use crate::ui_contract::AuthoritativeSemanticFact;
-use crate::ui_contract::{
-    OperationId, SemanticOperationKind, SemanticOperationPhase,
-};
+use crate::ui_contract::{OperationId, SemanticOperationKind, SemanticOperationPhase};
 use crate::workflows::runtime::{
     converge_runtime, ensure_runtime_peer_connectivity, require_runtime,
 };
@@ -165,12 +163,14 @@ use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
 use aura_core::AuraError;
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 
 const CONTACT_LINK_ATTEMPTS: usize = 32;
 const CONTACT_LINK_BACKOFF_MS: u64 = 100;
 const CHANNEL_BOOTSTRAP_RETRY_ATTEMPTS: usize = 6;
 const CHANNEL_BOOTSTRAP_RETRY_BACKOFF_MS: u64 = 75;
+const CHANNEL_INVITATION_CREATE_TIMEOUT_MS: u64 = 3_000;
 
 fn has_pending_home_or_channel_invitation(invitations: &InvitationsState) -> bool {
     invitations
@@ -195,6 +195,23 @@ async fn publish_invitation_operation_status(
     publish_authoritative_operation_phase(app_core, operation_id, kind, phase).await
 }
 
+fn semantic_kind_for_bridge_invitation(
+    invitation: &crate::runtime_bridge::InvitationInfo,
+) -> SemanticOperationKind {
+    match invitation.invitation_type {
+        crate::runtime_bridge::InvitationBridgeType::Contact { .. } => {
+            SemanticOperationKind::AcceptContactInvitation
+        }
+        crate::runtime_bridge::InvitationBridgeType::Channel { .. }
+        | crate::runtime_bridge::InvitationBridgeType::Guardian { .. } => {
+            SemanticOperationKind::AcceptPendingChannelInvitation
+        }
+        crate::runtime_bridge::InvitationBridgeType::DeviceEnrollment { .. } => {
+            SemanticOperationKind::AcceptPendingChannelInvitation
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 enum ChannelInvitationBootstrapError {
     #[error("InviteActorToChannel requires a canonical channel id, got {raw}")]
@@ -209,12 +226,24 @@ enum ChannelInvitationBootstrapError {
         context_id: ContextId,
     },
     #[error("Failed to bootstrap channel invitation for channel {channel_id}: {detail}")]
-    BootstrapTransport { channel_id: ChannelId, detail: String },
+    BootstrapTransport {
+        channel_id: ChannelId,
+        detail: String,
+    },
+    #[error(
+        "Timed out creating channel invitation for channel {channel_id} and receiver {receiver_id}"
+    )]
+    CreateTimedOut {
+        channel_id: ChannelId,
+        receiver_id: AuthorityId,
+    },
 }
 
 impl ChannelInvitationBootstrapError {
     fn semantic_error(&self) -> crate::ui_contract::SemanticOperationError {
-        use crate::ui_contract::{SemanticFailureCode, SemanticFailureDomain, SemanticOperationError};
+        use crate::ui_contract::{
+            SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
+        };
 
         match self {
             Self::InvalidCanonicalChannelId { raw } => SemanticOperationError::new(
@@ -240,6 +269,16 @@ impl ChannelInvitationBootstrapError {
                 SemanticFailureCode::ChannelBootstrapUnavailable,
             )
             .with_detail(format!("channel_id={channel_id}; detail={detail}")),
+            Self::CreateTimedOut {
+                channel_id,
+                receiver_id,
+            } => SemanticOperationError::new(
+                SemanticFailureDomain::Transport,
+                SemanticFailureCode::InternalError,
+            )
+            .with_detail(format!(
+                "channel_id={channel_id}; receiver_id={receiver_id}; detail=create_channel_invitation_timeout"
+            )),
         }
     }
 }
@@ -286,7 +325,9 @@ impl AcceptInvitationError {
         &self,
         kind: SemanticOperationKind,
     ) -> crate::ui_contract::SemanticOperationError {
-        use crate::ui_contract::{SemanticFailureCode, SemanticFailureDomain, SemanticOperationError};
+        use crate::ui_contract::{
+            SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
+        };
 
         match self {
             Self::AcceptFailed { detail } => SemanticOperationError::new(
@@ -345,17 +386,17 @@ async fn ensure_channel_invitation_context_and_bootstrap(
                     "channel invitation bootstrap",
                 )
                 .await
-                .map_err(|_| ChannelInvitationBootstrapError::MissingAuthoritativeContext {
-                    channel_id,
+                .map_err(|_| {
+                    ChannelInvitationBootstrapError::MissingAuthoritativeContext { channel_id }
                 })?
             }
             #[cfg(not(feature = "signals"))]
             {
                 let _ = app_core;
                 let _ = runtime;
-                return Err(ChannelInvitationBootstrapError::MissingAuthoritativeContext {
-                    channel_id,
-                });
+                return Err(
+                    ChannelInvitationBootstrapError::MissingAuthoritativeContext { channel_id },
+                );
             }
         }
     };
@@ -425,6 +466,27 @@ pub async fn refresh_authoritative_invitation_readiness(
     replace_authoritative_semantic_facts_of_kind(
         app_core,
         crate::ui_contract::AuthoritativeSemanticFactKind::PendingHomeInvitationReady,
+        replacements,
+    )
+    .await
+}
+
+/// Refresh authoritative contact-link readiness facts from the current contacts state.
+pub async fn refresh_authoritative_contact_link_readiness(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
+    let contacts = read_signal_or_default(app_core, &*CONTACTS_SIGNAL).await;
+    let contact_count = contacts.contact_count();
+    let replacements = contacts
+        .all_contacts()
+        .map(|contact| AuthoritativeSemanticFact::ContactLinkReady {
+            authority_id: contact.id.to_string(),
+            contact_count,
+        })
+        .collect::<Vec<_>>();
+    replace_authoritative_semantic_facts_of_kind(
+        app_core,
+        crate::ui_contract::AuthoritativeSemanticFactKind::ContactLinkReady,
         replacements,
     )
     .await
@@ -610,17 +672,49 @@ pub async fn create_channel_invitation(
     )
     .await?;
 
-    let invitation = runtime
-        .create_channel_invitation(
+    let invitation = match tokio::time::timeout(
+        Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS),
+        runtime.create_channel_invitation(
             receiver,
             home_id,
             Some(context_id),
             Some(bootstrap),
             message,
             ttl_ms,
-        )
-        .await
-        .map_err(|e| AuraError::agent(format!("Failed to create channel invitation: {e}")))?;
+        ),
+    )
+    .await
+    {
+        Ok(Ok(invitation)) => invitation,
+        Ok(Err(error)) => {
+            let semantic_error = crate::ui_contract::SemanticOperationError::new(
+                crate::ui_contract::SemanticFailureDomain::Internal,
+                crate::ui_contract::SemanticFailureCode::InternalError,
+            )
+            .with_detail(format!("detail={error}"));
+            return Err(AuraError::agent(format!(
+                "Failed to create channel invitation: {}; semantic_error={semantic_error:?}",
+                error
+            )));
+        }
+        Err(_) => {
+            return fail_channel_invitation(
+                app_core,
+                ChannelInvitationBootstrapError::CreateTimedOut {
+                    channel_id,
+                    receiver_id: receiver,
+                },
+            )
+            .await;
+        }
+    };
+    publish_invitation_operation_status(
+        app_core,
+        OperationId::invitation_create(),
+        SemanticOperationKind::InviteActorToChannel,
+        SemanticOperationPhase::Succeeded,
+    )
+    .await?;
     Ok(invitation)
 }
 
@@ -807,6 +901,130 @@ pub async fn accept_invitation(
                 .await;
             }
         }
+    }
+
+    publish_invitation_operation_status(
+        app_core,
+        OperationId::invitation_accept(),
+        operation_kind,
+        SemanticOperationPhase::Succeeded,
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Accept an imported invitation using the invitation metadata returned by the runtime bridge.
+pub async fn accept_imported_invitation(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation: &crate::runtime_bridge::InvitationInfo,
+) -> Result<(), AuraError> {
+    let operation_kind = semantic_kind_for_bridge_invitation(invitation);
+    if matches!(
+        invitation.invitation_type,
+        crate::runtime_bridge::InvitationBridgeType::DeviceEnrollment { .. }
+    ) {
+        return fail_invitation_accept(
+            app_core,
+            operation_kind,
+            AcceptInvitationError::AcceptFailed {
+                detail:
+                    "device enrollment invitations must use accept_device_enrollment_invitation"
+                        .to_string(),
+            },
+        )
+        .await;
+    }
+
+    let runtime = require_runtime(app_core).await?;
+
+    if let Err(error) = runtime
+        .accept_invitation(invitation.invitation_id.as_str())
+        .await
+    {
+        if classify_invitation_accept_error(&error) != InvitationAcceptErrorClass::AlreadyHandled {
+            return fail_invitation_accept(
+                app_core,
+                operation_kind,
+                AcceptInvitationError::AcceptFailed {
+                    detail: error.to_string(),
+                },
+            )
+            .await;
+        }
+    }
+
+    for _ in 0..4 {
+        let _ = runtime.trigger_discovery().await;
+        let _ = runtime.process_ceremony_messages().await;
+        let _ = runtime.trigger_sync().await;
+        converge_runtime(&runtime).await;
+        let _ = crate::workflows::system::refresh_account(app_core).await;
+        if ensure_runtime_peer_connectivity(&runtime, "accept_invitation")
+            .await
+            .is_ok()
+        {
+            break;
+        }
+    }
+
+    match &invitation.invitation_type {
+        crate::runtime_bridge::InvitationBridgeType::Contact { .. } => {
+            if let Err(error) =
+                wait_for_contact_link(app_core, &runtime, invitation.sender_id).await
+            {
+                return fail_invitation_accept(app_core, operation_kind, error).await;
+            }
+            let contact_count = read_signal_or_default(app_core, &*CONTACTS_SIGNAL)
+                .await
+                .contact_count();
+            publish_authoritative_semantic_fact(
+                app_core,
+                AuthoritativeSemanticFact::ContactLinkReady {
+                    authority_id: invitation.sender_id.to_string(),
+                    contact_count,
+                },
+            )
+            .await?;
+        }
+        crate::runtime_bridge::InvitationBridgeType::Channel { home_id, .. } => {
+            let channel_id = match home_id.parse::<ChannelId>() {
+                Ok(channel_id) => channel_id,
+                Err(_) => {
+                    return fail_invitation_accept(
+                        app_core,
+                        operation_kind,
+                        AcceptInvitationError::AcceptFailed {
+                            detail: format!(
+                                "channel invitation {} resolved to invalid canonical channel id {home_id}",
+                                invitation.invitation_id
+                            ),
+                        },
+                    )
+                    .await;
+                }
+            };
+            if let Err(error) = reconcile_accepted_channel_invitation(
+                app_core,
+                &runtime,
+                channel_id,
+                invitation.sender_id,
+                None,
+            )
+            .await
+            {
+                return fail_invitation_accept(
+                    app_core,
+                    operation_kind,
+                    AcceptInvitationError::AcceptFailed {
+                        detail: error.to_string(),
+                    },
+                )
+                .await;
+            }
+        }
+        crate::runtime_bridge::InvitationBridgeType::Guardian { .. } => {}
+        crate::runtime_bridge::InvitationBridgeType::DeviceEnrollment { .. } => unreachable!(),
     }
 
     publish_invitation_operation_status(
@@ -1490,6 +1708,51 @@ mod tests {
             .any(|fact| matches!(fact, AuthoritativeSemanticFact::PendingHomeInvitationReady)));
     }
 
+    #[tokio::test]
+    async fn test_refresh_authoritative_contact_link_readiness_tracks_contacts_signal() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+        let contact_id = AuthorityId::new_from_entropy([50u8; 32]);
+        let contact = crate::views::contacts::Contact {
+            id: contact_id,
+            nickname: "Bob".to_string(),
+            nickname_suggestion: Some("Bob".to_string()),
+            is_guardian: false,
+            is_member: false,
+            last_interaction: None,
+            is_online: false,
+            read_receipt_policy: crate::views::contacts::ReadReceiptPolicy::Disabled,
+        };
+
+        emit_signal(
+            &app_core,
+            &*crate::signal_defs::CONTACTS_SIGNAL,
+            crate::views::contacts::ContactsState::from_contacts(vec![contact]),
+            crate::signal_defs::CONTACTS_SIGNAL_NAME,
+        )
+        .await
+        .unwrap();
+
+        refresh_authoritative_contact_link_readiness(&app_core)
+            .await
+            .unwrap();
+
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| matches!(
+            fact,
+            AuthoritativeSemanticFact::ContactLinkReady {
+                authority_id,
+                contact_count
+            } if authority_id == &contact_id.to_string() && *contact_count == 1
+        )));
+    }
+
     #[test]
     fn test_channel_invitation_bootstrap_error_maps_to_typed_semantic_failure() {
         let channel_id = ChannelId::from_bytes([44u8; 32]);
@@ -1503,12 +1766,31 @@ mod tests {
             semantic.code,
             SemanticFailureCode::ChannelBootstrapUnavailable
         );
-        assert!(
-            semantic
-                .detail
-                .as_deref()
-                .is_some_and(|detail| detail.contains(&channel_id.to_string()))
-        );
+        assert!(semantic
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains(&channel_id.to_string())));
+    }
+
+    #[test]
+    fn test_channel_invitation_timeout_maps_to_typed_semantic_failure() {
+        let channel_id = ChannelId::from_bytes([47u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([48u8; 32]);
+        let error = ChannelInvitationBootstrapError::CreateTimedOut {
+            channel_id,
+            receiver_id,
+        };
+        let semantic = error.semantic_error();
+        assert_eq!(semantic.domain, SemanticFailureDomain::Transport);
+        assert_eq!(semantic.code, SemanticFailureCode::InternalError);
+        assert!(semantic
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains(&channel_id.to_string())));
+        assert!(semantic
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains(&receiver_id.to_string())));
     }
 
     #[test]
@@ -1521,11 +1803,50 @@ mod tests {
             semantic.code,
             SemanticFailureCode::ContactLinkDidNotConverge
         );
-        assert!(
-            semantic
-                .detail
-                .as_deref()
-                .is_some_and(|detail| detail.contains(&contact_id.to_string()))
+        assert!(semantic
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains(&contact_id.to_string())));
+    }
+
+    #[test]
+    fn test_semantic_kind_for_bridge_invitation_uses_imported_type() {
+        let sender = AuthorityId::new_from_entropy([47u8; 32]);
+        let receiver = AuthorityId::new_from_entropy([48u8; 32]);
+
+        let contact = crate::runtime_bridge::InvitationInfo {
+            invitation_id: InvitationId::new("contact"),
+            sender_id: sender,
+            receiver_id: receiver,
+            invitation_type: crate::runtime_bridge::InvitationBridgeType::Contact {
+                nickname: None,
+            },
+            status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+            created_at_ms: 1,
+            expires_at_ms: None,
+            message: None,
+        };
+        assert_eq!(
+            semantic_kind_for_bridge_invitation(&contact),
+            SemanticOperationKind::AcceptContactInvitation
+        );
+
+        let channel = crate::runtime_bridge::InvitationInfo {
+            invitation_id: InvitationId::new("channel"),
+            sender_id: sender,
+            receiver_id: receiver,
+            invitation_type: crate::runtime_bridge::InvitationBridgeType::Channel {
+                home_id: ChannelId::from_bytes([49u8; 32]).to_string(),
+                nickname_suggestion: None,
+            },
+            status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+            created_at_ms: 1,
+            expires_at_ms: None,
+            message: None,
+        };
+        assert_eq!(
+            semantic_kind_for_bridge_invitation(&channel),
+            SemanticOperationKind::AcceptPendingChannelInvitation
         );
     }
 }

@@ -13,9 +13,7 @@ pub(crate) enum AmpChannelErrorClass {
     Other,
 }
 
-pub(crate) fn classify_invitation_accept_error(
-    error: &impl Display,
-) -> InvitationAcceptErrorClass {
+pub(crate) fn classify_invitation_accept_error(error: &impl Display) -> InvitationAcceptErrorClass {
     let lowered = error.to_string().to_ascii_lowercase();
     if lowered.contains("already accepted") || lowered.contains("not pending") {
         InvitationAcceptErrorClass::AlreadyHandled

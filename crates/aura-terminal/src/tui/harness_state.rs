@@ -1,9 +1,12 @@
 //! Structured TUI state export for harness observation.
 
 use crate::tui::screens::Screen;
+use crate::tui::state::commands::ThresholdK;
 use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::state::toast::ToastLevel;
-use crate::tui::state_machine::{DispatchCommand, ImportInvitationModalState, TuiCommand};
+use crate::tui::state_machine::{
+    DispatchCommand, ImportInvitationModalState, InvitationKind, TuiCommand,
+};
 use crate::tui::types::{
     Channel as TuiChannel, Contact as TuiContact, Device as TuiDevice, Message as TuiMessage,
     SettingsSection,
@@ -141,6 +144,22 @@ fn select_settings_section(state: &mut TuiState, section: SettingsSection) {
     state.settings.section = section;
     state.settings.selected_index = section.index();
     state.settings.focus = crate::tui::navigation::TwoPanelFocus::List;
+}
+
+fn visible_home_ids(app_snapshot: &StateSnapshot) -> Vec<String> {
+    let mut home_ids = Vec::new();
+    if app_snapshot.neighborhood.home_home_id != aura_core::identifiers::ChannelId::default() {
+        home_ids.push(app_snapshot.neighborhood.home_home_id.to_string());
+    }
+    let neighbor_home_ids = app_snapshot
+        .neighborhood
+        .all_neighbors()
+        .filter(|home| home.id != aura_core::identifiers::ChannelId::default())
+        .map(|home| home.id.to_string())
+        .filter(|home_id| !home_ids.iter().any(|existing| existing == home_id))
+        .collect::<Vec<_>>();
+    home_ids.extend(neighbor_home_ids);
+    home_ids
 }
 
 fn screen_item_id(screen: ScreenId) -> String {
@@ -357,6 +376,21 @@ pub(crate) fn apply_harness_command(
             }
             Ok(Vec::new())
         }
+        HarnessUiCommand::DismissTransient => {
+            if state.modal_queue.current().is_some() {
+                state.modal_queue.dismiss();
+            } else if state.toast_queue.current().is_some() {
+                state.toast_queue.dismiss();
+            }
+            Ok(Vec::new())
+        }
+        HarnessUiCommand::OpenSettingsSection { section } => {
+            let section = match section {
+                aura_app::scenario_contract::SettingsSection::Devices => SettingsSection::Devices,
+            };
+            select_settings_section(state, section);
+            Ok(Vec::new())
+        }
         HarnessUiCommand::ActivateControl { control_id } => match control_id {
             ControlId::NavNeighborhood => {
                 state.router.go_to(Screen::Neighborhood);
@@ -461,15 +495,110 @@ pub(crate) fn apply_harness_command(
             }
             _ => Ok(Vec::new()),
         },
-        HarnessUiCommand::CreateAccount { account_name } => Ok(vec![TuiCommand::Dispatch(
-            DispatchCommand::CreateAccount { name: account_name },
-        )]),
-        HarnessUiCommand::CreateHome { home_name } => Ok(vec![TuiCommand::Dispatch(
-            DispatchCommand::CreateHome {
+        HarnessUiCommand::CreateAccount { account_name } => {
+            Ok(vec![TuiCommand::Dispatch(DispatchCommand::CreateAccount {
+                name: account_name,
+            })])
+        }
+        HarnessUiCommand::CreateHome { home_name } => {
+            Ok(vec![TuiCommand::Dispatch(DispatchCommand::CreateHome {
                 name: home_name,
                 description: None,
-            },
+            })])
+        }
+        HarnessUiCommand::CreateChannel { channel_name } => {
+            state.router.go_to(Screen::Chat);
+            Ok(vec![TuiCommand::Dispatch(DispatchCommand::CreateChannel {
+                name: channel_name,
+                topic: None,
+                members: Vec::new(),
+                threshold_k: ThresholdK::new(1)
+                    .map_err(|error| format!("invalid default channel threshold: {error}"))?,
+            })])
+        }
+        HarnessUiCommand::SelectHome { home_id } => {
+            let home_ids = visible_home_ids(semantic_inputs.app_snapshot);
+            let selected_index = home_ids
+                .iter()
+                .position(|candidate| candidate == &home_id)
+                .ok_or_else(|| format!("home list item {home_id} is not visible"))?;
+            state.router.go_to(Screen::Neighborhood);
+            state.neighborhood.grid.set_cols(1);
+            state.neighborhood.grid.set_count(home_ids.len());
+            state.neighborhood.grid.select(selected_index);
+            state.neighborhood.selected_home = selected_index;
+            Ok(Vec::new())
+        }
+        HarnessUiCommand::StartDeviceEnrollment { device_name } => {
+            select_settings_section(state, SettingsSection::Devices);
+            let invitee_authority_id = if state.settings.demo_mobile_authority_id.is_empty() {
+                None
+            } else {
+                Some(
+                    state
+                        .settings
+                        .demo_mobile_authority_id
+                        .parse::<aura_core::AuthorityId>()
+                        .map_err(|error| {
+                            format!("invalid demo mobile authority id in settings state: {error}")
+                        })?,
+                )
+            };
+            Ok(vec![TuiCommand::Dispatch(DispatchCommand::AddDevice {
+                name: device_name,
+                invitee_authority_id,
+            })])
+        }
+        HarnessUiCommand::ImportDeviceEnrollmentCode { code } => Ok(vec![TuiCommand::Dispatch(
+            DispatchCommand::ImportDeviceEnrollmentDuringOnboarding { code },
         )]),
+        HarnessUiCommand::RemoveSelectedDevice => {
+            select_settings_section(state, SettingsSection::Devices);
+            let device_id = semantic_inputs
+                .settings_devices
+                .iter()
+                .find(|device| !device.is_current)
+                .map(|device| device.id.clone())
+                .ok_or_else(|| "no removable device is visible".to_string())?;
+            Ok(vec![TuiCommand::Dispatch(DispatchCommand::RemoveDevice {
+                device_id: device_id.into(),
+            })])
+        }
+        HarnessUiCommand::CreateContactInvitation {
+            receiver_authority_id,
+        } => {
+            let receiver_id = receiver_authority_id
+                .parse::<aura_core::AuthorityId>()
+                .map_err(|error| format!("invalid authority id: {error}"))?;
+            Ok(vec![TuiCommand::Dispatch(
+                DispatchCommand::CreateInvitation {
+                    receiver_id,
+                    invitation_type: InvitationKind::Contact,
+                    message: None,
+                    ttl_secs: None,
+                },
+            )])
+        }
+        HarnessUiCommand::ImportInvitation { code } => Ok(vec![TuiCommand::Dispatch(
+            DispatchCommand::ImportInvitation { code },
+        )]),
+        HarnessUiCommand::InviteActorToChannel {
+            authority_id,
+            channel_id,
+        } => {
+            let authority_id = authority_id
+                .parse::<aura_core::AuthorityId>()
+                .map_err(|error| format!("invalid authority id: {error}"))?;
+            channel_id
+                .parse::<aura_core::ChannelId>()
+                .map_err(|error| format!("invalid channel id: {error}"))?;
+            Ok(vec![TuiCommand::Dispatch(
+                DispatchCommand::InviteActorToChannel {
+                    authority_id,
+                    channel_id,
+                },
+            )])
+        }
         HarnessUiCommand::AcceptPendingChannelInvitation => {
             state.router.go_to(Screen::Chat);
             Ok(vec![TuiCommand::Dispatch(
@@ -480,6 +609,19 @@ pub(crate) fn apply_harness_command(
             state.router.go_to(Screen::Chat);
             Ok(vec![TuiCommand::Dispatch(DispatchCommand::JoinChannel {
                 channel_name,
+            })])
+        }
+        HarnessUiCommand::SelectChannel { channel_id } => {
+            let channel_visible = semantic_inputs
+                .chat_channels
+                .iter()
+                .any(|candidate| candidate.id == channel_id);
+            if !channel_visible {
+                return Err(format!("channel list item {channel_id} is not visible"));
+            }
+            state.router.go_to(Screen::Chat);
+            Ok(vec![TuiCommand::Dispatch(DispatchCommand::SelectChannel {
+                channel_id: channel_id.into(),
             })])
         }
         HarnessUiCommand::SendChatMessage { content } => Ok(vec![TuiCommand::Dispatch(
@@ -894,7 +1036,8 @@ mod tests {
     use crate::tui::state::modal_queue::QueuedModal;
     use crate::tui::state::views::{AccountSetupModalState, DeviceEnrollmentCeremonyModalState};
     use crate::tui::state::DispatchCommand;
-    use crate::tui::types::{Channel as TuiChannel, SettingsSection};
+    use crate::tui::state_machine::InvitationKind;
+    use crate::tui::types::{Channel as TuiChannel, Device as TuiDevice, SettingsSection};
     use crate::tui::updates::{harness_command_channel, HarnessCommandSubmission};
     use crate::tui::{TuiCommand, TuiState};
     use aura_app::ui::contract::{
@@ -1060,17 +1203,64 @@ mod tests {
     }
 
     #[test]
-    fn harness_command_remove_device_emits_dispatch_followup() {
+    fn harness_command_open_settings_section_applies_immediately() {
         let mut state = TuiState::new();
         let followup = apply_harness_command(
             &mut state,
-            HarnessUiCommand::ActivateControl {
-                control_id: ControlId::SettingsRemoveDeviceButton,
+            HarnessUiCommand::OpenSettingsSection {
+                section: aura_app::scenario_contract::SettingsSection::Devices,
             },
             TuiSemanticInputs {
                 app_snapshot: &StateSnapshot::default(),
                 contacts: &[],
                 settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("settings section command should apply: {error}"));
+
+        assert!(followup.is_empty());
+        assert_eq!(state.screen(), Screen::Settings);
+        assert_eq!(state.settings.section, SettingsSection::Devices);
+    }
+
+    #[test]
+    fn harness_command_dismiss_transient_closes_modal() {
+        let mut state = TuiState::new();
+        state.show_modal(QueuedModal::AccountSetup(AccountSetupModalState::default()));
+
+        let followup = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::DismissTransient,
+            TuiSemanticInputs {
+                app_snapshot: &StateSnapshot::default(),
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("dismiss transient command should apply: {error}"));
+
+        assert!(followup.is_empty());
+        assert!(state.modal_queue.current().is_none());
+    }
+
+    #[test]
+    fn harness_command_remove_device_emits_dispatch_followup() {
+        let mut state = TuiState::new();
+        let devices = vec![
+            TuiDevice::new("device:current", "Current").current(),
+            TuiDevice::new("device:removable", "Backup"),
+        ];
+        let followup = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::RemoveSelectedDevice,
+            TuiSemanticInputs {
+                app_snapshot: &StateSnapshot::default(),
+                contacts: &[],
+                settings_devices: &devices,
                 chat_channels: &[],
                 chat_messages: &[],
             },
@@ -1081,7 +1271,8 @@ mod tests {
         assert_eq!(state.settings.section, SettingsSection::Devices);
         assert!(matches!(
             followup.as_slice(),
-            [TuiCommand::Dispatch(DispatchCommand::OpenDeviceSelectModal)]
+            [TuiCommand::Dispatch(DispatchCommand::RemoveDevice { device_id })]
+                if device_id.to_string() == "device:removable"
         ));
     }
 
@@ -1135,6 +1326,176 @@ mod tests {
     }
 
     #[test]
+    fn harness_command_create_channel_emits_dispatch_followup() {
+        let mut state = TuiState::new();
+        let followup = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::CreateChannel {
+                channel_name: "shared-parity-lab".to_string(),
+            },
+            TuiSemanticInputs {
+                app_snapshot: &StateSnapshot::default(),
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("create channel command should apply: {error}"));
+
+        assert_eq!(state.screen(), Screen::Chat);
+        assert!(matches!(
+            followup.as_slice(),
+            [TuiCommand::Dispatch(DispatchCommand::CreateChannel {
+                name,
+                topic: None,
+                members,
+                threshold_k,
+            })] if name == "shared-parity-lab" && members.is_empty() && threshold_k.get() == 1
+        ));
+    }
+
+    #[test]
+    fn harness_command_start_device_enrollment_emits_add_device_followup() {
+        let mut state = TuiState::new();
+        let followup = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::StartDeviceEnrollment {
+                device_name: "Mobile".to_string(),
+            },
+            TuiSemanticInputs {
+                app_snapshot: &StateSnapshot::default(),
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("device enrollment command should apply: {error}"));
+
+        assert_eq!(state.screen(), Screen::Settings);
+        assert_eq!(state.settings.section, SettingsSection::Devices);
+        assert!(matches!(
+            followup.as_slice(),
+            [TuiCommand::Dispatch(DispatchCommand::AddDevice {
+                name,
+                invitee_authority_id: None
+            })] if name == "Mobile"
+        ));
+    }
+
+    #[test]
+    fn harness_command_import_device_enrollment_code_uses_onboarding_dispatch() {
+        let mut state = TuiState::new();
+        let followup = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::ImportDeviceEnrollmentCode {
+                code: "device-code".to_string(),
+            },
+            TuiSemanticInputs {
+                app_snapshot: &StateSnapshot::default(),
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("device import command should apply: {error}"));
+
+        assert!(matches!(
+            followup.as_slice(),
+            [TuiCommand::Dispatch(DispatchCommand::ImportDeviceEnrollmentDuringOnboarding {
+                code
+            })] if code == "device-code"
+        ));
+    }
+
+    #[test]
+    fn harness_command_create_contact_invitation_emits_dispatch_followup() {
+        let mut state = TuiState::new();
+        let authority_id = crate::ids::authority_id("harness-state:test-contact").to_string();
+        let followup = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::CreateContactInvitation {
+                receiver_authority_id: authority_id.to_string(),
+            },
+            TuiSemanticInputs {
+                app_snapshot: &StateSnapshot::default(),
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("create invitation command should apply: {error}"));
+
+        assert!(matches!(
+            followup.as_slice(),
+            [TuiCommand::Dispatch(DispatchCommand::CreateInvitation {
+                receiver_id,
+                invitation_type: InvitationKind::Contact,
+                message: None,
+                ttl_secs: None,
+            })] if receiver_id.to_string() == authority_id
+        ));
+    }
+
+    #[test]
+    fn harness_command_invite_actor_to_channel_emits_dispatch_followup() {
+        let mut state = TuiState::new();
+        let authority_id = crate::ids::authority_id("harness-state:test-channel-invite");
+        let channel_id = aura_core::ChannelId::from_bytes([7u8; 32]);
+        let followup = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::InviteActorToChannel {
+                authority_id: authority_id.to_string(),
+                channel_id: channel_id.to_string(),
+            },
+            TuiSemanticInputs {
+                app_snapshot: &StateSnapshot::default(),
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("invite actor command should apply: {error}"));
+
+        assert!(matches!(
+            followup.as_slice(),
+            [TuiCommand::Dispatch(DispatchCommand::InviteActorToChannel {
+                authority_id: dispatched_id,
+                channel_id: dispatched_channel_id,
+            })] if dispatched_id == &authority_id && dispatched_channel_id == &channel_id.to_string()
+        ));
+    }
+
+    #[test]
+    fn harness_command_import_invitation_emits_dispatch_followup() {
+        let mut state = TuiState::new();
+        let followup = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::ImportInvitation {
+                code: "aura:v1:test".to_string(),
+            },
+            TuiSemanticInputs {
+                app_snapshot: &StateSnapshot::default(),
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("import invitation command should apply: {error}"));
+
+        assert!(matches!(
+            followup.as_slice(),
+            [TuiCommand::Dispatch(DispatchCommand::ImportInvitation { code })]
+                if code == "aura:v1:test"
+        ));
+    }
+
+    #[test]
     fn harness_command_navigation_publishes_newer_authoritative_projection() {
         let app_snapshot = StateSnapshot::default();
 
@@ -1181,6 +1542,66 @@ mod tests {
             updated_snapshot.revision.semantic_seq > initial_snapshot.revision.semantic_seq,
             "semantic command application must publish a newer authoritative projection"
         );
+    }
+
+    #[test]
+    fn harness_command_select_home_uses_visible_home_ids() {
+        let mut state = TuiState::new();
+        let mut app_snapshot = StateSnapshot::default();
+        let home_id = "channel:1111111111111111111111111111111111111111111111111111111111111111";
+        app_snapshot.neighborhood.home_home_id = home_id
+            .parse()
+            .unwrap_or_else(|error| panic!("home id should parse: {error}"));
+
+        let followup = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::SelectHome {
+                home_id: home_id.to_string(),
+            },
+            TuiSemanticInputs {
+                app_snapshot: &app_snapshot,
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("home selection command should apply: {error}"));
+
+        assert!(followup.is_empty());
+        assert_eq!(state.screen(), Screen::Neighborhood);
+        assert_eq!(state.neighborhood.selected_home, 0);
+    }
+
+    #[test]
+    fn harness_command_select_channel_emits_dispatch_followup() {
+        let app_snapshot = StateSnapshot::default();
+        let channels = vec![
+            TuiChannel::new("channel:note-to-self", "Note to Self"),
+            TuiChannel::new("channel:shared", "Shared"),
+        ];
+        let mut state = TuiState::new();
+        let followup = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::SelectChannel {
+                channel_id: "channel:shared".to_string(),
+            },
+            TuiSemanticInputs {
+                app_snapshot: &app_snapshot,
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &channels,
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("channel selection command should apply: {error}"));
+
+        assert_eq!(state.screen(), Screen::Chat);
+        assert!(matches!(
+            followup.as_slice(),
+            [TuiCommand::Dispatch(DispatchCommand::SelectChannel { channel_id })]
+                if channel_id.to_string() == "channel:shared"
+        ));
     }
 
     #[test]

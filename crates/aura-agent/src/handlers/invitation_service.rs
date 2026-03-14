@@ -4,8 +4,9 @@
 //! Wraps `InvitationHandler` with ergonomic methods and proper error handling.
 
 use super::invitation::{
-    Invitation, InvitationHandler, InvitationResult, InvitationStatus, InvitationType,
-    ShareableInvitation, ShareableInvitationError,
+    execute_invitation_effect_commands, DeferredInvitationNetworkEffects, Invitation,
+    InvitationHandler, InvitationResult, InvitationStatus, InvitationType, ShareableInvitation,
+    ShareableInvitationError,
 };
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::services::ceremony_runner::{
@@ -113,6 +114,88 @@ impl InvitationServiceApi {
         }
     }
 
+    fn spawn_deferred_invitation_delivery(
+        &self,
+        invitation: &Invitation,
+        deferred_network_effects: DeferredInvitationNetworkEffects,
+    ) {
+        if deferred_network_effects.is_empty() {
+            return;
+        }
+
+        let authority = self.handler.authority_context().clone();
+        let effects = self.effects.clone();
+        let tasks = self.tasks.group(format!(
+            "invitation_service.delivery.{}",
+            invitation.invitation_id
+        ));
+        let invitation_id = invitation.invitation_id.clone();
+        let sender_id = invitation.sender_id;
+        let receiver_id = invitation.receiver_id;
+        let command_count = deferred_network_effects.commands().len();
+        let commands = deferred_network_effects.into_commands();
+        let fut = async move {
+            tracing::debug!(
+                invitation_id = %invitation_id,
+                sender_id = %sender_id,
+                receiver_id = %receiver_id,
+                command_count,
+                "Executing deferred invitation delivery side effects"
+            );
+            if let Err(error) =
+                execute_invitation_effect_commands(commands, &authority, effects.as_ref(), true)
+                    .await
+            {
+                tracing::warn!(
+                    invitation_id = %invitation_id,
+                    sender_id = %sender_id,
+                    receiver_id = %receiver_id,
+                    error = %error,
+                    "Deferred invitation delivery side effects failed"
+                );
+            }
+        };
+
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                tasks.spawn_local_named("delivery", fut);
+            } else {
+                tasks.spawn_named("delivery", fut);
+            }
+        }
+    }
+
+    fn spawn_contact_acceptance_notification(&self, invitation_id: InvitationId) {
+        let handler = self.handler.clone();
+        let effects = self.effects.clone();
+        let tasks = self.tasks.group(format!(
+            "invitation_service.contact_acceptance.{}",
+            invitation_id
+        ));
+        let task_name = format!("notify.{}", invitation_id);
+        let invitation_id_for_log = invitation_id.clone();
+        let fut = async move {
+            if let Err(error) = handler
+                .notify_contact_invitation_acceptance(effects.as_ref(), &invitation_id)
+                .await
+            {
+                tracing::warn!(
+                    invitation_id = %invitation_id_for_log,
+                    error = %error,
+                    "Contact acceptance notification failed; continuing"
+                );
+            }
+        };
+        #[cfg(target_arch = "wasm32")]
+        {
+            tasks.spawn_local_named(task_name, fut);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            tasks.spawn_named(task_name, fut);
+        }
+    }
+
     fn should_track_ceremony(invitation_type: &InvitationType) -> bool {
         matches!(
             invitation_type,
@@ -182,9 +265,9 @@ impl InvitationServiceApi {
             ))
         })?;
 
-        let invitation = self
+        let prepared = self
             .handler
-            .create_invitation_with_context(
+            .prepare_invitation_with_context(
                 self.effects.clone(),
                 receiver_id,
                 InvitationType::Channel {
@@ -197,7 +280,9 @@ impl InvitationServiceApi {
                 expires_in_ms,
             )
             .await?;
+        let invitation = prepared.invitation;
         let _ = self.ensure_invitation_ceremony(&invitation).await?;
+        self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);
         self.spawn_channel_invitation_exchange(&invitation);
         Ok(invitation)
     }
@@ -219,17 +304,20 @@ impl InvitationServiceApi {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
-        let invitation = self
+        let prepared = self
             .handler
-            .create_invitation(
+            .prepare_invitation_with_context(
                 self.effects.clone(),
                 receiver_id,
                 InvitationType::Guardian { subject_authority },
+                None,
                 message,
                 expires_in_ms,
             )
             .await?;
+        let invitation = prepared.invitation;
         let _ = self.ensure_invitation_ceremony(&invitation).await?;
+        self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);
         Ok(invitation)
     }
 
@@ -250,17 +338,20 @@ impl InvitationServiceApi {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
-        let invitation = self
+        let prepared = self
             .handler
-            .create_invitation(
+            .prepare_invitation_with_context(
                 self.effects.clone(),
                 receiver_id,
                 InvitationType::Contact { nickname },
+                None,
                 message,
                 expires_in_ms,
             )
             .await?;
+        let invitation = prepared.invitation;
         let _ = self.ensure_invitation_ceremony(&invitation).await?;
+        self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);
         Ok(invitation)
     }
 
@@ -325,6 +416,9 @@ impl InvitationServiceApi {
             .get_invitation_with_storage(self.effects.as_ref(), invitation_id)
             .await
         {
+            if matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
+                self.spawn_contact_acceptance_notification(invitation.invitation_id.clone());
+            }
             if let Some(ceremony_id) = self.ensure_invitation_ceremony(&invitation).await? {
                 let _ = self
                     .ceremony_runner

@@ -226,6 +226,7 @@ enum ContactPhase {
 enum ChannelPhase {
     #[default]
     None,
+    LocalReady,
     InvitationPending,
     MembershipReady,
 }
@@ -290,6 +291,7 @@ enum SharedFlowTransition {
     AccountReady,
     ContactInvitationReady,
     ContactLinked,
+    ChannelCreated,
     PendingChannelInvitation,
     ChannelMembershipReady,
     MessageVisible,
@@ -322,6 +324,12 @@ impl SharedFlowState {
                     bail!("contact link requires AccountPhase::Ready");
                 }
                 next.contact = ContactPhase::Linked;
+            }
+            SharedFlowTransition::ChannelCreated => {
+                if !matches!(self.account, AccountPhase::Ready) {
+                    bail!("channel create requires AccountPhase::Ready");
+                }
+                next.channel = ChannelPhase::LocalReady;
             }
             SharedFlowTransition::PendingChannelInvitation => {
                 if !matches!(self.contact, ContactPhase::Linked) {
@@ -368,8 +376,13 @@ impl SharedFlowState {
                 if !matches!(self.contact, ContactPhase::Linked) {
                     bail!("invite_actor_to_channel requires ContactPhase::Linked");
                 }
-                if !matches!(self.channel, ChannelPhase::MembershipReady) {
-                    bail!("invite_actor_to_channel requires ChannelPhase::MembershipReady");
+                if !matches!(
+                    self.channel,
+                    ChannelPhase::LocalReady | ChannelPhase::MembershipReady
+                ) {
+                    bail!(
+                        "invite_actor_to_channel requires ChannelPhase::LocalReady or MembershipReady"
+                    );
                 }
             }
             ScenarioAction::AcceptPendingChannelInvitation => {
@@ -400,6 +413,7 @@ impl SharedFlowState {
 enum SharedSemanticBinding {
     CreateAccount,
     CreateHome,
+    CreateChannel,
     StartDeviceEnrollment,
     ImportDeviceEnrollmentCode,
     RemoveSelectedDevice,
@@ -416,6 +430,7 @@ impl SharedSemanticBinding {
         match action {
             ScenarioAction::CreateAccount => Some(Self::CreateAccount),
             ScenarioAction::CreateHome => Some(Self::CreateHome),
+            ScenarioAction::CreateChannel => Some(Self::CreateChannel),
             ScenarioAction::StartDeviceEnrollment => Some(Self::StartDeviceEnrollment),
             ScenarioAction::ImportDeviceEnrollmentCode => Some(Self::ImportDeviceEnrollmentCode),
             ScenarioAction::RemoveSelectedDevice => Some(Self::RemoveSelectedDevice),
@@ -851,7 +866,7 @@ fn execute_step(
     }
     match step.action {
         ScenarioAction::LaunchInstances | ScenarioAction::Noop => Ok(()),
-        ScenarioAction::CreateHome => {
+        ScenarioAction::CreateHome | ScenarioAction::CreateChannel => {
             unreachable!("shared semantic action should have been handled")
         }
         ScenarioAction::SetVar => {
@@ -1139,29 +1154,11 @@ fn execute_step(
             record_submission_handle(context, &instance_id, operation_handle.clone());
             let mut contact_link_step = semantic_wait_step(step);
             contact_link_step.runtime_event_kind = Some(RuntimeEventKind::ContactLinkReady);
-            if let Some(handle) = operation_handle {
-                let remaining_ms = deadline
-                    .saturating_duration_since(Instant::now())
-                    .as_millis()
-                    .max(1) as u64;
-                convergence_stage(
-                    step,
-                    "accept_contact_operation",
-                    wait_for_operation_handle_state(
-                        step,
-                        tool_api,
-                        &instance_id,
-                        remaining_ms,
-                        &handle,
-                        OperationState::Succeeded,
-                    ),
-                )?;
-            }
             let remaining_ms = deadline
                 .saturating_duration_since(Instant::now())
                 .as_millis()
                 .max(1) as u64;
-            convergence_stage(
+            if convergence_stage(
                 step,
                 "contact_link",
                 wait_for_semantic_state(
@@ -1171,7 +1168,28 @@ fn execute_step(
                     &instance_id,
                     remaining_ms,
                 ),
-            )?;
+            )
+            .is_err()
+            {
+                let remaining_ms = deadline
+                    .saturating_duration_since(Instant::now())
+                    .as_millis()
+                    .max(1) as u64;
+                let mut contacts_step = semantic_wait_step(step);
+                contacts_step.list_id = Some(ListId::Contacts);
+                contacts_step.count = Some(1);
+                convergence_stage(
+                    step,
+                    "contacts_list",
+                    wait_for_semantic_state(
+                        &contacts_step,
+                        tool_api,
+                        context,
+                        &instance_id,
+                        remaining_ms,
+                    ),
+                )?;
+            }
             record_shared_flow_progress(step, context, &instance_id);
             Ok(())
         }
@@ -2299,6 +2317,10 @@ fn semantic_execution_adapter_step(step: &SemanticStep) -> Result<ScenarioStep> 
             compat_step.action = ScenarioAction::CreateHome;
             compat_step.value = Some(home_name);
         }
+        SemanticAction::Intent(IntentAction::CreateChannel { channel_name }) => {
+            compat_step.action = ScenarioAction::CreateChannel;
+            compat_step.value = Some(channel_name);
+        }
         SemanticAction::Intent(IntentAction::StartDeviceEnrollment {
             device_name,
             code_name,
@@ -2592,6 +2614,29 @@ fn execute_shared_semantic_action(
             record_shared_flow_progress(step, context, &instance_id);
             Ok(())
         }
+        SharedSemanticBinding::CreateChannel => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let channel_name = resolve_required_field(
+                step,
+                "value",
+                step.value.as_deref().or(step.expect.as_deref()),
+                context,
+            )?;
+            let response = submit_shared_intent(
+                step,
+                tool_api,
+                context,
+                &instance_id,
+                IntentAction::CreateChannel { channel_name },
+            )?;
+            record_submission_handle(
+                context,
+                &instance_id,
+                require_semantic_unit_submission(step, "create_channel", response)?,
+            );
+            record_shared_flow_progress(step, context, &instance_id);
+            Ok(())
+        }
         SharedSemanticBinding::StartDeviceEnrollment => {
             let instance_id = resolve_required_instance(step, context)?;
             let device_name = resolve_required_field(
@@ -2709,24 +2754,6 @@ fn execute_shared_semantic_action(
             record_submission_handle(context, &instance_id, operation_handle.clone());
             let mut contact_link_step = semantic_wait_step(step);
             contact_link_step.runtime_event_kind = Some(RuntimeEventKind::ContactLinkReady);
-            if let Some(handle) = operation_handle {
-                let remaining_ms = deadline
-                    .saturating_duration_since(Instant::now())
-                    .as_millis()
-                    .max(1) as u64;
-                convergence_stage(
-                    step,
-                    "accept_contact_operation",
-                    wait_for_operation_handle_state(
-                        step,
-                        tool_api,
-                        &instance_id,
-                        remaining_ms,
-                        &handle,
-                        OperationState::Succeeded,
-                    ),
-                )?;
-            }
             let remaining_ms = deadline
                 .saturating_duration_since(Instant::now())
                 .as_millis()
@@ -2905,6 +2932,40 @@ fn unsatisfied_action_preconditions(
         .collect()
 }
 
+fn barrier_covers_precondition(
+    barrier: &BarrierDeclaration,
+    precondition: &ActionPrecondition,
+) -> bool {
+    match (barrier, precondition) {
+        (BarrierDeclaration::Readiness(left), ActionPrecondition::Readiness(right)) => {
+            left == right
+        }
+        (BarrierDeclaration::Quiescence(left), ActionPrecondition::Quiescence(right)) => {
+            left == right
+        }
+        (BarrierDeclaration::Screen(left), ActionPrecondition::Screen(right)) => left == right,
+        (BarrierDeclaration::RuntimeEvent(left), ActionPrecondition::RuntimeEvent(right)) => {
+            left == right
+        }
+        _ => false,
+    }
+}
+
+fn uncovered_action_preconditions(contract: &SharedActionContract) -> Vec<ActionPrecondition> {
+    contract
+        .preconditions
+        .iter()
+        .filter(|precondition| {
+            !contract
+                .barriers
+                .before_issue
+                .iter()
+                .any(|barrier| barrier_covers_precondition(barrier, precondition))
+        })
+        .cloned()
+        .collect()
+}
+
 fn enforce_action_preconditions(
     step: &ScenarioStep,
     tool_api: &mut ToolApi,
@@ -2912,12 +2973,17 @@ fn enforce_action_preconditions(
     intent: &IntentAction,
 ) -> Result<()> {
     let contract = intent.contract();
-    if contract.preconditions.is_empty() {
+    let uncovered = uncovered_action_preconditions(&contract);
+    if uncovered.is_empty() {
         return Ok(());
     }
     let instance_id = resolve_required_instance(step, context)?;
     let snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
-    let failures = unsatisfied_action_preconditions(&contract, &snapshot);
+    let filtered_contract = SharedActionContract {
+        preconditions: uncovered,
+        ..contract
+    };
+    let failures = unsatisfied_action_preconditions(&filtered_contract, &snapshot);
     if failures.is_empty() {
         return Ok(());
     }
@@ -3134,6 +3200,7 @@ fn semantic_action_label(action: &SemanticAction) -> &'static str {
             IntentAction::OpenScreen(_) => "open_screen",
             IntentAction::CreateAccount { .. } => "create_account",
             IntentAction::CreateHome { .. } => "create_home",
+            IntentAction::CreateChannel { .. } => "create_channel",
             IntentAction::StartDeviceEnrollment { .. } => "start_device_enrollment",
             IntentAction::ImportDeviceEnrollmentCode { .. } => "import_device_enrollment_code",
             IntentAction::OpenSettingsSection(_) => "open_settings_section",
@@ -3196,6 +3263,14 @@ fn shared_intent_action(
         },
         SharedSemanticBinding::CreateHome => IntentAction::CreateHome {
             home_name: resolve_required_field(
+                step,
+                "value",
+                step.value.as_deref().or(step.expect.as_deref()),
+                context,
+            )?,
+        },
+        SharedSemanticBinding::CreateChannel => IntentAction::CreateChannel {
+            channel_name: resolve_required_field(
                 step,
                 "value",
                 step.value.as_deref().or(step.expect.as_deref()),
@@ -4297,6 +4372,7 @@ fn record_shared_flow_progress(
             Some(SharedFlowTransition::ContactInvitationReady)
         }
         ScenarioAction::AcceptContactInvitation => Some(SharedFlowTransition::ContactLinked),
+        ScenarioAction::CreateChannel => Some(SharedFlowTransition::ChannelCreated),
         ScenarioAction::AcceptPendingChannelInvitation => {
             Some(SharedFlowTransition::ChannelMembershipReady)
         }

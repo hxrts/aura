@@ -9,8 +9,7 @@ pub use aura_app::scenario_contract::{
     SubmittedAction, UiOperationHandle,
 };
 use aura_app::ui::contract::{
-    ControlId, FieldId, ListId, ModalId, OperationId, OperationInstanceId, OperationState,
-    ScreenId, UiSnapshot,
+    ControlId, FieldId, ListId, OperationId, OperationInstanceId, OperationState, UiSnapshot,
 };
 use aura_app::ui_contract::ProjectionRevision;
 use aura_app::ui_contract::RuntimeFact;
@@ -226,6 +225,17 @@ pub trait SharedSemanticBackend {
         )
     }
 
+    fn submit_create_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
+        expect_semantic_command_unit(
+            self.submit_semantic_command(SemanticCommandRequest::new(
+                IntentAction::CreateChannel {
+                    channel_name: channel_name.to_string(),
+                },
+            ))?,
+            "submit_create_channel",
+        )
+    }
+
     fn submit_create_contact_invitation(
         &mut self,
         receiver_authority_id: &str,
@@ -317,128 +327,6 @@ fn expect_semantic_command_unit(
             "{operation} produced an unexpected contact invitation code payload"
         )),
     }
-}
-
-pub(crate) fn wait_for_modal_visible(
-    backend: &dyn InstanceBackend,
-    modal_id: ModalId,
-    timeout: Duration,
-) -> Result<()> {
-    let deadline = Instant::now() + timeout;
-    loop {
-        if backend.ui_snapshot()?.open_modal == Some(modal_id) {
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            bail!("timed out waiting for modal {modal_id:?}");
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-}
-
-pub(crate) fn wait_for_screen_visible(
-    backend: &dyn InstanceBackend,
-    screen_id: ScreenId,
-    timeout: Duration,
-) -> Result<()> {
-    let deadline = Instant::now() + timeout;
-    loop {
-        if backend.ui_snapshot()?.screen == screen_id {
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            bail!("timed out waiting for screen {screen_id:?}");
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-}
-
-pub(crate) fn wait_for_list_item_visible(
-    backend: &dyn InstanceBackend,
-    list_id: ListId,
-    item_id: &str,
-    timeout: Duration,
-) -> Result<()> {
-    let deadline = Instant::now() + timeout;
-    loop {
-        let snapshot = backend.ui_snapshot()?;
-        if snapshot
-            .lists
-            .iter()
-            .find(|list| list.id == list_id)
-            .is_some_and(|list| list.items.iter().any(|item| item.id == item_id))
-        {
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            bail!("timed out waiting for item {item_id} in list {list_id:?}");
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-}
-
-pub(crate) fn submit_accept_contact_invitation_via_shared_ui<B>(
-    backend: &mut B,
-    code: &str,
-) -> Result<SubmittedAction<()>>
-where
-    B: InstanceBackend + RawUiBackend,
-{
-    let previous_operation =
-        observe_operation(&backend.ui_snapshot()?, &OperationId::invitation_accept());
-    let modal_open_deadline = Instant::now() + Duration::from_secs(5);
-    let mut modal_open = false;
-    while Instant::now() < modal_open_deadline {
-        let _ = backend.send_keys("\x1b");
-        backend.activate_control(ControlId::ContactsAcceptInvitationButton)?;
-        if wait_for_modal_visible(backend, ModalId::AcceptInvitation, Duration::from_secs(1))
-            .is_ok()
-        {
-            modal_open = true;
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(120));
-    }
-    if !modal_open {
-        bail!("submit_accept_contact_invitation: accept invitation modal did not open");
-    }
-    backend.fill_field(FieldId::InvitationCode, code)?;
-    backend.activate_control(ControlId::ModalConfirmButton)?;
-    let handle = wait_for_operation_submission(
-        backend,
-        OperationId::invitation_accept(),
-        previous_operation,
-        Duration::from_secs(5),
-    )?;
-    Ok(SubmittedAction::with_ui_operation((), handle))
-}
-
-pub(crate) fn submit_invite_actor_to_channel_via_shared_ui<B>(
-    backend: &mut B,
-    authority_id: &str,
-) -> Result<SubmittedAction<()>>
-where
-    B: InstanceBackend + RawUiBackend,
-{
-    backend.activate_control(ControlId::NavContacts)?;
-    wait_for_screen_visible(backend, ScreenId::Contacts, Duration::from_secs(5))?;
-    wait_for_list_item_visible(
-        backend,
-        ListId::Contacts,
-        authority_id,
-        Duration::from_secs(30),
-    )?;
-    backend.activate_list_item(ListId::Contacts, authority_id)?;
-    let previous_operation =
-        observe_operation(&backend.ui_snapshot()?, &OperationId::invitation_create());
-    backend.activate_control(ControlId::ContactsInviteToChannelButton)?;
-    let handle = wait_for_operation_submission(
-        backend,
-        OperationId::invitation_create(),
-        previous_operation,
-        Duration::from_secs(5),
-    )?;
-    Ok(SubmittedAction::with_ui_operation((), handle))
 }
 
 #[must_use]
