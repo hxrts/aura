@@ -113,8 +113,8 @@ struct TaskGroupShared {
     inherited_cancellation: Option<Arc<dyn CancellationToken>>,
     diagnostics: Option<Arc<RuntimeDiagnosticSink>>,
     tasks: Mutex<BTreeMap<u64, TaskMetadata>>,
-    exit_tx: mpsc::UnboundedSender<TaskExit>,
-    exit_rx: Mutex<mpsc::UnboundedReceiver<TaskExit>>,
+    exit_tx: mpsc::Sender<TaskExit>,
+    exit_rx: Mutex<mpsc::Receiver<TaskExit>>,
     notify: Arc<Notify>,
 }
 
@@ -276,7 +276,7 @@ impl Drop for TaskSupervisor {
 impl TaskGroup {
     fn root(name: impl Into<String>, diagnostics: Option<Arc<RuntimeDiagnosticSink>>) -> Self {
         let (shutdown_tx, _shutdown_rx) = watch::channel(false);
-        let (exit_tx, exit_rx) = mpsc::unbounded_channel();
+        let (exit_tx, exit_rx) = mpsc::channel(256);
         Self {
             shared: Arc::new(TaskGroupShared {
                 name: name.into(),
@@ -300,7 +300,7 @@ impl TaskGroup {
         let name = name.into();
         let full_name = format!("{}.{}", self.shared.name, name);
         let (shutdown_tx, _shutdown_rx) = watch::channel(false);
-        let (exit_tx, exit_rx) = mpsc::unbounded_channel();
+        let (exit_tx, exit_rx) = mpsc::channel(256);
         TaskGroup {
             shared: Arc::new(TaskGroupShared {
                 name: full_name,
