@@ -21,7 +21,7 @@ if rg -n 'context_workflows::|invitation_workflows::' crates/aura-harness/src/ba
   fail "backend implementations must not call app-internal workflow shortcuts directly"
 fi
 
-cargo test -p aura-harness local_shared_intent_methods_drive_visible_tui_controls --quiet
+cargo test -p aura-harness local_shared_intent_methods_use_semantic_harness_commands_for_shared_flows --quiet
 cargo test -p aura-harness playwright_shared_intent_methods_use_semantic_bridge --quiet
 cargo test -p aura-harness playwright_shared_semantic_methods_do_not_regress_to_raw_ui_driving --quiet
 cargo test -p aura-harness playwright_shared_semantic_bridge_replaces_shortcut_bypasses --quiet

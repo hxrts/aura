@@ -13,14 +13,16 @@ contract="crates/aura-harness/src/backend/mod.rs"
 local_backend="crates/aura-harness/src/backend/local_pty.rs"
 browser_backend="crates/aura-harness/src/backend/playwright_browser.rs"
 
-for helper in submit_accept_contact_invitation_via_shared_ui submit_invite_actor_to_channel_via_shared_ui; do
-  rg -q "fn $helper" "$contract" || fail "missing shared semantic helper $helper"
-done
+if rg -n 'submit_accept_contact_invitation_via_shared_ui|submit_invite_actor_to_channel_via_shared_ui' \
+  "$contract" "$local_backend" >/dev/null; then
+  fail "legacy shared semantic UI helper shortcuts must be removed"
+fi
 
-rg -q 'submit_accept_contact_invitation_via_shared_ui\(self, code\)' "$local_backend" \
-  || fail "local backend must route contact invitation acceptance through shared helper"
-rg -q 'submit_invite_actor_to_channel_via_shared_ui\(self, authority_id\)' "$local_backend" \
-  || fail "local backend must route channel invitation through shared helper"
+for command in OpenSettingsSection StartDeviceEnrollment ImportDeviceEnrollmentCode RemoveSelectedDevice \
+  CreateContactInvitation InviteActorToChannel SelectChannel SelectHome; do
+  rg -q "HarnessUiCommand::$command" "$local_backend" \
+    || fail "local backend must route $command through typed harness commands"
+done
 
 if rg -n 'SHARED_INTENT_UI_BYPASS_ALLOWLIST|TemporaryHarnessBridgeShortcut' "$contract" >/dev/null; then
   fail "shared semantic browser bridge migration should remove the old bypass allowlist machinery"

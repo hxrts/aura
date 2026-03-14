@@ -13,7 +13,7 @@
 #
 # Phase 3 - Shared chat setup:
 # 1. Both actors navigate to chat.
-# 2. Alice joins a shared named channel.
+# 2. Alice creates a shared named channel.
 # 3. Alice invites Bob into that channel.
 # 4. Bob joins the same channel from the pending invitation path.
 #
@@ -156,17 +156,10 @@ timeout_ms = 6000
 
 [[steps]]
 id = "alice-join-shared-channel"
-action = "join_channel"
+action = "create_channel"
 actor = "alice"
 value = "shared-parity-lab"
 timeout_ms = 6000
-
-[[steps]]
-id = "alice-channel-membership-ready"
-action = "runtime_event_occurred"
-actor = "alice"
-runtime_event_kind = "channel_membership_ready"
-timeout_ms = 120000
 
 [[steps]]
 id = "alice-open-contacts-before-invite"
