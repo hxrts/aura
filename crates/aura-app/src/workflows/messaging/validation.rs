@@ -41,6 +41,7 @@ fn collect_home_candidates(
     candidates
 }
 
+#[cfg(test)]
 pub(super) fn join_error_is_not_found(error: &AuraError) -> bool {
     if matches!(error, AuraError::NotFound { .. }) {
         return true;

@@ -1338,7 +1338,7 @@ fn submit_runtime_modal_action(
                         harness_log("accept_invitation runtime_accept start");
                         let accepted = match invitation.invitation_type {
                             InvitationBridgeType::DeviceEnrollment { .. } => {
-                                invitation_workflows::issue_device_enrollment_invitation_accept(
+                                invitation_workflows::accept_device_enrollment_invitation(
                                     &app_core,
                                     &invitation,
                                 )
@@ -1517,22 +1517,12 @@ fn submit_runtime_modal_action(
                             }
                         }
 
-                        match invitation_workflows::issue_device_enrollment_invitation_accept(
+                        match invitation_workflows::accept_device_enrollment_invitation(
                             &app_core,
                             &invitation,
                         )
-                        .await
-                        {
+                        .await {
                             Ok(()) => {
-                                let app_core_for_convergence = app_core.clone();
-                                let invitation_for_convergence = invitation.clone();
-                                spawn(async move {
-                                    let _ = invitation_workflows::converge_device_enrollment_invitation_accept(
-                                        &app_core_for_convergence,
-                                        &invitation_for_convergence,
-                                    )
-                                    .await;
-                                });
                                 let _ =
                                     settings_workflows::refresh_settings_from_runtime(&app_core)
                                         .await;

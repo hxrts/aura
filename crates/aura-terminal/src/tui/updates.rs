@@ -47,7 +47,7 @@
 use crate::tui::components::ToastMessage;
 use crate::tui::types::{Device, MfaPolicy};
 use aura_app::ui::contract::HarnessUiCommand;
-use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact};
+use aura_app::ui_contract::{OperationId, RuntimeEventKind, RuntimeFact, SemanticOperationStatus};
 use aura_core::types::Epoch;
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
@@ -191,9 +191,6 @@ pub enum UiUpdate {
     // =========================================================================
     /// A message was successfully sent
     MessageSendSubmitting,
-
-    /// The runtime send path completed successfully
-    MessageSendCompleted,
 
     /// A message was successfully sent
     MessageSent {
@@ -390,6 +387,12 @@ pub enum UiUpdate {
     RuntimeFactsUpdated {
         replace_kinds: Vec<RuntimeEventKind>,
         facts: Vec<RuntimeFact>,
+    },
+
+    /// Apply an authoritative semantic operation status emitted by `aura-app`.
+    AuthoritativeOperationStatus {
+        operation_id: OperationId,
+        status: SemanticOperationStatus,
     },
 
     // =========================================================================

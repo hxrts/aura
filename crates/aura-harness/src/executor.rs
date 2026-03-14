@@ -33,7 +33,6 @@ use crate::config::{
 use crate::introspection::{
     extract_command_metadata, extract_toast, CommandConsistency, CommandStatus, ToastLevel,
 };
-use crate::recovery_registry::{run_registered_recovery, RecoveryPath};
 use crate::tool_api::{ToolApi, ToolKey, ToolRequest, ToolResponse};
 
 const CLIPBOARD_PASTE_CHUNK_CHARS: usize = 48;
@@ -1162,7 +1161,7 @@ fn execute_step(
                 .saturating_duration_since(Instant::now())
                 .as_millis()
                 .max(1) as u64;
-            if convergence_stage(
+            convergence_stage(
                 step,
                 "contact_link",
                 wait_for_semantic_state(
@@ -1172,33 +1171,7 @@ fn execute_step(
                     &instance_id,
                     remaining_ms,
                 ),
-            )
-            .is_err()
-            {
-                let remaining_ms = deadline
-                    .saturating_duration_since(Instant::now())
-                    .as_millis()
-                    .max(1) as u64;
-                let mut contacts_step = semantic_wait_step(step);
-                contacts_step.list_id = Some(ListId::Contacts);
-                contacts_step.count = Some(1);
-                run_registered_recovery(
-                    RecoveryPath::AcceptContactInvitationContactsFallback,
-                    || {
-                        convergence_stage(
-                            step,
-                            "contacts_list",
-                            wait_for_semantic_state(
-                                &contacts_step,
-                                tool_api,
-                                context,
-                                &instance_id,
-                                remaining_ms,
-                            ),
-                        )
-                    },
-                )?;
-            }
+            )?;
             record_shared_flow_progress(step, context, &instance_id);
             Ok(())
         }
@@ -3902,34 +3875,7 @@ fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
             .as_deref()
             .or(step.value.as_deref())
             .or(step.expect.as_deref());
-        let matched = snapshot.has_runtime_event(kind, detail_needle)
-            || matches!(kind, RuntimeEventKind::ContactLinkReady)
-                && snapshot
-                    .lists
-                    .iter()
-                    .find(|candidate| candidate.id == ListId::Contacts)
-                    .map(|contacts| {
-                        if let Some(needle) = detail_needle {
-                            contacts.items.iter().any(|item| item.id.contains(needle))
-                        } else {
-                            !contacts.items.is_empty()
-                        }
-                    })
-                    .unwrap_or(false)
-            || matches!(kind, RuntimeEventKind::ChannelMembershipReady)
-                && snapshot
-                    .lists
-                    .iter()
-                    .find(|candidate| candidate.id == ListId::Channels)
-                    .map(|channels| {
-                        channels.items.iter().any(|item| {
-                            item.selected
-                                && detail_needle
-                                    .map(|needle| item.id.contains(needle))
-                                    .unwrap_or(true)
-                        })
-                    })
-                    .unwrap_or(false);
+        let matched = snapshot.has_runtime_event(kind, detail_needle);
         if !matched {
             return false;
         }
@@ -4020,6 +3966,34 @@ fn semantic_wait_matches(step: &ScenarioStep, snapshot: &UiSnapshot) -> bool {
     }
 
     true
+}
+
+fn semantic_wait_matches_for_instance(
+    step: &ScenarioStep,
+    snapshot: &UiSnapshot,
+    context: &ScenarioContext,
+    instance_id: &str,
+) -> bool {
+    let mut non_operation_step = step.clone();
+    non_operation_step.operation_id = None;
+    non_operation_step.operation_state = None;
+    if !semantic_wait_matches(&non_operation_step, snapshot) {
+        return false;
+    }
+
+    let (Some(operation_id), Some(operation_state)) = (&step.operation_id, step.operation_state)
+    else {
+        return true;
+    };
+
+    let Some(handle) = context.last_operation_handle.get(instance_id) else {
+        return true;
+    };
+    if handle.id != *operation_id {
+        return true;
+    }
+
+    snapshot.operation_state_for_instance(&handle.id, &handle.instance_id) == Some(operation_state)
 }
 
 fn operation_handle_matches(
@@ -4127,7 +4101,7 @@ fn clear_projection_baseline_if_semantic_state_already_visible(
     let Ok(snapshot) = fetch_ui_snapshot(tool_api, instance_id) else {
         return;
     };
-    if semantic_wait_matches(wait_step, &snapshot) {
+    if semantic_wait_matches_for_instance(wait_step, &snapshot, context, instance_id) {
         context.pending_projection_baseline.remove(instance_id);
     }
 }
@@ -4389,7 +4363,7 @@ fn wait_for_semantic_state(
     let mut last_snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
     let mut snapshot_version = Some(last_snapshot.revision.semantic_seq);
     if baseline_satisfied(required_newer_than, &last_snapshot)
-        && semantic_wait_matches(step, &last_snapshot)
+        && semantic_wait_matches_for_instance(step, &last_snapshot, context, instance_id)
     {
         context.pending_projection_baseline.remove(instance_id);
         return Ok(());
@@ -4436,7 +4410,7 @@ fn wait_for_semantic_state(
             fetch_ui_snapshot(tool_api, instance_id)?
         };
         if baseline_satisfied(required_newer_than, &snapshot)
-            && semantic_wait_matches(step, &snapshot)
+            && semantic_wait_matches_for_instance(step, &snapshot, context, instance_id)
         {
             context.pending_projection_baseline.remove(instance_id);
             return Ok(());
@@ -5576,6 +5550,59 @@ mod tests {
     }
 
     #[test]
+    fn semantic_wait_operation_state_uses_recorded_handle_for_instance() {
+        let step = crate::config::ScenarioStep {
+            id: "wait-op-handle".to_string(),
+            action: crate::config::ScenarioAction::WaitFor,
+            operation_id: Some(OperationId::invitation_accept()),
+            operation_state: Some(OperationState::Succeeded),
+            ..Default::default()
+        };
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Contacts,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: next_projection_revision(None),
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: Vec::new(),
+            lists: Vec::new(),
+            messages: Vec::new(),
+            operations: vec![
+                OperationSnapshot {
+                    id: OperationId::invitation_accept(),
+                    instance_id: OperationInstanceId("stale-instance".to_string()),
+                    state: OperationState::Failed,
+                },
+                OperationSnapshot {
+                    id: OperationId::invitation_accept(),
+                    instance_id: OperationInstanceId("fresh-instance".to_string()),
+                    state: OperationState::Succeeded,
+                },
+            ],
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+        let mut context = ScenarioContext::default();
+        context.last_operation_handle.insert(
+            "alice".to_string(),
+            UiOperationHandle {
+                id: OperationId::invitation_accept(),
+                instance_id: OperationInstanceId("fresh-instance".to_string()),
+            },
+        );
+
+        assert!(
+            !semantic_wait_matches(&step, &snapshot),
+            "generic operation-id matching should still see the stale first instance"
+        );
+        assert!(
+            semantic_wait_matches_for_instance(&step, &snapshot, &context, "alice"),
+            "handle-aware matching must follow the recorded instance instead of the first matching operation id"
+        );
+    }
+
+    #[test]
     fn operation_handle_match_requires_matching_instance_and_state() {
         let handle = UiOperationHandle {
             id: OperationId::invitation_accept(),
@@ -6445,6 +6472,30 @@ mod tests {
         assert!(
             context.pending_convergence.is_empty(),
             "cross-actor pending-home convergence should clear across the shared flow"
+        );
+    }
+
+    #[test]
+    fn semantic_wait_runtime_events_require_authoritative_runtime_facts() {
+        let step = crate::config::ScenarioStep {
+            id: "wait-contact-link".to_string(),
+            action: crate::config::ScenarioAction::WaitFor,
+            runtime_event_kind: Some(RuntimeEventKind::ContactLinkReady),
+            ..Default::default()
+        };
+        let mut snapshot = UiSnapshot::loading(ScreenId::Contacts);
+        snapshot.lists = vec![ListSnapshot {
+            id: ListId::Contacts,
+            items: vec![ListItemSnapshot {
+                id: "contact-1".to_string(),
+                selected: false,
+                confirmation: ConfirmationState::Confirmed,
+            }],
+        }];
+
+        assert!(
+            !semantic_wait_matches(&step, &snapshot),
+            "runtime event waits must not fall back to list/UI state"
         );
     }
 

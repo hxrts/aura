@@ -60,9 +60,10 @@ use crate::tui::keymap::{global_footer_hints, screen_footer_hints};
 use crate::tui::layout::dim;
 use crate::tui::navigation::clamp_list_index;
 use crate::tui::screens::app::subscriptions::{
-    use_authority_id_subscription, use_channels_subscription, use_contacts_subscription,
-    use_devices_subscription, use_discovered_peers_subscription, use_invitations_subscription,
-    use_messages_subscription, use_nav_status_signals, use_neighborhood_home_meta_subscription,
+    use_authoritative_semantic_facts_subscription, use_authority_id_subscription,
+    use_channels_subscription, use_contacts_subscription, use_devices_subscription,
+    use_discovered_peers_subscription, use_invitations_subscription, use_messages_subscription,
+    use_nav_status_signals, use_neighborhood_home_meta_subscription,
     use_neighborhood_homes_subscription, use_notifications_subscription,
     use_pending_requests_subscription, use_threshold_subscription, SharedChannels, SharedContacts,
     SharedDevices, SharedMessages, SharedNeighborhoodHomeMeta,
@@ -171,6 +172,38 @@ fn execute_harness_followup_command(
     selected_channel: &std::sync::Arc<std::sync::RwLock<Option<String>>>,
 ) {
     match command {
+        TuiCommand::Dispatch(DispatchCommand::CreateAccount { name }) => {
+            let Some(cb) = callbacks.as_ref() else {
+                state.toast_error("App callbacks are unavailable");
+                return;
+            };
+            state.set_operation_state(OperationId::account_create(), OperationState::Submitting);
+            (cb.app.on_create_account)(name);
+        }
+        TuiCommand::Dispatch(DispatchCommand::CreateHome { name, description }) => {
+            let Some(cb) = callbacks.as_ref() else {
+                state.toast_error("Neighborhood callbacks are unavailable");
+                return;
+            };
+            state.set_operation_state(OperationId::create_home(), OperationState::Submitting);
+            (cb.neighborhood.on_create_home)(name, description);
+        }
+        TuiCommand::Dispatch(DispatchCommand::JoinChannel { channel_name }) => {
+            let Some(cb) = callbacks.as_ref() else {
+                state.toast_error("Chat callbacks are unavailable");
+                return;
+            };
+            state.router.go_to(Screen::Chat);
+            (cb.chat.on_join_channel)(channel_name);
+        }
+        TuiCommand::Dispatch(DispatchCommand::AcceptPendingHomeInvitation) => {
+            let Some(cb) = callbacks.as_ref() else {
+                state.toast_error("Chat callbacks are unavailable");
+                return;
+            };
+            state.router.go_to(Screen::Chat);
+            (cb.chat.on_accept_pending_channel_invitation)();
+        }
         TuiCommand::Dispatch(DispatchCommand::SendChatMessage { content }) => {
             let Some(cb) = callbacks.as_ref() else {
                 state.toast_error("Chat callbacks are unavailable");
@@ -485,6 +518,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     let shared_invitations =
         use_invitations_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
+    use_authoritative_semantic_facts_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
 
     // =========================================================================
     // Neighborhood homes subscription: SharedNeighborhoodHomes for dispatch handlers to read
@@ -909,10 +943,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             device_id: _,
                         } => {
                             tui.with_mut(|state| {
-                                state.set_operation_state(
-                                    OperationId::device_enrollment(),
-                                    OperationState::Submitting,
-                                );
                                 state.settings.last_device_enrollment_code =
                                     enrollment_code.clone();
                                 state.upsert_runtime_fact(RuntimeFact::DeviceEnrollmentCodeReady {
@@ -958,8 +988,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 None;
                             let mut dismiss_ceremony_started_toast = false;
                             let mut handled_device_enrollment_modal = false;
-                            let mut next_device_enrollment_state: Option<OperationState> = None;
-
                             tui.with_mut(|state| {
                                 let mut dismiss_modal = false;
 
@@ -980,8 +1008,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             );
 
                                             if has_failed {
-                                                next_device_enrollment_state =
-                                                    Some(OperationState::Failed);
                                                 toast = Some((
                                                     error_message
                                                         .clone()
@@ -989,8 +1015,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     crate::tui::state_machine::ToastLevel::Error,
                                                 ));
                                             } else if is_complete {
-                                                next_device_enrollment_state =
-                                                    Some(OperationState::Succeeded);
                                                 dismiss_modal = true;
                                                 toast = Some((
                                                     "Device enrollment complete".to_string(),
@@ -1003,9 +1027,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                                                     let _ = refresh_settings_from_runtime(&app_core).await;
                                                 });
-                                            } else {
-                                                next_device_enrollment_state =
-                                                    Some(OperationState::Submitting);
                                             }
                                         }
                                     } else if let crate::tui::state_machine::QueuedModal::GuardianSetup(ref mut s) = modal {
@@ -1152,12 +1173,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 if dismiss_modal {
                                     state.modal_queue.dismiss();
                                 }
-                                if let Some(operation_state) = next_device_enrollment_state.clone() {
-                                    state.set_operation_state(
-                                        OperationId::device_enrollment(),
-                                        operation_state,
-                                    );
-                                }
                                 if dismiss_ceremony_started_toast {
                                     state.toast_queue.dismiss();
                                 }
@@ -1233,14 +1248,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 state.set_operation_state(
                                     OperationId::send_message(),
                                     OperationState::Submitting,
-                                );
-                            });
-                        }
-                        UiUpdate::MessageSendCompleted => {
-                            tui.with_mut(|state| {
-                                state.set_operation_state(
-                                    OperationId::send_message(),
-                                    OperationState::Succeeded,
                                 );
                             });
                         }
@@ -1493,12 +1500,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             );
                         }
                         UiUpdate::InvitationCreated { invitation_code: _ } => {
-                            tui.with_mut(|state| {
-                                state.set_operation_state(
-                                    OperationId::invitation_create(),
-                                    OperationState::Succeeded,
-                                );
-                            });
                             enqueue_toast!(
                                 "Invitation created".to_string(),
                                 crate::tui::state_machine::ToastLevel::Success
@@ -1506,10 +1507,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
                         UiUpdate::InvitationExported { code } => {
                             tui.with_mut(|state| {
-                                state.set_operation_state(
-                                    OperationId::invitation_create(),
-                                    OperationState::Succeeded,
-                                );
                                 state.last_exported_invitation_code = Some(code.clone());
                                 state.upsert_runtime_fact(RuntimeFact::InvitationCodeReady {
                                     receiver_authority_id: None,
@@ -1529,6 +1526,23 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             modal
                                         },
                                     ));
+                            });
+                        }
+                        UiUpdate::AuthoritativeOperationStatus {
+                            operation_id,
+                            status,
+                        } => {
+                            let next_state = match status.phase {
+                                aura_app::ui_contract::SemanticOperationPhase::Failed => {
+                                    OperationState::Failed
+                                }
+                                aura_app::ui_contract::SemanticOperationPhase::Succeeded => {
+                                    OperationState::Succeeded
+                                }
+                                _ => OperationState::Submitting,
+                            };
+                            tui.with_mut(|state| {
+                                state.set_operation_state(operation_id, next_state);
                             });
                         }
                         UiUpdate::InvitationImported { invitation_code: _ } => {
@@ -1696,43 +1710,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             facts,
                         } => {
                             tui.with_mut(|state| {
-                                let invitation_accept_ready = facts.iter().any(|fact| {
-                                    matches!(
-                                        fact,
-                                        RuntimeFact::ContactLinkReady { .. }
-                                            | RuntimeFact::ChannelMembershipReady { .. }
-                                    )
-                                });
-                                let invitation_create_ready = facts.iter().any(|fact| {
-                                    matches!(fact, RuntimeFact::PendingHomeInvitationReady)
-                                });
                                 for kind in replace_kinds {
                                     state.clear_runtime_fact_kind(kind);
                                 }
                                 for fact in facts {
                                     state.upsert_runtime_fact(fact);
-                                }
-                                if invitation_accept_ready
-                                    && matches!(
-                                        state.operation_state(&OperationId::invitation_accept()),
-                                        Some(OperationState::Submitting)
-                                    )
-                                {
-                                    state.set_operation_state(
-                                        OperationId::invitation_accept(),
-                                        OperationState::Succeeded,
-                                    );
-                                }
-                                if invitation_create_ready
-                                    && matches!(
-                                        state.operation_state(&OperationId::invitation_create()),
-                                        Some(OperationState::Submitting)
-                                    )
-                                {
-                                    state.set_operation_state(
-                                        OperationId::invitation_create(),
-                                        OperationState::Succeeded,
-                                    );
                                 }
                             });
                         }
@@ -1807,10 +1789,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // =========================================================================
                         UiUpdate::AccountCreated => {
                             tui.with_mut(|state| {
-                                state.set_operation_state(
-                                    OperationId::account_create(),
-                                    OperationState::Succeeded,
-                                );
                                 state.account_created_queued();
                             });
                             if show_setup {
@@ -1844,39 +1822,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // UI-only errors (domain/runtime errors use ERROR_SIGNAL)
                         // =========================================================================
                         UiUpdate::OperationFailed { operation, error } => {
-                            if matches!(operation.as_str(), "AcceptInvitation" | "ImportInvitation")
-                            {
-                                tui.with_mut(|state| {
-                                    state.set_operation_state(
-                                        OperationId::invitation_accept(),
-                                        OperationState::Failed,
-                                    );
-                                });
-                            }
-                            if matches!(operation.as_str(), "CreateInvitation" | "InviteUserToChannel")
-                            {
-                                tui.with_mut(|state| {
-                                    state.set_operation_state(
-                                        OperationId::invitation_create(),
-                                        OperationState::Failed,
-                                    );
-                                });
-                            }
-                            if operation == "SendMessage" {
-                                tui.with_mut(|state| {
-                                    state.set_operation_state(
-                                        OperationId::send_message(),
-                                        OperationState::Failed,
-                                    );
-                                });
-                            }
                             // For account creation, show error in the modal instead of toast.
                             if operation == "CreateAccount" {
                                 tui.with_mut(|state| {
-                                    state.set_operation_state(
-                                        OperationId::account_create(),
-                                        OperationState::Failed,
-                                    );
                                     state.modal_queue.update_active(|modal| {
                                         if let QueuedModal::AccountSetup(ref mut s) = modal {
                                             s.set_error(error.clone());

@@ -30,7 +30,6 @@ use crate::backend::{
     RawUiBackend, SharedSemanticBackend, SubmittedAction, UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
-use crate::recovery_registry::{run_registered_recovery, RecoveryPath};
 use crate::screen_normalization::{authoritative_screen, has_nav_header};
 use crate::workspace_root;
 
@@ -1264,6 +1263,45 @@ impl RawUiBackend for LocalPtyBackend {
     }
 }
 
+impl LocalPtyBackend {
+    fn submit_start_device_enrollment(&mut self, device_name: &str) -> Result<SubmittedAction<()>> {
+        let previous_operation =
+            observe_operation(&self.ui_snapshot()?, &OperationId::device_enrollment());
+        self.send_harness_command(&HarnessUiCommand::ActivateControl {
+            control_id: ControlId::NavSettings,
+        })?;
+        self.send_harness_command(&HarnessUiCommand::ActivateListItem {
+            list_id: ListId::SettingsSections,
+            item_id: "devices".to_string(),
+        })?;
+        self.activate_control(ControlId::SettingsAddDeviceButton)?;
+        wait_for_modal_visible(self, ModalId::AddDevice, Duration::from_secs(5))?;
+        self.fill_field(FieldId::DeviceName, device_name)?;
+        self.activate_control(ControlId::ModalConfirmButton)?;
+        let handle = wait_for_operation_submission(
+            self,
+            OperationId::device_enrollment(),
+            previous_operation,
+            Duration::from_secs(5),
+        )?;
+        Ok(SubmittedAction::with_ui_operation((), handle))
+    }
+
+    fn submit_import_device_enrollment_code(&mut self, code: &str) -> Result<SubmittedAction<()>> {
+        let previous_operation =
+            observe_operation(&self.ui_snapshot()?, &OperationId::device_enrollment());
+        self.fill_field(FieldId::DeviceImportCode, code)?;
+        self.activate_control(ControlId::OnboardingImportDeviceButton)?;
+        let handle = wait_for_operation_submission(
+            self,
+            OperationId::device_enrollment(),
+            previous_operation,
+            Duration::from_secs(5),
+        )?;
+        Ok(SubmittedAction::with_ui_operation((), handle))
+    }
+}
+
 impl SharedSemanticBackend for LocalPtyBackend {
     fn shared_projection(&self) -> Result<UiSnapshot> {
         self.ui_snapshot()
@@ -1316,23 +1354,20 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 })
             }
             IntentAction::StartDeviceEnrollment { device_name, .. } => {
-                self.send_harness_command(&HarnessUiCommand::ActivateControl {
-                    control_id: ControlId::NavSettings,
-                })?;
-                self.send_harness_command(&HarnessUiCommand::ActivateListItem {
-                    list_id: ListId::SettingsSections,
-                    item_id: "devices".to_string(),
-                })?;
-                self.activate_control(ControlId::SettingsAddDeviceButton)?;
-                wait_for_modal_visible(self, ModalId::AddDevice, Duration::from_secs(5))?;
-                self.fill_field(FieldId::DeviceName, &device_name)?;
-                self.activate_control(ControlId::ModalConfirmButton)?;
-                Ok(SemanticCommandResponse::accepted_without_value())
+                let submitted = self.submit_start_device_enrollment(&device_name)?;
+                Ok(SemanticCommandResponse {
+                    submission: submitted.submission,
+                    handle: submitted.handle,
+                    value: SemanticCommandValue::None,
+                })
             }
             IntentAction::ImportDeviceEnrollmentCode { code } => {
-                self.fill_field(FieldId::DeviceImportCode, &code)?;
-                self.activate_control(ControlId::OnboardingImportDeviceButton)?;
-                Ok(SemanticCommandResponse::accepted_without_value())
+                let submitted = self.submit_import_device_enrollment_code(&code)?;
+                Ok(SemanticCommandResponse {
+                    submission: submitted.submission,
+                    handle: submitted.handle,
+                    value: SemanticCommandValue::None,
+                })
             }
             IntentAction::RemoveSelectedDevice => {
                 self.send_harness_command(&HarnessUiCommand::ActivateControl {
@@ -1410,29 +1445,39 @@ impl SharedSemanticBackend for LocalPtyBackend {
     }
 
     fn submit_create_account(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
-        self.fill_field(FieldId::AccountName, account_name)?;
-        self.activate_control(ControlId::OnboardingCreateAccountButton)?;
+        let previous_operation =
+            observe_operation(&self.ui_snapshot()?, &OperationId::account_create());
+        self.send_harness_command(&HarnessUiCommand::CreateAccount {
+            account_name: account_name.to_string(),
+        })?;
+        let handle = wait_for_operation_submission(
+            self,
+            OperationId::account_create(),
+            previous_operation,
+            Duration::from_secs(5),
+        )?;
         let issue_deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let snapshot = self.ui_snapshot()?;
-            if snapshot.operations.iter().any(|operation| {
-                operation.id == OperationId::account_create()
-                    && operation.state == aura_app::ui::contract::OperationState::Failed
-            }) {
+            if snapshot.operation_state_for_instance(&handle.id, &handle.instance_id)
+                == Some(aura_app::ui::contract::OperationState::Failed)
+            {
                 anyhow::bail!("submit_create_account: account creation failed");
             }
-            if snapshot.operations.iter().any(|operation| {
-                operation.id == OperationId::account_create()
-                    && matches!(
-                        operation.state,
+            if snapshot
+                .operation_state_for_instance(&handle.id, &handle.instance_id)
+                .is_some_and(|state| {
+                    matches!(
+                        state,
                         aura_app::ui::contract::OperationState::Submitting
                             | aura_app::ui::contract::OperationState::Succeeded
                     )
-            }) {
-                return Ok(SubmittedAction::without_handle(()));
+                })
+            {
+                return Ok(SubmittedAction::with_ui_operation((), handle));
             }
             if snapshot.screen != ScreenId::Onboarding || snapshot_has_real_home(&snapshot) {
-                return Ok(SubmittedAction::without_handle(()));
+                return Ok(SubmittedAction::with_ui_operation((), handle));
             }
             if Instant::now() >= issue_deadline {
                 anyhow::bail!("submit_create_account: account creation did not issue");
@@ -1442,47 +1487,17 @@ impl SharedSemanticBackend for LocalPtyBackend {
     }
 
     fn submit_create_home(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
-        self.activate_control(ControlId::NavNeighborhood)
-            .context("submit_create_home: nav_neighborhood")?;
-        wait_for_screen_visible(self, ScreenId::Neighborhood, Duration::from_secs(5))
-            .context("submit_create_home: wait_neighborhood")?;
-        let modal_open_deadline = Instant::now() + Duration::from_secs(5);
-        let mut modal_open = false;
-        while Instant::now() < modal_open_deadline {
-            self.activate_control(ControlId::NeighborhoodNewHomeButton)
-                .context("submit_create_home: open_create_home")?;
-            if wait_for_modal_visible(self, ModalId::CreateHome, Duration::from_secs(2)).is_ok() {
-                modal_open = true;
-                break;
-            }
-            thread::sleep(Duration::from_millis(150));
-        }
-        anyhow::ensure!(
-            modal_open,
-            "submit_create_home: create_home_modal did not open"
-        );
-        thread::sleep(Duration::from_millis(200));
-        self.fill_field(FieldId::HomeName, home_name)
-            .context("submit_create_home: fill_home_name")?;
-        thread::sleep(Duration::from_millis(150));
-        for _ in 0..3 {
-            self.send_keys("\r")
-                .context("submit_create_home: submit_create_home")?;
-            let modal_close_deadline = Instant::now() + Duration::from_millis(800);
-            loop {
-                let snapshot = self.ui_snapshot()?;
-                if snapshot.open_modal != Some(ModalId::CreateHome) {
-                    break;
-                }
-                if Instant::now() >= modal_close_deadline {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(80));
-            }
-            if self.ui_snapshot()?.open_modal != Some(ModalId::CreateHome) {
-                break;
-            }
-        }
+        let previous_operation =
+            observe_operation(&self.ui_snapshot()?, &OperationId::create_home());
+        self.send_harness_command(&HarnessUiCommand::CreateHome {
+            home_name: home_name.to_string(),
+        })?;
+        let handle = wait_for_operation_submission(
+            self,
+            OperationId::create_home(),
+            previous_operation,
+            Duration::from_secs(5),
+        )?;
         let deadline = Instant::now() + Duration::from_secs(8);
         loop {
             let snapshot = self.ui_snapshot()?;
@@ -1498,7 +1513,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 });
             if let Some(home_id) = created_home {
                 self.activate_list_item(ListId::Homes, &home_id)?;
-                return Ok(SubmittedAction::without_handle(()));
+                return Ok(SubmittedAction::with_ui_operation((), handle));
             }
             if Instant::now() >= deadline {
                 break;
@@ -1573,6 +1588,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
 
     fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>> {
         let snapshot = self.ui_snapshot()?;
+        let previous_operation = observe_operation(&snapshot, &OperationId::invitation_accept());
         let previous_channel_count = snapshot
             .lists
             .iter()
@@ -1606,6 +1622,12 @@ impl SharedSemanticBackend for LocalPtyBackend {
             return Ok(SubmittedAction::without_handle(()));
         }
         self.send_harness_command(&HarnessUiCommand::AcceptPendingChannelInvitation)?;
+        let handle = wait_for_operation_submission(
+            self,
+            OperationId::invitation_accept(),
+            previous_operation,
+            Duration::from_secs(5),
+        )?;
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             let snapshot = self.ui_snapshot()?;
@@ -1639,9 +1661,9 @@ impl SharedSemanticBackend for LocalPtyBackend {
                         select_home_and_channel(self, &channel_id)?;
                     }
                 }
-                return Ok(SubmittedAction::without_handle(()));
+                return Ok(SubmittedAction::with_ui_operation((), handle));
             }
-            if snapshot.operation_state(&OperationId::invitation_accept())
+            if snapshot.operation_state_for_instance(&handle.id, &handle.instance_id)
                 == Some(OperationState::Failed)
             {
                 anyhow::bail!("submit_accept_pending_channel_invitation: invitation_accept failed");
@@ -1731,21 +1753,10 @@ impl SharedSemanticBackend for LocalPtyBackend {
             }
             thread::sleep(Duration::from_millis(80));
         }
-        run_registered_recovery(RecoveryPath::LocalPtyJoinChannelSlashFallback, || {
-            self.activate_control(ControlId::ChatNewGroupButton)
-                .context("submit_join_channel: open_create_channel")?;
-            wait_for_modal_visible(self, ModalId::CreateChannel, Duration::from_secs(2))
-                .context("submit_join_channel: wait_create_channel")?;
-            self.fill_field(FieldId::CreateChannelName, channel_name)
-                .context("submit_join_channel: fill_channel_name")?;
-            self.send_keys("\r")
-                .context("submit_join_channel: advance_details")?;
-            self.send_keys("\r")
-                .context("submit_join_channel: advance_members")?;
-            self.send_keys("\r")
-                .context("submit_join_channel: submit_threshold")
-        })?;
-        Ok(SubmittedAction::without_handle(()))
+        anyhow::bail!(
+            "submit_join_channel: authoritative ChannelMembershipReady not observed for channel {}",
+            channel_name
+        )
     }
 
     fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>> {
@@ -1952,12 +1963,15 @@ mod tests {
     }
 
     #[test]
-    fn local_shared_intent_methods_drive_visible_tui_controls() {
+    fn local_shared_intent_methods_use_semantic_harness_commands_for_onboarding() {
         let source = include_str!("local_pty.rs");
         assert!(source.contains("fn submit_create_account"));
-        assert!(source.contains("self.fill_field(FieldId::AccountName, account_name)?;"));
         assert!(
-            source.contains("self.activate_control(ControlId::OnboardingCreateAccountButton)?;")
+            source.contains("self.send_harness_command(&HarnessUiCommand::CreateAccount {")
+        );
+        assert!(source.contains("fn submit_create_home"));
+        assert!(
+            source.contains("self.send_harness_command(&HarnessUiCommand::CreateHome {")
         );
         assert!(source.contains("fn submit_create_contact_invitation"));
         assert!(

@@ -929,7 +929,7 @@ impl IoContext {
             ));
         }
 
-        aura_app::ui::workflows::invitation::issue_device_enrollment_invitation_accept(
+        aura_app::ui::workflows::invitation::accept_device_enrollment_invitation(
             app_core,
             &invitation,
         )
@@ -939,17 +939,6 @@ impl IoContext {
                 "Failed to accept device enrollment invitation: {e}"
             ))
         })?;
-
-        let app_core_for_convergence = app_core.clone();
-        let invitation_for_convergence = invitation.clone();
-        tokio::spawn(async move {
-            let _ =
-                aura_app::ui::workflows::invitation::converge_device_enrollment_invitation_accept(
-                    &app_core_for_convergence,
-                    &invitation_for_convergence,
-                )
-                .await;
-        });
 
         Ok(())
     }

@@ -800,7 +800,11 @@ fn run_cargo_test(crate_name: &str, test_name: &str) -> Result<()> {
 }
 
 fn normalize_rel_path(path: impl AsRef<Path>) -> String {
-    path.as_ref().to_string_lossy().replace('\\', "/")
+    let mut normalized = path.as_ref().to_string_lossy().replace('\\', "/");
+    while normalized.contains("//") {
+        normalized = normalized.replace("//", "/");
+    }
+    normalized
 }
 
 fn is_ci() -> bool {

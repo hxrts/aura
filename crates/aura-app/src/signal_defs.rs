@@ -51,6 +51,7 @@ use crate::queries::{
     BoundSignal, ChatQuery, ContactsQuery, GuardiansQuery, HomesQuery, InvitationsQuery,
     NeighborhoodQuery, RecoveryQuery,
 };
+use crate::ui_contract::AuthoritativeSemanticFact;
 use crate::views::{
     ChatState, ContactsState, HomesState, InvitationsState, NeighborhoodState, RecoveryState,
 };
@@ -178,6 +179,11 @@ pub static DISCOVERED_PEERS_SIGNAL: LazyLock<Signal<DiscoveredPeersState>> =
 pub const SETTINGS_SIGNAL_NAME: &str = "SETTINGS_SIGNAL";
 pub static SETTINGS_SIGNAL: LazyLock<Signal<SettingsState>> =
     LazyLock::new(|| Signal::new("app:settings"));
+
+/// Signal for authoritative semantic lifecycle/readiness facts.
+pub const AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL_NAME: &str = "AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL";
+pub static AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL: LazyLock<Signal<Vec<AuthoritativeSemanticFact>>> =
+    LazyLock::new(|| Signal::new("app:authoritative_semantic_facts"));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Signal Value Types
@@ -391,6 +397,9 @@ pub async fn register_app_signals<R: ReactiveEffects>(handler: &R) -> Result<(),
     handler
         .register(&*SETTINGS_SIGNAL, SettingsState::default())
         .await?;
+    handler
+        .register(&*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, Vec::new())
+        .await?;
 
     Ok(())
 }
@@ -465,6 +474,9 @@ pub async fn register_app_signals_with_queries<R: QuerySignalEffects>(
     handler.register(&*TRANSPORT_PEERS_SIGNAL, 0usize).await?;
     handler.register(&*ERROR_SIGNAL, None).await?;
     handler.register(&*UNREAD_COUNT_SIGNAL, 0).await?;
+    handler
+        .register(&*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, Vec::new())
+        .await?;
 
     Ok(())
 }

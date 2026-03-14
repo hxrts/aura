@@ -92,6 +92,9 @@ pub mod query;
 pub mod recovery;
 pub mod recovery_cli;
 pub mod runtime;
+pub(crate) mod runtime_error_classification;
+/// Shared helpers for publishing authoritative semantic lifecycle and readiness facts.
+pub mod semantic_facts;
 pub mod settings;
 pub mod signals;
 pub mod snapshot;

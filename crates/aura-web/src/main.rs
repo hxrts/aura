@@ -755,20 +755,11 @@ cfg_if! {
                                 time_workflows::sleep_ms(&app_core, 250).await?;
                             }
 
-                            invitation_workflows::issue_device_enrollment_invitation_accept(
+                            invitation_workflows::accept_device_enrollment_invitation(
                                 &app_core,
                                 &invitation,
                             )
                             .await?;
-                            let app_core_for_convergence = app_core.clone();
-                            let invitation_for_convergence = invitation.clone();
-                            spawn_local(async move {
-                                let _ = invitation_workflows::converge_device_enrollment_invitation_accept(
-                                    &app_core_for_convergence,
-                                    &invitation_for_convergence,
-                                )
-                                .await;
-                            });
                             let runtime_devices_after_accept = runtime.list_devices().await;
                             web_sys::console::log_1(
                                 &format!(

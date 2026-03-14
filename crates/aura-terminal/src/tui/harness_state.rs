@@ -461,6 +461,15 @@ pub(crate) fn apply_harness_command(
             }
             _ => Ok(Vec::new()),
         },
+        HarnessUiCommand::CreateAccount { account_name } => Ok(vec![TuiCommand::Dispatch(
+            DispatchCommand::CreateAccount { name: account_name },
+        )]),
+        HarnessUiCommand::CreateHome { home_name } => Ok(vec![TuiCommand::Dispatch(
+            DispatchCommand::CreateHome {
+                name: home_name,
+                description: None,
+            },
+        )]),
         HarnessUiCommand::AcceptPendingChannelInvitation => {
             state.router.go_to(Screen::Chat);
             Ok(vec![TuiCommand::Dispatch(
@@ -1073,6 +1082,55 @@ mod tests {
         assert!(matches!(
             followup.as_slice(),
             [TuiCommand::Dispatch(DispatchCommand::OpenDeviceSelectModal)]
+        ));
+    }
+
+    #[test]
+    fn harness_command_create_account_emits_dispatch_followup() {
+        let mut state = TuiState::new();
+        let followup = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::CreateAccount {
+                account_name: "AliceUser".to_string(),
+            },
+            TuiSemanticInputs {
+                app_snapshot: &StateSnapshot::default(),
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("create account command should apply: {error}"));
+
+        assert!(matches!(
+            followup.as_slice(),
+            [TuiCommand::Dispatch(DispatchCommand::CreateAccount { name })] if name == "AliceUser"
+        ));
+    }
+
+    #[test]
+    fn harness_command_join_channel_emits_dispatch_followup() {
+        let mut state = TuiState::new();
+        let followup = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::JoinChannel {
+                channel_name: "shared-parity-lab".to_string(),
+            },
+            TuiSemanticInputs {
+                app_snapshot: &StateSnapshot::default(),
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("join channel command should apply: {error}"));
+
+        assert!(matches!(
+            followup.as_slice(),
+            [TuiCommand::Dispatch(DispatchCommand::JoinChannel { channel_name })]
+                if channel_name == "shared-parity-lab"
         ));
     }
 

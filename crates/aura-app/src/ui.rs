@@ -37,12 +37,15 @@ impl From<Arc<RwLock<AppCore>>> for UiAppCore {
 pub mod signals {
     pub use crate::signal_defs::{
         register_app_signals, register_app_signals_with_queries, DiscoveredPeer,
-        DiscoveredPeerMethod, BUDGET_SIGNAL, CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL,
-        CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL, ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL,
-        NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL,
-        SYNC_STATUS_SIGNAL, TRANSPORT_PEERS_SIGNAL, UNREAD_COUNT_SIGNAL,
+        DiscoveredPeerMethod, AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
+        AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL_NAME, BUDGET_SIGNAL, CHAT_SIGNAL,
+        CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL, ERROR_SIGNAL,
+        HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL,
+        RECOVERY_SIGNAL, SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
+        UNREAD_COUNT_SIGNAL,
     };
     pub use crate::signal_defs::{ConnectionStatus, NetworkStatus, SyncStatus};
+    pub use crate::ui_contract::AuthoritativeSemanticFact;
     // Signal name constants for emit_signal calls
     pub use crate::signal_defs::{
         BUDGET_SIGNAL_NAME, CHAT_SIGNAL_NAME, CONNECTION_STATUS_SIGNAL_NAME, CONTACTS_SIGNAL_NAME,
@@ -57,11 +60,11 @@ pub mod contract {
     pub use crate::ui_contract::{
         compare_ui_snapshots_for_parity, list_item_dom_id, list_item_selector,
         shared_flow_scenarios, shared_flow_support, shared_list_support, shared_modal_support,
-        shared_screen_support, ConfirmationState, ControlId, FieldId, FlowAvailability, FrontendId,
-        HarnessUiCommand, HarnessUiCommandReceipt, ListId, ListItemSnapshot, ListSnapshot,
-        MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
-        OperationState, ParityException, RenderHeartbeat, RuntimeEventId, RuntimeEventKind,
-        RuntimeEventSnapshot, ScreenId, SelectionSnapshot, SharedFlowId,
+        shared_screen_support, AuthoritativeSemanticFact, ConfirmationState, ControlId, FieldId,
+        FlowAvailability, FrontendId, HarnessUiCommand, HarnessUiCommandReceipt, ListId,
+        ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId,
+        OperationSnapshot, OperationState, ParityException, RenderHeartbeat, RuntimeEventId,
+        RuntimeEventKind, RuntimeEventSnapshot, ScreenId, SelectionSnapshot, SharedFlowId,
         SharedFlowScenarioCoverage, SharedFlowSupport, SharedListSupport, SharedModalSupport,
         SharedScreenModuleMap, SharedScreenSupport, ToastId, ToastKind, ToastSnapshot,
         UiParityMismatch, UiReadiness, UiSnapshot, ALL_SHARED_FLOW_IDS,
@@ -102,6 +105,7 @@ pub mod workflows {
     pub use crate::workflows::query;
     pub use crate::workflows::recovery_cli;
     pub use crate::workflows::runtime;
+    pub use crate::workflows::semantic_facts;
     pub use crate::workflows::settings;
     pub use crate::workflows::signals;
     pub use crate::workflows::snapshot;

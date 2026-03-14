@@ -3,6 +3,12 @@
 //! This module contains messaging operations that are portable across all frontends.
 //! Uses typed reactive signals for state reads/writes.
 
+use crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
+use crate::ui_contract::{
+    AuthoritativeSemanticFact, AuthoritativeSemanticFactKind, ChannelFactKey, OperationId,
+    SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
+    SemanticOperationKind, SemanticOperationPhase,
+};
 use crate::workflows::channel_ref::ChannelRef;
 use crate::workflows::chat_commands::normalize_channel_name;
 use crate::workflows::context::current_home_context_or_authority_default;
@@ -11,7 +17,15 @@ use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::{
     converge_runtime, cooperative_yield, ensure_runtime_peer_connectivity, require_runtime,
 };
-use crate::workflows::signals::{emit_signal, read_signal};
+use crate::workflows::runtime_error_classification::{
+    classify_amp_channel_error, classify_invitation_accept_error, AmpChannelErrorClass,
+    InvitationAcceptErrorClass,
+};
+use crate::workflows::semantic_facts::{
+    publish_authoritative_operation_failure, publish_authoritative_operation_phase,
+    replace_authoritative_semantic_facts_of_kind, update_authoritative_semantic_facts,
+};
+use crate::workflows::signals::{emit_signal, read_signal, read_signal_or_default};
 use crate::workflows::snapshot_policy::{chat_snapshot, contacts_snapshot};
 use crate::workflows::state_helpers::with_chat_state;
 use crate::{
@@ -48,10 +62,11 @@ use aura_protocol::amp::{serialize_amp_message, AmpMessage};
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::sync::Arc;
+use thiserror::Error;
 const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const CHAT_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
-const AMP_SEND_RETRY_ATTEMPTS: usize = 6;
-const AMP_SEND_RETRY_BACKOFF_MS: u64 = 75;
+pub(crate) const AMP_SEND_RETRY_ATTEMPTS: usize = 6;
+pub(crate) const AMP_SEND_RETRY_BACKOFF_MS: u64 = 75;
 const CHANNEL_CONTEXT_RETRY_ATTEMPTS: usize = 12;
 const CHANNEL_CONTEXT_RETRY_BACKOFF_MS: u64 = 100;
 const REMOTE_DELIVERY_RETRY_ATTEMPTS: usize = 24;
@@ -81,6 +96,218 @@ pub enum MessagingBackend {
     LocalOnly,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct MessageSendReadiness {
+    recipient_resolution_ready: bool,
+    delivery_ready: bool,
+}
+
+#[derive(Debug, Clone)]
+struct ChannelReadinessState {
+    channel: Channel,
+    fact_key: ChannelFactKey,
+    member_count: u32,
+    recipients: Vec<AuthorityId>,
+    delivery_supported: bool,
+}
+
+impl ChannelReadinessState {
+    fn new(channel: Channel, recipients: Vec<AuthorityId>) -> Self {
+        let member_count = channel.member_count.max(channel.member_ids.len() as u32 + 1);
+        let delivery_supported = !channel.name.eq_ignore_ascii_case("note to self")
+            && !channel.is_dm
+            && !recipients.is_empty();
+        Self {
+            fact_key: ChannelFactKey {
+                id: Some(channel.id.to_string()),
+                name: Some(channel.name.clone()),
+            },
+            channel,
+            member_count,
+            recipients,
+            delivery_supported,
+        }
+    }
+
+    fn membership_fact(&self) -> AuthoritativeSemanticFact {
+        AuthoritativeSemanticFact::ChannelMembershipReady {
+            channel: self.fact_key.clone(),
+            member_count: self.member_count,
+        }
+    }
+
+    fn recipient_resolution_fact(&self) -> Option<AuthoritativeSemanticFact> {
+        (self.delivery_supported).then(|| AuthoritativeSemanticFact::RecipientPeersResolved {
+            channel: self.fact_key.clone(),
+            member_count: self.member_count.max(self.recipients.len() as u32),
+        })
+    }
+
+    fn delivery_facts(
+        &self,
+        context_id: ContextId,
+        ready_peers: &[AuthorityId],
+    ) -> (Vec<AuthoritativeSemanticFact>, Option<AuthoritativeSemanticFact>) {
+        let peer_facts = ready_peers
+            .iter()
+            .map(|peer| AuthoritativeSemanticFact::PeerChannelReady {
+                channel: self.fact_key.clone(),
+                peer_authority_id: peer.to_string(),
+                context_id: Some(context_id.to_string()),
+            })
+            .collect::<Vec<_>>();
+        let delivery_fact =
+            (self.delivery_supported && ready_peers.len() == self.recipients.len()).then(|| {
+                AuthoritativeSemanticFact::MessageDeliveryReady {
+                    channel: self.fact_key.clone(),
+                    member_count: self.member_count,
+                }
+            });
+        (peer_facts, delivery_fact)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct ChannelReadinessCoordinator {
+    states: Vec<ChannelReadinessState>,
+}
+
+impl ChannelReadinessCoordinator {
+    async fn load(app_core: &Arc<RwLock<AppCore>>) -> Self {
+        let chat = chat_snapshot(app_core).await;
+        let contacts = contacts_snapshot(app_core).await;
+        let (homes, runtime, self_authority) = {
+            let core = app_core.read().await;
+            (
+                core.views().get_homes(),
+                core.runtime().cloned(),
+                core.authority().copied(),
+            )
+        };
+        let self_authority =
+            self_authority.or_else(|| runtime.as_ref().map(|runtime| runtime.authority_id()));
+        let discovered = if let Some(runtime) = runtime {
+            let authority_id = self_authority.unwrap_or_else(|| runtime.authority_id());
+            runtime
+                .get_discovered_peers()
+                .await
+                .into_iter()
+                .filter(|peer| *peer != authority_id)
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        let states = chat
+            .all_channels()
+            .cloned()
+            .map(|channel| {
+                let recipients = self_authority
+                    .map(|authority_id| {
+                        resolved_recipient_peers_for_channel_view(
+                            &channel,
+                            &homes,
+                            &contacts,
+                            &discovered,
+                            authority_id,
+                        )
+                    })
+                    .unwrap_or_default();
+                ChannelReadinessState::new(channel, recipients)
+            })
+            .collect();
+
+        Self { states }
+    }
+
+    fn states(&self) -> &[ChannelReadinessState] {
+        &self.states
+    }
+
+    fn state_for_channel(&self, channel_id: ChannelId) -> Option<&ChannelReadinessState> {
+        self.states.iter().find(|state| state.channel.id == channel_id)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+enum SendMessageError {
+    #[error("Missing authoritative context for channel {channel_id}")]
+    MissingAuthoritativeContext { channel_id: ChannelId },
+    #[error("Recipient peers are not resolved for channel {channel_id}")]
+    RecipientResolutionNotReady { channel_id: ChannelId },
+    #[error("Peer channel establishment is not complete for channel {channel_id}")]
+    DeliveryNotReady { channel_id: ChannelId },
+    #[error("AMP channel bootstrap is unavailable for channel {channel_id} in context {context_id}")]
+    ChannelBootstrapUnavailable {
+        channel_id: ChannelId,
+        context_id: ContextId,
+    },
+    #[error("Transport error while sending on channel {channel_id}: {detail}")]
+    Transport { channel_id: ChannelId, detail: String },
+}
+
+impl SendMessageError {
+    fn semantic_error(&self) -> SemanticOperationError {
+        match self {
+            Self::MissingAuthoritativeContext { channel_id } => SemanticOperationError::new(
+                SemanticFailureDomain::ChannelContext,
+                SemanticFailureCode::MissingAuthoritativeContext,
+            )
+            .with_detail(format!("channel_id={channel_id}")),
+            Self::RecipientResolutionNotReady { channel_id } => SemanticOperationError::new(
+                SemanticFailureDomain::Delivery,
+                SemanticFailureCode::DeliveryReadinessNotReached,
+            )
+            .with_detail(format!("channel_id={channel_id}; reason=recipient_resolution_missing")),
+            Self::DeliveryNotReady { channel_id } => SemanticOperationError::new(
+                SemanticFailureDomain::Delivery,
+                SemanticFailureCode::PeerChannelNotEstablished,
+            )
+            .with_detail(format!("channel_id={channel_id}")),
+            Self::ChannelBootstrapUnavailable {
+                channel_id,
+                context_id,
+            } => SemanticOperationError::new(
+                SemanticFailureDomain::Transport,
+                SemanticFailureCode::ChannelBootstrapUnavailable,
+            )
+            .with_detail(format!("channel_id={channel_id}; context_id={context_id}")),
+            Self::Transport { channel_id, detail } => SemanticOperationError::new(
+                SemanticFailureDomain::Internal,
+                SemanticFailureCode::InternalError,
+            )
+            .with_detail(format!("channel_id={channel_id}; detail={detail}")),
+        }
+    }
+}
+
+impl From<SendMessageError> for AuraError {
+    fn from(error: SendMessageError) -> Self {
+        AuraError::agent(error.to_string())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+enum JoinChannelError {
+    #[error("JoinChannel requires an authoritative context for channel {channel_id}")]
+    MissingAuthoritativeContext { channel_id: ChannelId },
+    #[error("JoinChannel failed for channel {channel_id}: {detail}")]
+    Transport { channel_id: ChannelId, detail: String },
+}
+
+impl JoinChannelError {
+    fn into_aura_error(self) -> AuraError {
+        match self {
+            Self::MissingAuthoritativeContext { channel_id } => AuraError::not_found(format!(
+                "JoinChannel requires an authoritative context for channel {channel_id}"
+            )),
+            Self::Transport { channel_id, detail } => {
+                AuraError::agent(format!("JoinChannel failed for channel {channel_id}: {detail}"))
+            }
+        }
+    }
+}
+
 async fn messaging_backend(app_core: &Arc<RwLock<AppCore>>) -> MessagingBackend {
     let core = app_core.read().await;
     if core.runtime().is_some() {
@@ -88,6 +315,87 @@ async fn messaging_backend(app_core: &Arc<RwLock<AppCore>>) -> MessagingBackend 
     } else {
         MessagingBackend::LocalOnly
     }
+}
+
+fn send_operation_requires_delivery_readiness(channel: Option<&Channel>) -> bool {
+    channel.is_some_and(|channel| !channel.is_dm && !channel.name.eq_ignore_ascii_case("note to self"))
+}
+
+fn authoritative_send_readiness_for_channel(
+    facts: &[AuthoritativeSemanticFact],
+    channel_id: ChannelId,
+) -> MessageSendReadiness {
+    let channel_id = channel_id.to_string();
+    let mut readiness = MessageSendReadiness::default();
+    for fact in facts {
+        match fact {
+            AuthoritativeSemanticFact::RecipientPeersResolved { channel, .. }
+                if channel.id.as_deref() == Some(channel_id.as_str()) =>
+            {
+                readiness.recipient_resolution_ready = true;
+            }
+            AuthoritativeSemanticFact::MessageDeliveryReady { channel, .. }
+                if channel.id.as_deref() == Some(channel_id.as_str()) =>
+            {
+                readiness.delivery_ready = true;
+            }
+            _ => {}
+        }
+    }
+    readiness
+}
+
+async fn publish_send_message_phase(
+    app_core: &Arc<RwLock<AppCore>>,
+    phase: SemanticOperationPhase,
+) -> Result<(), AuraError> {
+    publish_authoritative_operation_phase(
+        app_core,
+        OperationId::send_message(),
+        SemanticOperationKind::SendChatMessage,
+        phase,
+    )
+    .await
+}
+
+async fn publish_send_message_failure(
+    app_core: &Arc<RwLock<AppCore>>,
+    error: &SendMessageError,
+) -> Result<(), AuraError> {
+    publish_authoritative_operation_failure(
+        app_core,
+        OperationId::send_message(),
+        SemanticOperationKind::SendChatMessage,
+        error.semantic_error(),
+    )
+    .await
+}
+
+async fn require_send_message_readiness(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+) -> Result<MessageSendReadiness, SendMessageError> {
+    let facts = read_signal_or_default(app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+    let readiness = authoritative_send_readiness_for_channel(&facts, channel_id);
+    if !readiness.recipient_resolution_ready {
+        return Err(SendMessageError::RecipientResolutionNotReady { channel_id });
+    }
+    if !readiness.delivery_ready {
+        return Err(SendMessageError::DeliveryNotReady { channel_id });
+    }
+    Ok(readiness)
+}
+
+pub(crate) fn is_amp_channel_state_unavailable(error: &impl std::fmt::Display) -> bool {
+    classify_amp_channel_error(error) == AmpChannelErrorClass::ChannelStateUnavailable
+}
+
+async fn fail_send_message<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    error: SendMessageError,
+) -> Result<T, AuraError> {
+    publish_send_message_failure(app_core, &error).await?;
+    Err(error.into())
 }
 
 /// Create a deterministic ChannelId from a DM channel descriptor string
@@ -338,15 +646,13 @@ async fn ensure_runtime_note_to_self_channel(
 
     let created_now = match create_result {
         Ok(_) => true,
+        Err(error) if classify_amp_channel_error(&error) == AmpChannelErrorClass::AlreadyExists => {
+            false
+        }
         Err(error) => {
-            let lowered = error.to_string().to_ascii_lowercase();
-            if lowered.contains("already") || lowered.contains("exists") {
-                false
-            } else {
-                return Err(AuraError::agent(format!(
-                    "Failed to create note-to-self channel: {error}"
-                )));
-            }
+            return Err(AuraError::agent(format!(
+                "Failed to create note-to-self channel: {error}"
+            )));
         }
     };
 
@@ -358,8 +664,7 @@ async fn ensure_runtime_note_to_self_channel(
         })
         .await
     {
-        let lowered = error.to_string().to_ascii_lowercase();
-        if !(lowered.contains("already") || lowered.contains("exists")) {
+        if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists {
             return Err(AuraError::agent(format!(
                 "Failed to join note-to-self channel: {error}"
             )));
@@ -396,6 +701,104 @@ async fn ensure_runtime_note_to_self_channel(
 
 fn bootstrap_required_for_recipients(recipient_count: usize) -> bool {
     recipient_count > 0
+}
+
+pub(crate) async fn refresh_authoritative_channel_membership_readiness(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
+    let coordinator = ChannelReadinessCoordinator::load(app_core).await;
+    let replacements = coordinator
+        .states()
+        .iter()
+        .map(ChannelReadinessState::membership_fact)
+        .collect::<Vec<_>>();
+    replace_authoritative_semantic_facts_of_kind(
+        app_core,
+        AuthoritativeSemanticFactKind::ChannelMembershipReady,
+        replacements,
+    )
+    .await
+}
+
+pub(crate) async fn refresh_authoritative_recipient_resolution_readiness(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
+    let coordinator = ChannelReadinessCoordinator::load(app_core).await;
+    let replacements = coordinator
+        .states()
+        .iter()
+        .filter_map(ChannelReadinessState::recipient_resolution_fact)
+        .collect::<Vec<_>>();
+    replace_authoritative_semantic_facts_of_kind(
+        app_core,
+        AuthoritativeSemanticFactKind::RecipientPeersResolved,
+        replacements,
+    )
+    .await
+}
+
+fn fact_matches_channel(fact: &AuthoritativeSemanticFact, channel_id: ChannelId) -> bool {
+    let channel_id = channel_id.to_string();
+    match fact {
+        AuthoritativeSemanticFact::ChannelMembershipReady { channel, .. }
+        | AuthoritativeSemanticFact::RecipientPeersResolved { channel, .. }
+        | AuthoritativeSemanticFact::MessageCommitted { channel, .. }
+        | AuthoritativeSemanticFact::MessageDeliveryReady { channel, .. } => {
+            channel.id.as_deref() == Some(channel_id.as_str())
+        }
+        AuthoritativeSemanticFact::PeerChannelReady { channel, .. } => {
+            channel.id.as_deref() == Some(channel_id.as_str())
+        }
+        AuthoritativeSemanticFact::OperationStatus { .. }
+        | AuthoritativeSemanticFact::ContactLinkReady { .. }
+        | AuthoritativeSemanticFact::PendingHomeInvitationReady => false,
+    }
+}
+
+async fn refresh_authoritative_delivery_readiness_for_channel(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn RuntimeBridge>,
+    channel_id: ChannelId,
+    context_id: ContextId,
+) -> Result<(), AuraError> {
+    let coordinator = ChannelReadinessCoordinator::load(app_core).await;
+    let Some(channel_state) = coordinator.state_for_channel(channel_id).cloned() else {
+        return update_authoritative_semantic_facts(app_core, |facts| {
+            facts.retain(|fact| {
+                !matches!(
+                    fact,
+                    AuthoritativeSemanticFact::PeerChannelReady { .. }
+                        | AuthoritativeSemanticFact::MessageDeliveryReady { .. }
+                ) || !fact_matches_channel(fact, channel_id)
+            });
+        })
+        .await;
+    };
+
+    let mut ready_peers = Vec::new();
+    if channel_state.delivery_supported {
+        for peer in channel_state.recipients.iter().copied() {
+            if runtime.ensure_peer_channel(context_id, peer).await.is_ok() {
+                ready_peers.push(peer);
+            }
+        }
+    }
+    let (peer_facts, delivery_fact) = channel_state.delivery_facts(context_id, &ready_peers);
+
+    update_authoritative_semantic_facts(app_core, |facts| {
+        facts.retain(|fact| {
+            !matches!(
+                fact,
+                AuthoritativeSemanticFact::PeerChannelReady { .. }
+                    | AuthoritativeSemanticFact::MessageDeliveryReady { .. }
+            ) || !fact_matches_channel(fact, channel_id)
+        });
+        facts.extend(peer_facts);
+        if let Some(delivery_fact) = delivery_fact {
+            facts.push(delivery_fact);
+        }
+    })
+    .await
 }
 
 fn channel_id_from_pending_channel_invitation(invitation: &InvitationInfo) -> Option<ChannelId> {
@@ -446,11 +849,9 @@ async fn try_join_via_pending_channel_invitation(
     };
 
     if let Err(error) = runtime.accept_invitation(invitation_id.as_str()).await {
-        let message = error.to_string();
-        let lowered = message.to_lowercase();
-        if !lowered.contains("already accepted") && !lowered.contains("not pending") {
+        if classify_invitation_accept_error(&error) != InvitationAcceptErrorClass::AlreadyHandled {
             return Err(AuraError::agent(format!(
-                "Failed to accept pending channel invitation: {message}"
+                "Failed to accept pending channel invitation: {error}"
             )));
         }
     }
@@ -523,6 +924,7 @@ async fn context_id_for_channel(
     routing::context_id_for_channel(app_core, channel_id, local_authority).await
 }
 
+#[cfg(test)]
 fn join_error_is_not_found(error: &AuraError) -> bool {
     validation::join_error_is_not_found(error)
 }
@@ -915,7 +1317,7 @@ pub(crate) async fn authoritative_context_id_for_channel(
         .and_then(|home| home.context_id)
 }
 
-async fn require_authoritative_context_id_for_channel(
+pub(crate) async fn require_authoritative_context_id_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
     channel_id: ChannelId,
@@ -1077,6 +1479,10 @@ async fn warm_channel_connectivity(
     for peer in recipients {
         let _ = runtime.ensure_peer_channel(context_id, peer).await;
     }
+    let _ = refresh_authoritative_delivery_readiness_for_channel(
+        app_core, runtime, channel_id, context_id,
+    )
+    .await;
     converge_runtime(runtime).await;
     let _ = crate::workflows::system::refresh_account(app_core).await;
 }
@@ -1450,8 +1856,11 @@ pub async fn join_channel(
     channel_id: ChannelId,
 ) -> Result<(), AuraError> {
     let runtime = { require_runtime(app_core).await? };
-    let context_id =
-        context_id_for_channel(app_core, channel_id, Some(runtime.authority_id())).await?;
+    let context_id = authoritative_context_id_for_channel(app_core, channel_id)
+        .await
+        .ok_or_else(|| {
+            JoinChannelError::MissingAuthoritativeContext { channel_id }.into_aura_error()
+        })?;
     enforce_home_join_allowed(app_core, context_id, channel_id, runtime.authority_id()).await?;
 
     runtime
@@ -1463,9 +1872,13 @@ pub async fn join_channel(
         .await
         .map_err(|error| {
             if intent_error_is_not_found(&error) {
-                AuraError::not_found(format!("Failed to join channel: {error}"))
+                JoinChannelError::MissingAuthoritativeContext { channel_id }.into_aura_error()
             } else {
-                AuraError::agent(format!("Failed to join channel: {error}"))
+                JoinChannelError::Transport {
+                    channel_id,
+                    detail: error.to_string(),
+                }
+                .into_aura_error()
             }
         })?;
 
@@ -1514,67 +1927,26 @@ pub async fn join_channel_by_name(
         return Ok(());
     }
 
-    match join_channel(app_core, channel_id).await {
-        Ok(()) => {
-            let context_id = context_id_for_channel(
-                app_core,
-                channel_id,
-                Some(require_runtime(app_core).await?.authority_id()),
-            )
-            .await?;
-            apply_authoritative_membership_projection(
-                app_core,
-                channel_id,
-                context_id,
-                true,
-                Some(channel_name),
-            )
-            .await?;
-            let runtime = require_runtime(app_core).await?;
-            converge_runtime(&runtime).await;
-            ensure_runtime_peer_connectivity(&runtime, "join_channel_by_name").await?;
-            Ok(())
-        }
-        Err(join_error) => {
-            // "/join" is "join or create". If the channel is unknown locally,
-            // create it in the current context as a fallback.
-            if channel_exists_locally || !join_error_is_not_found(&join_error) {
-                return Err(join_error);
-            }
-
-            let runtime = require_runtime(app_core).await?;
-            let (fallback_context, _) =
-                current_home_context_or_authority_default(app_core, runtime.authority_id()).await?;
-            enforce_home_join_allowed(
-                app_core,
-                fallback_context,
-                channel_id,
-                runtime.authority_id(),
-            )
-            .await?;
-
-            if try_join_via_pending_channel_invitation(app_core, channel_id).await? {
-                return Ok(());
-            }
-
-            let timestamp_ms = crate::workflows::time::current_time_ms(app_core).await?;
-            create_channel(
-                app_core,
-                channel_name,
-                None,
-                &known_members,
-                0,
-                timestamp_ms,
-            )
-                .await
-                .map(|_| ())
-                .map_err(|create_error| {
-                    AuraError::agent(format!(
-                        "Failed to join channel: {join_error}; failed to create missing channel: {create_error}"
-                    ))
-                })
-        }
+    if try_join_via_pending_channel_invitation(app_core, channel_id).await? {
+        return Ok(());
     }
+
+    join_channel(app_core, channel_id).await?;
+    let context_id = authoritative_context_id_for_channel(app_core, channel_id)
+        .await
+        .ok_or_else(|| JoinChannelError::MissingAuthoritativeContext { channel_id }.into_aura_error())?;
+    apply_authoritative_membership_projection(
+        app_core,
+        channel_id,
+        context_id,
+        true,
+        Some(channel_name),
+    )
+    .await?;
+    let runtime = require_runtime(app_core).await?;
+    converge_runtime(&runtime).await;
+    ensure_runtime_peer_connectivity(&runtime, "join_channel_by_name").await?;
+    Ok(())
 }
 
 /// Leave a channel using a typed ChannelId.
@@ -1772,6 +2144,8 @@ pub async fn send_message_ref(
     content: &str,
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
+    publish_send_message_phase(app_core, SemanticOperationPhase::WorkflowDispatched).await?;
+
     let channel_id = channel.to_channel_id();
     let channel_label = match &channel {
         ChannelRef::Id(id) => id.to_string(),
@@ -1813,13 +2187,36 @@ pub async fn send_message_ref(
             (sender_id, message_id)
         } else {
             let message_id = next_message_id(channel_id, sender_id, timestamp_ms, content);
-            let context_id = authoritative_context_id_for_channel(app_core, channel_id)
-                .await
-                .ok_or_else(|| {
-                    AuraError::agent(format!(
-                        "Missing authoritative context for channel {channel_id}"
-                    ))
-                })?;
+            let channel_view = chat_snapshot(app_core).await.channel(&channel_id).cloned();
+            let context_id = match authoritative_context_id_for_channel(app_core, channel_id).await {
+                Some(context_id) => context_id,
+                None => {
+                    return fail_send_message(
+                        app_core,
+                        SendMessageError::MissingAuthoritativeContext { channel_id },
+                    )
+                    .await;
+                }
+            };
+            publish_send_message_phase(app_core, SemanticOperationPhase::AuthoritativeContextReady)
+                .await?;
+            if send_operation_requires_delivery_readiness(channel_view.as_ref()) {
+                let readiness = match require_send_message_readiness(app_core, channel_id).await {
+                    Ok(readiness) => readiness,
+                    Err(error) => return fail_send_message(app_core, error).await,
+                };
+                if readiness.recipient_resolution_ready {
+                    publish_send_message_phase(
+                        app_core,
+                        SemanticOperationPhase::RecipientResolutionReady,
+                    )
+                    .await?;
+                }
+                if readiness.delivery_ready {
+                    publish_send_message_phase(app_core, SemanticOperationPhase::DeliveryReady)
+                        .await?;
+                }
+            }
             enforce_home_moderation_for_sender(
                 app_core,
                 context_id,
@@ -1840,13 +2237,19 @@ pub async fn send_message_ref(
             let mut maybe_cipher = match runtime.amp_send_message(send_params.clone()).await {
                 Ok(cipher) => Some(cipher),
                 Err(error) => {
-                    let error_text = error.to_string();
-                    if error_text.contains("channel state not found") {
+                    if is_amp_channel_state_unavailable(&error) {
                         None
                     } else {
-                        return Err(AuraError::agent(format!(
-                            "Failed to send message on context {context_id} channel {channel_id}: {error}"
-                        )));
+                        return fail_send_message(
+                            app_core,
+                            SendMessageError::Transport {
+                                channel_id,
+                                detail: format!(
+                                    "context_id={context_id}; amp_send_message failed: {error}"
+                                ),
+                            },
+                        )
+                        .await;
                     }
                 }
             };
@@ -1861,13 +2264,19 @@ pub async fn send_message_ref(
                             break;
                         }
                         Err(error) => {
-                            let error_text = error.to_string();
-                            if error_text.contains("channel state not found") {
+                            if is_amp_channel_state_unavailable(&error) {
                                 continue;
                             }
-                            return Err(AuraError::agent(format!(
-                                "Failed to send message on context {context_id} channel {channel_id}: {error}"
-                            )));
+                            return fail_send_message(
+                                app_core,
+                                SendMessageError::Transport {
+                                    channel_id,
+                                    detail: format!(
+                                        "context_id={context_id}; amp_send_message retry failed: {error}"
+                                    ),
+                                },
+                            )
+                            .await;
                         }
                     }
                 }
@@ -1912,7 +2321,9 @@ pub async fn send_message_ref(
                         FactOptions::default().with_ack_tracking(),
                     )
                     .await
-                    .map_err(|e| AuraError::agent(format!("Failed to persist message: {e}")))?;
+                    .map_err(|e| {
+                        AuraError::agent(format!("Failed to persist message: {e}"))
+                    })?;
 
                 if let Some(spawner) = runtime.task_spawner() {
                     let background_app_core = Arc::clone(app_core);
@@ -1950,6 +2361,15 @@ pub async fn send_message_ref(
                     )
                     .await?;
                 }
+            } else {
+                return fail_send_message(
+                    app_core,
+                    SendMessageError::ChannelBootstrapUnavailable {
+                        channel_id,
+                        context_id,
+                    },
+                )
+                .await;
             }
 
             (sender_id, message_id)
@@ -1999,6 +2419,8 @@ pub async fn send_message_ref(
         );
     })
     .await?;
+
+    publish_send_message_phase(app_core, SemanticOperationPhase::Succeeded).await?;
 
     Ok(message_id)
 }
@@ -2081,8 +2503,7 @@ pub async fn start_direct_chat_with_authority(
             })
             .await;
         if let Err(error) = create_result {
-            let lowered = error.to_string().to_lowercase();
-            if !lowered.contains("already") && !lowered.contains("exists") {
+            if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists {
                 return Err(AuraError::agent(format!(
                     "Failed to create direct channel: {error}"
                 )));
@@ -2265,84 +2686,21 @@ pub async fn invite_authority_to_channel(
     ttl_ms: Option<u64>,
 ) -> Result<InvitationId, AuraError> {
     let runtime = require_runtime(app_core).await?;
-    let mut context_id = require_authoritative_context_id_for_channel(
-        app_core,
-        &runtime,
-        channel_id,
-        "channel invitation bootstrap",
-    )
-    .await?;
-
-    // Channel invitations must carry bootstrap key material so recipients can
-    // decrypt channel traffic immediately after acceptance.
-    let invitees = vec![receiver];
-    let mut maybe_bootstrap = match runtime
-        .amp_create_channel_bootstrap(context_id, channel_id, invitees.clone())
-        .await
-    {
-        Ok(bootstrap) => Some(bootstrap),
-        Err(error) => {
-            let error_text = error.to_string();
-            if error_text.contains("channel state not found") {
-                None
-            } else {
-                return Err(AuraError::agent(format!(
-                    "Failed to bootstrap channel invitation: {error}"
-                )));
-            }
-        }
-    };
-    if maybe_bootstrap.is_none() {
-        for attempt in 1..=AMP_SEND_RETRY_ATTEMPTS {
-            converge_runtime(&runtime).await;
-            runtime
-                .sleep_ms(AMP_SEND_RETRY_BACKOFF_MS * attempt as u64)
-                .await;
-            if let Ok(authoritative_context) = require_authoritative_context_id_for_channel(
-                app_core,
-                &runtime,
-                channel_id,
-                "channel invitation bootstrap",
-            )
-            .await
-            {
-                context_id = authoritative_context;
-            }
-            match runtime
-                .amp_create_channel_bootstrap(context_id, channel_id, invitees.clone())
-                .await
-            {
-                Ok(bootstrap) => {
-                    maybe_bootstrap = Some(bootstrap);
-                    break;
-                }
-                Err(error) => {
-                    let error_text = error.to_string();
-                    if error_text.contains("channel state not found") {
-                        continue;
-                    }
-                    return Err(AuraError::agent(format!(
-                        "Failed to bootstrap channel invitation: {error}"
-                    )));
-                }
-            }
-        }
-    }
-    let bootstrap = maybe_bootstrap.ok_or_else(|| {
-        AuraError::agent(format!(
-            "Failed to bootstrap channel invitation after {AMP_SEND_RETRY_ATTEMPTS} retries: channel state not found"
-        ))
-    })?;
-
-    // Delegate to invitation workflow.
     let invitation = crate::workflows::invitation::create_channel_invitation(
         app_core,
         receiver,
         channel_id.to_string(),
-        Some(context_id),
-        Some(bootstrap),
+        None,
+        None,
         message,
         ttl_ms,
+    )
+    .await?;
+    let context_id = require_authoritative_context_id_for_channel(
+        app_core,
+        &runtime,
+        channel_id,
+        "channel invitation projection",
     )
     .await?;
     if let Some(spawner) = runtime.task_spawner() {
@@ -2397,10 +2755,12 @@ pub async fn invite_authority_to_channel(
 mod tests {
     use super::*;
     use crate::runtime_bridge::InvitationBridgeStatus;
-    use crate::signal_defs::{CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME};
+    use crate::signal_defs::{
+        AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME,
+    };
     use crate::views::contacts::{Contact, ContactsState};
     use crate::views::home::{BanRecord, HomeRole, HomeState, HomesState, MuteRecord};
-    use crate::workflows::signals::emit_signal;
+    use crate::workflows::signals::{emit_signal, read_signal_or_default};
     use crate::AppConfig;
 
     #[tokio::test]
@@ -2412,6 +2772,252 @@ mod tests {
 
         let state = get_chat_state(&app_core).await.unwrap();
         assert!(state.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_refresh_authoritative_channel_membership_readiness_tracks_visible_channels() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let channel_id = ChannelId::from_bytes(hash(b"membership-ready"));
+        let peer = AuthorityId::new_from_entropy([55u8; 32]);
+
+        with_chat_state(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: channel_id,
+                context_id: None,
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: vec![peer],
+                member_count: 2,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await
+        .unwrap();
+
+        refresh_authoritative_channel_membership_readiness(&app_core)
+            .await
+            .unwrap();
+
+        let channel_id_string = channel_id.to_string();
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::ChannelMembershipReady { channel, member_count }
+                    if channel.id.as_deref() == Some(channel_id_string.as_str())
+                        && *member_count == 2
+            )
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_refresh_authoritative_recipient_resolution_readiness_tracks_resolved_peers() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let local = AuthorityId::new_from_entropy([56u8; 32]);
+        let peer = AuthorityId::new_from_entropy([57u8; 32]);
+        let channel_id = ChannelId::from_bytes(hash(b"recipient-ready"));
+        {
+            let mut core = app_core.write().await;
+            core.set_authority(local);
+        }
+
+        with_chat_state(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: channel_id,
+                context_id: None,
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: vec![peer],
+                member_count: 2,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await
+        .unwrap();
+
+        refresh_authoritative_recipient_resolution_readiness(&app_core)
+            .await
+            .unwrap();
+
+        let channel_id_string = channel_id.to_string();
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::RecipientPeersResolved { channel, member_count }
+                    if channel.id.as_deref() == Some(channel_id_string.as_str())
+                        && *member_count == 2
+            )
+        }));
+    }
+
+    #[test]
+    fn test_delivery_readiness_facts_emit_peer_and_channel_facts() {
+        let peer = AuthorityId::new_from_entropy([59u8; 32]);
+        let channel_id = ChannelId::from_bytes(hash(b"delivery-ready"));
+        let context_id = ContextId::new_from_entropy([61u8; 32]);
+        let state = ChannelReadinessState::new(
+            Channel {
+                id: channel_id,
+                context_id: Some(context_id),
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: vec![peer],
+                member_count: 2,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            },
+            vec![peer],
+        );
+
+        let (peer_facts, delivery_fact) = state.delivery_facts(context_id, &[peer]);
+
+        let channel_id_string = channel_id.to_string();
+        let peer_id_string = peer.to_string();
+        assert!(peer_facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::PeerChannelReady {
+                    channel,
+                    peer_authority_id,
+                    context_id: Some(fact_context),
+                } if channel.id.as_deref() == Some(channel_id_string.as_str())
+                    && peer_authority_id == &peer_id_string
+                    && fact_context == &context_id.to_string()
+            )
+        }));
+        assert!(matches!(
+            delivery_fact,
+            Some(AuthoritativeSemanticFact::MessageDeliveryReady { channel, member_count })
+                if channel.id.as_deref() == Some(channel_id_string.as_str())
+                    && member_count == 2
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_channel_readiness_coordinator_tracks_shared_channel_state() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let local = AuthorityId::new_from_entropy([62u8; 32]);
+        let peer = AuthorityId::new_from_entropy([63u8; 32]);
+        let channel_id = ChannelId::from_bytes(hash(b"channel-readiness-coordinator"));
+        {
+            let mut core = app_core.write().await;
+            core.set_authority(local);
+        }
+
+        with_chat_state(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: channel_id,
+                context_id: None,
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: vec![peer],
+                member_count: 2,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await
+        .unwrap();
+
+        let coordinator = ChannelReadinessCoordinator::load(&app_core).await;
+        let state = coordinator
+            .state_for_channel(channel_id)
+            .unwrap_or_else(|| panic!("expected channel readiness state for {channel_id}"));
+
+        assert_eq!(state.member_count, 2);
+        assert_eq!(state.recipients, vec![peer]);
+        assert!(state.delivery_supported);
+    }
+
+    #[test]
+    fn test_authoritative_send_readiness_for_channel_requires_matching_facts() {
+        let channel_id = ChannelId::from_bytes(hash(b"send-ready"));
+        let other_channel_id = ChannelId::from_bytes(hash(b"other-send-ready"));
+        let facts = vec![
+            AuthoritativeSemanticFact::RecipientPeersResolved {
+                channel: ChannelFactKey {
+                    id: Some(channel_id.to_string()),
+                    name: Some("shared-parity-lab".to_string()),
+                },
+                member_count: 2,
+            },
+            AuthoritativeSemanticFact::MessageDeliveryReady {
+                channel: ChannelFactKey {
+                    id: Some(other_channel_id.to_string()),
+                    name: Some("other".to_string()),
+                },
+                member_count: 2,
+            },
+        ];
+
+        let readiness = authoritative_send_readiness_for_channel(&facts, channel_id);
+        assert!(readiness.recipient_resolution_ready);
+        assert!(!readiness.delivery_ready);
+    }
+
+    #[test]
+    fn test_send_message_error_maps_to_typed_semantic_failure() {
+        let channel_id = ChannelId::from_bytes(hash(b"send-error"));
+        let error = SendMessageError::DeliveryNotReady { channel_id };
+        let semantic_error = error.semantic_error();
+        assert_eq!(semantic_error.domain, SemanticFailureDomain::Delivery);
+        assert_eq!(
+            semantic_error.code,
+            SemanticFailureCode::PeerChannelNotEstablished
+        );
+        assert!(
+            semantic_error
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains(&channel_id.to_string()))
+        );
+    }
+
+    #[test]
+    fn test_join_channel_error_missing_context_maps_to_not_found() {
+        let channel_id = ChannelId::from_bytes(hash(b"join-missing-context"));
+        let error = JoinChannelError::MissingAuthoritativeContext { channel_id }.into_aura_error();
+        match error {
+            AuraError::NotFound { message } => {
+                assert!(message.contains(&channel_id.to_string()));
+            }
+            other => panic!("expected not_found error, got {other:?}"),
+        }
     }
 
     #[test]

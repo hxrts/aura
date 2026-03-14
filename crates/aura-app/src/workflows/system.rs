@@ -207,6 +207,7 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
 
     // Refresh invitations state
     let _ = super::invitation::list_invitations(app_core).await;
+    let _ = super::invitation::refresh_authoritative_invitation_readiness(app_core).await;
 
     // Refresh settings state
     let _ = super::settings::refresh_settings_from_runtime(app_core).await;
@@ -226,9 +227,19 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
     {
         let _ = emit_chat_snapshot_signal(app_core).await;
     }
+    #[cfg(feature = "signals")]
+    {
+        let _ =
+            super::messaging::refresh_authoritative_channel_membership_readiness(app_core).await;
+    }
 
     // Refresh discovered peers (re-query runtime, not just read stale signal)
     let _ = super::network::refresh_discovered_peers(app_core).await;
+    #[cfg(feature = "signals")]
+    {
+        let _ =
+            super::messaging::refresh_authoritative_recipient_resolution_readiness(app_core).await;
+    }
 
     // Refresh connection and network status derived from contacts.
     let _ = refresh_connection_status_from_contacts(app_core).await;

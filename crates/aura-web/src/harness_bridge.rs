@@ -267,18 +267,9 @@ async fn submit_semantic_command(
             let invitation = invitation_workflows::import_invitation_details(&app_core, &code)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            invitation_workflows::issue_device_enrollment_invitation_accept(&app_core, &invitation)
+            invitation_workflows::accept_device_enrollment_invitation(&app_core, &invitation)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            let app_core_for_convergence = app_core.clone();
-            let invitation_for_convergence = invitation.clone();
-            spawn_local(async move {
-                let _ = invitation_workflows::converge_device_enrollment_invitation_accept(
-                    &app_core_for_convergence,
-                    &invitation_for_convergence,
-                )
-                .await;
-            });
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::OpenSettingsSection(section) => {

@@ -10,6 +10,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
+use aura_harness::artifact_sync::sync_remote_artifacts;
 use aura_harness::build_startup_summary;
 use aura_harness::config::{require_existing_file, ScreenSource};
 use aura_harness::coordinator::HarnessCoordinator;
@@ -26,7 +27,6 @@ use aura_harness::routing::AddressResolver;
 use aura_harness::scenario::ScenarioRunner;
 use aura_harness::scenario_execution::{execute_with_run_budgets, lint_for_run};
 use aura_harness::tool_api::{ToolApi, ToolRequest};
-use aura_harness::{api_version::TOOL_API_DEFAULT_VERSION, artifact_sync::sync_remote_artifacts};
 use aura_harness::{artifacts::ArtifactBundle, default_artifacts_dir};
 use clap::{Parser, Subcommand};
 
@@ -296,7 +296,7 @@ fn run_with_artifacts(
         .collect();
     let replay_bundle = ReplayBundle {
         schema_version: REPLAY_SCHEMA_VERSION,
-        tool_api_version: TOOL_API_DEFAULT_VERSION.to_string(),
+        tool_api_version: tool_api.negotiated_version().to_string(),
         run_config: config.clone(),
         actions: action_log,
         routing_metadata: routing_metadata.clone(),

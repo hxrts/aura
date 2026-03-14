@@ -10,14 +10,13 @@ use std::time::Duration;
 use iocraft::prelude::*;
 
 use aura_app::ui::signals::{
-    ConnectionStatus, DiscoveredPeer, DiscoveredPeerMethod, NetworkStatus, CHAT_SIGNAL,
-    CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL, HOMES_SIGNAL,
-    INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL,
-    SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
+    ConnectionStatus, DiscoveredPeer, DiscoveredPeerMethod, NetworkStatus,
+    AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL,
+    DISCOVERED_PEERS_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
+    NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
 };
 use aura_app::ui::types::{ChatState, ContactsState, HomesState};
-use aura_app::ui::workflows::messaging as messaging_workflows;
-use aura_app::ui_contract::{ChannelFactKey, RuntimeEventKind, RuntimeFact};
+use aura_app::ui_contract::{AuthoritativeSemanticFact, RuntimeEventKind, RuntimeFact};
 use aura_core::AuthorityId;
 
 use crate::tui::chat_scope::{
@@ -34,6 +33,76 @@ fn publish_ui_update(tx: &UiUpdateSender, update: UiUpdate) {
             let _ = tx.send(update).await;
         });
     }
+}
+
+fn runtime_fact_from_authoritative_semantic_fact(
+    fact: &AuthoritativeSemanticFact,
+) -> Option<(RuntimeEventKind, RuntimeFact)> {
+    match fact {
+        AuthoritativeSemanticFact::ContactLinkReady {
+            authority_id,
+            contact_count,
+        } => Some((
+            RuntimeEventKind::ContactLinkReady,
+            RuntimeFact::ContactLinkReady {
+                authority_id: Some(authority_id.clone()),
+                contact_count: Some(*contact_count),
+            },
+        )),
+        AuthoritativeSemanticFact::PendingHomeInvitationReady => Some((
+            RuntimeEventKind::PendingHomeInvitationReady,
+            RuntimeFact::PendingHomeInvitationReady,
+        )),
+        AuthoritativeSemanticFact::ChannelMembershipReady {
+            channel,
+            member_count,
+        } => Some((
+            RuntimeEventKind::ChannelMembershipReady,
+            RuntimeFact::ChannelMembershipReady {
+                channel: channel.clone(),
+                member_count: Some(*member_count),
+            },
+        )),
+        AuthoritativeSemanticFact::RecipientPeersResolved {
+            channel,
+            member_count,
+        } => Some((
+            RuntimeEventKind::RecipientPeersResolved,
+            RuntimeFact::RecipientPeersResolved {
+                channel: channel.clone(),
+                member_count: *member_count,
+            },
+        )),
+        AuthoritativeSemanticFact::MessageCommitted { channel, content } => Some((
+            RuntimeEventKind::MessageCommitted,
+            RuntimeFact::MessageCommitted {
+                channel: channel.clone(),
+                content: content.clone(),
+            },
+        )),
+        AuthoritativeSemanticFact::MessageDeliveryReady {
+            channel,
+            member_count,
+        } => Some((
+            RuntimeEventKind::MessageDeliveryReady,
+            RuntimeFact::MessageDeliveryReady {
+                channel: channel.clone(),
+                member_count: *member_count,
+            },
+        )),
+        AuthoritativeSemanticFact::OperationStatus { .. }
+        | AuthoritativeSemanticFact::PeerChannelReady { .. } => None,
+    }
+}
+
+fn authoritative_runtime_replace_kinds() -> Vec<RuntimeEventKind> {
+    vec![
+        RuntimeEventKind::ContactLinkReady,
+        RuntimeEventKind::PendingHomeInvitationReady,
+        RuntimeEventKind::ChannelMembershipReady,
+        RuntimeEventKind::RecipientPeersResolved,
+        RuntimeEventKind::MessageDeliveryReady,
+    ]
 }
 
 /// Shared authority id state for UI dispatch handlers.
@@ -313,21 +382,6 @@ pub fn use_contacts_subscription(
                     if previous != new_count {
                         publish_ui_update(tx, UiUpdate::ContactCountChanged(new_count));
                     }
-                    let facts = if new_count > 0 {
-                        vec![RuntimeFact::ContactLinkReady {
-                            authority_id: None,
-                            contact_count: Some(new_count),
-                        }]
-                    } else {
-                        Vec::new()
-                    };
-                    publish_ui_update(
-                        tx,
-                        UiUpdate::RuntimeFactsUpdated {
-                            replace_kinds: vec![RuntimeEventKind::ContactLinkReady],
-                            facts,
-                        },
-                    );
                 }
             })
             .await;
@@ -523,11 +577,11 @@ fn publish_scoped_channels(
     last_channel_count: &Arc<AtomicUsize>,
     last_message_count: &Arc<AtomicUsize>,
     last_channel_signature: &Arc<RwLock<Option<String>>>,
-    transport_peer_count: usize,
+    _transport_peer_count: usize,
     _discovered_peer_ids: &[AuthorityId],
-    self_authority: Option<AuthorityId>,
-    homes_state: &HomesState,
-    contacts_state: &ContactsState,
+    _self_authority: Option<AuthorityId>,
+    _homes_state: &HomesState,
+    _contacts_state: &ContactsState,
     chat_state: &ChatState,
     active_scope: Option<&str>,
 ) {
@@ -561,74 +615,11 @@ fn publish_scoped_channels(
         .map(|channel| channel.id.as_str())
         .collect::<Vec<_>>()
         .join("|");
-    let runtime_channels = chat_state.all_channels().cloned().collect::<Vec<_>>();
-    let runtime_facts = runtime_channels
-        .iter()
-        .flat_map(|channel| {
-            let channel_fact = ChannelFactKey {
-                id: Some(channel.id.to_string()),
-                name: Some(channel.name.clone()),
-            };
-            let resolved_recipients = self_authority
-                .map(|authority_id| {
-                    messaging_workflows::resolved_recipient_peers_for_channel_view(
-                        channel,
-                        homes_state,
-                        contacts_state,
-                        &[],
-                        authority_id,
-                    )
-                })
-                .unwrap_or_default();
-            let resolved_recipient_count = resolved_recipients.len();
-            let observed_remote_message = chat_state
-                .messages_for_channel(&channel.id)
-                .iter()
-                .any(|message| !message.is_own);
-            let resolved_member_count = channel
-                .member_count
-                .max((resolved_recipient_count.saturating_add(1)) as u32);
-            let mut facts = vec![RuntimeFact::ChannelMembershipReady {
-                channel: channel_fact.clone(),
-                member_count: Some(resolved_member_count),
-            }];
-            let recipients_resolved = resolved_recipient_count > 0
-                && !channel.name.eq_ignore_ascii_case("note to self")
-                && !is_dm_like_channel(channel);
-            let remote_delivery_ready =
-                recipients_resolved && (transport_peer_count > 0 || observed_remote_message);
-            if recipients_resolved {
-                facts.push(RuntimeFact::RecipientPeersResolved {
-                    channel: channel_fact.clone(),
-                    member_count: resolved_member_count,
-                });
-            }
-            if remote_delivery_ready {
-                facts.push(RuntimeFact::MessageDeliveryReady {
-                    channel: channel_fact,
-                    member_count: resolved_member_count,
-                });
-            }
-            facts
-        })
-        .collect::<Vec<_>>();
-
     if let Ok(mut guard) = channels.write() {
         *guard = channel_list;
     }
 
     if let Some(tx) = update_tx {
-        publish_ui_update(
-            tx,
-            UiUpdate::RuntimeFactsUpdated {
-                replace_kinds: vec![
-                    RuntimeEventKind::ChannelMembershipReady,
-                    RuntimeEventKind::RecipientPeersResolved,
-                    RuntimeEventKind::MessageDeliveryReady,
-                ],
-                facts: runtime_facts,
-            },
-        );
         let channel_signature_changed = {
             let mut guard = last_channel_signature
                 .write()
@@ -1207,7 +1198,7 @@ pub type SharedInvitations = Arc<RwLock<Vec<Invitation>>>;
 pub fn use_invitations_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
-    update_tx: Option<UiUpdateSender>,
+    _update_tx: Option<UiUpdateSender>,
 ) -> SharedInvitations {
     let shared_invitations_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
     let shared_invitations: SharedInvitations = shared_invitations_ref.read().clone();
@@ -1228,37 +1219,62 @@ pub fn use_invitations_subscription(
                 if let Ok(mut guard) = invitations.write() {
                     *guard = all;
                 }
-
-                if let Some(ref tx) = update_tx {
-                    let facts = if inv_state
-                        .all_pending()
-                        .iter()
-                        .chain(inv_state.all_sent().iter())
-                        .any(|invitation| {
-                            matches!(
-                                invitation.invitation_type,
-                                aura_app::ui::types::InvitationType::Home
-                                    | aura_app::ui::types::InvitationType::Chat
-                            ) && invitation.status == aura_app::ui::types::InvitationStatus::Pending
-                        }) {
-                        vec![RuntimeFact::PendingHomeInvitationReady]
-                    } else {
-                        Vec::new()
-                    };
-                    publish_ui_update(
-                        tx,
-                        UiUpdate::RuntimeFactsUpdated {
-                            replace_kinds: vec![RuntimeEventKind::PendingHomeInvitationReady],
-                            facts,
-                        },
-                    );
-                }
             })
             .await;
         }
     });
 
     shared_invitations
+}
+
+pub fn use_authoritative_semantic_facts_subscription(
+    hooks: &mut Hooks,
+    app_ctx: &AppCoreContext,
+    update_tx: Option<UiUpdateSender>,
+) {
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        async move {
+            subscribe_signal_with_retry(
+                app_core,
+                &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
+                move |facts| {
+                    let Some(ref tx) = update_tx else {
+                        return;
+                    };
+                    for fact in facts.iter() {
+                        if let AuthoritativeSemanticFact::OperationStatus {
+                            operation_id,
+                            status,
+                            ..
+                        } = fact
+                        {
+                            publish_ui_update(
+                                tx,
+                                UiUpdate::AuthoritativeOperationStatus {
+                                    operation_id: operation_id.clone(),
+                                    status: status.clone(),
+                                },
+                            );
+                        }
+                    }
+                    let mapped = facts
+                        .iter()
+                        .filter_map(runtime_fact_from_authoritative_semantic_fact)
+                        .collect::<Vec<_>>();
+                    let facts = mapped.into_iter().map(|(_, fact)| fact).collect::<Vec<_>>();
+                    publish_ui_update(
+                        tx,
+                        UiUpdate::RuntimeFactsUpdated {
+                            replace_kinds: authoritative_runtime_replace_kinds(),
+                            facts,
+                        },
+                    );
+                },
+            )
+            .await;
+        }
+    });
 }
 
 /// Shared neighborhood home IDs (in display order).

@@ -66,6 +66,8 @@ pub enum HarnessUiCommand {
     NavigateScreen { screen: ScreenId },
     ActivateControl { control_id: ControlId },
     ActivateListItem { list_id: ListId, item_id: String },
+    CreateAccount { account_name: String },
+    CreateHome { home_name: String },
     AcceptPendingChannelInvitation,
     JoinChannel { channel_name: String },
     SendChatMessage { content: String },
@@ -635,6 +637,261 @@ impl ChannelFactKey {
 pub enum InvitationFactKind {
     Generic,
     Contact,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticOperationKind {
+    CreateAccount,
+    CreateHome,
+    StartDeviceEnrollment,
+    ImportDeviceEnrollmentCode,
+    CreateContactInvitation,
+    AcceptContactInvitation,
+    InviteActorToChannel,
+    AcceptPendingChannelInvitation,
+    JoinChannel,
+    SendChatMessage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticOperationPhase {
+    Submitted,
+    WorkflowDispatched,
+    AuthoritativeContextReady,
+    ContactLinkReady,
+    MembershipReady,
+    RecipientResolutionReady,
+    PeerChannelReady,
+    DeliveryReady,
+    Succeeded,
+    Failed,
+}
+
+impl SemanticOperationPhase {
+    #[must_use]
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Succeeded | Self::Failed)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticFailureDomain {
+    Command,
+    Invitation,
+    ChannelContext,
+    Transport,
+    Delivery,
+    Projection,
+    Internal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticFailureCode {
+    UnsupportedCommand,
+    MissingAuthoritativeContext,
+    ContactLinkDidNotConverge,
+    ChannelBootstrapUnavailable,
+    PeerChannelNotEstablished,
+    DeliveryReadinessNotReached,
+    OperationTimedOut,
+    ShellDeclaredSuccessIllegally,
+    InternalError,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticOperationError {
+    pub domain: SemanticFailureDomain,
+    pub code: SemanticFailureCode,
+    pub detail: Option<String>,
+}
+
+impl SemanticOperationError {
+    #[must_use]
+    pub fn new(domain: SemanticFailureDomain, code: SemanticFailureCode) -> Self {
+        Self {
+            domain,
+            code,
+            detail: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticOperationStatus {
+    pub kind: SemanticOperationKind,
+    pub phase: SemanticOperationPhase,
+    pub error: Option<SemanticOperationError>,
+}
+
+impl SemanticOperationStatus {
+    #[must_use]
+    pub fn new(kind: SemanticOperationKind, phase: SemanticOperationPhase) -> Self {
+        Self {
+            kind,
+            phase,
+            error: None,
+        }
+    }
+
+    #[must_use]
+    pub fn failed(kind: SemanticOperationKind, error: SemanticOperationError) -> Self {
+        Self {
+            kind,
+            phase: SemanticOperationPhase::Failed,
+            error: Some(error),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthoritativeSemanticFactKind {
+    OperationStatus,
+    ContactLinkReady,
+    PendingHomeInvitationReady,
+    ChannelMembershipReady,
+    RecipientPeersResolved,
+    PeerChannelReady,
+    MessageCommitted,
+    MessageDeliveryReady,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AuthoritativeSemanticFact {
+    OperationStatus {
+        operation_id: OperationId,
+        instance_id: Option<OperationInstanceId>,
+        status: SemanticOperationStatus,
+    },
+    ContactLinkReady {
+        authority_id: String,
+        contact_count: usize,
+    },
+    PendingHomeInvitationReady,
+    ChannelMembershipReady {
+        channel: ChannelFactKey,
+        member_count: u32,
+    },
+    RecipientPeersResolved {
+        channel: ChannelFactKey,
+        member_count: u32,
+    },
+    PeerChannelReady {
+        channel: ChannelFactKey,
+        peer_authority_id: String,
+        context_id: Option<String>,
+    },
+    MessageCommitted {
+        channel: ChannelFactKey,
+        content: String,
+    },
+    MessageDeliveryReady {
+        channel: ChannelFactKey,
+        member_count: u32,
+    },
+}
+
+impl AuthoritativeSemanticFact {
+    #[must_use]
+    pub fn kind(&self) -> AuthoritativeSemanticFactKind {
+        match self {
+            Self::OperationStatus { .. } => AuthoritativeSemanticFactKind::OperationStatus,
+            Self::ContactLinkReady { .. } => AuthoritativeSemanticFactKind::ContactLinkReady,
+            Self::PendingHomeInvitationReady => {
+                AuthoritativeSemanticFactKind::PendingHomeInvitationReady
+            }
+            Self::ChannelMembershipReady { .. } => {
+                AuthoritativeSemanticFactKind::ChannelMembershipReady
+            }
+            Self::RecipientPeersResolved { .. } => {
+                AuthoritativeSemanticFactKind::RecipientPeersResolved
+            }
+            Self::PeerChannelReady { .. } => AuthoritativeSemanticFactKind::PeerChannelReady,
+            Self::MessageCommitted { .. } => AuthoritativeSemanticFactKind::MessageCommitted,
+            Self::MessageDeliveryReady { .. } => {
+                AuthoritativeSemanticFactKind::MessageDeliveryReady
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn key(&self) -> String {
+        match self {
+            Self::OperationStatus {
+                operation_id,
+                instance_id,
+                status,
+            } => format!(
+                "operation_status:{}:{}:{:?}",
+                operation_id.0,
+                instance_id
+                    .as_ref()
+                    .map(|value| value.0.as_str())
+                    .unwrap_or("*"),
+                status.kind
+            ),
+            Self::ContactLinkReady { authority_id, .. } => {
+                format!("contact_link_ready:{authority_id}")
+            }
+            Self::PendingHomeInvitationReady => "pending_home_invitation_ready".to_string(),
+            Self::ChannelMembershipReady { channel, .. } => format!(
+                "channel_membership_ready:{}",
+                channel
+                    .name
+                    .as_deref()
+                    .or(channel.id.as_deref())
+                    .unwrap_or("*")
+            ),
+            Self::RecipientPeersResolved { channel, .. } => format!(
+                "recipient_peers_resolved:{}",
+                channel
+                    .name
+                    .as_deref()
+                    .or(channel.id.as_deref())
+                    .unwrap_or("*")
+            ),
+            Self::PeerChannelReady {
+                channel,
+                peer_authority_id,
+                ..
+            } => format!(
+                "peer_channel_ready:{}:{peer_authority_id}",
+                channel
+                    .name
+                    .as_deref()
+                    .or(channel.id.as_deref())
+                    .unwrap_or("*")
+            ),
+            Self::MessageCommitted { channel, content } => format!(
+                "message_committed:{}:{}",
+                channel
+                    .name
+                    .as_deref()
+                    .or(channel.id.as_deref())
+                    .unwrap_or("*"),
+                content
+            ),
+            Self::MessageDeliveryReady { channel, .. } => format!(
+                "message_delivery_ready:{}",
+                channel
+                    .name
+                    .as_deref()
+                    .or(channel.id.as_deref())
+                    .unwrap_or("*")
+            ),
+        }
+    }
 }
 
 impl OperationId {
@@ -2740,16 +2997,18 @@ mod tests {
         list_item_selector, settings_section_item_id, shared_flow_scenarios,
         shared_flow_source_areas, shared_list_support, shared_modal_support,
         shared_screen_module_map, shared_screen_support, uncovered_ui_parity_mismatches,
-        validate_harness_shell_structure, validate_render_convergence,
-        BrowserHarnessBridgeMethodKind, ChannelFactKey, ConfirmationState, ControlId, FieldId,
-        FlowAvailability, FrontendExecutionBoundaryKind, FrontendSpecificSettingsSectionId,
-        HarnessModeChangeKind, HarnessShellMode, HarnessShellStructureSnapshot, ListId,
-        ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId,
-        OperationSnapshot, OperationState, ParityUiIdentity, ProjectionRevision,
-        QuiescenceSnapshot, RenderHeartbeat, RuntimeEventId, RuntimeEventSnapshot, RuntimeFact,
-        ScreenId, SelectionSnapshot, SettingsSectionSurfaceId, SharedSettingsSectionId, ToastId,
-        ToastKind, ToastSnapshot, UiParityMismatch, UiReadiness, UiSnapshot, ALL_SHARED_FLOW_IDS,
-        BROWSER_CACHE_BOUNDARIES, BROWSER_HARNESS_BRIDGE_METHODS,
+        validate_harness_shell_structure, validate_render_convergence, AuthoritativeSemanticFact,
+        AuthoritativeSemanticFactKind, BrowserHarnessBridgeMethodKind, ChannelFactKey,
+        ConfirmationState, ControlId, FieldId, FlowAvailability, FrontendExecutionBoundaryKind,
+        FrontendSpecificSettingsSectionId, HarnessModeChangeKind, HarnessShellMode,
+        HarnessShellStructureSnapshot, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot,
+        ModalId, OperationId, OperationInstanceId, OperationSnapshot, OperationState,
+        ParityUiIdentity, ProjectionRevision, QuiescenceSnapshot, RenderHeartbeat, RuntimeEventId,
+        RuntimeEventSnapshot, RuntimeFact, ScreenId, SelectionSnapshot, SemanticFailureCode,
+        SemanticFailureDomain, SemanticOperationError, SemanticOperationKind,
+        SemanticOperationPhase, SemanticOperationStatus, SettingsSectionSurfaceId,
+        SharedSettingsSectionId, ToastId, ToastKind, ToastSnapshot, UiParityMismatch, UiReadiness,
+        UiSnapshot, ALL_SHARED_FLOW_IDS, BROWSER_CACHE_BOUNDARIES, BROWSER_HARNESS_BRIDGE_METHODS,
         BROWSER_OBSERVATION_SURFACE_GLOBAL, BROWSER_OBSERVATION_SURFACE_METHODS,
         FRONTEND_EXECUTION_BOUNDARIES, FRONTEND_SPECIFIC_SETTINGS_SECTIONS, HARNESS_MODE_ALLOWLIST,
         PARITY_CRITICAL_SETTINGS_SECTIONS, PARITY_EXCEPTION_METADATA,
@@ -2936,6 +3195,71 @@ mod tests {
             error.contains("focused screen") || error.contains("modal cannot be open"),
             "unexpected error: {error}"
         );
+    }
+
+    #[test]
+    fn semantic_operation_status_round_trips_through_json() {
+        let status = SemanticOperationStatus::failed(
+            SemanticOperationKind::SendChatMessage,
+            SemanticOperationError::new(
+                SemanticFailureDomain::Delivery,
+                SemanticFailureCode::DeliveryReadinessNotReached,
+            )
+            .with_detail("peer channel never became ready"),
+        );
+
+        let encoded =
+            serde_json::to_string(&status).unwrap_or_else(|error| panic!("serialize: {error}"));
+        let decoded: SemanticOperationStatus =
+            serde_json::from_str(&encoded).unwrap_or_else(|error| panic!("deserialize: {error}"));
+
+        assert_eq!(decoded, status);
+        assert!(decoded.phase.is_terminal());
+    }
+
+    #[test]
+    fn semantic_operation_status_supports_non_terminal_progress() {
+        let status = SemanticOperationStatus::new(
+            SemanticOperationKind::InviteActorToChannel,
+            SemanticOperationPhase::AuthoritativeContextReady,
+        );
+
+        assert_eq!(status.error, None);
+        assert!(!status.phase.is_terminal());
+    }
+
+    #[test]
+    fn authoritative_semantic_fact_round_trips_through_json() {
+        let fact = AuthoritativeSemanticFact::OperationStatus {
+            operation_id: OperationId::send_message(),
+            instance_id: Some(OperationInstanceId("semantic-op-1".to_string())),
+            status: SemanticOperationStatus::new(
+                SemanticOperationKind::SendChatMessage,
+                SemanticOperationPhase::PeerChannelReady,
+            ),
+        };
+
+        let encoded =
+            serde_json::to_string(&fact).unwrap_or_else(|error| panic!("serialize: {error}"));
+        let decoded: AuthoritativeSemanticFact =
+            serde_json::from_str(&encoded).unwrap_or_else(|error| panic!("deserialize: {error}"));
+
+        assert_eq!(decoded, fact);
+        assert_eq!(
+            decoded.kind(),
+            AuthoritativeSemanticFactKind::OperationStatus
+        );
+    }
+
+    #[test]
+    fn authoritative_semantic_fact_distinguishes_peer_channel_readiness() {
+        let fact = AuthoritativeSemanticFact::PeerChannelReady {
+            channel: ChannelFactKey::named("shared"),
+            peer_authority_id: "authority:peer".to_string(),
+            context_id: Some("context:test".to_string()),
+        };
+
+        assert_eq!(fact.kind(), AuthoritativeSemanticFactKind::PeerChannelReady);
     }
 
     #[test]
