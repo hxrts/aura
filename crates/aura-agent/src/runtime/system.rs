@@ -1164,14 +1164,6 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
     });
 }
 
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn spawn_lan_transport_listener_tasks(
-    _parent_tasks: crate::runtime::services::runtime_tasks::TaskGroup,
-    _effects: Arc<AuraEffectSystem>,
-    _lan_transport: Arc<LanTransportService>,
-) {
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 async fn handle_inbound_transport_envelope(
     effects: Arc<AuraEffectSystem>,
@@ -1232,9 +1224,11 @@ async fn handle_inbound_transport_envelope(
         .get("content-type")
         .is_some_and(|content_type| content_type == CHAT_FACT_CONTENT_TYPE)
     {
-        eprintln!(
-            "[recv-chat-fact] source={};destination={};context={}",
-            envelope.source, envelope.destination, envelope.context
+        tracing::debug!(
+            source = %envelope.source,
+            destination = %envelope.destination,
+            context = %envelope.context,
+            "recv-chat-fact"
         );
         match from_slice::<RelationalFact>(&envelope.payload) {
             Ok(fact) => {

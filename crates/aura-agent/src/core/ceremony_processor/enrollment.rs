@@ -268,12 +268,12 @@ impl<'a> EnrollmentHandler<'a> {
             destination = %envelope.destination,
             "Processing device enrollment acceptance envelope"
         );
-        eprintln!(
-            "[device-enrollment-acceptance] ceremony_id={};acceptor_device_id={};source={};destination={}",
-            ceremony_id,
-            acceptor_device_id,
-            envelope.source,
-            envelope.destination,
+        tracing::debug!(
+            ceremony_id = %ceremony_id,
+            acceptor_device_id = %acceptor_device_id,
+            source = %envelope.source,
+            destination = %envelope.destination,
+            "device-enrollment-acceptance"
         );
 
         let participant = aura_core::threshold::ParticipantIdentity::device(acceptor_device_id);
@@ -300,11 +300,11 @@ impl<'a> EnrollmentHandler<'a> {
             threshold_reached,
             "Recorded device enrollment acceptance"
         );
-        eprintln!(
-            "[device-enrollment-acceptance-recorded] ceremony_id={};acceptor_device_id={};threshold_reached={}",
-            ceremony_id,
-            acceptor_device_id,
+        tracing::debug!(
+            ceremony_id = %ceremony_id,
+            acceptor_device_id = %acceptor_device_id,
             threshold_reached,
+            "device-enrollment-acceptance-recorded"
         );
 
         if threshold_reached {
@@ -596,9 +596,11 @@ impl<'a> EnrollmentHandler<'a> {
                     error = %e,
                     "Failed to send enrollment commit to device"
                 );
-                eprintln!(
-                    "[device-enrollment-commit-send-failed] ceremony_id={};device_id={};error={}",
-                    ceremony_id, device_id, e,
+                tracing::warn!(
+                    ceremony_id = %ceremony_id,
+                    device_id = %device_id,
+                    error = %e,
+                    "device-enrollment-commit-send-failed"
                 );
             } else {
                 tracing::info!(
@@ -607,11 +609,11 @@ impl<'a> EnrollmentHandler<'a> {
                     has_leaf_op = attested_leaf_op.is_some(),
                     "Sent enrollment commit to device"
                 );
-                eprintln!(
-                    "[device-enrollment-commit-sent] ceremony_id={};device_id={};has_leaf_op={}",
-                    ceremony_id,
-                    device_id,
-                    attested_leaf_op.is_some(),
+                tracing::debug!(
+                    ceremony_id = %ceremony_id,
+                    device_id = %device_id,
+                    has_leaf_op = attested_leaf_op.is_some(),
+                    "device-enrollment-commit-sent"
                 );
             }
         }

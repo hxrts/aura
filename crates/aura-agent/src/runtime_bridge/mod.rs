@@ -497,11 +497,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 receipt: None,
             };
 
-            eprintln!(
-                "[send-chat-fact] source={};destination={};context={};mode=authority_fallback",
-                self.agent.authority_id(),
-                peer,
-                context
+            tracing::debug!(
+                source = %self.agent.authority_id(),
+                destination = %peer,
+                context = %context,
+                mode = "authority_fallback",
+                "send-chat-fact"
             );
 
             return effects
@@ -527,13 +528,14 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 receipt: None,
             };
 
-            eprintln!(
-                "[send-chat-fact] source={};destination={};context={};target_authority={};device_id={};mode=device_route",
-                self.agent.authority_id(),
-                envelope.destination,
-                context,
-                peer,
-                device_id
+            tracing::debug!(
+                source = %self.agent.authority_id(),
+                destination = %envelope.destination,
+                context = %context,
+                target_authority = %peer,
+                device_id = %device_id,
+                mode = "device_route",
+                "send-chat-fact"
             );
 
             match effects.send_envelope(envelope).await {

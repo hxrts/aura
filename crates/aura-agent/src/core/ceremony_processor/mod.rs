@@ -104,27 +104,15 @@ impl<'a> CeremonyProcessor<'a> {
                 destination_device_id = envelope.metadata.get("aura-destination-device-id").cloned().unwrap_or_default(),
                 "CeremonyProcessor received envelope"
             );
-            eprintln!(
-                "[ceremony-envelope] authority_id={};source={};destination={};content_type={};ceremony_id={};acceptor_device_id={};destination_device_id={}",
-                self.authority_id,
-                envelope.source,
-                envelope.destination,
-                envelope
-                    .metadata
-                    .get("content-type")
-                    .cloned()
-                    .unwrap_or_default(),
-                envelope.metadata.get("ceremony-id").cloned().unwrap_or_default(),
-                envelope
-                    .metadata
-                    .get("acceptor-device-id")
-                    .cloned()
-                    .unwrap_or_default(),
-                envelope
-                    .metadata
-                    .get("aura-destination-device-id")
-                    .cloned()
-                    .unwrap_or_default(),
+            tracing::debug!(
+                authority_id = %self.authority_id,
+                source = %envelope.source,
+                destination = %envelope.destination,
+                content_type = envelope.metadata.get("content-type").cloned().unwrap_or_default(),
+                ceremony_id = envelope.metadata.get("ceremony-id").cloned().unwrap_or_default(),
+                acceptor_device_id = envelope.metadata.get("acceptor-device-id").cloned().unwrap_or_default(),
+                destination_device_id = envelope.metadata.get("aura-destination-device-id").cloned().unwrap_or_default(),
+                "ceremony-envelope received"
             );
 
             match self.process_envelope(envelope).await {

@@ -105,9 +105,10 @@ impl<'a> CommitHandler<'a> {
                 authority_id = %authority_id,
                 "Applied enrollment commit op"
             );
-            eprintln!(
-                "[device-enrollment-commit-applied] authority_id={};content_type={}",
-                authority_id, content_type,
+            tracing::debug!(
+                authority_id = %authority_id,
+                content_type = %content_type,
+                "device-enrollment-commit-applied"
             );
         } else if content_type == "application/aura-device-enrollment-commit" {
             tracing::info!(
@@ -115,9 +116,10 @@ impl<'a> CommitHandler<'a> {
                 authority_id = %authority_id,
                 "Received enrollment commit without leaf op payload"
             );
-            eprintln!(
-                "[device-enrollment-commit-empty] authority_id={};content_type={}",
-                authority_id, content_type,
+            tracing::debug!(
+                authority_id = %authority_id,
+                content_type = %content_type,
+                "device-enrollment-commit-empty"
             );
         }
 
