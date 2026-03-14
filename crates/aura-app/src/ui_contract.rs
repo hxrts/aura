@@ -821,7 +821,7 @@ pub enum AuthoritativeSemanticFact {
     },
     ContactLinkReady {
         authority_id: String,
-        contact_count: usize,
+        contact_count: u32,
     },
     PendingHomeInvitationReady,
     ChannelMembershipReady {
