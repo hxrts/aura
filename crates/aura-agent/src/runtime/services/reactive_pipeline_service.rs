@@ -135,21 +135,25 @@ impl ReactivePipelineService {
 
         let pipeline = self.pipeline.write().await.take();
         let shutdown_error = if let Some(pipeline) = pipeline {
-            tokio::time::timeout(Self::SHUTDOWN_TIMEOUT, pipeline.shutdown())
-                .await
-                .map_err(|error| {
-                    ServiceError::shutdown_failed(
+            let timeout_ms = Self::SHUTDOWN_TIMEOUT.as_millis() as u64;
+            let shutdown_fut = std::pin::pin!(pipeline.shutdown());
+            let sleep_fut = std::pin::pin!(self.effects.sleep_ms(timeout_ms));
+            match futures::future::select(shutdown_fut, sleep_fut).await {
+                futures::future::Either::Left((result, _)) => result
+                    .map_err(|error| {
+                        ServiceError::shutdown_failed(
+                            self.name(),
+                            format!("reactive pipeline shutdown failed: {error}"),
+                        )
+                    })
+                    .err(),
+                futures::future::Either::Right(_) => {
+                    return Err(ServiceError::shutdown_failed(
                         self.name(),
-                        format!("reactive pipeline shutdown timed out: {error}"),
-                    )
-                })?
-                .map_err(|error| {
-                    ServiceError::shutdown_failed(
-                        self.name(),
-                        format!("reactive pipeline shutdown failed: {error}"),
-                    )
-                })
-                .err()
+                        "reactive pipeline shutdown timed out".to_string(),
+                    ));
+                }
+            }
         } else {
             None
         };
