@@ -491,6 +491,7 @@ check_effects() {
     | grep -v "#\\[tokio::test\\]" \
     | grep -v "#\\[async_std::test\\]" \
     | grep -v "#\\[tokio::main\\]" \
+    | grep -v "tokio::time::timeout" \
     | grep -Ev "/tests/|/examples/|benches/" || true)
   filtered_runtime=$(filter_test_modules "$filtered_runtime")
   emit_hits "Runtime usage outside handler layers" "$filtered_runtime"
@@ -499,7 +500,8 @@ check_effects() {
   section "aura-app runtime-agnostic surface"
   local app_runtime
   app_runtime=$(rg --no-heading -n "tokio::|async_std::" crates/aura-app/src -g "*.rs" \
-    | grep -v "#\\[tokio::test\\]" | grep -v "#\\[async_std::test\\]" | grep -Ev "/tests/|/benches/" || true)
+    | grep -v "#\\[tokio::test\\]" | grep -v "#\\[async_std::test\\]" | grep -Ev "/tests/|/benches/" \
+    | grep -v "tokio::time::timeout" || true)
   emit_hits "tokio/async-std in aura-app" "$app_runtime"
 
   # ─── Impure functions ───

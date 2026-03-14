@@ -12,12 +12,15 @@ struct AuthState {
 }
 
 impl AuthState {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), super::invariant::InvariantViolation> {
         for (id, challenge) in &self.pending_challenges {
             if id != &challenge.challenge_id {
-                return Err(format!(
-                    "challenge id mismatch: key {} vs value {}",
-                    id, challenge.challenge_id
+                return Err(super::invariant::InvariantViolation::new(
+                    "AuthManager",
+                    format!(
+                        "challenge id mismatch: key {} vs value {}",
+                        id, challenge.challenge_id
+                    ),
                 ));
             }
         }

@@ -19,12 +19,15 @@ pub struct LogicalClockState {
 }
 
 impl LogicalClockState {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), super::invariant::InvariantViolation> {
         let max = self.vector.iter().map(|(_, v)| *v).max().unwrap_or(0);
         if self.lamport < max {
-            return Err(format!(
-                "Lamport counter {} is behind vector max {}",
-                self.lamport, max
+            return Err(super::invariant::InvariantViolation::new(
+                "LogicalClock",
+                format!(
+                    "Lamport counter {} is behind vector max {}",
+                    self.lamport, max
+                ),
             ));
         }
         Ok(())

@@ -124,44 +124,62 @@ struct ThresholdSigningState {
 }
 
 impl ThresholdSigningState {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), super::invariant::InvariantViolation> {
         for (authority, context) in &self.contexts {
             if context.config.threshold == 0 {
-                return Err(format!("authority {:?} has zero threshold", authority));
+                return Err(super::invariant::InvariantViolation::new(
+                    "ThresholdSigning",
+                    format!("authority {:?} has zero threshold", authority),
+                ));
             }
             if context.config.threshold > context.config.total_participants {
-                return Err(format!(
-                    "authority {:?} threshold {} exceeds total {}",
-                    authority, context.config.threshold, context.config.total_participants
+                return Err(super::invariant::InvariantViolation::new(
+                    "ThresholdSigning",
+                    format!(
+                        "authority {:?} threshold {} exceeds total {}",
+                        authority, context.config.threshold, context.config.total_participants
+                    ),
                 ));
             }
             if context.participants.len() != context.config.total_participants as usize {
-                return Err(format!(
-                    "authority {:?} participant count {} does not match total {}",
-                    authority,
-                    context.participants.len(),
-                    context.config.total_participants
+                return Err(super::invariant::InvariantViolation::new(
+                    "ThresholdSigning",
+                    format!(
+                        "authority {:?} participant count {} does not match total {}",
+                        authority,
+                        context.participants.len(),
+                        context.config.total_participants
+                    ),
                 ));
             }
             if let Some(index) = context.my_signer_index {
                 if index == 0 || index > context.config.total_participants {
-                    return Err(format!(
-                        "authority {:?} signer index {} out of bounds",
-                        authority, index
+                    return Err(super::invariant::InvariantViolation::new(
+                        "ThresholdSigning",
+                        format!(
+                            "authority {:?} signer index {} out of bounds",
+                            authority, index
+                        ),
                     ));
                 }
             }
             if context.public_key_package.is_empty() {
-                return Err(format!(
-                    "authority {:?} missing public key package",
-                    authority
+                return Err(super::invariant::InvariantViolation::new(
+                    "ThresholdSigning",
+                    format!(
+                        "authority {:?} missing public key package",
+                        authority
+                    ),
                 ));
             }
             let participant_set: HashSet<_> = context.participants.iter().collect();
             if participant_set.len() != context.participants.len() {
-                return Err(format!(
-                    "authority {:?} has duplicate participants",
-                    authority
+                return Err(super::invariant::InvariantViolation::new(
+                    "ThresholdSigning",
+                    format!(
+                        "authority {:?} has duplicate participants",
+                        authority
+                    ),
                 ));
             }
         }

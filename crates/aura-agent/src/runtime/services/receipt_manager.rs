@@ -116,13 +116,16 @@ struct ReceiptState {
 }
 
 impl ReceiptState {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), super::invariant::InvariantViolation> {
         for (key, chain) in &self.chains {
             for receipt_id in chain {
                 if !self.receipts.contains_key(receipt_id) {
-                    return Err(format!(
-                        "chain {:?} references missing receipt {:?}",
-                        key, receipt_id
+                    return Err(super::invariant::InvariantViolation::new(
+                        "ReceiptManager",
+                        format!(
+                            "chain {:?} references missing receipt {:?}",
+                            key, receipt_id
+                        ),
                     ));
                 }
             }

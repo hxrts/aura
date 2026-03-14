@@ -101,16 +101,22 @@ struct OtaState {
 }
 
 impl OtaState {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), super::invariant::InvariantViolation> {
         if let Some(intent) = &self.pending_activation {
             if !self.staged_releases.contains_key(&intent.to_release_id) {
-                return Err("pending activation target must be staged".to_string());
+                return Err(super::invariant::InvariantViolation::new(
+                    "OtaManager",
+                    "pending activation target must be staged",
+                ));
             }
         }
 
         if let Some(intent) = &self.pending_rollback {
             if !self.staged_releases.contains_key(&intent.to_release_id) {
-                return Err("pending rollback target must be staged".to_string());
+                return Err(super::invariant::InvariantViolation::new(
+                    "OtaManager",
+                    "pending rollback target must be staged",
+                ));
             }
         }
 
@@ -119,24 +125,28 @@ impl OtaState {
                 .staged_releases
                 .contains_key(&scoped_state.target_release_id)
             {
-                return Err("scoped upgrade target must be staged".to_string());
+                return Err(super::invariant::InvariantViolation::new(
+                    "OtaManager",
+                    "scoped upgrade target must be staged",
+                ));
             }
         }
 
         for (scope, approvals) in &self.managed_quorum_approvals {
             let AuraActivationScope::ManagedQuorum { participants, .. } = scope else {
-                return Err(
-                    "managed quorum approvals must only exist for managed quorum scopes"
-                        .to_string(),
-                );
+                return Err(super::invariant::InvariantViolation::new(
+                    "OtaManager",
+                    "managed quorum approvals must only exist for managed quorum scopes",
+                ));
             };
             if !approvals
                 .iter()
                 .all(|authority_id| participants.contains(authority_id))
             {
-                return Err(
-                    "managed quorum approvals must be a subset of scope participants".to_string(),
-                );
+                return Err(super::invariant::InvariantViolation::new(
+                    "OtaManager",
+                    "managed quorum approvals must be a subset of scope participants",
+                ));
             }
         }
 
@@ -221,7 +231,7 @@ impl OtaManager {
         }
         guard.scoped_states.insert(scope, scope_state.clone());
         guard.status = UpdateStatus::Ready { version };
-        guard.validate()?;
+        guard.validate().map_err(|v| v.to_string())?;
         Ok(scope_state)
     }
 
@@ -245,7 +255,7 @@ impl OtaManager {
             .or_insert_with(BTreeSet::new);
         approvals.insert(authority_id);
         let approval_count = approvals.len();
-        guard.validate()?;
+        guard.validate().map_err(|v| v.to_string())?;
         Ok(approval_count)
     }
 
@@ -291,7 +301,7 @@ impl OtaManager {
         });
         guard.scoped_states.insert(scope.clone(), next);
         guard.status = UpdateStatus::Installing { version };
-        guard.validate()?;
+        guard.validate().map_err(|v| v.to_string())?;
         Ok(plan)
     }
 
@@ -313,7 +323,7 @@ impl OtaManager {
         guard.pending_rollback = None;
         guard.scoped_states.insert(scope.clone(), next.clone());
         guard.status = UpdateStatus::UpToDate;
-        guard.validate()?;
+        guard.validate().map_err(|v| v.to_string())?;
         Ok(next)
     }
 
@@ -351,7 +361,7 @@ impl OtaManager {
         });
         guard.scoped_states.insert(scope.clone(), next);
         guard.status = UpdateStatus::Installing { version };
-        guard.validate()?;
+        guard.validate().map_err(|v| v.to_string())?;
         Ok(directive)
     }
 
@@ -385,7 +395,7 @@ impl OtaManager {
                 guard.status = UpdateStatus::Failed {
                     reason: failure.detail.clone(),
                 };
-                guard.validate()?;
+                guard.validate().map_err(|v| v.to_string())?;
                 Ok(None)
             }
         }
@@ -432,7 +442,7 @@ impl OtaManager {
                 guard.status = UpdateStatus::Failed {
                     reason: failure.detail.clone(),
                 };
-                guard.validate()?;
+                guard.validate().map_err(|v| v.to_string())?;
                 return Ok(None);
             }
         }
@@ -462,7 +472,7 @@ impl OtaManager {
         guard.pending_rollback = None;
         guard.scoped_states.insert(scope.clone(), next.clone());
         guard.status = UpdateStatus::UpToDate;
-        guard.validate()?;
+        guard.validate().map_err(|v| v.to_string())?;
         Ok(next)
     }
 
@@ -488,7 +498,7 @@ impl OtaManager {
             to_release_id,
         });
         guard.status = UpdateStatus::Installing { version };
-        guard.validate()
+        guard.validate().map_err(|v| v.to_string())
     }
 
     #[allow(dead_code)] // Used by the upcoming launcher bridge.
@@ -531,7 +541,7 @@ impl OtaManager {
             failure,
         });
         guard.status = UpdateStatus::Installing { version };
-        guard.validate()
+        guard.validate().map_err(|v| v.to_string())
     }
 
     #[allow(dead_code)] // Used by the upcoming launcher bridge.

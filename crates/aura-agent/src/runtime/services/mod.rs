@@ -29,6 +29,7 @@ pub mod runtime_tasks;
 pub mod service_actor;
 pub mod session_manager;
 pub mod social_manager;
+pub mod invariant;
 pub mod state;
 pub mod sync_manager;
 pub mod threshold_signing;

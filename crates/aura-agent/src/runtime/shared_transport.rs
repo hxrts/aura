@@ -42,15 +42,21 @@ struct SharedTransportState {
 
 impl SharedTransportState {
     #[allow(dead_code)] // For use with with_state_mut_validated
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), crate::runtime::services::invariant::InvariantViolation> {
         for authority_id in &self.online {
             if !self.inboxes.contains_key(authority_id) {
-                return Err(format!("online authority {:?} missing inbox", authority_id));
+                return Err(crate::runtime::services::invariant::InvariantViolation::new(
+                    "SharedTransport",
+                    format!("online authority {:?} missing inbox", authority_id),
+                ));
             }
             if !self.inbox_notifiers.contains_key(authority_id) {
-                return Err(format!(
-                    "online authority {:?} missing inbox notifier",
-                    authority_id
+                return Err(crate::runtime::services::invariant::InvariantViolation::new(
+                    "SharedTransport",
+                    format!(
+                        "online authority {:?} missing inbox notifier",
+                        authority_id
+                    ),
                 ));
             }
         }

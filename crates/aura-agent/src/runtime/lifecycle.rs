@@ -35,14 +35,14 @@ impl LifecycleManager {
         &self,
         effects: Arc<AuraEffectSystem>,
         authority_context: crate::core::AuthorityContext,
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::AgentError> {
         // Clean up any stale sessions from previous runs
         let account_id = aura_core::identifiers::AccountId::new_from_entropy(
             aura_core::hash::hash(&authority_context.authority_id().to_bytes()),
         );
 
         let session_service = SessionServiceApi::new(effects, authority_context, account_id)
-            .map_err(|e| format!("Session service init failed: {e}"))?;
+            .map_err(|e| crate::AgentError::runtime(format!("Session service init failed: {e}")))?;
 
         // Clean up sessions older than the timeout
         match session_service
@@ -63,7 +63,7 @@ impl LifecycleManager {
     }
 
     /// Shutdown all managed components
-    pub async fn shutdown(self, _ctx: &EffectContext) -> Result<(), String> {
+    pub async fn shutdown(self, _ctx: &EffectContext) -> Result<(), crate::AgentError> {
         // Coordinate clean shutdown of all components
         // Session data is already persisted to storage, so no action needed
         tracing::info!("Lifecycle manager shutdown complete");

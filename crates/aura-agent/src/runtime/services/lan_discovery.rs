@@ -48,7 +48,7 @@ pub struct LanDiscoveryMetrics {
 
 impl LanDiscoveryState {
     #[allow(dead_code)] // For use with with_state_mut_validated
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), super::invariant::InvariantViolation> {
         Ok(())
     }
 }
@@ -98,9 +98,13 @@ impl LanDiscoveryService {
         let result = op(&mut guard);
         #[cfg(debug_assertions)]
         {
-            if let Err(message) = guard.validate() {
-                tracing::error!(%message, "LanDiscoveryService state invariant violated");
-                debug_assert!(false, "LanDiscoveryService invariant violated: {}", message);
+            if let Err(violation) = guard.validate() {
+                tracing::error!(
+                    component = violation.component,
+                    description = %violation.description,
+                    "LanDiscoveryService state invariant violated"
+                );
+                debug_assert!(false, "LanDiscoveryService invariant violated: {}", violation);
             }
         }
         result

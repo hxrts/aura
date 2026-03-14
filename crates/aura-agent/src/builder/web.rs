@@ -208,7 +208,7 @@ impl WebPresetBuilder {
                     .with_authority(authority_id)
                     .build(&effect_context)
                     .await
-                    .map_err(BuildError::RuntimeConstruction)?,
+                    .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
                 ExecutionMode::Production => EffectSystemBuilder::production()
                     .with_config(config)
                     .with_authority(authority_id)
@@ -216,13 +216,13 @@ impl WebPresetBuilder {
                     .with_rendezvous()
                     .build(&effect_context)
                     .await
-                    .map_err(BuildError::RuntimeConstruction)?,
+                    .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
                 ExecutionMode::Simulation { seed } => EffectSystemBuilder::simulation(seed)
                     .with_config(config)
                     .with_authority(authority_id)
                     .build(&effect_context)
                     .await
-                    .map_err(BuildError::RuntimeConstruction)?,
+                    .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
             };
 
             Ok(AuraAgent::new(runtime, authority_id))

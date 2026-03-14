@@ -78,12 +78,15 @@ struct FlowBudgetState {
 }
 
 impl FlowBudgetState {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), super::invariant::InvariantViolation> {
         for ((context_id, peer_id), budget) in &self.budgets {
             if budget.spent > budget.limit {
-                return Err(format!(
-                    "budget overspent for ({:?}, {:?}): spent {} > limit {}",
-                    context_id, peer_id, budget.spent, budget.limit
+                return Err(super::invariant::InvariantViolation::new(
+                    "FlowBudget",
+                    format!(
+                        "budget overspent for ({:?}, {:?}): spent {} > limit {}",
+                        context_id, peer_id, budget.spent, budget.limit
+                    ),
                 ));
             }
         }

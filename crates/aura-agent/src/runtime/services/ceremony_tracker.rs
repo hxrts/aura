@@ -65,48 +65,69 @@ struct CeremonyTrackerState {
 }
 
 impl CeremonyTrackerState {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), super::invariant::InvariantViolation> {
         for (ceremony_id, state) in &self.ceremonies {
             if state.threshold_k == 0 {
-                return Err(format!("ceremony {} has zero threshold", ceremony_id));
+                return Err(super::invariant::InvariantViolation::new(
+                    "CeremonyTracker",
+                    format!("ceremony {} has zero threshold", ceremony_id),
+                ));
             }
             if state.threshold_k > state.total_n {
-                return Err(format!(
-                    "ceremony {} threshold {} exceeds total {}",
-                    ceremony_id, state.threshold_k, state.total_n
+                return Err(super::invariant::InvariantViolation::new(
+                    "CeremonyTracker",
+                    format!(
+                        "ceremony {} threshold {} exceeds total {}",
+                        ceremony_id, state.threshold_k, state.total_n
+                    ),
                 ));
             }
             if state.total_n as usize != state.participants.len() {
-                return Err(format!(
-                    "ceremony {} total_n {} does not match participant count {}",
-                    ceremony_id,
-                    state.total_n,
-                    state.participants.len()
+                return Err(super::invariant::InvariantViolation::new(
+                    "CeremonyTracker",
+                    format!(
+                        "ceremony {} total_n {} does not match participant count {}",
+                        ceremony_id,
+                        state.total_n,
+                        state.participants.len()
+                    ),
                 ));
             }
             if !state.accepted_participants.is_subset(&state.participants) {
-                return Err(format!(
-                    "ceremony {} has accepted participants not in participant list",
-                    ceremony_id
+                return Err(super::invariant::InvariantViolation::new(
+                    "CeremonyTracker",
+                    format!(
+                        "ceremony {} has accepted participants not in participant list",
+                        ceremony_id
+                    ),
                 ));
             }
             if state.is_committed && state.has_failed {
-                return Err(format!(
-                    "ceremony {} cannot be committed and failed",
-                    ceremony_id
+                return Err(super::invariant::InvariantViolation::new(
+                    "CeremonyTracker",
+                    format!(
+                        "ceremony {} cannot be committed and failed",
+                        ceremony_id
+                    ),
                 ));
             }
             if state.is_superseded && state.is_committed {
-                return Err(format!(
-                    "ceremony {} cannot be superseded and committed",
-                    ceremony_id
+                return Err(super::invariant::InvariantViolation::new(
+                    "CeremonyTracker",
+                    format!(
+                        "ceremony {} cannot be superseded and committed",
+                        ceremony_id
+                    ),
                 ));
             }
             if state.is_committed && state.accepted_participants.len() < state.threshold_k as usize
             {
-                return Err(format!(
-                    "ceremony {} committed without reaching threshold",
-                    ceremony_id
+                return Err(super::invariant::InvariantViolation::new(
+                    "CeremonyTracker",
+                    format!(
+                        "ceremony {} committed without reaching threshold",
+                        ceremony_id
+                    ),
                 ));
             }
         }

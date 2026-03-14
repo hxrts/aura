@@ -19,13 +19,16 @@ struct SessionRecord {
 }
 
 impl SessionState {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), super::invariant::InvariantViolation> {
         for (session_id, record) in &self.sessions {
             let mut dedup = std::collections::HashSet::new();
             for device_id in &record.participants {
                 if !dedup.insert(*device_id) {
-                    return Err(format!(
-                        "Duplicate participant {device_id} in session {session_id}"
+                    return Err(super::invariant::InvariantViolation::new(
+                        "SessionManager",
+                        format!(
+                            "Duplicate participant {device_id} in session {session_id}"
+                        ),
                     ));
                 }
             }

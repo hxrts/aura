@@ -72,7 +72,7 @@ pub enum RuntimeShutdownError {
     #[error("runtime service teardown failed: {0}")]
     Service(#[from] ServiceError),
     #[error("lifecycle shutdown failed: {0}")]
-    Lifecycle(String),
+    Lifecycle(crate::AgentError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

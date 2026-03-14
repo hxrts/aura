@@ -328,19 +328,19 @@ impl
                 .with_authority(authority_id)
                 .build(&effect_context)
                 .await
-                .map_err(BuildError::RuntimeConstruction)?,
+                .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
             ExecutionMode::Production => EffectSystemBuilder::production()
                 .with_config(self.config)
                 .with_authority(authority_id)
                 .build(&effect_context)
                 .await
-                .map_err(BuildError::RuntimeConstruction)?,
+                .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
             ExecutionMode::Simulation { seed } => EffectSystemBuilder::simulation(seed)
                 .with_config(self.config)
                 .with_authority(authority_id)
                 .build(&effect_context)
                 .await
-                .map_err(BuildError::RuntimeConstruction)?,
+                .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
         };
 
         Ok(AuraAgent::new(runtime, authority_id))
@@ -359,7 +359,7 @@ impl
                 .with_config(self.config)
                 .with_authority(authority_id)
                 .build_sync()
-                .map_err(BuildError::RuntimeConstruction)?,
+                .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
             ExecutionMode::Production => {
                 return Err(BuildError::RuntimeConstruction(
                     "production mode requires async build".to_string(),
@@ -370,7 +370,7 @@ impl
                 .with_config(self.config)
                 .with_authority(authority_id)
                 .build_sync()
-                .map_err(BuildError::RuntimeConstruction)?,
+                .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
         };
 
         Ok(AuraAgent::new(runtime, authority_id))

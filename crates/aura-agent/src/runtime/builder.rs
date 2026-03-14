@@ -146,9 +146,16 @@ impl EffectSystemBuilder {
     }
 
     /// Build the runtime system (async)
-    pub async fn build(self, _ctx: &EffectContext) -> Result<RuntimeSystem, String> {
+    pub async fn build(
+        self,
+        _ctx: &EffectContext,
+    ) -> Result<RuntimeSystem, crate::builder::error::BuildError> {
         let config = self.config.unwrap_or_default();
-        let authority_id = self.authority_id.ok_or("Authority ID required")?;
+        let authority_id = self
+            .authority_id
+            .ok_or(crate::builder::error::BuildError::MissingRequired(
+                "authority_id",
+            ))?;
 
         // Create lifecycle manager
         let lifecycle_manager = LifecycleManager::new();
@@ -162,7 +169,7 @@ impl EffectSystemBuilder {
                 let executor = EffectExecutor::production(authority_id, registry.clone());
                 let system =
                     super::AuraEffectSystem::production_for_authority(config.clone(), authority_id)
-                        .map_err(|e| e.to_string())?;
+                        .map_err(|e| crate::builder::error::BuildError::RuntimeConstruction(e.to_string()))?;
                 (executor, system)
             }
             ExecutionMode::Testing => {
@@ -171,7 +178,7 @@ impl EffectSystemBuilder {
                 // Test-only callsites must use simulation_for_test* helpers instead.
                 #[allow(clippy::disallowed_methods)]
                 let system = super::AuraEffectSystem::testing_for_authority(&config, authority_id)
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| crate::builder::error::BuildError::RuntimeConstruction(e.to_string()))?;
                 (executor, system)
             }
             ExecutionMode::Simulation { seed } => {
@@ -185,10 +192,10 @@ impl EffectSystemBuilder {
                         authority_id,
                         shared,
                     )
-                    .map_err(|e| e.to_string())?
+                    .map_err(|e| crate::builder::error::BuildError::RuntimeConstruction(e.to_string()))?
                 } else {
                     super::AuraEffectSystem::simulation_for_authority(&config, seed, authority_id)
-                        .map_err(|e| e.to_string())?
+                        .map_err(|e| crate::builder::error::BuildError::RuntimeConstruction(e.to_string()))?
                 };
                 (executor, system)
             }
@@ -256,7 +263,7 @@ impl EffectSystemBuilder {
         let rendezvous_handler = if rendezvous_enabled {
             let authority_context =
                 AuthorityContext::new_with_device(authority_id, config.device_id);
-            let handler = RendezvousHandler::new(authority_context).map_err(|e| e.to_string())?;
+            let handler = RendezvousHandler::new(authority_context).map_err(|e| crate::builder::error::BuildError::RuntimeConstruction(e.to_string()))?;
             let handler = if let Some(manager) = rendezvous_manager.as_ref() {
                 handler.with_rendezvous_manager(manager.clone())
             } else {
@@ -304,38 +311,47 @@ impl EffectSystemBuilder {
         // This prevents "SignalNotFound" races during startup.
         aura_app::signal_defs::register_app_signals(&system.effects().reactive_handler())
             .await
-            .map_err(|e| format!("Failed to register app signals: {e}"))?;
+            .map_err(|e| crate::builder::error::BuildError::EffectInit {
+                effect: "app_signals",
+                message: e.to_string(),
+            })?;
 
         // Start runtime services (sync, rendezvous, social, etc).
-        system.start_services().await.map_err(|e| e.to_string())?;
+        system.start_services().await.map_err(|e| crate::builder::error::BuildError::RuntimeConstruction(e.to_string()))?;
 
         Ok(system)
     }
 
     /// Build the runtime system (sync)
-    pub fn build_sync(self) -> Result<RuntimeSystem, String> {
+    pub fn build_sync(self) -> Result<RuntimeSystem, crate::builder::error::BuildError> {
         #[cfg(target_arch = "wasm32")]
         {
             let _ = self;
-            Err("build_sync is unavailable on wasm32; use build(...).await".to_string())
+            Err(crate::builder::error::BuildError::RuntimeConstruction(
+                "build_sync is unavailable on wasm32; use build(...).await".to_string(),
+            ))
         }
 
         #[cfg(not(target_arch = "wasm32"))]
         {
+            use crate::builder::error::BuildError;
             // For testing/simulation, we can build synchronously
             match self.execution_mode {
-                ExecutionMode::Production => {
-                    Err("Production runtime requires async build".to_string())
-                }
+                ExecutionMode::Production => Err(BuildError::RuntimeConstruction(
+                    "Production runtime requires async build".to_string(),
+                )),
                 _ => {
                     // Create a build-time context for wiring handlers
-                    let authority_id = self.authority_id.ok_or("Authority ID required")?;
+                    let authority_id = self
+                        .authority_id
+                        .ok_or(BuildError::MissingRequired("authority_id"))?;
                     let context_id = aura_core::identifiers::ContextId::new_from_entropy([2u8; 32]);
                     let ctx = EffectContext::new(authority_id, context_id, self.execution_mode);
 
                     // Use a minimal async runtime just for building
-                    let rt = tokio::runtime::Runtime::new()
-                        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+                    let rt = tokio::runtime::Runtime::new().map_err(|e| {
+                        BuildError::RuntimeConstruction(format!("tokio runtime: {e}"))
+                    })?;
                     rt.block_on(self.build(&ctx))
                 }
             }

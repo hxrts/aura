@@ -85,26 +85,35 @@ struct ContextManagerState {
 }
 
 impl ContextManagerState {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), super::invariant::InvariantViolation> {
         for (authority, contexts) in &self.authority_contexts {
             let mut seen = std::collections::HashSet::new();
             for context_id in contexts {
                 if !seen.insert(*context_id) {
-                    return Err(format!(
-                        "authority {:?} has duplicate context entry {:?}",
-                        authority, context_id
+                    return Err(super::invariant::InvariantViolation::new(
+                        "ContextManager",
+                        format!(
+                            "authority {:?} has duplicate context entry {:?}",
+                            authority, context_id
+                        ),
                     ));
                 }
                 let context = self.contexts.get(context_id).ok_or_else(|| {
-                    format!(
-                        "authority {:?} references missing context {:?}",
-                        authority, context_id
+                    super::invariant::InvariantViolation::new(
+                        "ContextManager",
+                        format!(
+                            "authority {:?} references missing context {:?}",
+                            authority, context_id
+                        ),
                     )
                 })?;
                 if context.authority_id != *authority {
-                    return Err(format!(
-                        "context {:?} authority mismatch: {:?} vs {:?}",
-                        context_id, context.authority_id, authority
+                    return Err(super::invariant::InvariantViolation::new(
+                        "ContextManager",
+                        format!(
+                            "context {:?} authority mismatch: {:?} vs {:?}",
+                            context_id, context.authority_id, authority
+                        ),
                     ));
                 }
             }
@@ -115,15 +124,21 @@ impl ContextManagerState {
                 .authority_contexts
                 .get(&context.authority_id)
                 .ok_or_else(|| {
-                    format!(
-                        "context {:?} missing authority index for {:?}",
-                        context_id, context.authority_id
+                    super::invariant::InvariantViolation::new(
+                        "ContextManager",
+                        format!(
+                            "context {:?} missing authority index for {:?}",
+                            context_id, context.authority_id
+                        ),
                     )
                 })?;
             if !contexts.contains(context_id) {
-                return Err(format!(
-                    "context {:?} missing from authority index {:?}",
-                    context_id, context.authority_id
+                return Err(super::invariant::InvariantViolation::new(
+                    "ContextManager",
+                    format!(
+                        "context {:?} missing from authority index {:?}",
+                        context_id, context.authority_id
+                    ),
                 ));
             }
         }

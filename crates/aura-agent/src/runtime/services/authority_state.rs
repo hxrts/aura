@@ -52,26 +52,35 @@ pub(crate) struct AuthorityManagerState {
 }
 
 impl AuthorityManagerState {
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), super::invariant::InvariantViolation> {
         for (authority_id, state) in &self.authorities {
             if *authority_id != state.authority_id {
-                return Err(format!(
-                    "authority key {:?} does not match state {:?}",
-                    authority_id, state.authority_id
+                return Err(super::invariant::InvariantViolation::new(
+                    "AuthorityManager",
+                    format!(
+                        "authority key {:?} does not match state {:?}",
+                        authority_id, state.authority_id
+                    ),
                 ));
             }
             if state.last_activity < state.created_at {
-                return Err(format!(
-                    "authority {:?} last_activity < created_at",
-                    authority_id
+                return Err(super::invariant::InvariantViolation::new(
+                    "AuthorityManager",
+                    format!(
+                        "authority {:?} last_activity < created_at",
+                        authority_id
+                    ),
                 ));
             }
             let mut seen = HashSet::new();
             for context_id in &state.contexts {
                 if !seen.insert(*context_id) {
-                    return Err(format!(
-                        "authority {:?} has duplicate context {:?}",
-                        authority_id, context_id
+                    return Err(super::invariant::InvariantViolation::new(
+                        "AuthorityManager",
+                        format!(
+                            "authority {:?} has duplicate context {:?}",
+                            authority_id, context_id
+                        ),
                     ));
                 }
             }

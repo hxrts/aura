@@ -13,7 +13,7 @@ struct RecoveryStateCache {
 }
 
 impl RecoveryStateCache {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), super::invariant::InvariantViolation> {
         Ok(())
     }
 }

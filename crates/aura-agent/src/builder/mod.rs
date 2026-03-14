@@ -49,7 +49,7 @@ use crate::core::AgentBuilder;
 // Core presets (always available)
 mod cli;
 mod custom;
-mod error;
+pub mod error;
 
 // Platform-specific presets (feature-gated)
 #[cfg(feature = "android")]

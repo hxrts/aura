@@ -21,20 +21,26 @@ struct RendezvousCacheState {
 }
 
 impl RendezvousCacheState {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), super::invariant::InvariantViolation> {
         for ((ctx, peer), desc) in &self.descriptors {
             if *ctx != desc.context_id || *peer != desc.authority_id {
-                return Err(format!(
-                    "descriptor key mismatch: ({:?}, {:?}) vs ({:?}, {:?})",
-                    ctx, peer, desc.context_id, desc.authority_id
+                return Err(super::invariant::InvariantViolation::new(
+                    "RendezvousCache",
+                    format!(
+                        "descriptor key mismatch: ({:?}, {:?}) vs ({:?}, {:?})",
+                        ctx, peer, desc.context_id, desc.authority_id
+                    ),
                 ));
             }
         }
         for ((ctx, peer), pending) in &self.pending_channels {
             if *ctx != pending.context_id || *peer != pending.peer {
-                return Err(format!(
-                    "pending channel key mismatch: ({:?}, {:?}) vs ({:?}, {:?})",
-                    ctx, peer, pending.context_id, pending.peer
+                return Err(super::invariant::InvariantViolation::new(
+                    "RendezvousCache",
+                    format!(
+                        "pending channel key mismatch: ({:?}, {:?}) vs ({:?}, {:?})",
+                        ctx, peer, pending.context_id, pending.peer
+                    ),
                 ));
             }
         }
