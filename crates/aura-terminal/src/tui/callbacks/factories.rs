@@ -1272,7 +1272,9 @@ impl InvitationsCallbacks {
                             if let Some(operation) = operation {
                                 operation.succeed().await;
                             }
-                            let _ = copy_to_clipboard(&code);
+                            if let Err(e) = copy_to_clipboard(&code) {
+                            tracing::debug!(error = %e, "clipboard copy failed; code still available in UI");
+                        }
                             send_ui_update_reliable(&tx, UiUpdate::InvitationExported { code })
                                 .await;
                         }
@@ -1302,7 +1304,9 @@ impl InvitationsCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.export_invitation_code(&invitation_id).await {
                     Ok(code) => {
-                        let _ = copy_to_clipboard(&code);
+                        if let Err(e) = copy_to_clipboard(&code) {
+                            tracing::debug!(error = %e, "clipboard copy failed; code still available in UI");
+                        }
                         send_ui_update_reliable(&tx, UiUpdate::InvitationExported { code }).await;
                     }
                     Err(_e) => {
