@@ -172,7 +172,7 @@ impl AppCoreContext {
 
     pub fn request_authority_switch(
         &self,
-        authority_id: aura_core::identifiers::AuthorityId,
+        authority_id: aura_core::types::identifiers::AuthorityId,
         nickname_suggestion: Option<String>,
     ) {
         self.io_context
@@ -200,6 +200,10 @@ impl AppCoreContext {
 /// - Reads the current value first (catch-up).
 /// - Subscribes and forwards values to `on_value`.
 /// - On any error, emits `ERROR_SIGNAL` and retries.
+/// Maximum outer retry attempts before giving up on a signal subscription.
+/// At 2s max backoff this is ~6+ minutes of retrying before the loop exits.
+const MAX_SUBSCRIPTION_RETRIES: u32 = 200;
+
 pub async fn subscribe_signal_with_retry<T, F>(
     app_core: InitializedAppCore,
     signal: &'static Signal<T>,
@@ -215,8 +219,18 @@ pub async fn subscribe_signal_with_retry<T, F>(
 
     let mut last_emitted: Option<String> = None;
     let mut backoff = Duration::from_millis(50);
+    let mut retries = 0u32;
 
     loop {
+        retries += 1;
+        if retries > MAX_SUBSCRIPTION_RETRIES {
+            tracing::warn!(
+                signal = %signal.id(),
+                retries,
+                "Signal subscription abandoned after max retries"
+            );
+            break;
+        }
         // Guard against races where a component subscribes before init_signals().
         if !reactive.is_registered(signal.id()) {
             maybe_emit_reactive_error(
@@ -256,6 +270,8 @@ pub async fn subscribe_signal_with_retry<T, F>(
         }
 
         // Subscribe and forward updates. If the stream errors, retry.
+        // Reset retry counter since the subscription was successfully established.
+        retries = 0;
         let mut stream = reactive.subscribe(signal);
         loop {
             match stream.recv().await {

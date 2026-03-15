@@ -1010,10 +1010,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 if shutdown.load(std::sync::atomic::Ordering::Acquire) {
                     break;
                 }
-                let timestamp_ms = aura_app::ui::workflows::time::current_time_ms(&app_core)
+                let timestamp_ms = match aura_app::ui::workflows::time::current_time_ms(&app_core)
                     .await
-                    .unwrap_or(0);
-                let _ = network_workflows::discover_peers(&app_core, timestamp_ms).await;
+                {
+                    Ok(ts) => ts,
+                    Err(e) => {
+                        tracing::debug!(error = %e, "current_time_ms failed in peer discovery");
+                        0
+                    }
+                };
+                if let Err(e) = network_workflows::discover_peers(&app_core, timestamp_ms).await {
+                    tracing::debug!(error = %e, "discover_peers failed");
+                }
                 tokio::time::sleep(network_workflows::DISCOVERED_PEERS_REFRESH_INTERVAL).await;
             }
         }
