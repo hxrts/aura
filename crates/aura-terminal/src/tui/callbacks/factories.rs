@@ -37,7 +37,7 @@ where
     ctx.tasks().spawn(fut);
 }
 
-use super::updates::{send_ui_update_lossy, send_ui_update_required};
+use crate::tui::updates::{send_ui_update_lossy, send_ui_update_required};
 
 async fn send_ui_update_reliable(tx: &UiUpdateSender, update: UiUpdate) {
     send_ui_update_required(tx, update).await;

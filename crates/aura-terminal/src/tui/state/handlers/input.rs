@@ -109,7 +109,7 @@ pub fn handle_mouse_event(
 const MAX_PASTE_LENGTH: usize = 8192;
 
 /// Truncate pasted text to a safe length, respecting UTF-8 char boundaries.
-fn truncate_paste(field: &str, text: &str) -> &str {
+fn truncate_paste<'a>(field: &str, text: &'a str) -> &'a str {
     let remaining = MAX_PASTE_LENGTH.saturating_sub(field.len());
     if text.len() <= remaining {
         return text;
