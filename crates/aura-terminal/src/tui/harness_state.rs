@@ -304,8 +304,14 @@ async fn process_harness_command_stream(mut stream: UnixStream) -> bool {
             return true;
         }
     };
-    const MAX_RETRIES: u32 = 200; // 200 × 50ms = 10s budget
-    const RETRY_INTERVAL_MS: u64 = 50;
+    let max_retries: u32 = std::env::var("AURA_HARNESS_COMMAND_max_retries")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(200); // 200 × 50ms = 10s budget
+    let retry_interval_ms: u64 = std::env::var("AURA_HARNESS_COMMAND_retry_interval_ms")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(50);
     let mut attempts = 0u32;
     let receipt = loop {
         let command_tx = match active_harness_command_sender().lock() {
@@ -317,12 +323,12 @@ async fn process_harness_command_stream(mut stream: UnixStream) -> bool {
         };
         let Some(command_tx) = command_tx else {
             attempts += 1;
-            if attempts >= MAX_RETRIES {
+            if attempts >= max_retries {
                 break HarnessUiCommandReceipt::Rejected {
                     reason: "TUI harness command plane is temporarily unavailable".to_string(),
                 };
             }
-            tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_INTERVAL_MS)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(retry_interval_ms)).await;
             continue;
         };
 
@@ -337,14 +343,14 @@ async fn process_harness_command_stream(mut stream: UnixStream) -> bool {
             Ok(()) => {}
             Err(error) => {
                 attempts += 1;
-                if attempts >= MAX_RETRIES {
+                if attempts >= max_retries {
                     break HarnessUiCommandReceipt::Rejected {
                         reason: format!(
                             "failed to submit harness command into shell ingress: {error}"
                         ),
                     };
                 }
-                tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_INTERVAL_MS)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(retry_interval_ms)).await;
                 continue;
             }
         }
@@ -353,12 +359,12 @@ async fn process_harness_command_stream(mut stream: UnixStream) -> bool {
             Ok(receipt) => break receipt,
             Err(error) => {
                 attempts += 1;
-                if attempts >= MAX_RETRIES {
+                if attempts >= max_retries {
                     break HarnessUiCommandReceipt::Rejected {
                         reason: format!("harness command dropped before application: {error}"),
                     };
                 }
-                tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_INTERVAL_MS)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(retry_interval_ms)).await;
             }
         }
     };
