@@ -245,6 +245,7 @@ pub(crate) fn ensure_harness_command_listener() -> io::Result<()> {
     tokio::spawn(async move {
         let _guard = guard;
         forward_harness_commands_from_listener(listener).await;
+        tracing::debug!("harness command listener exited");
     });
     let _ = HARNESS_COMMAND_LISTENER_STARTED.set(());
     Ok(())
