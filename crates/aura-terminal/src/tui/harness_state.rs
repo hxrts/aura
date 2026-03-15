@@ -4,9 +4,7 @@ use crate::tui::screens::Screen;
 use crate::tui::state::commands::ThresholdK;
 use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::state::toast::ToastLevel;
-use crate::tui::state_machine::{
-    DispatchCommand, ImportInvitationModalState, InvitationKind, TuiCommand,
-};
+use crate::tui::state::{DispatchCommand, ImportInvitationModalState, InvitationKind, TuiCommand};
 use crate::tui::types::{
     Channel as TuiChannel, Contact as TuiContact, Device as TuiDevice, Message as TuiMessage,
     SettingsSection,
@@ -148,13 +146,14 @@ fn select_settings_section(state: &mut TuiState, section: SettingsSection) {
 
 fn visible_home_ids(app_snapshot: &StateSnapshot) -> Vec<String> {
     let mut home_ids = Vec::new();
-    if app_snapshot.neighborhood.home_home_id != aura_core::identifiers::ChannelId::default() {
+    if app_snapshot.neighborhood.home_home_id != aura_core::types::identifiers::ChannelId::default()
+    {
         home_ids.push(app_snapshot.neighborhood.home_home_id.to_string());
     }
     let neighbor_home_ids = app_snapshot
         .neighborhood
         .all_neighbors()
-        .filter(|home| home.id != aura_core::identifiers::ChannelId::default())
+        .filter(|home| home.id != aura_core::types::identifiers::ChannelId::default())
         .map(|home| home.id.to_string())
         .filter(|home_id| !home_ids.iter().any(|existing| existing == home_id))
         .collect::<Vec<_>>();
@@ -252,14 +251,20 @@ pub(crate) fn ensure_harness_command_listener() -> io::Result<()> {
 }
 
 pub(crate) fn register_harness_command_sender(sender: HarnessCommandSender) {
-    if let Ok(mut guard) = active_harness_command_sender().lock() {
-        *guard = Some(sender);
+    match active_harness_command_sender().lock() {
+        Ok(mut guard) => *guard = Some(sender),
+        Err(error) => {
+            tracing::error!("harness command sender lock poisoned during register: {error}");
+        }
     }
 }
 
 pub(crate) fn clear_harness_command_sender() {
-    if let Ok(mut guard) = active_harness_command_sender().lock() {
-        *guard = None;
+    match active_harness_command_sender().lock() {
+        Ok(mut guard) => *guard = None,
+        Err(error) => {
+            tracing::error!("harness command sender lock poisoned during clear: {error}");
+        }
     }
 }
 
@@ -303,10 +308,13 @@ async fn process_harness_command_stream(mut stream: UnixStream) -> bool {
     const RETRY_INTERVAL_MS: u64 = 50;
     let mut attempts = 0u32;
     let receipt = loop {
-        let command_tx = active_harness_command_sender()
-            .lock()
-            .ok()
-            .and_then(|guard| guard.clone());
+        let command_tx = match active_harness_command_sender().lock() {
+            Ok(guard) => guard.clone(),
+            Err(error) => {
+                tracing::error!("harness command sender lock poisoned during dispatch: {error}");
+                None
+            }
+        };
         let Some(command_tx) = command_tx else {
             attempts += 1;
             if attempts >= MAX_RETRIES {
@@ -419,7 +427,7 @@ pub(crate) fn apply_harness_command(
             }
             ControlId::SettingsAddDeviceButton => {
                 select_settings_section(state, SettingsSection::Devices);
-                let mut modal_state = crate::tui::state_machine::AddDeviceModalState::default();
+                let mut modal_state = crate::tui::state::AddDeviceModalState::default();
                 if !state.settings.demo_mobile_authority_id.is_empty() {
                     modal_state.invitee_authority_id =
                         state.settings.demo_mobile_authority_id.clone();
@@ -438,7 +446,7 @@ pub(crate) fn apply_harness_command(
                     state.next_toast_id += 1;
                     state
                         .toast_queue
-                        .enqueue(crate::tui::state_machine::QueuedToast::new(
+                        .enqueue(crate::tui::state::QueuedToast::new(
                             state.next_toast_id,
                             "[DEMO] Press Ctrl+m to auto-fill the Mobile device code",
                             ToastLevel::Info,
@@ -600,9 +608,7 @@ pub(crate) fn apply_harness_command(
             let receiver_id = receiver_authority_id
                 .parse::<aura_core::AuthorityId>()
                 .map_err(|error| {
-                    format!(
-                        "invalid authority id {receiver_authority_id}: {error}"
-                    )
+                    format!("invalid authority id {receiver_authority_id}: {error}")
                 })?;
             Ok(vec![TuiCommand::Dispatch(
                 DispatchCommand::CreateInvitation {
@@ -823,13 +829,14 @@ pub fn try_authoritative_ui_snapshot(
     }
 
     let mut home_ids = Vec::new();
-    if app_snapshot.neighborhood.home_home_id != aura_core::identifiers::ChannelId::default() {
+    if app_snapshot.neighborhood.home_home_id != aura_core::types::identifiers::ChannelId::default()
+    {
         home_ids.push(app_snapshot.neighborhood.home_home_id.to_string());
     }
     let neighbor_home_ids = app_snapshot
         .neighborhood
         .all_neighbors()
-        .filter(|home| home.id != aura_core::identifiers::ChannelId::default())
+        .filter(|home| home.id != aura_core::types::identifiers::ChannelId::default())
         .map(|home| home.id.to_string())
         .filter(|home_id| !home_ids.iter().any(|existing| existing == home_id))
         .collect::<Vec<_>>();
@@ -1070,7 +1077,7 @@ mod tests {
     use crate::tui::state::modal_queue::QueuedModal;
     use crate::tui::state::views::{AccountSetupModalState, DeviceEnrollmentCeremonyModalState};
     use crate::tui::state::DispatchCommand;
-    use crate::tui::state_machine::InvitationKind;
+    use crate::tui::state::InvitationKind;
     use crate::tui::types::{Channel as TuiChannel, Device as TuiDevice, SettingsSection};
     use crate::tui::updates::{harness_command_channel, HarnessCommandSubmission};
     use crate::tui::{TuiCommand, TuiState};
