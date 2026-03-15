@@ -28,9 +28,10 @@ pub async fn propose_bump<E: AmpJournalEffects>(
 ) -> Result<ProposedChannelEpochBump, AuraError> {
     let state = inspect_channel(effects, context, channel).await?;
     if state.pending_bump.is_some() {
-        return Err(
-            super::error::WorkflowError::Precondition("Channel already has a pending bump").into(),
-        );
+        return Err(super::error::WorkflowError::Precondition(
+            "Channel already has a pending bump",
+        )
+        .into());
     }
 
     let proposal = ProposedChannelEpochBump {

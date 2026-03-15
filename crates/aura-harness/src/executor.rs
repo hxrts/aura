@@ -226,7 +226,6 @@ enum ContactPhase {
 enum ChannelPhase {
     #[default]
     None,
-    LocalReady,
     InvitationPending,
     MembershipReady,
 }
@@ -291,7 +290,6 @@ enum SharedFlowTransition {
     AccountReady,
     ContactInvitationReady,
     ContactLinked,
-    ChannelCreated,
     PendingChannelInvitation,
     ChannelMembershipReady,
     MessageVisible,
@@ -324,12 +322,6 @@ impl SharedFlowState {
                     bail!("contact link requires AccountPhase::Ready");
                 }
                 next.contact = ContactPhase::Linked;
-            }
-            SharedFlowTransition::ChannelCreated => {
-                if !matches!(self.account, AccountPhase::Ready) {
-                    bail!("channel create requires AccountPhase::Ready");
-                }
-                next.channel = ChannelPhase::LocalReady;
             }
             SharedFlowTransition::PendingChannelInvitation => {
                 if !matches!(self.contact, ContactPhase::Linked) {
@@ -376,13 +368,8 @@ impl SharedFlowState {
                 if !matches!(self.contact, ContactPhase::Linked) {
                     bail!("invite_actor_to_channel requires ContactPhase::Linked");
                 }
-                if !matches!(
-                    self.channel,
-                    ChannelPhase::LocalReady | ChannelPhase::MembershipReady
-                ) {
-                    bail!(
-                        "invite_actor_to_channel requires ChannelPhase::LocalReady or MembershipReady"
-                    );
+                if !matches!(self.channel, ChannelPhase::MembershipReady) {
+                    bail!("invite_actor_to_channel requires ChannelPhase::MembershipReady");
                 }
             }
             ScenarioAction::AcceptPendingChannelInvitation => {
@@ -4068,7 +4055,8 @@ fn semantic_wait_matches_for_instance(
         return true;
     }
 
-    snapshot.operation_state_for_instance(handle.id(), handle.instance_id()) == Some(operation_state)
+    snapshot.operation_state_for_instance(handle.id(), handle.instance_id())
+        == Some(operation_state)
 }
 
 fn operation_handle_matches(
@@ -4372,7 +4360,7 @@ fn record_shared_flow_progress(
             Some(SharedFlowTransition::ContactInvitationReady)
         }
         ScenarioAction::AcceptContactInvitation => Some(SharedFlowTransition::ContactLinked),
-        ScenarioAction::CreateChannel => Some(SharedFlowTransition::ChannelCreated),
+        ScenarioAction::CreateChannel => Some(SharedFlowTransition::ChannelMembershipReady),
         ScenarioAction::AcceptPendingChannelInvitation => {
             Some(SharedFlowTransition::ChannelMembershipReady)
         }

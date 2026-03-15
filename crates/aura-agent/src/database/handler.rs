@@ -58,14 +58,16 @@ impl DatabaseState {
     #[allow(dead_code)] // For use with with_state_mut_validated
     fn validate(&self) -> Result<(), crate::runtime::services::invariant::InvariantViolation> {
         if self.bloom_filter.element_count < self.fact_hashes.len() as u64 {
-            return Err(crate::runtime::services::invariant::InvariantViolation::new(
-                "IndexedJournal",
-                format!(
-                    "bloom filter count {} below fact hash count {}",
-                    self.bloom_filter.element_count,
-                    self.fact_hashes.len()
+            return Err(
+                crate::runtime::services::invariant::InvariantViolation::new(
+                    "IndexedJournal",
+                    format!(
+                        "bloom filter count {} below fact hash count {}",
+                        self.bloom_filter.element_count,
+                        self.fact_hashes.len()
+                    ),
                 ),
-            ));
+            );
         }
         Ok(())
     }

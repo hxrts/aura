@@ -4,6 +4,101 @@
 
 use aura_core::types::Epoch;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpFailureCode {
+    AcceptPendingHomeInvitation,
+    CreateHome,
+    CreateNeighborhood,
+    AddHomeToNeighborhood,
+    LinkHomeOneHopLink,
+    CreateInvitation,
+    CreateContactInvitation,
+    CreateGuardianInvitation,
+    CreateChannelInvitation,
+    ExportInvitation,
+    ImportInvitation,
+    AcceptInvitation,
+    ImportDeviceEnrollmentCode,
+    DeclineInvitation,
+    CancelInvitation,
+    StartDeviceEnrollment,
+    RemoveDevice,
+    CreateChannel,
+    SendMessage,
+    SendDirectMessage,
+    StartDirectChat,
+    SetTopic,
+    SendAction,
+    InviteUserToChannel,
+    JoinChannel,
+    LeaveChannel,
+    CloseChannel,
+    RetryMessage,
+}
+
+impl OpFailureCode {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AcceptPendingHomeInvitation => "TUI_ACCEPT_PENDING_HOME_INVITATION",
+            Self::CreateHome => "TUI_CREATE_HOME",
+            Self::CreateNeighborhood => "TUI_CREATE_NEIGHBORHOOD",
+            Self::AddHomeToNeighborhood => "TUI_ADD_HOME_TO_NEIGHBORHOOD",
+            Self::LinkHomeOneHopLink => "TUI_LINK_HOME_ONE_HOP_LINK",
+            Self::CreateInvitation => "TUI_CREATE_INVITATION",
+            Self::CreateContactInvitation => "TUI_CREATE_CONTACT_INVITATION",
+            Self::CreateGuardianInvitation => "TUI_CREATE_GUARDIAN_INVITATION",
+            Self::CreateChannelInvitation => "TUI_CREATE_CHANNEL_INVITATION",
+            Self::ExportInvitation => "TUI_EXPORT_INVITATION",
+            Self::ImportInvitation => "TUI_IMPORT_INVITATION",
+            Self::AcceptInvitation => "TUI_ACCEPT_INVITATION",
+            Self::ImportDeviceEnrollmentCode => "TUI_IMPORT_DEVICE_ENROLLMENT_CODE",
+            Self::DeclineInvitation => "TUI_DECLINE_INVITATION",
+            Self::CancelInvitation => "TUI_CANCEL_INVITATION",
+            Self::StartDeviceEnrollment => "TUI_START_DEVICE_ENROLLMENT",
+            Self::RemoveDevice => "TUI_REMOVE_DEVICE",
+            Self::CreateChannel => "TUI_CREATE_CHANNEL",
+            Self::SendMessage => "TUI_SEND_MESSAGE",
+            Self::SendDirectMessage => "TUI_SEND_DIRECT_MESSAGE",
+            Self::StartDirectChat => "TUI_START_DIRECT_CHAT",
+            Self::SetTopic => "TUI_SET_TOPIC",
+            Self::SendAction => "TUI_SEND_ACTION",
+            Self::InviteUserToChannel => "TUI_INVITE_USER_TO_CHANNEL",
+            Self::JoinChannel => "TUI_JOIN_CHANNEL",
+            Self::LeaveChannel => "TUI_LEAVE_CHANNEL",
+            Self::CloseChannel => "TUI_CLOSE_CHANNEL",
+            Self::RetryMessage => "TUI_RETRY_MESSAGE",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
+pub struct TypedOpFailure {
+    code: OpFailureCode,
+    message: String,
+}
+
+impl TypedOpFailure {
+    #[must_use]
+    pub fn new(code: OpFailureCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+
+    #[must_use]
+    pub const fn code(&self) -> OpFailureCode {
+        self.code
+    }
+
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
 /// Result type for operational commands
 pub type OpResult = Result<OpResponse, OpError>;
 
@@ -138,4 +233,13 @@ pub enum OpError {
     InvalidArgument(String),
     #[error("Operation failed: {0}")]
     Failed(String),
+    #[error("Operation failed [{code}]: {message}", code = .0.code().as_str(), message = .0.message())]
+    TypedFailure(TypedOpFailure),
+}
+
+impl OpError {
+    #[must_use]
+    pub fn typed(code: OpFailureCode, message: impl Into<String>) -> Self {
+        Self::TypedFailure(TypedOpFailure::new(code, message))
+    }
 }

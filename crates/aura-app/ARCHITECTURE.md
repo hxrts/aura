@@ -62,6 +62,15 @@ one authoritative coordinator must own:
 Frontend crates may not invent parallel lifecycle ownership for those
 operations.
 
+### Ownership Inventory
+
+| Path | Category | Authoritative owner | May mutate | Observe only |
+|------|----------|---------------------|------------|--------------|
+| Semantic command request/receipt types | `Pure` | `aura-app::ui_contract`, `aura-app::scenario_contract` | contract modules | `aura-terminal`, `aura-web`, `aura-harness` |
+| Parity-critical semantic operation lifecycle | `MoveOwned` | workflow-local semantic coordinator per operation | `aura-app::workflows::*`, semantic-fact publishers | frontends, harness |
+| Invitation/channel/delivery readiness derivation rules | `Pure` + coordinator-consumed `ActorOwned` inputs | readiness coordinators in `aura-app::workflows::*` | workflow/coordinator modules only | frontends, harness |
+| Opaque handles / owner-token / handoff surfaces | `MoveOwned` | current token/record holder through sanctioned APIs | contract/workflow transfer APIs | render/projection layers, harness diagnostics |
+
 ### Detailed Specifications
 
 ### InvariantAppWorkflowPurity

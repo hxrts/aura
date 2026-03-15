@@ -16,7 +16,7 @@ use aura_app::scenario_contract::{
 };
 use aura_app::ui::contract::{
     ControlId, FieldId, HarnessUiCommand, HarnessUiCommandReceipt, ListId, ModalId, OperationId,
-    OperationState, ScreenId, UiSnapshot,
+    OperationState, ScreenId, UiReadiness, UiSnapshot,
 };
 use aura_app::ui_contract::RuntimeFact;
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
@@ -26,7 +26,7 @@ use tokio::time::Instant;
 use crate::backend::{
     latest_invitation_code, observe_operation, wait_for_operation_submission,
     ContactInvitationCode, InstanceBackend, RawUiBackend, SharedSemanticBackend, SubmittedAction,
-    UiSnapshotEvent,
+    UiOperationHandle, UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
 use crate::screen_normalization::{authoritative_screen, has_nav_header};
@@ -397,7 +397,10 @@ impl LocalPtyBackend {
         Ok(())
     }
 
-    fn send_harness_command(&mut self, command: &HarnessUiCommand) -> Result<()> {
+    fn send_harness_command(
+        &mut self,
+        command: &HarnessUiCommand,
+    ) -> Result<Option<aura_app::ui_contract::HarnessUiOperationHandle>> {
         let socket_path = Self::absolutize_path(self.command_socket_path());
         let payload = serde_json::to_vec(command).context("failed to encode harness UI command")?;
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -405,7 +408,7 @@ impl LocalPtyBackend {
         loop {
             match UnixStream::connect(&socket_path) {
                 Ok(mut stream) => {
-                    let command_result: Result<()> = (|| {
+                    let command_result: Result<Option<aura_app::ui_contract::HarnessUiOperationHandle>> = (|| {
                         stream
                             .write_all(&payload)
                             .context("failed to write harness UI command")?;
@@ -440,7 +443,7 @@ impl LocalPtyBackend {
                             }
                         })?;
                         match receipt {
-                            HarnessUiCommandReceipt::Accepted => Ok(()),
+                            HarnessUiCommandReceipt::Accepted { operation } => Ok(operation),
                             HarnessUiCommandReceipt::Rejected { reason } => {
                                 anyhow::bail!("TUI harness command rejected: {reason}")
                             }
@@ -448,7 +451,7 @@ impl LocalPtyBackend {
                     })();
 
                     match command_result {
-                        Ok(()) => return Ok(()),
+                        Ok(operation) => return Ok(operation),
                         Err(error)
                             if error
                                 .downcast_ref::<std::io::Error>()
@@ -958,8 +961,10 @@ impl InstanceBackend for LocalPtyBackend {
 
         let deadline = Instant::now() + timeout;
         loop {
-            if self.ui_snapshot().is_ok() {
-                return Ok(());
+            if let Ok(snapshot) = self.ui_snapshot() {
+                if snapshot.readiness == UiReadiness::Ready {
+                    return Ok(());
+                }
             }
             if self
                 .session
@@ -975,10 +980,11 @@ impl InstanceBackend for LocalPtyBackend {
                 );
             }
             if Instant::now() >= deadline {
+                let readiness = self.ui_snapshot().ok().map(|snapshot| snapshot.readiness);
                 anyhow::bail!(
-                    "local PTY instance {} did not reach readiness within {:?}",
+                    "local PTY instance {} did not reach semantic readiness within {:?}; readiness={readiness:?}",
                     self.config.id,
-                    timeout
+                    timeout,
                 );
             }
             thread::sleep(Duration::from_millis(100));
@@ -1374,15 +1380,18 @@ impl SharedSemanticBackend for LocalPtyBackend {
     fn submit_create_account(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
         let previous_operation =
             observe_operation(&self.ui_snapshot()?, &OperationId::account_create());
-        self.send_harness_command(&HarnessUiCommand::CreateAccount {
+        let receipt_handle = self.send_harness_command(&HarnessUiCommand::CreateAccount {
             account_name: account_name.to_string(),
         })?;
-        let handle = wait_for_operation_submission(
-            self,
-            OperationId::account_create(),
-            previous_operation,
-            Duration::from_secs(5),
-        )?;
+        let handle = match receipt_handle {
+            Some(handle) => UiOperationHandle::new(handle.operation_id, handle.instance_id),
+            None => wait_for_operation_submission(
+                self,
+                OperationId::account_create(),
+                previous_operation,
+                Duration::from_secs(5),
+            )?,
+        };
         let issue_deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let snapshot = self.ui_snapshot()?;
@@ -1464,15 +1473,18 @@ impl SharedSemanticBackend for LocalPtyBackend {
     ) -> Result<SubmittedAction<ContactInvitationCode>> {
         let previous_operation =
             observe_operation(&self.ui_snapshot()?, &OperationId::invitation_create());
-        self.send_harness_command(&HarnessUiCommand::CreateContactInvitation {
+        let receipt_handle = self.send_harness_command(&HarnessUiCommand::CreateContactInvitation {
             receiver_authority_id: receiver_authority_id.to_string(),
         })?;
-        let handle = wait_for_operation_submission(
-            self,
-            OperationId::invitation_create(),
-            previous_operation,
-            Duration::from_secs(5),
-        )?;
+        let handle = match receipt_handle {
+            Some(handle) => UiOperationHandle::new(handle.operation_id, handle.instance_id),
+            None => wait_for_operation_submission(
+                self,
+                OperationId::invitation_create(),
+                previous_operation,
+                Duration::from_secs(5),
+            )?,
+        };
         let code_deadline = Instant::now() + Duration::from_secs(5);
         let code = loop {
             let snapshot = self.ui_snapshot()?;
@@ -1539,16 +1551,19 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     "submit_invite_actor_to_channel requires an authoritative selected channel"
                 )
             })?;
-        self.send_harness_command(&HarnessUiCommand::InviteActorToChannel {
+        let receipt_handle = self.send_harness_command(&HarnessUiCommand::InviteActorToChannel {
             authority_id: authority_id.to_string(),
             channel_id,
         })?;
-        let handle = wait_for_operation_submission(
-            self,
-            OperationId::invitation_create(),
-            previous_operation,
-            Duration::from_secs(5),
-        )?;
+        let handle = match receipt_handle {
+            Some(handle) => UiOperationHandle::new(handle.operation_id, handle.instance_id),
+            None => wait_for_operation_submission(
+                self,
+                OperationId::invitation_create(),
+                previous_operation,
+                Duration::from_secs(5),
+            )?,
+        };
         Ok(SubmittedAction::with_ui_operation((), handle))
     }
 

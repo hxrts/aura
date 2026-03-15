@@ -135,7 +135,9 @@ pub async fn start_recovery_from_state(
     }
 
     if state.active_recovery().is_some() {
-        return Err(super::error::WorkflowError::Precondition("Recovery already in progress").into());
+        return Err(
+            super::error::WorkflowError::Precondition("Recovery already in progress").into(),
+        );
     }
 
     let guardian_ids: Vec<AuthorityId> = state.all_guardians().map(|g| g.id).collect();

@@ -119,9 +119,18 @@ pub enum HarnessUiCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnessUiOperationHandle {
+    pub operation_id: OperationId,
+    pub instance_id: OperationInstanceId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "submission", rename_all = "snake_case")]
 pub enum HarnessUiCommandReceipt {
-    Accepted,
+    Accepted {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        operation: Option<HarnessUiOperationHandle>,
+    },
     Rejected { reason: String },
 }
 
@@ -712,12 +721,13 @@ pub enum SemanticOperationPhase {
     DeliveryReady,
     Succeeded,
     Failed,
+    Cancelled,
 }
 
 impl SemanticOperationPhase {
     #[must_use]
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Succeeded | Self::Failed)
+        matches!(self, Self::Succeeded | Self::Failed | Self::Cancelled)
     }
 }
 
@@ -794,6 +804,15 @@ impl SemanticOperationStatus {
             kind,
             phase: SemanticOperationPhase::Failed,
             error: Some(error),
+        }
+    }
+
+    #[must_use]
+    pub fn cancelled(kind: SemanticOperationKind) -> Self {
+        Self {
+            kind,
+            phase: SemanticOperationPhase::Cancelled,
+            error: None,
         }
     }
 }
@@ -1006,7 +1025,36 @@ impl AuthoritativeSemanticFact {
             _ => None,
         }
     }
+}
 
+#[must_use]
+pub fn bridged_operation_statuses(
+    facts: &[AuthoritativeSemanticFact],
+) -> Vec<(OperationId, SemanticOperationStatus)> {
+    let mut bridged = facts
+        .iter()
+        .filter_map(AuthoritativeSemanticFact::operation_status_bridge)
+        .collect::<Vec<_>>();
+
+    let contact_link_ready = facts
+        .iter()
+        .any(|fact| matches!(fact, AuthoritativeSemanticFact::ContactLinkReady { .. }));
+
+    if contact_link_ready {
+        for (operation_id, status) in &mut bridged {
+            if *operation_id == OperationId::invitation_accept()
+                && status.kind == SemanticOperationKind::AcceptContactInvitation
+                && !status.phase.is_terminal()
+            {
+                *status = SemanticOperationStatus::new(
+                    SemanticOperationKind::AcceptContactInvitation,
+                    SemanticOperationPhase::Succeeded,
+                );
+            }
+        }
+    }
+
+    bridged
 }
 
 impl OperationId {
@@ -1352,7 +1400,6 @@ impl RuntimeFact {
             }
         }
     }
-
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3345,6 +3392,15 @@ mod tests {
     }
 
     #[test]
+    fn semantic_operation_status_supports_cancelled_terminality() {
+        let status = SemanticOperationStatus::cancelled(SemanticOperationKind::CreateAccount);
+
+        assert_eq!(status.error, None);
+        assert!(status.phase.is_terminal());
+        assert_eq!(status.phase, SemanticOperationPhase::Cancelled);
+    }
+
+    #[test]
     fn authoritative_semantic_fact_round_trips_through_json() {
         let fact = AuthoritativeSemanticFact::OperationStatus {
             operation_id: OperationId::send_message(),
@@ -3440,6 +3496,35 @@ mod tests {
         };
 
         assert_eq!(contact_invite.key(), channel_invite.key());
+    }
+
+    #[test]
+    fn bridged_operation_statuses_finalize_contact_accept_on_contact_link_ready() {
+        let statuses = super::bridged_operation_statuses(&[
+            AuthoritativeSemanticFact::OperationStatus {
+                operation_id: OperationId::invitation_accept(),
+                instance_id: None,
+                status: SemanticOperationStatus::new(
+                    SemanticOperationKind::AcceptContactInvitation,
+                    SemanticOperationPhase::WorkflowDispatched,
+                ),
+            },
+            AuthoritativeSemanticFact::ContactLinkReady {
+                authority_id: "authority:test".to_string(),
+                contact_count: 1,
+            },
+        ]);
+
+        assert_eq!(
+            statuses,
+            vec![(
+                OperationId::invitation_accept(),
+                SemanticOperationStatus::new(
+                    SemanticOperationKind::AcceptContactInvitation,
+                    SemanticOperationPhase::Succeeded,
+                ),
+            )]
+        );
     }
 
     #[test]

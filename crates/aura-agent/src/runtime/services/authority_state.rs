@@ -66,10 +66,7 @@ impl AuthorityManagerState {
             if state.last_activity < state.created_at {
                 return Err(super::invariant::InvariantViolation::new(
                     "AuthorityManager",
-                    format!(
-                        "authority {:?} last_activity < created_at",
-                        authority_id
-                    ),
+                    format!("authority {:?} last_activity < created_at", authority_id),
                 ));
             }
             let mut seen = HashSet::new();

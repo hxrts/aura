@@ -59,6 +59,15 @@ Rules:
 - Detached fire-and-forget tasks are forbidden in production runtime code.
 - Shutdown is hierarchical and parent-driven.
 
+## Ownership Inventory
+
+| Path | Category | Authoritative owner | May mutate | Observe only |
+|------|----------|---------------------|------------|--------------|
+| Runtime services and long-lived async coordinators | `ActorOwned` | service actor / rooted task group | owning service module and its typed command ingress | `aura-app`, frontends, harness |
+| Session / endpoint / fragment transfer surfaces | `MoveOwned` | current owner record and capability scope | sanctioned delegation / transfer APIs only | projections, diagnostics, harness |
+| Runtime-facing readiness and lifecycle state consumed by shared semantic flows | `ActorOwned` | runtime readiness/lifecycle coordinator | owning runtime coordinator and sanctioned hooks | `aura-app`, frontends, harness |
+| Frontend-visible projections and facts | `Observed` | downstream of runtime/workflow ownership | projection reducers/exporters only | frontends, harness |
+
 ### Service Actor Pattern
 
 Long-lived runtime services use actor ownership with typed command channels:

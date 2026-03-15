@@ -30,7 +30,7 @@ cfg_if! {
         };
         use aura_core::{identifiers::AuthorityId, DeviceId};
         use aura_app::ui::contract::{
-            ControlId, FieldId, OperationId, OperationState, ScreenId, UiReadiness,
+            ControlId, FieldId, ScreenId, UiReadiness,
         };
         use aura_effects::{new_authority_id, new_device_id, RealRandomHandler};
         use aura_ui::{AuraUiRoot, UiController};
@@ -1067,7 +1067,6 @@ cfg_if! {
                         pending_device_enrollment_code_key(&storage_prefix);
                     importing_code.set(true);
                     import_error.set(None);
-                    controller.start_runtime_operation(OperationId::device_enrollment());
 
                     let controller = controller.clone();
                     spawn(async move {
@@ -1276,10 +1275,6 @@ cfg_if! {
                         match result {
                             Ok(requires_reload) => {
                                 if !requires_reload {
-                                    controller.finish_runtime_operation(
-                                        OperationId::device_enrollment(),
-                                        OperationState::Succeeded,
-                                    );
                                     controller.info_toast("Device enrollment complete");
                                     bootstrap_account_ready.set(true);
                                     controller.set_account_setup_state(true, "", None);
@@ -1294,10 +1289,6 @@ cfg_if! {
                                 {
                                     log_web_error("warn", &clear_error);
                                 }
-                                controller.finish_runtime_operation(
-                                    OperationId::device_enrollment(),
-                                    OperationState::Failed,
-                                );
                                 let message = error.user_message();
                                 controller.set_account_setup_state(
                                     false,

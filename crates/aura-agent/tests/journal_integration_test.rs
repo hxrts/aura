@@ -20,6 +20,8 @@ use aura_core::{
     Hash32,
 };
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -55,10 +57,12 @@ impl FactRecordingView {
 }
 
 impl ReactiveView for FactRecordingView {
-    async fn update(&self, facts: &[Fact]) {
-        self.update_count.fetch_add(1, Ordering::SeqCst);
-        let mut stored = self.received_facts.write().await;
-        stored.extend_from_slice(facts);
+    fn update<'a>(&'a self, facts: &'a [Fact]) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            self.update_count.fetch_add(1, Ordering::SeqCst);
+            let mut stored = self.received_facts.write().await;
+            stored.extend_from_slice(facts);
+        })
     }
 
     fn view_id(&self) -> &str {

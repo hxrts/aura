@@ -19,6 +19,8 @@
 use aura_agent::fact_registry::build_fact_registry;
 use aura_agent::reactive::{Dynamic, ReactiveScheduler, ReactiveView, SchedulerConfig};
 use aura_journal::fact::Fact;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -259,8 +261,10 @@ impl OrderTrackingView {
 }
 
 impl ReactiveView for OrderTrackingView {
-    async fn update(&self, _facts: &[Fact]) {
-        self.update_order.write().await.push(self.id.clone());
+    fn update<'a>(&'a self, _facts: &'a [Fact]) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            self.update_order.write().await.push(self.id.clone());
+        })
     }
 
     fn view_id(&self) -> &str {

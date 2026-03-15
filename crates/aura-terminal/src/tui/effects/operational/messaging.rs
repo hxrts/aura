@@ -17,7 +17,7 @@ use aura_app::ui::signals::CHAT_SIGNAL;
 use aura_core::effects::reactive::ReactiveEffects;
 use tracing::error;
 
-use super::types::{OpResponse, OpResult};
+use super::types::{OpError, OpFailureCode, OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflow functions for convenience
@@ -87,9 +87,10 @@ pub async fn handle_messaging(
                 Ok(channel_id) => Some(Ok(OpResponse::ChannelCreated {
                     channel_id: channel_id.to_string(),
                 })),
-                Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to create channel: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::CreateChannel,
+                    format!("Failed to create channel: {e}"),
+                ))),
             }
         }
 
@@ -109,9 +110,10 @@ pub async fn handle_messaging(
                         error = %e,
                         "tui send_message failed"
                     );
-                    Some(Err(super::types::OpError::Failed(format!(
-                        "Failed to send message: {compact}"
-                    ))))
+                    Some(Err(OpError::typed(
+                        OpFailureCode::SendMessage,
+                        format!("Failed to send message: {compact}"),
+                    )))
                 }
             }
         }
@@ -123,9 +125,10 @@ pub async fn handle_messaging(
                 Ok(dm_channel_id) => Some(Ok(OpResponse::DirectMessageSent {
                     channel_id: dm_channel_id,
                 })),
-                Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to send message: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::SendDirectMessage,
+                    format!("Failed to send message: {e}"),
+                ))),
             }
         }
 
@@ -136,9 +139,10 @@ pub async fn handle_messaging(
                 Ok(dm_channel_id) => Some(Ok(OpResponse::DirectMessageSent {
                     channel_id: dm_channel_id,
                 })),
-                Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to start chat: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::StartDirectChat,
+                    format!("Failed to start chat: {e}"),
+                ))),
             }
         }
 
@@ -153,9 +157,10 @@ pub async fn handle_messaging(
             .await
             {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
-                Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to set topic: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::SetTopic,
+                    format!("Failed to set topic: {e}"),
+                ))),
             }
         }
 
@@ -165,9 +170,10 @@ pub async fn handle_messaging(
             // Use send_action_by_name for string-based channel input from TUI
             match send_action_by_name(app_core, channel, action, timestamp).await {
                 Ok(message_id) => Some(Ok(OpResponse::ActionSent { message_id })),
-                Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to send action: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::SendAction,
+                    format!("Failed to send action: {e}"),
+                ))),
             }
         }
 
@@ -177,9 +183,10 @@ pub async fn handle_messaging(
                 Ok(invitation_id) => Some(Ok(OpResponse::ChannelInvitationSent {
                     invitation_id: invitation_id.to_string(),
                 })),
-                Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to invite user: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::InviteUserToChannel,
+                    format!("Failed to invite user: {e}"),
+                ))),
             }
         }
 
@@ -189,9 +196,10 @@ pub async fn handle_messaging(
                 Ok(()) => Some(Ok(OpResponse::ChannelJoined {
                     channel_id: channel.clone(),
                 })),
-                Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to join channel: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::JoinChannel,
+                    format!("Failed to join channel: {e}"),
+                ))),
             }
         }
 
@@ -199,9 +207,10 @@ pub async fn handle_messaging(
             // Use leave_channel_by_name for string-based channel input from TUI
             match leave_channel_by_name(app_core, channel).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
-                Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to leave channel: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::LeaveChannel,
+                    format!("Failed to leave channel: {e}"),
+                ))),
             }
         }
 
@@ -215,9 +224,10 @@ pub async fn handle_messaging(
             .await
             {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
-                Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to close channel: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::CloseChannel,
+                    format!("Failed to close channel: {e}"),
+                ))),
             }
         }
 
@@ -234,9 +244,10 @@ pub async fn handle_messaging(
             };
             match result {
                 Ok(message_id) => Some(Ok(OpResponse::RetrySent { message_id })),
-                Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to retry message: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::RetryMessage,
+                    format!("Failed to retry message: {e}"),
+                ))),
             }
         }
 

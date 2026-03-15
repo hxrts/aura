@@ -675,6 +675,31 @@ impl RuntimeBridge for AgentRuntimeBridge {
         })
     }
 
+    async fn amp_channel_state_exists(
+        &self,
+        context: ContextId,
+        channel: ChannelId,
+    ) -> Result<bool, IntentError> {
+        let effects = self.agent.runtime().effects();
+        match aura_protocol::amp::get_channel_state(&effects, context, channel).await {
+            Ok(_) => Ok(true),
+            Err(error) => {
+                let detail = error.to_string().to_ascii_lowercase();
+                if detail.contains("not found")
+                    || detail.contains("missing")
+                    || detail.contains("unavailable")
+                    || detail.contains("checkpoint")
+                {
+                    Ok(false)
+                } else {
+                    Err(IntentError::internal_error(format!(
+                        "AMP state lookup failed: {error}"
+                    )))
+                }
+            }
+        }
+    }
+
     async fn amp_close_channel(&self, params: ChannelCloseParams) -> Result<(), IntentError> {
         let effects = self.agent.runtime().effects();
         effects.close_channel(params).await.map_err(map_amp_error)

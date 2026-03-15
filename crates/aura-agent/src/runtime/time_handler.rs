@@ -50,26 +50,32 @@ struct TimeHandlerState {
 }
 
 impl TimeHandlerState {
-    fn validate(&self) -> std::result::Result<(), crate::runtime::services::invariant::InvariantViolation> {
+    fn validate(
+        &self,
+    ) -> std::result::Result<(), crate::runtime::services::invariant::InvariantViolation> {
         if self.stats.active_contexts != self.contexts.len() as u64 {
-            return Err(crate::runtime::services::invariant::InvariantViolation::new(
-                "TimeHandler",
-                format!(
-                    "active_contexts {} does not match context count {}",
-                    self.stats.active_contexts,
-                    self.contexts.len()
+            return Err(
+                crate::runtime::services::invariant::InvariantViolation::new(
+                    "TimeHandler",
+                    format!(
+                        "active_contexts {} does not match context count {}",
+                        self.stats.active_contexts,
+                        self.contexts.len()
+                    ),
                 ),
-            ));
+            );
         }
         if self.stats.active_timeouts > self.timeouts.len() as u64 {
-            return Err(crate::runtime::services::invariant::InvariantViolation::new(
-                "TimeHandler",
-                format!(
-                    "active_timeouts {} exceeds timeout count {}",
-                    self.stats.active_timeouts,
-                    self.timeouts.len()
+            return Err(
+                crate::runtime::services::invariant::InvariantViolation::new(
+                    "TimeHandler",
+                    format!(
+                        "active_timeouts {} exceeds timeout count {}",
+                        self.stats.active_timeouts,
+                        self.timeouts.len()
+                    ),
                 ),
-            ));
+            );
         }
         Ok(())
     }

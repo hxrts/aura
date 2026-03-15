@@ -16,7 +16,9 @@ use aura_app::ui::signals::{
     NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
 };
 use aura_app::ui::types::{ChatState, ContactsState, HomesState};
-use aura_app::ui_contract::{AuthoritativeSemanticFact, RuntimeEventKind};
+use aura_app::ui_contract::{
+    bridged_operation_statuses, AuthoritativeSemanticFact, RuntimeEventKind,
+};
 use aura_core::AuthorityId;
 
 use crate::tui::chat_scope::{
@@ -34,6 +36,27 @@ fn publish_ui_update(tx: &UiUpdateSender, update: UiUpdate) {
             let _ = tx.send(update).await;
         });
     }
+}
+
+fn publish_ui_updates_ordered(
+    tx: &UiUpdateSender,
+    ordered_gate: &Arc<tokio::sync::Mutex<()>>,
+    updates: Vec<UiUpdate>,
+) {
+    if updates.is_empty() {
+        return;
+    }
+
+    let tx = tx.clone();
+    let ordered_gate = Arc::clone(ordered_gate);
+    tokio::spawn(async move {
+        let _guard = ordered_gate.lock().await;
+        for update in updates {
+            if tx.try_send(update.clone()).is_err() {
+                let _ = tx.send(update).await;
+            }
+        }
+    });
 }
 
 fn authoritative_runtime_replace_kinds() -> Vec<RuntimeEventKind> {
@@ -1175,6 +1198,7 @@ pub fn use_authoritative_semantic_facts_subscription(
 ) {
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
+        let ordered_gate = Arc::new(tokio::sync::Mutex::new(()));
         async move {
             subscribe_signal_with_retry(
                 app_core,
@@ -1183,23 +1207,24 @@ pub fn use_authoritative_semantic_facts_subscription(
                     let Some(ref tx) = update_tx else {
                         return;
                     };
-                    for fact in facts.iter() {
-                        if let Some((operation_id, status)) = fact.operation_status_bridge() {
-                            publish_ui_update(tx, authoritative_operation_status_update(operation_id, status));
-                        }
+                    let mut updates = Vec::new();
+                    for (operation_id, status) in bridged_operation_statuses(&facts) {
+                        updates.push(authoritative_operation_status_update(
+                            operation_id,
+                            None,
+                            status,
+                        ));
                     }
                     let mapped = facts
                         .iter()
                         .filter_map(AuthoritativeSemanticFact::runtime_fact_bridge)
                         .collect::<Vec<_>>();
                     let facts = mapped.into_iter().map(|(_, fact)| fact).collect::<Vec<_>>();
-                    publish_ui_update(
-                        tx,
-                        UiUpdate::RuntimeFactsUpdated {
-                            replace_kinds: authoritative_runtime_replace_kinds(),
-                            facts,
-                        },
-                    );
+                    updates.push(UiUpdate::RuntimeFactsUpdated {
+                        replace_kinds: authoritative_runtime_replace_kinds(),
+                        facts,
+                    });
+                    publish_ui_updates_ordered(tx, &ordered_gate, updates);
                 },
             )
             .await;

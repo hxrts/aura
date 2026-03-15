@@ -29,7 +29,7 @@ use aura_app::ui::signals::{
     CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL, INVITATIONS_SIGNAL, SETTINGS_SIGNAL,
 };
 
-use crate::tui::callbacks::{ImportInvitationCallback, StartChatCallback, UpdateNicknameCallback};
+use crate::tui::callbacks::{StartChatCallback, UpdateNicknameCallback};
 use crate::tui::components::{
     DetailPanel, DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState,
     InvitePeerCallback, KeyValue, ListPanel, StatusIndicator,
@@ -234,8 +234,6 @@ pub struct ContactsScreenProps {
     pub on_start_chat: Option<StartChatCallback>,
     /// Callback when inviting a discovered LAN peer
     pub on_invite_lan_peer: Option<InvitePeerCallback>,
-    /// Callback when importing an invite code
-    pub on_import_invitation: Option<ImportInvitationCallback>,
 }
 
 /// The contacts screen

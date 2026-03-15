@@ -36,6 +36,35 @@ text snapshot rendering used by harness automation.
   revision/sequence and render-convergence semantics.
 - Onboarding must publish through the same semantic snapshot path as every
   other screen.
+- `aura-ui` is an `Observed` shared UI core for parity-critical semantic flows.
+  It may render lifecycle and submit frontend-local UI transitions, but terminal
+  semantic truth stays in authoritative workflow/runtime ownership upstream.
+
+## Ownership Model
+
+For shared semantic flows, `aura-ui` should use:
+
+- `Observed`
+  - semantic snapshot rendering
+  - operation/runtime-event presentation state
+  - keyboard/focus/modal state
+- narrow `ActorOwned` shell ownership only at the frontend boundary
+  - shell crates may own command ingress/event-loop mechanics around `aura-ui`
+
+It must not use:
+
+- shared-UI-local terminal lifecycle authorship for parity-critical operations
+- callback-owned readiness synthesis
+- browser-only or TUI-only owner fields shadowing authoritative operation state
+
+### Ownership Inventory
+
+| Path | Category | Authoritative owner | May mutate | Observe only |
+|------|----------|---------------------|------------|--------------|
+| Semantic snapshot shaping and projection export | `Observed` | authoritative facts and shared UI state reducers | `model.rs` presentation state only | harness, web shell, users |
+| Keyboard/focus/modal state | `Observed` | shared UI model | `keyboard.rs`, `model.rs` | harness, shells |
+| Parity-critical operation rendering | `Observed` | authoritative semantic facts from `aura-app` | `model.rs` projection state only | harness, shells |
+| Shared-flow completion helpers | `Observed` | upstream workflow/runtime coordinators | auxiliary UI facts/toasts/modal dismissal only | harness, shells |
 
 ### InvariantUiSnapshotReflectsSemanticState
 `aura-ui` publishes semantic state that matches the shared contract rather than

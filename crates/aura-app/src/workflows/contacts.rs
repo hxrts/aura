@@ -3,6 +3,7 @@
 //! This module contains contact-management operations that are portable across
 //! all frontends via the RuntimeBridge abstraction.
 
+use super::error::runtime_call;
 use crate::views::contacts::ReadReceiptPolicy;
 use crate::workflows::context::default_relational_context;
 use crate::workflows::parse::parse_authority_id;
@@ -12,7 +13,6 @@ use crate::AppCore;
 use async_lock::RwLock;
 use aura_chat::ChatFact;
 use aura_core::identifiers::ChannelId;
-use super::error::runtime_call;
 use aura_core::AuraError;
 use aura_journal::DomainFact;
 use aura_relational::ContactFact;

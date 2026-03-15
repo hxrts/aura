@@ -777,13 +777,29 @@ impl IntentAction {
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
                         BarrierDeclaration::Quiescence(QuiescenceState::Settled),
                     ],
-                    before_next_intent: vec![BarrierDeclaration::Readiness(UiReadiness::Ready)],
+                    before_next_intent: vec![
+                        BarrierDeclaration::RuntimeEvent(RuntimeEventKind::ChannelMembershipReady),
+                        BarrierDeclaration::Readiness(UiReadiness::Ready),
+                    ],
                 },
-                post_operation_convergence: None,
+                post_operation_convergence: Some(PostOperationConvergenceContract {
+                    required_before_next_intent: vec![BarrierDeclaration::RuntimeEvent(
+                        RuntimeEventKind::ChannelMembershipReady,
+                    )],
+                    violation_code: "channel_membership_convergence_required".to_string(),
+                }),
                 focus_semantics: FocusSemantics::Screen(ScreenId::Chat),
                 selection_semantics: SelectionSemantics::List(ListId::Channels),
-                transitions: vec![AuthoritativeTransitionKind::Screen(ScreenId::Chat)],
-                terminal_success: vec![TerminalSuccessKind::Readiness(UiReadiness::Ready)],
+                transitions: vec![
+                    AuthoritativeTransitionKind::Screen(ScreenId::Chat),
+                    AuthoritativeTransitionKind::RuntimeEvent(
+                        RuntimeEventKind::ChannelMembershipReady,
+                    ),
+                ],
+                terminal_success: vec![
+                    TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::ChannelMembershipReady),
+                    TerminalSuccessKind::Readiness(UiReadiness::Ready),
+                ],
                 terminal_failure_codes: vec![
                     "create_channel_issue_failed".to_string(),
                     "create_channel_timeout".to_string(),

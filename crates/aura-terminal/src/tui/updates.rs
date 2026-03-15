@@ -48,7 +48,9 @@ use crate::error::TerminalError;
 use crate::tui::components::ToastMessage;
 use crate::tui::types::{Device, MfaPolicy};
 use aura_app::ui::contract::HarnessUiCommand;
-use aura_app::ui_contract::{OperationId, RuntimeEventKind, RuntimeFact, SemanticOperationStatus};
+use aura_app::ui_contract::{
+    OperationId, OperationInstanceId, RuntimeEventKind, RuntimeFact, SemanticOperationStatus,
+};
 use aura_core::types::Epoch;
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
@@ -227,9 +229,6 @@ pub enum UiUpdate {
     // =========================================================================
     // Chat/Messages
     // =========================================================================
-    /// A message was successfully sent
-    MessageSendSubmitting,
-
     /// A message was successfully sent
     MessageSent {
         /// The channel the message was sent to
@@ -430,6 +429,7 @@ pub enum UiUpdate {
     /// Apply an authoritative semantic operation status emitted by `aura-app`.
     AuthoritativeOperationStatus {
         operation_id: OperationId,
+        instance_id: Option<OperationInstanceId>,
         status: SemanticOperationStatus,
     },
 

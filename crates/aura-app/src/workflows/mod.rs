@@ -64,7 +64,6 @@
 //! ```
 
 pub mod access;
-pub mod error;
 pub mod account;
 pub mod admin;
 pub mod amp;
@@ -77,6 +76,7 @@ pub mod config;
 pub mod contacts;
 pub mod context;
 pub mod demo_config;
+pub mod error;
 pub mod harness_determinism;
 pub mod ids;
 pub mod invitation;

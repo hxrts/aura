@@ -26,11 +26,7 @@ where
                 description = %violation.description,
                 "State invariant violated"
             );
-            debug_assert!(
-                false,
-                "State invariant violated: {}",
-                violation
-            );
+            debug_assert!(false, "State invariant violated: {}", violation);
         }
     }
     result

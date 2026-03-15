@@ -26,9 +26,7 @@ impl SessionState {
                 if !dedup.insert(*device_id) {
                     return Err(super::invariant::InvariantViolation::new(
                         "SessionManager",
-                        format!(
-                            "Duplicate participant {device_id} in session {session_id}"
-                        ),
+                        format!("Duplicate participant {device_id} in session {session_id}"),
                     ));
                 }
             }

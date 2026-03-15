@@ -105,10 +105,7 @@ impl CeremonyTrackerState {
             if state.is_committed && state.has_failed {
                 return Err(super::invariant::InvariantViolation::new(
                     "CeremonyTracker",
-                    format!(
-                        "ceremony {} cannot be committed and failed",
-                        ceremony_id
-                    ),
+                    format!("ceremony {} cannot be committed and failed", ceremony_id),
                 ));
             }
             if state.is_superseded && state.is_committed {

@@ -134,23 +134,43 @@ mod tests {
     }
 
     #[test]
-    fn invite_to_channel_dispatch_tracks_invitation_create_operation() {
+    fn invite_to_channel_dispatch_clears_readiness_without_local_lifecycle_authorship() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let shell_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
         let shell_source = std::fs::read_to_string(&shell_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", shell_path.display()));
 
         let invite_start = shell_source
-            .find("DispatchCommand::InviteSelectedContactToChannel")
-            .unwrap_or_else(|| panic!("missing InviteSelectedContactToChannel dispatch arm"));
+            .find("DispatchCommand::InviteActorToChannel {")
+            .unwrap_or_else(|| panic!("missing InviteActorToChannel dispatch arm"));
         let next_arm = shell_source[invite_start..]
             .find("DispatchCommand::RemoveContact")
             .map(|offset| invite_start + offset)
             .unwrap_or_else(|| panic!("missing RemoveContact dispatch arm"));
         let invite_branch = &shell_source[invite_start..next_arm];
 
-        assert!(invite_branch.contains("OperationId::invitation_create()"));
-        assert!(invite_branch.contains("OperationState::Submitting"));
         assert!(invite_branch.contains("RuntimeEventKind::PendingHomeInvitationReady"));
+        assert!(invite_branch.contains("(cb.contacts.on_invite_to_channel)("));
+    }
+
+    #[test]
+    fn device_enrollment_completion_refresh_does_not_sleep() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let shell_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
+        let shell_source = std::fs::read_to_string(&shell_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", shell_path.display()));
+
+        let status_start = shell_source
+            .find("UiUpdate::KeyRotationCeremonyStatus {")
+            .unwrap_or_else(|| panic!("missing KeyRotationCeremonyStatus update arm"));
+        let next_arm = shell_source[status_start..]
+            .find("UiUpdate::OperationFailed")
+            .map(|offset| status_start + offset)
+            .unwrap_or_else(|| panic!("missing OperationFailed update arm"));
+        let status_branch = &shell_source[status_start..next_arm];
+
+        assert!(status_branch.contains("refresh_settings_from_runtime(&app_core).await"));
+        assert!(!status_branch.contains("tokio::time::sleep"));
+        assert!(!status_branch.contains("Small delay to allow commitment tree update to propagate"));
     }
 }

@@ -166,20 +166,14 @@ impl ThresholdSigningState {
             if context.public_key_package.is_empty() {
                 return Err(super::invariant::InvariantViolation::new(
                     "ThresholdSigning",
-                    format!(
-                        "authority {:?} missing public key package",
-                        authority
-                    ),
+                    format!("authority {:?} missing public key package", authority),
                 ));
             }
             let participant_set: HashSet<_> = context.participants.iter().collect();
             if participant_set.len() != context.participants.len() {
                 return Err(super::invariant::InvariantViolation::new(
                     "ThresholdSigning",
-                    format!(
-                        "authority {:?} has duplicate participants",
-                        authority
-                    ),
+                    format!("authority {:?} has duplicate participants", authority),
                 ));
             }
         }

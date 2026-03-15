@@ -62,6 +62,7 @@ use aura_protocol::amp::{serialize_amp_message, AmpMessage};
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const CHAT_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
@@ -71,6 +72,7 @@ const CHANNEL_CONTEXT_RETRY_ATTEMPTS: usize = 12;
 const CHANNEL_CONTEXT_RETRY_BACKOFF_MS: u64 = 100;
 const REMOTE_DELIVERY_RETRY_ATTEMPTS: usize = 24;
 const REMOTE_DELIVERY_RETRY_BACKOFF_MS: u64 = 250;
+const INVITE_USER_STAGE_TIMEOUT_MS: u64 = 5_000;
 
 mod routing;
 mod validation;
@@ -85,6 +87,22 @@ macro_rules! messaging_warn {
 #[cfg(not(feature = "instrumented"))]
 macro_rules! messaging_warn {
     ($($arg:tt)*) => {};
+}
+
+async fn timeout_workflow_stage<T>(
+    operation: &'static str,
+    stage: &'static str,
+    future: impl Future<Output = Result<T, AuraError>>,
+) -> Result<T, AuraError> {
+    tokio::time::timeout(Duration::from_millis(INVITE_USER_STAGE_TIMEOUT_MS), future)
+        .await
+        .map_err(|_| {
+            AuraError::from(super::error::WorkflowError::TimedOut {
+                operation,
+                stage,
+                timeout_ms: INVITE_USER_STAGE_TIMEOUT_MS,
+            })
+        })?
 }
 
 /// Messaging backend policy (runtime-backed vs UI-local).
@@ -735,11 +753,21 @@ pub async fn refresh_authoritative_channel_membership_readiness(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
     let coordinator = ChannelReadinessCoordinator::load(app_core).await;
-    let replacements = coordinator
-        .states()
-        .iter()
-        .map(ChannelReadinessState::membership_fact)
-        .collect::<Vec<_>>();
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime().cloned()
+    };
+    let mut replacements = Vec::new();
+    for state in coordinator.states() {
+        let membership_ready = if let Some(runtime) = runtime.as_ref() {
+            runtime_channel_state_exists(app_core, runtime, state.channel.id).await?
+        } else {
+            true
+        };
+        if membership_ready {
+            replacements.push(state.membership_fact());
+        }
+    }
     replace_authoritative_semantic_facts_of_kind(
         app_core,
         AuthoritativeSemanticFactKind::ChannelMembershipReady,
@@ -878,7 +906,9 @@ async fn try_join_via_pending_channel_invitation(
 
     if let Err(error) = runtime.accept_invitation(invitation_id.as_str()).await {
         if classify_invitation_accept_error(&error) != InvitationAcceptErrorClass::AlreadyHandled {
-            return Err(super::error::runtime_call("accept pending channel invitation", error).into());
+            return Err(
+                super::error::runtime_call("accept pending channel invitation", error).into(),
+            );
         }
     }
 
@@ -942,7 +972,7 @@ pub async fn current_home_channel_ref(
     Ok(format!("home:{channel_id}"))
 }
 
-async fn context_id_for_channel(
+pub(crate) async fn context_id_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
     local_authority: Option<AuthorityId>,
@@ -1360,10 +1390,47 @@ pub(crate) async fn require_authoritative_context_id_for_channel(
         }
     }
 
-    Err(super::error::WorkflowError::Precondition(
-        "authoritative context required for channel",
+    Err(
+        super::error::WorkflowError::Precondition("authoritative context required for channel")
+            .into(),
     )
-    .into())
+}
+
+async fn runtime_channel_state_exists(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn RuntimeBridge>,
+    channel_id: ChannelId,
+) -> Result<bool, AuraError> {
+    let Some(context_id) = authoritative_context_id_for_channel(app_core, channel_id).await else {
+        return Ok(false);
+    };
+
+    runtime
+        .amp_channel_state_exists(context_id, channel_id)
+        .await
+        .map_err(|error| super::error::runtime_call("inspect channel state", error).into())
+}
+
+async fn wait_for_runtime_channel_state(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn RuntimeBridge>,
+    channel_id: ChannelId,
+) -> Result<(), AuraError> {
+    for attempt in 0..CHANNEL_CONTEXT_RETRY_ATTEMPTS {
+        if runtime_channel_state_exists(app_core, runtime, channel_id).await? {
+            refresh_authoritative_channel_membership_readiness(app_core).await?;
+            return Ok(());
+        }
+
+        if attempt + 1 < CHANNEL_CONTEXT_RETRY_ATTEMPTS {
+            converge_runtime(runtime).await;
+            runtime.sleep_ms(CHANNEL_CONTEXT_RETRY_BACKOFF_MS).await;
+        }
+    }
+
+    Err(
+        super::error::WorkflowError::Precondition("canonical AMP channel state required").into(),
+    )
 }
 
 async fn ensure_home_state_for_channel(
@@ -1773,6 +1840,11 @@ pub async fn create_channel(
         }
     }
 
+    if backend == MessagingBackend::Runtime {
+        let runtime = require_runtime(app_core).await?;
+        wait_for_runtime_channel_state(app_core, &runtime, channel_id).await?;
+    }
+
     // Create channel invitations for selected members (if any).
     if backend == MessagingBackend::Runtime && !member_ids.is_empty() {
         let runtime = require_runtime(app_core).await?;
@@ -1920,6 +1992,7 @@ pub async fn join_channel(
     )
     .await?;
     apply_authoritative_membership_projection(app_core, channel_id, context_id, true, None).await?;
+    wait_for_runtime_channel_state(app_core, &runtime, channel_id).await?;
     warm_channel_connectivity(app_core, &runtime, channel_id, context_id).await;
 
     Ok(())
@@ -2315,8 +2388,8 @@ pub async fn send_message_ref(
 
             let maybe_fact = if let Some(cipher) = maybe_cipher {
                 let wire = AmpMessage::new(cipher.header.clone(), cipher.ciphertext.clone());
-                let sealed = serialize_amp_message(&wire)
-                    .map_err(|e| super::error::fact_encoding(e))?;
+                let sealed =
+                    serialize_amp_message(&wire).map_err(|e| super::error::fact_encoding(e))?;
 
                 // Extract epoch from the AMP header (used for consensus finalization tracking)
                 epoch_hint = Some(cipher.header.chan_epoch as u32);
@@ -2533,9 +2606,7 @@ pub async fn start_direct_chat_with_authority(
             .await;
         if let Err(error) = create_result {
             if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists {
-                return Err(
-                    super::error::runtime_call("create direct channel", error).into(),
-                );
+                return Err(super::error::runtime_call("create direct channel", error).into());
             }
         }
 
@@ -2555,9 +2626,7 @@ pub async fn start_direct_chat_with_authority(
                 participant: contact_authority,
             })
             .await
-            .map_err(|error| {
-                super::error::runtime_call("add contact to direct channel", error)
-            })?;
+            .map_err(|error| super::error::runtime_call("add contact to direct channel", error))?;
 
         let fact = ChatFact::channel_created_ms(
             context_id,
@@ -2698,10 +2767,25 @@ pub async fn invite_user_to_channel(
     ttl_ms: Option<u64>,
 ) -> Result<InvitationId, AuraError> {
     // Resolve via contacts first so command targets can use IDs or contact names.
-    let receiver = resolve_target_authority_for_invite(app_core, target_user_id).await?;
-    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_id).await?;
+    let receiver = timeout_workflow_stage(
+        "invite_user_to_channel",
+        "resolve_target_authority",
+        resolve_target_authority_for_invite(app_core, target_user_id),
+    )
+    .await?;
+    let channel_id = timeout_workflow_stage(
+        "invite_user_to_channel",
+        "resolve_channel_id",
+        resolve_channel_id_from_state_or_input(app_core, channel_id),
+    )
+    .await?;
 
-    invite_authority_to_channel(app_core, receiver, channel_id, message, ttl_ms).await
+    timeout_workflow_stage(
+        "invite_user_to_channel",
+        "invite_authority_to_channel",
+        invite_authority_to_channel(app_core, receiver, channel_id, message, ttl_ms),
+    )
+    .await
 }
 
 /// Invite a canonical authority to a canonical channel.
@@ -2712,22 +2796,35 @@ pub async fn invite_authority_to_channel(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationId, AuraError> {
-    let runtime = require_runtime(app_core).await?;
-    let invitation = crate::workflows::invitation::create_channel_invitation(
-        app_core,
-        receiver,
-        channel_id.to_string(),
-        None,
-        None,
-        message,
-        ttl_ms,
+    let runtime = timeout_workflow_stage(
+        "invite_authority_to_channel",
+        "require_runtime",
+        require_runtime(app_core),
     )
     .await?;
-    let context_id = require_authoritative_context_id_for_channel(
-        app_core,
-        &runtime,
-        channel_id,
-        "channel invitation projection",
+    let context_id = timeout_workflow_stage(
+        "invite_authority_to_channel",
+        "require_authoritative_context",
+        require_authoritative_context_id_for_channel(
+            app_core,
+            &runtime,
+            channel_id,
+            "channel invitation creation",
+        ),
+    )
+    .await?;
+    let invitation = timeout_workflow_stage(
+        "invite_authority_to_channel",
+        "create_channel_invitation",
+        crate::workflows::invitation::create_channel_invitation(
+            app_core,
+            receiver,
+            channel_id.to_string(),
+            Some(context_id),
+            None,
+            message,
+            ttl_ms,
+        ),
     )
     .await?;
     if let Some(spawner) = runtime.task_spawner() {
@@ -2762,16 +2859,24 @@ pub async fn invite_authority_to_channel(
             converge_runtime(&background_runtime).await;
         });
     } else {
-        project_channel_peer_membership_with_context(
-            app_core,
-            channel_id,
-            Some(context_id),
-            receiver,
-            None,
+        timeout_workflow_stage(
+            "invite_authority_to_channel",
+            "local_projection",
+            async {
+                project_channel_peer_membership_with_context(
+                    app_core,
+                    channel_id,
+                    Some(context_id),
+                    receiver,
+                    None,
+                )
+                .await?;
+                warm_channel_connectivity(app_core, &runtime, channel_id, context_id).await;
+                converge_runtime(&runtime).await;
+                Ok(())
+            },
         )
         .await?;
-        warm_channel_connectivity(app_core, &runtime, channel_id, context_id).await;
-        converge_runtime(&runtime).await;
     }
 
     Ok(invitation.invitation_id)
@@ -2789,6 +2894,7 @@ mod tests {
     use crate::views::home::{BanRecord, HomeRole, HomeState, HomesState, MuteRecord};
     use crate::workflows::signals::{emit_signal, read_signal_or_default};
     use crate::AppConfig;
+    use aura_testkit::MockRuntimeBridge;
 
     #[tokio::test]
     async fn test_get_chat_state_default() {
@@ -2867,6 +2973,105 @@ mod tests {
                     if channel.id.as_deref() == Some(channel_id_string.as_str())
                         && channel.name.as_deref() == Some("shared-parity-lab")
                         && *member_count == 1
+            )
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_runtime_membership_readiness_requires_canonical_amp_state() {
+        let runtime = Arc::new(MockRuntimeBridge::new());
+        runtime.set_amp_channel_state_exists(false).await;
+
+        let config = AppConfig::default();
+        let core = AppCore::with_runtime(config, runtime.clone()).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let local = runtime.authority_id();
+        let channel_id = ChannelId::from_bytes(hash(b"runtime-membership-ready"));
+        let context_id = ContextId::new_from_entropy([88u8; 32]);
+        {
+            let mut core = app_core.write().await;
+            core.set_authority(local);
+        }
+
+        with_chat_state(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: channel_id,
+                context_id: Some(context_id),
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: Vec::new(),
+                member_count: 1,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await
+        .unwrap();
+
+        refresh_authoritative_channel_membership_readiness(&app_core)
+            .await
+            .unwrap();
+
+        let channel_id_string = channel_id.to_string();
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(!facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::ChannelMembershipReady { channel, .. }
+                    if channel.id.as_deref() == Some(channel_id_string.as_str())
+            )
+        }));
+
+        runtime.set_amp_channel_state_exists(true).await;
+        refresh_authoritative_channel_membership_readiness(&app_core)
+            .await
+            .unwrap();
+
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::ChannelMembershipReady { channel, member_count }
+                    if channel.id.as_deref() == Some(channel_id_string.as_str())
+                        && *member_count == 1
+            )
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_create_channel_waits_for_runtime_channel_state() {
+        let runtime = Arc::new(MockRuntimeBridge::new());
+        runtime.set_amp_channel_state_exists(false).await;
+
+        let config = AppConfig::default();
+        let core = AppCore::with_runtime(config, runtime.clone()).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let runtime_for_flip = runtime.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            runtime_for_flip.set_amp_channel_state_exists(true).await;
+        });
+
+        let channel_id = create_channel(&app_core, "shared-parity-lab", None, &[], 0, 42)
+            .await
+            .unwrap();
+
+        let channel_id_string = channel_id.to_string();
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::ChannelMembershipReady { channel, .. }
+                    if channel.id.as_deref() == Some(channel_id_string.as_str())
             )
         }));
     }

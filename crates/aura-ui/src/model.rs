@@ -11,6 +11,7 @@ use crate::snapshot::render_canonical_snapshot;
 use async_lock::RwLock as AsyncRwLock;
 use aura_app::ui_contract::{
     next_projection_revision, InvitationFactKind, QuiescenceSnapshot, RuntimeFact,
+    SemanticOperationPhase, SemanticOperationStatus,
 };
 use aura_app::views::chat::{NOTE_TO_SELF_CHANNEL_NAME, NOTE_TO_SELF_CHANNEL_TOPIC};
 use aura_app::{
@@ -676,6 +677,35 @@ impl UiModel {
             instance_id: OperationInstanceId(format!("op-{}", self.operation_instance_key)),
             state,
         });
+    }
+
+    fn set_authoritative_operation_state(
+        &mut self,
+        operation_id: OperationId,
+        state: OperationState,
+    ) {
+        let needs_new_instance = state == OperationState::Submitting
+            && self
+                .operations
+                .iter()
+                .find(|operation| operation.id == operation_id)
+                .is_some_and(|operation| {
+                    matches!(
+                        operation.state,
+                        OperationState::Succeeded | OperationState::Failed
+                    )
+                });
+        if needs_new_instance {
+            self.set_operation_state(operation_id, state);
+            return;
+        }
+
+        if let Some(operation) = self.operations.iter_mut().find(|op| op.id == operation_id) {
+            operation.state = state;
+            return;
+        }
+
+        self.set_operation_state(operation_id, state);
     }
 
     fn clear_operation(&mut self, operation_id: &OperationId) {
@@ -1873,7 +1903,7 @@ impl UiController {
         }
     }
 
-    pub fn complete_runtime_home_created(&self, name: &str) {
+    pub(crate) fn complete_runtime_home_created(&self, name: &str) {
         let mut model = write_model(&self.model);
         model.select_home(
             format!("home-{}", name.to_lowercase().replace(' ', "-")),
@@ -1890,36 +1920,32 @@ impl UiController {
         self.request_rerender();
     }
 
-    pub fn start_runtime_operation(&self, operation_id: OperationId) {
-        let mut model = write_model(&self.model);
-        model.set_operation_state(operation_id, OperationState::Submitting);
-        drop(model);
-        self.request_rerender();
-    }
-
-    pub fn finish_runtime_operation(&self, operation_id: OperationId, state: OperationState) {
-        let mut model = write_model(&self.model);
-        model.set_operation_state(operation_id, state);
-        drop(model);
-        self.request_rerender();
-    }
-
-    pub fn complete_runtime_modal_operation_success(
+    pub(crate) fn apply_authoritative_operation_status(
         &self,
         operation_id: OperationId,
+        status: SemanticOperationStatus,
+    ) {
+        let next_state = match status.phase {
+            SemanticOperationPhase::Succeeded => OperationState::Succeeded,
+            SemanticOperationPhase::Failed | SemanticOperationPhase::Cancelled => {
+                OperationState::Failed
+            }
+            _ => OperationState::Submitting,
+        };
+        let mut model = write_model(&self.model);
+        model.set_authoritative_operation_state(operation_id, next_state);
+        drop(model);
+        self.request_rerender();
+    }
+
+    pub(crate) fn complete_runtime_modal_operation_success(
+        &self,
+        _operation_id: OperationId,
         message: impl Into<String>,
     ) {
         let mut model = write_model(&self.model);
-        model.set_operation_state(operation_id, OperationState::Succeeded);
         set_toast(&mut model, '✓', message);
         dismiss_modal(&mut model);
-        drop(model);
-        self.request_rerender();
-    }
-
-    pub fn clear_runtime_operation(&self, operation_id: &OperationId) {
-        let mut model = write_model(&self.model);
-        model.clear_operation(operation_id);
         drop(model);
         self.request_rerender();
     }
@@ -1931,14 +1957,13 @@ impl UiController {
         self.request_rerender();
     }
 
-    pub fn complete_runtime_invitation_operation(&self, state: OperationState) {
+    pub(crate) fn complete_runtime_invitation_operation(&self) {
         let mut model = write_model(&self.model);
         dismiss_modal(&mut model);
-        model.set_operation_state(OperationId::invitation_accept(), state);
         model.push_runtime_fact(RuntimeFact::InvitationAccepted {
             invitation_kind: InvitationFactKind::Generic,
             authority_id: None,
-            operation_state: Some(state),
+            operation_state: None,
         });
         let snapshot = model.semantic_snapshot();
         let snapshot_modal = snapshot
@@ -1963,7 +1988,7 @@ impl UiController {
         self.request_rerender();
     }
 
-    pub fn complete_runtime_contact_invitation_acceptance(
+    pub(crate) fn complete_runtime_contact_invitation_acceptance(
         &self,
         authority_id: AuthorityId,
         display_name: String,
@@ -1973,7 +1998,7 @@ impl UiController {
         model.push_runtime_fact(RuntimeFact::InvitationAccepted {
             invitation_kind: InvitationFactKind::Contact,
             authority_id: Some(authority_id.to_string()),
-            operation_state: Some(OperationState::Succeeded),
+            operation_state: None,
         });
         model.push_runtime_fact(RuntimeFact::ContactLinkReady {
             authority_id: Some(authority_id.to_string()),
@@ -1981,7 +2006,6 @@ impl UiController {
         });
         model.set_selected_contact_authority_id(authority_id);
         dismiss_modal(&mut model);
-        model.set_operation_state(OperationId::invitation_accept(), OperationState::Succeeded);
         let snapshot = model.semantic_snapshot();
         let snapshot_modal = snapshot
             .open_modal
@@ -2005,7 +2029,7 @@ impl UiController {
         self.request_rerender();
     }
 
-    pub fn complete_runtime_modal_success(&self, message: impl Into<String>) {
+    pub(crate) fn complete_runtime_modal_success(&self, message: impl Into<String>) {
         let mut model = write_model(&self.model);
         set_toast(&mut model, '✓', message);
         dismiss_modal(&mut model);
@@ -2013,7 +2037,11 @@ impl UiController {
         self.request_rerender();
     }
 
-    pub fn complete_runtime_device_enrollment_started(&self, name: &str, enrollment_code: &str) {
+    pub(crate) fn complete_runtime_device_enrollment_started(
+        &self,
+        name: &str,
+        enrollment_code: &str,
+    ) {
         let mut model = write_model(&self.model);
         model.modal_hint = "Add Device — Step 2 of 3".to_string();
         model.active_modal = Some(ActiveModal::AddDevice(AddDeviceModalState {
@@ -2032,7 +2060,7 @@ impl UiController {
         self.request_rerender();
     }
 
-    pub fn set_runtime_device_enrollment_ceremony_id(&self, ceremony_id: CeremonyId) {
+    pub(crate) fn set_runtime_device_enrollment_ceremony_id(&self, ceremony_id: CeremonyId) {
         let mut model = write_model(&self.model);
         if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
             state.ceremony_id = Some(ceremony_id);
@@ -2041,7 +2069,7 @@ impl UiController {
         self.request_rerender();
     }
 
-    pub fn update_runtime_device_enrollment_status(
+    pub(crate) fn update_runtime_device_enrollment_status(
         &self,
         accepted_count: u16,
         total_count: u16,
@@ -2051,7 +2079,6 @@ impl UiController {
         error_message: Option<String>,
     ) {
         let mut model = write_model(&self.model);
-        let mut operation_state = None;
         if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
             state.accepted_count = accepted_count;
             state.total_count = total_count;
@@ -2059,13 +2086,6 @@ impl UiController {
             state.is_complete = is_complete;
             state.has_failed = has_failed;
             state.error_message = error_message;
-            operation_state = Some(if has_failed {
-                OperationState::Failed
-            } else if is_complete {
-                OperationState::Succeeded
-            } else {
-                OperationState::Submitting
-            });
             let device_name = state.device_name.clone();
             if is_complete {
                 let should_set_name =
@@ -2075,9 +2095,6 @@ impl UiController {
                     model.secondary_device_name = Some(device_name);
                 }
             }
-        }
-        if let Some(operation_state) = operation_state {
-            model.set_operation_state(OperationId::device_enrollment(), operation_state);
         }
         drop(model);
         self.request_rerender();
@@ -2092,7 +2109,7 @@ impl UiController {
         self.request_rerender();
     }
 
-    pub fn advance_runtime_device_enrollment_share(&self) {
+    pub(crate) fn advance_runtime_device_enrollment_share(&self) {
         let mut model = write_model(&self.model);
         model.modal_hint = "Add Device — Step 3 of 3".to_string();
         if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
@@ -2102,7 +2119,7 @@ impl UiController {
         self.request_rerender();
     }
 
-    pub fn complete_runtime_device_enrollment_ready(&self) {
+    pub(crate) fn complete_runtime_device_enrollment_ready(&self) {
         let mut model = write_model(&self.model);
         dismiss_modal(&mut model);
         drop(model);

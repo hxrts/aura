@@ -151,11 +151,11 @@ impl EffectSystemBuilder {
         _ctx: &EffectContext,
     ) -> Result<RuntimeSystem, crate::builder::error::BuildError> {
         let config = self.config.unwrap_or_default();
-        let authority_id = self
-            .authority_id
-            .ok_or(crate::builder::error::BuildError::MissingRequired(
-                "authority_id",
-            ))?;
+        let authority_id =
+            self.authority_id
+                .ok_or(crate::builder::error::BuildError::MissingRequired(
+                    "authority_id",
+                ))?;
 
         // Create lifecycle manager
         let lifecycle_manager = LifecycleManager::new();
@@ -169,7 +169,9 @@ impl EffectSystemBuilder {
                 let executor = EffectExecutor::production(authority_id, registry.clone());
                 let system =
                     super::AuraEffectSystem::production_for_authority(config.clone(), authority_id)
-                        .map_err(|e| crate::builder::error::BuildError::RuntimeConstruction(e.to_string()))?;
+                        .map_err(|e| {
+                            crate::builder::error::BuildError::RuntimeConstruction(e.to_string())
+                        })?;
                 (executor, system)
             }
             ExecutionMode::Testing => {
@@ -178,7 +180,9 @@ impl EffectSystemBuilder {
                 // Test-only callsites must use simulation_for_test* helpers instead.
                 #[allow(clippy::disallowed_methods)]
                 let system = super::AuraEffectSystem::testing_for_authority(&config, authority_id)
-                    .map_err(|e| crate::builder::error::BuildError::RuntimeConstruction(e.to_string()))?;
+                    .map_err(|e| {
+                        crate::builder::error::BuildError::RuntimeConstruction(e.to_string())
+                    })?;
                 (executor, system)
             }
             ExecutionMode::Simulation { seed } => {
@@ -192,10 +196,14 @@ impl EffectSystemBuilder {
                         authority_id,
                         shared,
                     )
-                    .map_err(|e| crate::builder::error::BuildError::RuntimeConstruction(e.to_string()))?
+                    .map_err(|e| {
+                        crate::builder::error::BuildError::RuntimeConstruction(e.to_string())
+                    })?
                 } else {
                     super::AuraEffectSystem::simulation_for_authority(&config, seed, authority_id)
-                        .map_err(|e| crate::builder::error::BuildError::RuntimeConstruction(e.to_string()))?
+                        .map_err(|e| {
+                        crate::builder::error::BuildError::RuntimeConstruction(e.to_string())
+                    })?
                 };
                 (executor, system)
             }
@@ -263,7 +271,9 @@ impl EffectSystemBuilder {
         let rendezvous_handler = if rendezvous_enabled {
             let authority_context =
                 AuthorityContext::new_with_device(authority_id, config.device_id);
-            let handler = RendezvousHandler::new(authority_context).map_err(|e| crate::builder::error::BuildError::RuntimeConstruction(e.to_string()))?;
+            let handler = RendezvousHandler::new(authority_context).map_err(|e| {
+                crate::builder::error::BuildError::RuntimeConstruction(e.to_string())
+            })?;
             let handler = if let Some(manager) = rendezvous_manager.as_ref() {
                 handler.with_rendezvous_manager(manager.clone())
             } else {
@@ -317,7 +327,10 @@ impl EffectSystemBuilder {
             })?;
 
         // Start runtime services (sync, rendezvous, social, etc).
-        system.start_services().await.map_err(|e| crate::builder::error::BuildError::RuntimeConstruction(e.to_string()))?;
+        system
+            .start_services()
+            .await
+            .map_err(|e| crate::builder::error::BuildError::RuntimeConstruction(e.to_string()))?;
 
         Ok(system)
     }

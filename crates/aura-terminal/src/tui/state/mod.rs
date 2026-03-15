@@ -86,7 +86,36 @@ impl OperationTracker {
         }
     }
 
-    fn set_authoritative_state(&mut self, operation_id: OperationId, state: OperationState) {
+    fn set_authoritative_state(
+        &mut self,
+        operation_id: OperationId,
+        instance_id: Option<OperationInstanceId>,
+        state: OperationState,
+    ) {
+        if let Some(instance_id) = instance_id {
+            match self.entries.get_mut(&operation_id) {
+                Some(entry) if entry.instance_id == instance_id => {
+                    entry.state = state;
+                    return;
+                }
+                _ => {
+                    self.entries
+                        .insert(operation_id, TrackedOperation { instance_id, state });
+                    return;
+                }
+            }
+        }
+        let needs_new_instance = matches!(state, OperationState::Submitting)
+            && self.entries.get(&operation_id).is_some_and(|entry| {
+                matches!(
+                    entry.state,
+                    OperationState::Succeeded | OperationState::Failed
+                )
+            });
+        if needs_new_instance {
+            self.set_state(operation_id, state);
+            return;
+        }
         if let Some(entry) = self.entries.get_mut(&operation_id) {
             entry.state = state;
             return;
@@ -315,10 +344,11 @@ impl TuiState {
     pub fn set_authoritative_operation_state(
         &mut self,
         operation_id: OperationId,
+        instance_id: Option<OperationInstanceId>,
         state: OperationState,
     ) {
         self.operation_states
-            .set_authoritative_state(operation_id, state);
+            .set_authoritative_state(operation_id, instance_id, state);
     }
 
     pub fn clear_operation_state(&mut self, operation_id: &OperationId) {
@@ -566,6 +596,7 @@ mod tests {
         let mut state = TuiState::new();
         state.set_authoritative_operation_state(
             OperationId::invitation_accept(),
+            None,
             OperationState::Submitting,
         );
         let first = state.exported_operation_snapshots();
@@ -573,6 +604,7 @@ mod tests {
 
         state.set_authoritative_operation_state(
             OperationId::invitation_accept(),
+            None,
             OperationState::Submitting,
         );
         let second = state.exported_operation_snapshots();
@@ -580,10 +612,27 @@ mod tests {
 
         state.set_authoritative_operation_state(
             OperationId::invitation_accept(),
+            None,
             OperationState::Succeeded,
         );
         let third = state.exported_operation_snapshots();
         assert_eq!(third[0].instance_id, first_instance);
         assert_eq!(third[0].state, OperationState::Succeeded);
+    }
+
+    #[test]
+    fn authoritative_submitting_after_terminal_allocates_new_instance() {
+        let mut state = TuiState::new();
+        let operation_id = OperationId::invitation_create();
+        state.set_authoritative_operation_state(operation_id.clone(), None, OperationState::Submitting);
+        let first = state.exported_operation_snapshots();
+        let first_instance = first[0].instance_id.clone();
+
+        state.set_authoritative_operation_state(operation_id.clone(), None, OperationState::Succeeded);
+        state.set_authoritative_operation_state(operation_id, None, OperationState::Submitting);
+
+        let snapshots = state.exported_operation_snapshots();
+        assert_eq!(snapshots[0].state, OperationState::Submitting);
+        assert_ne!(snapshots[0].instance_id, first_instance);
     }
 }

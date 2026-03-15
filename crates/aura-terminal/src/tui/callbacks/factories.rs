@@ -11,16 +11,13 @@ use crate::tui::components::copy_to_clipboard;
 use crate::tui::components::ToastMessage;
 use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
-use crate::tui::semantic_lifecycle::{
-    publish_authoritative_operation_failure_to_tui, SubmittedOperationOwner,
-};
+use crate::tui::semantic_lifecycle::{SemanticOperationTransferScope, SubmittedOperationOwner};
 use crate::tui::types::{AccessLevel, MfaPolicy};
 use crate::tui::updates::{UiOperation, UiUpdate, UiUpdateSender};
 use aura_app::ui::types::InvitationBridgeType;
 use aura_app::ui::workflows::invitation::import_invitation_details;
 use aura_app::ui_contract::{
-    ChannelFactKey, InvitationFactKind, OperationId, OperationState, RuntimeEventKind, RuntimeFact,
-    SemanticOperationKind,
+    ChannelFactKey, InvitationFactKind, OperationState, RuntimeEventKind, RuntimeFact,
 };
 use aura_core::identifiers::CeremonyId;
 use aura_core::AuthorityId;
@@ -90,7 +87,12 @@ fn invitation_import_success_updates(
     updates
 }
 
-async fn run_invitation_import_flow(ctx: Arc<IoContext>, tx: UiUpdateSender, code: String) {
+async fn run_invitation_import_flow(
+    ctx: Arc<IoContext>,
+    tx: UiUpdateSender,
+    code: String,
+    operation: SubmittedOperationOwner,
+) {
     let app_core = ctx.app_core_raw().clone();
     let invitation = import_invitation_details(&app_core, &code).await.ok();
     match ctx
@@ -98,12 +100,14 @@ async fn run_invitation_import_flow(ctx: Arc<IoContext>, tx: UiUpdateSender, cod
         .await
     {
         Ok(_) => {
+            let _ = operation.relinquish_to_workflow(SemanticOperationTransferScope::InvitationImport);
             for update in invitation_import_success_updates(&code, invitation.as_ref()) {
                 send_ui_update_required(&tx, update).await;
             }
         }
         Err(error) => {
             tracing::error!(error = %error, "ImportInvitation dispatch failed");
+            operation.fail(error.to_string()).await;
             send_ui_update_required(
                 &tx,
                 UiUpdate::ToastAdded(ToastMessage::error(
@@ -609,7 +613,6 @@ impl ChatCallbacks {
                     content: content_clone.clone(),
                 };
 
-                send_ui_update_reliable(&tx, UiUpdate::MessageSendSubmitting).await;
                 send_ui_update_reliable(
                     &tx,
                     UiUpdate::MessageSent {
@@ -838,8 +841,7 @@ impl ChatCallbacks {
 pub struct ContactsCallbacks {
     pub on_update_nickname: UpdateNicknameCallback,
     pub on_start_chat: StartChatCallback,
-    pub on_invite_to_channel: TwoStringCallback,
-    pub on_import_invitation: ImportInvitationCallback,
+    pub(crate) on_invite_to_channel: TwoStringOwnedCallback,
     pub on_invite_lan_peer: Arc<dyn Fn(String, String) + Send + Sync>,
     pub on_remove_contact: IdCallback,
 }
@@ -851,7 +853,6 @@ impl ContactsCallbacks {
             on_update_nickname: Self::make_update_nickname(ctx.clone(), tx.clone()),
             on_start_chat: Self::make_start_chat(ctx.clone(), tx.clone()),
             on_invite_to_channel: Self::make_invite_to_channel(ctx.clone(), tx.clone()),
-            on_import_invitation: Self::make_import_invitation(ctx.clone(), tx.clone()),
             on_invite_lan_peer: Self::make_invite_lan_peer(ctx.clone(), tx.clone()),
             on_remove_contact: Self::make_remove_contact(ctx, tx),
         }
@@ -913,18 +914,8 @@ impl ContactsCallbacks {
         })
     }
 
-    fn make_import_invitation(ctx: Arc<IoContext>, tx: UiUpdateSender) -> ImportInvitationCallback {
-        Arc::new(move |code: String| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            spawn_ctx(ctx.clone(), async move {
-                run_invitation_import_flow(ctx, tx, code).await;
-            });
-        })
-    }
-
-    fn make_invite_to_channel(ctx: Arc<IoContext>, tx: UiUpdateSender) -> TwoStringCallback {
-        Arc::new(move |contact_id: String, channel: String| {
+    fn make_invite_to_channel(ctx: Arc<IoContext>, tx: UiUpdateSender) -> TwoStringOwnedCallback {
+        Arc::new(move |contact_id: String, channel: String, operation: Option<SubmittedOperationOwner>| {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let cmd = EffectCommand::InviteUser {
@@ -932,8 +923,17 @@ impl ContactsCallbacks {
                 channel,
             };
             spawn_ctx(ctx.clone(), async move {
-                let task_result = std::panic::AssertUnwindSafe(async {
-                    if let Err(error) = ctx.dispatch(cmd).await {
+                let dispatch = std::panic::AssertUnwindSafe(ctx.dispatch(cmd)).catch_unwind();
+                match dispatch.await {
+                    Ok(Ok(())) => {
+                        if let Some(operation) = operation {
+                            operation.succeed().await;
+                        }
+                    }
+                    Ok(Err(error)) => {
+                        if let Some(operation) = operation {
+                            operation.fail(error.to_string()).await;
+                        }
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::ToastAdded(ToastMessage::error(
@@ -942,40 +942,37 @@ impl ContactsCallbacks {
                             )),
                         )
                         .await;
-                        publish_authoritative_operation_failure_to_tui(
-                            ctx.as_ref(),
+                    }
+                    Err(panic) => {
+                        if let Some(operation) = operation {
+                            let detail = if let Some(message) = panic.downcast_ref::<&str>() {
+                                format!("invite_to_channel callback panicked: {message}")
+                            } else if let Some(message) = panic.downcast_ref::<String>() {
+                                format!("invite_to_channel callback panicked: {message}")
+                            } else {
+                                "invite_to_channel callback panicked".to_string()
+                            };
+                            operation.fail(detail.clone()).await;
+                            send_ui_update_reliable(
+                                &tx,
+                                UiUpdate::ToastAdded(ToastMessage::error("invitation", detail)),
+                            )
+                            .await;
+                            return;
+                        }
+                        let detail = if let Some(message) = panic.downcast_ref::<&str>() {
+                            format!("invite_to_channel callback panicked: {message}")
+                        } else if let Some(message) = panic.downcast_ref::<String>() {
+                            format!("invite_to_channel callback panicked: {message}")
+                        } else {
+                            "invite_to_channel callback panicked".to_string()
+                        };
+                        send_ui_update_reliable(
                             &tx,
-                            OperationId::invitation_create(),
-                            SemanticOperationKind::InviteActorToChannel,
-                            error.to_string(),
+                            UiUpdate::ToastAdded(ToastMessage::error("invitation", detail.clone())),
                         )
                         .await;
                     }
-                })
-                .catch_unwind()
-                .await;
-
-                if let Err(panic) = task_result {
-                    let detail = if let Some(message) = panic.downcast_ref::<&str>() {
-                        format!("invite_to_channel callback panicked: {message}")
-                    } else if let Some(message) = panic.downcast_ref::<String>() {
-                        format!("invite_to_channel callback panicked: {message}")
-                    } else {
-                        "invite_to_channel callback panicked".to_string()
-                    };
-                    send_ui_update_reliable(
-                        &tx,
-                        UiUpdate::ToastAdded(ToastMessage::error("invitation", detail.clone())),
-                    )
-                    .await;
-                    publish_authoritative_operation_failure_to_tui(
-                        ctx.as_ref(),
-                        &tx,
-                        OperationId::invitation_create(),
-                        SemanticOperationKind::InviteActorToChannel,
-                        detail,
-                    )
-                    .await;
                 }
             });
         })
@@ -1047,9 +1044,9 @@ pub struct InvitationsCallbacks {
     pub on_accept: InvitationCallback,
     pub on_decline: InvitationCallback,
     pub on_revoke: InvitationCallback,
-    pub on_create: CreateInvitationCallback,
+    pub(crate) on_create: CreateInvitationCallback,
     pub on_export: ExportInvitationCallback,
-    pub on_import: ImportInvitationCallback,
+    pub(crate) on_import: ImportInvitationOwnedCallback,
 }
 
 impl InvitationsCallbacks {
@@ -1161,7 +1158,8 @@ impl InvitationsCallbacks {
             move |receiver_id: AuthorityId,
                   invitation_type: String,
                   message: Option<String>,
-                  ttl_secs: Option<u64>| {
+                  ttl_secs: Option<u64>,
+                  operation: Option<SubmittedOperationOwner>| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
                 spawn_ctx(ctx.clone(), async move {
@@ -1170,11 +1168,17 @@ impl InvitationsCallbacks {
                         .await;
                     match result {
                         Ok(code) => {
+                            if let Some(operation) = operation {
+                                operation.succeed().await;
+                            }
                             let _ = copy_to_clipboard(&code);
                             send_ui_update_reliable(&tx, UiUpdate::InvitationExported { code })
                                 .await;
                         }
                         Err(e) => {
+                            if let Some(operation) = operation {
+                                operation.fail(e.to_string()).await;
+                            }
                             send_ui_update_reliable(
                                 &tx,
                                 UiUpdate::ToastAdded(ToastMessage::error(
@@ -1208,12 +1212,12 @@ impl InvitationsCallbacks {
         })
     }
 
-    fn make_import(ctx: Arc<IoContext>, tx: UiUpdateSender) -> ImportInvitationCallback {
-        Arc::new(move |code: String| {
+    fn make_import(ctx: Arc<IoContext>, tx: UiUpdateSender) -> ImportInvitationOwnedCallback {
+        Arc::new(move |code: String, operation: SubmittedOperationOwner| {
             let ctx = ctx.clone();
             let tx = tx.clone();
             spawn_ctx(ctx.clone(), async move {
-                run_invitation_import_flow(ctx, tx, code).await;
+                run_invitation_import_flow(ctx, tx, code, operation).await;
             });
         })
     }
@@ -1997,53 +2001,55 @@ impl AppCallbacks {
     }
 
     fn make_create_account(ctx: Arc<IoContext>, tx: UiUpdateSender) -> CreateAccountCallback {
-        Arc::new(move |nickname_suggestion: String, operation: SubmittedOperationOwner| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            spawn_ctx(ctx.clone(), async move {
-                let account_result = std::panic::AssertUnwindSafe(async {
-                    ctx.create_account(&nickname_suggestion).await
-                })
-                .catch_unwind()
-                .await;
+        Arc::new(
+            move |nickname_suggestion: String, operation: SubmittedOperationOwner| {
+                let ctx = ctx.clone();
+                let tx = tx.clone();
+                spawn_ctx(ctx.clone(), async move {
+                    let account_result = std::panic::AssertUnwindSafe(async {
+                        ctx.create_account(&nickname_suggestion).await
+                    })
+                    .catch_unwind()
+                    .await;
 
-                match account_result {
-                    Ok(Ok(())) => {
-                        tracing::info!("tui create_account callback succeeded");
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::NicknameSuggestionChanged(nickname_suggestion.clone()),
-                        )
-                        .await;
-                        operation.succeed().await;
-                        send_ui_update_reliable(&tx, UiUpdate::AccountCreated).await;
-                    }
-                    Ok(Err(e)) => {
-                        tracing::error!("tui create_account callback failed: {e}");
-                        operation.fail(e.to_string()).await;
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::operation_failed(UiOperation::CreateAccount, e),
-                        )
-                        .await;
-                    }
-                    Err(_) => {
-                        tracing::error!("tui create_account callback panicked");
-                        operation.fail("panic in CreateAccount callback").await;
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::operation_failed(
-                                UiOperation::CreateAccount,
-                                crate::error::TerminalError::Operation(
-                                    "panic in CreateAccount callback".to_string(),
+                    match account_result {
+                        Ok(Ok(())) => {
+                            tracing::info!("tui create_account callback succeeded");
+                            send_ui_update_reliable(
+                                &tx,
+                                UiUpdate::NicknameSuggestionChanged(nickname_suggestion.clone()),
+                            )
+                            .await;
+                            operation.succeed().await;
+                            send_ui_update_reliable(&tx, UiUpdate::AccountCreated).await;
+                        }
+                        Ok(Err(e)) => {
+                            tracing::error!("tui create_account callback failed: {e}");
+                            operation.fail(e.to_string()).await;
+                            send_ui_update_reliable(
+                                &tx,
+                                UiUpdate::operation_failed(UiOperation::CreateAccount, e),
+                            )
+                            .await;
+                        }
+                        Err(_) => {
+                            tracing::error!("tui create_account callback panicked");
+                            operation.fail("panic in CreateAccount callback").await;
+                            send_ui_update_reliable(
+                                &tx,
+                                UiUpdate::operation_failed(
+                                    UiOperation::CreateAccount,
+                                    crate::error::TerminalError::Operation(
+                                        "panic in CreateAccount callback".to_string(),
+                                    ),
                                 ),
-                            ),
-                        )
-                        .await;
+                            )
+                            .await;
+                        }
                     }
-                }
-            });
-        })
+                });
+            },
+        )
     }
 
     fn make_import_device_enrollment_during_onboarding(

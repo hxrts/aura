@@ -445,6 +445,17 @@ pub trait RuntimeBridge: Send + Sync {
         recipients: Vec<AuthorityId>,
     ) -> Result<ChannelBootstrapPackage, IntentError>;
 
+    /// Return whether canonical AMP state is materialized for the given channel.
+    ///
+    /// This is the authoritative runtime-side readiness boundary for workflows
+    /// that require a channel checkpoint to exist before later operations such
+    /// as invitation bootstrap creation can succeed.
+    async fn amp_channel_state_exists(
+        &self,
+        context: ContextId,
+        channel: ChannelId,
+    ) -> Result<bool, IntentError>;
+
     async fn amp_close_channel(&self, params: ChannelCloseParams) -> Result<(), IntentError>;
 
     async fn amp_join_channel(&self, params: ChannelJoinParams) -> Result<(), IntentError>;
@@ -1040,6 +1051,14 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         Err(IntentError::no_agent(
             "AMP bootstrap not available in offline mode",
         ))
+    }
+
+    async fn amp_channel_state_exists(
+        &self,
+        _context: ContextId,
+        _channel: ChannelId,
+    ) -> Result<bool, IntentError> {
+        Err(IntentError::no_agent("AMP not available in offline mode"))
     }
 
     async fn amp_close_channel(&self, _params: ChannelCloseParams) -> Result<(), IntentError> {

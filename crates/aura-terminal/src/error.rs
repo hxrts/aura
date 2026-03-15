@@ -32,9 +32,19 @@ pub enum TerminalError {
     NotImplemented(String),
     #[error("Operation failed: {0}")]
     Operation(String),
+    #[error("Operation failed [{code}]: {message}")]
+    StructuredOperation { code: &'static str, message: String },
 }
 
 impl TerminalError {
+    #[must_use]
+    pub fn structured_operation(code: &'static str, message: impl Into<String>) -> Self {
+        Self::StructuredOperation {
+            code,
+            message: message.into(),
+        }
+    }
+
     /// Stable error code for UI and telemetry.
     #[must_use]
     pub fn code(&self) -> &'static str {
@@ -46,6 +56,7 @@ impl TerminalError {
             Self::Network(_) => "TERM_NETWORK",
             Self::NotImplemented(_) => "TERM_NOT_IMPLEMENTED",
             Self::Operation(_) => "TERM_OPERATION",
+            Self::StructuredOperation { code, .. } => code,
         }
     }
 
@@ -59,7 +70,8 @@ impl TerminalError {
             | Self::NotFound(message)
             | Self::Network(message)
             | Self::NotImplemented(message)
-            | Self::Operation(message) => message,
+            | Self::Operation(message)
+            | Self::StructuredOperation { message, .. } => message,
         }
     }
 
@@ -75,7 +87,7 @@ impl TerminalError {
             Self::NotFound(_) => ErrorCategory::NotFound,
             Self::Network(_) => ErrorCategory::Network,
             Self::NotImplemented(_) => ErrorCategory::NotImplemented,
-            Self::Operation(_) => ErrorCategory::Operation,
+            Self::Operation(_) | Self::StructuredOperation { .. } => ErrorCategory::Operation,
         }
     }
 
@@ -158,6 +170,12 @@ impl From<crate::tui::effects::OpError> for TerminalError {
         match err {
             crate::tui::effects::OpError::NotImplemented(s) => TerminalError::NotImplemented(s),
             crate::tui::effects::OpError::InvalidArgument(s) => TerminalError::Input(s),
+            crate::tui::effects::OpError::TypedFailure(failure) => {
+                TerminalError::StructuredOperation {
+                    code: failure.code().as_str(),
+                    message: failure.message().to_string(),
+                }
+            }
             crate::tui::effects::OpError::Failed(s) => {
                 if let Some(message) = s.strip_prefix("Permission denied: ") {
                     TerminalError::Capability(message.to_string())
@@ -172,5 +190,26 @@ impl From<crate::tui::effects::OpError> for TerminalError {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::effects::{OpError, OpFailureCode};
+
+    #[test]
+    fn typed_operational_error_maps_to_structured_terminal_error() {
+        let error = TerminalError::from(OpError::typed(
+            OpFailureCode::SendMessage,
+            "Failed to send message: missing channel membership",
+        ));
+
+        assert_eq!(error.code(), "TUI_SEND_MESSAGE");
+        assert_eq!(
+            error.message(),
+            "Failed to send message: missing channel membership"
+        );
+        assert_eq!(error.category(), ErrorCategory::Operation);
     }
 }

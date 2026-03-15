@@ -20,6 +20,8 @@ pub type IdCallback = Arc<dyn Fn(String) + Send + Sync>;
 
 /// Callback that takes two string arguments.
 pub type TwoStringCallback = Arc<dyn Fn(String, String) + Send + Sync>;
+pub(crate) type TwoStringOwnedCallback =
+    Arc<dyn Fn(String, String, Option<SubmittedOperationOwner>) + Send + Sync>;
 
 /// Callback that takes three string arguments.
 pub type ThreeStringCallback = Arc<dyn Fn(String, String, String) + Send + Sync>;
@@ -41,8 +43,17 @@ pub type ThresholdCallback = Arc<dyn Fn(u8, u8) + Send + Sync>;
 /// - invitation type string (e.g. "contact", "guardian", "channel")
 /// - optional message
 /// - optional TTL (seconds)
-pub type CreateInvitationCallbackType =
-    Arc<dyn Fn(AuthorityId, String, Option<String>, Option<u64>) + Send + Sync>;
+pub(crate) type CreateInvitationCallbackType =
+    Arc<
+        dyn Fn(
+                AuthorityId,
+                String,
+                Option<String>,
+                Option<u64>,
+                Option<SubmittedOperationOwner>,
+            ) + Send
+            + Sync,
+    >;
 
 // =============================================================================
 // Semantic Type Aliases
@@ -76,9 +87,10 @@ pub type ImportDeviceEnrollmentCallback = IdCallback;
 
 // --- Invitations Screen ---
 pub type InvitationCallback = IdCallback;
-pub type CreateInvitationCallback = CreateInvitationCallbackType;
+pub(crate) type CreateInvitationCallback = CreateInvitationCallbackType;
 pub type ExportInvitationCallback = IdCallback;
-pub type ImportInvitationCallback = IdCallback;
+pub(crate) type ImportInvitationOwnedCallback =
+    Arc<dyn Fn(String, SubmittedOperationOwner) + Send + Sync>;
 
 // --- Neighborhood Screen ---
 pub type GoHomeCallback = NoArgCallback;
@@ -92,6 +104,5 @@ pub type NeighborhoodHomeCallback = IdCallback;
 pub type SetModeratorCallback = Arc<dyn Fn(Option<String>, String, bool) + Send + Sync>;
 
 // --- App Screen ---
-pub(crate) type CreateAccountCallback =
-    Arc<dyn Fn(String, SubmittedOperationOwner) + Send + Sync>;
+pub(crate) type CreateAccountCallback = Arc<dyn Fn(String, SubmittedOperationOwner) + Send + Sync>;
 pub type GuardianSelectCallback = IdCallback;

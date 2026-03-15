@@ -156,6 +156,26 @@ For migration and cleanup discipline:
 - every shared UX or harness contract hardening change should remove obsolete compatibility code, stale allowlist entries, and transitional comments in the same milestone or the next explicit cleanup pass
 - prefer extending typed governance in `cargo run -p aura-harness --bin aura-harness --quiet -- governance ...` over adding standalone shell policy logic
 
+### Ownership Migration Cleanup Tasks
+
+Each parity-critical ownership migration must include explicit cleanup work for
+the abstraction it replaces. Do not treat the new ownership model as additive.
+
+For every migrated flow, include these cleanup questions and complete the
+matching deletion work in the same migration or the next named cleanup task:
+
+- delete actor wrappers around purely local/value transitions that should stay
+  `Pure`
+- delete shared mutable ownership state where a `MoveOwned` handoff or
+  owner-token surface is the correct model
+- delete detached callback/task ownership for state that should instead live
+  under one `ActorOwned` coordinator
+
+If a migration leaves one of those old abstractions in place, record it as
+explicit migration debt with the owning module and removal milestone. Do not
+hide it behind "temporary" ambient lifecycle helpers, duplicate readiness
+emitters, or shell-local terminal state.
+
 The authoritative written update map for these surfaces lives in
 `scripts/check/user-flow-guidance-sync.sh` and is enforced by `just ci-user-flow-policy`.
 Ownership-model policy for the shared semantic lane is enforced by the existing

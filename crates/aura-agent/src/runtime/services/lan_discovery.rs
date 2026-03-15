@@ -104,7 +104,11 @@ impl LanDiscoveryService {
                     description = %violation.description,
                     "LanDiscoveryService state invariant violated"
                 );
-                debug_assert!(false, "LanDiscoveryService invariant violated: {}", violation);
+                debug_assert!(
+                    false,
+                    "LanDiscoveryService invariant violated: {}",
+                    violation
+                );
             }
         }
         result

@@ -115,14 +115,6 @@ impl WebUiError {
         }
     }
 
-    pub(crate) fn code(&self) -> &'static str {
-        self.code
-    }
-
-    pub(crate) fn message(&self) -> &str {
-        &self.message
-    }
-
     pub(crate) fn user_message(&self) -> String {
         format!(
             "[{}] {}: {}. Hint: {}",

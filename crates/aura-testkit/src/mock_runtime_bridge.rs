@@ -74,6 +74,8 @@ pub struct MockRuntimeBridge {
     current_time_ms: AtomicU64,
     /// Devices registered with this authority
     devices: Arc<RwLock<Vec<BridgeDeviceInfo>>>,
+    /// Whether canonical AMP channel state should be reported as available.
+    amp_channel_state_exists: Arc<RwLock<bool>>,
 }
 
 // Manual Debug impl since ReactiveHandler doesn't derive Debug
@@ -114,6 +116,7 @@ impl MockRuntimeBridge {
                 is_current: true,
                 last_seen: Some(1700000000000),
             }])),
+            amp_channel_state_exists: Arc::new(RwLock::new(true)),
         }
     }
 
@@ -229,6 +232,11 @@ impl MockRuntimeBridge {
         self.current_time_ms.store(ms, Ordering::SeqCst);
     }
 
+    /// Control whether canonical AMP channel state exists for readiness tests.
+    pub async fn set_amp_channel_state_exists(&self, exists: bool) {
+        *self.amp_channel_state_exists.write().await = exists;
+    }
+
     /// Generate a unique string ID for general use
     fn next_string_id(&self) -> String {
         format!("mock-{}", self.id_counter.fetch_add(1, Ordering::SeqCst))
@@ -332,6 +340,14 @@ impl RuntimeBridge for MockRuntimeBridge {
             bootstrap_id: Hash32::default(),
             key: vec![0u8; 32],
         })
+    }
+
+    async fn amp_channel_state_exists(
+        &self,
+        _context: ContextId,
+        _channel: ChannelId,
+    ) -> Result<bool, IntentError> {
+        Ok(*self.amp_channel_state_exists.read().await)
     }
 
     async fn amp_close_channel(&self, _params: ChannelCloseParams) -> Result<(), IntentError> {

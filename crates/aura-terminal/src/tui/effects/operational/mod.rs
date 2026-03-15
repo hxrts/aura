@@ -55,7 +55,7 @@ use aura_app::ui::prelude::*;
 use aura_app::ui::signals::{ConnectionStatus, SyncStatus, ERROR_SIGNAL};
 use aura_core::effects::reactive::ReactiveEffects;
 
-pub use types::{OpError, OpResponse, OpResult};
+pub use types::{OpError, OpFailureCode, OpResponse, OpResult};
 
 use super::EffectCommand;
 use crate::error::TerminalError;
@@ -297,6 +297,9 @@ fn map_terminal_error(err: &TerminalError) -> AppError {
         TerminalError::Network(msg) => AppError::network(NetworkErrorCode::Other, msg),
         TerminalError::NotImplemented(msg) => AppError::internal("not_implemented", msg),
         TerminalError::Operation(msg) => AppError::internal("operation", msg),
+        TerminalError::StructuredOperation { code, message } => {
+            AppError::internal(*code, message)
+        }
     }
 }
 
@@ -351,6 +354,17 @@ mod tests {
             .await;
 
         match result {
+            Some(Err(OpError::TypedFailure(failure))) => {
+                assert_eq!(
+                    failure.code(),
+                    crate::tui::effects::operational::types::OpFailureCode::ExportInvitation
+                );
+                assert!(
+                    failure.message().contains("Runtime bridge not available")
+                        || failure.message().contains("Failed to export"),
+                    "Expected runtime error, got: {failure}"
+                );
+            }
             Some(Err(OpError::Failed(msg))) => {
                 assert!(
                     msg.contains("Runtime bridge not available")

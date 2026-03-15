@@ -23,4 +23,4 @@ pub use command_parser::{
     ThresholdConfig,
 };
 pub use dispatcher::{CapabilityPolicy, CommandDispatcher, DispatchError};
-pub use operational::{OpError, OpResponse, OpResult, OperationalHandler};
+pub use operational::{OpError, OpFailureCode, OpResponse, OpResult, OperationalHandler};

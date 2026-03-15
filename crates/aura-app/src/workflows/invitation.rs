@@ -150,7 +150,7 @@ use crate::workflows::runtime_error_classification::{
 };
 use crate::workflows::semantic_facts::{
     publish_authoritative_operation_failure, publish_authoritative_operation_phase,
-    publish_authoritative_semantic_fact, replace_authoritative_semantic_facts_of_kind,
+    replace_authoritative_semantic_facts_of_kind, update_authoritative_semantic_facts,
 };
 use crate::workflows::settings;
 #[cfg(feature = "signals")]
@@ -163,12 +163,29 @@ use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
 use aura_core::AuraError;
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 
 const CONTACT_LINK_ATTEMPTS: usize = 32;
 const CONTACT_LINK_BACKOFF_MS: u64 = 100;
 const CHANNEL_BOOTSTRAP_RETRY_ATTEMPTS: usize = 6;
 const CHANNEL_BOOTSTRAP_RETRY_BACKOFF_MS: u64 = 75;
+const CHANNEL_INVITATION_CREATE_TIMEOUT_MS: u64 = 5_000;
+
+async fn timeout_channel_invitation_stage<T>(
+    stage: &'static str,
+    future: impl std::future::Future<Output = Result<T, AuraError>>,
+) -> Result<T, AuraError> {
+    tokio::time::timeout(Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS), future)
+        .await
+        .map_err(|_| {
+            AuraError::from(crate::workflows::error::WorkflowError::TimedOut {
+                operation: "create_channel_invitation",
+                stage,
+                timeout_ms: CHANNEL_INVITATION_CREATE_TIMEOUT_MS,
+            })
+        })?
+}
 
 fn has_pending_home_or_channel_invitation(invitations: &InvitationsState) -> bool {
     invitations
@@ -191,6 +208,34 @@ async fn publish_invitation_operation_status(
     phase: SemanticOperationPhase,
 ) -> Result<(), AuraError> {
     publish_authoritative_operation_phase(app_core, operation_id, kind, phase).await
+}
+
+async fn publish_contact_accept_success(
+    app_core: &Arc<RwLock<AppCore>>,
+    authority_id: AuthorityId,
+    contact_count: u32,
+) -> Result<(), AuraError> {
+    let contact_link = AuthoritativeSemanticFact::ContactLinkReady {
+        authority_id: authority_id.to_string(),
+        contact_count,
+    };
+    let operation_status = AuthoritativeSemanticFact::OperationStatus {
+        operation_id: OperationId::invitation_accept(),
+        instance_id: None,
+        status: crate::ui_contract::SemanticOperationStatus::new(
+            SemanticOperationKind::AcceptContactInvitation,
+            SemanticOperationPhase::Succeeded,
+        ),
+    };
+
+    update_authoritative_semantic_facts(app_core, |facts| {
+        facts.retain(|existing| {
+            existing.key() != contact_link.key() && existing.key() != operation_status.key()
+        });
+        facts.push(contact_link);
+        facts.push(operation_status);
+    })
+    .await
 }
 
 fn semantic_kind_for_bridge_invitation(
@@ -229,19 +274,20 @@ enum ChannelInvitationBootstrapError {
         detail: String,
     },
     #[error(
-        "Timed out creating channel invitation for channel {channel_id} and receiver {receiver_id}"
-    )]
-    CreateTimedOut {
-        channel_id: ChannelId,
-        receiver_id: AuthorityId,
-    },
-    #[error(
         "Failed to create channel invitation for channel {channel_id} and receiver {receiver_id}: {detail}"
     )]
     CreateFailed {
         channel_id: ChannelId,
         receiver_id: AuthorityId,
         detail: String,
+    },
+    #[error(
+        "Timed out creating channel invitation for channel {channel_id} and receiver {receiver_id} after {timeout_ms}ms"
+    )]
+    CreateTimedOut {
+        channel_id: ChannelId,
+        receiver_id: AuthorityId,
+        timeout_ms: u64,
     },
 }
 
@@ -275,16 +321,6 @@ impl ChannelInvitationBootstrapError {
                 SemanticFailureCode::ChannelBootstrapUnavailable,
             )
             .with_detail(format!("channel_id={channel_id}; detail={detail}")),
-            Self::CreateTimedOut {
-                channel_id,
-                receiver_id,
-            } => SemanticOperationError::new(
-                SemanticFailureDomain::Transport,
-                SemanticFailureCode::InternalError,
-            )
-            .with_detail(format!(
-                "channel_id={channel_id}; receiver_id={receiver_id}; detail=create_channel_invitation_timeout"
-            )),
             Self::CreateFailed {
                 channel_id,
                 receiver_id,
@@ -295,6 +331,17 @@ impl ChannelInvitationBootstrapError {
             )
             .with_detail(format!(
                 "channel_id={channel_id}; receiver_id={receiver_id}; detail={detail}"
+            )),
+            Self::CreateTimedOut {
+                channel_id,
+                receiver_id,
+                timeout_ms,
+            } => SemanticOperationError::new(
+                SemanticFailureDomain::Invitation,
+                SemanticFailureCode::OperationTimedOut,
+            )
+            .with_detail(format!(
+                "channel_id={channel_id}; receiver_id={receiver_id}; timeout_ms={timeout_ms}"
             )),
         }
     }
@@ -398,11 +445,9 @@ async fn fail_device_enrollment_accept<T>(
         error.clone(),
     )
     .await?;
-    Err(AuraError::agent(
-        error
-            .detail
-            .unwrap_or_else(|| "device enrollment acceptance failed".to_string()),
-    ))
+    Err(AuraError::agent(error.detail.unwrap_or_else(|| {
+        "device enrollment acceptance failed".to_string()
+    })))
 }
 
 async fn ensure_channel_invitation_context_and_bootstrap(
@@ -419,24 +464,22 @@ async fn ensure_channel_invitation_context_and_bootstrap(
         None => {
             #[cfg(feature = "signals")]
             {
-                crate::workflows::messaging::require_authoritative_context_id_for_channel(
+                crate::workflows::messaging::context_id_for_channel(
                     app_core,
-                    runtime,
                     channel_id,
-                    "channel invitation bootstrap",
+                    Some(runtime.authority_id()),
                 )
                 .await
-                .map_err(|_| {
-                    ChannelInvitationBootstrapError::MissingAuthoritativeContext { channel_id }
+                .map_err(|_| ChannelInvitationBootstrapError::MissingAuthoritativeContext {
+                    channel_id,
                 })?
             }
             #[cfg(not(feature = "signals"))]
             {
                 let _ = app_core;
-                let _ = runtime;
-                return Err(
-                    ChannelInvitationBootstrapError::MissingAuthoritativeContext { channel_id },
-                );
+                return Err(ChannelInvitationBootstrapError::MissingAuthoritativeContext {
+                    channel_id,
+                });
             }
         }
     };
@@ -660,7 +703,9 @@ pub async fn create_guardian_invitation(
     let invitation = runtime
         .create_guardian_invitation(receiver, subject, message, ttl_ms)
         .await
-        .map_err(|e| AuraError::from(super::error::runtime_call("create guardian invitation", e)))?;
+        .map_err(|e| {
+            AuraError::from(super::error::runtime_call("create guardian invitation", e))
+        })?;
     Ok(invitation)
 }
 
@@ -678,7 +723,7 @@ pub async fn create_channel_invitation(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationInfo, AuraError> {
-    let runtime = require_runtime(app_core).await?;
+    let runtime = timeout_channel_invitation_stage("require_runtime", require_runtime(app_core)).await?;
     publish_invitation_operation_status(
         app_core,
         OperationId::invitation_create(),
@@ -696,13 +741,34 @@ pub async fn create_channel_invitation(
             .await;
         }
     };
-    let (context_id, bootstrap) = match ensure_channel_invitation_context_and_bootstrap(
-        app_core, &runtime, receiver, channel_id, context_id, bootstrap,
+    let (context_id, bootstrap) = match tokio::time::timeout(
+        Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS),
+        ensure_channel_invitation_context_and_bootstrap(
+            app_core,
+            &runtime,
+            receiver,
+            channel_id,
+            context_id,
+            bootstrap,
+        ),
     )
     .await
     {
-        Ok(resolved) => resolved,
-        Err(error) => return fail_channel_invitation(app_core, error).await,
+        Ok(Ok(resolved)) => resolved,
+        Ok(Err(error)) => return fail_channel_invitation(app_core, error).await,
+        Err(_) => {
+            return fail_channel_invitation(
+                app_core,
+                ChannelInvitationBootstrapError::BootstrapTransport {
+                    channel_id,
+                    detail: format!(
+                        "create_channel_invitation timed out in stage resolve_context_and_bootstrap after {}ms",
+                        CHANNEL_INVITATION_CREATE_TIMEOUT_MS
+                    ),
+                },
+            )
+            .await;
+        }
     };
     publish_invitation_operation_status(
         app_core,
@@ -712,25 +778,38 @@ pub async fn create_channel_invitation(
     )
     .await?;
 
-    let invitation = match runtime
-        .create_channel_invitation(
+    let invitation = match tokio::time::timeout(
+        Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS),
+        runtime.create_channel_invitation(
             receiver,
             home_id,
             Some(context_id),
             Some(bootstrap),
             message,
             ttl_ms,
-        )
-        .await
+        ),
+    )
+    .await
     {
-        Ok(invitation) => invitation,
-        Err(error) => {
+        Ok(Ok(invitation)) => invitation,
+        Ok(Err(error)) => {
             return fail_channel_invitation(
                 app_core,
                 ChannelInvitationBootstrapError::CreateFailed {
                     channel_id,
                     receiver_id: receiver,
                     detail: error.to_string(),
+                },
+            )
+            .await;
+        }
+        Err(_) => {
+            return fail_channel_invitation(
+                app_core,
+                ChannelInvitationBootstrapError::CreateTimedOut {
+                    channel_id,
+                    receiver_id: receiver,
+                    timeout_ms: CHANNEL_INVITATION_CREATE_TIMEOUT_MS,
                 },
             )
             .await;
@@ -904,14 +983,8 @@ pub async fn accept_invitation(
             let contact_count = read_signal_or_default(app_core, &*CONTACTS_SIGNAL)
                 .await
                 .contact_count() as u32;
-            publish_authoritative_semantic_fact(
-                app_core,
-                AuthoritativeSemanticFact::ContactLinkReady {
-                    authority_id: invitation.from_id.to_string(),
-                    contact_count,
-                },
-            )
-            .await?;
+            publish_contact_accept_success(app_core, invitation.from_id, contact_count).await?;
+            return Ok(());
         }
     } else if let Some(invitation) = accepted_invitation.as_ref().filter(|invitation| {
         invitation.invitation_type == crate::views::invitations::InvitationType::Chat
@@ -1020,14 +1093,8 @@ pub async fn accept_imported_invitation(
             let contact_count = read_signal_or_default(app_core, &*CONTACTS_SIGNAL)
                 .await
                 .contact_count() as u32;
-            publish_authoritative_semantic_fact(
-                app_core,
-                AuthoritativeSemanticFact::ContactLinkReady {
-                    authority_id: invitation.sender_id.to_string(),
-                    contact_count,
-                },
-            )
-            .await?;
+            publish_contact_accept_success(app_core, invitation.sender_id, contact_count).await?;
+            return Ok(());
         }
         crate::runtime_bridge::InvitationBridgeType::Channel { home_id, .. } => {
             let channel_id = match home_id.parse::<ChannelId>() {
@@ -1101,7 +1168,10 @@ pub async fn accept_device_enrollment_invitation(
     };
 
     let runtime = require_runtime(app_core).await?;
-    if let Err(error) = runtime.accept_invitation(invitation.invitation_id.as_str()).await {
+    if let Err(error) = runtime
+        .accept_invitation(invitation.invitation_id.as_str())
+        .await
+    {
         return fail_device_enrollment_accept(
             app_core,
             format!("accept invitation failed: {error}"),
@@ -1841,27 +1911,6 @@ mod tests {
     }
 
     #[test]
-    fn test_channel_invitation_timeout_maps_to_typed_semantic_failure() {
-        let channel_id = ChannelId::from_bytes([47u8; 32]);
-        let receiver_id = AuthorityId::new_from_entropy([48u8; 32]);
-        let error = ChannelInvitationBootstrapError::CreateTimedOut {
-            channel_id,
-            receiver_id,
-        };
-        let semantic = error.semantic_error();
-        assert_eq!(semantic.domain, SemanticFailureDomain::Transport);
-        assert_eq!(semantic.code, SemanticFailureCode::InternalError);
-        assert!(semantic
-            .detail
-            .as_deref()
-            .is_some_and(|detail| detail.contains(&channel_id.to_string())));
-        assert!(semantic
-            .detail
-            .as_deref()
-            .is_some_and(|detail| detail.contains(&receiver_id.to_string())));
-    }
-
-    #[test]
     fn test_channel_invitation_create_failure_maps_to_typed_semantic_failure() {
         let channel_id = ChannelId::from_bytes([49u8; 32]);
         let receiver_id = AuthorityId::new_from_entropy([50u8; 32]);
@@ -1885,6 +1934,32 @@ mod tests {
             .detail
             .as_deref()
             .is_some_and(|detail| detail.contains("bridge create failed")));
+    }
+
+    #[test]
+    fn test_channel_invitation_timeout_maps_to_typed_semantic_failure() {
+        let channel_id = ChannelId::from_bytes([51u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([52u8; 32]);
+        let error = ChannelInvitationBootstrapError::CreateTimedOut {
+            channel_id,
+            receiver_id,
+            timeout_ms: CHANNEL_INVITATION_CREATE_TIMEOUT_MS,
+        };
+        let semantic = error.semantic_error();
+        assert_eq!(semantic.domain, SemanticFailureDomain::Invitation);
+        assert_eq!(semantic.code, SemanticFailureCode::OperationTimedOut);
+        assert!(semantic
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains(&channel_id.to_string())));
+        assert!(semantic
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains(&receiver_id.to_string())));
+        assert!(semantic
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains(&CHANNEL_INVITATION_CREATE_TIMEOUT_MS.to_string())));
     }
 
     #[tokio::test]

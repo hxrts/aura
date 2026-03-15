@@ -69,6 +69,14 @@ pub enum WorkflowError {
     #[error("{0}")]
     Precondition(&'static str),
 
+    /// A bounded workflow stage did not complete in time.
+    #[error("{operation} timed out in stage {stage} after {timeout_ms}ms")]
+    TimedOut {
+        operation: &'static str,
+        stage: &'static str,
+        timeout_ms: u64,
+    },
+
     /// Passthrough for an underlying AuraError.
     #[error(transparent)]
     Core(AuraError),

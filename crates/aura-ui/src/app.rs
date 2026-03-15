@@ -22,9 +22,10 @@ use aura_app::ui::contract::{
     OperationState, ScreenId as ContractScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::signals::{
-    DiscoveredPeerMethod, NetworkStatus, CHAT_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL,
-    ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL,
-    RECOVERY_SIGNAL, SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
+    DiscoveredPeerMethod, NetworkStatus, AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, CHAT_SIGNAL,
+    CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL, ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL,
+    NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL,
+    TRANSPORT_PEERS_SIGNAL,
 };
 use aura_app::ui::types::{
     all_command_help, command_help, format_network_status_with_severity, parse_chat_command,
@@ -40,7 +41,7 @@ use aura_app::ui::workflows::{
     recovery as recovery_workflows, runtime as runtime_workflows, settings as settings_workflows,
     time as time_workflows,
 };
-use aura_app::ui_contract::{ChannelFactKey, RuntimeFact};
+use aura_app::ui_contract::{bridged_operation_statuses, ChannelFactKey, RuntimeFact};
 use aura_app::views::chat::{is_note_to_self_channel_name, NOTE_TO_SELF_CHANNEL_NAME};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, CeremonyId};
@@ -684,16 +685,10 @@ async fn load_contacts_runtime_view(controller: Arc<UiController>) -> ContactsRu
             .unwrap_or_default()
     };
     let runtime = build_contacts_runtime_view(contacts, discovered_peers);
-    let mut runtime_facts = vec![RuntimeFact::RemoteFactsPulled {
+    let runtime_facts = vec![RuntimeFact::RemoteFactsPulled {
         contact_count: u32::try_from(runtime.contacts.len()).unwrap_or(u32::MAX),
         lan_peer_count: u32::try_from(runtime.lan_peers.len()).unwrap_or(u32::MAX),
     }];
-    if !runtime.contacts.is_empty() {
-        runtime_facts.push(RuntimeFact::ContactLinkReady {
-            authority_id: None,
-            contact_count: Some(runtime.contacts.len()),
-        });
-    }
     controller.publish_runtime_contacts_projection(
         runtime
             .contacts
@@ -991,20 +986,13 @@ async fn load_notifications_runtime_view(
         core.read(&*ERROR_SIGNAL).await.unwrap_or_default()
     };
     let runtime = build_notifications_runtime_view(invitations, recovery, error);
-    let mut runtime_facts = Vec::new();
-    if runtime.items.iter().any(|item| {
-        matches!(item.action, NotificationRuntimeAction::ReceivedInvitation)
-            && (item.kind_label == "Home Invite" || item.kind_label == "Chat Invite")
-    }) {
-        runtime_facts.push(RuntimeFact::PendingHomeInvitationReady);
-    }
     controller.publish_runtime_notifications_projection(
         runtime
             .items
             .iter()
             .map(|item| (NotificationSelectionId(item.id.clone()), item.title.clone()))
             .collect(),
-        runtime_facts,
+        Vec::new(),
     );
     runtime
 }
@@ -1159,7 +1147,6 @@ fn submit_runtime_modal_action(
                         return true;
                     }
 
-                    controller.start_runtime_operation(OperationId::device_enrollment());
                     let app_core = controller.app_core().clone();
                     let rerender_for_start = rerender.clone();
                     spawn(async move {
@@ -1215,10 +1202,6 @@ fn submit_runtime_modal_action(
                                 });
                             }
                             Err(error) => {
-                                controller.finish_runtime_operation(
-                                    OperationId::device_enrollment(),
-                                    OperationState::Failed,
-                                );
                                 controller.runtime_error_toast(error.to_string());
                             }
                         }
@@ -1233,7 +1216,6 @@ fn submit_runtime_modal_action(
                 }
                 AddDeviceWizardStep::Confirm => {
                     if add_device_is_complete || add_device_has_failed {
-                        controller.clear_runtime_operation(&OperationId::device_enrollment());
                         controller.complete_runtime_device_enrollment_ready();
                         rerender();
                         return true;
@@ -1278,25 +1260,12 @@ fn submit_runtime_modal_action(
                 return true;
             }
 
-            controller.start_runtime_operation(OperationId::create_home());
             let app_core = controller.app_core().clone();
             let rerender_for_create = rerender.clone();
             spawn(async move {
                 match context_workflows::create_home(&app_core, Some(name.clone()), None).await {
-                    Ok(_) => {
-                        controller.finish_runtime_operation(
-                            OperationId::create_home(),
-                            OperationState::Succeeded,
-                        );
-                        controller.complete_runtime_home_created(&name);
-                    }
-                    Err(error) => {
-                        controller.finish_runtime_operation(
-                            OperationId::create_home(),
-                            OperationState::Failed,
-                        );
-                        controller.runtime_error_toast(error.to_string());
-                    }
+                    Ok(_) => controller.complete_runtime_home_created(&name),
+                    Err(error) => controller.runtime_error_toast(error.to_string()),
                 }
                 rerender_for_create();
             });
@@ -1310,7 +1279,6 @@ fn submit_runtime_modal_action(
                 return true;
             }
 
-            controller.start_runtime_operation(OperationId::invitation_accept());
             let submit_log = format!("accept_invitation submit start code_len={}", code.len());
             controller.push_log(&submit_log);
             harness_log(&submit_log);
@@ -1381,10 +1349,6 @@ fn submit_runtime_modal_action(
                                     controller.complete_runtime_modal_success(
                                         "Device enrollment complete",
                                     );
-                                    controller_for_import.finish_runtime_operation(
-                                        OperationId::invitation_accept(),
-                                        OperationState::Succeeded,
-                                    );
                                     controller_for_import
                                         .push_log("accept_invitation complete device_enrollment");
                                     harness_log("accept_invitation complete device_enrollment");
@@ -1441,9 +1405,7 @@ fn submit_runtime_modal_action(
                                     controller_for_import
                                         .push_log("accept_invitation refresh_contacts done");
                                     harness_log("accept_invitation refresh_contacts done");
-                                    controller_for_import.complete_runtime_invitation_operation(
-                                        OperationState::Succeeded,
-                                    );
+                                    controller_for_import.complete_runtime_invitation_operation();
                                     controller_for_import
                                         .push_log("accept_invitation complete generic");
                                     harness_log("accept_invitation complete generic");
@@ -1454,10 +1416,6 @@ fn submit_runtime_modal_action(
                                     format!("accept_invitation runtime_accept error={error}");
                                 controller_for_import.push_log(&error_log);
                                 harness_log(&error_log);
-                                controller_for_import.finish_runtime_operation(
-                                    OperationId::invitation_accept(),
-                                    OperationState::Failed,
-                                );
                                 controller.runtime_error_toast(error.to_string());
                             }
                         }
@@ -1466,10 +1424,6 @@ fn submit_runtime_modal_action(
                         let error_log = format!("accept_invitation import_details error={error}");
                         controller_for_import.push_log(&error_log);
                         harness_log(&error_log);
-                        controller_for_import.finish_runtime_operation(
-                            OperationId::invitation_accept(),
-                            OperationState::Failed,
-                        );
                         controller.runtime_error_toast(error.to_string());
                     }
                 }
@@ -1485,7 +1439,6 @@ fn submit_runtime_modal_action(
                 return true;
             }
 
-            controller.start_runtime_operation(OperationId::device_enrollment());
             let app_core = controller.app_core().clone();
             let rerender_for_import = rerender.clone();
             spawn(async move {
@@ -1527,29 +1480,13 @@ fn submit_runtime_modal_action(
                                 let _ =
                                     settings_workflows::refresh_settings_from_runtime(&app_core)
                                         .await;
-                                controller.finish_runtime_operation(
-                                    OperationId::device_enrollment(),
-                                    OperationState::Succeeded,
-                                );
                                 controller
                                     .complete_runtime_modal_success("Device enrollment complete");
                             }
-                            Err(error) => {
-                                controller.finish_runtime_operation(
-                                    OperationId::device_enrollment(),
-                                    OperationState::Failed,
-                                );
-                                controller.runtime_error_toast(error.to_string());
-                            }
+                            Err(error) => controller.runtime_error_toast(error.to_string()),
                         }
                     }
-                    Err(error) => {
-                        controller.finish_runtime_operation(
-                            OperationId::device_enrollment(),
-                            OperationState::Failed,
-                        );
-                        controller.runtime_error_toast(error.to_string());
-                    }
+                    Err(error) => controller.runtime_error_toast(error.to_string()),
                 }
                 rerender_for_import();
             });
@@ -1564,17 +1501,12 @@ fn submit_runtime_modal_action(
             }
 
             let app_core = controller.app_core().clone();
-            controller.start_runtime_operation(OperationId::invitation_create());
             spawn(async move {
                 tracing::info!("create_invitation submit start");
                 let receiver_id = match receiver.parse::<AuthorityId>() {
                     Ok(value) => value,
                     Err(error) => {
                         tracing::warn!(error = %error, "create_invitation invalid receiver");
-                        controller.finish_runtime_operation(
-                            OperationId::invitation_create(),
-                            OperationState::Failed,
-                        );
                         controller.runtime_error_toast(format!("Invalid authority id: {error}"));
                         rerender();
                         return;
@@ -1617,20 +1549,12 @@ fn submit_runtime_modal_action(
                             }
                             Err(error) => {
                                 tracing::warn!(error = %error, "create_invitation export_invitation failed");
-                                controller.finish_runtime_operation(
-                                    OperationId::invitation_create(),
-                                    OperationState::Failed,
-                                );
                                 controller.runtime_error_toast(error.to_string());
                             }
                         }
                     }
                     Err(error) => {
                         tracing::warn!(error = %error, "create_invitation create_contact_invitation failed");
-                        controller.finish_runtime_operation(
-                            OperationId::invitation_create(),
-                            OperationState::Failed,
-                        );
                         controller.runtime_error_toast(error.to_string());
                     }
                 }
@@ -2193,7 +2117,6 @@ fn cancel_runtime_modal_action(
     spawn(async move {
         match ceremony_workflows::cancel_key_rotation_ceremony(&app_core, &ceremony_id).await {
             Ok(()) => {
-                controller.clear_runtime_operation(&OperationId::device_enrollment());
                 controller.complete_runtime_modal_success("Device enrollment canceled");
             }
             Err(error) => controller.runtime_error_toast(error.to_string()),
@@ -2936,6 +2859,33 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                 notifications_for_errors
                     .set(load_notifications_runtime_view(controller_for_errors.clone()).await);
                 controller_for_errors.request_rerender();
+            }
+        });
+
+        let controller_for_authoritative_operations = controller_for_runtime.clone();
+        spawn(async move {
+            let mut stream = {
+                let core = controller_for_authoritative_operations
+                    .app_core()
+                    .read()
+                    .await;
+                core.subscribe(&*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL)
+            };
+
+            while stream.recv().await.is_ok() {
+                let facts = {
+                    let core = controller_for_authoritative_operations
+                        .app_core()
+                        .read()
+                        .await;
+                    core.read(&*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL)
+                        .await
+                        .unwrap_or_default()
+                };
+                for (operation_id, status) in bridged_operation_statuses(&facts) {
+                    controller_for_authoritative_operations
+                        .apply_authoritative_operation_status(operation_id, status);
+                }
             }
         });
     });
@@ -6492,4 +6442,38 @@ fn should_skip_global_key(controller: &UiController, event: &KeyboardData) -> bo
         return false;
     }
     !matches!(event.key(), Key::Enter | Key::Escape)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    #[test]
+    fn runtime_projection_loaders_do_not_synthesize_authoritative_readiness() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let app_path = repo_root.join("crates/aura-ui/src/app.rs");
+        let source = std::fs::read_to_string(&app_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", app_path.display()));
+
+        let contacts_start = source
+            .find("async fn load_contacts_runtime_view")
+            .unwrap_or_else(|| panic!("missing load_contacts_runtime_view"));
+        let settings_start = source[contacts_start..]
+            .find("fn build_settings_runtime_view")
+            .map(|offset| contacts_start + offset)
+            .unwrap_or_else(|| panic!("missing build_settings_runtime_view"));
+        let contacts_branch = &source[contacts_start..settings_start];
+
+        let notifications_start = source
+            .find("async fn load_notifications_runtime_view")
+            .unwrap_or_else(|| panic!("missing load_notifications_runtime_view"));
+        let next_fn = source[notifications_start..]
+            .find("fn selected_home_id_for_modal")
+            .map(|offset| notifications_start + offset)
+            .unwrap_or_else(|| panic!("missing selected_home_id_for_modal"));
+        let notifications_branch = &source[notifications_start..next_fn];
+
+        assert!(!contacts_branch.contains("RuntimeFact::ContactLinkReady"));
+        assert!(!notifications_branch.contains("RuntimeFact::PendingHomeInvitationReady"));
+    }
 }

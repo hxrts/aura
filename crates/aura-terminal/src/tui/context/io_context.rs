@@ -49,7 +49,7 @@ use crate::handlers::tui::{resolve_storage_path, TuiMode};
 use crate::tui::context::{
     AccountFilesHelper, DispatchHelper, InitializedAppCore, SnapshotHelper, ToastHelper,
 };
-use crate::tui::effects::{EffectCommand, OpResponse, OperationalHandler};
+use crate::tui::effects::{EffectCommand, OpFailureCode, OpResponse, OperationalHandler};
 use crate::tui::tasks::UiTaskRegistry;
 use crate::tui::types::ChannelMode;
 
@@ -555,15 +555,30 @@ impl IoContext {
                     .ok_or_else(|| TerminalError::NotFound("Demo Mobile agent unavailable".to_string()))?;
                 let invitations = agent
                     .invitations()
-                    .map_err(|e| TerminalError::Operation(format!("Invitation service unavailable: {e}")))?;
+                    .map_err(|e| {
+                        TerminalError::structured_operation(
+                            OpFailureCode::ImportInvitation.as_str(),
+                            format!("Invitation service unavailable: {e}"),
+                        )
+                    })?;
                 let invitation = invitations
                     .import_and_cache(code)
                     .await
-                    .map_err(|e| TerminalError::Operation(format!("Failed to import invitation: {e}")))?;
+                    .map_err(|e| {
+                        TerminalError::structured_operation(
+                            OpFailureCode::ImportInvitation.as_str(),
+                            format!("Failed to import invitation: {e}"),
+                        )
+                    })?;
                 invitations
                     .accept(&invitation.invitation_id)
                     .await
-                    .map_err(|e| TerminalError::Operation(format!("Failed to accept invitation: {e}")))?;
+                    .map_err(|e| {
+                        TerminalError::structured_operation(
+                            OpFailureCode::AcceptInvitation.as_str(),
+                            format!("Failed to accept invitation: {e}"),
+                        )
+                    })?;
                 Ok(())
             }
 
@@ -762,9 +777,10 @@ impl IoContext {
             .await
         {
             Some(Ok(OpResponse::InvitationCode { code, .. })) => Ok(code),
-            Some(Ok(other)) => Err(TerminalError::Operation(format!(
-                "Unexpected response: {other:?}"
-            ))),
+            Some(Ok(other)) => Err(TerminalError::structured_operation(
+                OpFailureCode::ExportInvitation.as_str(),
+                format!("Unexpected response: {other:?}"),
+            )),
             Some(Err(err)) => {
                 let terr: TerminalError = err.clone().into();
                 self.operational.emit_error(terr).await;
@@ -794,9 +810,10 @@ impl IoContext {
             .await
         {
             Some(Ok(OpResponse::InvitationCode { code, .. })) => Ok(code),
-            Some(Ok(other)) => Err(TerminalError::Operation(format!(
-                "Unexpected response: {other:?}"
-            ))),
+            Some(Ok(other)) => Err(TerminalError::structured_operation(
+                OpFailureCode::CreateInvitation.as_str(),
+                format!("Unexpected response: {other:?}"),
+            )),
             Some(Err(err)) => {
                 let terr: TerminalError = err.clone().into();
                 self.operational.emit_error(terr).await;
@@ -832,9 +849,10 @@ impl IoContext {
                 pending_epoch,
                 device_id,
             }),
-            Some(Ok(other)) => Err(TerminalError::Operation(format!(
-                "Unexpected response: {other:?}"
-            ))),
+            Some(Ok(other)) => Err(TerminalError::structured_operation(
+                OpFailureCode::StartDeviceEnrollment.as_str(),
+                format!("Unexpected response: {other:?}"),
+            )),
             Some(Err(err)) => {
                 let terr: TerminalError = err.clone().into();
                 self.operational.emit_error(terr).await;
@@ -855,9 +873,10 @@ impl IoContext {
             .await
         {
             Some(Ok(OpResponse::DeviceRemovalStarted { ceremony_id })) => Ok(ceremony_id),
-            Some(Ok(other)) => Err(TerminalError::Operation(format!(
-                "Unexpected response: {other:?}"
-            ))),
+            Some(Ok(other)) => Err(TerminalError::structured_operation(
+                OpFailureCode::RemoveDevice.as_str(),
+                format!("Unexpected response: {other:?}"),
+            )),
             Some(Err(err)) => {
                 let terr: TerminalError = err.clone().into();
                 self.operational.emit_error(terr).await;
@@ -885,7 +904,10 @@ impl IoContext {
         };
         if !runtime_available {
             let shareable = ShareableInvitation::from_code(code).map_err(|e| {
-                TerminalError::Operation(format!("Failed to parse device enrollment code: {e}"))
+                TerminalError::structured_operation(
+                    OpFailureCode::ImportDeviceEnrollmentCode.as_str(),
+                    format!("Failed to parse device enrollment code: {e}"),
+                )
             })?;
             let AgentInvitationType::DeviceEnrollment {
                 subject_authority,
@@ -918,7 +940,12 @@ impl IoContext {
 
         let invitation = import_invitation_details(app_core, code)
             .await
-            .map_err(|e| TerminalError::Operation(format!("Failed to import invitation: {e}")))?;
+            .map_err(|e| {
+                TerminalError::structured_operation(
+                    OpFailureCode::ImportDeviceEnrollmentCode.as_str(),
+                    format!("Failed to import invitation: {e}"),
+                )
+            })?;
 
         if !matches!(
             invitation.invitation_type,
@@ -935,9 +962,10 @@ impl IoContext {
         )
         .await
         .map_err(|e| {
-            TerminalError::Operation(format!(
-                "Failed to accept device enrollment invitation: {e}"
-            ))
+            TerminalError::structured_operation(
+                OpFailureCode::ImportDeviceEnrollmentCode.as_str(),
+                format!("Failed to accept device enrollment invitation: {e}"),
+            )
         })?;
 
         Ok(())

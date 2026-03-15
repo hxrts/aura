@@ -17,7 +17,7 @@ use aura_core::identifiers::ChannelId;
 use aura_core::AuraError;
 use std::str::FromStr;
 
-use super::types::{OpResponse, OpResult};
+use super::types::{OpError, OpFailureCode, OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
@@ -143,7 +143,7 @@ pub async fn handle_context(
                 Ok(context) => Some(Ok(OpResponse::ContextChanged {
                     context_id: context,
                 })),
-                Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
+                Err(e) => Some(Err(OpError::Failed(e.to_string()))),
             }
         }
 
@@ -155,7 +155,7 @@ pub async fn handle_context(
             // Delegate to workflow
             match move_position(app_core, home_id, depth).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
-                Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
+                Err(e) => Some(Err(OpError::Failed(e.to_string()))),
             }
         }
 
@@ -174,7 +174,10 @@ pub async fn handle_context(
                     {
                         Some(Err(super::types::OpError::InvalidArgument(message)))
                     } else {
-                        Some(Err(super::types::OpError::Failed(message)))
+                        Some(Err(OpError::typed(
+                            OpFailureCode::AcceptPendingHomeInvitation,
+                            message,
+                        )))
                     }
                 }
             }
@@ -185,9 +188,10 @@ pub async fn handle_context(
             Ok(home_id) => Some(Ok(OpResponse::HomeCreated {
                 home_id: home_id.to_string(),
             })),
-            Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                "Failed to create home: {e}"
-            )))),
+            Err(e) => Some(Err(OpError::typed(
+                OpFailureCode::CreateHome,
+                format!("Failed to create home: {e}"),
+            ))),
         },
 
         EffectCommand::CreateNeighborhood { name } => {
@@ -195,9 +199,10 @@ pub async fn handle_context(
                 Ok(neighborhood_id) => {
                     Some(Ok(OpResponse::NeighborhoodCreated { neighborhood_id }))
                 }
-                Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to create neighborhood: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::CreateNeighborhood,
+                    format!("Failed to create neighborhood: {e}"),
+                ))),
             }
         }
 
@@ -212,13 +217,15 @@ pub async fn handle_context(
                         target_home_id: home_id.clone(),
                         message: None,
                     })),
-                    Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                        "Failed to auto-accept demo neighborhood join: {e}"
-                    )))),
+                    Err(e) => Some(Err(OpError::typed(
+                        OpFailureCode::AddHomeToNeighborhood,
+                        format!("Failed to auto-accept demo neighborhood join: {e}"),
+                    ))),
                 },
-                Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to add home to neighborhood: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::AddHomeToNeighborhood,
+                    format!("Failed to add home to neighborhood: {e}"),
+                ))),
             }
         }
 
@@ -227,9 +234,10 @@ pub async fn handle_context(
                 Ok(()) => Some(Ok(OpResponse::HomeOneHopLinkSet {
                     target_home_id: home_id.clone(),
                 })),
-                Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to link home one_hop_link: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::LinkHomeOneHopLink,
+                    format!("Failed to link home one_hop_link: {e}"),
+                ))),
             }
         }
 

@@ -76,6 +76,15 @@ The correct split is:
   coordinators
 - DOM helpers stay conformance-only and downstream of semantic ownership
 
+### Ownership Inventory
+
+| Path | Category | Authoritative owner | May mutate | Observe only |
+|------|----------|---------------------|------------|--------------|
+| Browser harness bridge installation and command ingress | `ActorOwned` | `aura-web::harness_bridge` bridge loop | bridge ingress/installation code | browser render layer, harness |
+| Browser semantic lifecycle rendering | `Observed` | authoritative semantic facts from `aura-app` | browser presentation state only | harness, user-visible rendering |
+| Render-convergence and projection publication | `Observed` | browser projection/export path | bridge/publication code only | Playwright/harness |
+| Web onboarding/bootstrap command helpers for shared flows | `Observed` shell over upstream `MoveOwned`/`ActorOwned` coordination | shared workflow/runtime coordinators | browser-local UI state only; never terminal truth | harness, DOM/render readers |
+
 ### InvariantBrowserHarnessBridgePublishesSemanticState
 The browser shell exports structured semantic UI state and render convergence
 signals for harness observation.

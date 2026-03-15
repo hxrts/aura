@@ -13,7 +13,7 @@ use aura_app::ui::signals::SETTINGS_SIGNAL;
 use aura_app::ui::types::InvitationBridgeType;
 use aura_core::effects::reactive::ReactiveEffects;
 
-use super::types::{OpError, OpResponse, OpResult};
+use super::types::{OpError, OpFailureCode, OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
@@ -99,9 +99,10 @@ pub async fn handle_invitations(
                     {
                         Ok(info) => info,
                         Err(e) => {
-                            return Some(Err(OpError::Failed(format!(
-                                "Failed to create contact invitation: {e}"
-                            ))));
+                            return Some(Err(OpError::typed(
+                                OpFailureCode::CreateContactInvitation,
+                                format!("Failed to create contact invitation: {e}"),
+                            )));
                         }
                     }
                 }
@@ -130,9 +131,10 @@ pub async fn handle_invitations(
                     {
                         Ok(info) => info,
                         Err(e) => {
-                            return Some(Err(OpError::Failed(format!(
-                                "Failed to create guardian invitation: {e}"
-                            ))));
+                            return Some(Err(OpError::typed(
+                                OpFailureCode::CreateGuardianInvitation,
+                                format!("Failed to create guardian invitation: {e}"),
+                            )));
                         }
                     }
                 }
@@ -172,9 +174,10 @@ pub async fn handle_invitations(
                     {
                         Ok(info) => info,
                         Err(e) => {
-                            return Some(Err(OpError::Failed(format!(
-                                "Failed to create channel invitation: {e}"
-                            ))));
+                            return Some(Err(OpError::typed(
+                                OpFailureCode::CreateChannelInvitation,
+                                format!("Failed to create channel invitation: {e}"),
+                            )));
                         }
                     }
                 }
@@ -190,9 +193,10 @@ pub async fn handle_invitations(
                     id: info.invitation_id.as_str().to_string(),
                     code,
                 })),
-                Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to export invitation: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::ExportInvitation,
+                    format!("Failed to export invitation: {e}"),
+                ))),
             }
         }
 
@@ -215,9 +219,10 @@ pub async fn handle_invitations(
                 Ok(info) => Some(Ok(OpResponse::ChannelInvitationSent {
                     invitation_id: info.invitation_id.as_str().to_string(),
                 })),
-                Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to send home invitation: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::CreateChannelInvitation,
+                    format!("Failed to send home invitation: {e}"),
+                ))),
             }
         }
 
@@ -231,9 +236,10 @@ pub async fn handle_invitations(
                 Err(e) => {
                     // Workflow failed (likely RuntimeBridge unavailable in demo mode)
                     // Return error - the UI layer can decide how to handle this
-                    Some(Err(OpError::Failed(format!(
-                        "Failed to export invitation: {e}"
-                    ))))
+                    Some(Err(OpError::typed(
+                        OpFailureCode::ExportInvitation,
+                        format!("Failed to export invitation: {e}"),
+                    )))
                 }
             }
         }
@@ -257,9 +263,10 @@ pub async fn handle_invitations(
                             )
                             .await
                         {
-                            return Some(Err(OpError::InvalidArgument(format!(
-                                "Failed to accept invitation: {e}"
-                            ))));
+                            return Some(Err(OpError::typed(
+                                OpFailureCode::AcceptInvitation,
+                                format!("Failed to accept invitation: {e}"),
+                            )));
                         }
                     }
 
@@ -297,36 +304,40 @@ pub async fn handle_invitations(
                         message: invitation.message,
                     }))
                 }
-                Err(e) => Some(Err(OpError::InvalidArgument(format!(
-                    "Invalid invite code: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::ImportInvitation,
+                    format!("Invalid invite code: {e}"),
+                ))),
             }
         }
 
         EffectCommand::AcceptInvitation { invitation_id } => {
             match accept_invitation_by_str(app_core, invitation_id).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
-                Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to accept invitation: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::AcceptInvitation,
+                    format!("Failed to accept invitation: {e}"),
+                ))),
             }
         }
 
         EffectCommand::DeclineInvitation { invitation_id } => {
             match decline_invitation_by_str(app_core, invitation_id).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
-                Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to decline invitation: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::DeclineInvitation,
+                    format!("Failed to decline invitation: {e}"),
+                ))),
             }
         }
 
         EffectCommand::CancelInvitation { invitation_id } => {
             match cancel_invitation_by_str(app_core, invitation_id).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
-                Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to cancel invitation: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::typed(
+                    OpFailureCode::CancelInvitation,
+                    format!("Failed to cancel invitation: {e}"),
+                ))),
             }
         }
 

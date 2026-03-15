@@ -961,7 +961,7 @@ pub fn try_authoritative_ui_snapshot(
 
     let operations = state.exported_operation_snapshots();
     let runtime_events = state.exported_runtime_events();
-    let readiness = if onboarding_active || state.pending_runtime_bootstrap {
+    let readiness = if state.pending_runtime_bootstrap {
         UiReadiness::Loading
     } else {
         UiReadiness::Ready
@@ -1084,7 +1084,7 @@ mod tests {
                 chat_messages: &[],
             },
         );
-        assert_eq!(snapshot.readiness, UiReadiness::Loading);
+        assert_eq!(snapshot.readiness, UiReadiness::Ready);
         assert_eq!(snapshot.focused_control, Some(ControlId::OnboardingRoot));
         assert_eq!(snapshot.open_modal, None);
     }
@@ -1670,7 +1670,7 @@ mod tests {
                         },
                     receipt,
                 } => {
-                    receipt.complete(HarnessUiCommandReceipt::Accepted);
+                    receipt.complete(HarnessUiCommandReceipt::Accepted { operation: None });
                 }
                 other => panic!("unexpected harness command submission: {other:?}"),
             }
@@ -1699,7 +1699,10 @@ mod tests {
             .unwrap_or_else(|error| panic!("failed to read harness command receipt: {error}"));
         let receipt = serde_json::from_slice::<HarnessUiCommandReceipt>(&receipt_payload)
             .unwrap_or_else(|error| panic!("failed to decode harness command receipt: {error}"));
-        assert_eq!(receipt, HarnessUiCommandReceipt::Accepted);
+        assert_eq!(
+            receipt,
+            HarnessUiCommandReceipt::Accepted { operation: None }
+        );
 
         apply_task
             .await

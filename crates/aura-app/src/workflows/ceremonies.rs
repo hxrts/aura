@@ -9,6 +9,7 @@ use std::sync::Arc;
 use async_lock::RwLock;
 
 use super::error::{ceremony_op, WorkflowError};
+use crate::runtime_bridge::KeyRotationCeremonyStatus;
 use crate::ui_contract::{
     OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
     SemanticOperationKind, SemanticOperationPhase,
@@ -16,7 +17,6 @@ use crate::ui_contract::{
 use crate::workflows::semantic_facts::{
     publish_authoritative_operation_failure, publish_authoritative_operation_phase,
 };
-use crate::runtime_bridge::KeyRotationCeremonyStatus;
 use crate::AppCore;
 use aura_core::identifiers::{AuthorityId, CeremonyId};
 use aura_core::types::FrostThreshold;
@@ -40,11 +40,9 @@ async fn fail_start_device_enrollment<T>(
         error.clone(),
     )
     .await?;
-    Err(AuraError::agent(
-        error
-            .detail
-            .unwrap_or_else(|| "start device enrollment failed".to_string()),
-    ))
+    Err(AuraError::agent(error.detail.unwrap_or_else(|| {
+        "start device enrollment failed".to_string()
+    })))
 }
 
 /// Start a guardian key-rotation ceremony.
@@ -98,9 +96,9 @@ pub async fn start_device_enrollment_ceremony(
     .await?;
     let runtime = {
         let core = app_core.read().await;
-        core.runtime().cloned().ok_or_else(|| {
-            AuraError::from(WorkflowError::RuntimeUnavailable)
-        })?
+        core.runtime()
+            .cloned()
+            .ok_or_else(|| AuraError::from(WorkflowError::RuntimeUnavailable))?
     };
     let start = match runtime
         .initiate_device_enrollment_ceremony(nickname_suggestion, invitee_authority_id)
@@ -131,9 +129,9 @@ pub async fn start_device_removal_ceremony(
 ) -> Result<CeremonyId, AuraError> {
     let runtime = {
         let core = app_core.read().await;
-        core.runtime().cloned().ok_or_else(|| {
-            AuraError::from(WorkflowError::RuntimeUnavailable)
-        })?
+        core.runtime()
+            .cloned()
+            .ok_or_else(|| AuraError::from(WorkflowError::RuntimeUnavailable))?
     };
     runtime
         .initiate_device_removal_ceremony(device_id)

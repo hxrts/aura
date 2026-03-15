@@ -88,6 +88,15 @@ The correct split is:
 - the harness consumes typed move-owned handles/tokens but does not create or
   advance them outside approved command-plane surfaces
 
+### Ownership Inventory
+
+| Path | Category | Authoritative owner | May mutate | Observe only |
+|------|----------|---------------------|------------|--------------|
+| Harness coordinator / multi-instance orchestration | `ActorOwned` | `HarnessCoordinator` and executor-owned orchestration state | coordinator/executor orchestration code | scenarios, CI, diagnostics |
+| Shared semantic command submission results and handles | `Observed` over upstream `MoveOwned` handles | frontend/product command plane | backend adapters store handle references only | waits, diagnostics, replay |
+| Readiness waits and projection reads | `Observed` | product readiness coordinators and authoritative facts | harness-local timeout/trace bookkeeping only | scenario authors, CI |
+| Frontend-conformance raw mechanics | frontend-local only, never shared semantic ownership | frontend under test | conformance adapters only | shared semantic lane must not depend on them |
+
 ### Detailed Specifications
 
 ### InvariantHarnessDeterministicReplayInputs

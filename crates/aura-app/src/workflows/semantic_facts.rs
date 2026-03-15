@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use async_lock::RwLock;
 use aura_core::AuraError;
@@ -13,6 +13,9 @@ use crate::ui_contract::{
 use crate::workflows::signals::{emit_signal, read_signal_or_default};
 use crate::AppCore;
 
+static AUTHORITATIVE_SEMANTIC_FACTS_UPDATE_GATE: LazyLock<tokio::sync::Mutex<()>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(()));
+
 /// Mutate the authoritative semantic-fact set and publish the replacement atomically.
 pub async fn update_authoritative_semantic_facts<F>(
     app_core: &Arc<RwLock<AppCore>>,
@@ -21,6 +24,7 @@ pub async fn update_authoritative_semantic_facts<F>(
 where
     F: FnOnce(&mut Vec<AuthoritativeSemanticFact>),
 {
+    let _guard = AUTHORITATIVE_SEMANTIC_FACTS_UPDATE_GATE.lock().await;
     let mut facts = read_signal_or_default(app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
     update(&mut facts);
     emit_signal(
@@ -88,6 +92,23 @@ pub async fn publish_authoritative_operation_failure(
             operation_id,
             instance_id: None,
             status: SemanticOperationStatus::failed(kind, error),
+        },
+    )
+    .await
+}
+
+/// Publish explicit cancellation for a semantic operation.
+pub async fn publish_authoritative_operation_cancellation(
+    app_core: &Arc<RwLock<AppCore>>,
+    operation_id: OperationId,
+    kind: SemanticOperationKind,
+) -> Result<(), AuraError> {
+    publish_authoritative_semantic_fact(
+        app_core,
+        AuthoritativeSemanticFact::OperationStatus {
+            operation_id,
+            instance_id: None,
+            status: SemanticOperationStatus::cancelled(kind),
         },
     )
     .await

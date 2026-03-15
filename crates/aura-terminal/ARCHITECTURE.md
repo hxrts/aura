@@ -67,6 +67,15 @@ The correct split is:
   coordinators
 - the shell observes and renders lifecycle but does not decide it
 
+### Ownership Inventory
+
+| Path | Category | Authoritative owner | May mutate | Observe only |
+|------|----------|---------------------|------------|--------------|
+| TUI command ingress queue and wakeup path | `ActorOwned` | TUI update/event loop | ingress/update-loop code | shell render code, harness |
+| Shell-rendered semantic operation lifecycle | `Observed` | authoritative semantic facts from `aura-app` | local UI presentation state only | harness, user-visible rendering |
+| Callback/subscription bridges for parity-critical flows | `Observed` | upstream workflow/runtime coordinators | local UI adaptation only; never terminal semantic truth | harness, shell |
+| Local focus/selection and nonsemantic view state | `Observed` | TUI shell/model | shell/update-loop code | harness snapshots |
+
 ### Detailed Specifications
 
 ### InvariantTerminalUiBoundary
