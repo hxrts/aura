@@ -180,9 +180,12 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
                     1 => modal_state
                         .partial_caps
                         .push_str(truncate_paste(&modal_state.partial_caps, text)),
-                    _ => modal_state
+                    2 => modal_state
                         .limited_caps
                         .push_str(truncate_paste(&modal_state.limited_caps, text)),
+                    other => {
+                        tracing::debug!(active_field = other, "unexpected active_field in capability config paste");
+                    }
                 }
                 return;
             }
