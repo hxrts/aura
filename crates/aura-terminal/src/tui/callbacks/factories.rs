@@ -742,7 +742,7 @@ impl ChatCallbacks {
                             .await;
                         }
                         Err(_e) => {
-                            // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                            tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                         }
                     }
                 });
@@ -908,7 +908,7 @@ impl ChatCallbacks {
                         .await;
                     }
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                     }
                 }
             });
@@ -977,7 +977,7 @@ impl ContactsCallbacks {
                         .await;
                     }
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                     }
                 }
             });
@@ -1128,7 +1128,7 @@ impl ContactsCallbacks {
                         .await;
                     }
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                     }
                 }
             });
@@ -1237,7 +1237,7 @@ impl InvitationsCallbacks {
                         .await;
                     }
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                     }
                 }
             });
@@ -1306,7 +1306,7 @@ impl InvitationsCallbacks {
                         send_ui_update_reliable(&tx, UiUpdate::InvitationExported { code }).await;
                     }
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                     }
                 }
             });
@@ -1359,7 +1359,7 @@ impl RecoveryCallbacks {
                         send_ui_update_required(&tx, UiUpdate::RecoveryStarted).await;
                     }
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                     }
                 }
             });
@@ -1383,7 +1383,7 @@ impl RecoveryCallbacks {
                         .await;
                     }
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                     }
                 }
             });
@@ -1410,7 +1410,7 @@ impl RecoveryCallbacks {
                         .await;
                     }
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                     }
                 }
             });
@@ -1437,7 +1437,7 @@ impl RecoveryCallbacks {
                         .await;
                     }
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                     }
                 }
             });
@@ -1492,7 +1492,7 @@ impl SettingsCallbacks {
                         send_ui_update_required(&tx, UiUpdate::MfaPolicyChanged(policy)).await;
                     }
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                     }
                 }
             });
@@ -1518,7 +1518,7 @@ impl SettingsCallbacks {
                         .await;
                     }
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                     }
                 }
             });
@@ -1557,7 +1557,7 @@ impl SettingsCallbacks {
                         .await;
                     }
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                     }
                 }
             });
@@ -1675,7 +1675,7 @@ impl SettingsCallbacks {
                 let ceremony_id = match ctx.start_device_removal(&device_id_clone).await {
                     Ok(id) => id,
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by operational layer.
+                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                         return;
                     }
                 };
@@ -1852,7 +1852,7 @@ impl NeighborhoodCallbacks {
                         .await;
                     }
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                     }
                 }
             });
@@ -1874,7 +1874,7 @@ impl NeighborhoodCallbacks {
                         send_ui_update_required(&tx, UiUpdate::NavigatedHome).await;
                     }
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                     }
                 }
             });
@@ -1896,7 +1896,7 @@ impl NeighborhoodCallbacks {
                         send_ui_update_required(&tx, UiUpdate::NavigatedToLimited).await;
                     }
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                     }
                 }
             });
@@ -2002,7 +2002,7 @@ impl NeighborhoodCallbacks {
                         .await;
                     }
                     Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                     }
                 }
             });
