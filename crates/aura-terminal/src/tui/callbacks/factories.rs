@@ -100,7 +100,8 @@ async fn run_invitation_import_flow(
         .await
     {
         Ok(_) => {
-            let _ = operation.relinquish_to_workflow(SemanticOperationTransferScope::InvitationImport);
+            let _ =
+                operation.relinquish_to_workflow(SemanticOperationTransferScope::InvitationImport);
             for update in invitation_import_success_updates(&code, invitation.as_ref()) {
                 send_ui_update_required(&tx, update).await;
             }
@@ -841,7 +842,7 @@ impl ChatCallbacks {
 pub struct ContactsCallbacks {
     pub on_update_nickname: UpdateNicknameCallback,
     pub on_start_chat: StartChatCallback,
-    pub(crate) on_invite_to_channel: TwoStringOwnedCallback,
+    pub(crate) on_invite_to_channel: TwoStringContextOwnedCallback,
     pub on_invite_lan_peer: Arc<dyn Fn(String, String) + Send + Sync>,
     pub on_remove_contact: IdCallback,
 }
@@ -914,37 +915,56 @@ impl ContactsCallbacks {
         })
     }
 
-    fn make_invite_to_channel(ctx: Arc<IoContext>, tx: UiUpdateSender) -> TwoStringOwnedCallback {
-        Arc::new(move |contact_id: String, channel: String, operation: Option<SubmittedOperationOwner>| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let cmd = EffectCommand::InviteUser {
-                target: contact_id,
-                channel,
-            };
-            spawn_ctx(ctx.clone(), async move {
-                let dispatch = std::panic::AssertUnwindSafe(ctx.dispatch(cmd)).catch_unwind();
-                match dispatch.await {
-                    Ok(Ok(())) => {
-                        if let Some(operation) = operation {
-                            operation.succeed().await;
-                        }
+    fn make_invite_to_channel(
+        ctx: Arc<IoContext>,
+        tx: UiUpdateSender,
+    ) -> TwoStringContextOwnedCallback {
+        Arc::new(
+            move |contact_id: String,
+                  channel: String,
+                  context_id: Option<String>,
+                  operation: Option<SubmittedOperationOwner>| {
+                let ctx = ctx.clone();
+                let tx = tx.clone();
+                let operation_instance_id = operation
+                    .as_ref()
+                    .map(|operation| operation.harness_handle().instance_id.clone());
+                let app_core = ctx.app_core_raw().clone();
+                spawn_ctx(ctx.clone(), async move {
+                    if let Some(operation) = operation {
+                        let _ = operation.relinquish_to_workflow(
+                            SemanticOperationTransferScope::InviteActorToChannel,
+                        );
                     }
-                    Ok(Err(error)) => {
-                        if let Some(operation) = operation {
-                            operation.fail(error.to_string()).await;
+
+                    let parsed_context_id = context_id
+                        .as_deref()
+                        .and_then(|context_id| context_id.parse::<aura_core::ContextId>().ok());
+                    let dispatch = std::panic::AssertUnwindSafe(
+                        aura_app::ui::workflows::messaging::invite_user_to_channel_with_context(
+                            &app_core,
+                            &contact_id,
+                            &channel,
+                            parsed_context_id,
+                            operation_instance_id,
+                            None,
+                            None,
+                        ),
+                    )
+                    .catch_unwind();
+                    match dispatch.await {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(error)) => {
+                            send_ui_update_reliable(
+                                &tx,
+                                UiUpdate::ToastAdded(ToastMessage::error(
+                                    "invitation",
+                                    format!("Invite to channel failed: {error}"),
+                                )),
+                            )
+                            .await;
                         }
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::error(
-                                "invitation",
-                                format!("Invite to channel failed: {error}"),
-                            )),
-                        )
-                        .await;
-                    }
-                    Err(panic) => {
-                        if let Some(operation) = operation {
+                        Err(panic) => {
                             let detail = if let Some(message) = panic.downcast_ref::<&str>() {
                                 format!("invite_to_channel callback panicked: {message}")
                             } else if let Some(message) = panic.downcast_ref::<String>() {
@@ -952,30 +972,19 @@ impl ContactsCallbacks {
                             } else {
                                 "invite_to_channel callback panicked".to_string()
                             };
-                            operation.fail(detail.clone()).await;
                             send_ui_update_reliable(
                                 &tx,
-                                UiUpdate::ToastAdded(ToastMessage::error("invitation", detail)),
+                                UiUpdate::ToastAdded(ToastMessage::error(
+                                    "invitation",
+                                    detail.clone(),
+                                )),
                             )
                             .await;
-                            return;
                         }
-                        let detail = if let Some(message) = panic.downcast_ref::<&str>() {
-                            format!("invite_to_channel callback panicked: {message}")
-                        } else if let Some(message) = panic.downcast_ref::<String>() {
-                            format!("invite_to_channel callback panicked: {message}")
-                        } else {
-                            "invite_to_channel callback panicked".to_string()
-                        };
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::error("invitation", detail.clone())),
-                        )
-                        .await;
                     }
-                }
-            });
-        })
+                });
+            },
+        )
     }
 
     fn make_remove_contact(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdCallback {

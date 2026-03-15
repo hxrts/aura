@@ -408,7 +408,9 @@ impl LocalPtyBackend {
         loop {
             match UnixStream::connect(&socket_path) {
                 Ok(mut stream) => {
-                    let command_result: Result<Option<aura_app::ui_contract::HarnessUiOperationHandle>> = (|| {
+                    let command_result: Result<
+                        Option<aura_app::ui_contract::HarnessUiOperationHandle>,
+                    > = (|| {
                         stream
                             .write_all(&payload)
                             .context("failed to write harness UI command")?;
@@ -1313,6 +1315,10 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 self.send_harness_command(&HarnessUiCommand::RemoveSelectedDevice)?;
                 Ok(SemanticCommandResponse::accepted_without_value())
             }
+            IntentAction::SwitchAuthority { authority_id } => {
+                self.send_harness_command(&HarnessUiCommand::SwitchAuthority { authority_id })?;
+                Ok(SemanticCommandResponse::accepted_without_value())
+            }
             IntentAction::CreateContactInvitation {
                 receiver_authority_id,
                 ..
@@ -1473,9 +1479,10 @@ impl SharedSemanticBackend for LocalPtyBackend {
     ) -> Result<SubmittedAction<ContactInvitationCode>> {
         let previous_operation =
             observe_operation(&self.ui_snapshot()?, &OperationId::invitation_create());
-        let receipt_handle = self.send_harness_command(&HarnessUiCommand::CreateContactInvitation {
-            receiver_authority_id: receiver_authority_id.to_string(),
-        })?;
+        let receipt_handle =
+            self.send_harness_command(&HarnessUiCommand::CreateContactInvitation {
+                receiver_authority_id: receiver_authority_id.to_string(),
+            })?;
         let handle = match receipt_handle {
             Some(handle) => UiOperationHandle::new(handle.operation_id, handle.instance_id),
             None => wait_for_operation_submission(
@@ -1551,10 +1558,11 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     "submit_invite_actor_to_channel requires an authoritative selected channel"
                 )
             })?;
-        let receipt_handle = self.send_harness_command(&HarnessUiCommand::InviteActorToChannel {
-            authority_id: authority_id.to_string(),
-            channel_id,
-        })?;
+        let receipt_handle =
+            self.send_harness_command(&HarnessUiCommand::InviteActorToChannel {
+                authority_id: authority_id.to_string(),
+                channel_id,
+            })?;
         let handle = match receipt_handle {
             Some(handle) => UiOperationHandle::new(handle.operation_id, handle.instance_id),
             None => wait_for_operation_submission(
@@ -1913,6 +1921,9 @@ mod tests {
         assert!(
             source.contains("self.send_harness_command(&HarnessUiCommand::RemoveSelectedDevice)?;")
         );
+        assert!(source.contains(
+            "self.send_harness_command(&HarnessUiCommand::SwitchAuthority { authority_id })?;"
+        ));
         assert!(
             source.contains("self.send_harness_command(&HarnessUiCommand::InviteActorToChannel {")
         );

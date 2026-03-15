@@ -29,11 +29,6 @@ while IFS= read -r line; do
   inventory_classes+=("$line")
 done < <(rg '^classification\s*=\s*"([^"]+)"' -or '$1' "$inventory" | sort)
 
-inventory_statuses=()
-while IFS= read -r line; do
-  inventory_statuses+=("$line")
-done < <(rg '^migration_status\s*=\s*"([^"]+)"' -or '$1' "$inventory" | sort)
-
 [[ ${#scenario_files[@]} -eq ${#inventory_paths[@]} ]] || fail "inventory path count (${#inventory_paths[@]}) does not match scenario file count (${#scenario_files[@]})"
 
 for path in "${scenario_files[@]}"; do
@@ -43,22 +38,15 @@ for path in "${inventory_paths[@]}"; do
   [[ -f "$path" ]] || fail "inventory references missing scenario: $path"
 done
 
-for class in shared web_conformance tui_conformance to_be_removed; do
+for class in shared web_conformance tui_conformance; do
   printf '%s\n' "${inventory_classes[@]}" | rg -qx "$class" >/dev/null || true
 done
-if printf '%s\n' "${inventory_classes[@]}" | rg -vx '(shared|web_conformance|tui_conformance|to_be_removed)' >/tmp/harness-inventory-bad-class.$$ 2>/dev/null; then
+if printf '%s\n' "${inventory_classes[@]}" | rg -vx '(shared|web_conformance|tui_conformance)' >/tmp/harness-inventory-bad-class.$$ 2>/dev/null; then
   cat /tmp/harness-inventory-bad-class.$$ >&2
   rm -f /tmp/harness-inventory-bad-class.$$
   fail "inventory contains invalid classification"
 fi
 rm -f /tmp/harness-inventory-bad-class.$$ || true
-
-if printf '%s\n' "${inventory_statuses[@]}" | rg -vx '(converted|legacy_pending_conversion|superseded)' >/tmp/harness-inventory-bad-status.$$ 2>/dev/null; then
-  cat /tmp/harness-inventory-bad-status.$$ >&2
-  rm -f /tmp/harness-inventory-bad-status.$$
-  fail "inventory contains invalid migration_status"
-fi
-rm -f /tmp/harness-inventory-bad-status.$$ || true
 
 if [[ $(printf '%s\n' "${inventory_ids[@]}" | uniq -d | wc -l | tr -d ' ') != "0" ]]; then
   fail "inventory contains duplicate scenario ids"

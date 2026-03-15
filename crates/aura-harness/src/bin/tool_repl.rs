@@ -25,7 +25,7 @@ use tokio::time::Instant;
 struct Cli {
     #[arg(long)]
     config: PathBuf,
-    /// Optional scripted scenario TOML to execute before entering interactive mode.
+    /// Optional compatibility scenario TOML to execute before entering interactive mode.
     #[arg(long)]
     prelude: Option<PathBuf>,
     /// Auto-shutdown after this many milliseconds without incoming requests.

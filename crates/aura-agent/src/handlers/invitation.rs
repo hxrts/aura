@@ -66,7 +66,9 @@ use aura_invitation::{
 };
 use aura_journal::fact::{FactContent, RelationalFact};
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
+use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
 use aura_protocol::effects::EffectApiEffects;
@@ -98,6 +100,23 @@ const CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE: &str =
     "application/aura-contact-invitation-acceptance";
 const CHAT_FACT_CONTENT_TYPE: &str = "application/aura-chat-fact";
 const INVITATION_CONTENT_TYPE: &str = "application/aura-invitation";
+const INVITATION_PREPARE_STAGE_TIMEOUT_MS: u64 = 4_000;
+
+async fn timeout_prepare_invitation_stage<T>(
+    stage: &'static str,
+    future: impl Future<Output = AgentResult<T>>,
+) -> AgentResult<T> {
+    tokio::time::timeout(
+        Duration::from_millis(INVITATION_PREPARE_STAGE_TIMEOUT_MS),
+        future,
+    )
+    .await
+    .map_err(|_| {
+        AgentError::runtime(format!(
+            "invitation.prepare stage `{stage}` timed out after {INVITATION_PREPARE_STAGE_TIMEOUT_MS}ms"
+        ))
+    })?
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct ContactInvitationAcceptance {
@@ -507,8 +526,15 @@ impl InvitationHandler {
         let invitation_context = if let Some(context_id) = context_override {
             context_id
         } else {
-            self.resolve_invitation_context(effects.as_ref(), &invitation_type)
-                .await
+            timeout_prepare_invitation_stage(
+                "resolve_invitation_context",
+                async {
+                    Ok(self
+                        .resolve_invitation_context(effects.as_ref(), &invitation_type)
+                        .await)
+                },
+            )
+            .await?
         };
         tracing::debug!(
             receiver_id = %receiver_id,
@@ -535,11 +561,14 @@ impl InvitationHandler {
 
         let (local_effects, deferred_network_effects) =
             split_invitation_send_guard_outcome(outcome, &self.context.authority)?;
-        execute_invitation_effect_commands(
-            local_effects,
-            &self.context.authority,
-            effects.as_ref(),
-            false,
+        timeout_prepare_invitation_stage(
+            "execute_local_effects",
+            execute_invitation_effect_commands(
+                local_effects,
+                &self.context.authority,
+                effects.as_ref(),
+                false,
+            ),
         )
         .await?;
 
@@ -586,10 +615,13 @@ impl InvitationHandler {
         }
 
         // Persist the invitation to storage (so it survives service recreation)
-        Self::persist_created_invitation(
-            effects.as_ref(),
-            self.context.authority.authority_id(),
-            &invitation,
+        timeout_prepare_invitation_stage(
+            "persist_created_invitation",
+            Self::persist_created_invitation(
+                effects.as_ref(),
+                self.context.authority.authority_id(),
+                &invitation,
+            ),
         )
         .await?;
 

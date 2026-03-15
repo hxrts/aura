@@ -402,20 +402,22 @@ fn require_binary(binary: &str) -> Result<()> {
 mod tests {
     use super::*;
     use crate::config::{
-        InstanceConfig, InstanceMode, RunSection, ScenarioAction, ScenarioCanonicalModel,
-        ScenarioConfig, ScenarioStep,
+        InstanceConfig, InstanceMode, RunSection, ScenarioAction, ScenarioConfig, ScenarioStep,
     };
 
-    fn test_scenario_config(id: &str, goal: &str, steps: Vec<ScenarioStep>) -> ScenarioConfig {
+    fn test_scenario_config(
+        id: &str,
+        goal: &str,
+        compatibility_steps: Vec<ScenarioStep>,
+    ) -> ScenarioConfig {
         ScenarioConfig {
             schema_version: 1,
             id: id.to_string(),
             goal: goal.to_string(),
-            execution_mode: Some("scripted".to_string()),
+            execution_mode: Some("compatibility".to_string()),
             required_capabilities: vec![],
-            steps,
-            canonical_model: ScenarioCanonicalModel::CompatibilityStepBridge,
-            canonical_semantic_steps: Vec::new(),
+            compatibility_steps,
+            semantic_steps: Vec::new(),
         }
     }
 

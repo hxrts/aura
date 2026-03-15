@@ -62,6 +62,7 @@ pub enum IntentKind {
     ImportDeviceEnrollmentCode,
     OpenSettingsSection,
     RemoveSelectedDevice,
+    SwitchAuthority,
     CreateContactInvitation,
     AcceptContactInvitation,
     AcceptPendingChannelInvitation,
@@ -71,7 +72,7 @@ pub enum IntentKind {
 }
 
 impl IntentKind {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::OpenScreen,
         Self::CreateAccount,
         Self::CreateHome,
@@ -80,6 +81,7 @@ impl IntentKind {
         Self::ImportDeviceEnrollmentCode,
         Self::OpenSettingsSection,
         Self::RemoveSelectedDevice,
+        Self::SwitchAuthority,
         Self::CreateContactInvitation,
         Self::AcceptContactInvitation,
         Self::AcceptPendingChannelInvitation,
@@ -616,6 +618,9 @@ pub enum IntentAction {
     },
     OpenSettingsSection(SettingsSection),
     RemoveSelectedDevice,
+    SwitchAuthority {
+        authority_id: String,
+    },
     CreateContactInvitation {
         receiver_authority_id: String,
         code_name: Option<String>,
@@ -647,6 +652,7 @@ impl IntentAction {
             Self::ImportDeviceEnrollmentCode { .. } => IntentKind::ImportDeviceEnrollmentCode,
             Self::OpenSettingsSection(_) => IntentKind::OpenSettingsSection,
             Self::RemoveSelectedDevice => IntentKind::RemoveSelectedDevice,
+            Self::SwitchAuthority { .. } => IntentKind::SwitchAuthority,
             Self::CreateContactInvitation { .. } => IntentKind::CreateContactInvitation,
             Self::AcceptContactInvitation { .. } => IntentKind::AcceptContactInvitation,
             Self::AcceptPendingChannelInvitation => IntentKind::AcceptPendingChannelInvitation,
@@ -936,6 +942,37 @@ impl IntentAction {
                 terminal_failure_codes: vec![
                     "remove_device_issue_failed".to_string(),
                     "remove_device_timeout".to_string(),
+                ],
+            },
+            Self::SwitchAuthority { .. } => SharedActionContract {
+                intent: IntentKind::SwitchAuthority,
+                preconditions: vec![
+                    ActionPrecondition::Screen(ScreenId::Settings),
+                    ActionPrecondition::Readiness(UiReadiness::Ready),
+                    ActionPrecondition::Quiescence(QuiescenceState::Settled),
+                ],
+                barriers: SharedActionBarrierMetadata {
+                    before_issue: vec![
+                        BarrierDeclaration::Screen(ScreenId::Settings),
+                        BarrierDeclaration::Readiness(UiReadiness::Ready),
+                        BarrierDeclaration::Quiescence(QuiescenceState::Settled),
+                    ],
+                    before_next_intent: vec![
+                        BarrierDeclaration::Screen(ScreenId::Settings),
+                        BarrierDeclaration::Readiness(UiReadiness::Ready),
+                    ],
+                },
+                post_operation_convergence: None,
+                focus_semantics: FocusSemantics::Screen(ScreenId::Settings),
+                selection_semantics: SelectionSemantics::List(ListId::Authorities),
+                transitions: vec![AuthoritativeTransitionKind::Screen(ScreenId::Settings)],
+                terminal_success: vec![
+                    TerminalSuccessKind::Screen(ScreenId::Settings),
+                    TerminalSuccessKind::Readiness(UiReadiness::Ready),
+                ],
+                terminal_failure_codes: vec![
+                    "switch_authority_issue_failed".to_string(),
+                    "switch_authority_timeout".to_string(),
                 ],
             },
             Self::CreateContactInvitation { .. } => SharedActionContract {
@@ -1367,6 +1404,7 @@ pub enum SemanticActionKind {
     ImportDeviceEnrollmentCode,
     OpenSettingsSection,
     RemoveSelectedDevice,
+    SwitchAuthority,
     CreateContactInvitation,
     AcceptContactInvitation,
     AcceptPendingChannelInvitation,
@@ -1498,6 +1536,11 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
             }
             SemanticActionKind::RemoveSelectedDevice => {
                 ScenarioAction::Intent(IntentAction::RemoveSelectedDevice)
+            }
+            SemanticActionKind::SwitchAuthority => {
+                ScenarioAction::Intent(IntentAction::SwitchAuthority {
+                    authority_id: required(value.value, "value", value.action)?,
+                })
             }
             SemanticActionKind::CreateContactInvitation => {
                 ScenarioAction::Intent(IntentAction::CreateContactInvitation {
@@ -1978,6 +2021,9 @@ mod tests {
             },
             IntentAction::OpenSettingsSection(SettingsSection::Devices),
             IntentAction::RemoveSelectedDevice,
+            IntentAction::SwitchAuthority {
+                authority_id: "authority:self".to_string(),
+            },
             IntentAction::CreateContactInvitation {
                 receiver_authority_id: "authority:peer".to_string(),
                 code_name: Some("contact_code".to_string()),
@@ -2034,6 +2080,9 @@ mod tests {
             },
             IntentAction::OpenSettingsSection(SettingsSection::Devices),
             IntentAction::RemoveSelectedDevice,
+            IntentAction::SwitchAuthority {
+                authority_id: "authority:self".to_string(),
+            },
             IntentAction::CreateContactInvitation {
                 receiver_authority_id: "authority:peer".to_string(),
                 code_name: Some("contact_code".to_string()),
@@ -2089,6 +2138,9 @@ mod tests {
             },
             IntentAction::OpenSettingsSection(SettingsSection::Devices),
             IntentAction::RemoveSelectedDevice,
+            IntentAction::SwitchAuthority {
+                authority_id: "authority:self".to_string(),
+            },
             IntentAction::CreateContactInvitation {
                 receiver_authority_id: "authority:peer".to_string(),
                 code_name: Some("contact_code".to_string()),

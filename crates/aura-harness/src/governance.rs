@@ -14,9 +14,8 @@ use aura_app::ui_contract::{
 };
 
 use crate::config::{
-    load_scenario_inventory, load_semantic_scenario_definition, NonCanonicalScenarioField,
-    ScenarioCanonicalModel, ScenarioClassification, ScenarioConfig, ScenarioInventoryEntry,
-    NON_CANONICAL_SCENARIO_FIELDS,
+    load_scenario_inventory, load_semantic_scenario_definition, ScenarioClassification,
+    ScenarioConfig, ScenarioInventoryEntry,
 };
 
 const COVERAGE_DOC: &str = "docs/997_flow_coverage.md";
@@ -32,9 +31,8 @@ pub enum GovernanceCheck {
     UserFlowCoverage,
     UiParityContract,
     SettingsSurfaceContract,
-    ScenarioCanonicalModel,
+    ScenarioShapeContract,
     GovernanceWrappers,
-    LegacySharedQuarantine,
 }
 
 pub fn run(check: GovernanceCheck) -> Result<()> {
@@ -45,9 +43,8 @@ pub fn run(check: GovernanceCheck) -> Result<()> {
         GovernanceCheck::UserFlowCoverage => validate_ux_flow_coverage(),
         GovernanceCheck::UiParityContract => validate_ui_parity_contract(),
         GovernanceCheck::SettingsSurfaceContract => validate_settings_surface_contract(),
-        GovernanceCheck::ScenarioCanonicalModel => validate_scenario_canonical_model(),
+        GovernanceCheck::ScenarioShapeContract => validate_scenario_shape_contract(),
         GovernanceCheck::GovernanceWrappers => validate_governance_wrappers(),
-        GovernanceCheck::LegacySharedQuarantine => validate_legacy_shared_quarantine(),
     }
 }
 
@@ -62,13 +59,6 @@ pub fn validate_shared_scenario_contract() -> Result<()> {
     }
 
     for entry in shared {
-        if entry.migration_status != "converted" {
-            bail!(
-                "shared scenario is not converted: {} ({})",
-                entry.path.display(),
-                entry.migration_status
-            );
-        }
         let definition = load_semantic_scenario_definition(&entry.path)?;
         definition
             .validate_shared_intent_contract()
@@ -121,19 +111,17 @@ pub fn validate_scenario_legality() -> Result<()> {
             bail!("missing scenario file: {}", entry.path.display());
         }
 
-        if entry.migration_status == "converted" {
-            let definition = load_semantic_scenario_definition(&entry.path)?;
-            ensure_converted_frontend_mechanics_are_classified(entry, &definition)?;
-            if entry.classification == ScenarioClassification::Shared {
-                definition
-                    .validate_shared_intent_contract()
-                    .map_err(|error| {
-                        anyhow!(
-                            "shared scenario {} violates intent contract: {error}",
-                            entry.path.display()
-                        )
-                    })?;
-            }
+        let definition = load_semantic_scenario_definition(&entry.path)?;
+        ensure_converted_frontend_mechanics_are_classified(entry, &definition)?;
+        if entry.classification == ScenarioClassification::Shared {
+            definition
+                .validate_shared_intent_contract()
+                .map_err(|error| {
+                    anyhow!(
+                        "shared scenario {} violates intent contract: {error}",
+                        entry.path.display()
+                    )
+                })?;
         }
     }
 
@@ -153,12 +141,6 @@ pub fn validate_core_scenario_mechanics() -> Result<()> {
         if entry.classification != ScenarioClassification::Shared {
             bail!(
                 "core shared scenario {} must be classified as shared",
-                entry.path.display()
-            );
-        }
-        if entry.migration_status != "converted" {
-            bail!(
-                "core shared scenario {} must be converted",
                 entry.path.display()
             );
         }
@@ -439,24 +421,10 @@ pub fn validate_settings_surface_contract() -> Result<()> {
     Ok(())
 }
 
-pub fn validate_scenario_canonical_model() -> Result<()> {
-    if NON_CANONICAL_SCENARIO_FIELDS.is_empty() {
-        bail!("NON_CANONICAL_SCENARIO_FIELDS must not be empty");
-    }
-    for NonCanonicalScenarioField {
-        field,
-        allowed_until,
-        reason,
-    } in NON_CANONICAL_SCENARIO_FIELDS
-    {
-        if field.trim().is_empty() || allowed_until.trim().is_empty() || reason.trim().is_empty() {
-            bail!("non-canonical scenario fields must declare field, allowed_until, and reason");
-        }
-    }
-
+pub fn validate_scenario_shape_contract() -> Result<()> {
     let definition = ScenarioDefinition {
         id: "canonical-shared-check".to_string(),
-        goal: "typed canonical model".to_string(),
+        goal: "shared scenario shape contract".to_string(),
         steps: vec![
             ScenarioStep {
                 id: "create".to_string(),
@@ -477,22 +445,19 @@ pub fn validate_scenario_canonical_model() -> Result<()> {
         ],
     };
     let config = ScenarioConfig::try_from(definition)?;
-    if config.canonical_model != ScenarioCanonicalModel::SemanticSharedFlow {
-        bail!("semantic shared scenarios must use ScenarioCanonicalModel::SemanticSharedFlow");
-    }
-    if !config.steps.is_empty() {
-        bail!("canonical shared scenarios must not store mirrored compatibility steps");
+    if !config.compatibility_steps.is_empty() {
+        bail!("semantic shared scenarios must not store mirrored frontend-conformance execution steps");
     }
     if config
-        .shared_execution_semantic_steps()
+        .semantic_steps()
         .map_or(true, |steps| steps.is_empty())
     {
-        bail!("canonical shared scenarios must retain canonical semantic steps");
+        bail!("semantic shared scenarios must retain semantic steps");
     }
 
     run_cargo_test(
         "aura-harness",
-        "canonical_shared_scenarios_do_not_store_mirrored_compatibility_steps",
+        "semantic_scenarios_keep_canonical_steps_directly",
     )?;
     run_cargo_test(
         "aura-harness",
@@ -502,12 +467,7 @@ pub fn validate_scenario_canonical_model() -> Result<()> {
         "aura-harness",
         "semantic_parity_expectation_translates_into_execution_scenario",
     )?;
-    run_cargo_test(
-        "aura-harness",
-        "non_canonical_fields_have_explicit_deprecation_deadlines",
-    )?;
-
-    println!("harness-scenario-canonical-model: clean");
+    println!("harness-scenario-shape-contract: clean");
     Ok(())
 }
 
@@ -532,16 +492,12 @@ pub fn validate_governance_wrappers() -> Result<()> {
             "settings-surface-contract",
         ),
         (
-            "scripts/check/harness-scenario-canonical-model.sh",
-            "scenario-canonical-model",
+            "scripts/check/harness-scenario-shape-contract.sh",
+            "scenario-shape-contract",
         ),
         (
             "scripts/check/harness-governance-wrappers.sh",
             "governance-wrappers",
-        ),
-        (
-            "scripts/check/harness-legacy-shared-quarantine.sh",
-            "legacy-shared-quarantine",
         ),
     ];
 
@@ -572,54 +528,6 @@ pub fn validate_governance_wrappers() -> Result<()> {
     println!("harness-governance-wrappers: clean");
     Ok(())
 }
-
-pub fn validate_legacy_shared_quarantine() -> Result<()> {
-    let inventory = load_scenario_inventory(None)?;
-    if inventory.is_empty() {
-        bail!("no inventory entries found");
-    }
-
-    for entry in &inventory {
-        match entry.classification {
-            ScenarioClassification::Shared => {
-                if entry.migration_status != "converted" {
-                    bail!(
-                        "shared scenario {} must use the semantic shared contract; found migration_status={}",
-                        entry.path.display(),
-                        entry.migration_status
-                    );
-                }
-                let definition = load_semantic_scenario_definition(&entry.path)?;
-                definition
-                    .validate_shared_intent_contract()
-                    .map_err(|error| {
-                        anyhow!(
-                            "shared scenario {} violates semantic shared contract: {error}",
-                            entry.path.display()
-                        )
-                    })?;
-            }
-            ScenarioClassification::TuiConformance
-            | ScenarioClassification::WebConformance
-            | ScenarioClassification::ToBeRemoved => {
-                if entry.migration_status == "legacy_pending_conversion" {
-                    continue;
-                }
-                if entry.migration_status != "converted" && entry.migration_status != "superseded" {
-                    bail!(
-                        "scenario {} declares unknown migration_status={}",
-                        entry.path.display(),
-                        entry.migration_status
-                    );
-                }
-            }
-        }
-    }
-
-    println!("harness legacy shared quarantine: clean");
-    Ok(())
-}
-
 fn ensure_converted_frontend_mechanics_are_classified(
     entry: &ScenarioInventoryEntry,
     definition: &ScenarioDefinition,
@@ -631,7 +539,7 @@ fn ensure_converted_frontend_mechanics_are_classified(
         return Ok(());
     }
     bail!(
-        "converted scenario {} uses frontend-local ui mechanics and must be classified as tui_conformance or web_conformance",
+        "scenario {} uses frontend-local ui mechanics and must be classified as tui_conformance or web_conformance",
         entry.path.display()
     );
 }
@@ -644,14 +552,14 @@ fn uses_frontend_ui_mechanics(definition: &ScenarioDefinition) -> bool {
 }
 
 fn ensure_shared_execution_is_strict(scenario: &ScenarioConfig, path: &Path) -> Result<()> {
-    if !scenario.uses_canonical_shared_model() {
+    if !scenario.is_semantic_scenario() {
         bail!(
-            "shared scenario {} must use the canonical semantic shared-flow model",
+            "shared scenario {} must use the semantic shared-flow model",
             path.display()
         );
     }
     for step in scenario
-        .shared_execution_semantic_steps()
+        .semantic_steps()
         .unwrap_or(&[])
         .iter()
     {
@@ -972,7 +880,6 @@ mod tests {
             id: "ui-conformance".to_string(),
             path: PathBuf::from("tests/fixtures/ui-conformance.toml"),
             classification: ScenarioClassification::Shared,
-            migration_status: "converted".to_string(),
             runtime_substrate: "real_runtime".to_string(),
             notes: "test".to_string(),
         };
@@ -1007,7 +914,6 @@ mod tests {
             id: "ui-conformance".to_string(),
             path: PathBuf::from("tests/fixtures/ui-conformance.toml"),
             classification: ScenarioClassification::TuiConformance,
-            migration_status: "converted".to_string(),
             runtime_substrate: "real_runtime".to_string(),
             notes: "test".to_string(),
         };

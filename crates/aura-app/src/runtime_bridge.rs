@@ -456,6 +456,22 @@ pub trait RuntimeBridge: Send + Sync {
         channel: ChannelId,
     ) -> Result<bool, IntentError>;
 
+    /// Resolve the authoritative checkpoint context for a channel from runtime-owned facts.
+    async fn resolve_amp_channel_context(
+        &self,
+        channel: ChannelId,
+    ) -> Result<Option<ContextId>, IntentError>;
+
+    /// Repair local AMP membership after a checkpoint repair.
+    ///
+    /// This exists because bootstrap repair has stronger preconditions than a
+    /// generic join flow: the caller has already established or repaired the
+    /// channel checkpoint and only needs to materialize local membership.
+    async fn amp_repair_local_channel_membership(
+        &self,
+        params: ChannelJoinParams,
+    ) -> Result<(), IntentError>;
+
     async fn amp_close_channel(&self, params: ChannelCloseParams) -> Result<(), IntentError>;
 
     async fn amp_join_channel(&self, params: ChannelJoinParams) -> Result<(), IntentError>;
@@ -1058,6 +1074,20 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         _context: ContextId,
         _channel: ChannelId,
     ) -> Result<bool, IntentError> {
+        Err(IntentError::no_agent("AMP not available in offline mode"))
+    }
+
+    async fn resolve_amp_channel_context(
+        &self,
+        _channel: ChannelId,
+    ) -> Result<Option<ContextId>, IntentError> {
+        Err(IntentError::no_agent("AMP not available in offline mode"))
+    }
+
+    async fn amp_repair_local_channel_membership(
+        &self,
+        _params: ChannelJoinParams,
+    ) -> Result<(), IntentError> {
         Err(IntentError::no_agent("AMP not available in offline mode"))
     }
 

@@ -158,35 +158,6 @@ impl std::fmt::Display for MaintenanceOperation {
     }
 }
 
-/// Operation category map (A/B/C) for maintenance gating and review.
-#[deprecated(
-    since = "0.1.0",
-    note = "Use MaintenanceOperation::category() for compile-time exhaustive matching"
-)]
-pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
-    ("maintenance:snapshot-proposed", "B"),
-    ("maintenance:snapshot-completed", "B"),
-    ("maintenance:cache-invalidated", "A"),
-    ("maintenance:upgrade-activated", "C"),
-    ("maintenance:admin-replacement", "C"),
-    ("maintenance:release-distribution", "B"),
-    ("maintenance:release-policy", "C"),
-    ("maintenance:upgrade-execution", "C"),
-];
-
-/// Lookup the operation category (A/B/C) for a given maintenance operation.
-#[deprecated(
-    since = "0.1.0",
-    note = "Use MaintenanceOperation::from_str().map(|op| op.category()) instead"
-)]
-pub fn operation_category(operation: &str) -> Option<&'static str> {
-    #[allow(deprecated)]
-    OPERATION_CATEGORIES
-        .iter()
-        .find(|(op, _)| *op == operation)
-        .map(|(_, category)| *category)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,22 +212,6 @@ mod tests {
             let s = op.as_str();
             let parsed = MaintenanceOperation::from_str(s);
             assert_eq!(parsed, Some(op), "Roundtrip failed for {s}");
-        }
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn test_legacy_compatibility() {
-        // Verify deprecated API still works and matches new API
-        for op in MaintenanceOperation::all() {
-            let legacy_cat = operation_category(op.as_str());
-            let new_cat = op.category().as_str();
-            assert_eq!(
-                legacy_cat,
-                Some(new_cat),
-                "Category mismatch for {}",
-                op.as_str()
-            );
         }
     }
 }

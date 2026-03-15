@@ -1797,13 +1797,6 @@ impl UiController {
         self.request_rerender();
     }
 
-    pub fn sync_runtime_notifications(
-        &self,
-        notifications: Vec<(NotificationSelectionId, String)>,
-    ) {
-        self.try_update_model(|model| model.sync_runtime_notifications(notifications));
-    }
-
     pub fn publish_runtime_notifications_projection(
         &self,
         notifications: Vec<(NotificationSelectionId, String)>,
@@ -1817,10 +1810,6 @@ impl UiController {
         });
     }
 
-    pub fn sync_runtime_channels(&self, channels: Vec<(String, String)>) {
-        self.try_update_model(|model| model.replace_channels(channels));
-    }
-
     pub fn publish_runtime_channels_projection(
         &self,
         channels: Vec<(String, String)>,
@@ -1832,10 +1821,6 @@ impl UiController {
                 model.push_runtime_fact(fact);
             }
         });
-    }
-
-    pub fn sync_runtime_contacts(&self, contacts: Vec<(AuthorityId, String, bool)>) {
-        self.try_update_model(|model| model.replace_contacts(contacts));
     }
 
     pub fn publish_runtime_contacts_projection(
@@ -1945,13 +1930,6 @@ impl UiController {
     ) {
         let mut model = write_model(&self.model);
         set_toast(&mut model, '✓', message);
-        dismiss_modal(&mut model);
-        drop(model);
-        self.request_rerender();
-    }
-
-    pub fn complete_runtime_invitation_import(&self) {
-        let mut model = write_model(&self.model);
         dismiss_modal(&mut model);
         drop(model);
         self.request_rerender();

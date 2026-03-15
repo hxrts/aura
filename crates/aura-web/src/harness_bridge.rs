@@ -226,6 +226,23 @@ fn selected_device_id(controller: &UiController) -> Result<String, JsValue> {
         .ok_or_else(|| JsValue::from_str("no device is selected"))
 }
 
+fn selected_authority_id(controller: &UiController) -> Option<String> {
+    let snapshot = controller.ui_snapshot();
+    snapshot
+        .selections
+        .iter()
+        .find(|selection| selection.list == ListId::Authorities)
+        .map(|selection| selection.item_id.clone())
+        .or_else(|| {
+            snapshot
+                .lists
+                .iter()
+                .find(|list| list.id == ListId::Authorities)
+                .and_then(|list| list.items.iter().find(|item| item.selected))
+                .map(|item| item.id.clone())
+        })
+}
+
 async fn submit_semantic_command(
     controller: Arc<UiController>,
     request: SemanticCommandRequest,
@@ -300,6 +317,22 @@ async fn submit_semantic_command(
             ceremony_workflows::start_device_removal_ceremony(&controller.app_core(), device_id)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        IntentAction::SwitchAuthority { authority_id } => {
+            controller.set_screen(UiScreen::Settings);
+            controller.set_settings_section(browser_settings_section(SettingsSection::Authority));
+            if selected_authority_id(&controller).as_deref() == Some(authority_id.as_str()) {
+                return Ok(SemanticCommandResponse::accepted_without_value());
+            }
+            let authority_id = authority_id
+                .parse::<AuthorityId>()
+                .map_err(|error| JsValue::from_str(&format!("invalid authority id: {error}")))?;
+            if !controller.request_authority_switch(authority_id) {
+                return Err(JsValue::from_str(
+                    "authority switching is not available for this frontend",
+                ));
+            }
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::CreateContactInvitation {

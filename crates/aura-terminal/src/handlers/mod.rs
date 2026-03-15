@@ -92,7 +92,6 @@ pub mod invite;
 pub mod node;
 pub mod ota;
 pub mod recovery;
-pub mod recovery_status;
 pub mod snapshot;
 pub mod status;
 pub mod sync;

@@ -22,8 +22,10 @@ use aura_authorization::BiscuitAuthorizationBridge;
 use aura_journal::extensibility::FactRegistry;
 use biscuit_auth::Biscuit;
 use parking_lot::Mutex;
+use std::collections::HashSet;
+use std::future::Future;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, Mutex as AsyncMutex};
 
 /// Journal subsystem grouping fact storage and publication.
 ///
@@ -61,6 +63,18 @@ pub struct JournalSubsystem {
 
     /// Verification key for journal signatures
     journal_verifying_key: Option<Vec<u8>>,
+
+    /// Journal keys already mirrored into the indexed journal.
+    ///
+    /// Facts are append-only, so we can safely skip keys we have already
+    /// indexed instead of reindexing the entire journal on every persist.
+    indexed_keys: Arc<Mutex<HashSet<String>>>,
+
+    /// Cached copy of the append-only journal for fast runtime reads/merges.
+    ///
+    /// This avoids reloading and deserializing the full stored journal on every
+    /// fact append in hot runtime paths such as AMP membership repair.
+    cached_journal: Arc<AsyncMutex<Option<aura_core::Journal>>>,
 }
 
 impl JournalSubsystem {
@@ -74,6 +88,8 @@ impl JournalSubsystem {
             view_update_tx: Mutex::new(None),
             journal_policy: None,
             journal_verifying_key: None,
+            indexed_keys: Arc::new(Mutex::new(HashSet::new())),
+            cached_journal: Arc::new(AsyncMutex::new(None)),
         }
     }
 
@@ -92,12 +108,59 @@ impl JournalSubsystem {
             view_update_tx: Mutex::new(None),
             journal_policy,
             journal_verifying_key,
+            indexed_keys: Arc::new(Mutex::new(HashSet::new())),
+            cached_journal: Arc::new(AsyncMutex::new(None)),
         }
     }
 
     /// Get the indexed journal handler
     pub fn indexed_journal(&self) -> Arc<IndexedJournalHandler> {
         self.indexed_journal.clone()
+    }
+
+    /// Load the journal into the shared runtime cache if needed, then return it.
+    pub async fn get_or_load_journal<F, Fut>(&self, load: F) -> Result<aura_core::Journal, aura_core::AuraError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<aura_core::Journal, aura_core::AuraError>>,
+    {
+        let mut cache = self.cached_journal.lock().await;
+        if let Some(journal) = cache.as_ref() {
+            return Ok(journal.clone());
+        }
+
+        let journal = load().await?;
+        *cache = Some(journal.clone());
+        Ok(journal)
+    }
+
+    /// Replace the shared runtime journal cache with the latest persisted state.
+    pub async fn update_cached_journal(&self, journal: &aura_core::Journal) {
+        *self.cached_journal.lock().await = Some(journal.clone());
+    }
+
+    /// Index only journal facts that have not been mirrored yet.
+    pub fn index_new_journal_facts(
+        &self,
+        journal: &aura_core::Journal,
+        authority: Option<aura_core::AuthorityId>,
+        timestamp: Option<aura_core::time::TimeStamp>,
+    ) -> usize {
+        let mut indexed_keys = self.indexed_keys.lock();
+        let mut added = 0usize;
+
+        for (key, value) in journal.facts.iter() {
+            let key_owned = key.as_str().to_string();
+            if !indexed_keys.insert(key_owned.clone()) {
+                continue;
+            }
+
+            self.indexed_journal
+                .add_fact(key_owned, value.clone(), authority, timestamp.clone());
+            added += 1;
+        }
+
+        added
     }
 
     /// Get the fact registry
@@ -200,6 +263,8 @@ impl Clone for JournalSubsystem {
             view_update_tx: Mutex::new(self.view_update_tx.lock().clone()),
             journal_policy: self.journal_policy.clone(),
             journal_verifying_key: self.journal_verifying_key.clone(),
+            indexed_keys: self.indexed_keys.clone(),
+            cached_journal: self.cached_journal.clone(),
         }
     }
 }
@@ -220,6 +285,7 @@ impl std::fmt::Debug for JournalSubsystem {
 mod tests {
     use super::*;
     use crate::fact_registry::build_fact_registry;
+    use aura_core::effects::IndexedJournalEffects;
 
     #[test]
     fn test_journal_subsystem_creation() {
@@ -254,5 +320,27 @@ mod tests {
             .publish_facts(FactSource::Journal(Vec::new()))
             .await;
         assert!(matches!(result, Err(JournalSubsystemError::SinkClosed)));
+    }
+
+    #[tokio::test]
+    async fn test_index_new_journal_facts_skips_already_indexed_keys() {
+        let registry = Arc::new(build_fact_registry());
+        let subsystem = JournalSubsystem::new(1000u64, registry);
+        let mut journal = aura_core::Journal::new();
+        journal
+            .facts
+            .insert(
+                "relational:test:1".to_string(),
+                aura_core::FactValue::String("value".to_string()),
+            )
+            .unwrap();
+
+        let added_first = subsystem.index_new_journal_facts(&journal, None, None);
+        let added_second = subsystem.index_new_journal_facts(&journal, None, None);
+        let stats = subsystem.indexed_journal().index_stats().await.unwrap();
+
+        assert_eq!(added_first, 1);
+        assert_eq!(added_second, 0);
+        assert_eq!(stats.fact_count, 1);
     }
 }

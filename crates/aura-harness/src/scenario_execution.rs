@@ -44,10 +44,13 @@ pub fn execute_with_run_budgets(
 mod tests {
     use super::*;
     use crate::config::{
-        InstanceConfig, InstanceMode, RunSection, RuntimeSubstrate, ScenarioAction,
-        ScenarioCanonicalModel, ScenarioStep,
+        InstanceConfig, InstanceMode, RunSection, RuntimeSubstrate,
     };
     use crate::coordinator::HarnessCoordinator;
+    use aura_app::scenario_contract::{
+        ActorId, EnvironmentAction, ScenarioAction as SemanticAction, ScenarioStep as SemanticStep,
+        UiAction,
+    };
     use std::path::PathBuf;
 
     fn test_run_config(data_dir: PathBuf) -> RunConfig {
@@ -93,16 +96,19 @@ mod tests {
         }
     }
 
-    fn test_scenario_config(id: &str, goal: &str, steps: Vec<ScenarioStep>) -> ScenarioConfig {
+    fn test_semantic_scenario_config(
+        id: &str,
+        goal: &str,
+        semantic_steps: Vec<SemanticStep>,
+    ) -> ScenarioConfig {
         ScenarioConfig {
             schema_version: 1,
             id: id.to_string(),
             goal: goal.to_string(),
-            execution_mode: Some("scripted".to_string()),
+            execution_mode: None,
             required_capabilities: vec![],
-            steps,
-            canonical_model: ScenarioCanonicalModel::CompatibilityStepBridge,
-            canonical_semantic_steps: Vec::new(),
+            compatibility_steps: Vec::new(),
+            semantic_steps,
         }
     }
 
@@ -110,16 +116,14 @@ mod tests {
     fn lint_for_run_rejects_unknown_instance() {
         let temp_dir = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
         let run_config = test_run_config(temp_dir.path().join("alice"));
-        let scenario = test_scenario_config(
+        let scenario = test_semantic_scenario_config(
             "lint-failure",
             "unknown instance",
-            vec![ScenarioStep {
+            vec![SemanticStep {
                 id: "step-1".to_string(),
-                action: ScenarioAction::SendKeys,
-                instance: Some("bob".to_string()),
-                expect: Some("hello".to_string()),
+                actor: Some(ActorId("bob".to_string())),
+                action: SemanticAction::Ui(UiAction::InputText("hello".to_string())),
                 timeout_ms: Some(250),
-                ..Default::default()
             }],
         );
 
@@ -137,16 +141,14 @@ mod tests {
     fn execute_with_run_budgets_runs_noop_scenario() {
         let temp_dir = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
         let run_config = test_run_config(temp_dir.path().join("alice"));
-        let scenario = test_scenario_config(
+        let scenario = test_semantic_scenario_config(
             "noop",
             "noop",
-            vec![ScenarioStep {
+            vec![SemanticStep {
                 id: "step-1".to_string(),
-                action: ScenarioAction::Noop,
-                instance: None,
-                expect: None,
+                actor: None,
+                action: SemanticAction::Environment(EnvironmentAction::LaunchActors),
                 timeout_ms: Some(100),
-                ..Default::default()
             }],
         );
 
@@ -172,16 +174,17 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
         let mut run_config = test_run_config(temp_dir.path().join("alice"));
         run_config.run.runtime_substrate = RuntimeSubstrate::Simulator;
-        let scenario = test_scenario_config(
+        let scenario = test_semantic_scenario_config(
             "sim-fault",
             "simulator substrate fault",
-            vec![ScenarioStep {
+            vec![SemanticStep {
                 id: "step-1".to_string(),
-                action: ScenarioAction::FaultDelay,
-                instance: Some("alice".to_string()),
-                expect: None,
+                actor: None,
+                action: SemanticAction::Environment(EnvironmentAction::FaultDelay {
+                    actor: ActorId("alice".to_string()),
+                    delay_ms: 10,
+                }),
                 timeout_ms: Some(10),
-                ..Default::default()
             }],
         );
 

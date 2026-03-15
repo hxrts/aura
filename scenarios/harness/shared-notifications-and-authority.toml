@@ -1,0 +1,117 @@
+# Shared notifications and authority test:
+#
+# 1. Launch alice and create an account.
+# 2. Navigate to notifications through the shared semantic command plane.
+# 3. Navigate to settings and capture the current authority id.
+# 4. Reissue switch-authority semantically against the current authority id.
+#
+# Success criteria: notifications navigation and switch-authority command
+# both execute through the shared semantic lane without renderer-specific input.
+
+id = "shared-notifications-and-authority"
+goal = "Validate shared semantic notifications navigation and switch-authority command handling."
+
+[[steps]]
+id = "launch"
+action = "launch_actors"
+timeout_ms = 15000
+
+[[steps]]
+id = "alice-onboarding-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "onboarding"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-create-account"
+action = "create_account"
+actor = "alice"
+value = "AliceUser"
+timeout_ms = 4000
+
+[[steps]]
+id = "alice-neighborhood-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "neighborhood"
+timeout_ms = 120000
+
+[[steps]]
+id = "alice-neighborhood-ready"
+action = "readiness_is"
+actor = "alice"
+readiness = "ready"
+timeout_ms = 120000
+
+[[steps]]
+id = "alice-open-notifications"
+action = "open_screen"
+actor = "alice"
+screen_id = "notifications"
+timeout_ms = 4000
+
+[[steps]]
+id = "alice-notifications-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "notifications"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-open-settings"
+action = "open_screen"
+actor = "alice"
+screen_id = "settings"
+timeout_ms = 4000
+
+[[steps]]
+id = "alice-settings-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "settings"
+timeout_ms = 30000
+
+[[steps]]
+id = "capture-alice-authority-id"
+action = "capture_current_authority_id"
+actor = "alice"
+name = "alice_authority_id"
+timeout_ms = 4000
+
+[[steps]]
+id = "alice-authorities-count"
+action = "list_count_is"
+actor = "alice"
+list_id = "authorities"
+count = 1
+timeout_ms = 10000
+
+[[steps]]
+id = "alice-authority-selected"
+action = "selection_is"
+actor = "alice"
+list_id = "authorities"
+item_id = "${alice_authority_id}"
+timeout_ms = 10000
+
+[[steps]]
+id = "alice-switch-current-authority"
+action = "switch_authority"
+actor = "alice"
+value = "${alice_authority_id}"
+timeout_ms = 4000
+
+[[steps]]
+id = "alice-settings-still-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "settings"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-settings-ready"
+action = "readiness_is"
+actor = "alice"
+readiness = "ready"
+timeout_ms = 30000

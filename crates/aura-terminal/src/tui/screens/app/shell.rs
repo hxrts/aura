@@ -70,10 +70,10 @@ use crate::tui::screens::app::subscriptions::{
     SharedDevices, SharedMessages, SharedNeighborhoodHomeMeta,
 };
 use crate::tui::screens::router::Screen;
-use crate::tui::state::InvitationKind;
 use crate::tui::screens::{
     ChatScreen, ContactsScreen, NeighborhoodScreen, NotificationsScreen, SettingsScreen,
 };
+use crate::tui::state::InvitationKind;
 use crate::tui::types::{
     AccessLevel, Channel, Contact, Device, Guardian, HomeSummary, Invitation, Message, MfaPolicy,
 };
@@ -379,8 +379,27 @@ fn execute_harness_followup_command(
             let Some(channel) = channels.get(channel_idx) else {
                 return Err("No channel selected".to_string());
             };
+            let context_id = channel
+                .id
+                .parse::<aura_core::ChannelId>()
+                .ok()
+                .and_then(|channel_id| {
+                    futures::executor::block_on(
+                        aura_app::ui::workflows::messaging::authoritative_context_id_for_channel(
+                            app_ctx.app_core.raw(),
+                            channel_id,
+                        ),
+                    )
+                })
+                .map(|id| id.to_string())
+                .or_else(|| channel.context_id.clone());
             state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
-            (cb.contacts.on_invite_to_channel)(contact.id.clone(), channel.name.clone(), None);
+            (cb.contacts.on_invite_to_channel)(
+                contact.id.clone(),
+                channel.name.clone(),
+                context_id,
+                None,
+            );
             Ok(None)
         }
         TuiCommand::Dispatch(DispatchCommand::InviteActorToChannel {
@@ -414,10 +433,24 @@ fn execute_harness_followup_command(
                 SemanticOperationKind::InviteActorToChannel,
             );
             let handle = operation.harness_handle();
+            let context_id = channel_id
+                .parse::<aura_core::ChannelId>()
+                .ok()
+                .and_then(|channel_id| {
+                    futures::executor::block_on(
+                        aura_app::ui::workflows::messaging::authoritative_context_id_for_channel(
+                            app_ctx.app_core.raw(),
+                            channel_id,
+                        ),
+                    )
+                })
+                .map(|id| id.to_string())
+                .or_else(|| channel.context_id.clone());
             state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
             (cb.contacts.on_invite_to_channel)(
                 authority_id.to_string(),
                 channel.id.clone(),
+                context_id,
                 Some(operation),
             );
             Ok(Some(handle))
@@ -2209,6 +2242,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let shared_discovered_peers_for_dispatch = shared_discovered_peers;
         let _shared_authority_id_for_dispatch = shared_authority_id;
         let app_ctx_for_dispatch = app_ctx.clone();
+        let app_core_for_dispatch = app_ctx.app_core.raw().clone();
         // Clone shared messages Arc for message retry dispatch
         // Used to look up failed messages by ID to get channel and content for retry
         let shared_messages_for_dispatch = shared_messages.clone();
@@ -2705,12 +2739,27 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             new_state.toast_error("No channel selected");
                                             continue;
                                         };
+                                        let context_id = channel
+                                            .id
+                                            .parse::<aura_core::ChannelId>()
+                                            .ok()
+                                            .and_then(|channel_id| {
+                                                futures::executor::block_on(
+                                                    aura_app::ui::workflows::messaging::authoritative_context_id_for_channel(
+                                                        &app_core_for_dispatch,
+                                                        channel_id,
+                                                    ),
+                                                )
+                                            })
+                                            .map(|id| id.to_string())
+                                            .or_else(|| channel.context_id.clone());
                                         new_state.clear_runtime_fact_kind(
                                             RuntimeEventKind::PendingHomeInvitationReady,
                                         );
                                         (cb.contacts.on_invite_to_channel)(
                                             contact.id.clone(),
                                             channel.name.clone(),
+                                            context_id,
                                             None,
                                         );
                                     }
@@ -2731,12 +2780,26 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             ));
                                             continue;
                                         };
+                                        let context_id = channel_id
+                                            .parse::<aura_core::ChannelId>()
+                                            .ok()
+                                            .and_then(|channel_id| {
+                                                futures::executor::block_on(
+                                                    aura_app::ui::workflows::messaging::authoritative_context_id_for_channel(
+                                                        &app_core_for_dispatch,
+                                                        channel_id,
+                                                    ),
+                                                )
+                                            })
+                                            .map(|id| id.to_string())
+                                            .or_else(|| channel.context_id.clone());
                                         new_state.clear_runtime_fact_kind(
                                             RuntimeEventKind::PendingHomeInvitationReady,
                                         );
                                         (cb.contacts.on_invite_to_channel)(
                                             authority_id.to_string(),
                                             channel.id.clone(),
+                                            context_id,
                                             None,
                                         );
                                     }

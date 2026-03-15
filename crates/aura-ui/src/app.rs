@@ -2310,6 +2310,7 @@ fn submit_runtime_chat_input(
                         None,
                         None,
                         None,
+                        None,
                     )
                     .await
                     .map(|_| Some("home invitation sent".to_string()))
@@ -2882,7 +2883,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                         .await
                         .unwrap_or_default()
                 };
-                for (operation_id, status) in bridged_operation_statuses(&facts) {
+                for (operation_id, _instance_id, status) in bridged_operation_statuses(&facts) {
                     controller_for_authoritative_operations
                         .apply_authoritative_operation_status(operation_id, status);
                 }

@@ -20,188 +20,192 @@
 # Success criteria: neighborhood key-path commands produce correct
 # toasts and state transitions.
 
-schema_version = 1
 id = "scenario7-neighborhood-keypath-parity-e2e"
-goal = "Exercise neighborhood key-path commands and verify resulting toasts/state transitions."
-execution_mode = "scripted"
-required_capabilities = ["local"]
+goal = "Exercise neighborhood key-path commands and verify resulting toasts and state transitions."
 
 [[steps]]
 id = "launch"
-action = "launch_instances"
+action = "launch_actors"
 timeout_ms = 15000
 
 [[steps]]
-id = "alice-ready"
-action = "wait_for"
-instance = "alice"
-pattern = "Welcome to Aura"
+id = "alice-onboarding-visible"
+action = "control_visible"
+actor = "alice"
+control_id = "onboarding_root"
 timeout_ms = 30000
 
 [[steps]]
 id = "alice-create-account"
-action = "send_keys"
-instance = "alice"
-keys = "Alice\n"
-timeout_ms = 3000
+action = "create_account"
+actor = "alice"
+value = "Alice"
+timeout_ms = 4000
 
 [[steps]]
-id = "alice-map-ready"
-action = "wait_for"
-instance = "alice"
-pattern = "Can enter:"
+id = "alice-neighborhood-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "neighborhood"
 timeout_ms = 30000
 
 [[steps]]
-id = "alice-neighborhood-screen-visible"
-action = "wait_for"
-instance = "alice"
-pattern = "Map"
+id = "alice-neighborhood-ready"
+action = "readiness_is"
+actor = "alice"
+readiness = "ready"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-neighborhood-map-visible"
+action = "message_contains"
+actor = "alice"
+value = "Can enter:"
 timeout_ms = 8000
 
 [[steps]]
 id = "alice-neighborhood-state-indicator-visible"
-action = "wait_for"
-instance = "alice"
-pattern = "D:Lim M:Off P:0"
+action = "message_contains"
+actor = "alice"
+value = "D:Lim M:Off P:0"
 timeout_ms = 8000
 
 [[steps]]
 id = "alice-create-neighborhood-keypath"
-action = "send_keys"
-instance = "alice"
-keys = "m"
+action = "input_text"
+actor = "alice"
+value = "m"
 timeout_ms = 2000
 
 [[steps]]
 id = "alice-neighborhood-created-toast"
-action = "expect_toast"
-instance = "alice"
+action = "toast_contains"
+actor = "alice"
 value = "Neighborhood"
 timeout_ms = 12000
 
 [[steps]]
 id = "alice-dismiss-neighborhood-toast"
-action = "send_key"
-instance = "alice"
+action = "press_key"
+actor = "alice"
 key = "esc"
 timeout_ms = 1000
 
 [[steps]]
 id = "alice-add-selected-home-keypath"
-action = "send_keys"
-instance = "alice"
-keys = "v"
+action = "input_text"
+actor = "alice"
+value = "v"
 timeout_ms = 2000
 
 [[steps]]
 id = "alice-home-added-toast"
-action = "expect_toast"
-instance = "alice"
+action = "toast_contains"
+actor = "alice"
 value = "Home added to neighborhood"
 timeout_ms = 12000
 
 [[steps]]
 id = "alice-dismiss-home-added-toast"
-action = "send_key"
-instance = "alice"
+action = "press_key"
+actor = "alice"
 key = "esc"
 timeout_ms = 1000
 
 [[steps]]
 id = "alice-link-one-hop-keypath"
-action = "send_keys"
-instance = "alice"
-keys = "L"
+action = "input_text"
+actor = "alice"
+value = "L"
 timeout_ms = 2000
 
 [[steps]]
 id = "alice-one-hop-link-toast"
-action = "expect_toast"
-instance = "alice"
+action = "toast_contains"
+actor = "alice"
 value = "link"
 timeout_ms = 12000
 
 [[steps]]
 id = "alice-dismiss-link-toast"
-action = "send_key"
-instance = "alice"
+action = "press_key"
+actor = "alice"
 key = "esc"
 timeout_ms = 1000
 
 [[steps]]
 id = "alice-go-home-key-g"
-action = "send_keys"
-instance = "alice"
-keys = "g"
+action = "input_text"
+actor = "alice"
+value = "g"
 timeout_ms = 2000
 
 [[steps]]
 id = "alice-map-stable-after-g"
-action = "wait_for"
-instance = "alice"
-pattern = "Can enter:"
+action = "message_contains"
+actor = "alice"
+value = "Can enter:"
 timeout_ms = 8000
 
 [[steps]]
 id = "alice-go-home-key-H"
-action = "send_keys"
-instance = "alice"
-keys = "H"
+action = "input_text"
+actor = "alice"
+value = "H"
 timeout_ms = 2000
 
 [[steps]]
 id = "alice-map-stable-after-H"
-action = "wait_for"
-instance = "alice"
-pattern = "Can enter:"
+action = "message_contains"
+actor = "alice"
+value = "Can enter:"
 timeout_ms = 8000
 
 [[steps]]
 id = "alice-back-to-limited-key-b"
-action = "send_keys"
-instance = "alice"
-keys = "b"
+action = "input_text"
+actor = "alice"
+value = "b"
 timeout_ms = 2000
 
 [[steps]]
 id = "alice-map-stable-after-b"
-action = "wait_for"
-instance = "alice"
-pattern = "Can enter:"
+action = "message_contains"
+actor = "alice"
+value = "Can enter:"
 timeout_ms = 8000
 
 [[steps]]
 id = "alice-enter-depth-full"
-action = "send_keys"
-instance = "alice"
-keys = "dd"
+action = "input_text"
+actor = "alice"
+value = "dd"
 timeout_ms = 2000
 
 [[steps]]
 id = "alice-enter-home-detail"
-action = "send_key"
-instance = "alice"
+action = "press_key"
+actor = "alice"
 key = "enter"
 timeout_ms = 1000
 
 [[steps]]
 id = "alice-home-detail-visible"
-action = "wait_for"
-instance = "alice"
-pattern = "Access:"
+action = "message_contains"
+actor = "alice"
+value = "Access:"
 timeout_ms = 10000
 
 [[steps]]
 id = "alice-send-detail-message"
-action = "send_keys"
-instance = "alice"
-keys = "in7-map-detail-msg\n"
+action = "input_text"
+actor = "alice"
+value = "in7-map-detail-msg\n"
 timeout_ms = 2000
 
 [[steps]]
 id = "alice-detail-still-visible-after-send"
-action = "wait_for"
-instance = "alice"
-pattern = "Access:"
+action = "message_contains"
+actor = "alice"
+value = "Access:"
 timeout_ms = 8000

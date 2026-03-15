@@ -18,10 +18,10 @@ fail() {
 collect_expected_ids() {
   local lane="$1"
   awk -v lane="$lane" '
-    BEGIN { id=""; class=""; status="" }
+    BEGIN { id=""; class="" }
     /^\[\[scenario\]\]/ {
       if (id != "") emit()
-      id=""; class=""; status=""
+      id=""; class=""
       next
     }
     /^id = / {
@@ -34,13 +34,7 @@ collect_expected_ids() {
       class=$0
       next
     }
-    /^migration_status = / {
-      gsub(/^migration_status = |"/, "", $0)
-      status=$0
-      next
-    }
     function emit() {
-      if (status != "converted") return
       if (lane == "tui" && (class == "shared" || class == "tui_conformance")) print id
       if (lane == "web" && (class == "shared" || class == "web_conformance")) print id
     }
@@ -71,7 +65,7 @@ compare_lane() {
   if ! diff -u "$expected_file" "$actual_file" >/tmp/harness-matrix-inventory-diff.$$; then
     cat /tmp/harness-matrix-inventory-diff.$$ >&2
     rm -f /tmp/harness-matrix-inventory-diff.$$ || true
-    fail "lane $lane does not match inventory-derived converted scenario set"
+    fail "lane $lane does not match inventory-derived scenario set"
   fi
   rm -f /tmp/harness-matrix-inventory-diff.$$ || true
 

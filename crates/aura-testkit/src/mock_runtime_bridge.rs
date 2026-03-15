@@ -350,6 +350,32 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(*self.amp_channel_state_exists.read().await)
     }
 
+    async fn resolve_amp_channel_context(
+        &self,
+        channel: ChannelId,
+    ) -> Result<Option<ContextId>, IntentError> {
+        let facts = self.facts.read().await;
+        for fact in facts.iter().rev() {
+            if let RelationalFact::Protocol(aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(
+                checkpoint,
+            )) = fact
+            {
+                if checkpoint.channel == channel {
+                    return Ok(Some(checkpoint.context));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    async fn amp_repair_local_channel_membership(
+        &self,
+        _params: ChannelJoinParams,
+    ) -> Result<(), IntentError> {
+        *self.amp_channel_state_exists.write().await = true;
+        Ok(())
+    }
+
     async fn amp_close_channel(&self, _params: ChannelCloseParams) -> Result<(), IntentError> {
         Ok(())
     }

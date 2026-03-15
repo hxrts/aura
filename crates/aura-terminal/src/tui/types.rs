@@ -28,6 +28,7 @@ pub use aura_app::ui::types::MessageDeliveryStatus as PortableDeliveryStatus;
 #[derive(Clone, Debug, Default)]
 pub struct Channel {
     pub id: String,
+    pub context_id: Option<String>,
     pub name: String,
     pub topic: Option<String>,
     pub unread_count: usize,
@@ -39,6 +40,7 @@ impl From<&AppChannel> for Channel {
     fn from(ch: &AppChannel) -> Self {
         Self {
             id: ch.id.to_string(),
+            context_id: ch.context_id.map(|id| id.to_string()),
             name: ch.name.clone(),
             topic: ch.topic.clone(),
             unread_count: ch.unread_count as usize,
@@ -53,6 +55,7 @@ impl Channel {
     pub fn from_app(ch: &AppChannel, is_selected: bool) -> Self {
         Self {
             id: ch.id.to_string(),
+            context_id: ch.context_id.map(|id| id.to_string()),
             name: ch.name.clone(),
             topic: ch.topic.clone(),
             unread_count: ch.unread_count as usize,
@@ -66,6 +69,7 @@ impl Channel {
     pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             id: id.into(),
+            context_id: None,
             name: name.into(),
             topic: None,
             unread_count: 0,

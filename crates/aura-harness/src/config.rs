@@ -13,8 +13,8 @@ use aura_app::scenario_contract::{
 };
 use serde::{Deserialize, Serialize};
 
-pub(crate) use crate::legacy_scenario::{nav_control_id_for_screen, settings_section_item_id};
-pub use crate::legacy_scenario::{ScenarioAction, ScenarioStep, ScreenSource};
+pub(crate) use crate::execution_step::{nav_control_id_for_screen, settings_section_item_id};
+pub use crate::execution_step::{ScenarioAction, ScenarioStep, ScreenSource};
 
 pub const RUN_SCHEMA_VERSION: u32 = 1;
 pub const SCENARIO_SCHEMA_VERSION: u32 = 1;
@@ -34,7 +34,6 @@ pub struct ScenarioInventoryEntry {
     pub id: String,
     pub path: PathBuf,
     pub classification: ScenarioClassification,
-    pub migration_status: String,
     pub runtime_substrate: String,
     pub notes: String,
 }
@@ -45,7 +44,6 @@ pub enum ScenarioClassification {
     Shared,
     TuiConformance,
     WebConformance,
-    ToBeRemoved,
 }
 
 impl ScenarioClassification {
@@ -189,44 +187,11 @@ pub struct ScenarioConfig {
     pub execution_mode: Option<String>,
     #[serde(default)]
     pub required_capabilities: Vec<String>,
-    pub steps: Vec<ScenarioStep>,
+    #[serde(rename = "steps")]
+    pub compatibility_steps: Vec<ScenarioStep>,
     #[serde(skip)]
-    pub canonical_model: ScenarioCanonicalModel,
-    #[serde(skip)]
-    pub canonical_semantic_steps: Vec<SemanticStep>,
+    pub semantic_steps: Vec<SemanticStep>,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ScenarioCanonicalModel {
-    #[default]
-    CompatibilityStepBridge,
-    SemanticSharedFlow,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NonCanonicalScenarioField {
-    pub field: &'static str,
-    pub allowed_until: &'static str,
-    pub reason: &'static str,
-}
-
-pub const NON_CANONICAL_SCENARIO_FIELDS: &[NonCanonicalScenarioField] = &[
-    NonCanonicalScenarioField {
-        field: "expect",
-        allowed_until: "2026-06-30",
-        reason: "legacy scripted compatibility bridge; shared UX scenarios must use typed semantic fields",
-    },
-    NonCanonicalScenarioField {
-        field: "contains",
-        allowed_until: "2026-06-30",
-        reason: "legacy assertion compatibility bridge; shared UX scenarios must use typed expectation metadata",
-    },
-    NonCanonicalScenarioField {
-        field: "screen_source",
-        allowed_until: "2026-06-30",
-        reason: "legacy browser-oriented observation compatibility; parity-critical waits must use canonical semantic barriers",
-    },
-];
 
 impl TryFrom<ScenarioDefinition> for ScenarioConfig {
     type Error = anyhow::Error;
@@ -237,11 +202,10 @@ impl TryFrom<ScenarioDefinition> for ScenarioConfig {
             schema_version: SCENARIO_SCHEMA_VERSION,
             id,
             goal,
-            execution_mode: Some("scripted".to_string()),
+            execution_mode: None,
             required_capabilities: Vec::new(),
-            steps: Vec::new(),
-            canonical_model: ScenarioCanonicalModel::SemanticSharedFlow,
-            canonical_semantic_steps: steps,
+            compatibility_steps: Vec::new(),
+            semantic_steps: steps,
         })
     }
 }
@@ -272,20 +236,11 @@ pub fn load_scenario_inventory(path: Option<&Path>) -> Result<Vec<ScenarioInvent
 }
 
 pub fn load_scenario_config(path: &Path) -> Result<ScenarioConfig> {
-    let body = fs::read_to_string(path)
-        .with_context(|| format!("failed to read scenario config at {}", path.display()))?;
-    let mut config: ScenarioConfig = toml::from_str(&body)
-        .with_context(|| format!("failed to parse scenario config TOML at {}", path.display()))?;
-    config.attach_canonical_metadata_from_steps()?;
-    Ok(config)
-}
-
-pub fn load_execution_scenario_config(path: &Path) -> Result<ScenarioConfig> {
     let semantic = load_semantic_scenario_definition(path)
         .with_context(|| format!("failed to load semantic scenario at {}", path.display()))?;
     ScenarioConfig::try_from(semantic).with_context(|| {
         format!(
-            "failed to build canonical harness scenario model from semantic scenario {}",
+            "failed to build harness scenario model from semantic scenario {}",
             path.display()
         )
     })
@@ -547,33 +502,20 @@ fn bind_address_has_explicit_port(bind_address: &str) -> Result<bool> {
 }
 
 impl ScenarioConfig {
-    fn attach_canonical_metadata_from_steps(&mut self) -> Result<()> {
-        self.canonical_model = ScenarioCanonicalModel::CompatibilityStepBridge;
-        self.canonical_semantic_steps.clear();
-        for step in &self.steps {
-            if let Some(semantic_step) = step.to_semantic_step()? {
-                self.canonical_semantic_steps.push(semantic_step);
-            }
+    pub fn is_semantic_scenario(&self) -> bool {
+        self.compatibility_steps.is_empty() && !self.semantic_steps.is_empty()
+    }
+
+    pub fn semantic_steps(&self) -> Option<&[SemanticStep]> {
+        self.is_semantic_scenario()
+            .then_some(self.semantic_steps.as_slice())
+    }
+
+    pub fn compatibility_steps(&self) -> Result<&[ScenarioStep]> {
+        if self.is_semantic_scenario() {
+            bail!("semantic scenarios do not lower into frontend-conformance execution step graphs");
         }
-        Ok(())
-    }
-
-    pub fn uses_canonical_shared_model(&self) -> bool {
-        self.canonical_model == ScenarioCanonicalModel::SemanticSharedFlow
-    }
-
-    pub fn shared_execution_semantic_steps(&self) -> Option<&[SemanticStep]> {
-        self.uses_canonical_shared_model()
-            .then_some(self.canonical_semantic_steps.as_slice())
-    }
-
-    pub fn execution_steps(&self) -> Result<Vec<ScenarioStep>> {
-        match self.canonical_model {
-            ScenarioCanonicalModel::CompatibilityStepBridge => Ok(self.steps.clone()),
-            ScenarioCanonicalModel::SemanticSharedFlow => {
-                bail!("canonical shared scenarios do not lower into legacy ScenarioStep graphs")
-            }
-        }
+        Ok(self.compatibility_steps.as_slice())
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -592,22 +534,32 @@ impl ScenarioConfig {
             bail!("scenario goal must be non-empty");
         }
         if let Some(mode) = self.execution_mode.as_deref() {
-            if mode != "scripted" && mode != "agent" {
-                bail!("scenario execution_mode must be one of: scripted, agent");
+            if mode != "compatibility" && mode != "scripted" && mode != "agent" {
+                bail!("scenario execution_mode must be one of: compatibility, agent");
             }
         }
-        if self.uses_canonical_shared_model() {
-            if self.canonical_semantic_steps.is_empty() {
-                bail!("canonical shared scenario must include at least one semantic step");
+        if self.compatibility_steps.is_empty() && self.semantic_steps.is_empty() {
+            bail!("scenario must include at least one step");
+        }
+        if !self.compatibility_steps.is_empty() && !self.semantic_steps.is_empty() {
+            bail!(
+                "scenario {} must not mix compatibility steps with semantic steps",
+                self.id
+            );
+        }
+
+        if self.is_semantic_scenario() {
+            if self.semantic_steps.is_empty() {
+                bail!("semantic scenario must include at least one semantic step");
             }
-            if !self.steps.is_empty() {
+            if !self.compatibility_steps.is_empty() {
                 bail!(
-                    "canonical shared scenario {} must not carry mirrored compatibility steps",
+                    "semantic scenario {} must not carry mirrored frontend-conformance execution steps",
                     self.id
                 );
             }
             let mut step_ids = HashSet::new();
-            for step in &self.canonical_semantic_steps {
+            for step in &self.semantic_steps {
                 if step.id.trim().is_empty() {
                     bail!("scenario step id must be non-empty");
                 }
@@ -616,13 +568,11 @@ impl ScenarioConfig {
                 }
             }
             return Ok(());
-        } else if self.steps.is_empty() {
-            bail!("scenario must include at least one step");
         }
 
-        let steps = self.execution_steps()?;
+        let steps = self.compatibility_steps()?;
         let mut step_ids = HashSet::new();
-        for step in &steps {
+        for step in steps {
             if step.id.trim().is_empty() {
                 bail!("scenario step id must be non-empty");
             }
@@ -684,21 +634,22 @@ pub fn require_existing_file(path: &Path, label: &str) -> Result<()> {
 mod tests {
     use super::*;
     use aura_app::scenario_contract::{
-        EnvironmentAction, Expectation, ScenarioAction as SemanticAction, UiAction,
+        ActorId, EnvironmentAction, Expectation, ScenarioAction as SemanticAction, ScenarioStep,
+        UiAction,
     };
-    use aura_app::ui::contract::{FieldId, ScreenId, ToastKind};
+    use aura_app::ui::contract::{ScreenId, ToastKind, UiReadiness};
 
-    fn compatibility_scenario(id: &str, goal: &str, steps: Vec<ScenarioStep>) -> ScenarioConfig {
-        ScenarioConfig {
-            schema_version: SCENARIO_SCHEMA_VERSION,
+    fn semantic_scenario(
+        id: &str,
+        goal: &str,
+        semantic_steps: Vec<ScenarioStep>,
+    ) -> ScenarioConfig {
+        ScenarioConfig::try_from(ScenarioDefinition {
             id: id.to_string(),
             goal: goal.to_string(),
-            execution_mode: Some("scripted".to_string()),
-            required_capabilities: vec![],
-            steps,
-            canonical_model: ScenarioCanonicalModel::CompatibilityStepBridge,
-            canonical_semantic_steps: Vec::new(),
-        }
+            steps: semantic_steps,
+        })
+        .unwrap_or_else(|error| panic!("semantic scenario conversion failed: {error}"))
     }
 
     #[test]
@@ -801,7 +752,7 @@ mod tests {
 
     #[test]
     fn scenario_requires_non_empty_steps() {
-        let mut config = compatibility_scenario("smoke", "test", vec![]);
+        let mut config = semantic_scenario("smoke", "test", vec![]);
         config.execution_mode = None;
 
         let error = match config.validate() {
@@ -809,165 +760,6 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.to_string().contains("at least one step"));
-    }
-
-    #[test]
-    fn scenario_step_explicit_fields_parse_from_toml() {
-        let body = r#"
-            schema_version = 1
-            id = "aliases"
-            goal = "exercise aliases"
-            execution_mode = "scripted"
-            required_capabilities = []
-
-            [[steps]]
-            id = "send"
-            action = "send_keys"
-            instance = "alice"
-            keys = "hello\n"
-
-            [[steps]]
-            id = "command"
-            action = "send_chat_command"
-            instance = "alice"
-            command = "join slash-lab"
-
-            [[steps]]
-            id = "wait"
-            action = "wait_for"
-            instance = "alice"
-            pattern = "slash-lab"
-
-            [[steps]]
-            id = "key"
-            action = "send_key"
-            instance = "alice"
-            key = "esc"
-
-            [[steps]]
-            id = "clipboard"
-            action = "send_clipboard"
-            instance = "bob"
-            source_instance = "alice"
-        "#;
-
-        let parsed: ScenarioConfig =
-            toml::from_str(body).unwrap_or_else(|error| panic!("parse failed: {error}"));
-        assert_eq!(parsed.steps[0].keys.as_deref(), Some("hello\n"));
-        assert_eq!(parsed.steps[1].command.as_deref(), Some("join slash-lab"));
-        assert_eq!(parsed.steps[2].pattern.as_deref(), Some("slash-lab"));
-        assert_eq!(parsed.steps[3].key.as_deref(), Some("esc"));
-        assert_eq!(parsed.steps[4].source_instance.as_deref(), Some("alice"));
-    }
-
-    #[test]
-    fn scenario_step_unknown_action_is_rejected_during_parse() {
-        let body = r#"
-            schema_version = 1
-            id = "invalid-action"
-            goal = "invalid action should fail parsing"
-            execution_mode = "scripted"
-            required_capabilities = []
-
-            [[steps]]
-            id = "bad"
-            action = "not_a_real_action"
-        "#;
-
-        let parsed: Result<ScenarioConfig, _> = toml::from_str(body);
-        assert!(parsed.is_err());
-    }
-
-    #[test]
-    fn semantic_translation_maps_typed_wait_and_fill_steps() {
-        let config = compatibility_scenario(
-            "semantic",
-            "semantic translation",
-            vec![
-                ScenarioStep {
-                    id: "fill-nickname".to_string(),
-                    action: ScenarioAction::FillInput,
-                    instance: Some("web".to_string()),
-                    field_id: Some(FieldId::Nickname),
-                    value: Some("Ops".to_string()),
-                    ..ScenarioStep::default()
-                },
-                ScenarioStep {
-                    id: "wait-settings".to_string(),
-                    action: ScenarioAction::WaitFor,
-                    instance: Some("web".to_string()),
-                    screen_id: Some(ScreenId::Settings),
-                    ..ScenarioStep::default()
-                },
-            ],
-        );
-
-        assert_eq!(
-            config.canonical_model,
-            ScenarioCanonicalModel::CompatibilityStepBridge
-        );
-        let semantic = config
-            .execution_steps()
-            .unwrap_or_else(|error| panic!("execution step lowering failed: {error}"));
-        assert_eq!(semantic.len(), 2);
-        assert!(matches!(
-            config.steps[0]
-                .to_semantic_step()
-                .unwrap_or_else(|error| panic!("semantic lowering failed: {error}")),
-            Some(SemanticStep {
-                action: SemanticAction::Ui(UiAction::Fill(FieldId::Nickname, ref value)),
-                ..
-            }) if value == "Ops"
-        ));
-        assert!(matches!(
-            config.steps[1]
-                .to_semantic_step()
-                .unwrap_or_else(|error| panic!("semantic lowering failed: {error}")),
-            Some(SemanticStep {
-                action: SemanticAction::Expect(Expectation::ScreenIs(ScreenId::Settings)),
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn semantic_translation_rejects_missing_required_fields() {
-        let step = ScenarioStep {
-            id: "bad-fill".to_string(),
-            action: ScenarioAction::FillInput,
-            instance: Some("web".to_string()),
-            field_id: Some(FieldId::Nickname),
-            ..ScenarioStep::default()
-        };
-
-        let error = step.to_semantic_step().unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("action fill_input requires value"));
-    }
-
-    #[test]
-    fn semantic_translation_maps_toast_expectation_kind() {
-        let step = ScenarioStep {
-            id: "toast".to_string(),
-            action: ScenarioAction::ExpectToast,
-            level: Some("error".to_string()),
-            contains: Some("denied".to_string()),
-            ..ScenarioStep::default()
-        };
-
-        let semantic = step
-            .to_semantic_step()
-            .unwrap_or_else(|error| panic!("toast semantic translation failed: {error}"))
-            .unwrap_or_else(|| panic!("toast step should map"));
-
-        assert!(matches!(
-            semantic.action,
-            SemanticAction::Expect(Expectation::ToastContains {
-                kind: Some(ToastKind::Error),
-                message_contains
-            }) if message_contains == "denied"
-        ));
     }
 
     #[test]
@@ -1030,25 +822,17 @@ mod tests {
         let scenario = ScenarioConfig::try_from(definition)
             .unwrap_or_else(|error| panic!("semantic scenario translation failed: {error}"));
 
-        assert!(scenario.steps.is_empty());
-        assert_eq!(
-            scenario.canonical_model,
-            ScenarioCanonicalModel::SemanticSharedFlow
-        );
-        assert_eq!(scenario.canonical_semantic_steps.len(), 2);
-        let shared_steps = scenario
-            .shared_execution_semantic_steps()
-            .unwrap_or_else(|| panic!("missing canonical shared semantic steps"));
-        assert_eq!(shared_steps.len(), 2);
+        assert!(scenario.compatibility_steps.is_empty());
+        assert_eq!(scenario.execution_mode, None);
+        assert_eq!(scenario.semantic_steps.len(), 2);
         assert!(matches!(
-            shared_steps[0].action,
+            scenario.semantic_steps[0].action,
             SemanticAction::Environment(EnvironmentAction::LaunchActors)
         ));
         assert!(matches!(
-            shared_steps[1].action,
+            scenario.semantic_steps[1].action,
             SemanticAction::Ui(UiAction::Navigate(ScreenId::Chat))
         ));
-        assert!(scenario.execution_steps().is_err());
     }
 
     #[test]
@@ -1069,21 +853,19 @@ mod tests {
         let scenario = ScenarioConfig::try_from(definition)
             .unwrap_or_else(|error| panic!("semantic scenario translation failed: {error}"));
 
-        assert!(scenario.steps.is_empty());
-        let shared_steps = scenario
-            .shared_execution_semantic_steps()
-            .unwrap_or_else(|| panic!("missing canonical shared semantic steps"));
-        assert_eq!(shared_steps.len(), 1);
+        assert!(scenario.compatibility_steps.is_empty());
         assert!(matches!(
-            &shared_steps[0].action,
+            &scenario.semantic_steps[0].action,
             SemanticAction::Expect(Expectation::ParityWithActor { actor })
                 if actor.0 == "tui"
         ));
         assert_eq!(
-            shared_steps[0].actor.as_ref().map(|actor| actor.0.as_str()),
+            scenario.semantic_steps[0]
+                .actor
+                .as_ref()
+                .map(|actor| actor.0.as_str()),
             Some("web")
         );
-        assert!(scenario.execution_steps().is_err());
     }
 
     #[test]
@@ -1265,59 +1047,11 @@ mod tests {
     }
 
     #[test]
-    fn scenario_noop_steps_are_rejected() {
-        let config = compatibility_scenario(
-            "noop-invalid",
-            "reject noop",
-            vec![ScenarioStep {
-                id: "noop".to_string(),
-                action: ScenarioAction::Noop,
-                ..ScenarioStep::default()
-            }],
-        );
-
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn scenario_wait_for_requires_target() {
-        let config = compatibility_scenario(
-            "wait-invalid",
-            "reject bare wait",
-            vec![ScenarioStep {
-                id: "wait".to_string(),
-                action: ScenarioAction::WaitFor,
-                timeout_ms: Some(1000),
-                ..ScenarioStep::default()
-            }],
-        );
-
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn scenario_assert_parity_requires_peer_instance() {
-        let config = compatibility_scenario(
-            "parity-invalid",
-            "reject parity without peer",
-            vec![ScenarioStep {
-                id: "parity".to_string(),
-                action: ScenarioAction::AssertParity,
-                instance: Some("web".to_string()),
-                timeout_ms: Some(1000),
-                ..ScenarioStep::default()
-            }],
-        );
-
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn canonical_shared_scenarios_do_not_store_mirrored_compatibility_steps() {
+    fn semantic_scenarios_keep_canonical_steps_directly() {
         let definition = ScenarioDefinition {
             id: "semantic-shared".to_string(),
-            goal: "canonical shared execution".to_string(),
-            steps: vec![SemanticStep {
+            goal: "semantic execution".to_string(),
+            steps: vec![ScenarioStep {
                 id: "launch".to_string(),
                 actor: None,
                 timeout_ms: Some(1000),
@@ -1327,23 +1061,25 @@ mod tests {
 
         let scenario = ScenarioConfig::try_from(definition)
             .unwrap_or_else(|error| panic!("semantic scenario translation failed: {error}"));
-        assert!(scenario.steps.is_empty());
-        assert_eq!(
-            scenario.canonical_model,
-            ScenarioCanonicalModel::SemanticSharedFlow
-        );
+        assert!(scenario.compatibility_steps.is_empty());
+        assert_eq!(scenario.semantic_steps.len(), 1);
         assert!(scenario.validate().is_ok());
     }
 
     #[test]
-    fn non_canonical_fields_have_explicit_deprecation_deadlines() {
-        assert!(!NON_CANONICAL_SCENARIO_FIELDS.is_empty());
-        for field in NON_CANONICAL_SCENARIO_FIELDS {
-            assert!(!field.field.trim().is_empty());
-            assert!(!field.allowed_until.trim().is_empty());
-            assert!(field.allowed_until.starts_with("202"));
-            assert!(!field.reason.trim().is_empty());
-        }
+    fn semantic_scenario_rejects_empty_step_ids() {
+        let config = semantic_scenario(
+            "invalid-step-id",
+            "reject empty step id",
+            vec![ScenarioStep {
+                id: String::new(),
+                actor: Some(ActorId("alice".to_string())),
+                timeout_ms: Some(1000),
+                action: SemanticAction::Expect(Expectation::ReadinessIs(UiReadiness::Ready)),
+            }],
+        );
+
+        assert!(config.validate().is_err());
     }
 
     #[test]
@@ -1363,6 +1099,5 @@ mod tests {
         assert!(!ScenarioClassification::Shared.is_frontend_conformance());
         assert!(ScenarioClassification::TuiConformance.is_frontend_conformance());
         assert!(ScenarioClassification::WebConformance.is_frontend_conformance());
-        assert!(!ScenarioClassification::ToBeRemoved.is_frontend_conformance());
     }
 }

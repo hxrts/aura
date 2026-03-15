@@ -624,11 +624,19 @@ mod tests {
     fn authoritative_submitting_after_terminal_allocates_new_instance() {
         let mut state = TuiState::new();
         let operation_id = OperationId::invitation_create();
-        state.set_authoritative_operation_state(operation_id.clone(), None, OperationState::Submitting);
+        state.set_authoritative_operation_state(
+            operation_id.clone(),
+            None,
+            OperationState::Submitting,
+        );
         let first = state.exported_operation_snapshots();
         let first_instance = first[0].instance_id.clone();
 
-        state.set_authoritative_operation_state(operation_id.clone(), None, OperationState::Succeeded);
+        state.set_authoritative_operation_state(
+            operation_id.clone(),
+            None,
+            OperationState::Succeeded,
+        );
         state.set_authoritative_operation_state(operation_id, None, OperationState::Submitting);
 
         let snapshots = state.exported_operation_snapshots();

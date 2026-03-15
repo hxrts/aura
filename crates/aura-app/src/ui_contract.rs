@@ -96,6 +96,9 @@ pub enum HarnessUiCommand {
         code: String,
     },
     RemoveSelectedDevice,
+    SwitchAuthority {
+        authority_id: String,
+    },
     CreateContactInvitation {
         receiver_authority_id: String,
     },
@@ -131,7 +134,9 @@ pub enum HarnessUiCommandReceipt {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         operation: Option<HarnessUiOperationHandle>,
     },
-    Rejected { reason: String },
+    Rejected {
+        reason: String,
+    },
 }
 
 impl ModalId {
@@ -1015,13 +1020,19 @@ impl AuthoritativeSemanticFact {
     }
 
     #[must_use]
-    pub fn operation_status_bridge(&self) -> Option<(OperationId, SemanticOperationStatus)> {
+    pub fn operation_status_bridge(
+        &self,
+    ) -> Option<(
+        OperationId,
+        Option<OperationInstanceId>,
+        SemanticOperationStatus,
+    )> {
         match self {
             Self::OperationStatus {
                 operation_id,
+                instance_id,
                 status,
-                ..
-            } => Some((operation_id.clone(), status.clone())),
+            } => Some((operation_id.clone(), instance_id.clone(), status.clone())),
             _ => None,
         }
     }
@@ -1030,7 +1041,11 @@ impl AuthoritativeSemanticFact {
 #[must_use]
 pub fn bridged_operation_statuses(
     facts: &[AuthoritativeSemanticFact],
-) -> Vec<(OperationId, SemanticOperationStatus)> {
+) -> Vec<(
+    OperationId,
+    Option<OperationInstanceId>,
+    SemanticOperationStatus,
+)> {
     let mut bridged = facts
         .iter()
         .filter_map(AuthoritativeSemanticFact::operation_status_bridge)
@@ -1041,7 +1056,7 @@ pub fn bridged_operation_statuses(
         .any(|fact| matches!(fact, AuthoritativeSemanticFact::ContactLinkReady { .. }));
 
     if contact_link_ready {
-        for (operation_id, status) in &mut bridged {
+        for (operation_id, _instance_id, status) in &mut bridged {
             if *operation_id == OperationId::invitation_accept()
                 && status.kind == SemanticOperationKind::AcceptContactInvitation
                 && !status.phase.is_terminal()
@@ -2406,7 +2421,7 @@ pub const SHARED_FLOW_SCENARIO_COVERAGE: &[SharedFlowScenarioCoverage] = &[
     },
     SharedFlowScenarioCoverage {
         flow: SharedFlowId::NavigateNotifications,
-        scenario_id: "scenario10-recovery-and-notifications-e2e",
+        scenario_id: "shared-notifications-and-authority",
     },
     SharedFlowScenarioCoverage {
         flow: SharedFlowId::NavigateSettings,
@@ -2442,7 +2457,7 @@ pub const SHARED_FLOW_SCENARIO_COVERAGE: &[SharedFlowScenarioCoverage] = &[
     },
     SharedFlowScenarioCoverage {
         flow: SharedFlowId::SwitchAuthority,
-        scenario_id: "scenario8-settings-devices-authority-e2e",
+        scenario_id: "shared-notifications-and-authority",
     },
 ];
 
@@ -3468,6 +3483,7 @@ mod tests {
             fact.operation_status_bridge(),
             Some((
                 OperationId::invitation_accept(),
+                Some(OperationInstanceId("accept-1".to_string())),
                 SemanticOperationStatus::new(
                     SemanticOperationKind::AcceptContactInvitation,
                     SemanticOperationPhase::Succeeded,
@@ -3519,6 +3535,7 @@ mod tests {
             statuses,
             vec![(
                 OperationId::invitation_accept(),
+                None,
                 SemanticOperationStatus::new(
                     SemanticOperationKind::AcceptContactInvitation,
                     SemanticOperationPhase::Succeeded,

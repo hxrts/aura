@@ -5,81 +5,10 @@ version = 1
 #   - shared: expected to run on both TUI and web lanes
 #   - tui_conformance: intentionally retained only for TUI frontend-conformance lane
 #   - web_conformance: intentionally retained only for web frontend-conformance lane
-#   - to_be_removed: superseded legacy scenario retained only until deletion
-# migration_status:
-#   - converted: uses the unified semantic scenario contract
-#   - legacy_pending_conversion: still uses legacy scripted harness TOML
-#   - superseded: explicitly displaced by converted coverage
-
-[[scenario]]
-id = "access-override-flow"
-path = "scenarios/harness/access-override.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
-runtime_substrate = "real_runtime"
-notes = "Legacy scripted TUI path superseded by typed shared access-override coverage in converted mixed flows."
-
-[[scenario]]
-id = "cross-authority-contact-flow"
-path = "scenarios/harness/cross-authority-contact.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
-runtime_substrate = "real_runtime"
-notes = "Legacy contact establishment flow superseded by converted mixed contact/channel scenarios."
-
-[[scenario]]
-id = "home-roles-flow"
-path = "scenarios/harness/home-roles.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
-runtime_substrate = "real_runtime"
-notes = "Terminology-only scripted regression; superseded by parity and semantic observation coverage."
-
-[[scenario]]
-id = "local-discovery-smoke"
-path = "scenarios/harness/local-discovery-smoke.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
-runtime_substrate = "real_runtime"
-notes = "Legacy discovery smoke with raw mechanics; replace with converted shared contact/channel flows."
-
-[[scenario]]
-id = "mixed-topology-agent"
-path = "scenarios/harness/mixed-topology-agent.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
-runtime_substrate = "real_runtime"
-notes = "Legacy agent-mode scenario; superseded by unified semantic harness execution."
-
-[[scenario]]
-id = "mixed-topology-smoke"
-path = "scenarios/harness/mixed-topology-smoke.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
-runtime_substrate = "real_runtime"
-notes = "Legacy topology smoke pending semantic replacement."
-
-[[scenario]]
-id = "moderation-and-modal-coverage"
-path = "scenarios/harness/moderation-and-modal-coverage.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
-runtime_substrate = "real_runtime"
-notes = "Legacy moderation/modal scripted coverage pending semantic replacement."
-
-[[scenario]]
-id = "moderator-assign-flow"
-path = "scenarios/harness/moderator-assign.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
-runtime_substrate = "real_runtime"
-notes = "Legacy moderator assignment scripted flow pending semantic replacement."
-
 [[scenario]]
 id = "quint-semantic-observation-smoke"
 path = "scenarios/harness/quint-semantic-observation-smoke.toml"
 classification = "tui_conformance"
-migration_status = "converted"
 runtime_substrate = "real_runtime"
 notes = "Reference Quint-originated semantic flow executed through the local/TUI harness lane."
 
@@ -87,39 +16,13 @@ notes = "Reference Quint-originated semantic flow executed through the local/TUI
 id = "real-runtime-mixed-startup-smoke"
 path = "scenarios/harness/real-runtime-mixed-startup-smoke.toml"
 classification = "shared"
-migration_status = "converted"
 runtime_substrate = "real_runtime"
 notes = "Reference mixed startup/readiness flow for both frontends."
-
-[[scenario]]
-id = "scenario1-invitation-chat-e2e"
-path = "scenarios/harness/scenario1-invitation-chat-e2e.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
-runtime_substrate = "real_runtime"
-notes = "Superseded by converted mixed invitation/contact/channel/message coverage."
-
-[[scenario]]
-id = "scenario10-recovery-and-notifications-e2e"
-path = "scenarios/harness/scenario10-recovery-and-notifications-e2e.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
-runtime_substrate = "real_runtime"
-notes = "Legacy recovery/notifications scripted flow pending semantic replacement."
-
-[[scenario]]
-id = "scenario11-demo-full-tui-flow-e2e"
-path = "scenarios/harness/scenario11-demo-full-tui-flow-e2e.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
-runtime_substrate = "real_runtime"
-notes = "Large legacy TUI macro-flow superseded by focused semantic coverage."
 
 [[scenario]]
 id = "scenario12-mixed-device-enrollment-removal-e2e"
 path = "scenarios/harness/scenario12-mixed-device-enrollment-removal-e2e.toml"
 classification = "shared"
-migration_status = "converted"
 runtime_substrate = "real_runtime"
 notes = "Primary shared device-enrollment/removal scenario."
 
@@ -127,79 +30,34 @@ notes = "Primary shared device-enrollment/removal scenario."
 id = "scenario13-mixed-contact-channel-message-e2e"
 path = "scenarios/harness/scenario13-mixed-contact-channel-message-e2e.toml"
 classification = "shared"
-migration_status = "converted"
 runtime_substrate = "real_runtime"
 notes = "Primary shared contact/channel/message scenario."
 
 [[scenario]]
-id = "scenario2-social-topology-e2e"
-path = "scenarios/harness/scenario2-social-topology-e2e.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
+id = "shared-notifications-and-authority"
+path = "scenarios/harness/shared-notifications-and-authority.toml"
+classification = "shared"
 runtime_substrate = "real_runtime"
-notes = "Legacy social-topology scripted flow superseded by converted mixed/contact flows."
-
-[[scenario]]
-id = "scenario3-irc-slash-commands-e2e"
-path = "scenarios/harness/scenario3-irc-slash-commands-e2e.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
-runtime_substrate = "real_runtime"
-notes = "Legacy chat command scripted flow pending semantic replacement."
+notes = "Shared semantic notifications navigation and authority-switch command coverage."
 
 [[scenario]]
 id = "scenario4-global-nav-and-help-e2e"
 path = "scenarios/harness/scenario4-global-nav-and-help-e2e.toml"
 classification = "tui_conformance"
-migration_status = "legacy_pending_conversion"
 runtime_substrate = "real_runtime"
 notes = "Intentional TUI frontend-conformance coverage for numeric navigation, focus stepping, and help-modal hotkeys; keep isolated from shared semantic product flows."
-
-[[scenario]]
-id = "scenario5-chat-modal-and-retry-e2e"
-path = "scenarios/harness/scenario5-chat-modal-and-retry-e2e.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
-runtime_substrate = "real_runtime"
-notes = "Legacy chat modal/retry scripted flow pending semantic replacement."
-
-[[scenario]]
-id = "scenario6-contacts-lan-and-contact-lifecycle-e2e"
-path = "scenarios/harness/scenario6-contacts-lan-and-contact-lifecycle-e2e.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
-runtime_substrate = "real_runtime"
-notes = "Legacy contacts/LAN scripted flow pending semantic replacement."
 
 [[scenario]]
 id = "scenario7-neighborhood-keypath-parity-e2e"
 path = "scenarios/harness/scenario7-neighborhood-keypath-parity-e2e.toml"
 classification = "tui_conformance"
-migration_status = "legacy_pending_conversion"
 runtime_substrate = "real_runtime"
 notes = "Intentional TUI frontend-conformance coverage for neighborhood key-paths and toast wiring; keep isolated from shared semantic product flows."
-
-[[scenario]]
-id = "scenario8-settings-devices-authority-e2e"
-path = "scenarios/harness/scenario8-settings-devices-authority-e2e.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
-runtime_substrate = "real_runtime"
-notes = "Legacy settings scripted flow superseded by semantic shared settings/device coverage."
-
-[[scenario]]
-id = "scenario9-guardian-and-mfa-ceremonies-e2e"
-path = "scenarios/harness/scenario9-guardian-and-mfa-ceremonies-e2e.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
-runtime_substrate = "real_runtime"
-notes = "Legacy guardian/MFA scripted flow pending semantic replacement."
 
 [[scenario]]
 id = "semantic-observation-browser-smoke"
 path = "scenarios/harness/semantic-observation-browser-smoke.toml"
 classification = "web_conformance"
-migration_status = "converted"
 runtime_substrate = "real_runtime"
 notes = "Reference browser-only semantic observation smoke."
 
@@ -207,7 +65,6 @@ notes = "Reference browser-only semantic observation smoke."
 id = "semantic-observation-tui-smoke"
 path = "scenarios/harness/semantic-observation-tui-smoke.toml"
 classification = "tui_conformance"
-migration_status = "converted"
 runtime_substrate = "real_runtime"
 notes = "Reference TUI-only semantic observation smoke."
 
@@ -215,14 +72,5 @@ notes = "Reference TUI-only semantic observation smoke."
 id = "shared-settings-parity"
 path = "scenarios/harness/shared-settings-parity.toml"
 classification = "shared"
-migration_status = "converted"
 runtime_substrate = "real_runtime"
 notes = "Parity scenario for shared Settings flow."
-
-[[scenario]]
-id = "shared-storage"
-path = "scenarios/harness/shared-storage.toml"
-classification = "to_be_removed"
-migration_status = "legacy_pending_conversion"
-runtime_substrate = "real_runtime"
-notes = "Legacy shared-storage scripted scenario pending removal or semantic replacement."

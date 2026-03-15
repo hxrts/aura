@@ -7,8 +7,9 @@ use crate::signal_defs::{
     AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL_NAME,
 };
 use crate::ui_contract::{
-    AuthoritativeSemanticFact, AuthoritativeSemanticFactKind, OperationId, SemanticOperationError,
-    SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus,
+    AuthoritativeSemanticFact, AuthoritativeSemanticFactKind, OperationId, OperationInstanceId,
+    SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
+    SemanticOperationStatus,
 };
 use crate::workflows::signals::{emit_signal, read_signal_or_default};
 use crate::AppCore;
@@ -68,11 +69,23 @@ pub async fn publish_authoritative_operation_phase(
     kind: SemanticOperationKind,
     phase: SemanticOperationPhase,
 ) -> Result<(), AuraError> {
+    publish_authoritative_operation_phase_with_instance(app_core, operation_id, None, kind, phase)
+        .await
+}
+
+/// Publish the current phase for a semantic operation with an explicit instance.
+pub async fn publish_authoritative_operation_phase_with_instance(
+    app_core: &Arc<RwLock<AppCore>>,
+    operation_id: OperationId,
+    instance_id: Option<OperationInstanceId>,
+    kind: SemanticOperationKind,
+    phase: SemanticOperationPhase,
+) -> Result<(), AuraError> {
     publish_authoritative_semantic_fact(
         app_core,
         AuthoritativeSemanticFact::OperationStatus {
             operation_id,
-            instance_id: None,
+            instance_id,
             status: SemanticOperationStatus::new(kind, phase),
         },
     )
@@ -86,11 +99,23 @@ pub async fn publish_authoritative_operation_failure(
     kind: SemanticOperationKind,
     error: SemanticOperationError,
 ) -> Result<(), AuraError> {
+    publish_authoritative_operation_failure_with_instance(app_core, operation_id, None, kind, error)
+        .await
+}
+
+/// Publish a terminal failure for a semantic operation with an explicit instance.
+pub async fn publish_authoritative_operation_failure_with_instance(
+    app_core: &Arc<RwLock<AppCore>>,
+    operation_id: OperationId,
+    instance_id: Option<OperationInstanceId>,
+    kind: SemanticOperationKind,
+    error: SemanticOperationError,
+) -> Result<(), AuraError> {
     publish_authoritative_semantic_fact(
         app_core,
         AuthoritativeSemanticFact::OperationStatus {
             operation_id,
-            instance_id: None,
+            instance_id,
             status: SemanticOperationStatus::failed(kind, error),
         },
     )

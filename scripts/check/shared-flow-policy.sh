@@ -17,9 +17,8 @@ bash scripts/check/ui-parity-contract.sh
 bash scripts/check/harness-scenario-inventory.sh
 bash scripts/check/harness-shared-scenario-contract.sh
 bash scripts/check/harness-scenario-legality.sh
-bash scripts/check/harness-legacy-shared-quarantine.sh
 bash scripts/check/harness-scenario-config-boundary.sh
-bash scripts/check/harness-scenario-canonical-model.sh
+bash scripts/check/harness-scenario-shape-contract.sh
 bash scripts/check/harness-shared-flow-metadata.sh
 bash scripts/check/harness-command-plane-boundary.sh
 bash scripts/check/harness-trace-determinism.sh

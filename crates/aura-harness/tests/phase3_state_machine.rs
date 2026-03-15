@@ -1,15 +1,25 @@
 #![allow(missing_docs)]
 
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::executor::{ExecutionMode, ScenarioExecutor};
 use aura_harness::tool_api::ToolApi;
 
+fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static TEST_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+    TEST_MUTEX
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
+
 #[test]
-fn state_machine_executes_mixed_topology_scripted_scenario() {
+fn compatibility_state_machine_executes_mixed_topology_scenario() {
+    let _guard = test_guard();
     let run_config = sample_mixed_run_config();
-    let scenario = sample_scripted_scenario();
+    let scenario = sample_compatibility_scenario();
 
     let coordinator = match HarnessCoordinator::from_run_config(&run_config) {
         Ok(coordinator) => coordinator,
@@ -20,9 +30,10 @@ fn state_machine_executes_mixed_topology_scripted_scenario() {
     if let Err(error) = api.start_all() {
         panic!("start_all failed: {error}");
     }
-    let report = match ScenarioExecutor::new(ExecutionMode::Scripted).execute(&scenario, &mut api) {
+    let report =
+        match ScenarioExecutor::new(ExecutionMode::Compatibility).execute(&scenario, &mut api) {
         Ok(report) => report,
-        Err(error) => panic!("scripted execution failed: {error}"),
+        Err(error) => panic!("compatibility execution failed: {error}"),
     };
     if let Err(error) = api.stop_all() {
         panic!("stop_all failed: {error}");
@@ -37,28 +48,39 @@ fn state_machine_executes_mixed_topology_scripted_scenario() {
         .states_visited
         .iter()
         .any(|state| state == "local-send"));
-    assert_eq!(report.step_metrics.len(), scenario.steps.len());
+    assert_eq!(report.step_metrics.len(), scenario.compatibility_steps.len());
     assert!(report.total_duration_ms > 0);
 }
 
 #[test]
-fn scripted_and_agent_modes_are_transition_equivalent() {
+fn compatibility_and_agent_modes_are_transition_equivalent() {
+    let _guard = test_guard();
     let run_config = sample_mixed_run_config();
-    let scripted_scenario = sample_scripted_scenario();
+    let compatibility_scenario = sample_compatibility_scenario();
     let agent_scenario = sample_agent_scenario();
 
-    let scripted = execute_mode(&run_config, &scripted_scenario, ExecutionMode::Scripted);
+    let compatibility = execute_mode(
+        &run_config,
+        &compatibility_scenario,
+        ExecutionMode::Compatibility,
+    );
     let agent = execute_mode(&run_config, &agent_scenario, ExecutionMode::Agent);
 
-    assert!(scripted.completed);
+    assert!(compatibility.completed);
     assert!(agent.completed);
-    assert_eq!(scripted.execution_mode, ExecutionMode::Scripted);
+    assert_eq!(compatibility.execution_mode, ExecutionMode::Compatibility);
     assert_eq!(agent.execution_mode, ExecutionMode::Agent);
-    assert!(!scripted.states_visited.is_empty());
+    assert!(!compatibility.states_visited.is_empty());
     assert!(!agent.states_visited.is_empty());
-    assert_eq!(scripted.step_metrics.len(), scripted_scenario.steps.len());
-    assert_eq!(agent.step_metrics.len(), agent_scenario.steps.len());
-    assert!(scripted.total_duration_ms > 0);
+    assert_eq!(
+        compatibility.step_metrics.len(),
+        compatibility_scenario.compatibility_steps.len()
+    );
+    assert_eq!(
+        agent.step_metrics.len(),
+        agent_scenario.compatibility_steps.len()
+    );
+    assert!(compatibility.total_duration_ms > 0);
     assert!(agent.total_duration_ms > 0);
 }
 
@@ -158,18 +180,16 @@ fn sample_mixed_run_config() -> aura_harness::config::RunConfig {
     }
 }
 
-fn sample_scripted_scenario() -> aura_harness::config::ScenarioConfig {
-    use aura_harness::config::{
-        ScenarioAction, ScenarioCanonicalModel, ScenarioConfig, ScenarioStep,
-    };
+fn sample_compatibility_scenario() -> aura_harness::config::ScenarioConfig {
+    use aura_harness::config::{ScenarioAction, ScenarioConfig, ScenarioStep};
 
     ScenarioConfig {
         schema_version: 1,
         id: "mixed-topology-smoke".to_string(),
-        goal: "Exercise local plus ssh-dry-run topology with state-machine execution.".to_string(),
-        execution_mode: Some("scripted".to_string()),
+        goal: "Exercise local plus ssh-dry-run topology with compatibility execution.".to_string(),
+        execution_mode: Some("compatibility".to_string()),
         required_capabilities: vec!["local".to_string(), "ssh".to_string()],
-        steps: vec![
+        compatibility_steps: vec![
             ScenarioStep {
                 id: "launch".to_string(),
                 action: ScenarioAction::LaunchInstances,
@@ -200,23 +220,20 @@ fn sample_scripted_scenario() -> aura_harness::config::ScenarioConfig {
                 ..Default::default()
             },
         ],
-        canonical_model: ScenarioCanonicalModel::CompatibilityStepBridge,
-        canonical_semantic_steps: Vec::new(),
+        semantic_steps: Vec::new(),
     }
 }
 
 fn sample_agent_scenario() -> aura_harness::config::ScenarioConfig {
-    use aura_harness::config::{
-        ScenarioAction, ScenarioCanonicalModel, ScenarioConfig, ScenarioStep,
-    };
+    use aura_harness::config::{ScenarioAction, ScenarioConfig, ScenarioStep};
 
     ScenarioConfig {
         schema_version: 1,
         id: "mixed-topology-agent".to_string(),
-        goal: "Run the same state-machine path using agent mode.".to_string(),
+        goal: "Run the same compatibility path using agent mode.".to_string(),
         execution_mode: Some("agent".to_string()),
         required_capabilities: vec!["local".to_string(), "ssh".to_string()],
-        steps: vec![
+        compatibility_steps: vec![
             ScenarioStep {
                 id: "launch".to_string(),
                 action: ScenarioAction::LaunchInstances,
@@ -247,7 +264,6 @@ fn sample_agent_scenario() -> aura_harness::config::ScenarioConfig {
                 ..Default::default()
             },
         ],
-        canonical_model: ScenarioCanonicalModel::CompatibilityStepBridge,
-        canonical_semantic_steps: Vec::new(),
+        semantic_steps: Vec::new(),
     }
 }

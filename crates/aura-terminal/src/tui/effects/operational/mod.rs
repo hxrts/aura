@@ -297,9 +297,7 @@ fn map_terminal_error(err: &TerminalError) -> AppError {
         TerminalError::Network(msg) => AppError::network(NetworkErrorCode::Other, msg),
         TerminalError::NotImplemented(msg) => AppError::internal("not_implemented", msg),
         TerminalError::Operation(msg) => AppError::internal("operation", msg),
-        TerminalError::StructuredOperation { code, message } => {
-            AppError::internal(*code, message)
-        }
+        TerminalError::StructuredOperation { code, message } => AppError::internal(*code, message),
     }
 }
 

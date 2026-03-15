@@ -109,9 +109,8 @@ enum GovernanceCheckArg {
     UserFlowCoverage,
     UiParityContract,
     SettingsSurfaceContract,
-    ScenarioCanonicalModel,
+    ScenarioShapeContract,
     GovernanceWrappers,
-    LegacySharedQuarantine,
 }
 
 fn main() -> Result<()> {
@@ -133,9 +132,8 @@ fn governance_check(args: GovernanceArgs) -> Result<()> {
         GovernanceCheckArg::UserFlowCoverage => GovernanceCheck::UserFlowCoverage,
         GovernanceCheckArg::UiParityContract => GovernanceCheck::UiParityContract,
         GovernanceCheckArg::SettingsSurfaceContract => GovernanceCheck::SettingsSurfaceContract,
-        GovernanceCheckArg::ScenarioCanonicalModel => GovernanceCheck::ScenarioCanonicalModel,
+        GovernanceCheckArg::ScenarioShapeContract => GovernanceCheck::ScenarioShapeContract,
         GovernanceCheckArg::GovernanceWrappers => GovernanceCheck::GovernanceWrappers,
-        GovernanceCheckArg::LegacySharedQuarantine => GovernanceCheck::LegacySharedQuarantine,
     };
     governance::run(check)
 }

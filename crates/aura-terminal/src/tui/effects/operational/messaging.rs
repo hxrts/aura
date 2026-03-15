@@ -24,9 +24,9 @@ use super::EffectCommand;
 // Note: Primary functions accept typed ChannelId directly (typesafe API)
 // TUI uses *_by_name variants for string-based user input
 pub use aura_app::ui::workflows::messaging::{
-    close_channel_by_name, create_channel, invite_user_to_channel, join_channel_by_name,
-    leave_channel_by_name, send_action_by_name, send_direct_message, send_message,
-    send_message_by_name, set_topic_by_name, start_direct_chat,
+    close_channel_by_name, create_channel, join_channel_by_name, leave_channel_by_name,
+    send_action_by_name, send_direct_message, send_message, send_message_by_name,
+    set_topic_by_name, start_direct_chat,
 };
 
 fn compact_send_error(error: &aura_core::AuraError) -> String {
@@ -177,17 +177,35 @@ pub async fn handle_messaging(
             }
         }
 
-        EffectCommand::InviteUser { target, channel } => {
-            // Invite user to channel - use workflow
-            match invite_user_to_channel(app_core, target, channel, None, None).await {
-                Ok(invitation_id) => Some(Ok(OpResponse::ChannelInvitationSent {
-                    invitation_id: invitation_id.to_string(),
-                })),
-                Err(e) => Some(Err(OpError::typed(
-                    OpFailureCode::InviteUserToChannel,
-                    format!("Failed to invite user: {e}"),
-                ))),
-            }
+        EffectCommand::InviteUser {
+            target,
+            channel,
+            context_id,
+            operation_instance_id,
+        } => {
+            let parsed_context_id = context_id
+                .as_deref()
+                .and_then(|context_id| context_id.parse::<aura_core::ContextId>().ok());
+            let app_core = Arc::clone(app_core);
+            let target = target.clone();
+            let channel = channel.clone();
+            let operation_instance_id = operation_instance_id.clone();
+            tokio::spawn(async move {
+                if let Err(error) = aura_app::ui::workflows::messaging::invite_user_to_channel_with_context(
+                    &app_core,
+                    &target,
+                    &channel,
+                    parsed_context_id,
+                    operation_instance_id,
+                    None,
+                    None,
+                )
+                .await
+                {
+                    error!(target = %target, channel = %channel, error = %error, "tui invite_user_to_channel failed");
+                }
+            });
+            Some(Ok(OpResponse::Ok))
         }
 
         EffectCommand::JoinChannel { channel } => {

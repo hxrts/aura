@@ -112,17 +112,15 @@ run_lane() {
   local scenario_id=""
   local scenario_path=""
   local scenario_class=""
-  local migration_status=""
   local config=""
   local count=0
 
   echo "[harness-matrix] lane=$selected_lane suite=$suite begin"
 
-  while IFS='|' read -r scenario_id scenario_path scenario_class migration_status; do
+  while IFS='|' read -r scenario_id scenario_path scenario_class; do
     [[ -n "$scenario_id" ]] || continue
     suite_match "$scenario_class" || continue
     lane_match "$scenario_class" "$selected_lane" || continue
-    [[ "$migration_status" == "converted" ]] || continue
     scenario_id_requested "$scenario_id" || continue
 
     config="$(config_for_run "$scenario_class" "$selected_lane")" || fail "no config for classification $scenario_class on lane $selected_lane"
@@ -137,10 +135,10 @@ run_lane() {
     fi
   done < <(
     awk '
-      BEGIN { id=""; path=""; class=""; status="" }
+      BEGIN { id=""; path=""; class="" }
       /^\[\[scenario\]\]/ {
-        if (id != "") print id "|" path "|" class "|" status
-        id=""; path=""; class=""; status=""
+        if (id != "") print id "|" path "|" class
+        id=""; path=""; class=""
       }
       /^id = / {
         gsub(/^id = |"/, "", $0)
@@ -154,12 +152,8 @@ run_lane() {
         gsub(/^classification = |"/, "", $0)
         class=$0
       }
-      /^migration_status = / {
-        gsub(/^migration_status = |"/, "", $0)
-        status=$0
-      }
       END {
-        if (id != "") print id "|" path "|" class "|" status
+        if (id != "") print id "|" path "|" class
       }
     ' "$inventory"
   )

@@ -4,15 +4,18 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use async_lock::RwLock;
 
+use crate::core::IntentError;
 use crate::runtime_bridge::RuntimeBridge;
 use crate::AppCore;
 use aura_core::AuraError;
 
 const DEFAULT_HARNESS_CONVERGENCE_ROUNDS: usize = 8;
 const DEFAULT_HARNESS_CONVERGENCE_BACKOFF_MS: u64 = 150;
+const DEFAULT_HARNESS_CONVERGENCE_STEP_TIMEOUT_MS: u64 = 1_000;
 
 #[cfg(test)]
 static HARNESS_MODE_OVERRIDE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
@@ -40,6 +43,14 @@ fn harness_convergence_backoff_ms() -> u64 {
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(DEFAULT_HARNESS_CONVERGENCE_BACKOFF_MS)
+}
+
+fn harness_convergence_step_timeout_ms() -> u64 {
+    std::env::var("AURA_HARNESS_CONVERGENCE_STEP_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|timeout_ms| *timeout_ms > 0)
+        .unwrap_or(DEFAULT_HARNESS_CONVERGENCE_STEP_TIMEOUT_MS)
 }
 
 /// Get the runtime bridge or return a consistent error.
@@ -82,13 +93,18 @@ pub async fn converge_runtime(runtime: &Arc<dyn RuntimeBridge>) {
         1
     };
     let backoff_ms = harness_convergence_backoff_ms();
+    let step_timeout_ms = harness_convergence_step_timeout_ms();
+
+    let run_step = |future: Pin<Box<dyn Future<Output = Result<(), IntentError>> + Send>>| async move {
+        let _ = tokio::time::timeout(Duration::from_millis(step_timeout_ms), future).await;
+    };
 
     for round in 0..rounds {
         if harness_mode_enabled() {
-            let _ = runtime.trigger_discovery().await;
-            let _ = runtime.process_ceremony_messages().await;
+            run_step(Box::pin(runtime.trigger_discovery())).await;
+            run_step(Box::pin(runtime.process_ceremony_messages())).await;
         }
-        let _ = runtime.trigger_sync().await;
+        run_step(Box::pin(runtime.trigger_sync())).await;
         cooperative_yield().await;
 
         if round + 1 < rounds && harness_mode_enabled() && backoff_ms > 0 {

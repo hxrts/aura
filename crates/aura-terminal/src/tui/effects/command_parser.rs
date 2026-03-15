@@ -12,6 +12,7 @@
 //! Commands are organized by functional area (Recovery, Account, Chat, etc.) and
 //! classified by the authorization level required to execute them.
 
+use aura_app::ui::contract::OperationInstanceId;
 use aura_app::ui::types::chat::Channel;
 use aura_core::identifiers::AuthorityId;
 use tokio::sync::broadcast;
@@ -275,6 +276,11 @@ pub enum EffectCommand {
         target: String,
         /// Channel to invite to
         channel: String,
+        /// Canonical context for the selected channel when already known.
+        context_id: Option<String>,
+        /// Concrete semantic operation instance when the command originates from
+        /// the shared harness command plane.
+        operation_instance_id: Option<OperationInstanceId>,
     },
 
     // === Contact Commands ===

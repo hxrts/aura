@@ -25,7 +25,7 @@ By default it is intended to validate the real Aura runtime and real user interf
 - `config.rs`: Schema parsing and translation from the shared semantic scenario contract into executor steps.
 - `coordinator.rs`: Multi-instance orchestration and per-instance command routing.
 - `tool_api.rs`: Versioned request and response surface used by tests and automation.
-- `executor.rs`: Scenario state machine execution with deterministic budgets.
+- `executor.rs`: Semantic and compatibility scenario execution with deterministic budgets.
 - `replay.rs`: Replay bundle validation and shape-based response conformance.
 - `preflight.rs`: Capability, binary, storage, port, and SSH baseline checks.
 - `backend/`: Local PTY and SSH backend adapters.
@@ -192,11 +192,11 @@ Verification hooks:
   - `scenarios/harness/semantic-observation-browser-smoke.toml`
   - `scenarios/harness/real-runtime-mixed-startup-smoke.toml`
 - Direct Quint-to-TUI execution paths have been removed. Quint now emits semantic traces rather than frontend-driving scripts.
-- Remaining legacy harness scenarios under `scenarios/harness/` are repository corpus pending full semantic conversion. They are audited by `just harness-migration-audit` and are not part of the supported runner input surface anymore.
+- The inventoried harness scenario corpus is now semantic-only and executes through the semantic step model. Frontend-conformance coverage still reuses parts of the executor's internal compatibility IR, but that IR is no longer a user-authored scenario dialect.
 
 ### Migration Sequence
 1. Define shared semantic contracts in `aura-app`.
 2. Route all real frontend execution through `aura-harness`.
 3. Convert high-value smoke and CI scenarios first.
-4. Inventory the remaining legacy scenario corpus and migrate shared flows in priority order.
-5. Remove or fail policy checks on any remaining parallel execution paths or legacy scenario dialects.
+4. Delete migration-era file-format and inventory scaffolding once the scenario corpus is semantic-only.
+5. Keep shrinking executor-internal compatibility code as frontend-conformance paths gain direct semantic execution support.

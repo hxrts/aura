@@ -10,8 +10,8 @@ use aura_app::ui::workflows::semantic_facts::{
 };
 use aura_app::ui_contract::{
     HarnessUiOperationHandle, OperationId, OperationInstanceId, SemanticFailureCode,
-    SemanticFailureDomain, SemanticOperationError, SemanticOperationKind,
-    SemanticOperationPhase, SemanticOperationStatus,
+    SemanticFailureDomain, SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
+    SemanticOperationStatus,
 };
 
 static NEXT_OWNER_OPERATION_NONCE: AtomicU64 = AtomicU64::new(0);
@@ -25,6 +25,7 @@ pub(crate) enum SemanticOperationOwner {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SemanticOperationTransferScope {
     InvitationImport,
+    InviteActorToChannel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -370,7 +371,7 @@ mod tests {
         };
         assert!(facts.iter().any(|fact| {
             fact.operation_status_bridge()
-                .is_some_and(|(operation_id, status)| {
+                .is_some_and(|(operation_id, _instance_id, status)| {
                     operation_id == OperationId::account_create()
                         && status.phase == SemanticOperationPhase::Failed
                 })
@@ -398,11 +399,18 @@ mod tests {
             SemanticOperationKind::AcceptContactInvitation,
         );
 
-        let transfer = owner.relinquish_to_workflow(SemanticOperationTransferScope::InvitationImport);
+        let transfer =
+            owner.relinquish_to_workflow(SemanticOperationTransferScope::InvitationImport);
 
-        assert_eq!(transfer.prior_owner, SemanticOperationOwner::FrontendCallback);
+        assert_eq!(
+            transfer.prior_owner,
+            SemanticOperationOwner::FrontendCallback
+        );
         assert_eq!(transfer.new_owner, SemanticOperationOwner::AppWorkflow);
-        assert_eq!(transfer.kind, SemanticOperationKind::AcceptContactInvitation);
+        assert_eq!(
+            transfer.kind,
+            SemanticOperationKind::AcceptContactInvitation
+        );
         assert_eq!(
             transfer.scope,
             SemanticOperationTransferScope::InvitationImport
@@ -487,7 +495,7 @@ mod tests {
         };
         assert!(facts.iter().any(|fact| {
             fact.operation_status_bridge()
-                .is_some_and(|(operation_id, status)| {
+                .is_some_and(|(operation_id, _instance_id, status)| {
                     operation_id == OperationId::account_create()
                         && status.phase == SemanticOperationPhase::Succeeded
                 })

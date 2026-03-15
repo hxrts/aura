@@ -6,8 +6,8 @@
 use crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
 use crate::ui_contract::{
     AuthoritativeSemanticFact, AuthoritativeSemanticFactKind, ChannelFactKey, OperationId,
-    SemanticFailureCode, SemanticFailureDomain, SemanticOperationError, SemanticOperationKind,
-    SemanticOperationPhase,
+    OperationInstanceId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
+    SemanticOperationKind, SemanticOperationPhase,
 };
 use crate::workflows::channel_ref::ChannelRef;
 use crate::workflows::chat_commands::normalize_channel_name;
@@ -22,7 +22,8 @@ use crate::workflows::runtime_error_classification::{
     InvitationAcceptErrorClass,
 };
 use crate::workflows::semantic_facts::{
-    publish_authoritative_operation_failure, publish_authoritative_operation_phase,
+    publish_authoritative_operation_failure, publish_authoritative_operation_failure_with_instance,
+    publish_authoritative_operation_phase, publish_authoritative_operation_phase_with_instance,
     replace_authoritative_semantic_facts_of_kind, update_authoritative_semantic_facts,
 };
 use crate::workflows::signals::{emit_signal, read_signal, read_signal_or_default};
@@ -61,8 +62,9 @@ use aura_journal::DomainFact;
 use aura_protocol::amp::{serialize_amp_message, AmpMessage};
 use std::collections::BTreeSet;
 use std::future::Future;
+use std::sync::Mutex;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const CHAT_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
@@ -73,6 +75,7 @@ const CHANNEL_CONTEXT_RETRY_BACKOFF_MS: u64 = 100;
 const REMOTE_DELIVERY_RETRY_ATTEMPTS: usize = 24;
 const REMOTE_DELIVERY_RETRY_BACKOFF_MS: u64 = 250;
 const INVITE_USER_STAGE_TIMEOUT_MS: u64 = 5_000;
+const INVITE_USER_OPERATION_TIMEOUT_MS: u64 = 5_000;
 
 mod routing;
 mod validation;
@@ -89,20 +92,49 @@ macro_rules! messaging_warn {
     ($($arg:tt)*) => {};
 }
 
-async fn timeout_workflow_stage<T>(
+async fn timeout_workflow_stage_with_deadline<T>(
     operation: &'static str,
     stage: &'static str,
+    deadline: Option<Instant>,
     future: impl Future<Output = Result<T, AuraError>>,
 ) -> Result<T, AuraError> {
-    tokio::time::timeout(Duration::from_millis(INVITE_USER_STAGE_TIMEOUT_MS), future)
+    let timeout = match deadline {
+        Some(deadline) => {
+            let now = Instant::now();
+            if now >= deadline {
+                return Err(AuraError::from(super::error::WorkflowError::TimedOut {
+                    operation,
+                    stage,
+                    timeout_ms: 0,
+                }));
+            }
+            std::cmp::min(
+                deadline.duration_since(now),
+                Duration::from_millis(INVITE_USER_STAGE_TIMEOUT_MS),
+            )
+        }
+        None => Duration::from_millis(INVITE_USER_STAGE_TIMEOUT_MS),
+    };
+    tokio::time::timeout(timeout, future)
         .await
         .map_err(|_| {
             AuraError::from(super::error::WorkflowError::TimedOut {
                 operation,
                 stage,
-                timeout_ms: INVITE_USER_STAGE_TIMEOUT_MS,
+                timeout_ms: timeout.as_millis() as u64,
             })
         })?
+}
+
+fn update_invite_stage(
+    tracker: &Option<Arc<Mutex<&'static str>>>,
+    stage: &'static str,
+) {
+    if let Some(tracker) = tracker {
+        if let Ok(mut guard) = tracker.lock() {
+            *guard = stage;
+        }
+    }
 }
 
 /// Messaging backend policy (runtime-backed vs UI-local).
@@ -1344,7 +1376,12 @@ async fn project_home_peer_membership(
     Ok(())
 }
 
-pub(crate) async fn authoritative_context_id_for_channel(
+/// Return the canonical context currently associated with a channel in app state.
+///
+/// Frontend bindings use this when they must preserve a channel's ownership
+/// bundle across screen transitions instead of re-resolving it later from a
+/// weaker renderer-local snapshot.
+pub async fn authoritative_context_id_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
 ) -> Option<ContextId> {
@@ -1428,9 +1465,7 @@ async fn wait_for_runtime_channel_state(
         }
     }
 
-    Err(
-        super::error::WorkflowError::Precondition("canonical AMP channel state required").into(),
-    )
+    Err(super::error::WorkflowError::Precondition("canonical AMP channel state required").into())
 }
 
 async fn ensure_home_state_for_channel(
@@ -1884,6 +1919,9 @@ pub async fn create_channel(
                 channel_id.to_string(),
                 Some(context_id),
                 bootstrap.clone(),
+                None,
+                None,
+                None,
                 invitation_message.clone(),
                 None,
             )
@@ -2766,26 +2804,110 @@ pub async fn invite_user_to_channel(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationId, AuraError> {
-    // Resolve via contacts first so command targets can use IDs or contact names.
-    let receiver = timeout_workflow_stage(
-        "invite_user_to_channel",
-        "resolve_target_authority",
-        resolve_target_authority_for_invite(app_core, target_user_id),
-    )
-    .await?;
-    let channel_id = timeout_workflow_stage(
-        "invite_user_to_channel",
-        "resolve_channel_id",
-        resolve_channel_id_from_state_or_input(app_core, channel_id),
-    )
-    .await?;
-
-    timeout_workflow_stage(
-        "invite_user_to_channel",
-        "invite_authority_to_channel",
-        invite_authority_to_channel(app_core, receiver, channel_id, message, ttl_ms),
+    invite_user_to_channel_with_context(
+        app_core,
+        target_user_id,
+        channel_id,
+        None,
+        None,
+        message,
+        ttl_ms,
     )
     .await
+}
+
+/// Invite a user to a channel while carrying an already-authoritative context,
+/// when the caller has one.
+pub async fn invite_user_to_channel_with_context(
+    app_core: &Arc<RwLock<AppCore>>,
+    target_user_id: &str,
+    channel_id: &str,
+    context_id: Option<ContextId>,
+    operation_instance_id: Option<OperationInstanceId>,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+) -> Result<InvitationId, AuraError> {
+    let timeout = Duration::from_millis(INVITE_USER_OPERATION_TIMEOUT_MS);
+    let deadline = Instant::now() + timeout;
+    let stage_tracker = Some(Arc::new(Mutex::new("publish_workflow_dispatched")));
+    if operation_instance_id.is_some() {
+        publish_authoritative_operation_phase_with_instance(
+            app_core,
+            OperationId::invitation_create(),
+            operation_instance_id.clone(),
+            SemanticOperationKind::InviteActorToChannel,
+            SemanticOperationPhase::WorkflowDispatched,
+        )
+        .await?;
+    }
+
+    let result = tokio::time::timeout(timeout, async {
+        // Resolve via contacts first so command targets can use IDs or contact names.
+        update_invite_stage(&stage_tracker, "resolve_target_authority");
+        let receiver = timeout_workflow_stage_with_deadline(
+            "invite_user_to_channel",
+            "resolve_target_authority",
+            Some(deadline),
+            resolve_target_authority_for_invite(app_core, target_user_id),
+        )
+        .await?;
+        update_invite_stage(&stage_tracker, "resolve_channel_id");
+        let channel_id = timeout_workflow_stage_with_deadline(
+            "invite_user_to_channel",
+            "resolve_channel_id",
+            Some(deadline),
+            resolve_channel_id_from_state_or_input(app_core, channel_id),
+        )
+        .await?;
+        update_invite_stage(&stage_tracker, "invite_authority_to_channel");
+
+        invite_authority_to_channel_with_context(
+            app_core,
+            receiver,
+            channel_id,
+            context_id,
+            operation_instance_id.clone(),
+            Some(deadline),
+            stage_tracker.clone(),
+            message,
+            ttl_ms,
+        )
+        .await
+    }
+    )
+    .await
+    .map_err(|_| {
+        let stage = stage_tracker
+            .as_ref()
+            .and_then(|tracker| tracker.lock().ok().map(|guard| *guard))
+            .unwrap_or("operation");
+        AuraError::from(super::error::WorkflowError::TimedOut {
+            operation: "invite_user_to_channel",
+            stage,
+            timeout_ms: INVITE_USER_OPERATION_TIMEOUT_MS,
+        })
+    })
+    .and_then(|inner| inner);
+
+    if let Err(error) = &result {
+        if let Some(instance_id) = operation_instance_id {
+            let semantic_error = SemanticOperationError::new(
+                SemanticFailureDomain::Command,
+                SemanticFailureCode::InternalError,
+            )
+            .with_detail(error.to_string());
+            let _ = publish_authoritative_operation_failure_with_instance(
+                app_core,
+                OperationId::invitation_create(),
+                Some(instance_id),
+                SemanticOperationKind::InviteActorToChannel,
+                semantic_error,
+            )
+            .await;
+        }
+    }
+
+    result
 }
 
 /// Invite a canonical authority to a canonical channel.
@@ -2796,35 +2918,63 @@ pub async fn invite_authority_to_channel(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationId, AuraError> {
-    let runtime = timeout_workflow_stage(
+    invite_authority_to_channel_with_context(
+        app_core, receiver, channel_id, None, None, None, None, message, ttl_ms,
+    )
+    .await
+}
+
+/// Invite a canonical authority to a canonical channel while carrying an
+/// already-authoritative context, when the caller has one.
+pub async fn invite_authority_to_channel_with_context(
+    app_core: &Arc<RwLock<AppCore>>,
+    receiver: AuthorityId,
+    channel_id: ChannelId,
+    context_id: Option<ContextId>,
+    operation_instance_id: Option<OperationInstanceId>,
+    deadline: Option<Instant>,
+    stage_tracker: Option<Arc<Mutex<&'static str>>>,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+) -> Result<InvitationId, AuraError> {
+    update_invite_stage(&stage_tracker, "require_runtime");
+    let runtime = timeout_workflow_stage_with_deadline(
         "invite_authority_to_channel",
         "require_runtime",
+        deadline,
         require_runtime(app_core),
     )
     .await?;
-    let context_id = timeout_workflow_stage(
-        "invite_authority_to_channel",
-        "require_authoritative_context",
-        require_authoritative_context_id_for_channel(
-            app_core,
-            &runtime,
-            channel_id,
-            "channel invitation creation",
-        ),
-    )
-    .await?;
-    let invitation = timeout_workflow_stage(
-        "invite_authority_to_channel",
-        "create_channel_invitation",
-        crate::workflows::invitation::create_channel_invitation(
-            app_core,
-            receiver,
-            channel_id.to_string(),
-            Some(context_id),
-            None,
-            message,
-            ttl_ms,
-        ),
+    let context_id = match context_id {
+        Some(context_id) => context_id,
+        None => {
+            update_invite_stage(&stage_tracker, "require_authoritative_context");
+            timeout_workflow_stage_with_deadline(
+                "invite_authority_to_channel",
+                "require_authoritative_context",
+                deadline,
+                require_authoritative_context_id_for_channel(
+                    app_core,
+                    &runtime,
+                    channel_id,
+                    "channel invitation creation",
+                ),
+            )
+            .await?
+        }
+    };
+    update_invite_stage(&stage_tracker, "create_channel_invitation");
+    let invitation = crate::workflows::invitation::create_channel_invitation(
+        app_core,
+        receiver,
+        channel_id.to_string(),
+        Some(context_id),
+        None,
+        operation_instance_id,
+        deadline,
+        stage_tracker.clone(),
+        message,
+        ttl_ms,
     )
     .await?;
     if let Some(spawner) = runtime.task_spawner() {
@@ -2859,22 +3009,24 @@ pub async fn invite_authority_to_channel(
             converge_runtime(&background_runtime).await;
         });
     } else {
-        timeout_workflow_stage(
+        update_invite_stage(&stage_tracker, "local_projection");
+        timeout_workflow_stage_with_deadline(
             "invite_authority_to_channel",
             "local_projection",
+            deadline,
             async {
-                project_channel_peer_membership_with_context(
-                    app_core,
-                    channel_id,
-                    Some(context_id),
-                    receiver,
-                    None,
-                )
-                .await?;
-                warm_channel_connectivity(app_core, &runtime, channel_id, context_id).await;
-                converge_runtime(&runtime).await;
-                Ok(())
-            },
+            project_channel_peer_membership_with_context(
+                app_core,
+                channel_id,
+                Some(context_id),
+                receiver,
+                None,
+            )
+            .await?;
+            warm_channel_connectivity(app_core, &runtime, channel_id, context_id).await;
+            converge_runtime(&runtime).await;
+            Ok(())
+        },
         )
         .await?;
     }

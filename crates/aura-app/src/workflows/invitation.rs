@@ -140,7 +140,10 @@ pub fn prev_ttl_preset(current_hours: u64) -> u64 {
 use crate::signal_defs::INVITATIONS_SIGNAL;
 use crate::ui::signals::CONTACTS_SIGNAL;
 use crate::ui_contract::AuthoritativeSemanticFact;
-use crate::ui_contract::{OperationId, SemanticOperationKind, SemanticOperationPhase};
+use crate::ui_contract::{
+    OperationId, OperationInstanceId, SemanticOperationKind, SemanticOperationPhase,
+    SemanticOperationStatus,
+};
 use crate::workflows::runtime::{
     converge_runtime, ensure_runtime_peer_connectivity, require_runtime,
 };
@@ -150,7 +153,8 @@ use crate::workflows::runtime_error_classification::{
 };
 use crate::workflows::semantic_facts::{
     publish_authoritative_operation_failure, publish_authoritative_operation_phase,
-    replace_authoritative_semantic_facts_of_kind, update_authoritative_semantic_facts,
+    publish_authoritative_semantic_fact, replace_authoritative_semantic_facts_of_kind,
+    update_authoritative_semantic_facts,
 };
 use crate::workflows::settings;
 #[cfg(feature = "signals")]
@@ -162,8 +166,8 @@ use async_lock::RwLock;
 use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
 use aura_core::AuraError;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use thiserror::Error;
 
 const CONTACT_LINK_ATTEMPTS: usize = 32;
@@ -172,19 +176,78 @@ const CHANNEL_BOOTSTRAP_RETRY_ATTEMPTS: usize = 6;
 const CHANNEL_BOOTSTRAP_RETRY_BACKOFF_MS: u64 = 75;
 const CHANNEL_INVITATION_CREATE_TIMEOUT_MS: u64 = 5_000;
 
-async fn timeout_channel_invitation_stage<T>(
+fn update_channel_invitation_stage(
+    tracker: &Option<Arc<Mutex<&'static str>>>,
     stage: &'static str,
+) {
+    if let Some(tracker) = tracker {
+        if let Ok(mut guard) = tracker.lock() {
+            *guard = stage;
+        }
+    }
+}
+
+async fn timeout_channel_invitation_stage_with_deadline<T>(
+    stage: &'static str,
+    deadline: Option<Instant>,
     future: impl std::future::Future<Output = Result<T, AuraError>>,
 ) -> Result<T, AuraError> {
-    tokio::time::timeout(Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS), future)
-        .await
-        .map_err(|_| {
-            AuraError::from(crate::workflows::error::WorkflowError::TimedOut {
-                operation: "create_channel_invitation",
-                stage,
-                timeout_ms: CHANNEL_INVITATION_CREATE_TIMEOUT_MS,
-            })
-        })?
+    let timeout = match deadline {
+        Some(deadline) => {
+            let now = Instant::now();
+            if now >= deadline {
+                return Err(AuraError::from(crate::workflows::error::WorkflowError::TimedOut {
+                    operation: "create_channel_invitation",
+                    stage,
+                    timeout_ms: 0,
+                }));
+            }
+            std::cmp::min(
+                deadline.duration_since(now),
+                Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS),
+            )
+        }
+        None => Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS),
+    };
+    tokio::time::timeout(
+        timeout,
+        future,
+    )
+    .await
+    .map_err(|_| {
+        AuraError::from(crate::workflows::error::WorkflowError::TimedOut {
+            operation: "create_channel_invitation",
+            stage,
+            timeout_ms: timeout.as_millis() as u64,
+        })
+    })?
+}
+
+fn channel_invitation_bootstrap_timeout(
+    deadline: Option<Instant>,
+    channel_id: ChannelId,
+    stage: &'static str,
+    context_id: Option<ContextId>,
+) -> Result<Duration, ChannelInvitationBootstrapError> {
+    match deadline {
+        Some(deadline) => {
+            let now = Instant::now();
+            if now >= deadline {
+                let context_detail = context_id
+                    .map(|context| format!(" in context {context}"))
+                    .unwrap_or_default();
+                return Err(ChannelInvitationBootstrapError::BootstrapTransport {
+                    channel_id,
+                    detail: format!("create_channel_invitation deadline exhausted before {stage}{context_detail}"),
+                });
+            }
+            Ok(std::cmp::min(
+                deadline.duration_since(now),
+                Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS),
+            ))
+        }
+        None => Ok(Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS)),
+    }
 }
 
 fn has_pending_home_or_channel_invitation(invitations: &InvitationsState) -> bool {
@@ -204,10 +267,46 @@ fn has_pending_home_or_channel_invitation(invitations: &InvitationsState) -> boo
 async fn publish_invitation_operation_status(
     app_core: &Arc<RwLock<AppCore>>,
     operation_id: OperationId,
+    instance_id: Option<OperationInstanceId>,
+    deadline: Option<Instant>,
     kind: SemanticOperationKind,
     phase: SemanticOperationPhase,
 ) -> Result<(), AuraError> {
-    publish_authoritative_operation_phase(app_core, operation_id, kind, phase).await
+    let stage = match phase {
+        SemanticOperationPhase::Submitted => "publish_submitted",
+        SemanticOperationPhase::WorkflowDispatched => "publish_workflow_dispatched",
+        SemanticOperationPhase::AuthoritativeContextReady => "publish_authoritative_context_ready",
+        SemanticOperationPhase::ContactLinkReady => "publish_contact_link_ready",
+        SemanticOperationPhase::MembershipReady => "publish_membership_ready",
+        SemanticOperationPhase::RecipientResolutionReady => "publish_recipient_resolution_ready",
+        SemanticOperationPhase::PeerChannelReady => "publish_peer_channel_ready",
+        SemanticOperationPhase::DeliveryReady => "publish_delivery_ready",
+        SemanticOperationPhase::Succeeded => "publish_succeeded",
+        SemanticOperationPhase::Failed => "publish_failed",
+        SemanticOperationPhase::Cancelled => "publish_cancelled",
+    };
+    if let Some(instance_id) = instance_id {
+        timeout_channel_invitation_stage_with_deadline(
+            stage,
+            deadline,
+            publish_authoritative_semantic_fact(
+                app_core,
+                AuthoritativeSemanticFact::OperationStatus {
+                    operation_id,
+                    instance_id: Some(instance_id),
+                    status: SemanticOperationStatus::new(kind, phase),
+                },
+            ),
+        )
+        .await
+    } else {
+        timeout_channel_invitation_stage_with_deadline(
+            stage,
+            deadline,
+            publish_authoritative_operation_phase(app_core, operation_id, kind, phase),
+        )
+        .await
+    }
 }
 
 async fn publish_contact_accept_success(
@@ -356,19 +455,46 @@ impl From<ChannelInvitationBootstrapError> for AuraError {
 async fn publish_invitation_operation_failure(
     app_core: &Arc<RwLock<AppCore>>,
     operation_id: OperationId,
+    instance_id: Option<OperationInstanceId>,
+    deadline: Option<Instant>,
     kind: SemanticOperationKind,
     error: crate::ui_contract::SemanticOperationError,
 ) -> Result<(), AuraError> {
-    publish_authoritative_operation_failure(app_core, operation_id, kind, error).await
+    if let Some(instance_id) = instance_id {
+        timeout_channel_invitation_stage_with_deadline(
+            "publish_failure",
+            deadline,
+            publish_authoritative_semantic_fact(
+                app_core,
+                AuthoritativeSemanticFact::OperationStatus {
+                    operation_id,
+                    instance_id: Some(instance_id),
+                    status: SemanticOperationStatus::failed(kind, error),
+                },
+            ),
+        )
+        .await
+    } else {
+        timeout_channel_invitation_stage_with_deadline(
+            "publish_failure",
+            deadline,
+            publish_authoritative_operation_failure(app_core, operation_id, kind, error),
+        )
+        .await
+    }
 }
 
 async fn fail_channel_invitation<T>(
     app_core: &Arc<RwLock<AppCore>>,
+    instance_id: Option<OperationInstanceId>,
+    _deadline: Option<Instant>,
     error: ChannelInvitationBootstrapError,
 ) -> Result<T, AuraError> {
     publish_invitation_operation_failure(
         app_core,
         OperationId::invitation_create(),
+        instance_id,
+        None,
         SemanticOperationKind::InviteActorToChannel,
         error.semantic_error(),
     )
@@ -422,6 +548,8 @@ async fn fail_invitation_accept<T>(
     publish_invitation_operation_failure(
         app_core,
         OperationId::invitation_accept(),
+        None,
+        None,
         kind,
         error.semantic_error(kind),
     )
@@ -457,11 +585,14 @@ async fn ensure_channel_invitation_context_and_bootstrap(
     channel_id: ChannelId,
     context_id: Option<ContextId>,
     bootstrap: Option<ChannelBootstrapPackage>,
+    stage_tracker: &Option<Arc<Mutex<&'static str>>>,
+    deadline: Option<Instant>,
 ) -> Result<(ContextId, ChannelBootstrapPackage), ChannelInvitationBootstrapError> {
     #[allow(unused_mut)]
     let mut resolved_context = match context_id {
         Some(context_id) => context_id,
         None => {
+            update_channel_invitation_stage(stage_tracker, "resolve_context");
             #[cfg(feature = "signals")]
             {
                 crate::workflows::messaging::context_id_for_channel(
@@ -470,16 +601,16 @@ async fn ensure_channel_invitation_context_and_bootstrap(
                     Some(runtime.authority_id()),
                 )
                 .await
-                .map_err(|_| ChannelInvitationBootstrapError::MissingAuthoritativeContext {
-                    channel_id,
+                .map_err(|_| {
+                    ChannelInvitationBootstrapError::MissingAuthoritativeContext { channel_id }
                 })?
             }
             #[cfg(not(feature = "signals"))]
             {
                 let _ = app_core;
-                return Err(ChannelInvitationBootstrapError::MissingAuthoritativeContext {
-                    channel_id,
-                });
+                return Err(
+                    ChannelInvitationBootstrapError::MissingAuthoritativeContext { channel_id },
+                );
             }
         }
     };
@@ -488,45 +619,129 @@ async fn ensure_channel_invitation_context_and_bootstrap(
         return Ok((resolved_context, bootstrap));
     }
 
+    update_channel_invitation_stage(stage_tracker, "resolve_runtime_channel_context");
+    if let Some(runtime_context) = timeout_channel_invitation_stage_with_deadline(
+        "resolve_runtime_channel_context",
+        deadline,
+        async {
+            runtime
+                .resolve_amp_channel_context(channel_id)
+                .await
+                .map_err(|error| AuraError::internal(error.to_string()))
+        },
+    )
+    .await
+    .map_err(|error| ChannelInvitationBootstrapError::BootstrapTransport {
+        channel_id,
+        detail: error.to_string(),
+    })? {
+        resolved_context = runtime_context;
+    }
+
     let invitees = vec![receiver];
     for attempt in 0..=CHANNEL_BOOTSTRAP_RETRY_ATTEMPTS {
-        match runtime
-            .amp_create_channel_bootstrap(resolved_context, channel_id, invitees.clone())
-            .await
-        {
-            Ok(bootstrap) => return Ok((resolved_context, bootstrap)),
-            Err(error)
-                if classify_amp_channel_error(&error)
-                    == AmpChannelErrorClass::ChannelStateUnavailable =>
-            {
-                if attempt == CHANNEL_BOOTSTRAP_RETRY_ATTEMPTS {
-                    break;
-                }
-                converge_runtime(runtime).await;
-                runtime
-                    .sleep_ms(CHANNEL_BOOTSTRAP_RETRY_BACKOFF_MS * (attempt as u64 + 1))
-                    .await;
-                #[cfg(feature = "signals")]
-                {
-                    if let Ok(authoritative_context) =
-                        crate::workflows::messaging::require_authoritative_context_id_for_channel(
-                            app_core,
-                            runtime,
-                            channel_id,
-                            "channel invitation bootstrap",
-                        )
-                        .await
-                    {
-                        resolved_context = authoritative_context;
-                    }
-                }
-            }
-            Err(error) => {
+        update_channel_invitation_stage(stage_tracker, "amp_create_channel_bootstrap");
+        let bootstrap_timeout = channel_invitation_bootstrap_timeout(
+            deadline,
+            channel_id,
+            "amp_create_channel_bootstrap",
+            Some(resolved_context),
+        )?;
+        let bootstrap_attempt = tokio::time::timeout(
+            bootstrap_timeout,
+            runtime.amp_create_channel_bootstrap(resolved_context, channel_id, invitees.clone()),
+        )
+        .await;
+        match bootstrap_attempt {
+            Err(_) => {
                 return Err(ChannelInvitationBootstrapError::BootstrapTransport {
                     channel_id,
-                    detail: error.to_string(),
+                    detail: format!(
+                        "amp_create_channel_bootstrap timed out after {}ms in context {resolved_context}",
+                        CHANNEL_INVITATION_CREATE_TIMEOUT_MS
+                    ),
                 });
             }
+            Ok(result) => match result {
+                Ok(bootstrap) => return Ok((resolved_context, bootstrap)),
+                Err(error)
+                    if classify_amp_channel_error(&error)
+                        == AmpChannelErrorClass::ChannelStateUnavailable =>
+                {
+                    if attempt == CHANNEL_BOOTSTRAP_RETRY_ATTEMPTS {
+                        break;
+                    }
+                    // A channel that already satisfied the authoritative
+                    // runtime-state gate for create/join must not be silently
+                    // "repaired" here by re-running channel creation. The
+                    // invite path is allowed to wait for convergence and retry
+                    // bootstrap lookup, but a missing checkpoint after that is
+                    // a real inconsistency that should fail explicitly.
+                    converge_runtime(runtime).await;
+                    runtime
+                        .sleep_ms(CHANNEL_BOOTSTRAP_RETRY_BACKOFF_MS * (attempt as u64 + 1))
+                        .await;
+                    update_channel_invitation_stage(stage_tracker, "amp_channel_state_exists");
+                    let exists_timeout = channel_invitation_bootstrap_timeout(
+                        deadline,
+                        channel_id,
+                        "amp_channel_state_exists",
+                        Some(resolved_context),
+                    )?;
+                    let state_exists = match tokio::time::timeout(
+                        exists_timeout,
+                        runtime.amp_channel_state_exists(resolved_context, channel_id),
+                    )
+                    .await
+                    {
+                        Err(_) => {
+                            return Err(ChannelInvitationBootstrapError::BootstrapTransport {
+                                channel_id,
+                                detail: format!(
+                                    "amp_channel_state_exists timed out after {}ms in context {resolved_context}",
+                                    CHANNEL_INVITATION_CREATE_TIMEOUT_MS
+                                ),
+                            });
+                        }
+                        Ok(Ok(state_exists)) => state_exists,
+                        Ok(Err(state_error)) => {
+                            return Err(ChannelInvitationBootstrapError::BootstrapTransport {
+                                channel_id,
+                                detail: format!(
+                                    "failed to verify repaired channel state in context {resolved_context}: {state_error}"
+                                ),
+                            });
+                        }
+                    };
+                    #[cfg(feature = "signals")]
+                    {
+                        if !state_exists {
+                            if let Ok(authoritative_context) =
+                                crate::workflows::messaging::context_id_for_channel(
+                                    app_core,
+                                    channel_id,
+                                    Some(runtime.authority_id()),
+                                )
+                                .await
+                            {
+                                if authoritative_context != resolved_context {
+                                    resolved_context = authoritative_context;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                    if !state_exists {
+                        continue;
+                    }
+                }
+                Err(error) => {
+                    return Err(ChannelInvitationBootstrapError::BootstrapTransport {
+                        channel_id,
+                        detail: error.to_string(),
+                    });
+                }
+            },
         }
     }
 
@@ -666,6 +881,8 @@ pub async fn create_contact_invitation(
     publish_invitation_operation_status(
         app_core,
         OperationId::invitation_create(),
+        None,
+        None,
         SemanticOperationKind::CreateContactInvitation,
         SemanticOperationPhase::WorkflowDispatched,
     )
@@ -694,6 +911,8 @@ pub async fn create_guardian_invitation(
     publish_invitation_operation_status(
         app_core,
         OperationId::invitation_create(),
+        None,
+        None,
         SemanticOperationKind::CreateContactInvitation,
         SemanticOperationPhase::WorkflowDispatched,
     )
@@ -720,96 +939,144 @@ pub async fn create_channel_invitation(
     home_id: String,
     context_id: Option<ContextId>,
     bootstrap: Option<ChannelBootstrapPackage>,
+    operation_instance_id: Option<OperationInstanceId>,
+    deadline: Option<Instant>,
+    external_stage_tracker: Option<Arc<Mutex<&'static str>>>,
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationInfo, AuraError> {
-    let runtime = timeout_channel_invitation_stage("require_runtime", require_runtime(app_core)).await?;
-    publish_invitation_operation_status(
-        app_core,
-        OperationId::invitation_create(),
-        SemanticOperationKind::InviteActorToChannel,
-        SemanticOperationPhase::WorkflowDispatched,
-    )
-    .await?;
-    let channel_id = match home_id.parse::<ChannelId>() {
-        Ok(channel_id) => channel_id,
-        Err(_) => {
-            return fail_channel_invitation(
-                app_core,
-                ChannelInvitationBootstrapError::InvalidCanonicalChannelId { raw: home_id },
-            )
-            .await;
-        }
-    };
-    let (context_id, bootstrap) = match tokio::time::timeout(
+    let stage_tracker = external_stage_tracker.or_else(|| Some(Arc::new(Mutex::new("require_runtime"))));
+    let fallback_channel_id = home_id.parse::<ChannelId>().ok();
+    let invitation_result = tokio::time::timeout(
         Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS),
-        ensure_channel_invitation_context_and_bootstrap(
-            app_core,
-            &runtime,
-            receiver,
-            channel_id,
-            context_id,
-            bootstrap,
-        ),
-    )
-    .await
-    {
-        Ok(Ok(resolved)) => resolved,
-        Ok(Err(error)) => return fail_channel_invitation(app_core, error).await,
-        Err(_) => {
-            return fail_channel_invitation(
-                app_core,
-                ChannelInvitationBootstrapError::BootstrapTransport {
-                    channel_id,
-                    detail: format!(
-                        "create_channel_invitation timed out in stage resolve_context_and_bootstrap after {}ms",
-                        CHANNEL_INVITATION_CREATE_TIMEOUT_MS
-                    ),
-                },
+        async {
+            let runtime = timeout_channel_invitation_stage_with_deadline(
+                "require_runtime",
+                deadline,
+                require_runtime(app_core),
             )
-            .await;
-        }
-    };
-    publish_invitation_operation_status(
-        app_core,
-        OperationId::invitation_create(),
-        SemanticOperationKind::InviteActorToChannel,
-        SemanticOperationPhase::AuthoritativeContextReady,
-    )
-    .await?;
+            .await
+            .map_err(|error| ChannelInvitationBootstrapError::BootstrapTransport {
+                channel_id: fallback_channel_id.unwrap_or_else(|| ChannelId::new(aura_core::Hash32([0; 32]))),
+                detail: error.to_string(),
+            })?;
+            update_channel_invitation_stage(&stage_tracker, "publish_workflow_dispatched");
+            publish_invitation_operation_status(
+                app_core,
+                OperationId::invitation_create(),
+                operation_instance_id.clone(),
+                deadline,
+                SemanticOperationKind::InviteActorToChannel,
+                SemanticOperationPhase::WorkflowDispatched,
+            )
+            .await
+            .map_err(|error| ChannelInvitationBootstrapError::BootstrapTransport {
+                channel_id: fallback_channel_id.unwrap_or_else(|| ChannelId::new(aura_core::Hash32([0; 32]))),
+                detail: error.to_string(),
+            })?;
+            update_channel_invitation_stage(&stage_tracker, "parse_channel_id");
+            let channel_id = match home_id.parse::<ChannelId>() {
+                Ok(channel_id) => channel_id,
+                Err(_) => {
+                    return Err(ChannelInvitationBootstrapError::InvalidCanonicalChannelId {
+                        raw: home_id.clone(),
+                    });
+                }
+            };
+            update_channel_invitation_stage(&stage_tracker, "ensure_context_and_bootstrap");
+            let (context_id, bootstrap) = ensure_channel_invitation_context_and_bootstrap(
+                app_core,
+                &runtime,
+                receiver,
+                channel_id,
+                context_id,
+                bootstrap,
+                &stage_tracker,
+                deadline,
+            )
+            .await?;
+            update_channel_invitation_stage(&stage_tracker, "publish_authoritative_context_ready");
+            publish_invitation_operation_status(
+                app_core,
+                OperationId::invitation_create(),
+                operation_instance_id.clone(),
+                deadline,
+                SemanticOperationKind::InviteActorToChannel,
+                SemanticOperationPhase::AuthoritativeContextReady,
+            )
+            .await
+            .map_err(|error| ChannelInvitationBootstrapError::BootstrapTransport {
+                channel_id,
+                detail: error.to_string(),
+            })?;
 
-    let invitation = match tokio::time::timeout(
-        Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS),
-        runtime.create_channel_invitation(
-            receiver,
-            home_id,
-            Some(context_id),
-            Some(bootstrap),
-            message,
-            ttl_ms,
-        ),
+            update_channel_invitation_stage(&stage_tracker, "runtime.create_channel_invitation");
+            let invitation = match tokio::time::timeout(
+                channel_invitation_bootstrap_timeout(
+                    deadline,
+                    channel_id,
+                    "runtime.create_channel_invitation",
+                    Some(context_id),
+                )
+                ?,
+                runtime.create_channel_invitation(
+                    receiver,
+                    home_id,
+                    Some(context_id),
+                    Some(bootstrap),
+                    message,
+                    ttl_ms,
+                ),
+            )
+            .await
+            {
+                Ok(Ok(invitation)) => invitation,
+                Ok(Err(error)) => {
+                    return Err(ChannelInvitationBootstrapError::CreateFailed {
+                        channel_id,
+                        receiver_id: receiver,
+                        detail: error.to_string(),
+                    });
+                }
+                Err(_) => {
+                    return Err(ChannelInvitationBootstrapError::CreateTimedOut {
+                        channel_id,
+                        receiver_id: receiver,
+                        timeout_ms: CHANNEL_INVITATION_CREATE_TIMEOUT_MS,
+                    });
+                }
+            };
+
+            Ok((runtime, channel_id, context_id, invitation))
+        },
     )
-    .await
-    {
-        Ok(Ok(invitation)) => invitation,
+    .await;
+
+    let (_runtime, _channel_id, _context_id, invitation) = match invitation_result {
+        Ok(Ok(value)) => value,
         Ok(Err(error)) => {
             return fail_channel_invitation(
                 app_core,
-                ChannelInvitationBootstrapError::CreateFailed {
-                    channel_id,
-                    receiver_id: receiver,
-                    detail: error.to_string(),
-                },
+                operation_instance_id.clone(),
+                deadline,
+                error,
             )
             .await;
         }
         Err(_) => {
+            let detail = stage_tracker
+                .as_ref()
+                .and_then(|tracker| tracker.lock().ok().map(|guard| *guard))
+                .unwrap_or("operation");
+            let channel_id = fallback_channel_id
+                .unwrap_or_else(|| ChannelId::new(aura_core::Hash32([0; 32])));
             return fail_channel_invitation(
                 app_core,
-                ChannelInvitationBootstrapError::CreateTimedOut {
+                operation_instance_id.clone(),
+                deadline,
+                ChannelInvitationBootstrapError::BootstrapTransport {
                     channel_id,
-                    receiver_id: receiver,
-                    timeout_ms: CHANNEL_INVITATION_CREATE_TIMEOUT_MS,
+                    detail: format!("create_channel_invitation timed out in stage {detail}"),
                 },
             )
             .await;
@@ -818,6 +1085,8 @@ pub async fn create_channel_invitation(
     publish_invitation_operation_status(
         app_core,
         OperationId::invitation_create(),
+        operation_instance_id,
+        deadline,
         SemanticOperationKind::InviteActorToChannel,
         SemanticOperationPhase::Succeeded,
     )
@@ -888,6 +1157,8 @@ pub async fn export_invitation(
     publish_invitation_operation_status(
         app_core,
         OperationId::invitation_create(),
+        None,
+        None,
         SemanticOperationKind::CreateContactInvitation,
         SemanticOperationPhase::Succeeded,
     )
@@ -939,6 +1210,8 @@ pub async fn accept_invitation(
     publish_invitation_operation_status(
         app_core,
         OperationId::invitation_accept(),
+        None,
+        None,
         operation_kind,
         SemanticOperationPhase::WorkflowDispatched,
     )
@@ -1014,6 +1287,8 @@ pub async fn accept_invitation(
     publish_invitation_operation_status(
         app_core,
         OperationId::invitation_accept(),
+        None,
+        None,
         operation_kind,
         SemanticOperationPhase::Succeeded,
     )
@@ -1031,6 +1306,8 @@ pub async fn accept_imported_invitation(
     publish_invitation_operation_status(
         app_core,
         OperationId::invitation_accept(),
+        None,
+        None,
         operation_kind,
         SemanticOperationPhase::WorkflowDispatched,
     )
@@ -1139,6 +1416,8 @@ pub async fn accept_imported_invitation(
     publish_invitation_operation_status(
         app_core,
         OperationId::invitation_accept(),
+        None,
+        None,
         operation_kind,
         SemanticOperationPhase::Succeeded,
     )
@@ -1155,6 +1434,8 @@ pub async fn accept_device_enrollment_invitation(
     publish_invitation_operation_status(
         app_core,
         OperationId::device_enrollment(),
+        None,
+        None,
         SemanticOperationKind::ImportDeviceEnrollmentCode,
         SemanticOperationPhase::WorkflowDispatched,
     )
@@ -1225,6 +1506,8 @@ pub async fn accept_device_enrollment_invitation(
             publish_invitation_operation_status(
                 app_core,
                 OperationId::device_enrollment(),
+                None,
+                None,
                 SemanticOperationKind::ImportDeviceEnrollmentCode,
                 SemanticOperationPhase::Succeeded,
             )
@@ -1244,6 +1527,8 @@ pub async fn accept_device_enrollment_invitation(
     publish_invitation_operation_status(
         app_core,
         OperationId::device_enrollment(),
+        None,
+        None,
         SemanticOperationKind::ImportDeviceEnrollmentCode,
         SemanticOperationPhase::Succeeded,
     )
@@ -1956,10 +2241,9 @@ mod tests {
             .detail
             .as_deref()
             .is_some_and(|detail| detail.contains(&receiver_id.to_string())));
-        assert!(semantic
-            .detail
-            .as_deref()
-            .is_some_and(|detail| detail.contains(&CHANNEL_INVITATION_CREATE_TIMEOUT_MS.to_string())));
+        assert!(semantic.detail.as_deref().is_some_and(
+            |detail| detail.contains(&CHANNEL_INVITATION_CREATE_TIMEOUT_MS.to_string())
+        ));
     }
 
     #[tokio::test]
@@ -1977,6 +2261,8 @@ mod tests {
         let receiver_id = AuthorityId::new_from_entropy([52u8; 32]);
         let result = fail_channel_invitation::<()>(
             &app_core,
+            None,
+            None,
             ChannelInvitationBootstrapError::CreateFailed {
                 channel_id,
                 receiver_id,

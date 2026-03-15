@@ -12,6 +12,7 @@ use aura_agent::handlers::{
     GuardianProfile, GuardianSet, RecoveryDispute, RecoveryOperation, RecoveryRequest,
     RecoveryResponse,
 };
+use aura_app::ui::types::format_recovery_status;
 use aura_app::ui::workflows::recovery_cli::{
     self, validate_guardian_set, DISPUTE_WINDOW_HOURS_DEFAULT,
 };
@@ -24,7 +25,6 @@ use aura_effects::StorageCoreEffects;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::handlers::recovery_status;
 use crate::ids;
 use crate::RecoveryAction;
 
@@ -398,7 +398,7 @@ async fn get_status(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
         })
         .collect();
 
-    let report = recovery_status::format_recovery_status(&active_recoveries, &completed_facts);
+    let report = format_recovery_status(&active_recoveries, &completed_facts);
     output.println(report);
 
     Ok(output)

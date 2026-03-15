@@ -48,7 +48,10 @@ use aura_journal::fact::{
 use aura_journal::fact::{Fact as TypedFact, FactContent};
 use aura_journal::DomainFact;
 use aura_journal::ProtocolRelationalFact;
-use aura_protocol::amp::{commit_bump_with_consensus, emit_proposed_bump, AmpJournalEffects};
+use aura_protocol::amp::{
+    commit_bump_with_consensus, emit_proposed_bump, AmpJournalEffects,
+    ChannelMembershipFact, ChannelParticipantEvent,
+};
 use aura_protocol::effects::TreeEffects;
 use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
 use aura_social::moderation::{
@@ -59,6 +62,7 @@ use futures::{SinkExt, StreamExt};
 use gloo_net::websocket::{futures::WebSocket, Message};
 use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_tungstenite::connect_async;
 #[cfg(not(target_arch = "wasm32"))]
@@ -80,6 +84,47 @@ const FACT_SYNC_REQUEST_CONTENT_TYPE: &str = "application/aura-fact-sync-request
 const FACT_SYNC_RESPONSE_CONTENT_TYPE: &str = "application/aura-fact-sync-response";
 const DEFAULT_HARNESS_SYNC_ROUNDS: usize = 3;
 const DEFAULT_HARNESS_SYNC_BACKOFF_MS: u64 = 75;
+const INVITATION_BRIDGE_STAGE_TIMEOUT_MS: u64 = 4_500;
+const AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS: u64 = 1_000;
+
+#[derive(Debug, Default)]
+struct ChannelFactInspection {
+    checkpoint_exists: bool,
+    bootstrap: Option<ChannelBootstrap>,
+}
+
+async fn inspect_channel_context_facts(
+    effects: &crate::runtime::AuraEffectSystem,
+    context: ContextId,
+    channel: ChannelId,
+) -> Result<ChannelFactInspection, IntentError> {
+    let journal = effects
+        .fetch_context_journal(context)
+        .await
+        .map_err(|error| IntentError::internal_error(format!("AMP context journal lookup failed: {error}")))?;
+
+    let mut inspection = ChannelFactInspection::default();
+    for fact in journal.iter_facts() {
+        let FactContent::Relational(RelationalFact::Protocol(protocol_fact)) = &fact.content else {
+            continue;
+        };
+        match protocol_fact {
+            ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint)
+                if checkpoint.context == context && checkpoint.channel == channel =>
+            {
+                inspection.checkpoint_exists = true;
+            }
+            ProtocolRelationalFact::AmpChannelBootstrap(bootstrap)
+                if bootstrap.context == context && bootstrap.channel == channel =>
+            {
+                inspection.bootstrap = Some(bootstrap.clone());
+            }
+            _ => {}
+        }
+    }
+
+    Ok(inspection)
+}
 
 fn service_error_to_intent(err: ServiceError) -> IntentError {
     IntentError::service_error(err.to_string())
@@ -583,16 +628,14 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
 
         let effects = self.agent.runtime().effects();
-        let state = aura_protocol::amp::get_channel_state(&effects, context, channel)
-            .await
-            .map_err(|e| IntentError::internal_error(format!("AMP state lookup failed: {e}")))?;
+        let inspection = inspect_channel_context_facts(&effects, context, channel).await?;
 
         let mut requested_recipients = BTreeSet::new();
         for recipient in recipients {
             requested_recipients.insert(recipient);
         }
 
-        if let Some(existing) = state.bootstrap.clone() {
+        if let Some(existing) = inspection.bootstrap.clone() {
             if !requested_recipients.is_empty() {
                 let existing_recipients: BTreeSet<_> =
                     existing.recipients.iter().copied().collect();
@@ -625,6 +668,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 bootstrap_id: existing.bootstrap_id,
                 key,
             });
+        }
+
+        if !inspection.checkpoint_exists {
+            return Err(IntentError::internal_error(format!(
+                "AMP channel checkpoint unavailable for bootstrap in context {context}"
+            )));
         }
 
         let key_bytes = effects.random_bytes_32().await;
@@ -681,23 +730,77 @@ impl RuntimeBridge for AgentRuntimeBridge {
         channel: ChannelId,
     ) -> Result<bool, IntentError> {
         let effects = self.agent.runtime().effects();
-        match aura_protocol::amp::get_channel_state(&effects, context, channel).await {
-            Ok(_) => Ok(true),
-            Err(error) => {
-                let detail = error.to_string().to_ascii_lowercase();
-                if detail.contains("not found")
-                    || detail.contains("missing")
-                    || detail.contains("unavailable")
-                    || detail.contains("checkpoint")
-                {
-                    Ok(false)
-                } else {
-                    Err(IntentError::internal_error(format!(
-                        "AMP state lookup failed: {error}"
-                    )))
-                }
+        Ok(inspect_channel_context_facts(&effects, context, channel)
+            .await?
+            .checkpoint_exists)
+    }
+
+    async fn resolve_amp_channel_context(
+        &self,
+        channel: ChannelId,
+    ) -> Result<Option<ContextId>, IntentError> {
+        let effects = self.agent.runtime().effects();
+        let contexts = self
+            .agent
+            .runtime()
+            .contexts()
+            .list_contexts_for_authority(self.agent.authority_id())
+            .await
+            .map_err(|error| {
+                IntentError::internal_error(format!(
+                    "failed to list registered contexts for channel resolution: {error}"
+                ))
+            })?;
+
+        for context in contexts {
+            if inspect_channel_context_facts(&effects, context, channel)
+                .await?
+                .checkpoint_exists
+            {
+                return Ok(Some(context));
             }
         }
+
+        Ok(None)
+    }
+
+    async fn amp_repair_local_channel_membership(
+        &self,
+        params: ChannelJoinParams,
+    ) -> Result<(), IntentError> {
+        let effects = self.agent.runtime().effects();
+        let timestamp = tokio::time::timeout(
+            Duration::from_millis(AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS),
+            ChannelMembershipFact::random_timestamp(&effects),
+        )
+        .await
+        .map_err(|_| {
+            IntentError::internal_error(format!(
+                "amp_repair_local_channel_membership.random_timestamp timed out after {AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS}ms"
+            ))
+        })?;
+        let membership = ChannelMembershipFact::new(
+            params.context,
+            params.channel,
+            params.participant,
+            ChannelParticipantEvent::Joined,
+            timestamp,
+        );
+        tokio::time::timeout(
+            Duration::from_millis(AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS),
+            effects.insert_relational_fact(membership.to_generic()),
+        )
+        .await
+        .map_err(|_| {
+            IntentError::internal_error(format!(
+                "amp_repair_local_channel_membership.insert_relational_fact timed out after {AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS}ms"
+            ))
+        })?
+        .map_err(|error| {
+            IntentError::internal_error(format!(
+                "failed to repair local AMP membership: {error}"
+            ))
+        })
     }
 
     async fn amp_close_channel(&self, params: ChannelCloseParams) -> Result<(), IntentError> {
@@ -3325,12 +3428,53 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .invitations()
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
-        let invitation = invitation_service
-            .invite_to_channel(receiver, home_id, context_id, bootstrap, message, ttl_ms)
+        #[cfg(not(target_arch = "wasm32"))]
+        let invitation = {
+            let join = tokio::spawn(async move {
+                invitation_service
+                    .invite_to_channel(receiver, home_id, context_id, bootstrap, message, ttl_ms)
+                    .await
+            });
+            match tokio::time::timeout(
+                Duration::from_millis(INVITATION_BRIDGE_STAGE_TIMEOUT_MS),
+                join,
+            )
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!("Failed to create channel invitation: {}", e))
-            })?;
+            {
+                Err(_) => {
+                    return Err(IntentError::internal_error(format!(
+                        "invitation_service.invite_to_channel timed out after {INVITATION_BRIDGE_STAGE_TIMEOUT_MS}ms"
+                    )));
+                }
+                Ok(Err(error)) => {
+                    return Err(IntentError::internal_error(format!(
+                        "invitation_service.invite_to_channel task failed: {error}"
+                    )));
+                }
+                Ok(Ok(result)) => result.map_err(|e| {
+                    IntentError::internal_error(format!(
+                        "Failed to create channel invitation: {}",
+                        e
+                    ))
+                })?
+            }
+        };
+
+        #[cfg(target_arch = "wasm32")]
+        let invitation = tokio::time::timeout(
+            Duration::from_millis(INVITATION_BRIDGE_STAGE_TIMEOUT_MS),
+            invitation_service
+                .invite_to_channel(receiver, home_id, context_id, bootstrap, message, ttl_ms),
+        )
+        .await
+        .map_err(|_| {
+            IntentError::internal_error(format!(
+                "invitation_service.invite_to_channel timed out after {INVITATION_BRIDGE_STAGE_TIMEOUT_MS}ms"
+            ))
+        })?
+        .map_err(|e| {
+            IntentError::internal_error(format!("Failed to create channel invitation: {}", e))
+        })?;
 
         Ok(convert_invitation_to_bridge_info(&invitation))
     }

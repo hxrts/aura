@@ -20,28 +20,25 @@ impl JournalEffects for AuraEffectSystem {
     }
 
     async fn get_journal(&self) -> Result<Journal, AuraError> {
-        self.journal_handler().get_journal().await
+        let handler = self.journal_handler();
+        self.journal
+            .get_or_load_journal(move || async move { handler.get_journal().await })
+            .await
     }
 
     async fn persist_journal(&self, journal: &Journal) -> Result<(), AuraError> {
         // Persist the journal to storage
         self.journal_handler().persist_journal(journal).await?;
+        self.journal.update_cached_journal(journal).await;
 
-        // Index all facts for efficient lookup (B-tree, Bloom filter, Merkle tree)
+        // Mirror only newly appended facts into the runtime index.
         let ts_ms = self.time_handler.current_timestamp().await?;
         let timestamp = aura_core::time::TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
             ts_ms,
             uncertainty: None,
         });
-        for (predicate, value) in journal.facts.iter() {
-            let predicate_key = predicate.as_str().to_string();
-            self.journal.indexed_journal().add_fact(
-                predicate_key,
-                value.clone(),
-                Some(self.authority_id),
-                Some(timestamp.clone()),
-            );
-        }
+        self.journal
+            .index_new_journal_facts(journal, Some(self.authority_id), Some(timestamp));
 
         Ok(())
     }

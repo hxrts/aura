@@ -569,12 +569,41 @@ pub(crate) fn apply_harness_command(
                 device_id: device_id.into(),
             })])
         }
+        HarnessUiCommand::SwitchAuthority { authority_id } => {
+            state.router.go_to(Screen::Settings);
+            state.settings.section = SettingsSection::Authority;
+            let Some(selected_index) = state
+                .authorities
+                .iter()
+                .position(|authority| authority.id == authority_id)
+            else {
+                return Err(format!("authority {authority_id} is not visible"));
+            };
+            state.current_authority_index = selected_index;
+            if state
+                .authorities
+                .get(selected_index)
+                .is_some_and(|authority| authority.is_current)
+            {
+                return Ok(Vec::new());
+            }
+            let authority_id = authority_id
+                .parse::<aura_core::AuthorityId>()
+                .map_err(|error| format!("invalid authority id {authority_id}: {error}"))?;
+            Ok(vec![TuiCommand::Dispatch(
+                DispatchCommand::SwitchAuthority { authority_id },
+            )])
+        }
         HarnessUiCommand::CreateContactInvitation {
             receiver_authority_id,
         } => {
             let receiver_id = receiver_authority_id
                 .parse::<aura_core::AuthorityId>()
-                .map_err(|error| format!("invalid authority id: {error}"))?;
+                .map_err(|error| {
+                    format!(
+                        "invalid authority id {receiver_authority_id}: {error}"
+                    )
+                })?;
             Ok(vec![TuiCommand::Dispatch(
                 DispatchCommand::CreateInvitation {
                     receiver_id,
@@ -1279,6 +1308,32 @@ mod tests {
             [TuiCommand::Dispatch(DispatchCommand::RemoveDevice { device_id })]
                 if device_id.to_string() == "device:removable"
         ));
+    }
+
+    #[test]
+    fn harness_command_switch_authority_is_noop_for_current_authority() {
+        let mut state = TuiState::new();
+        state.authorities =
+            vec![crate::tui::types::AuthorityInfo::new("authority:current", "Current").current()];
+
+        let followup = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::SwitchAuthority {
+                authority_id: "authority:current".to_string(),
+            },
+            TuiSemanticInputs {
+                app_snapshot: &StateSnapshot::default(),
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("switch authority no-op should apply: {error}"));
+
+        assert!(followup.is_empty());
+        assert_eq!(state.screen(), Screen::Settings);
+        assert_eq!(state.settings.section, SettingsSection::Authority);
     }
 
     #[test]

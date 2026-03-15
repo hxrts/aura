@@ -327,7 +327,12 @@ impl CommandDispatcher {
                         .ok_or_else(|| DispatchError::NotFound {
                             resource: "current channel".to_string(),
                         })?;
-                Ok(EffectCommand::InviteUser { target, channel })
+                Ok(EffectCommand::InviteUser {
+                    target,
+                    channel,
+                    context_id: None,
+                    operation_instance_id: None,
+                })
             }
 
             IrcCommand::Topic { text } => {

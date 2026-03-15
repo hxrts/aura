@@ -8,7 +8,7 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::config::{
-    load_execution_scenario_config, require_existing_file, RunConfig, ScenarioConfig,
+    load_scenario_config, require_existing_file, RunConfig, ScenarioConfig,
 };
 
 pub struct ScenarioRunner;
@@ -22,7 +22,7 @@ pub struct ScenarioLintReport {
 impl ScenarioRunner {
     pub fn load_and_validate(path: &Path) -> Result<ScenarioConfig> {
         require_existing_file(path, "scenario config")?;
-        let scenario = load_execution_scenario_config(path)?;
+        let scenario = load_scenario_config(path)?;
         scenario.validate()?;
         Ok(scenario)
     }
@@ -36,8 +36,8 @@ impl ScenarioRunner {
             .map(|instance| instance.id.as_str())
             .collect();
 
-        if let Some(steps) = scenario.shared_execution_semantic_steps() {
-            for step in steps {
+        if let Some(semantic_steps) = scenario.semantic_steps() {
+            for step in semantic_steps {
                 if let Some(instance) = step.actor.as_ref().map(|actor| actor.0.as_str()) {
                     if !instance_ids.contains(instance) {
                         errors.push(format!(
@@ -47,21 +47,21 @@ impl ScenarioRunner {
                     }
                 }
             }
-            if steps.len() > 100 {
+            if semantic_steps.len() > 100 {
                 warnings.push("scenario has more than 100 steps; consider splitting".to_string());
             }
             return ScenarioLintReport { warnings, errors };
         }
 
-        let steps = match scenario.execution_steps() {
-            Ok(steps) => steps,
+        let compatibility_steps = match scenario.compatibility_steps() {
+            Ok(compatibility_steps) => compatibility_steps,
             Err(error) => {
                 errors.push(format!("scenario lowering failed: {error}"));
                 return ScenarioLintReport { warnings, errors };
             }
         };
 
-        for step in &steps {
+        for step in compatibility_steps {
             if let Some(instance) = step.instance.as_deref() {
                 if !instance_ids.contains(instance) {
                     errors.push(format!(
@@ -73,7 +73,7 @@ impl ScenarioRunner {
         }
 
         let mut previous_request_id: Option<u64> = None;
-        for step in &steps {
+        for step in compatibility_steps {
             let Some(request_id) = step.request_id else {
                 continue;
             };
@@ -88,7 +88,7 @@ impl ScenarioRunner {
             previous_request_id = Some(request_id);
         }
 
-        if steps.len() > 100 {
+        if compatibility_steps.len() > 100 {
             warnings.push("scenario has more than 100 steps; consider splitting".to_string());
         }
 
