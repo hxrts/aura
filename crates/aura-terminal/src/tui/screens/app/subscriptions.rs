@@ -114,8 +114,9 @@ pub fn use_authority_id_subscription(
         let authority_id = shared.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
-                if let Ok(mut guard) = authority_id.write() {
-                    *guard = settings_state.authority_id.parse::<AuthorityId>().ok();
+                match authority_id.write() {
+                    Ok(mut guard) => *guard = settings_state.authority_id.parse::<AuthorityId>().ok(),
+                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
                 }
             })
             .await;
@@ -309,8 +310,9 @@ pub fn use_discovered_peers_subscription(
 
                 let new_count = lan_peers.len();
 
-                if let Ok(mut guard) = peers.write() {
-                    *guard = lan_peers;
+                match peers.write() {
+                    Ok(mut guard) => *guard = lan_peers,
+                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
                 }
 
                 if let Some(ref tx) = update_tx {
@@ -356,8 +358,9 @@ pub fn use_contacts_subscription(
                     contacts_state.all_contacts().map(Contact::from).collect();
                 let new_count = contact_list.len();
 
-                if let Ok(mut guard) = contacts.write() {
-                    *guard = contact_list;
+                match contacts.write() {
+                    Ok(mut guard) => *guard = contact_list,
+                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
                 }
 
                 // Send contact count update for keyboard navigation
@@ -419,8 +422,9 @@ pub fn use_devices_subscription(
                         last_seen: d.last_seen,
                     })
                     .collect();
-                if let Ok(mut guard) = devices.write() {
-                    *guard = list;
+                match devices.write() {
+                    Ok(mut guard) => *guard = list,
+                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
                 }
                 if settings_state.devices.len() >= 2 {
                     if let Some(tx) = update_tx.as_ref() {
@@ -489,8 +493,9 @@ pub fn use_messages_subscription(
                     Vec::new()
                 };
 
-                if let Ok(mut guard) = messages.write() {
-                    *guard = message_list;
+                match messages.write() {
+                    Ok(mut guard) => *guard = message_list,
+                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
                 }
             })
             .await;
@@ -597,8 +602,9 @@ fn publish_scoped_channels(
         .map(|channel| channel.id.as_str())
         .collect::<Vec<_>>()
         .join("|");
-    if let Ok(mut guard) = channels.write() {
-        *guard = channel_list;
+    match channels.write() {
+        Ok(mut guard) => *guard = channel_list,
+        Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
     }
 
     if let Some(tx) = update_tx {
@@ -718,8 +724,9 @@ pub fn use_channels_subscription(
                     .join(" ; ");
                 tracing::debug!("CHAT_SIGNAL_CHANNELS: {channel_summary}");
 
-                if let Ok(mut guard) = latest_chat_state.write() {
-                    *guard = stabilized.clone();
+                match latest_chat_state.write() {
+                    Ok(mut guard) => *guard = stabilized.clone(),
+                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
                 }
 
                 let scope = active_scope.read().ok().and_then(|g| g.clone());
@@ -782,8 +789,9 @@ pub fn use_channels_subscription(
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
                 let authority_id = settings_state.authority_id.parse::<AuthorityId>().ok();
-                if let Ok(mut guard) = shared_authority_id.write() {
-                    *guard = authority_id;
+                match shared_authority_id.write() {
+                    Ok(mut guard) => *guard = authority_id,
+                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
                 }
 
                 let Some(authority_id) = authority_id else {
@@ -796,8 +804,9 @@ pub fn use_channels_subscription(
                     .map(|g| g.clone())
                     .unwrap_or_default();
                 chat_state.ensure_note_to_self_channel(authority_id);
-                if let Ok(mut guard) = latest_chat_state.write() {
-                    *guard = chat_state.clone();
+                match latest_chat_state.write() {
+                    Ok(mut guard) => *guard = chat_state.clone(),
+                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
                 }
                 let scope = active_scope.read().ok().and_then(|g| g.clone());
                 let contacts_state = latest_contacts_state
@@ -858,8 +867,9 @@ pub fn use_channels_subscription(
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
                 let scope = active_home_scope_id(&neighborhood);
-                if let Ok(mut guard) = active_scope.write() {
-                    *guard = Some(scope.clone());
+                match active_scope.write() {
+                    Ok(mut guard) => *guard = Some(scope.clone()),
+                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
                 }
 
                 let chat_state = latest_chat_state
@@ -925,8 +935,9 @@ pub fn use_channels_subscription(
         let selected_channel_id = selected_channel_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
-                if let Ok(mut guard) = latest_contacts_state.write() {
-                    *guard = contacts_state.clone();
+                match latest_contacts_state.write() {
+                    Ok(mut guard) => *guard = contacts_state.clone(),
+                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
                 }
                 let chat_state = latest_chat_state
                     .read()
@@ -987,8 +998,9 @@ pub fn use_channels_subscription(
         let selected_channel_id_handle = selected_channel_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |homes_state| {
-                if let Ok(mut guard) = latest_homes_state_handle.write() {
-                    *guard = homes_state.clone();
+                match latest_homes_state_handle.write() {
+                    Ok(mut guard) => *guard = homes_state.clone(),
+                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
                 }
                 let chat_state = latest_chat_state_handle
                     .read()
@@ -1122,8 +1134,9 @@ pub fn use_channels_subscription(
                     .iter()
                     .map(|peer| peer.authority_id)
                     .collect::<Vec<_>>();
-                if let Ok(mut guard) = latest_discovered_peers.write() {
-                    *guard = discovered_peer_ids.clone();
+                match latest_discovered_peers.write() {
+                    Ok(mut guard) => *guard = discovered_peer_ids.clone(),
+                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
                 }
 
                 let chat_state = latest_chat_state
@@ -1198,8 +1211,9 @@ pub fn use_invitations_subscription(
                     .map(Invitation::from)
                     .collect();
 
-                if let Ok(mut guard) = invitations.write() {
-                    *guard = all;
+                match invitations.write() {
+                    Ok(mut guard) => *guard = all,
+                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
                 }
             })
             .await;
@@ -1275,8 +1289,9 @@ pub fn use_neighborhood_homes_subscription(
                         .filter(|b| b.id != n.home_home_id)
                         .map(|b| b.id.to_string()),
                 );
-                if let Ok(mut guard) = homes.write() {
-                    *guard = ids;
+                match homes.write() {
+                    Ok(mut guard) => *guard = ids,
+                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
                 }
             })
             .await;
@@ -1315,8 +1330,9 @@ pub fn use_neighborhood_home_meta_subscription(
                         moderator_actions_enabled: home.is_admin(),
                     })
                     .unwrap_or_default();
-                if let Ok(mut guard) = meta.write() {
-                    *guard = snapshot;
+                match meta.write() {
+                    Ok(mut guard) => *guard = snapshot,
+                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
                 }
             })
             .await;
@@ -1349,8 +1365,9 @@ pub fn use_pending_requests_subscription(
                     .iter()
                     .map(PendingRequest::from)
                     .collect();
-                if let Ok(mut guard) = requests.write() {
-                    *guard = pending;
+                match requests.write() {
+                    Ok(mut guard) => *guard = pending,
+                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
                 }
             })
             .await;
@@ -1431,8 +1448,9 @@ pub fn use_threshold_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -
         let threshold = shared_threshold.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
-                if let Ok(mut guard) = threshold.write() {
-                    *guard = (settings_state.threshold_k, settings_state.threshold_n);
+                match threshold.write() {
+                    Ok(mut guard) => *guard = (settings_state.threshold_k, settings_state.threshold_n),
+                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
                 }
             })
             .await;
