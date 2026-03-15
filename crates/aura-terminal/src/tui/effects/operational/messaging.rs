@@ -24,9 +24,9 @@ use super::EffectCommand;
 // Note: Primary functions accept typed ChannelId directly (typesafe API)
 // TUI uses *_by_name variants for string-based user input
 pub use aura_app::ui::workflows::messaging::{
-    close_channel_by_name, create_channel, join_channel_by_name, leave_channel_by_name,
-    send_action_by_name, send_direct_message, send_message, send_message_by_name,
-    set_topic_by_name, start_direct_chat,
+    close_channel_by_name, create_channel_with_authoritative_binding, join_channel_by_name,
+    leave_channel_by_name, send_action_by_name, send_direct_message, send_message,
+    send_message_by_name, set_topic_by_name, start_direct_chat,
 };
 
 fn compact_send_error(error: &aura_core::AuraError) -> String {
@@ -74,7 +74,7 @@ pub async fn handle_messaging(
             threshold_k,
         } => {
             let timestamp = super::time::current_time_ms(app_core).await;
-            match create_channel(
+            match create_channel_with_authoritative_binding(
                 app_core,
                 name,
                 topic.clone(),
@@ -84,9 +84,14 @@ pub async fn handle_messaging(
             )
             .await
             {
-                Ok(channel_id) => Some(Ok(OpResponse::ChannelCreated {
-                    channel_id: channel_id.to_string(),
-                })),
+                Ok(created_channel) => {
+                    Some(Ok(OpResponse::ChannelCreated {
+                        channel_id: created_channel.channel_id.to_string(),
+                        context_id: created_channel
+                            .context_id
+                            .map(|context_id| context_id.to_string()),
+                    }))
+                }
                 Err(e) => Some(Err(OpError::typed(
                     OpFailureCode::CreateChannel,
                     format!("Failed to create channel: {e}"),

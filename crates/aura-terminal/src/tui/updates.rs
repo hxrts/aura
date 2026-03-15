@@ -250,6 +250,8 @@ pub enum UiUpdate {
     ChannelCreated {
         /// Canonical channel identity returned by the workflow/runtime.
         channel_id: String,
+        /// Authoritative context identity, if the workflow resolved one.
+        context_id: Option<String>,
         /// Display name used for user feedback.
         name: String,
     },

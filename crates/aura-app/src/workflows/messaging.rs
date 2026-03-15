@@ -1306,6 +1306,19 @@ pub async fn project_channel_peer_membership_with_context(
     Ok(())
 }
 
+/// Authoritative channel identity returned by channel-creation workflows.
+///
+/// This bundle keeps the canonical `channel_id` and the authoritative
+/// `context_id` together so frontend callers do not need to rediscover the
+/// context immediately after create.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CreatedChannel {
+    /// Canonical channel identifier created or selected by the workflow.
+    pub channel_id: ChannelId,
+    /// Authoritative context associated with the created channel, when known.
+    pub context_id: Option<ContextId>,
+}
+
 async fn project_home_peer_membership(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
@@ -1798,6 +1811,32 @@ pub async fn create_channel(
     threshold_k: u8,
     timestamp_ms: u64,
 ) -> Result<ChannelId, AuraError> {
+    Ok(
+        create_channel_with_authoritative_binding(
+            app_core,
+            name,
+            topic,
+            members,
+            threshold_k,
+            timestamp_ms,
+        )
+        .await?
+        .channel_id,
+    )
+}
+
+/// Create a channel and return its authoritative identity bundle.
+///
+/// This is the single-step surface for UI layers that must preserve the
+/// channel/context binding without performing a second lookup after creation.
+pub async fn create_channel_with_authoritative_binding(
+    app_core: &Arc<RwLock<AppCore>>,
+    name: &str,
+    topic: Option<String>,
+    members: &[String],
+    threshold_k: u8,
+    timestamp_ms: u64,
+) -> Result<CreatedChannel, AuraError> {
     publish_create_channel_phase(app_core, SemanticOperationPhase::WorkflowDispatched).await?;
 
     let result = async {
@@ -1809,14 +1848,11 @@ pub async fn create_channel(
     let mut channel_id = ChannelId::from_bytes(hash(format!("local:{timestamp_ms}").as_bytes()));
     let mut channel_context: Option<ContextId> = None;
     let mut channel_owner: Option<AuthorityId> = None;
-    let mut created_in_home_context = false;
-
     if backend == MessagingBackend::Runtime {
         let runtime = require_runtime(app_core).await?;
         channel_owner = Some(runtime.authority_id());
-        let (context_id, is_home_context) =
+        let (context_id, _is_home_context) =
             current_home_context_or_authority_default(app_core, runtime.authority_id()).await?;
-        created_in_home_context = is_home_context;
         channel_context = Some(context_id);
         let channel_hint = (!name.trim().is_empty())
             .then(|| channel_id_from_input(name))
@@ -1903,7 +1939,7 @@ pub async fn create_channel(
     })
     .await?;
 
-    if backend == MessagingBackend::Runtime && created_in_home_context {
+    if backend == MessagingBackend::Runtime {
         if let (Some(context_id), Some(owner_id)) = (channel_context, channel_owner) {
             ensure_home_state_for_channel(
                 app_core,
@@ -2030,7 +2066,10 @@ pub async fn create_channel(
 
     refresh_authoritative_channel_membership_readiness(app_core).await?;
 
-    Ok(channel_id)
+    Ok(CreatedChannel {
+        channel_id,
+        context_id: channel_context,
+    })
     }
     .await;
 
@@ -3183,6 +3222,31 @@ mod tests {
                         && *member_count == 1
             )
         }));
+    }
+
+    #[tokio::test]
+    async fn test_create_channel_with_authoritative_binding_returns_context_without_post_lookup() {
+        let runtime = Arc::new(MockRuntimeBridge::new());
+        let config = AppConfig::default();
+        let core = AppCore::with_runtime(config, runtime.clone()).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let created = create_channel_with_authoritative_binding(
+            &app_core,
+            "shared-parity-lab",
+            None,
+            &[],
+            0,
+            42,
+        )
+        .await
+        .unwrap();
+
+        let authoritative_context =
+            authoritative_context_id_for_channel(&app_core, created.channel_id).await;
+        assert_eq!(created.context_id, authoritative_context);
+        assert!(created.context_id.is_some());
     }
 
     #[tokio::test]

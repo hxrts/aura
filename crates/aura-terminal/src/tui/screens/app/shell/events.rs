@@ -14,6 +14,7 @@ pub(super) fn handle_channel_selection_change(
     new_state: &TuiState,
     shared_channels: &Arc<std::sync::RwLock<Vec<Channel>>>,
     selected_channel_id: &Arc<std::sync::RwLock<Option<String>>>,
+    selected_channel_binding: &Arc<std::sync::RwLock<Option<SelectedChannelBinding>>>,
 ) {
     let idx = new_state.chat.selected_channel;
 
@@ -35,6 +36,12 @@ pub(super) fn handle_channel_selection_change(
 
     if let Ok(mut guard) = selected_channel_id.write() {
         *guard = next_selected;
+    }
+    if let Ok(mut guard) = selected_channel_binding.write() {
+        let previous = guard.clone();
+        *guard = channels.get(idx).map(|channel| {
+            SelectedChannelBinding::merged_from_channel(channel, previous.as_ref())
+        });
     }
 }
 

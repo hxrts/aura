@@ -773,18 +773,22 @@ impl ChatCallbacks {
                 };
                 spawn_ctx(ctx.clone(), async move {
                     match ctx.dispatch_with_response(cmd).await {
-                        Ok(OpResponse::ChannelCreated { channel_id }) => {
-                            if let Some(operation) = operation {
-                                operation.succeed().await;
-                            }
+                        Ok(OpResponse::ChannelCreated {
+                            channel_id,
+                            context_id,
+                        }) => {
                             send_ui_update_required(
                                 &tx,
                                 UiUpdate::ChannelCreated {
                                     channel_id,
+                                    context_id,
                                     name: channel_name,
                                 },
                             )
                             .await;
+                            if let Some(operation) = operation {
+                                operation.succeed().await;
+                            }
                         }
                         Ok(other) => {
                             if let Some(operation) = operation {
@@ -972,15 +976,14 @@ impl ContactsCallbacks {
                         );
                     }
 
-                    let parsed_context_id = context_id
-                        .as_deref()
-                        .and_then(|context_id| context_id.parse::<aura_core::ContextId>().ok());
                     let dispatch = std::panic::AssertUnwindSafe(
                         aura_app::ui::workflows::messaging::invite_user_to_channel_with_context(
                             &app_core,
                             &contact_id,
                             &channel,
-                            parsed_context_id,
+                            context_id
+                                .as_deref()
+                                .and_then(|context_id| context_id.parse().ok()),
                             operation_instance_id,
                             None,
                             None,

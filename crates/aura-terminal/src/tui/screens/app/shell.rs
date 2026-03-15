@@ -108,6 +108,24 @@ enum NotificationSelection {
     RecoveryRequest(String),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SelectedChannelBinding {
+    channel_id: String,
+    context_id: Option<String>,
+}
+
+impl SelectedChannelBinding {
+    fn merged_from_channel(channel: &Channel, previous: Option<&Self>) -> Self {
+        let preserved_context = previous
+            .filter(|binding| binding.channel_id == channel.id)
+            .and_then(|binding| binding.context_id.clone());
+        Self {
+            channel_id: channel.id.clone(),
+            context_id: channel.context_id.clone().or(preserved_context),
+        }
+    }
+}
+
 fn terminal_error_to_toast_level(error: &TerminalError) -> crate::tui::state_machine::ToastLevel {
     match error.category().toast_severity() {
         aura_app::errors::ToastLevel::Info => crate::tui::state_machine::ToastLevel::Info,
@@ -203,6 +221,9 @@ fn execute_harness_followup_command(
     shared_devices: &SharedDevices,
     shared_messages: &SharedMessages,
     selected_channel: &std::sync::Arc<std::sync::RwLock<Option<String>>>,
+    selected_channel_binding: &std::sync::Arc<
+        std::sync::RwLock<Option<SelectedChannelBinding>>,
+    >,
 ) -> Result<Option<aura_app::ui_contract::HarnessUiOperationHandle>, String> {
     match command {
         TuiCommand::Dispatch(DispatchCommand::CreateAccount { name }) => {
@@ -270,6 +291,17 @@ fn execute_harness_followup_command(
                 state.chat.selected_channel = idx;
                 if let Ok(mut guard) = selected_channel.write() {
                     *guard = Some(channel_id.to_string());
+                }
+                if let Ok(mut guard) = selected_channel_binding.write() {
+                    let previous = guard.clone();
+                    *guard = channels
+                        .get(idx)
+                        .map(|channel| {
+                            SelectedChannelBinding::merged_from_channel(
+                                channel,
+                                previous.as_ref(),
+                            )
+                        });
                 }
             } else {
                 return Err("Selected channel is no longer visible".to_string());
@@ -409,25 +441,40 @@ fn execute_harness_followup_command(
             let Some(channel) = channels.get(channel_idx) else {
                 return Err("No channel selected".to_string());
             };
-            let context_id = channel
-                .id
-                .parse::<aura_core::ChannelId>()
+            let selected_binding = selected_channel_binding
+                .read()
                 .ok()
-                .and_then(|channel_id| {
-                    futures::executor::block_on(
-                        aura_app::ui::workflows::messaging::authoritative_context_id_for_channel(
-                            app_ctx.app_core.raw(),
-                            channel_id,
-                        ),
-                    )
-                })
-                .map(|id| id.to_string())
-                .or_else(|| channel.context_id.clone());
+                .and_then(|guard| guard.clone())
+                .filter(|binding| binding.channel_id == channel.id);
+            let context_id = selected_binding
+                .and_then(|binding| binding.context_id)
+                .or_else(|| channel.context_id.clone())
+                .or_else(|| {
+                channel
+                    .id
+                    .parse::<aura_core::ChannelId>()
+                    .ok()
+                    .and_then(|channel_id| {
+                        futures::executor::block_on(
+                            aura_app::ui::workflows::messaging::authoritative_context_id_for_channel(
+                                app_ctx.app_core.raw(),
+                                channel_id,
+                            ),
+                        )
+                    })
+                    .map(|id| id.to_string())
+            });
+            let Some(context_id) = context_id else {
+                return Err(format!(
+                    "Selected channel lacks authoritative context: {}",
+                    channel.id
+                ));
+            };
             state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
             (cb.contacts.on_invite_to_channel)(
                 contact.id.clone(),
-                channel.name.clone(),
-                context_id,
+                channel.id.clone(),
+                Some(context_id),
                 None,
             );
             Ok(None)
@@ -452,6 +499,34 @@ fn execute_harness_followup_command(
                     "Selected channel is stale or unavailable: {channel_id}"
                 ));
             };
+            let selected_binding = selected_channel_binding
+                .read()
+                .ok()
+                .and_then(|guard| guard.clone())
+                .filter(|binding| binding.channel_id == channel.id);
+            let context_id = selected_binding
+                .and_then(|binding| binding.context_id)
+                .or_else(|| channel.context_id.clone())
+                .or_else(|| {
+                channel_id
+                    .parse::<aura_core::ChannelId>()
+                    .ok()
+                    .and_then(|channel_id| {
+                        futures::executor::block_on(
+                            aura_app::ui::workflows::messaging::authoritative_context_id_for_channel(
+                                app_ctx.app_core.raw(),
+                                channel_id,
+                            ),
+                        )
+                    })
+                    .map(|id| id.to_string())
+            });
+            let Some(context_id) = context_id else {
+                return Err(format!(
+                    "Selected channel lacks authoritative context: {}",
+                    channel.id
+                ));
+            };
             let Some(update_tx) = update_tx.clone() else {
                 return Err("UI update sender is unavailable".to_string());
             };
@@ -463,24 +538,11 @@ fn execute_harness_followup_command(
                 SemanticOperationKind::InviteActorToChannel,
             );
             let handle = operation.harness_handle();
-            let context_id = channel_id
-                .parse::<aura_core::ChannelId>()
-                .ok()
-                .and_then(|channel_id| {
-                    futures::executor::block_on(
-                        aura_app::ui::workflows::messaging::authoritative_context_id_for_channel(
-                            app_ctx.app_core.raw(),
-                            channel_id,
-                        ),
-                    )
-                })
-                .map(|id| id.to_string())
-                .or_else(|| channel.context_id.clone());
             state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
             (cb.contacts.on_invite_to_channel)(
                 authority_id.to_string(),
                 channel.id.clone(),
-                context_id,
+                Some(context_id),
                 Some(operation),
             );
             Ok(Some(handle))
@@ -721,6 +783,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         hooks.use_ref(|| std::sync::Arc::new(std::sync::RwLock::new(None::<String>)));
     let tui_selected: std::sync::Arc<std::sync::RwLock<Option<String>>> =
         tui_selected_ref.read().clone();
+    let selected_channel_binding_ref = hooks
+        .use_ref(|| std::sync::Arc::new(std::sync::RwLock::new(None::<SelectedChannelBinding>)));
+    let selected_channel_binding: std::sync::Arc<
+        std::sync::RwLock<Option<SelectedChannelBinding>>,
+    > = selected_channel_binding_ref.read().clone();
 
     // =========================================================================
     // Channels subscription: SharedChannels for dispatch handlers to read
@@ -743,6 +810,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     // Clone for ChatScreen to compute per-channel message counts
     let tui_selected_for_chat_screen = tui_selected.clone();
+    let selected_channel_binding_for_chat_screen = selected_channel_binding.clone();
 
     // =========================================================================
     // Devices subscription: SharedDevices for dispatch handlers to read
@@ -980,6 +1048,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let shared_devices_for_commands = shared_devices.clone();
             let shared_messages_for_commands = shared_messages.clone();
             let tui_selected_for_commands = tui_selected_for_chat_screen.clone();
+            let selected_channel_binding_for_commands =
+                selected_channel_binding_for_chat_screen.clone();
             async move {
                 #[allow(clippy::expect_used)]
                 let mut rx = {
@@ -1043,6 +1113,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 &shared_devices_for_commands,
                                 &shared_messages_for_commands,
                                 &tui_selected_for_commands,
+                                &selected_channel_binding_for_commands,
                             )? {
                                 operation_handle = Some(handle);
                             }
@@ -1131,6 +1202,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let shared_messages_for_updates = shared_messages.clone();
             // Shared selection state for messages subscription synchronization
             let tui_selected_for_updates = tui_selected;
+            let selected_channel_binding_for_updates = selected_channel_binding;
             async move {
                 // Helper macro-like function to add a toast to the queue
                 // (Inline to avoid borrow checker issues with closures)
@@ -1562,6 +1634,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             if let Ok(mut guard) = tui_selected_for_updates.write() {
                                 *guard = Some(channel_id.clone());
                             }
+                            if let Ok(mut guard) = selected_channel_binding_for_updates.write() {
+                                let previous = guard.clone();
+                                *guard = selected_channel.as_ref().map(|(_, channel)| {
+                                    SelectedChannelBinding::merged_from_channel(
+                                        channel,
+                                        previous.as_ref(),
+                                    )
+                                });
+                            }
                             if let Some((idx, channel)) = selected_channel {
                                 tui.with_mut(|state| {
                                     state.chat.selected_channel = idx;
@@ -1570,9 +1651,33 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 });
                             }
                         }
-                        UiUpdate::ChannelCreated { channel_id, name } => {
+                        UiUpdate::ChannelCreated {
+                            channel_id,
+                            context_id,
+                            name,
+                        } => {
                             if let Ok(mut guard) = tui_selected_for_updates.write() {
                                 *guard = Some(channel_id.clone());
+                            }
+                            if let Ok(mut guard) = selected_channel_binding_for_updates.write() {
+                                *guard = Some(SelectedChannelBinding {
+                                    channel_id: channel_id.clone(),
+                                    context_id: context_id.clone(),
+                                });
+                            }
+                            if let Ok(mut channels) = shared_channels_for_updates.write() {
+                                if let Some(channel) =
+                                    channels.iter_mut().find(|channel| channel.id == channel_id)
+                                {
+                                    if channel.context_id.is_none() {
+                                        channel.context_id = context_id.clone();
+                                    }
+                                } else {
+                                    let mut channel = Channel::new(channel_id.clone(), name.clone());
+                                    channel.context_id = context_id.clone();
+                                    channel.member_count = 1;
+                                    channels.push(channel);
+                                }
                             }
                             let selected = shared_channels_for_updates.read().ok().and_then(|channels| {
                                 channels
@@ -1639,6 +1744,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             channels
                                                 .get(state.chat.selected_channel)
                                                 .map(|channel| channel.id.clone())
+                                        },
+                                    );
+                                }
+                                if let Ok(mut guard) = selected_channel_binding_for_updates.write()
+                                {
+                                    let previous = guard.clone();
+                                    *guard = shared_channels_for_updates.read().ok().and_then(
+                                        |channels| {
+                                            channels
+                                                .get(state.chat.selected_channel)
+                                                .map(|channel| {
+                                                    SelectedChannelBinding::merged_from_channel(
+                                                        channel,
+                                                        previous.as_ref(),
+                                                    )
+                                                })
                                         },
                                     );
                                 }
@@ -1774,6 +1895,29 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             status,
                             instance_id,
                         } => {
+                            let failure_message = if matches!(
+                                status.phase,
+                                aura_app::ui_contract::SemanticOperationPhase::Failed
+                                    | aura_app::ui_contract::SemanticOperationPhase::Cancelled
+                            ) {
+                                status.error.as_ref().map(|error| {
+                                    let detail = error
+                                        .detail
+                                        .clone()
+                                        .unwrap_or_else(|| format!("{:?}", error.code));
+                                    match status.kind {
+                                        SemanticOperationKind::InviteActorToChannel => {
+                                            format!("Invite to channel failed: {detail}")
+                                        }
+                                        SemanticOperationKind::CreateChannel => {
+                                            format!("Create channel failed: {detail}")
+                                        }
+                                        _ => detail,
+                                    }
+                                })
+                            } else {
+                                None
+                            };
                             let next_state = match status.phase {
                                 aura_app::ui_contract::SemanticOperationPhase::Failed => {
                                     OperationState::Failed
@@ -1793,6 +1937,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     next_state,
                                 );
                             });
+                            if let Some(message) = failure_message {
+                                tui.with_mut(|state| {
+                                    state.toast_queue.clear();
+                                });
+                                enqueue_toast!(
+                                    message,
+                                    crate::tui::state_machine::ToastLevel::Error
+                                );
+                            }
                             let export_state = tui.read_clone();
                             let app_snapshot = app_ctx_for_updates.snapshot();
                             let harness_contacts = shared_contacts_for_updates
@@ -2271,7 +2424,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let shared_discovered_peers_for_dispatch = shared_discovered_peers;
         let _shared_authority_id_for_dispatch = shared_authority_id;
         let app_ctx_for_dispatch = app_ctx.clone();
-        let app_core_for_dispatch = app_ctx.app_core.raw().clone();
         // Clone shared messages Arc for message retry dispatch
         // Used to look up failed messages by ID to get channel and content for retry
         let shared_messages_for_dispatch = shared_messages.clone();
@@ -2279,6 +2431,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let shared_devices_for_dispatch = shared_devices;
         // Clone shared selection state for immediate sync on channel navigation
         let tui_selected_for_events = tui_selected_for_chat_screen.clone();
+        let selected_channel_binding_for_events = selected_channel_binding_for_chat_screen.clone();
         // Used for recovery eligibility checks (from threshold subscription)
         move |event| {
             if let Some(input_transition) = transition_from_terminal_event(
@@ -2299,6 +2452,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         &new_state,
                         &shared_channels_for_dispatch,
                         &tui_selected_for_events,
+                        &selected_channel_binding_for_events,
                     );
                     for cmd in commands {
                         match cmd {
@@ -2348,6 +2502,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             new_state.chat.selected_channel = idx;
                                             if let Ok(mut guard) = tui_selected_for_events.write() {
                                                 *guard = Some(channel_id.to_string());
+                                            }
+                                            if let Ok(mut guard) =
+                                                selected_channel_binding_for_events.write()
+                                            {
+                                                let previous = guard.clone();
+                                                *guard = channels.get(idx).map(|channel| {
+                                                    SelectedChannelBinding::merged_from_channel(
+                                                        channel,
+                                                        previous.as_ref(),
+                                                    )
+                                                });
                                             }
                                         }
                                     }
@@ -2783,27 +2948,43 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             new_state.toast_error("No channel selected");
                                             continue;
                                         };
-                                        let context_id = channel
-                                            .id
-                                            .parse::<aura_core::ChannelId>()
+                                        let selected_binding = selected_channel_binding_for_events
+                                            .read()
                                             .ok()
-                                            .and_then(|channel_id| {
-                                                futures::executor::block_on(
-                                                    aura_app::ui::workflows::messaging::authoritative_context_id_for_channel(
-                                                        &app_core_for_dispatch,
-                                                        channel_id,
-                                                    ),
-                                                )
-                                            })
-                                            .map(|id| id.to_string())
-                                            .or_else(|| channel.context_id.clone());
+                                            .and_then(|guard| guard.clone())
+                                            .filter(|binding| binding.channel_id == channel.id);
+                                        let context_id = selected_binding
+                                            .and_then(|binding| binding.context_id)
+                                            .or_else(|| channel.context_id.clone())
+                                            .or_else(|| {
+                                                channel
+                                                    .id
+                                                    .parse::<aura_core::ChannelId>()
+                                                    .ok()
+                                                    .and_then(|channel_id| {
+                                                        futures::executor::block_on(
+                                                            aura_app::ui::workflows::messaging::authoritative_context_id_for_channel(
+                                                                app_ctx_for_dispatch.app_core.raw(),
+                                                                channel_id,
+                                                            ),
+                                                        )
+                                                    })
+                                                    .map(|id| id.to_string())
+                                            });
+                                        let Some(context_id) = context_id else {
+                                            new_state.toast_error(format!(
+                                                "Selected channel lacks authoritative context: {}",
+                                                channel.id
+                                            ));
+                                            continue;
+                                        };
                                         new_state.clear_runtime_fact_kind(
                                             RuntimeEventKind::PendingHomeInvitationReady,
                                         );
                                         (cb.contacts.on_invite_to_channel)(
                                             contact.id.clone(),
-                                            channel.name.clone(),
-                                            context_id,
+                                            channel.id.clone(),
+                                            Some(context_id),
                                             None,
                                         );
                                     }
@@ -2824,26 +3005,43 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             ));
                                             continue;
                                         };
-                                        let context_id = channel_id
-                                            .parse::<aura_core::ChannelId>()
+                                        let selected_binding = selected_channel_binding_for_events
+                                            .read()
                                             .ok()
-                                            .and_then(|channel_id| {
-                                                futures::executor::block_on(
-                                                    aura_app::ui::workflows::messaging::authoritative_context_id_for_channel(
-                                                        &app_core_for_dispatch,
-                                                        channel_id,
-                                                    ),
-                                                )
-                                            })
-                                            .map(|id| id.to_string())
-                                            .or_else(|| channel.context_id.clone());
+                                            .and_then(|guard| guard.clone())
+                                            .filter(|binding| binding.channel_id == channel.id);
+                                        let context_id = selected_binding
+                                            .and_then(|binding| binding.context_id)
+                                            .or_else(|| channel.context_id.clone())
+                                            .or_else(|| {
+                                                channel
+                                                    .id
+                                                    .parse::<aura_core::ChannelId>()
+                                                    .ok()
+                                                    .and_then(|channel_id| {
+                                                        futures::executor::block_on(
+                                                            aura_app::ui::workflows::messaging::authoritative_context_id_for_channel(
+                                                                app_ctx_for_dispatch.app_core.raw(),
+                                                                channel_id,
+                                                            ),
+                                                        )
+                                                    })
+                                                    .map(|id| id.to_string())
+                                            });
+                                        let Some(context_id) = context_id else {
+                                            new_state.toast_error(format!(
+                                                "Selected channel lacks authoritative context: {}",
+                                                channel.id
+                                            ));
+                                            continue;
+                                        };
                                         new_state.clear_runtime_fact_kind(
                                             RuntimeEventKind::PendingHomeInvitationReady,
                                         );
                                         (cb.contacts.on_invite_to_channel)(
                                             authority_id.to_string(),
                                             channel.id.clone(),
-                                            context_id,
+                                            Some(context_id),
                                             None,
                                         );
                                     }

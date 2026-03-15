@@ -204,7 +204,10 @@ pub enum OpResponse {
     /// Message sent in a channel.
     ChannelMessageSent { message_id: String },
     /// New channel created.
-    ChannelCreated { channel_id: String },
+    ChannelCreated {
+        channel_id: String,
+        context_id: Option<String>,
+    },
     /// Direct message channel sent/created.
     DirectMessageSent { channel_id: String },
     /// Action/emote message sent.
