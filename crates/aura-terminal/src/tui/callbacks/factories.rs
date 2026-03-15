@@ -915,10 +915,9 @@ impl ChatCallbacks {
         })
     }
 
-    fn make_close_channel(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdCallback {
+    fn make_close_channel(ctx: Arc<IoContext>, _tx: UiUpdateSender) -> IdCallback {
         Arc::new(move |channel_id: String| {
             let ctx = ctx.clone();
-            let _tx = tx.clone();
             let cmd = EffectCommand::CloseChannel {
                 channel: channel_id,
             };
@@ -1082,10 +1081,9 @@ impl ContactsCallbacks {
         )
     }
 
-    fn make_remove_contact(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdCallback {
+    fn make_remove_contact(ctx: Arc<IoContext>, _tx: UiUpdateSender) -> IdCallback {
         Arc::new(move |contact_id: String| {
             let ctx = ctx.clone();
-            let _tx = tx.clone();
             let cmd = EffectCommand::RemoveContact { contact_id };
             spawn_ctx(ctx.clone(), async move {
                 let _ = ctx.dispatch(cmd).await;
@@ -1246,10 +1244,9 @@ impl InvitationsCallbacks {
         })
     }
 
-    fn make_revoke(ctx: Arc<IoContext>, tx: UiUpdateSender) -> InvitationCallback {
+    fn make_revoke(ctx: Arc<IoContext>, _tx: UiUpdateSender) -> InvitationCallback {
         Arc::new(move |invitation_id: String| {
             let ctx = ctx.clone();
-            let _tx = tx.clone();
             let cmd = EffectCommand::CancelInvitation { invitation_id };
             spawn_ctx(ctx.clone(), async move {
                 let _ = ctx.dispatch(cmd).await;

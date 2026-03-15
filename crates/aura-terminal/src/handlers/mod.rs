@@ -71,7 +71,7 @@ use crate::cli::tui::TuiArgs;
 use crate::{DemoCommands, ScenarioAction};
 use async_lock::RwLock;
 use aura_app::ui::prelude::*;
-use aura_core::identifiers::DeviceId;
+use aura_core::types::identifiers::DeviceId;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -415,15 +415,4 @@ impl CliHandler {
             .map_err(|e| TerminalError::Operation(format!("TUI command failed: {e}")))
     }
 
-    /// Log error message through effects
-    #[allow(dead_code)]
-    pub fn log_error(&self, message: &str) {
-        eprintln!("ERROR: {message}");
-    }
-
-    /// Log info message through effects
-    #[allow(dead_code)]
-    pub fn log_info(&self, message: &str) {
-        println!("INFO: {message}");
-    }
 }

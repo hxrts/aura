@@ -277,16 +277,6 @@ impl OperationalHandler {
     }
 }
 
-/// Helper to create OperationalHandler (for cloning)
-impl OperationalHandler {
-    #[allow(dead_code)]
-    fn clone(&self) -> Self {
-        Self {
-            app_core: self.app_core.clone(),
-        }
-    }
-}
-
 /// Map terminal-facing errors onto AppError for signal emission.
 fn map_terminal_error(err: &TerminalError) -> AppError {
     match err {
