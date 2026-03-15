@@ -78,15 +78,20 @@ pub fn handle_mouse_event(
                     }
                 }
                 Screen::Contacts => {
-                    // Navigate down in contacts list
-                    state.contacts.selected_index = state.contacts.selected_index.saturating_add(1);
+                    // Navigate down in contacts list (clamp to last item)
+                    let max_index = state.contacts.contact_count.saturating_sub(1);
+                    state.contacts.selected_index =
+                        state.contacts.selected_index.saturating_add(1).min(max_index);
                 }
                 Screen::Neighborhood => {
                     // No dedicated scroll region on Neighborhood; keep mouse wheel a no-op here.
                 }
                 Screen::Settings => {
-                    // Navigate down in settings list
-                    state.settings.selected_index = state.settings.selected_index.saturating_add(1);
+                    // Navigate down in settings list (clamp to last section)
+                    let max_index =
+                        crate::tui::types::SettingsSection::all().len().saturating_sub(1);
+                    state.settings.selected_index =
+                        state.settings.selected_index.saturating_add(1).min(max_index);
                     state.settings.section = crate::tui::types::SettingsSection::from_index(
                         state.settings.selected_index,
                     );
@@ -100,16 +105,34 @@ pub fn handle_mouse_event(
     }
 }
 
+/// Maximum length for pasted text into any single field.
+const MAX_PASTE_LENGTH: usize = 8192;
+
+/// Truncate pasted text to a safe length, respecting UTF-8 char boundaries.
+fn truncate_paste(field: &str, text: &str) -> &str {
+    let remaining = MAX_PASTE_LENGTH.saturating_sub(field.len());
+    if text.len() <= remaining {
+        return text;
+    }
+    // Find the last char boundary at or before `remaining`
+    let mut end = remaining;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
 /// Handle a paste event
 ///
 /// Inserts pasted text into modal fields or the current input buffer.
+/// All fields are clamped to `MAX_PASTE_LENGTH` to prevent unbounded growth.
 pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>, text: &str) {
     // Handle modal input fields first
     if let Some(modal) = state.modal_queue.current_mut() {
         match modal {
             // Invitation import modal (Contacts workflow)
             QueuedModal::ContactsImport(modal_state) => {
-                modal_state.code.push_str(text);
+                modal_state.code.push_str(truncate_paste(&modal_state.code, text));
                 return;
             }
 
@@ -117,41 +140,49 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
             QueuedModal::ChatCreate(modal_state) => {
                 // Paste into active field (name or topic)
                 if modal_state.active_field == 0 {
-                    modal_state.name.push_str(text);
+                    modal_state.name.push_str(truncate_paste(&modal_state.name, text));
                 } else {
-                    modal_state.topic.push_str(text);
+                    modal_state.topic.push_str(truncate_paste(&modal_state.topic, text));
                 }
                 return;
             }
             QueuedModal::ChatTopic(modal_state) => {
-                modal_state.value.push_str(text);
+                modal_state.value.push_str(truncate_paste(&modal_state.value, text));
                 return;
             }
 
             // Contact nickname modal
             QueuedModal::ContactsNickname(modal_state) => {
-                modal_state.value.push_str(text);
+                modal_state.value.push_str(truncate_paste(&modal_state.value, text));
                 return;
             }
 
             // Settings nickname suggestion modal
             QueuedModal::SettingsNicknameSuggestion(modal_state) => {
-                modal_state.value.push_str(text);
+                modal_state.value.push_str(truncate_paste(&modal_state.value, text));
                 return;
             }
             QueuedModal::NeighborhoodHomeCreate(modal_state) => {
                 if modal_state.active_field == 0 {
-                    modal_state.name.push_str(text);
+                    modal_state.name.push_str(truncate_paste(&modal_state.name, text));
                 } else {
-                    modal_state.description.push_str(text);
+                    modal_state
+                        .description
+                        .push_str(truncate_paste(&modal_state.description, text));
                 }
                 return;
             }
             QueuedModal::NeighborhoodCapabilityConfig(modal_state) => {
                 match modal_state.active_field {
-                    0 => modal_state.full_caps.push_str(text),
-                    1 => modal_state.partial_caps.push_str(text),
-                    _ => modal_state.limited_caps.push_str(text),
+                    0 => modal_state
+                        .full_caps
+                        .push_str(truncate_paste(&modal_state.full_caps, text)),
+                    1 => modal_state
+                        .partial_caps
+                        .push_str(truncate_paste(&modal_state.partial_caps, text)),
+                    _ => modal_state
+                        .limited_caps
+                        .push_str(truncate_paste(&modal_state.limited_caps, text)),
                 }
                 return;
             }
@@ -188,7 +219,10 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
     match state.screen() {
         Screen::Chat => {
             if state.chat.focus == ChatFocus::Input {
-                state.chat.input_buffer.push_str(text);
+                state
+                    .chat
+                    .input_buffer
+                    .push_str(truncate_paste(&state.chat.input_buffer, text));
             }
         }
         Screen::Neighborhood => {
@@ -416,7 +450,7 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                         match crate::tui::commands::parse_chat_command(&content) {
                             // Handle /help locally so deterministic UI guidance is shown even
                             // when command callbacks are unavailable or delayed.
-                            Ok(crate::tui::commands::IrcCommand::Help { command }) => {
+                            Ok(crate::tui::commands::ChatCommand::Help { command }) => {
                                 let message = if let Some(raw_name) = command
                                     .as_deref()
                                     .map(str::trim)
