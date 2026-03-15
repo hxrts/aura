@@ -575,16 +575,11 @@ fn publish_scoped_channels(
         .map(|channel| channel.id.as_str())
         .collect::<Vec<_>>()
         .join("|");
-    match channels.write() {
-        Ok(mut guard) => *guard = channel_list,
-        Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-    }
+    *channels.write() = channel_list;
 
     if let Some(tx) = update_tx {
         let channel_signature_changed = {
-            let mut guard = last_channel_signature
-                .write()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut guard = last_channel_signature.write();
             let changed = guard.as_deref() != Some(channel_signature.as_str());
             *guard = Some(channel_signature);
             changed
@@ -655,26 +650,16 @@ pub fn use_channels_subscription(
         let selected_channel_id = selected_channel_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                let mut stabilized = latest_chat_state
-                    .read()
-                    .ok()
-                    .map(|previous| {
-                        let selected_channel = selected_channel_id
-                            .read()
-                            .ok()
-                            .and_then(|guard| guard.clone());
-                        merge_transient_channels(
-                            &chat_state,
-                            &previous,
-                            selected_channel.as_deref(),
-                        )
-                    })
-                    .unwrap_or_else(|| chat_state.clone());
-                if let Some(authority_id) = shared_authority_id
-                    .read()
-                    .ok()
-                    .and_then(|guard| guard.clone())
-                {
+                let mut stabilized = {
+                    let previous = latest_chat_state.read();
+                    let selected_channel = selected_channel_id.read().clone();
+                    merge_transient_channels(
+                        &chat_state,
+                        &previous,
+                        selected_channel.as_deref(),
+                    )
+                };
+                if let Some(authority_id) = *shared_authority_id.read() {
                     stabilized.ensure_note_to_self_channel(authority_id);
                 }
                 tracing::debug!(
