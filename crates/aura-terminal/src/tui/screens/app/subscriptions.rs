@@ -194,10 +194,13 @@ pub fn use_nav_status_signals(
 
     // Keep a best-effort physical clock for relative-time UI formatting.
     // This must come from the runtime/effects system (not OS clock).
+    // Exits after 200 consecutive failures (~3+ minutes) to avoid running
+    // forever during shutdown.
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let mut now_ms = now_ms.clone();
         async move {
+            let mut consecutive_failures = 0u32;
             loop {
                 let runtime = app_core.raw().read().await.runtime().cloned();
                 if let Some(runtime) = runtime {
@@ -206,7 +209,15 @@ pub fn use_nav_status_signals(
                         if now_ms.get() != next {
                             now_ms.set(next);
                         }
+                        consecutive_failures = 0;
+                    } else {
+                        consecutive_failures += 1;
                     }
+                } else {
+                    consecutive_failures += 1;
+                }
+                if consecutive_failures > 200 {
+                    break;
                 }
                 tokio::time::sleep(Duration::from_millis(1000)).await;
             }
@@ -570,8 +581,7 @@ fn publish_scoped_channels(
                 guard
                     .iter()
                     .find(|channel| {
-                        channel.id == selected_channel_id
-                            && is_dm_like_shared_channel(channel)
+                        channel.id == selected_channel_id && is_dm_like_shared_channel(channel)
                     })
                     .cloned()
             });
@@ -1439,7 +1449,7 @@ mod tests {
         Channel as AppChannel, ChannelType, ChatState, Message, MessageDeliveryStatus,
     };
     use aura_core::crypto::hash::hash;
-    use aura_core::identifiers::{AuthorityId, ChannelId};
+    use aura_core::types::identifiers::{AuthorityId, ChannelId};
     use std::path::Path;
 
     fn test_channel_id(seed: &str) -> ChannelId {
