@@ -762,10 +762,15 @@ impl RuntimeBridge for MockRuntimeBridge {
                             }
                         })
                     },
-                    InvitationBridgeType::Channel { home_id, nickname_suggestion } => {
+                    InvitationBridgeType::Channel {
+                        home_id,
+                        context_id,
+                        nickname_suggestion,
+                    } => {
                         serde_json::json!({
                             "Channel": {
                                 "home_id": home_id,
+                                "context_id": context_id.map(|id| id.to_string()),
                                 "nickname_suggestion": nickname_suggestion
                             }
                         })
@@ -873,7 +878,8 @@ impl RuntimeBridge for MockRuntimeBridge {
         &self,
         receiver: AuthorityId,
         home_id: String,
-        _context_id: Option<ContextId>,
+        context_id: Option<ContextId>,
+        channel_name_hint: Option<String>,
         _bootstrap: Option<ChannelBootstrapPackage>,
         message: Option<String>,
         ttl_ms: Option<u64>,
@@ -888,7 +894,8 @@ impl RuntimeBridge for MockRuntimeBridge {
             receiver_id: receiver,
             invitation_type: InvitationBridgeType::Channel {
                 home_id,
-                nickname_suggestion: None,
+                context_id,
+                nickname_suggestion: channel_name_hint,
             },
             status: InvitationBridgeStatus::Pending,
             created_at_ms: now,
@@ -1074,8 +1081,14 @@ impl RuntimeBridge for MockRuntimeBridge {
                     .and_then(|c| c.get("nickname_suggestion"))
                     .and_then(|n| n.as_str())
                     .map(|s| s.to_string());
+                let context_id = inv_type
+                    .get("Channel")
+                    .and_then(|c| c.get("context_id"))
+                    .and_then(|id| id.as_str())
+                    .and_then(|raw| raw.parse().ok());
                 InvitationBridgeType::Channel {
                     home_id,
+                    context_id,
                     nickname_suggestion,
                 }
             } else {

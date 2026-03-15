@@ -407,6 +407,7 @@ async fn test_channel_invitation() -> TestResult {
             invitee,
             home_id.clone(),
             None, // context_id
+            Some("shared-parity-lab".to_string()), // nickname_suggestion
             None, // bootstrap
             Some("Join our discussion channel".to_string()),
             None, // expires_in_ms

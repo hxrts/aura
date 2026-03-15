@@ -31,6 +31,12 @@ pub struct ContactInvitationCode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelBinding {
+    pub channel_id: String,
+    pub context_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObservedOperation {
     pub instance_id: OperationInstanceId,
     pub state: OperationState,
@@ -225,8 +231,11 @@ pub trait SharedSemanticBackend {
         )
     }
 
-    fn submit_create_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
-        expect_semantic_command_unit(
+    fn submit_create_channel(
+        &mut self,
+        channel_name: &str,
+    ) -> Result<SubmittedAction<ChannelBinding>> {
+        expect_semantic_command_channel_binding(
             self.submit_semantic_command(SemanticCommandRequest::new(
                 IntentAction::CreateChannel {
                     channel_name: channel_name.to_string(),
@@ -255,6 +264,9 @@ pub trait SharedSemanticBackend {
             SemanticCommandValue::None => Err(anyhow!(
                 "submit_create_contact_invitation did not produce a contact invitation code"
             )),
+            SemanticCommandValue::ChannelBinding { .. } => Err(anyhow!(
+                "submit_create_contact_invitation produced an unexpected channel binding payload"
+            )),
         }
     }
 
@@ -272,11 +284,13 @@ pub trait SharedSemanticBackend {
     fn submit_invite_actor_to_channel(
         &mut self,
         authority_id: &str,
+        channel_id: Option<&str>,
     ) -> Result<SubmittedAction<()>> {
         expect_semantic_command_unit(
             self.submit_semantic_command(SemanticCommandRequest::new(
                 IntentAction::InviteActorToChannel {
                     authority_id: authority_id.to_string(),
+                    channel_id: channel_id.map(ToOwned::to_owned),
                 },
             ))?,
             "submit_invite_actor_to_channel",
@@ -323,6 +337,34 @@ fn expect_semantic_command_unit(
             submission: response.submission,
             handle: response.handle,
         }),
+        SemanticCommandValue::ContactInvitationCode { .. } => Err(anyhow!(
+            "{operation} produced an unexpected contact invitation code payload"
+        )),
+        SemanticCommandValue::ChannelBinding { .. } => Err(anyhow!(
+            "{operation} produced an unexpected channel binding payload"
+        )),
+    }
+}
+
+fn expect_semantic_command_channel_binding(
+    response: SemanticCommandResponse,
+    operation: &str,
+) -> Result<SubmittedAction<ChannelBinding>> {
+    match response.value {
+        SemanticCommandValue::ChannelBinding {
+            channel_id,
+            context_id,
+        } => Ok(SubmittedAction {
+            value: ChannelBinding {
+                channel_id,
+                context_id,
+            },
+            submission: response.submission,
+            handle: response.handle,
+        }),
+        SemanticCommandValue::None => Err(anyhow!(
+            "{operation} did not produce a channel binding payload"
+        )),
         SemanticCommandValue::ContactInvitationCode { .. } => Err(anyhow!(
             "{operation} produced an unexpected contact invitation code payload"
         )),

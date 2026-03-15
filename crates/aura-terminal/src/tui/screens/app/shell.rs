@@ -380,8 +380,18 @@ fn execute_harness_followup_command(
             let Some(cb) = callbacks.as_ref() else {
                 return Err("Chat callbacks are unavailable".to_string());
             };
+            let Some(update_tx) = update_tx.clone() else {
+                return Err("UI update sender is unavailable".to_string());
+            };
+            let operation = SubmittedOperationOwner::submit_local_only(
+                app_ctx.app_core.raw().clone(),
+                app_ctx.tasks(),
+                update_tx,
+                OperationId::invitation_accept(),
+                SemanticOperationKind::AcceptPendingChannelInvitation,
+            );
             state.router.go_to(Screen::Chat);
-            (cb.chat.on_accept_pending_channel_invitation)();
+            (cb.chat.on_accept_pending_channel_invitation)(operation);
             Ok(None)
         }
         TuiCommand::Dispatch(DispatchCommand::SendChatMessage { content }) => {
@@ -2521,8 +2531,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         (cb.chat.on_join_channel)(channel_name);
                                     }
                                     DispatchCommand::AcceptPendingHomeInvitation => {
+                                        let Some(update_tx) = update_tx_for_events.clone() else {
+                                            new_state.toast_error(
+                                                "UI update sender is unavailable",
+                                            );
+                                            continue;
+                                        };
+                                        let operation =
+                                            SubmittedOperationOwner::submit_local_only(
+                                                app_core_for_events.clone(),
+                                                tasks_for_events.clone(),
+                                                update_tx,
+                                                OperationId::invitation_accept(),
+                                                SemanticOperationKind::AcceptPendingChannelInvitation,
+                                            );
                                         new_state.router.go_to(Screen::Chat);
-                                        (cb.chat.on_accept_pending_channel_invitation)();
+                                        (cb.chat.on_accept_pending_channel_invitation)(operation);
                                     }
                                     DispatchCommand::SendChatMessage { content } => {
                                         let channels = match shared_channels_for_dispatch.read() {

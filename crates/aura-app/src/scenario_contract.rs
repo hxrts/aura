@@ -194,6 +194,10 @@ impl<T> SubmittedAction<T> {
 pub enum SemanticCommandValue {
     None,
     ContactInvitationCode { code: String },
+    ChannelBinding {
+        channel_id: String,
+        context_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,6 +225,14 @@ impl SemanticCommandResponse {
     #[must_use]
     pub fn accepted_contact_invitation_code(code: String) -> Self {
         Self::accepted(SemanticCommandValue::ContactInvitationCode { code })
+    }
+
+    #[must_use]
+    pub fn accepted_channel_binding(channel_id: String, context_id: Option<String>) -> Self {
+        Self::accepted(SemanticCommandValue::ChannelBinding {
+            channel_id,
+            context_id,
+        })
     }
 }
 
@@ -634,6 +646,8 @@ pub enum IntentAction {
     },
     InviteActorToChannel {
         authority_id: String,
+        #[serde(default)]
+        channel_id: Option<String>,
     },
     SendChatMessage {
         message: String,
@@ -1562,6 +1576,7 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
             SemanticActionKind::InviteActorToChannel => {
                 ScenarioAction::Intent(IntentAction::InviteActorToChannel {
                     authority_id: required(value.value, "value", value.action)?,
+                    channel_id: None,
                 })
             }
             SemanticActionKind::Navigate => ScenarioAction::Ui(UiAction::Navigate(required(
@@ -2037,6 +2052,7 @@ mod tests {
             },
             IntentAction::InviteActorToChannel {
                 authority_id: "authority:peer".to_string(),
+                channel_id: None,
             },
             IntentAction::SendChatMessage {
                 message: "hello".to_string(),
@@ -2096,6 +2112,7 @@ mod tests {
             },
             IntentAction::InviteActorToChannel {
                 authority_id: "authority:peer".to_string(),
+                channel_id: None,
             },
             IntentAction::SendChatMessage {
                 message: "hello".to_string(),
@@ -2154,6 +2171,7 @@ mod tests {
             },
             IntentAction::InviteActorToChannel {
                 authority_id: "authority:peer".to_string(),
+                channel_id: None,
             },
             IntentAction::SendChatMessage {
                 message: "hello".to_string(),
@@ -2182,6 +2200,7 @@ mod tests {
     fn declared_post_operation_convergence_contracts_are_explicit() {
         let invite_contract = IntentAction::InviteActorToChannel {
             authority_id: "authority:peer".to_string(),
+            channel_id: None,
         }
         .contract();
         let invite_convergence = invite_contract
@@ -2327,6 +2346,7 @@ mod tests {
             },
             IntentAction::InviteActorToChannel {
                 authority_id: "authority:test".to_string(),
+                channel_id: None,
             },
             IntentAction::SendChatMessage {
                 message: "hello".to_string(),

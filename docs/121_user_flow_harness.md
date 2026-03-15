@@ -19,11 +19,15 @@ Shared scenarios must run in the shared semantic lane. That lane must not issue 
 
 ## 3. Scenario Sources
 
-The canonical shared scenario source is `aura-app::scenario_contract`. Converted shared scenarios load as semantic definitions and become `ScenarioCanonicalModel::SemanticSharedFlow`. Those scenarios keep typed semantic steps and do not keep mirrored legacy `ScenarioStep` graphs.
+The scenario source of truth is `aura-app::scenario_contract`. Inventoried harness scenarios load and execute as semantic definitions. Shared scenarios keep typed semantic steps and do not carry mirrored frontend-conformance execution step graphs.
 
-The harness still contains a compatibility bridge for legacy scripted scenarios. That bridge supports migration work and frontend-conformance coverage. It is not the canonical input surface for shared flows.
+Frontend-conformance scenarios may still use typed `UiAction` mechanics such as key presses, text input, and modal dismissal. They are semantic files too. Renderer-specific intent belongs in the scenario definition, not in a second file format.
 
-Shared scenario governance depends on `scenarios/harness_inventory.toml`. The inventory classifies scenarios as shared, TUI conformance, web conformance, or removal candidates. Governance checks use that classification to enforce lane policy.
+Semantic scenarios must not declare `execution_mode`. Compatibility-only executor fixtures must declare `execution_mode = "compatibility"` or `execution_mode = "agent"` explicitly. The harness no longer treats a missing mode as an implicit compatibility fallback.
+
+Compatibility-only fixtures are renderer-mechanic coverage only. They must not encode product semantic intents such as account creation, contact acceptance, channel joins, or chat sends as compatibility actions.
+
+Shared scenario governance depends on `scenarios/harness_inventory.toml`. The inventory classifies scenarios as shared, TUI conformance, or web conformance. Governance checks use that classification directly to enforce lane policy.
 
 ## 4. Backend Model
 
@@ -55,7 +59,7 @@ Unsupported semantic commands must fail closed. The harness must not silently fa
 
 Shared scenarios must declare convergence barriers before the next typed intent when the flow requires one. Governance validates those barriers against typed expectations. This keeps shared execution aligned with runtime events and authoritative state changes.
 
-The executor can also run frontend-conformance scenarios. Those runs still produce traces and diagnostics. They are not the primary parity oracle for shared business flows.
+The executor also runs frontend-conformance scenarios through the semantic step model. Those runs still produce traces and diagnostics. They are not the primary parity oracle for shared business flows.
 
 ## 8. Determinism And Replay
 
@@ -73,7 +77,7 @@ Simulator substrate runs currently support local instances only. Browser instanc
 
 ## 10. Governance And Policy
 
-Harness governance is typed first. `aura-harness` exposes governance checks for shared scenario contracts, canonical model enforcement, barrier legality, user-flow coverage, UI parity metadata, wrapper integrity, and legacy shared-flow quarantine.
+Harness governance is typed first. `aura-harness` exposes governance checks for shared scenario contracts, scenario-shape enforcement, barrier legality, user-flow coverage, UI parity metadata, and wrapper integrity.
 
 The main repository policy entry points are `scripts/check/shared-flow-policy.sh`, `scripts/check/user-flow-policy-guardrails.sh`, and `scripts/check/user-flow-guidance-sync.sh`. The corresponding aggregate commands are `just ci-shared-flow-policy`, `just ci-user-flow-policy`, and `just ci-harness-matrix-inventory`.
 

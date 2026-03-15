@@ -281,7 +281,7 @@ fn command_outcome_message(
 #[derive(Clone)]
 pub struct ChatCallbacks {
     pub on_send: SendCallback,
-    pub on_accept_pending_channel_invitation: NoArgCallback,
+    pub on_accept_pending_channel_invitation: NoArgOwnedCallback,
     pub on_join_channel: JoinChannelCallback,
     pub on_retry_message: RetryMessageCallback,
     pub on_create_channel: CreateChannelCallback,
@@ -314,8 +314,8 @@ impl ChatCallbacks {
     fn make_accept_pending_channel_invitation(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
-    ) -> NoArgCallback {
-        Arc::new(move || {
+    ) -> NoArgOwnedCallback {
+        Arc::new(move |operation| {
             let ctx = ctx.clone();
             let tx = tx.clone();
             spawn_ctx(ctx.clone(), async move {
@@ -324,15 +324,12 @@ impl ChatCallbacks {
                     .await
                 {
                     Ok(_) => {
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::InvitationAccepted {
-                                invitation_id: "pending-home".to_string(),
-                            },
-                        )
-                        .await;
+                        let _ = operation.relinquish_to_workflow(
+                            SemanticOperationTransferScope::AcceptPendingChannelInvitation,
+                        );
                     }
                     Err(error) => {
+                        operation.fail(error.to_string()).await;
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::ToastAdded(ToastMessage::error(
@@ -2196,6 +2193,7 @@ mod tests {
             receiver_id: authority("authority-00000000-0000-0000-0000-000000000002"),
             invitation_type: InvitationBridgeType::Channel {
                 home_id: "home-test".to_string(),
+                context_id: None,
                 nickname_suggestion: None,
             },
             status: InvitationBridgeStatus::Pending,

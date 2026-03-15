@@ -26,6 +26,7 @@ pub(crate) enum SemanticOperationOwner {
 pub(crate) enum SemanticOperationTransferScope {
     InvitationImport,
     InviteActorToChannel,
+    AcceptPendingChannelInvitation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

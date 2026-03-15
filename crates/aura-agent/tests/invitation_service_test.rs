@@ -134,13 +134,26 @@ async fn test_invite_to_channel_via_agent() -> TestResult {
     let receiver_id = AuthorityId::new_from_entropy([231u8; 32]);
     let home_id = ChannelId::from_bytes([232u8; 32]).to_string();
     let invitation = invitations
-        .invite_to_channel(receiver_id, home_id.clone(), None, None, None, None)
+        .invite_to_channel(
+            receiver_id,
+            home_id.clone(),
+            None,
+            Some("shared-parity-lab".to_string()),
+            None,
+            None,
+            None,
+        )
         .await?;
 
     assert!(invitation.invitation_id.as_str().starts_with("inv-"));
     match &invitation.invitation_type {
-        InvitationType::Channel { home_id, .. } => {
+        InvitationType::Channel {
+            home_id,
+            nickname_suggestion,
+            ..
+        } => {
             assert_eq!(home_id, &ChannelId::from_bytes([232u8; 32]));
+            assert_eq!(nickname_suggestion.as_deref(), Some("shared-parity-lab"));
         }
         _ => panic!("Expected Channel invitation type"),
     }
@@ -157,6 +170,7 @@ async fn test_invite_to_channel_rejects_invalid_home_id() -> TestResult {
         .invite_to_channel(
             receiver_id,
             "channel-123".to_string(),
+            None,
             None,
             None,
             None,

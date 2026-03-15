@@ -13,8 +13,8 @@ use aura_app::scenario_contract::{
 };
 use serde::{Deserialize, Serialize};
 
-pub(crate) use crate::execution_step::{nav_control_id_for_screen, settings_section_item_id};
-pub use crate::execution_step::{ScenarioAction, ScenarioStep, ScreenSource};
+pub(crate) use crate::compatibility_step::{nav_control_id_for_screen, settings_section_item_id};
+pub use crate::compatibility_step::{CompatibilityAction, CompatibilityStep, ScreenSource};
 
 pub const RUN_SCHEMA_VERSION: u32 = 1;
 pub const SCENARIO_SCHEMA_VERSION: u32 = 1;
@@ -188,7 +188,7 @@ pub struct ScenarioConfig {
     #[serde(default)]
     pub required_capabilities: Vec<String>,
     #[serde(rename = "steps")]
-    pub compatibility_steps: Vec<ScenarioStep>,
+    pub compatibility_steps: Vec<CompatibilityStep>,
     #[serde(skip)]
     pub semantic_steps: Vec<SemanticStep>,
 }
@@ -511,11 +511,8 @@ impl ScenarioConfig {
             .then_some(self.semantic_steps.as_slice())
     }
 
-    pub fn compatibility_steps(&self) -> Result<&[ScenarioStep]> {
-        if self.is_semantic_scenario() {
-            bail!("semantic scenarios do not lower into frontend-conformance execution step graphs");
-        }
-        Ok(self.compatibility_steps.as_slice())
+    pub fn compatibility_steps(&self) -> Option<&[CompatibilityStep]> {
+        (!self.is_semantic_scenario()).then_some(self.compatibility_steps.as_slice())
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -552,6 +549,12 @@ impl ScenarioConfig {
             if self.semantic_steps.is_empty() {
                 bail!("semantic scenario must include at least one semantic step");
             }
+            if self.execution_mode.is_some() {
+                bail!(
+                    "semantic scenario {} must not declare execution_mode; execution follows the semantic lane",
+                    self.id
+                );
+            }
             if !self.compatibility_steps.is_empty() {
                 bail!(
                     "semantic scenario {} must not carry mirrored frontend-conformance execution steps",
@@ -570,7 +573,16 @@ impl ScenarioConfig {
             return Ok(());
         }
 
-        let steps = self.compatibility_steps()?;
+        if self.execution_mode.is_none() {
+            bail!(
+                "compatibility scenario {} must declare execution_mode = \"compatibility\" or \"agent\"",
+                self.id
+            );
+        }
+
+        let steps = self
+            .compatibility_steps()
+            .expect("validated non-semantic scenarios must expose compatibility steps");
         let mut step_ids = HashSet::new();
         for step in steps {
             if step.id.trim().is_empty() {
@@ -582,13 +594,7 @@ impl ScenarioConfig {
             if step.request_id == Some(0) {
                 bail!("scenario step {} request_id must be >= 1", step.id);
             }
-            if matches!(step.action, ScenarioAction::Noop) {
-                bail!(
-                    "scenario step {} uses noop; use a semantic wait or explicit action instead",
-                    step.id
-                );
-            }
-            if matches!(step.action, ScenarioAction::WaitFor)
+            if matches!(step.action, CompatibilityAction::WaitFor)
                 && step.pattern.is_none()
                 && step.selector.is_none()
                 && step.contains.is_none()
@@ -606,7 +612,7 @@ impl ScenarioConfig {
                     step.id
                 );
             }
-            if matches!(step.action, ScenarioAction::AssertParity)
+            if matches!(step.action, CompatibilityAction::AssertParity)
                 && (step.instance.is_none() || step.peer_instance.is_none())
             {
                 bail!(
@@ -1109,9 +1115,9 @@ mod tests {
             goal: "reject legacy compatibility mode alias".to_string(),
             execution_mode: Some("scripted".to_string()),
             required_capabilities: Vec::new(),
-            compatibility_steps: vec![crate::config::ScenarioStep {
-                id: "noop".to_string(),
-                action: crate::config::ScenarioAction::Noop,
+            compatibility_steps: vec![crate::config::CompatibilityStep {
+                id: "launch".to_string(),
+                action: crate::config::CompatibilityAction::LaunchInstances,
                 ..Default::default()
             }],
             semantic_steps: Vec::new(),
@@ -1123,5 +1129,51 @@ mod tests {
             .unwrap_or_else(|| panic!("legacy scripted alias should be rejected"))
             .to_string();
         assert!(error.contains("compatibility, agent"));
+    }
+
+    #[test]
+    fn compatibility_scenarios_require_explicit_execution_mode() {
+        let config = ScenarioConfig {
+            schema_version: SCENARIO_SCHEMA_VERSION,
+            id: "compat-require-mode".to_string(),
+            goal: "reject implicit compatibility execution mode".to_string(),
+            execution_mode: None,
+            required_capabilities: Vec::new(),
+            compatibility_steps: vec![crate::config::CompatibilityStep {
+                id: "launch".to_string(),
+                action: crate::config::CompatibilityAction::LaunchInstances,
+                ..Default::default()
+            }],
+            semantic_steps: Vec::new(),
+        };
+
+        let error = config
+            .validate()
+            .err()
+            .unwrap_or_else(|| panic!("compatibility mode must be explicit"))
+            .to_string();
+        assert!(error.contains("must declare execution_mode"));
+    }
+
+    #[test]
+    fn semantic_scenarios_reject_execution_mode() {
+        let mut config = semantic_scenario(
+            "semantic-reject-mode",
+            "reject execution mode on semantic scenario",
+            vec![ScenarioStep {
+                id: "launch".to_string(),
+                actor: None,
+                timeout_ms: Some(1000),
+                action: SemanticAction::Environment(EnvironmentAction::LaunchActors),
+            }],
+        );
+        config.execution_mode = Some("compatibility".to_string());
+
+        let error = config
+            .validate()
+            .err()
+            .unwrap_or_else(|| panic!("semantic scenarios must reject execution_mode"))
+            .to_string();
+        assert!(error.contains("must not declare execution_mode"));
     }
 }

@@ -215,6 +215,7 @@ pub enum InvitationBridgeType {
     /// Channel/home invitation with optional nickname suggestion
     Channel {
         home_id: String,
+        context_id: Option<ContextId>,
         nickname_suggestion: Option<String>,
     },
     /// Device enrollment invitation (out-of-band transfer).
@@ -876,6 +877,7 @@ pub trait RuntimeBridge: Send + Sync {
         receiver: AuthorityId,
         home_id: String,
         context_id: Option<ContextId>,
+        channel_name_hint: Option<String>,
         bootstrap: Option<ChannelBootstrapPackage>,
         message: Option<String>,
         ttl_ms: Option<u64>,
@@ -1448,6 +1450,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         _receiver: AuthorityId,
         _home_id: String,
         _context_id: Option<ContextId>,
+        _channel_name_hint: Option<String>,
         _bootstrap: Option<ChannelBootstrapPackage>,
         _message: Option<String>,
         _ttl_ms: Option<u64>,

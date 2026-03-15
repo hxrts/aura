@@ -290,6 +290,7 @@ impl InvitationServiceApi {
         receiver_id: AuthorityId,
         home_id: String,
         context_id: Option<ContextId>,
+        nickname_suggestion: Option<String>,
         bootstrap: Option<ChannelBootstrapPackage>,
         message: Option<String>,
         expires_in_ms: Option<u64>,
@@ -307,7 +308,7 @@ impl InvitationServiceApi {
                 receiver_id,
                 InvitationType::Channel {
                     home_id,
-                    nickname_suggestion: None,
+                    nickname_suggestion,
                     bootstrap,
                 },
                 context_id,
@@ -808,11 +809,29 @@ mod tests {
         let receiver_id = AuthorityId::new_from_entropy([116u8; 32]);
         let home_id = ChannelId::from_bytes([116u8; 32]).to_string();
         let invitation = service
-            .invite_to_channel(receiver_id, home_id, None, None, None, None)
+            .invite_to_channel(
+                receiver_id,
+                home_id,
+                None,
+                Some("shared-parity-lab".to_string()),
+                None,
+                None,
+                None,
+            )
             .await
             .unwrap();
 
         assert!(invitation.invitation_id.as_str().starts_with("inv-"));
+        match &invitation.invitation_type {
+            InvitationType::Channel {
+                nickname_suggestion,
+                ..
+            } => assert_eq!(
+                nickname_suggestion.as_deref(),
+                Some("shared-parity-lab")
+            ),
+            _ => panic!("expected channel invitation"),
+        }
     }
 
     #[tokio::test]

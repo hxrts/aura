@@ -2311,6 +2311,8 @@ fn submit_runtime_chat_input(
                         None,
                         None,
                         None,
+                        None,
+                        None,
                     )
                     .await
                     .map(|_| Some("home invitation sent".to_string()))

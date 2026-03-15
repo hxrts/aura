@@ -1997,6 +1997,7 @@ pub async fn create_channel_with_authoritative_binding(
                 *receiver,
                 channel_id.to_string(),
                 Some(context_id),
+                Some(name.to_string()),
                 bootstrap.clone(),
                 None,
                 None,
@@ -2916,7 +2917,7 @@ pub async fn invite_user_to_channel(
 pub async fn invite_user_to_channel_with_context(
     app_core: &Arc<RwLock<AppCore>>,
     target_user_id: &str,
-    channel_id: &str,
+    channel_name_or_id: &str,
     context_id: Option<ContextId>,
     operation_instance_id: Option<OperationInstanceId>,
     message: Option<String>,
@@ -2951,9 +2952,10 @@ pub async fn invite_user_to_channel_with_context(
             "invite_user_to_channel",
             "resolve_channel_id",
             Some(deadline),
-            resolve_channel_id_from_state_or_input(app_core, channel_id),
+            resolve_channel_id_from_state_or_input(app_core, channel_name_or_id),
         )
         .await?;
+        let channel_name_hint = normalize_channel_name(channel_name_or_id);
         update_invite_stage(&stage_tracker, "invite_authority_to_channel");
 
         invite_authority_to_channel_with_context(
@@ -2961,6 +2963,7 @@ pub async fn invite_user_to_channel_with_context(
             receiver,
             channel_id,
             context_id,
+            Some(channel_name_hint),
             operation_instance_id.clone(),
             Some(deadline),
             stage_tracker.clone(),
@@ -3014,7 +3017,7 @@ pub async fn invite_authority_to_channel(
     ttl_ms: Option<u64>,
 ) -> Result<InvitationId, AuraError> {
     invite_authority_to_channel_with_context(
-        app_core, receiver, channel_id, None, None, None, None, message, ttl_ms,
+        app_core, receiver, channel_id, None, None, None, None, None, message, ttl_ms,
     )
     .await
 }
@@ -3026,6 +3029,7 @@ pub async fn invite_authority_to_channel_with_context(
     receiver: AuthorityId,
     channel_id: ChannelId,
     context_id: Option<ContextId>,
+    channel_name_hint: Option<String>,
     operation_instance_id: Option<OperationInstanceId>,
     deadline: Option<Instant>,
     stage_tracker: Option<Arc<Mutex<&'static str>>>,
@@ -3064,6 +3068,7 @@ pub async fn invite_authority_to_channel_with_context(
         receiver,
         channel_id.to_string(),
         Some(context_id),
+        channel_name_hint,
         None,
         operation_instance_id,
         deadline,
@@ -3731,6 +3736,7 @@ mod tests {
             receiver_id: AuthorityId::new_from_entropy([99u8; 32]),
             invitation_type: InvitationBridgeType::Channel {
                 home_id: channel_id.to_string(),
+                context_id: None,
                 nickname_suggestion: None,
             },
             status: InvitationBridgeStatus::Pending,

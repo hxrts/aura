@@ -8,7 +8,7 @@ pub mod capabilities;
 pub mod config;
 pub mod coordinator;
 pub mod determinism;
-mod execution_step;
+mod compatibility_step;
 pub mod events;
 pub mod executor;
 pub mod failure_attribution;

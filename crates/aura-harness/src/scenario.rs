@@ -53,13 +53,9 @@ impl ScenarioRunner {
             return ScenarioLintReport { warnings, errors };
         }
 
-        let compatibility_steps = match scenario.compatibility_steps() {
-            Ok(compatibility_steps) => compatibility_steps,
-            Err(error) => {
-                errors.push(format!("scenario lowering failed: {error}"));
-                return ScenarioLintReport { warnings, errors };
-            }
-        };
+        let compatibility_steps = scenario
+            .compatibility_steps()
+            .expect("non-semantic scenarios must expose compatibility steps");
 
         for step in compatibility_steps {
             if let Some(instance) = step.instance.as_deref() {

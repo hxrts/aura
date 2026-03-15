@@ -402,13 +402,14 @@ fn require_binary(binary: &str) -> Result<()> {
 mod tests {
     use super::*;
     use crate::config::{
-        InstanceConfig, InstanceMode, RunSection, ScenarioAction, ScenarioConfig, ScenarioStep,
+        CompatibilityAction, CompatibilityStep, InstanceConfig, InstanceMode, RunSection,
+        ScenarioConfig,
     };
 
     fn test_scenario_config(
         id: &str,
         goal: &str,
-        compatibility_steps: Vec<ScenarioStep>,
+        compatibility_steps: Vec<CompatibilityStep>,
     ) -> ScenarioConfig {
         ScenarioConfig {
             schema_version: 1,
@@ -427,11 +428,10 @@ mod tests {
         let mut scenario = test_scenario_config(
             "capability-fail",
             "require ssh",
-            vec![ScenarioStep {
+            vec![CompatibilityStep {
                 id: "step-1".to_string(),
-                action: ScenarioAction::Noop,
+                action: CompatibilityAction::LaunchInstances,
                 instance: None,
-                expect: None,
                 timeout_ms: None,
                 ..Default::default()
             }],

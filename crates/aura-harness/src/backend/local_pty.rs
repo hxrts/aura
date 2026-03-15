@@ -25,8 +25,8 @@ use tokio::time::Instant;
 
 use crate::backend::{
     latest_invitation_code, observe_operation, wait_for_operation_submission,
-    ContactInvitationCode, InstanceBackend, RawUiBackend, SharedSemanticBackend, SubmittedAction,
-    UiOperationHandle, UiSnapshotEvent,
+    ChannelBinding, ContactInvitationCode, InstanceBackend, RawUiBackend, SharedSemanticBackend,
+    SubmittedAction, UiOperationHandle, UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
 use crate::screen_normalization::{authoritative_screen, has_nav_header};
@@ -127,6 +127,28 @@ fn unique_shared_channel_candidate(snapshot: &UiSnapshot) -> Option<String> {
         [channel_id] => Some(channel_id.clone()),
         _ => None,
     }
+}
+
+fn authoritative_channel_binding(snapshot: &UiSnapshot, channel_name: &str) -> Option<ChannelBinding> {
+    snapshot
+        .runtime_events
+        .iter()
+        .rev()
+        .find_map(|event| match &event.fact {
+            RuntimeFact::ChannelMembershipReady { channel, .. }
+                if channel
+                    .name
+                    .as_deref()
+                    .map(|name| name.eq_ignore_ascii_case(channel_name))
+                    .unwrap_or(false) =>
+            {
+                channel.id.as_ref().map(|channel_id| ChannelBinding {
+                    channel_id: channel_id.clone(),
+                    context_id: None,
+                })
+            }
+            _ => None,
+        })
 }
 
 struct RunningSession {
@@ -1340,8 +1362,12 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     value: SemanticCommandValue::None,
                 })
             }
-            IntentAction::InviteActorToChannel { authority_id } => {
-                let submitted = self.submit_invite_actor_to_channel(&authority_id)?;
+            IntentAction::InviteActorToChannel {
+                authority_id,
+                channel_id,
+            } => {
+                let submitted =
+                    self.submit_invite_actor_to_channel(&authority_id, channel_id.as_deref())?;
                 Ok(SemanticCommandResponse {
                     submission: submitted.submission,
                     handle: submitted.handle,
@@ -1361,7 +1387,10 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 Ok(SemanticCommandResponse {
                     submission: submitted.submission,
                     handle: submitted.handle,
-                    value: SemanticCommandValue::None,
+                    value: SemanticCommandValue::ChannelBinding {
+                        channel_id: submitted.value.channel_id,
+                        context_id: submitted.value.context_id,
+                    },
                 })
             }
             IntentAction::JoinChannel { channel_name } => {
@@ -1465,7 +1494,10 @@ impl SharedSemanticBackend for LocalPtyBackend {
         anyhow::bail!("submit_create_home did not produce a non-placeholder home")
     }
 
-    fn submit_create_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
+    fn submit_create_channel(
+        &mut self,
+        channel_name: &str,
+    ) -> Result<SubmittedAction<ChannelBinding>> {
         let previous_operation =
             observe_operation(&self.ui_snapshot()?, &OperationId::create_channel());
         let receipt_handle = self.send_harness_command(&HarnessUiCommand::CreateChannel {
@@ -1481,7 +1513,24 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 Duration::from_secs(5),
             )?,
         };
-        Ok(SubmittedAction::with_ui_operation((), handle))
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            if let Some(binding) = authoritative_channel_binding(&snapshot, channel_name) {
+                return Ok(SubmittedAction::with_ui_operation(binding, handle));
+            }
+            if snapshot.operation_state_for_instance(handle.id(), handle.instance_id())
+                == Some(OperationState::Failed)
+            {
+                anyhow::bail!("submit_create_channel: create_channel failed");
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!(
+                    "submit_create_channel did not publish an authoritative channel binding for {channel_name}"
+                );
+            }
+            thread::sleep(Duration::from_millis(80));
+        }
     }
 
     fn submit_create_contact_invitation(
@@ -1556,14 +1605,19 @@ impl SharedSemanticBackend for LocalPtyBackend {
     fn submit_invite_actor_to_channel(
         &mut self,
         authority_id: &str,
+        channel_id: Option<&str>,
     ) -> Result<SubmittedAction<()>> {
         let snapshot = self.ui_snapshot()?;
         let previous_operation = observe_operation(&snapshot, &OperationId::invitation_create());
-        let channel_id = snapshot
-            .selections
-            .iter()
-            .find(|selection| selection.list == ListId::Channels)
-            .map(|selection| selection.item_id.clone())
+        let channel_id = channel_id
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                snapshot
+                    .selections
+                    .iter()
+                    .find(|selection| selection.list == ListId::Channels)
+                    .map(|selection| selection.item_id.clone())
+            })
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "submit_invite_actor_to_channel requires an authoritative selected channel"
@@ -1589,12 +1643,6 @@ impl SharedSemanticBackend for LocalPtyBackend {
     fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>> {
         let snapshot = self.ui_snapshot()?;
         let previous_operation = observe_operation(&snapshot, &OperationId::invitation_accept());
-        let previous_channel_count = snapshot
-            .lists
-            .iter()
-            .find(|list| list.id == ListId::Channels)
-            .map(|list| list.items.len())
-            .unwrap_or(0);
         let joined_channel_id =
             snapshot
                 .runtime_events
@@ -1605,9 +1653,15 @@ impl SharedSemanticBackend for LocalPtyBackend {
                         member_count: Some(member_count),
                         ..
                     } if *member_count > 1 => channel.id.clone(),
-                    _ => None,
-                });
-        let already_joined = previous_channel_count > 1 || joined_channel_id.is_some();
+                        _ => None,
+                    });
+        let already_joined = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Channels)
+            .map(|list| list.items.len() > 1)
+            .unwrap_or(false)
+            || joined_channel_id.is_some();
         if already_joined {
             if let Some(channel_id) = joined_channel_id {
                 let selected_channel_id = snapshot
@@ -1628,53 +1682,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
             previous_operation,
             Duration::from_secs(5),
         )?;
-        let deadline = Instant::now() + Duration::from_secs(20);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            let channel_count = snapshot
-                .lists
-                .iter()
-                .find(|list| list.id == ListId::Channels)
-                .map(|list| list.items.len())
-                .unwrap_or(0);
-            let joined_channel_id =
-                snapshot
-                    .runtime_events
-                    .iter()
-                    .find_map(|event| match &event.fact {
-                        RuntimeFact::ChannelMembershipReady {
-                            channel,
-                            member_count: Some(member_count),
-                            ..
-                        } if *member_count > 1 => channel.id.clone(),
-                        _ => None,
-                    });
-            let joined = channel_count > previous_channel_count || joined_channel_id.is_some();
-            if joined {
-                if let Some(channel_id) = joined_channel_id {
-                    let selected_channel_id = snapshot
-                        .selections
-                        .iter()
-                        .find(|selection| selection.list == ListId::Channels)
-                        .map(|selection| selection.item_id.clone());
-                    if selected_channel_id.as_deref() != Some(channel_id.as_str()) {
-                        select_home_and_channel(self, &channel_id)?;
-                    }
-                }
-                return Ok(SubmittedAction::with_ui_operation((), handle));
-            }
-            if snapshot.operation_state_for_instance(handle.id(), handle.instance_id())
-                == Some(OperationState::Failed)
-            {
-                anyhow::bail!("submit_accept_pending_channel_invitation: invitation_accept failed");
-            }
-            if Instant::now() >= deadline {
-                anyhow::bail!(
-                    "submit_accept_pending_channel_invitation: timed out waiting for channel join"
-                );
-            }
-            thread::sleep(Duration::from_millis(80));
-        }
+        Ok(SubmittedAction::with_ui_operation((), handle))
     }
 
     fn submit_join_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {

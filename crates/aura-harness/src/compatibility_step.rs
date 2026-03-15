@@ -7,43 +7,23 @@ use std::fmt;
 
 use aura_app::scenario_contract::SettingsSection;
 use aura_app::ui::contract::{
-    ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState,
-    RuntimeEventKind, ScreenId, UiReadiness,
+    ConfirmationState, ControlId, ListId, ModalId, OperationId, OperationState, RuntimeEventKind,
+    ScreenId, UiReadiness,
 };
 use aura_app::ui_contract::QuiescenceState;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum ScenarioAction {
-    LaunchInstances,
+pub enum CompatibilityAction {
     #[default]
-    Noop,
+    LaunchInstances,
     SetVar,
-    CaptureCurrentAuthorityId,
     CaptureSelection,
     ExtractVar,
-    CreateAccount,
-    CreateHome,
-    CreateChannel,
-    StartDeviceEnrollment,
-    ImportDeviceEnrollmentCode,
-    RemoveSelectedDevice,
-    SwitchAuthority,
-    CreateContactInvitation,
-    AcceptContactInvitation,
-    JoinChannel,
-    InviteActorToChannel,
-    AcceptPendingChannelInvitation,
     SendKeys,
     SendChatCommand,
-    SendChatMessage,
     SendClipboard,
-    ReadClipboard,
-    DismissTransient,
-    SendKey,
-    ClickButton,
-    FillInput,
     AssertParity,
     WaitFor,
     MessageContains,
@@ -62,36 +42,16 @@ pub enum ScreenSource {
     Dom,
 }
 
-impl fmt::Display for ScenarioAction {
+impl fmt::Display for CompatibilityAction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match self {
             Self::LaunchInstances => "launch_instances",
-            Self::Noop => "noop",
             Self::SetVar => "set_var",
-            Self::CaptureCurrentAuthorityId => "capture_current_authority_id",
             Self::CaptureSelection => "capture_selection",
             Self::ExtractVar => "extract_var",
-            Self::CreateAccount => "create_account",
-            Self::CreateHome => "create_home",
-            Self::CreateChannel => "create_channel",
-            Self::StartDeviceEnrollment => "start_device_enrollment",
-            Self::ImportDeviceEnrollmentCode => "import_device_enrollment_code",
-            Self::RemoveSelectedDevice => "remove_selected_device",
-            Self::SwitchAuthority => "switch_authority",
-            Self::CreateContactInvitation => "create_contact_invitation",
-            Self::AcceptContactInvitation => "accept_contact_invitation",
-            Self::JoinChannel => "join_channel",
-            Self::InviteActorToChannel => "invite_actor_to_channel",
-            Self::AcceptPendingChannelInvitation => "accept_pending_channel_invitation",
             Self::SendKeys => "send_keys",
             Self::SendChatCommand => "send_chat_command",
-            Self::SendChatMessage => "send_chat_message",
             Self::SendClipboard => "send_clipboard",
-            Self::ReadClipboard => "read_clipboard",
-            Self::DismissTransient => "dismiss_transient",
-            Self::SendKey => "send_key",
-            Self::ClickButton => "click_button",
-            Self::FillInput => "fill_input",
             Self::AssertParity => "assert_parity",
             Self::WaitFor => "wait_for",
             Self::MessageContains => "message_contains",
@@ -107,23 +67,19 @@ impl fmt::Display for ScenarioAction {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ScenarioStep {
+pub struct CompatibilityStep {
     pub id: String,
-    pub action: ScenarioAction,
+    pub action: CompatibilityAction,
     pub instance: Option<String>,
-    pub expect: Option<String>,
     pub timeout_ms: Option<u64>,
     pub request_id: Option<u64>,
     pub keys: Option<String>,
     pub screen_source: Option<ScreenSource>,
     pub command: Option<String>,
     pub pattern: Option<String>,
-    pub key: Option<String>,
-    pub label: Option<String>,
     pub selector: Option<String>,
     pub screen_id: Option<ScreenId>,
     pub control_id: Option<ControlId>,
-    pub field_id: Option<FieldId>,
     pub modal_id: Option<ModalId>,
     pub readiness: Option<UiReadiness>,
     pub quiescence: Option<QuiescenceState>,
@@ -134,7 +90,6 @@ pub struct ScenarioStep {
     pub item_id: Option<String>,
     pub count: Option<usize>,
     pub confirmation: Option<ConfirmationState>,
-    pub repeat: Option<u16>,
     pub source_instance: Option<String>,
     pub peer_instance: Option<String>,
     pub var: Option<String>,
@@ -144,14 +99,6 @@ pub struct ScenarioStep {
     pub from: Option<String>,
     pub contains: Option<String>,
     pub level: Option<String>,
-    pub status: Option<String>,
-    pub consistency: Option<String>,
-    pub reason_code: Option<String>,
-    pub channel: Option<String>,
-    pub selected: Option<bool>,
-    pub present: Option<bool>,
-    pub reason: Option<String>,
-    pub contains_any: Option<Vec<String>>,
 }
 
 pub(crate) fn nav_control_id_for_screen(screen_id: ScreenId) -> ControlId {

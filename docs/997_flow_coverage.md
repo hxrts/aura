@@ -22,11 +22,11 @@ The harness coverage model has two explicit lanes:
 
 | Metric | Count |
 |--------|-------|
-| Harness User Flow Scenarios | 13 |
-| Parity-Critical Scenarios (TUI + Web) | 11 |
+| Harness User Flow Scenarios | 10 |
+| Shared Semantic Scenarios | 5 |
 | Mixed-Runtime Scenarios (TUI + Web distinct keys) | 2 |
-| Auxiliary Coverage Scenarios | 8 |
-| Core User Flow Domains | 11 |
+| Frontend-Conformance Scenarios | 5 |
+| Core User Flow Domains | 9 |
 
 ## Coverage Classes
 
@@ -45,53 +45,45 @@ protocol correctness, and it does not replace conformance or verification lanes.
 
 | Scenario | File | Primary Flow |
 |----------|------|--------------|
-| Scenario 1 | `scenarios/harness/scenario1-invitation-chat-e2e.toml` | Invitation acceptance + shared channel + bidirectional chat |
-| Scenario 2 | `scenarios/harness/scenario2-social-topology-e2e.toml` | Social topology and neighborhood operations |
-| Scenario 3 | `scenarios/harness/scenario3-irc-slash-commands-e2e.toml` | Slash command lifecycle and moderation commands |
+| Startup Smoke | `scenarios/harness/real-runtime-mixed-startup-smoke.toml` | Shared runtime startup and onboarding readiness |
 | Scenario 4 | `scenarios/harness/scenario4-global-nav-and-help-e2e.toml` | TUI frontend-conformance: global navigation and help modal behavior |
-| Scenario 5 | `scenarios/harness/scenario5-chat-modal-and-retry-e2e.toml` | Chat wizard/modals and retry actions |
-| Scenario 6 | `scenarios/harness/scenario6-contacts-lan-and-contact-lifecycle-e2e.toml` | Contacts, LAN scan, contact removal |
 | Scenario 7 | `scenarios/harness/scenario7-neighborhood-keypath-parity-e2e.toml` | TUI frontend-conformance: neighborhood keypath parity and detail navigation |
-| Scenario 8 | `scenarios/harness/scenario8-settings-devices-authority-e2e.toml` | Settings: profile, devices, authority panels |
-| Scenario 9 | `scenarios/harness/scenario9-guardian-and-mfa-ceremonies-e2e.toml` | Guardian and MFA ceremony flows |
-| Scenario 10 | `scenarios/harness/scenario10-recovery-and-notifications-e2e.toml` | Recovery request and notifications surfaces |
-| Scenario 11 | `scenarios/harness/scenario11-demo-full-tui-flow-e2e.toml` | Full end-to-end demo-grade TUI flow |
 | Scenario 12 | `scenarios/harness/scenario12-mixed-device-enrollment-removal-e2e.toml` | Mixed TUI/Web device enrollment + removal |
 | Scenario 13 | `scenarios/harness/scenario13-mixed-contact-channel-message-e2e.toml` | Mixed TUI/Web contact invite + channel messaging |
+| Shared Settings | `scenarios/harness/shared-settings-parity.toml` | Shared semantic settings parity |
+| Shared Notifications/Authority | `scenarios/harness/shared-notifications-and-authority.toml` | Shared semantic notifications navigation and authority-switch handling |
+| Browser Observation | `scenarios/harness/semantic-observation-browser-smoke.toml` | Browser semantic observation contract smoke |
+| TUI Observation | `scenarios/harness/semantic-observation-tui-smoke.toml` | TUI semantic observation contract smoke |
+| Quint Observation | `scenarios/harness/quint-semantic-observation-smoke.toml` | Quint-origin semantic observation reference |
 
-Scenarios 4 and 7 are retained as TUI frontend-conformance coverage. They are
-not part of the shared semantic product-flow suite.
+Scenarios 4 and 7 are retained as TUI frontend-conformance coverage. All
+harness scenarios in this inventory now use the semantic scenario format.
 
 ## User Flow Matrix
 
 | Flow Domain | Main Coverage | Secondary Coverage | Runtime Context |
 |------------|----------------|--------------------|-----------------|
-| Invitation create/accept | Scenario 1 | Scenarios 2, 5, 6, 9, 11, 13 | TUI + Web |
-| Contact lifecycle | Scenario 6 | Scenarios 1, 2, 5, 9, 13 | TUI + Web |
-| Chat channel + messaging | Scenario 1 | Scenarios 3, 5, 11, 13 | TUI + Web |
-| Slash commands and moderation | Scenario 3 | `moderation-and-modal-coverage.toml`, `moderator-assign.toml` | TUI-heavy |
-| Global navigation/help | Scenario 4 | Scenario 11 | TUI frontend-conformance |
-| Neighborhood/home operations | `scenarios/harness/real-runtime-mixed-startup-smoke.toml` | Scenarios 2, 7, 11, `home-roles.toml` | Shared semantic + TUI conformance |
-| Settings panels | `scenarios/harness/shared-settings-parity.toml` | Scenarios 8, 9, 10, 12 | TUI + Web |
-| Device add/remove | Scenario 12 | Scenario 8 | Mixed runtime |
-| Guardian/MFA ceremonies | Scenario 9 | Scenario 10 | TUI + Web |
-| Recovery + notifications | Scenario 10 | Scenario 8 | TUI + Web |
-| Mixed-device and mixed-user interoperability | Scenarios 12 and 13 | `cross-authority-contact.toml` | Mixed runtime |
+| Startup and onboarding readiness | `real-runtime-mixed-startup-smoke.toml` | `quint-semantic-observation-smoke.toml` | TUI + Web |
+| Invitation create/accept + channel messaging | Scenario 13 | None | TUI + Web |
+| Device add/remove | Scenario 12 | `shared-settings-parity.toml` | Mixed runtime |
+| Settings navigation parity | `shared-settings-parity.toml` | `shared-notifications-and-authority.toml`, `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml`, `quint-semantic-observation-smoke.toml` | TUI + Web |
+| Global navigation/help | Scenario 4 | None | TUI frontend-conformance |
+| Neighborhood keypath navigation | Scenario 7 | `real-runtime-mixed-startup-smoke.toml` | TUI frontend-conformance + shared startup |
+| Notifications navigation | `shared-notifications-and-authority.toml` | None | TUI + Web |
+| Switch authority | `shared-notifications-and-authority.toml` | None | TUI + Web |
+| Semantic observation contract | `semantic-observation-browser-smoke.toml` | `semantic-observation-tui-smoke.toml`, `quint-semantic-observation-smoke.toml` | Browser + TUI |
 
-## Auxiliary Scenario Coverage
+## Frontend-Conformance Coverage
 
-These scenarios are maintained as focused supplements and smoke checks:
+These scenarios are maintained outside the main shared semantic lane:
 
 | Scenario File | Focus |
 |---------------|-------|
-| `local-discovery-smoke.toml` | Local discovery smoke coverage |
-| `mixed-topology-smoke.toml` | Mixed-topology connectivity smoke |
-| `mixed-topology-agent.toml` | Agent-level mixed topology behavior |
-| `moderation-and-modal-coverage.toml` | Moderation + modal interaction sweep |
-| `moderator-assign.toml` | Moderator assignment and kick operations |
-| `access-override.toml` | Access override modal flow |
-| `shared-storage.toml` | Shared-storage user flow |
-| `cross-authority-contact.toml` | Cross-authority contact + neighborhood path |
+| `scenario4-global-nav-and-help-e2e.toml` | TUI hotkeys, global navigation, help modal wiring |
+| `scenario7-neighborhood-keypath-parity-e2e.toml` | TUI neighborhood keypaths, detail navigation, toast wiring |
+| `semantic-observation-browser-smoke.toml` | Browser observation contract smoke |
+| `semantic-observation-tui-smoke.toml` | TUI observation contract smoke |
+| `quint-semantic-observation-smoke.toml` | Reference semantic observation smoke |
 
 ## Planned Release And Update Validation Matrix
 
@@ -184,7 +176,7 @@ Fast CI currently uses two separate gates:
 - `just ci-user-flow-policy` enforces documentation and contributor-guidance updates for shared user flow contract and determinism surfaces via `scripts/check/user-flow-guidance-sync.sh`
 - OTA and module release/update validation rows in this report are part of that same user-flow guidance surface and must be kept in sync as the release matrix evolves
 - The release/update rows are expected to land in staged order: mechanism validation first, candidate rehearsal second, and promotion-gate coverage last
-- `just ci-harness-matrix-inventory` enforces that converted scenario classification drives the TUI/web matrix lanes
+- `just ci-harness-matrix-inventory` enforces that scenario classification drives the TUI/web matrix lanes
 - shared semantic scenarios and frontend-conformance scenarios are expected to
   remain distinct classifications; CI policy should reject shared-flow drift
   back to renderer-driven mechanics

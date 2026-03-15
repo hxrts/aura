@@ -3473,6 +3473,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         receiver: AuthorityId,
         home_id: String,
         context_id: Option<ContextId>,
+        channel_name_hint: Option<String>,
         bootstrap: Option<ChannelBootstrapPackage>,
         message: Option<String>,
         ttl_ms: Option<u64>,
@@ -3486,7 +3487,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let invitation = {
             let join = tokio::spawn(async move {
                 invitation_service
-                    .invite_to_channel(receiver, home_id, context_id, bootstrap, message, ttl_ms)
+                    .invite_to_channel(
+                        receiver,
+                        home_id,
+                        context_id,
+                        channel_name_hint,
+                        bootstrap,
+                        message,
+                        ttl_ms,
+                    )
                     .await
             });
             match tokio::time::timeout(
@@ -3518,7 +3527,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let invitation = tokio::time::timeout(
             Duration::from_millis(INVITATION_BRIDGE_STAGE_TIMEOUT_MS),
             invitation_service
-                .invite_to_channel(receiver, home_id, context_id, bootstrap, message, ttl_ms),
+                .invite_to_channel(
+                    receiver,
+                    home_id,
+                    context_id,
+                    channel_name_hint,
+                    bootstrap,
+                    message,
+                    ttl_ms,
+                ),
         )
         .await
         .map_err(|_| {

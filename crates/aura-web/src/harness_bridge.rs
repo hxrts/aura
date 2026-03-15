@@ -265,7 +265,7 @@ async fn submit_semantic_command(
             let timestamp_ms = context_workflows::current_time_ms(controller.app_core())
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            messaging_workflows::create_channel(
+            let created = messaging_workflows::create_channel_with_authoritative_binding(
                 controller.app_core(),
                 &channel_name,
                 None,
@@ -275,7 +275,10 @@ async fn submit_semantic_command(
             )
             .await
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            Ok(SemanticCommandResponse::accepted_without_value())
+            Ok(SemanticCommandResponse::accepted_channel_binding(
+                created.channel_id.to_string(),
+                created.context_id.map(|context_id| context_id.to_string()),
+            ))
         }
         IntentAction::StartDeviceEnrollment { device_name, .. } => {
             controller.set_screen(UiScreen::Settings);
@@ -388,11 +391,19 @@ async fn submit_semantic_command(
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
             Ok(SemanticCommandResponse::accepted_without_value())
         }
-        IntentAction::InviteActorToChannel { authority_id } => {
+        IntentAction::InviteActorToChannel {
+            authority_id,
+            channel_id,
+        } => {
             let authority_id = authority_id
                 .parse::<AuthorityId>()
                 .map_err(|error| JsValue::from_str(&format!("invalid authority id: {error}")))?;
-            let channel_id = selected_channel_id(&controller)?;
+            let channel_id = match channel_id {
+                Some(channel_id) => channel_id
+                    .parse::<ChannelId>()
+                    .map_err(|error| JsValue::from_str(&format!("invalid channel id: {error}")))?,
+                None => selected_channel_id(&controller)?,
+            };
             messaging_workflows::invite_authority_to_channel(
                 controller.app_core(),
                 authority_id,

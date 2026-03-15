@@ -10,7 +10,7 @@ pub(super) fn convert_invitation_to_bridge_info(
         invitation_id: InvitationId::new(invitation.invitation_id.to_string()),
         sender_id: invitation.sender_id,
         receiver_id: invitation.receiver_id,
-        invitation_type: convert_invitation_type_to_bridge(&invitation.invitation_type),
+        invitation_type: convert_invitation_type_to_bridge(invitation),
         status: convert_invitation_status_to_bridge(&invitation.status),
         created_at_ms: invitation.created_at,
         expires_at_ms: invitation.expires_at,
@@ -20,9 +20,9 @@ pub(super) fn convert_invitation_to_bridge_info(
 
 /// Convert domain InvitationType to bridge InvitationBridgeType.
 pub(super) fn convert_invitation_type_to_bridge(
-    inv_type: &crate::handlers::invitation::InvitationType,
+    invitation: &crate::handlers::invitation::Invitation,
 ) -> InvitationBridgeType {
-    match inv_type {
+    match &invitation.invitation_type {
         crate::handlers::invitation::InvitationType::Contact { nickname } => {
             InvitationBridgeType::Contact {
                 nickname: nickname.clone(),
@@ -39,6 +39,7 @@ pub(super) fn convert_invitation_type_to_bridge(
             ..
         } => InvitationBridgeType::Channel {
             home_id: home_id.to_string(),
+            context_id: Some(invitation.context_id),
             nickname_suggestion: nickname_suggestion.clone(),
         },
         crate::handlers::invitation::InvitationType::DeviceEnrollment {

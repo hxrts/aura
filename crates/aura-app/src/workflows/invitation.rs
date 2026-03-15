@@ -805,22 +805,25 @@ async fn reconcile_accepted_channel_invitation(
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
     channel_id: ChannelId,
     sender_id: AuthorityId,
+    context_hint: Option<ContextId>,
     channel_name_hint: Option<&str>,
 ) -> Result<(), AuraError> {
     const CHANNEL_CONTEXT_ATTEMPTS: usize = 60;
     const CHANNEL_CONTEXT_BACKOFF_MS: u64 = 100;
 
-    let mut authoritative_context = None;
-    for attempt in 0..CHANNEL_CONTEXT_ATTEMPTS {
-        authoritative_context =
-            crate::workflows::messaging::authoritative_context_id_for_channel(app_core, channel_id)
-                .await;
-        if authoritative_context.is_some() {
-            break;
-        }
-        if attempt + 1 < CHANNEL_CONTEXT_ATTEMPTS {
-            converge_runtime(runtime).await;
-            runtime.sleep_ms(CHANNEL_CONTEXT_BACKOFF_MS).await;
+    let mut authoritative_context = context_hint;
+    if authoritative_context.is_none() {
+        for attempt in 0..CHANNEL_CONTEXT_ATTEMPTS {
+            authoritative_context =
+                crate::workflows::messaging::authoritative_context_id_for_channel(app_core, channel_id)
+                    .await;
+            if authoritative_context.is_some() {
+                break;
+            }
+            if attempt + 1 < CHANNEL_CONTEXT_ATTEMPTS {
+                converge_runtime(runtime).await;
+                runtime.sleep_ms(CHANNEL_CONTEXT_BACKOFF_MS).await;
+            }
         }
     }
     if authoritative_context.is_none() {
@@ -848,6 +851,8 @@ async fn reconcile_accepted_channel_invitation(
         channel_name_hint,
     )
     .await?;
+    crate::workflows::messaging::refresh_authoritative_channel_membership_readiness(app_core)
+        .await?;
     if crate::workflows::snapshot_policy::chat_snapshot(app_core)
         .await
         .channel(&channel_id)
@@ -947,6 +952,7 @@ pub async fn create_channel_invitation(
     receiver: AuthorityId,
     home_id: String,
     context_id: Option<ContextId>,
+    channel_name_hint: Option<String>,
     bootstrap: Option<ChannelBootstrapPackage>,
     operation_instance_id: Option<OperationInstanceId>,
     deadline: Option<Instant>,
@@ -1032,6 +1038,7 @@ pub async fn create_channel_invitation(
                     receiver,
                     home_id,
                     Some(context_id),
+                    channel_name_hint.clone(),
                     Some(bootstrap),
                     message,
                     ttl_ms,
@@ -1277,6 +1284,7 @@ pub async fn accept_invitation(
                 &runtime,
                 channel_id,
                 invitation.from_id,
+                None,
                 invitation.home_name.as_deref(),
             )
             .await
@@ -1382,7 +1390,12 @@ pub async fn accept_imported_invitation(
             publish_contact_accept_success(app_core, invitation.sender_id, contact_count).await?;
             return Ok(());
         }
-        crate::runtime_bridge::InvitationBridgeType::Channel { home_id, .. } => {
+        crate::runtime_bridge::InvitationBridgeType::Channel {
+            home_id,
+            context_id,
+            nickname_suggestion,
+            ..
+        } => {
             let channel_id = match home_id.parse::<ChannelId>() {
                 Ok(channel_id) => channel_id,
                 Err(_) => {
@@ -1404,7 +1417,8 @@ pub async fn accept_imported_invitation(
                 &runtime,
                 channel_id,
                 invitation.sender_id,
-                None,
+                *context_id,
+                nickname_suggestion.as_deref(),
             )
             .await
             {
@@ -1818,7 +1832,7 @@ pub async fn accept_pending_home_invitation(
 
         if let Some(inv) = home_invitation {
             let invitation_id = inv.invitation_id.clone();
-            accept_invitation(app_core, &invitation_id).await?;
+            accept_imported_invitation(app_core, inv).await?;
             return Ok(invitation_id);
         }
 
@@ -2344,6 +2358,7 @@ mod tests {
             receiver_id: receiver,
             invitation_type: crate::runtime_bridge::InvitationBridgeType::Channel {
                 home_id: ChannelId::from_bytes([49u8; 32]).to_string(),
+                context_id: None,
                 nickname_suggestion: None,
             },
             status: crate::runtime_bridge::InvitationBridgeStatus::Pending,

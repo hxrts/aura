@@ -181,7 +181,7 @@ fn sample_mixed_run_config() -> aura_harness::config::RunConfig {
 }
 
 fn sample_compatibility_scenario() -> aura_harness::config::ScenarioConfig {
-    use aura_harness::config::{ScenarioAction, ScenarioConfig, ScenarioStep};
+    use aura_harness::config::{CompatibilityAction, CompatibilityStep, ScenarioConfig};
 
     ScenarioConfig {
         schema_version: 1,
@@ -190,30 +190,30 @@ fn sample_compatibility_scenario() -> aura_harness::config::ScenarioConfig {
         execution_mode: Some("compatibility".to_string()),
         required_capabilities: vec!["local".to_string(), "ssh".to_string()],
         compatibility_steps: vec![
-            ScenarioStep {
+            CompatibilityStep {
                 id: "launch".to_string(),
-                action: ScenarioAction::LaunchInstances,
+                action: CompatibilityAction::LaunchInstances,
                 timeout_ms: Some(5000),
                 ..Default::default()
             },
-            ScenarioStep {
+            CompatibilityStep {
                 id: "fault-delay".to_string(),
-                action: ScenarioAction::FaultDelay,
+                action: CompatibilityAction::FaultDelay,
                 instance: Some("bob".to_string()),
                 timeout_ms: Some(50),
                 ..Default::default()
             },
-            ScenarioStep {
+            CompatibilityStep {
                 id: "local-send".to_string(),
-                action: ScenarioAction::SendKeys,
+                action: CompatibilityAction::SendKeys,
                 instance: Some("alice".to_string()),
                 keys: Some("mixed-topology-msg\n".to_string()),
                 timeout_ms: Some(2000),
                 ..Default::default()
             },
-            ScenarioStep {
+            CompatibilityStep {
                 id: "local-wait".to_string(),
-                action: ScenarioAction::WaitFor,
+                action: CompatibilityAction::WaitFor,
                 instance: Some("alice".to_string()),
                 pattern: Some("mixed-topology-msg".to_string()),
                 timeout_ms: Some(2000),
@@ -225,7 +225,7 @@ fn sample_compatibility_scenario() -> aura_harness::config::ScenarioConfig {
 }
 
 fn sample_agent_scenario() -> aura_harness::config::ScenarioConfig {
-    use aura_harness::config::{ScenarioAction, ScenarioConfig, ScenarioStep};
+    use aura_harness::config::{CompatibilityAction, CompatibilityStep, ScenarioConfig};
 
     ScenarioConfig {
         schema_version: 1,
@@ -234,30 +234,30 @@ fn sample_agent_scenario() -> aura_harness::config::ScenarioConfig {
         execution_mode: Some("agent".to_string()),
         required_capabilities: vec!["local".to_string(), "ssh".to_string()],
         compatibility_steps: vec![
-            ScenarioStep {
+            CompatibilityStep {
                 id: "launch".to_string(),
-                action: ScenarioAction::LaunchInstances,
+                action: CompatibilityAction::LaunchInstances,
                 timeout_ms: Some(5000),
                 ..Default::default()
             },
-            ScenarioStep {
+            CompatibilityStep {
                 id: "fault-delay".to_string(),
-                action: ScenarioAction::FaultDelay,
+                action: CompatibilityAction::FaultDelay,
                 instance: Some("bob".to_string()),
                 timeout_ms: Some(50),
                 ..Default::default()
             },
-            ScenarioStep {
+            CompatibilityStep {
                 id: "local-send".to_string(),
-                action: ScenarioAction::SendKeys,
+                action: CompatibilityAction::SendKeys,
                 instance: Some("alice".to_string()),
                 keys: Some("agent-mode-msg\n".to_string()),
                 timeout_ms: Some(2000),
                 ..Default::default()
             },
-            ScenarioStep {
+            CompatibilityStep {
                 id: "local-wait".to_string(),
-                action: ScenarioAction::WaitFor,
+                action: CompatibilityAction::WaitFor,
                 instance: Some("alice".to_string()),
                 pattern: Some("agent-mode-msg".to_string()),
                 timeout_ms: Some(2000),

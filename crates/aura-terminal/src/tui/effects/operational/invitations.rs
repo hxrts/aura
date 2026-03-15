@@ -170,6 +170,7 @@ pub async fn handle_invitations(
                         None,
                         None,
                         None,
+                        None,
                         message.clone(),
                         ttl_ms,
                     )
@@ -217,7 +218,7 @@ pub async fn handle_invitations(
                 };
 
             match create_channel_invitation(
-                app_core, receiver, home_id, None, None, None, None, None, None, None,
+                app_core, receiver, home_id, None, None, None, None, None, None, None, None,
             )
             .await
             {

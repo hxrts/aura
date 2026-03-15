@@ -14,6 +14,7 @@ use aura_core::AuthorityId;
 
 /// Callback that takes no arguments.
 pub type NoArgCallback = Arc<dyn Fn() + Send + Sync>;
+pub(crate) type NoArgOwnedCallback = Arc<dyn Fn(SubmittedOperationOwner) + Send + Sync>;
 
 /// Callback that takes a single string ID.
 pub type IdCallback = Arc<dyn Fn(String) + Send + Sync>;
