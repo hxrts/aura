@@ -703,6 +703,7 @@ pub enum InvitationFactKind {
 pub enum SemanticOperationKind {
     CreateAccount,
     CreateHome,
+    CreateChannel,
     StartDeviceEnrollment,
     ImportDeviceEnrollmentCode,
     CreateContactInvitation,
@@ -1081,6 +1082,11 @@ impl OperationId {
     #[must_use]
     pub fn create_home() -> Self {
         Self("create_home".to_string())
+    }
+
+    #[must_use]
+    pub fn create_channel() -> Self {
+        Self("create_channel".to_string())
     }
 
     #[must_use]

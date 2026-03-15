@@ -534,7 +534,7 @@ impl ScenarioConfig {
             bail!("scenario goal must be non-empty");
         }
         if let Some(mode) = self.execution_mode.as_deref() {
-            if mode != "compatibility" && mode != "scripted" && mode != "agent" {
+            if mode != "compatibility" && mode != "agent" {
                 bail!("scenario execution_mode must be one of: compatibility, agent");
             }
         }
@@ -1099,5 +1099,29 @@ mod tests {
         assert!(!ScenarioClassification::Shared.is_frontend_conformance());
         assert!(ScenarioClassification::TuiConformance.is_frontend_conformance());
         assert!(ScenarioClassification::WebConformance.is_frontend_conformance());
+    }
+
+    #[test]
+    fn compatibility_scenarios_reject_scripted_execution_mode() {
+        let config = ScenarioConfig {
+            schema_version: SCENARIO_SCHEMA_VERSION,
+            id: "compat-reject-scripted".to_string(),
+            goal: "reject legacy compatibility mode alias".to_string(),
+            execution_mode: Some("scripted".to_string()),
+            required_capabilities: Vec::new(),
+            compatibility_steps: vec![crate::config::ScenarioStep {
+                id: "noop".to_string(),
+                action: crate::config::ScenarioAction::Noop,
+                ..Default::default()
+            }],
+            semantic_steps: Vec::new(),
+        };
+
+        let error = config
+            .validate()
+            .err()
+            .unwrap_or_else(|| panic!("legacy scripted alias should be rejected"))
+            .to_string();
+        assert!(error.contains("compatibility, agent"));
     }
 }

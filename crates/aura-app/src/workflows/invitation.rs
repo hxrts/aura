@@ -588,6 +588,7 @@ async fn ensure_channel_invitation_context_and_bootstrap(
     stage_tracker: &Option<Arc<Mutex<&'static str>>>,
     deadline: Option<Instant>,
 ) -> Result<(ContextId, ChannelBootstrapPackage), ChannelInvitationBootstrapError> {
+    let requested_context = context_id;
     #[allow(unused_mut)]
     let mut resolved_context = match context_id {
         Some(context_id) => context_id,
@@ -619,6 +620,7 @@ async fn ensure_channel_invitation_context_and_bootstrap(
         return Ok((resolved_context, bootstrap));
     }
 
+    let mut runtime_resolved_context = None;
     update_channel_invitation_stage(stage_tracker, "resolve_runtime_channel_context");
     if let Some(runtime_context) = timeout_channel_invitation_stage_with_deadline(
         "resolve_runtime_channel_context",
@@ -633,8 +635,12 @@ async fn ensure_channel_invitation_context_and_bootstrap(
     .await
     .map_err(|error| ChannelInvitationBootstrapError::BootstrapTransport {
         channel_id,
-        detail: error.to_string(),
+        detail: format!(
+            "{}; requested_context={requested_context:?}; resolved_context_before_runtime={resolved_context}",
+            error
+        ),
     })? {
+        runtime_resolved_context = Some(runtime_context);
         resolved_context = runtime_context;
     }
 
@@ -738,7 +744,10 @@ async fn ensure_channel_invitation_context_and_bootstrap(
                 Err(error) => {
                     return Err(ChannelInvitationBootstrapError::BootstrapTransport {
                         channel_id,
-                        detail: error.to_string(),
+                        detail: format!(
+                            "{}; requested_context={requested_context:?}; runtime_resolved_context={runtime_resolved_context:?}; bootstrap_context={resolved_context}",
+                            error
+                        ),
                     });
                 }
             },

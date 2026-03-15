@@ -11,6 +11,7 @@ use crate::runtime::consensus::build_consensus_params;
 use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyInitRequest};
 use crate::runtime::services::ServiceError;
 use async_trait::async_trait;
+use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
 use aura_app::runtime_bridge::{
     BridgeAuthorityInfo, BridgeDeviceInfo, InvitationInfo, LanPeerInfo, RendezvousStatus,
     RuntimeBridge, SettingsBridgeState, SyncStatus,
@@ -124,6 +125,46 @@ async fn inspect_channel_context_facts(
     }
 
     Ok(inspection)
+}
+
+async fn resolve_channel_context_from_local_chat_facts(
+    effects: &crate::runtime::AuraEffectSystem,
+    authority: AuthorityId,
+    channel: ChannelId,
+) -> Result<Option<ContextId>, IntentError> {
+    let facts = effects
+        .load_committed_facts(authority)
+        .await
+        .map_err(|error| {
+            IntentError::internal_error(format!(
+                "failed to load committed facts for channel resolution: {error}"
+            ))
+        })?;
+
+    for fact in facts.into_iter().rev() {
+        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content else {
+            continue;
+        };
+
+        if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
+            continue;
+        }
+
+        let Some(ChatFact::ChannelCreated {
+            context_id,
+            channel_id,
+            creator_id,
+            ..
+        }) = ChatFact::from_envelope(&envelope) else {
+            continue;
+        };
+
+        if channel_id == channel && creator_id == authority {
+            return Ok(Some(context_id));
+        }
+    }
+
+    Ok(None)
 }
 
 fn service_error_to_intent(err: ServiceError) -> IntentError {
@@ -740,11 +781,24 @@ impl RuntimeBridge for AgentRuntimeBridge {
         channel: ChannelId,
     ) -> Result<Option<ContextId>, IntentError> {
         let effects = self.agent.runtime().effects();
+        let authority = self.agent.authority_id();
+
+        if let Some(context) =
+            resolve_channel_context_from_local_chat_facts(&effects, authority, channel).await?
+        {
+            if inspect_channel_context_facts(&effects, context, channel)
+                .await?
+                .checkpoint_exists
+            {
+                return Ok(Some(context));
+            }
+        }
+
         let contexts = self
             .agent
             .runtime()
             .contexts()
-            .list_contexts_for_authority(self.agent.authority_id())
+            .list_contexts_for_authority(authority)
             .await
             .map_err(|error| {
                 IntentError::internal_error(format!(
@@ -3895,6 +3949,11 @@ impl AuraAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::AgentBuilder;
+    use aura_chat::ChatFact;
+    use aura_core::context::EffectContext;
+    use aura_core::effects::ExecutionMode;
+    use aura_core::hash::hash;
     use std::sync::{Mutex, OnceLock};
 
     fn env_lock() -> &'static Mutex<()> {
@@ -3946,4 +4005,63 @@ mod tests {
         std::env::remove_var("AURA_HARNESS_SYNC_ROUNDS");
         std::env::remove_var("AURA_HARNESS_SYNC_BACKOFF_MS");
     }
+
+    #[tokio::test]
+    async fn resolve_amp_channel_context_finds_committed_channel_created_fact() {
+        let authority = AuthorityId::new_from_entropy([7u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([9u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+        let context = ContextId::new_from_entropy([8u8; 32]);
+        let channel = ChannelId::from_bytes(hash(b"resolve-amp-channel-context"));
+
+        bridge
+            .amp_create_channel(ChannelCreateParams {
+                context,
+                channel: Some(channel),
+                skip_window: None,
+                topic: None,
+            })
+            .await
+            .expect("create channel");
+        bridge
+            .amp_join_channel(ChannelJoinParams {
+                context,
+                channel,
+                participant: authority,
+            })
+            .await
+            .expect("join channel");
+        bridge
+            .commit_relational_facts(&[ChatFact::channel_created_ms(
+                context,
+                channel,
+                "shared-parity-lab".to_string(),
+                None,
+                false,
+                42,
+                authority,
+            )
+            .to_generic()])
+            .await
+            .expect("commit channel fact");
+
+        let resolved = bridge
+            .resolve_amp_channel_context(channel)
+            .await
+            .expect("resolve channel context");
+
+        assert_eq!(resolved, Some(context));
+    }
+
 }

@@ -69,6 +69,15 @@ fn authoritative_runtime_replace_kinds() -> Vec<RuntimeEventKind> {
     ]
 }
 
+fn is_dm_like_shared_channel(channel: &Channel) -> bool {
+    channel.name.to_ascii_lowercase().starts_with("dm:")
+        || channel
+            .topic
+            .as_deref()
+            .map(|topic| topic.to_ascii_lowercase().starts_with("direct messages"))
+            .unwrap_or(false)
+}
+
 /// Shared authority id state for UI dispatch handlers.
 #[derive(Clone, Default)]
 pub struct SharedAuthorityId(Arc<RwLock<Option<AuthorityId>>>);
@@ -488,7 +497,7 @@ pub type SharedChannels = Arc<RwLock<Vec<Channel>>>;
 fn merge_transient_channels(
     incoming: &ChatState,
     previous: &ChatState,
-    selected_channel_id: Option<&str>,
+    _selected_channel_id: Option<&str>,
 ) -> ChatState {
     if incoming.channel_count() == 0 && previous.channel_count() > 0 {
         let had_dm_like = previous.all_channels().any(is_dm_like_channel);
@@ -501,13 +510,9 @@ fn merge_transient_channels(
     }
 
     let mut merged = incoming.clone();
-    let selected_channel_id = selected_channel_id.map(str::to_owned);
 
     for channel in previous.all_channels() {
-        let preserve_selected = selected_channel_id
-            .as_deref()
-            .is_some_and(|selected_id| channel.id.to_string() == selected_id);
-        if (!is_dm_like_channel(channel) && !preserve_selected) || merged.has_channel(&channel.id) {
+        if !is_dm_like_channel(channel) || merged.has_channel(&channel.id) {
             continue;
         }
 
@@ -564,7 +569,10 @@ fn publish_scoped_channels(
             let preserved = channels.read().ok().and_then(|guard| {
                 guard
                     .iter()
-                    .find(|channel| channel.id == selected_channel_id)
+                    .find(|channel| {
+                        channel.id == selected_channel_id
+                            && is_dm_like_shared_channel(channel)
+                    })
                     .cloned()
             });
             if let Some(channel) = preserved {
@@ -1553,6 +1561,37 @@ mod tests {
         let (channels, message_count) = scoped_channel_snapshot(&state, None);
         assert_eq!(channels.len(), 2);
         assert_eq!(message_count, 3);
+    }
+
+    #[test]
+    fn merge_transient_channels_does_not_preserve_selected_shared_channel() {
+        let previous_channel = test_channel(test_channel_id("shared"), "Shared");
+        let previous = ChatState::from_channels([previous_channel.clone()]);
+        let incoming = ChatState::default();
+
+        let merged = super::merge_transient_channels(
+            &incoming,
+            &previous,
+            Some(previous_channel.id.to_string().as_str()),
+        );
+
+        assert_eq!(merged.channel_count(), 0);
+    }
+
+    #[test]
+    fn merge_transient_channels_preserves_selected_dm_like_channel() {
+        let previous_channel = test_dm_channel(test_channel_id("dm"), "dm:peer");
+        let previous = ChatState::from_channels([previous_channel.clone()]);
+        let incoming = ChatState::default();
+
+        let merged = super::merge_transient_channels(
+            &incoming,
+            &previous,
+            Some(previous_channel.id.to_string().as_str()),
+        );
+
+        assert_eq!(merged.channel_count(), 1);
+        assert!(merged.has_channel(&previous_channel.id));
     }
 
     #[test]

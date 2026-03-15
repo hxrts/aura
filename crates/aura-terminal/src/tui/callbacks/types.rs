@@ -31,7 +31,7 @@ pub type StringOptStringCallback = Arc<dyn Fn(String, Option<String>) + Send + S
 
 /// Callback that takes a string, optional string, and a list of strings.
 pub type StringOptStringVecU8Callback =
-    Arc<dyn Fn(String, Option<String>, Vec<String>, u8) + Send + Sync>;
+    Arc<dyn Fn(String, Option<String>, Vec<String>, u8, Option<SubmittedOperationOwner>) + Send + Sync>;
 
 /// Callback that takes two u8 values.
 pub type ThresholdCallback = Arc<dyn Fn(u8, u8) + Send + Sync>;

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::tui::components::copy_to_clipboard;
 use crate::tui::components::ToastMessage;
 use crate::tui::context::IoContext;
-use crate::tui::effects::EffectCommand;
+use crate::tui::effects::{EffectCommand, OpResponse};
 use crate::tui::semantic_lifecycle::{SemanticOperationTransferScope, SubmittedOperationOwner};
 use crate::tui::types::{AccessLevel, MfaPolicy};
 use crate::tui::updates::{UiOperation, UiUpdate, UiUpdateSender};
@@ -757,7 +757,11 @@ impl ChatCallbacks {
 
     fn make_create_channel(ctx: Arc<IoContext>, tx: UiUpdateSender) -> CreateChannelCallback {
         Arc::new(
-            move |name: String, topic: Option<String>, members: Vec<String>, threshold_k: u8| {
+            move |name: String,
+                  topic: Option<String>,
+                  members: Vec<String>,
+                  threshold_k: u8,
+                  operation: Option<SubmittedOperationOwner>| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
                 let channel_name = name.clone();
@@ -768,12 +772,43 @@ impl ChatCallbacks {
                     threshold_k,
                 };
                 spawn_ctx(ctx.clone(), async move {
-                    match ctx.dispatch(cmd).await {
-                        Ok(_) => {
-                            send_ui_update_required(&tx, UiUpdate::ChannelCreated(channel_name))
-                                .await;
+                    match ctx.dispatch_with_response(cmd).await {
+                        Ok(OpResponse::ChannelCreated { channel_id }) => {
+                            if let Some(operation) = operation {
+                                operation.succeed().await;
+                            }
+                            send_ui_update_required(
+                                &tx,
+                                UiUpdate::ChannelCreated {
+                                    channel_id,
+                                    name: channel_name,
+                                },
+                            )
+                            .await;
+                        }
+                        Ok(other) => {
+                            if let Some(operation) = operation {
+                                operation
+                                    .fail(format!(
+                                        "Create channel returned unexpected response: {other:?}"
+                                    ))
+                                    .await;
+                            }
+                            send_ui_update_required(
+                                &tx,
+                                UiUpdate::ToastAdded(ToastMessage::error(
+                                    "create-channel",
+                                    format!(
+                                        "Create channel returned unexpected response: {other:?}"
+                                    ),
+                                )),
+                            )
+                            .await;
                         }
                         Err(e) => {
+                            if let Some(operation) = operation {
+                                operation.fail(e.to_string()).await;
+                            }
                             send_ui_update_required(
                                 &tx,
                                 UiUpdate::ToastAdded(ToastMessage::error(

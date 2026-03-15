@@ -247,7 +247,12 @@ pub enum UiUpdate {
     ChannelSelected(String),
 
     /// A new channel was created
-    ChannelCreated(String),
+    ChannelCreated {
+        /// Canonical channel identity returned by the workflow/runtime.
+        channel_id: String,
+        /// Display name used for user feedback.
+        name: String,
+    },
 
     /// Chat state changed (channel/message counts + selection)
     ChatStateUpdated {

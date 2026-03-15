@@ -230,6 +230,36 @@ fn execute_harness_followup_command(
             (cb.neighborhood.on_create_home)(name, description);
             Ok(None)
         }
+        TuiCommand::Dispatch(DispatchCommand::CreateChannel {
+            name,
+            topic,
+            members,
+            threshold_k,
+        }) => {
+            let Some(cb) = callbacks.as_ref() else {
+                return Err("Chat callbacks are unavailable".to_string());
+            };
+            let Some(update_tx) = update_tx.clone() else {
+                return Err("UI update sender is unavailable".to_string());
+            };
+            state.router.go_to(Screen::Chat);
+            let operation = SubmittedOperationOwner::submit_local_only(
+                app_ctx.app_core.raw().clone(),
+                app_ctx.tasks(),
+                update_tx,
+                OperationId::create_channel(),
+                SemanticOperationKind::CreateChannel,
+            );
+            let handle = operation.harness_handle();
+            (cb.chat.on_create_channel)(
+                name,
+                topic,
+                members.into_iter().map(|id| id.to_string()).collect(),
+                threshold_k.get(),
+                Some(operation),
+            );
+            Ok(Some(handle))
+        }
         TuiCommand::Dispatch(DispatchCommand::SelectChannel { channel_id }) => {
             let channels = match shared_channels.read() {
                 Ok(guard) => guard.clone(),
@@ -1540,21 +1570,20 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 });
                             }
                         }
-                        UiUpdate::ChannelCreated(name) => {
+                        UiUpdate::ChannelCreated { channel_id, name } => {
+                            if let Ok(mut guard) = tui_selected_for_updates.write() {
+                                *guard = Some(channel_id.clone());
+                            }
                             let selected = shared_channels_for_updates.read().ok().and_then(|channels| {
                                 channels
                                     .iter()
-                                    .position(|channel| channel.name.eq_ignore_ascii_case(&name))
-                                    .and_then(|idx| channels.get(idx).map(|channel| (idx, channel.id.clone())))
+                                    .position(|channel| channel.id == channel_id)
                             });
-                            if let Some((idx, channel_id)) = selected {
+                            if let Some(idx) = selected {
                                 tui.with_mut(|state| {
                                     state.chat.selected_channel = idx;
                                     state.chat.message_scroll = 0;
                                 });
-                                if let Ok(mut guard) = tui_selected_for_updates.write() {
-                                    *guard = Some(channel_id);
-                                }
                             }
                             enqueue_toast!(
                                 format!("Created '{name}'."),
@@ -2618,11 +2647,26 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         }
                                         members.sort();
                                         members.dedup();
+                                        let Some(update_tx) = update_tx_for_events.clone() else {
+                                            new_state.toast_error(
+                                                "UI update sender is unavailable",
+                                            );
+                                            continue;
+                                        };
+                                        let operation =
+                                            SubmittedOperationOwner::submit_local_only(
+                                                app_core_for_events.clone(),
+                                                tasks_for_events.clone(),
+                                                update_tx,
+                                                OperationId::create_channel(),
+                                                aura_app::ui_contract::SemanticOperationKind::CreateChannel,
+                                            );
                                         (cb.chat.on_create_channel)(
                                             name,
                                             topic,
                                             members.into_iter().map(|id| id.to_string()).collect(),
                                             threshold_k.get(),
+                                            Some(operation),
                                         );
                                     }
                                     DispatchCommand::SetChannelTopic { channel_id, topic } => {

@@ -755,6 +755,18 @@ impl IoContext {
         self.dispatch.dispatch(command).await
     }
 
+    pub async fn dispatch_with_response(&self, command: EffectCommand) -> TerminalResult<OpResponse> {
+        cfg_if! {
+            if #[cfg(feature = "development")] {
+                if let Some(bridge) = &self.demo_bridge {
+                    bridge.route_command(&command).await;
+                }
+            }
+        }
+
+        self.dispatch.dispatch_with_response(command).await
+    }
+
     pub async fn dispatch_and_wait(&self, command: EffectCommand) -> TerminalResult<()> {
         // In demo mode, also route commands through the SimulatedBridge
         cfg_if! {

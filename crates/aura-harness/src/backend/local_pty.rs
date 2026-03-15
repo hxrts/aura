@@ -1466,11 +1466,22 @@ impl SharedSemanticBackend for LocalPtyBackend {
     }
 
     fn submit_create_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
-        self.send_harness_command(&HarnessUiCommand::CreateChannel {
+        let previous_operation =
+            observe_operation(&self.ui_snapshot()?, &OperationId::create_channel());
+        let receipt_handle = self.send_harness_command(&HarnessUiCommand::CreateChannel {
             channel_name: channel_name.to_string(),
         })
         .context("submit_create_channel: create_channel_command")?;
-        Ok(SubmittedAction::without_handle(()))
+        let handle = match receipt_handle {
+            Some(handle) => UiOperationHandle::new(handle.operation_id, handle.instance_id),
+            None => wait_for_operation_submission(
+                self,
+                OperationId::create_channel(),
+                previous_operation,
+                Duration::from_secs(5),
+            )?,
+        };
+        Ok(SubmittedAction::with_ui_operation((), handle))
     }
 
     fn submit_create_contact_invitation(

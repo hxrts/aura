@@ -30,9 +30,7 @@ use crate::config::{
     nav_control_id_for_screen, settings_section_item_id, ScenarioAction, ScenarioConfig,
     ScenarioStep, ScreenSource,
 };
-use crate::introspection::{
-    extract_command_metadata, extract_toast, CommandConsistency, CommandStatus, ToastLevel,
-};
+use crate::introspection::ToastLevel;
 use crate::tool_api::{ToolApi, ToolKey, ToolRequest, ToolResponse};
 
 const CLIPBOARD_PASTE_CHUNK_CHARS: usize = 48;
@@ -41,7 +39,7 @@ const CLIPBOARD_PASTE_INTER_CHUNK_DELAY_MS: u64 = 5;
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionMode {
-    #[serde(rename = "compatibility", alias = "scripted")]
+    #[serde(rename = "compatibility")]
     Compatibility,
     Agent,
 }
@@ -74,130 +72,6 @@ pub struct StepMetricRecord {
     pub actor: String,
     pub action: String,
     pub duration_ms: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ExpectedCommandStatus {
-    Ok,
-    Denied,
-    Invalid,
-    Failed,
-}
-
-impl ExpectedCommandStatus {
-    fn parse(raw: &str) -> Result<Self> {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "ok" => Ok(Self::Ok),
-            "denied" => Ok(Self::Denied),
-            "invalid" => Ok(Self::Invalid),
-            "failed" => Ok(Self::Failed),
-            other => bail!("unsupported expected command status `{other}`"),
-        }
-    }
-
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Ok => "ok",
-            Self::Denied => "denied",
-            Self::Invalid => "invalid",
-            Self::Failed => "failed",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ExpectedConsistency {
-    Accepted,
-    Replicated,
-    Enforced,
-    PartialTimeout,
-}
-
-impl ExpectedConsistency {
-    fn parse(raw: &str) -> Result<Self> {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "accepted" => Ok(Self::Accepted),
-            "replicated" => Ok(Self::Replicated),
-            "enforced" => Ok(Self::Enforced),
-            "partial_timeout" | "partial-timeout" => Ok(Self::PartialTimeout),
-            other => bail!("unsupported expected consistency `{other}`"),
-        }
-    }
-
-    const fn rank(self) -> u8 {
-        match self {
-            Self::Accepted => 0,
-            Self::Replicated => 1,
-            Self::Enforced => 2,
-            Self::PartialTimeout => 255,
-        }
-    }
-
-    fn is_satisfied_by(self, observed: Self) -> bool {
-        match (self, observed) {
-            (Self::PartialTimeout, Self::PartialTimeout) => true,
-            (Self::PartialTimeout, _) | (_, Self::PartialTimeout) => false,
-            _ => observed.rank() >= self.rank(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DeniedReason {
-    Permission,
-    MissingActiveContext,
-    NotMember,
-    NotFound,
-    InvalidArgument,
-    InvalidState,
-    Muted,
-    Banned,
-    Internal,
-}
-
-impl DeniedReason {
-    fn parse(raw: &str) -> Result<Self> {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "permission" | "permission_denied" => Ok(Self::Permission),
-            "missing_active_context" => Ok(Self::MissingActiveContext),
-            "not_member" => Ok(Self::NotMember),
-            "not_found" => Ok(Self::NotFound),
-            "invalid_argument" => Ok(Self::InvalidArgument),
-            "invalid_state" => Ok(Self::InvalidState),
-            "muted" => Ok(Self::Muted),
-            "banned" => Ok(Self::Banned),
-            "internal" => Ok(Self::Internal),
-            other => bail!("unsupported denied reason `{other}`"),
-        }
-    }
-
-    const fn reason_code(self) -> &'static str {
-        match self {
-            Self::Permission => "permission_denied",
-            Self::MissingActiveContext => "missing_active_context",
-            Self::NotMember => "not_member",
-            Self::NotFound => "not_found",
-            Self::InvalidArgument => "invalid_argument",
-            Self::InvalidState => "invalid_state",
-            Self::Muted => "muted",
-            Self::Banned => "banned",
-            Self::Internal => "internal",
-        }
-    }
-
-    const fn patterns(self) -> &'static [&'static str] {
-        match self {
-            Self::Permission => &["permission denied", "not allowed", "denied"],
-            Self::MissingActiveContext => &["missing active context", "no active home"],
-            Self::NotMember => &["not a member", "not_member"],
-            Self::NotFound => &["not found"],
-            Self::InvalidArgument => &["invalid argument", "invalid_argument"],
-            Self::InvalidState => &["invalid state", "invalid_state"],
-            Self::Muted => &["muted"],
-            Self::Banned => &["banned"],
-            Self::Internal => &["internal error", "internal"],
-        }
-    }
 }
 
 pub struct ScenarioExecutor {
@@ -486,7 +360,7 @@ impl ScenarioExecutor {
     pub fn from_config(config: &ScenarioConfig) -> Self {
         let mode = match config.execution_mode.as_deref() {
             Some("agent") => ExecutionMode::Agent,
-            Some("compatibility") | Some("scripted") | None => ExecutionMode::Compatibility,
+            Some("compatibility") | None => ExecutionMode::Compatibility,
             Some(other) => unreachable!("scenario.validate() should reject execution_mode={other}"),
         };
         Self::new(mode)
@@ -1618,20 +1492,6 @@ fn execute_compatibility_step(
             let actor = resolve_required_instance(step, context)?;
             let _decision = scenario_rng.range_u64(0, 2);
             tool_api.apply_fault_tunnel_drop(&actor)
-        }
-        ScenarioAction::ExpectToast
-        | ScenarioAction::ExpectCommandResult
-        | ScenarioAction::ExpectMembership
-        | ScenarioAction::ExpectDenied
-        | ScenarioAction::GetAuthorityId
-        | ScenarioAction::ListChannels
-        | ScenarioAction::CurrentSelection
-        | ScenarioAction::ListContacts
-        | ScenarioAction::SelectChannel => {
-            bail!(
-                "compatibility action {:?} is not supported in the current executor path",
-                step.action
-            )
         }
     }
 }
@@ -4922,25 +4782,6 @@ fn diagnostic_screen_contains(
     Ok(screen.contains(needle))
 }
 
-fn channel_name_matches(candidate: &str, target: &str) -> bool {
-    let normalize = |value: &str| {
-        value
-            .trim()
-            .trim_start_matches('#')
-            .chars()
-            .filter(|ch| ch.is_ascii_alphanumeric())
-            .collect::<String>()
-            .to_ascii_lowercase()
-    };
-
-    let candidate = normalize(candidate);
-    let target = normalize(target);
-    if candidate.is_empty() || target.is_empty() {
-        return false;
-    }
-    candidate == target || candidate.contains(&target) || target.contains(&candidate)
-}
-
 fn should_escape_insert_before_send_keys(keys: &str) -> bool {
     let mut chars = keys.chars();
     let Some(ch) = chars.next() else {
@@ -5761,7 +5602,6 @@ mod tests {
                 ..Default::default()
             }],
         );
-        scenario.execution_mode = None;
 
         let mut compatibility_api = ToolApi::new(
             HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}")),

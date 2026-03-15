@@ -280,6 +280,67 @@ impl DispatchHelper {
         }
     }
 
+    pub async fn dispatch_with_response(&self, command: EffectCommand) -> TerminalResult<OpResponse> {
+        if let Err(error) = self.check_authorization(&command) {
+            self.operational.emit_error(error.clone()).await;
+            return Err(error);
+        }
+
+        match &command {
+            EffectCommand::ExportAccountBackup => {
+                match self.account_files.export_account_backup().await {
+                    Ok(code) => {
+                        self.toasts
+                            .success("account-backup", format!("Backup code: {code}"))
+                            .await;
+                        return Err(TerminalError::NotImplemented(
+                            "dispatch_with_response does not support backup export".into(),
+                        ));
+                    }
+                    Err(error) => {
+                        self.operational.emit_error(error.clone()).await;
+                        return Err(error);
+                    }
+                }
+            }
+            EffectCommand::ImportAccountBackup { backup_code } => {
+                match self.account_files.import_account_backup(backup_code).await {
+                    Ok(()) => {
+                        self.toasts
+                            .success("account-backup", "Backup imported successfully")
+                            .await;
+                        return Err(TerminalError::NotImplemented(
+                            "dispatch_with_response does not support backup import".into(),
+                        ));
+                    }
+                    Err(error) => {
+                        self.operational.emit_error(error.clone()).await;
+                        return Err(error);
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        if let Some(result) = self.operational.execute_with_errors(&command).await {
+            match result {
+                Ok(response) => {
+                    self.handle_op_response(response.clone()).await?;
+                    Ok(response)
+                }
+                Err(e) => {
+                    tracing::error!("dispatch operation error: {e}");
+                    Err(e)
+                }
+            }
+        } else {
+            tracing::warn!("Unknown command not handled by Operational: {:?}", command);
+            let error = TerminalError::NotImplemented(format!("Unknown command: {command:?}"));
+            self.operational.emit_error(error.clone()).await;
+            Err(error)
+        }
+    }
+
     /// Dispatch a command and wait for completion.
     ///
     /// This is an alias for `dispatch()` with more explicit semantics.
