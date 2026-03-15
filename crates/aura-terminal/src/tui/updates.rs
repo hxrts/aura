@@ -74,7 +74,9 @@ pub type HarnessCommandReceiver = tokio::sync::mpsc::Receiver<HarnessCommandSubm
 /// silently dropped — the UI is shutting down.
 pub async fn send_ui_update_required(tx: &UiUpdateSender, update: UiUpdate) {
     if tx.try_send(update.clone()).is_err() {
-        let _ = tx.send(update).await;
+        if tx.send(update).await.is_err() {
+            tracing::debug!("UI update channel closed during shutdown");
+        }
     }
 }
 
