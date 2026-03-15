@@ -361,6 +361,10 @@ impl EventBridge {
     }
 
     /// Forward an iocraft event to the adapter.
+    ///
+    /// Uses `try_send` intentionally — backpressure drops events rather than
+    /// blocking the terminal event loop. This is acceptable because terminal
+    /// events are high-frequency and dropping a frame is better than stalling.
     pub fn forward(&self, event: iocraft::prelude::TerminalEvent) {
         if let Some(converted) = convert_iocraft_event(event) {
             let _ = self.sender.try_send(converted);

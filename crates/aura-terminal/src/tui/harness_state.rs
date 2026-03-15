@@ -279,9 +279,30 @@ async fn forward_harness_commands_from_listener(listener: UnixListener) {
     }
 }
 
+/// Per-connection timeout for reading a harness command payload.
+const HARNESS_COMMAND_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 async fn process_harness_command_stream(mut stream: UnixStream) -> bool {
     let mut payload = Vec::new();
-    if let Err(error) = stream.read_to_end(&mut payload).await {
+    let read_result = tokio::time::timeout(
+        HARNESS_COMMAND_READ_TIMEOUT,
+        stream.read_to_end(&mut payload),
+    )
+    .await;
+    let read_result = match read_result {
+        Ok(inner) => inner,
+        Err(_) => {
+            let _ = write_harness_command_receipt(
+                &mut stream,
+                &HarnessUiCommandReceipt::Rejected {
+                    reason: "harness command read timed out".to_string(),
+                },
+            )
+            .await;
+            return true;
+        }
+    };
+    if let Err(error) = read_result {
         let _ = write_harness_command_receipt(
             &mut stream,
             &HarnessUiCommandReceipt::Rejected {
