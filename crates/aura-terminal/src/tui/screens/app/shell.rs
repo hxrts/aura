@@ -43,7 +43,7 @@ use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
 use aura_app::ui::workflows::system as system_workflows;
 use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact, SemanticOperationKind};
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::identifiers::CeremonyId;
+use aura_core::types::identifiers::CeremonyId;
 use aura_core::types::FrostThreshold;
 
 use crate::error::TerminalError;
@@ -85,7 +85,7 @@ use crate::tui::props::{
     extract_notifications_view_props, extract_settings_view_props,
 };
 use crate::tui::semantic_lifecycle::SubmittedOperationOwner;
-use crate::tui::state_machine::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
+use crate::tui::state::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
 use crate::tui::updates::{
     harness_command_channel, ui_update_channel, HarnessCommandReceiver, UiOperation,
     UiOperationFailure, UiUpdate, UiUpdateReceiver, UiUpdateSender,
@@ -126,12 +126,12 @@ impl SelectedChannelBinding {
     }
 }
 
-fn terminal_error_to_toast_level(error: &TerminalError) -> crate::tui::state_machine::ToastLevel {
+fn terminal_error_to_toast_level(error: &TerminalError) -> crate::tui::state::ToastLevel {
     match error.category().toast_severity() {
-        aura_app::errors::ToastLevel::Info => crate::tui::state_machine::ToastLevel::Info,
-        aura_app::errors::ToastLevel::Success => crate::tui::state_machine::ToastLevel::Success,
-        aura_app::errors::ToastLevel::Warning => crate::tui::state_machine::ToastLevel::Warning,
-        aura_app::errors::ToastLevel::Error => crate::tui::state_machine::ToastLevel::Error,
+        aura_app::errors::ToastLevel::Info => crate::tui::state::ToastLevel::Info,
+        aura_app::errors::ToastLevel::Success => crate::tui::state::ToastLevel::Success,
+        aura_app::errors::ToastLevel::Warning => crate::tui::state::ToastLevel::Warning,
+        aura_app::errors::ToastLevel::Error => crate::tui::state::ToastLevel::Error,
     }
 }
 
@@ -221,9 +221,7 @@ fn execute_harness_followup_command(
     shared_devices: &SharedDevices,
     shared_messages: &SharedMessages,
     selected_channel: &std::sync::Arc<std::sync::RwLock<Option<String>>>,
-    selected_channel_binding: &std::sync::Arc<
-        std::sync::RwLock<Option<SelectedChannelBinding>>,
-    >,
+    selected_channel_binding: &std::sync::Arc<std::sync::RwLock<Option<SelectedChannelBinding>>>,
 ) -> Result<Option<aura_app::ui_contract::HarnessUiOperationHandle>, String> {
     match command {
         TuiCommand::Dispatch(DispatchCommand::CreateAccount { name }) => {
@@ -294,14 +292,9 @@ fn execute_harness_followup_command(
                 }
                 if let Ok(mut guard) = selected_channel_binding.write() {
                     let previous = guard.clone();
-                    *guard = channels
-                        .get(idx)
-                        .map(|channel| {
-                            SelectedChannelBinding::merged_from_channel(
-                                channel,
-                                previous.as_ref(),
-                            )
-                        });
+                    *guard = channels.get(idx).map(|channel| {
+                        SelectedChannelBinding::merged_from_channel(channel, previous.as_ref())
+                    });
                 }
             } else {
                 return Err("Selected channel is no longer visible".to_string());
@@ -604,11 +597,12 @@ fn execute_harness_followup_command(
                 })
                 .collect::<Vec<_>>();
 
-            let modal_state =
-                crate::tui::state_machine::DeviceSelectModalState::with_devices(devices);
+            let modal_state = crate::tui::state::DeviceSelectModalState::with_devices(devices);
             state
                 .modal_queue
-                .enqueue(crate::tui::state_machine::QueuedModal::SettingsDeviceSelect(modal_state));
+                .enqueue(crate::tui::state::QueuedModal::SettingsDeviceSelect(
+                    modal_state,
+                ));
             Ok(None)
         }
         _ => Ok(None),
@@ -685,6 +679,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let screen = hooks.use_state(|| Screen::Neighborhood);
     let mut should_exit = hooks.use_state(|| false);
     let mut system = hooks.use_context_mut::<SystemContext>();
+
+    // Shared shutdown flag for background tasks. Set to true when should_exit
+    // transitions, checked by all `use_future` loops to break cleanly.
+    let bg_shutdown =
+        hooks.use_ref(|| std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)));
 
     // Pure TUI state machine - holds all UI state for deterministic transitions
     // This is the source of truth; iocraft hooks sync FROM this state
@@ -872,6 +871,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let mut tui = tui.clone();
+        let shutdown = bg_shutdown.read().clone();
         async move {
             let format_error = |err: &AppError| format!("{}: {}", err.code(), err);
 
@@ -900,10 +900,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         if !routed {
                             let toast_id = state.next_toast_id;
                             state.next_toast_id += 1;
-                            let toast = crate::tui::state_machine::QueuedToast::new(
+                            let toast = crate::tui::state::QueuedToast::new(
                                 toast_id,
                                 msg,
-                                crate::tui::state_machine::ToastLevel::Error,
+                                crate::tui::state::ToastLevel::Error,
                             );
                             state.toast_queue.enqueue(toast);
                         }
@@ -916,12 +916,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // errors (e.g., closed/lost), retry with backoff instead of silently ending.
             let mut backoff = std::time::Duration::from_millis(50);
             loop {
+                if shutdown.load(std::sync::atomic::Ordering::Acquire) {
+                    break;
+                }
                 let mut stream = {
                     let core = app_core.raw().read().await;
                     core.subscribe(&*ERROR_SIGNAL)
                 };
 
                 while let Ok(err_opt) = stream.recv().await {
+                    if shutdown.load(std::sync::atomic::Ordering::Acquire) {
+                        return;
+                    }
                     let Some(err) = err_opt else { continue };
                     let msg = format_error(&err);
                     tui.with_mut(|state| {
@@ -941,10 +947,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         if !routed {
                             let toast_id = state.next_toast_id;
                             state.next_toast_id += 1;
-                            let toast = crate::tui::state_machine::QueuedToast::new(
+                            let toast = crate::tui::state::QueuedToast::new(
                                 toast_id,
                                 msg,
-                                crate::tui::state_machine::ToastLevel::Error,
+                                crate::tui::state::ToastLevel::Error,
                             );
                             state.toast_queue.enqueue(toast);
                         }
@@ -968,10 +974,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     hooks.use_future({
         let mut tui = tui.clone();
+        let shutdown = bg_shutdown.read().clone();
         async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
             loop {
                 interval.tick().await;
+                if shutdown.load(std::sync::atomic::Ordering::Acquire) {
+                    break;
+                }
                 // Only tick auto-dismissing toasts. Keep error toasts static and avoid
                 // forcing a full re-render unless dismissal actually occurred.
                 let should_tick = tui
@@ -994,8 +1004,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     hooks.use_future({
         let app_core = app_ctx.app_core.raw().clone();
+        let shutdown = bg_shutdown.read().clone();
         async move {
             loop {
+                if shutdown.load(std::sync::atomic::Ordering::Acquire) {
+                    break;
+                }
                 let timestamp_ms = aura_app::ui::workflows::time::current_time_ms(&app_core)
                     .await
                     .unwrap_or(0);
@@ -1015,8 +1029,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     if std::env::var_os("AURA_HARNESS_MODE").is_some() {
         hooks.use_future({
             let app_core = app_ctx.app_core.raw().clone();
+            let shutdown = bg_shutdown.read().clone();
             async move {
                 loop {
+                    if shutdown.load(std::sync::atomic::Ordering::Acquire) {
+                        break;
+                    }
                     let runtime = {
                         let core = app_core.read().await;
                         core.runtime().cloned()
@@ -1148,6 +1166,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     let updated_state = tui.read_clone();
                     if updated_state.should_exit && !should_exit.get() {
                         should_exit.set(true);
+                        bg_shutdown.read().store(true, std::sync::atomic::Ordering::Release);
                     }
 
                     let app_snapshot = app_ctx_for_commands.snapshot();
@@ -1221,7 +1240,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         tui.with_mut(|state| {
                             let toast_id = state.next_toast_id;
                             state.next_toast_id += 1;
-                            let toast = crate::tui::state_machine::QueuedToast::new(
+                            let toast = crate::tui::state::QueuedToast::new(
                                 toast_id,
                                 $msg,
                                 $level,
@@ -1289,14 +1308,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 if state.settings.pending_mobile_enrollment_autofill {
                                     state.settings.pending_mobile_enrollment_autofill = false;
                                     state.modal_queue.update_active(|modal| {
-                                        if let crate::tui::state_machine::QueuedModal::SettingsDeviceImport(ref mut s) = modal {
+                                        if let crate::tui::state::QueuedModal::SettingsDeviceImport(ref mut s) = modal {
                                             s.code = enrollment_code.clone();
                                         }
                                     });
                                 } else {
                                     state.modal_queue.enqueue(
-                                        crate::tui::state_machine::QueuedModal::SettingsDeviceEnrollment(
-                                            crate::tui::state_machine::DeviceEnrollmentCeremonyModalState::started(
+                                        crate::tui::state::QueuedModal::SettingsDeviceEnrollment(
+                                            crate::tui::state::DeviceEnrollmentCeremonyModalState::started(
                                                 ceremony_id,
                                                 nickname_suggestion,
                                                 enrollment_code,
@@ -1320,7 +1339,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             agreement_mode,
                             reversion_risk,
                         } => {
-                            let mut toast: Option<(String, crate::tui::state_machine::ToastLevel)> =
+                            let mut toast: Option<(String, crate::tui::state::ToastLevel)> =
                                 None;
                             let mut dismiss_ceremony_started_toast = false;
                             let mut handled_device_enrollment_modal = false;
@@ -1328,7 +1347,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 let mut dismiss_modal = false;
 
                                 state.modal_queue.update_active(|modal| {
-                                    if let crate::tui::state_machine::QueuedModal::SettingsDeviceEnrollment(ref mut s) = modal {
+                                    if let crate::tui::state::QueuedModal::SettingsDeviceEnrollment(ref mut s) = modal {
                                         handled_device_enrollment_modal = true;
                                         if s.ceremony.ceremony_id.as_deref() == Some(ceremony_id.as_str()) {
                                             s.update_from_status(
@@ -1348,13 +1367,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     error_message
                                                         .clone()
                                                         .unwrap_or_else(|| "Device enrollment failed".to_string()),
-                                                    crate::tui::state_machine::ToastLevel::Error,
+                                                    crate::tui::state::ToastLevel::Error,
                                                 ));
                                             } else if is_complete {
                                                 dismiss_modal = true;
                                                 toast = Some((
                                                     "Device enrollment complete".to_string(),
-                                                    crate::tui::state_machine::ToastLevel::Success,
+                                                    crate::tui::state::ToastLevel::Success,
                                                 ));
                                                 let app_core = app_core.raw().clone();
                                                 let tasks = tasks_for_updates.clone();
@@ -1363,10 +1382,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 });
                                             }
                                         }
-                                    } else if let crate::tui::state_machine::QueuedModal::GuardianSetup(ref mut s) = modal {
+                                    } else if let crate::tui::state::QueuedModal::GuardianSetup(ref mut s) = modal {
                                         if matches!(
                                             s.step(),
-                                            crate::tui::state_machine::GuardianSetupStep::CeremonyInProgress
+                                            crate::tui::state::GuardianSetupStep::CeremonyInProgress
                                         ) {
                                             // Ensure ceremony id is set for cancel UX.
                                             s.ensure_ceremony_id(ceremony_id.clone());
@@ -1402,7 +1421,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 // Return to threshold selection so the user can retry.
                                                 s.reset_to_threshold_after_failure();
 
-                                                toast = Some((msg, crate::tui::state_machine::ToastLevel::Error));
+                                                toast = Some((msg, crate::tui::state::ToastLevel::Error));
                                                 dismiss_ceremony_started_toast = true;
                                             } else if is_complete {
                                                 dismiss_modal = true;
@@ -1435,7 +1454,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                             "OTA activation ceremony complete".to_string()
                                                         }
                                                     },
-                                                    crate::tui::state_machine::ToastLevel::Success,
+                                                    crate::tui::state::ToastLevel::Success,
                                                 ));
                                                 dismiss_ceremony_started_toast = true;
                                                 if matches!(
@@ -1452,10 +1471,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 }
                                             }
                                         }
-                                    } else if let crate::tui::state_machine::QueuedModal::MfaSetup(ref mut s) = modal {
+                                    } else if let crate::tui::state::QueuedModal::MfaSetup(ref mut s) = modal {
                                         if matches!(
                                             s.step(),
-                                            crate::tui::state_machine::GuardianSetupStep::CeremonyInProgress
+                                            crate::tui::state::GuardianSetupStep::CeremonyInProgress
                                         ) {
                                             s.ensure_ceremony_id(ceremony_id.clone());
 
@@ -1488,7 +1507,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     .unwrap_or_else(|| "Multifactor ceremony failed".to_string());
                                                 s.reset_to_threshold_after_failure();
 
-                                                toast = Some((msg, crate::tui::state_machine::ToastLevel::Error));
+                                                toast = Some((msg, crate::tui::state::ToastLevel::Error));
                                                 dismiss_ceremony_started_toast = true;
                                             } else if is_complete {
                                                 dismiss_modal = true;
@@ -1496,7 +1515,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     format!(
                                                         "Multifactor ceremony complete! {threshold}-of-{total_count} committed"
                                                     ),
-                                                    crate::tui::state_machine::ToastLevel::Success,
+                                                    crate::tui::state::ToastLevel::Success,
                                                 ));
                                                 dismiss_ceremony_started_toast = true;
                                             }
@@ -1524,14 +1543,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 if is_complete {
                                     toast = Some((
                                         "Device enrollment complete".to_string(),
-                                        crate::tui::state_machine::ToastLevel::Success,
+                                        crate::tui::state::ToastLevel::Success,
                                     ));
                                 } else if has_failed {
                                     toast = Some((
                                         error_message
                                             .clone()
                                             .unwrap_or_else(|| "Device enrollment failed".to_string()),
-                                        crate::tui::state_machine::ToastLevel::Error,
+                                        crate::tui::state::ToastLevel::Error,
                                     ));
                                 }
                             }
@@ -1547,15 +1566,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::ToastAdded(toast) => {
                             // Convert ToastMessage to QueuedToast and enqueue.
                             let level = match toast.level {
-                                ToastLevel::Info => crate::tui::state_machine::ToastLevel::Info,
+                                ToastLevel::Info => crate::tui::state::ToastLevel::Info,
                                 ToastLevel::Success => {
-                                    crate::tui::state_machine::ToastLevel::Success
+                                    crate::tui::state::ToastLevel::Success
                                 }
                                 ToastLevel::Warning => {
-                                    crate::tui::state_machine::ToastLevel::Warning
+                                    crate::tui::state::ToastLevel::Warning
                                 }
                                 ToastLevel::Error | ToastLevel::Conflict => {
-                                    crate::tui::state_machine::ToastLevel::Error
+                                    crate::tui::state::ToastLevel::Error
                                 }
                             };
                             enqueue_toast!(toast.message, level);
@@ -1629,7 +1648,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::MessageRetried { message_id: _ } => {
                             enqueue_toast!(
                                 "Retrying message…".to_string(),
-                                crate::tui::state_machine::ToastLevel::Info
+                                crate::tui::state::ToastLevel::Info
                             );
                         }
                         UiUpdate::ChannelSelected(channel_id) => {
@@ -1702,7 +1721,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             }
                             enqueue_toast!(
                                 format!("Created '{name}'."),
-                                crate::tui::state_machine::ToastLevel::Success
+                                crate::tui::state::ToastLevel::Success
                             );
                         }
                         UiUpdate::ChatStateUpdated {
@@ -1846,7 +1865,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             };
                             tui.with_mut(|state| {
                                 state.modal_queue.update_active(|modal| {
-                                    if let crate::tui::state_machine::QueuedModal::ChatInfo(ref mut info) = modal {
+                                    if let crate::tui::state::QueuedModal::ChatInfo(ref mut info) = modal {
                                         if info.channel_id == channel_id
                                             && (mapped_participants.len() > 1 || info.participants.len() <= 1) {
                                                 info.participants = mapped_participants.clone();
@@ -1862,19 +1881,19 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::InvitationAccepted { invitation_id: _ } => {
                             enqueue_toast!(
                                 "Invitation accepted".to_string(),
-                                crate::tui::state_machine::ToastLevel::Success
+                                crate::tui::state::ToastLevel::Success
                             );
                         }
                         UiUpdate::InvitationDeclined { invitation_id: _ } => {
                             enqueue_toast!(
                                 "Invitation declined".to_string(),
-                                crate::tui::state_machine::ToastLevel::Info
+                                crate::tui::state::ToastLevel::Info
                             );
                         }
                         UiUpdate::InvitationCreated { invitation_code: _ } => {
                             enqueue_toast!(
                                 "Invitation created".to_string(),
-                                crate::tui::state_machine::ToastLevel::Success
+                                crate::tui::state::ToastLevel::Success
                             );
                         }
                         UiUpdate::InvitationExported { code } => {
@@ -1888,10 +1907,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 let copied = copy_to_clipboard(&code).is_ok();
                                 state
                                     .modal_queue
-                                    .enqueue(crate::tui::state_machine::QueuedModal::ContactsCode(
+                                    .enqueue(crate::tui::state::QueuedModal::ContactsCode(
                                         {
                                             let mut modal =
-                                                crate::tui::state_machine::InvitationCodeModalState::for_code(code);
+                                                crate::tui::state::InvitationCodeModalState::for_code(code);
                                             if copied {
                                                 modal.set_copied();
                                             }
@@ -1953,7 +1972,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 });
                                 enqueue_toast!(
                                     message,
-                                    crate::tui::state_machine::ToastLevel::Error
+                                    crate::tui::state::ToastLevel::Error
                                 );
                             }
                             let export_state = tui.read_clone();
@@ -1997,7 +2016,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::InvitationImported { invitation_code: _ } => {
                             enqueue_toast!(
                                 "Invitation imported".to_string(),
-                                crate::tui::state_machine::ToastLevel::Success
+                                crate::tui::state::ToastLevel::Success
                             );
                         }
 
@@ -2023,7 +2042,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::RecoveryStarted => {
                             enqueue_toast!(
                                 "Recovery process started".to_string(),
-                                crate::tui::state_machine::ToastLevel::Info
+                                crate::tui::state::ToastLevel::Info
                             );
                         }
                         UiUpdate::GuardianAdded { contact_id: _ } => {
@@ -2035,7 +2054,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::ApprovalSubmitted { request_id: _ } => {
                             enqueue_toast!(
                                 "Approval submitted".to_string(),
-                                crate::tui::state_machine::ToastLevel::Success
+                                crate::tui::state::ToastLevel::Success
                             );
                         }
                         UiUpdate::GuardianCeremonyProgress { step: _ } => {
@@ -2053,7 +2072,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             agreement_mode,
                             reversion_risk,
                         } => {
-                            let mut toast: Option<(String, crate::tui::state_machine::ToastLevel)> =
+                            let mut toast: Option<(String, crate::tui::state::ToastLevel)> =
                                 None;
                             let mut dismiss_ceremony_started_toast = false;
 
@@ -2061,10 +2080,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 let mut dismiss_modal = false;
 
                                 state.modal_queue.update_active(|modal| {
-                                    if let crate::tui::state_machine::QueuedModal::GuardianSetup(ref mut s) = modal {
+                                    if let crate::tui::state::QueuedModal::GuardianSetup(ref mut s) = modal {
                                         if matches!(
                                             s.step(),
-                                            crate::tui::state_machine::GuardianSetupStep::CeremonyInProgress
+                                            crate::tui::state::GuardianSetupStep::CeremonyInProgress
                                         ) {
                                             s.ensure_ceremony_id(ceremony_id.clone());
 
@@ -2091,7 +2110,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                                 toast = Some((
                                                     msg,
-                                                    crate::tui::state_machine::ToastLevel::Error,
+                                                    crate::tui::state::ToastLevel::Error,
                                                 ));
                                                 dismiss_ceremony_started_toast = true;
                                             } else if is_complete {
@@ -2100,7 +2119,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     format!(
                                                         "Guardian ceremony complete! {threshold}-of-{total_count} committed"
                                                     ),
-                                                    crate::tui::state_machine::ToastLevel::Success,
+                                                    crate::tui::state::ToastLevel::Success,
                                                 ));
                                                 dismiss_ceremony_started_toast = true;
                                             }
@@ -2183,7 +2202,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::LanPeerInvited { peer_id: _ } => {
                             enqueue_toast!(
                                 "LAN peer invited".to_string(),
-                                crate::tui::state_machine::ToastLevel::Success
+                                crate::tui::state::ToastLevel::Success
                             );
                         }
                         UiUpdate::LanPeersCountChanged(count) => {
@@ -2195,7 +2214,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     || (count == 0
                                         && !matches!(
                                             state.contacts.list_focus,
-                                            crate::tui::state_machine::ContactsListFocus::Contacts
+                                            crate::tui::state::ContactsListFocus::Contacts
                                         ))
                             };
                             if needs_update {
@@ -2203,7 +2222,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     state.contacts.lan_peer_count = count;
                                     if count == 0 {
                                         state.contacts.list_focus =
-                                            crate::tui::state_machine::ContactsListFocus::Contacts;
+                                            crate::tui::state::ContactsListFocus::Contacts;
                                     }
                                     state.contacts.lan_selected_index =
                                         clamp_list_index(state.contacts.lan_selected_index, count);
@@ -2217,19 +2236,19 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::HomeInviteSent { contact_id: _ } => {
                             enqueue_toast!(
                                 "Invite sent".to_string(),
-                                crate::tui::state_machine::ToastLevel::Success
+                                crate::tui::state::ToastLevel::Success
                             );
                         }
                         UiUpdate::ModeratorGranted { contact_id: _ } => {
                             enqueue_toast!(
                                 "Moderator granted".to_string(),
-                                crate::tui::state_machine::ToastLevel::Success
+                                crate::tui::state::ToastLevel::Success
                             );
                         }
                         UiUpdate::ModeratorRevoked { contact_id: _ } => {
                             enqueue_toast!(
                                 "Moderator revoked".to_string(),
-                                crate::tui::state_machine::ToastLevel::Info
+                                crate::tui::state::ToastLevel::Info
                             );
                         }
 
@@ -2242,6 +2261,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             });
                             if show_setup {
                                 should_exit.set(true);
+                                bg_shutdown.read().store(true, std::sync::atomic::Ordering::Release);
                             }
                         }
 
@@ -2251,19 +2271,19 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::SyncStarted => {
                             enqueue_toast!(
                                 "Syncing…".to_string(),
-                                crate::tui::state_machine::ToastLevel::Info
+                                crate::tui::state::ToastLevel::Info
                             );
                         }
                         UiUpdate::SyncCompleted => {
                             enqueue_toast!(
                                 "Sync completed".to_string(),
-                                crate::tui::state_machine::ToastLevel::Success
+                                crate::tui::state::ToastLevel::Success
                             );
                         }
                         UiUpdate::SyncFailed { error } => {
                             enqueue_toast!(
                                 format!("Sync failed: {}", error),
-                                crate::tui::state_machine::ToastLevel::Error
+                                crate::tui::state::ToastLevel::Error
                             );
                         }
 
@@ -2468,6 +2488,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         match cmd {
                             TuiCommand::Exit => {
                                 should_exit.set(true);
+                                bg_shutdown.read().store(true, std::sync::atomic::Ordering::Release);
                             }
                             TuiCommand::Dispatch(dispatch_cmd) => {
                                 // Handle dispatch commands via CallbackRegistry
@@ -2620,13 +2641,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             Err(poisoned) => poisoned.into_inner().clone(),
                                         };
                                         if let Some(channel) = channels.get(idx) {
-                                            let modal_state = crate::tui::state_machine::TopicModalState::for_channel(
+                                            let modal_state = crate::tui::state::TopicModalState::for_channel(
                                                 &channel.id,
                                                 channel.topic.as_deref().unwrap_or(""),
                                             );
                                             new_state
                                                 .modal_queue
-                                                .enqueue(crate::tui::state_machine::QueuedModal::ChatTopic(
+                                                .enqueue(crate::tui::state::QueuedModal::ChatTopic(
                                                     modal_state,
                                                 ));
                                         } else {
@@ -2640,7 +2661,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             Err(poisoned) => poisoned.into_inner().clone(),
                                         };
                                         if let Some(channel) = channels.get(idx) {
-                                            let mut modal_state = crate::tui::state_machine::ChannelInfoModalState::for_channel(
+                                            let mut modal_state = crate::tui::state::ChannelInfoModalState::for_channel(
                                                 &channel.id,
                                                 &channel.name,
                                                 channel.topic.as_deref(),
@@ -2661,7 +2682,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             modal_state.participants = participants;
                                             new_state
                                                 .modal_queue
-                                                .enqueue(crate::tui::state_machine::QueuedModal::ChatInfo(
+                                                .enqueue(crate::tui::state::QueuedModal::ChatInfo(
                                                     modal_state,
                                                 ));
                                             (cb.chat.on_list_participants)(channel.id.clone());
@@ -2687,12 +2708,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             continue;
                                         }
 
-                                        let mut candidates: Vec<crate::tui::state_machine::ChatMemberCandidate> =
+                                        let mut candidates: Vec<crate::tui::state::ChatMemberCandidate> =
                                             current_contacts
                                                 .iter()
                                                 // Channel member invites only support user authorities.
                                                 .filter(|c| c.id.starts_with("authority-"))
-                                                .map(|c| crate::tui::state_machine::ChatMemberCandidate {
+                                                .map(|c| crate::tui::state::ChatMemberCandidate {
                                                     id: c.id.clone(),
                                                     name: if !c.nickname.is_empty() {
                                                         c.nickname.clone()
@@ -2747,12 +2768,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         });
 
                                         let mut modal_state =
-                                            crate::tui::state_machine::CreateChannelModalState::new();
+                                            crate::tui::state::CreateChannelModalState::new();
                                         modal_state.contacts = candidates;
                                         modal_state.ensure_threshold();
 
                                         new_state.modal_queue.enqueue(
-                                            crate::tui::state_machine::QueuedModal::ChatCreate(
+                                            crate::tui::state::QueuedModal::ChatCreate(
                                                 modal_state,
                                             ),
                                         );
@@ -2880,13 +2901,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         if let Ok(guard) = shared_contacts_for_dispatch.read() {
                                             if let Some(contact) = guard.get(idx) {
                                                 // nickname is already populated with nickname_suggestion if empty (see Contact::from)
-                                                let modal_state = crate::tui::state_machine::NicknameModalState::for_contact(
+                                                let modal_state = crate::tui::state::NicknameModalState::for_contact(
                                                     &contact.id,
                                                     &contact.nickname,
                                                 ).with_suggestion(contact.nickname_suggestion.clone());
                                                 new_state
                                                     .modal_queue
-                                                    .enqueue(crate::tui::state_machine::QueuedModal::ContactsNickname(
+                                                    .enqueue(crate::tui::state::QueuedModal::ContactsNickname(
                                                         modal_state,
                                                     ));
                                             } else {
@@ -2900,17 +2921,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let idx = new_state.contacts.selected_index;
                                         if let Ok(guard) = shared_contacts_for_dispatch.read() {
                                             let mut modal_state = if let Some(contact) = guard.get(idx) {
-                                                crate::tui::state_machine::CreateInvitationModalState::for_receiver(
+                                                crate::tui::state::CreateInvitationModalState::for_receiver(
                                                     contact.id.clone(),
                                                     contact.nickname.clone(),
                                                 )
                                             } else {
-                                                crate::tui::state_machine::CreateInvitationModalState::new()
+                                                crate::tui::state::CreateInvitationModalState::new()
                                             };
                                             modal_state.type_index = 1;
                                             new_state
                                                 .modal_queue
-                                                .enqueue(crate::tui::state_machine::QueuedModal::ContactsCreate(
+                                                .enqueue(crate::tui::state::QueuedModal::ContactsCreate(
                                                     modal_state,
                                                 ));
                                         } else {
@@ -3088,13 +3109,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                                 // Show confirmation modal
                                                 new_state.modal_queue.enqueue(
-                                                    crate::tui::state_machine::QueuedModal::Confirm {
+                                                    crate::tui::state::QueuedModal::Confirm {
                                                         title: "Remove Contact".to_string(),
                                                         message: format!(
                                                             "Are you sure you want to remove \"{display_name}\"?"
                                                         ),
                                                         on_confirm: Some(
-                                                            crate::tui::state_machine::ConfirmAction::RemoveContact {
+                                                            crate::tui::state::ConfirmAction::RemoveContact {
                                                                 contact_id: contact.id.clone().into(),
                                                             },
                                                         ),
@@ -3285,9 +3306,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                         // Populate candidates from current contacts
                                         // Note: nickname is already populated with nickname_suggestion if empty (see Contact::from)
-                                        let candidates: Vec<crate::tui::state_machine::GuardianCandidate> = current_contacts
+                                        let candidates: Vec<crate::tui::state::GuardianCandidate> = current_contacts
                                             .iter()
-                                            .map(|c| crate::tui::state_machine::GuardianCandidate {
+                                            .map(|c| crate::tui::state::GuardianCandidate {
                                                 id: c.id.clone(),
                                                 name: c.nickname.clone(),
                                                 is_current_guardian: c.is_guardian,
@@ -3303,10 +3324,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             .collect();
 
                                         // Create populated modal state using factory
-                                        let modal_state = crate::tui::state_machine::GuardianSetupModalState::from_contacts_with_selection(candidates, selected);
+                                        let modal_state = crate::tui::state::GuardianSetupModalState::from_contacts_with_selection(candidates, selected);
 
                                         // Enqueue the modal to new_state (not tui_state, which gets overwritten)
-                                        new_state.modal_queue.enqueue(crate::tui::state_machine::QueuedModal::GuardianSetup(modal_state));
+                                        new_state.modal_queue.enqueue(crate::tui::state::QueuedModal::GuardianSetup(modal_state));
                                     }
 
                                     DispatchCommand::OpenMfaSetup => {
@@ -3327,7 +3348,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             continue;
                                         }
 
-                                        let candidates: Vec<crate::tui::state_machine::GuardianCandidate> = current_devices
+                                        let candidates: Vec<crate::tui::state::GuardianCandidate> = current_devices
                                             .iter()
                                             .map(|d| {
                                                 let name = if d.name.is_empty() {
@@ -3336,7 +3357,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 } else {
                                                     d.name.clone()
                                                 };
-                                                crate::tui::state_machine::GuardianCandidate {
+                                                crate::tui::state::GuardianCandidate {
                                                     id: d.id.clone(),
                                                     name,
                                                     is_current_guardian: d.is_current,
@@ -3349,10 +3370,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                         // Create modal state for MFA setup (pre-selects all, sets threshold)
                                         let modal_state =
-                                            crate::tui::state_machine::GuardianSetupModalState::for_mfa_setup(candidates, threshold_k);
+                                            crate::tui::state::GuardianSetupModalState::for_mfa_setup(candidates, threshold_k);
 
                                         new_state.modal_queue.enqueue(
-                                            crate::tui::state_machine::QueuedModal::MfaSetup(modal_state),
+                                            crate::tui::state::QueuedModal::MfaSetup(modal_state),
                                         );
                                     }
 
@@ -3742,9 +3763,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             })
                                             .collect();
 
-                                        let modal_state = crate::tui::state_machine::DeviceSelectModalState::with_devices(devices);
+                                        let modal_state = crate::tui::state::DeviceSelectModalState::with_devices(devices);
                                         new_state.modal_queue.enqueue(
-                                            crate::tui::state_machine::QueuedModal::SettingsDeviceSelect(modal_state),
+                                            crate::tui::state::QueuedModal::SettingsDeviceSelect(modal_state),
                                         );
                                     }
                                     DispatchCommand::ImportDeviceEnrollmentOnMobile { code } => {
@@ -3757,17 +3778,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             new_state.toast_info("Only one authority available");
                                         } else {
                                             // Convert authorities to contact-like format for picker
-                                            let contacts: Vec<(crate::tui::state_machine::AuthorityRef, String)> = authorities
+                                            let contacts: Vec<(crate::tui::state::AuthorityRef, String)> = authorities
                                                 .iter()
                                                 .map(|a| (a.id.clone().into(), format!("{} ({})", a.nickname_suggestion, a.short_id)))
                                                 .collect();
 
-                                            let modal_state = crate::tui::state_machine::ContactSelectModalState::single(
+                                            let modal_state = crate::tui::state::ContactSelectModalState::single(
                                                 "Select Authority",
                                                 contacts,
                                             );
                                             new_state.modal_queue.enqueue(
-                                                crate::tui::state_machine::QueuedModal::AuthorityPicker(modal_state),
+                                                crate::tui::state::QueuedModal::AuthorityPicker(modal_state),
                                             );
                                         }
                                     }
@@ -3831,8 +3852,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::OpenHomeCreate => {
                                         // Open home creation modal
                                         new_state.modal_queue.enqueue(
-                                            crate::tui::state_machine::QueuedModal::NeighborhoodHomeCreate(
-                                                crate::tui::state_machine::HomeCreateModalState::new(),
+                                            crate::tui::state::QueuedModal::NeighborhoodHomeCreate(
+                                                crate::tui::state::HomeCreateModalState::new(),
                                             ),
                                         );
                                     }
@@ -3842,8 +3863,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             .map(|guard| guard.clone())
                                             .unwrap_or_default();
                                         new_state.modal_queue.enqueue(
-                                            crate::tui::state_machine::QueuedModal::NeighborhoodModeratorAssignment(
-                                                crate::tui::state_machine::ModeratorAssignmentModalState::new(
+                                            crate::tui::state::QueuedModal::NeighborhoodModeratorAssignment(
+                                                crate::tui::state::ModeratorAssignmentModalState::new(
                                                     contacts,
                                                 ),
                                             ),
@@ -3863,8 +3884,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             .map(|guard| guard.clone())
                                             .unwrap_or_default();
                                         new_state.modal_queue.enqueue(
-                                            crate::tui::state_machine::QueuedModal::NeighborhoodAccessOverride(
-                                                crate::tui::state_machine::AccessOverrideModalState::new(
+                                            crate::tui::state::QueuedModal::NeighborhoodAccessOverride(
+                                                crate::tui::state::AccessOverrideModalState::new(
                                                     contacts,
                                                 ),
                                             ),
@@ -3920,8 +3941,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
                                     DispatchCommand::OpenHomeCapabilityConfigModal => {
                                         new_state.modal_queue.enqueue(
-                                            crate::tui::state_machine::QueuedModal::NeighborhoodCapabilityConfig(
-                                                crate::tui::state_machine::HomeCapabilityConfigModalState::default(),
+                                            crate::tui::state::QueuedModal::NeighborhoodCapabilityConfig(
+                                                crate::tui::state::HomeCapabilityConfigModalState::default(),
                                             ),
                                         );
                                     }
@@ -4023,7 +4044,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 // Apply UI-only effects to the next state (which is what we persist).
                                 let toast_id = new_state.next_toast_id;
                                 new_state.next_toast_id += 1;
-                                let toast = crate::tui::state_machine::QueuedToast::new(
+                                let toast = crate::tui::state::QueuedToast::new(
                                     toast_id,
                                     message,
                                     level,
@@ -4053,6 +4074,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 }
                 if new_state.should_exit && !should_exit.get() {
                     should_exit.set(true);
+                    bg_shutdown.read().store(true, std::sync::atomic::Ordering::Release);
                 }
 
                 // Update TuiState (and always bump render version)
@@ -4211,10 +4233,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         id: toast.id.to_string(),
                         message: toast.message.clone(),
                         level: match toast.level {
-                            crate::tui::state_machine::ToastLevel::Info => ToastLevel::Info,
-                            crate::tui::state_machine::ToastLevel::Success => ToastLevel::Success,
-                            crate::tui::state_machine::ToastLevel::Warning => ToastLevel::Warning,
-                            crate::tui::state_machine::ToastLevel::Error => ToastLevel::Error,
+                            crate::tui::state::ToastLevel::Info => ToastLevel::Info,
+                            crate::tui::state::ToastLevel::Success => ToastLevel::Success,
+                            crate::tui::state::ToastLevel::Warning => ToastLevel::Warning,
+                            crate::tui::state::ToastLevel::Error => ToastLevel::Error,
                         },
                     }])
                 })
